@@ -15,7 +15,6 @@ import os
 import socket as _socket
 import subprocess as _subprocess
 import sys
-import sys as _sys
 import time
 import urllib.request as _urllib
 from typing import Any
@@ -364,11 +363,21 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             return int(sock.getsockname()[1])
 
     def spawn_passive(port: int):
-        from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+        from agent_procutil import windowless_daemon_kwargs
 
-        python = _sys.executable
+        from .procutil import resolve_own_runtime_python
+
+        # Never bare `_sys.executable`: a self-relaunch site must target the
+        # canonically-resolved current-version slot, not whatever interpreter
+        # happened to be running this process -- see
+        # resolve_own_runtime_python's own docstring for the production
+        # incident this exact divergence already caused (a live coordinator
+        # parenting a full duplicate tree under the system Python instead of
+        # the versioned slot). A detached child inherits whatever its parent
+        # resolved, so this divergence compounds down the whole spawn tree.
+        python = resolve_own_runtime_python()
         cmd = [
-            windowless_python(python),
+            python,
             "-m",
             "agent_dispatch",
             "serve",
@@ -388,7 +397,6 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         # using, while the rest of this cutover keeps using the first
         # snapshot.
         child_env = dict(os.environ)
-        child_env.update(windowless_python_env(python))
         # AGENT_DISPATCH_PORT must be set *after* the overlay snapshot above:
         # the orchestrator already selected this specific free `port` for the
         # passive process to bind (and passes it explicitly via `--port`
@@ -402,7 +410,18 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             "stdout": _subprocess.DEVNULL,
             "stderr": _subprocess.DEVNULL,
         }
-        kwargs.update(detached_kwargs())
+        # NOT windowless_python()/detached_kwargs(): this coordinator is a
+        # daemon with RECURRING console-subsystem descendants (it repeatedly
+        # shells out to `agent-worktrees` etc. for repo/worktree-status
+        # queries). A DETACHED_PROCESS root has no console for those children
+        # to inherit, so each one allocates its own fresh, visible Default
+        # Terminal window (confirmed via a live controlled comparison -- see
+        # docs/patterns/windows-background-process-launch.md and
+        # efforts/active/windows-launch-hardening/README.md). Keep the
+        # console-subsystem interpreter (`python`, not `pythonw.exe`) and use
+        # CREATE_NO_WINDOW so this process's own console stays hidden while
+        # still being inheritable by its children.
+        kwargs.update(windowless_daemon_kwargs())
         return _subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
     def health_check(check_host: str, port: int) -> bool:
@@ -605,7 +624,7 @@ def register_coordinator_commands(sub) -> None:
             "`install.sh update` on POSIX) -- either by hand, "
             "or it is invoked automatically by a running coordinator's own "
             "self-update loop once it notices a newer version has been "
-            "published (opt-in via AGENT_DISPATCH_SELF_UPDATE=1)."
+            "published (default-on; opt out with AGENT_DISPATCH_SELF_UPDATE=0)."
         ),
     )
     _add_cutover_flags(p)

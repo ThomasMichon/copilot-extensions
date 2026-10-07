@@ -357,6 +357,10 @@ class CommandInjector(TokenInjector):
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **windowless_daemon_kwargs(),  # Windows: no console window;
+                                                # POSIX: own process group so a
+                                                # multi-process mint command can
+                                                # be fully reaped on timeout
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(input=self._stdin()), timeout=self._timeout,
@@ -365,8 +369,10 @@ class CommandInjector(TokenInjector):
             log.error("auth command timed out (%.0fs): %s", self._timeout, argv[0])
             # wait_for cancelled communicate() but left the child running -- a
             # hung helper (e.g. an interactive credential prompt) would otherwise
-            # leak a process, one per acquisition/401-retry. Reap it.
-            await _terminate_proc(proc)
+            # leak a process, one per acquisition/401-retry. Reap the whole
+            # tree: `auth.command` is caller-configured and may itself be a
+            # multi-process wrapper, not a guaranteed single process.
+            await _terminate_tree(proc)
             return None, True
         except FileNotFoundError:
             log.error("auth command not found on PATH: %s", argv[0])
@@ -398,13 +404,15 @@ class CommandInjector(TokenInjector):
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **windowless_daemon_kwargs(),  # same tree-reapable launch as the
+                                                # mint command above
             )
             _, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self._repair_timeout,
             )
         except (TimeoutError, asyncio.TimeoutError):
             log.error("auth repair timed out (%.0fs): %s", self._repair_timeout, argv[0])
-            await _terminate_proc(proc)
+            await _terminate_tree(proc)
             return False
         except FileNotFoundError:
             log.error("auth repair not found on PATH: %s", argv[0])

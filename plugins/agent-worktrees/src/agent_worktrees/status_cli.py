@@ -201,7 +201,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             result_entry["short_id"] = short_id
             display_title = rec.title if (rec.title and rec.title != "null") else None
             if not display_title:
-                norm = _core()._normalize_path(rec.worktree_path)
+                norm = sessions._normalize_path(rec.worktree_path)
                 display_title = session_ctx.latest_summary.get(norm)
             if not display_title:
                 display_title = info.title or "(none)"

@@ -663,7 +663,7 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
     }
 }
 
-function Invoke-VersionedActivate {
+function Invoke-VersionedActivateInner {
     <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
        junction onto it (first migration moves a legacy real `.venv` aside), then
        gc old slots keeping current + the previous-good. Returns $false on failure
@@ -728,8 +728,8 @@ function Invoke-VersionedActivate {
     }
     # Determine the just-superseded slot by calling the CANONICAL resolver
     # (resolve-runtime.ps1) directly, rather than reimplementing its tiered
-    # marker/last-known-good/newest-slot validity logic here (review finding,
-    # round 5): `current`/reading last-known-good as raw strings only checks
+    # marker/last-known-good/newest-slot validity logic here: `current`/
+    # reading last-known-good as raw strings only checks
     # for EMPTINESS, not whether the resolver actually considers that slot
     # valid/complete -- a nonempty but incomplete marker or last-known-good
     # value makes the resolver reject it and fall through to a further tier,
@@ -739,8 +739,8 @@ function Invoke-VersionedActivate {
     # resolve()/launch would use, so whatever slot it returns here is exactly
     # what a plan resolved moments earlier would have pinned.
     #
-    # MUST run BEFORE Invoke-VersionedMarkComplete (review finding, round 6):
-    # marking $SrcVersion complete makes IT a valid tier-3 candidate too: if
+    # MUST run BEFORE Invoke-VersionedMarkComplete: marking $SrcVersion
+    # complete makes IT a valid tier-3 candidate too: if
     # both the marker and last-known-good are invalid at this exact moment,
     # a resolve AFTER mark-complete could have the newest-slot scan pick the
     # brand-new $SrcVersion itself (its own version number sorts newest)
@@ -766,7 +766,7 @@ function Invoke-VersionedActivate {
     }
     Invoke-VersionedMarkComplete
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
-    # BEFORE activate() runs (review finding on #4451): installs run
+    # BEFORE activate() runs (see #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
     # where a CONCURRENT installer can activate the NEXT generation and run
@@ -848,6 +848,20 @@ function Invoke-VersionedActivate {
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP
     return $true
+}
+
+function Invoke-VersionedActivate {
+    <# Thin wrapper: releases the exclusive build lease (if one is held --
+       harmless no-op otherwise, e.g. when Test-SlotAlreadyComplete skipped
+       the build entirely) regardless of how Invoke-VersionedActivateInner
+       returns, so a lease acquired in Deploy-Venv is held through package
+       deployment and completion-marker publication and ALWAYS released
+       afterward -- never leaked past this run (#5439). #>
+    try {
+        Invoke-VersionedActivateInner
+    } finally {
+        Exit-VersionedSlotLease
+    }
 }
 # === end install-contract:v3 versioned-venv ===
 
@@ -1232,17 +1246,52 @@ function Get-BootstrapPython {
        Prefers the freshly-built slot venv python ($VenvDir, present at
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
+       Windows Store 'python' alias stub. Returns $null if none.
+
+       -ExcludeVenvDir skips $VenvDir entirely: used when the helper is
+       about to INSPECT $VenvDir itself (e.g. the slot-clean liveness
+       census) -- using that slot's own interpreter to run the census would
+       make the helper process itself show up as "a live process running
+       from this slot", permanently self-reporting an incomplete slot with
+       a stale python.exe as still in use on every retry. $LinkDir is NOT
+       guaranteed to be a different directory from $VenvDir (e.g. legacy
+       mode, or a retry where the active link already points at the slot
+       under inspection) -- in the current versioned-runtime wiring they
+       are in fact always the same path -- so -ExcludeVenvDir must actively
+       filter out any candidate that resolves to $VenvDir rather than
+       assuming $LinkDir alone is a safe stand-in. This exclusion must also
+       cover the `py -3` launcher and `Get-ApplicationPath` PATH-search
+       fallbacks below, not just the initial $dirs candidates: if an
+       activated target venv has put its own `Scripts` directory on PATH,
+       either fallback could still resolve straight back into $VenvDir and
+       defeat the whole exclusion. #>
+    param([switch]$ExcludeVenvDir)
+    $dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
+    foreach ($d in $dirs) {
+        if (-not $d) { continue }
+        if ($ExcludeVenvDir -and $VenvDir -and ($d -eq $VenvDir)) { continue }
+        $p = Join-Path $d 'Scripts\python.exe'
+        if (Test-Path $p) { return $p }
+    }
+    $venvFull = $null
+    if ($ExcludeVenvDir -and $VenvDir) {
+        $venvFull = [System.IO.Path]::GetFullPath($VenvDir).TrimEnd('\')
+    }
+    $isExcluded = {
+        param($candidate)
+        if (-not $venvFull -or -not $candidate) { return $false }
+        $candidateFull = [System.IO.Path]::GetFullPath($candidate)
+        return $candidateFull.StartsWith("$venvFull\", [StringComparison]::OrdinalIgnoreCase)
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $result = Invoke-NativeCapture { & py -3 -c 'import sys; print(sys.executable)' }
-        if ($result.ExitCode -eq 0 -and $result.Output -and (Test-Path $result.Output)) {
+        if ($result.ExitCode -eq 0 -and $result.Output -and (Test-Path $result.Output) -and -not (& $isExcluded $result.Output)) {
             return $result.Output
         }
     }
-    return Get-ApplicationPath -Name @('python3', 'python')
+    $fallback = Get-ApplicationPath -Name @('python3', 'python')
+    if (& $isExcluded $fallback) { return $null }
+    return $fallback
 }
 
 function Get-PayloadHash {
@@ -1292,6 +1341,75 @@ function Get-PayloadHash {
     } catch { return '' }
 }
 
+function Get-VersionedSlotLeasePath {
+    Join-Path $InstallDir ".build-lease-$SrcVersion.lock"
+}
+
+$script:VersionedSlotLeaseHandle = $null
+
+function Enter-VersionedSlotLease {
+    <# Acquire an OS-level exclusive lock for building THIS version's slot,
+       held for the remainder of this process's lifetime (released explicitly
+       by Exit-VersionedSlotLease, or automatically by the OS the instant this
+       process exits/crashes -- there is never a stale lease to detect or
+       reclaim, unlike a PID-recorded marker file). A slot-clean liveness
+       check alone is check-then-act: two concurrent installer invocations
+       could both observe a clean slot (neither has started its external
+       build yet) and then both build into it -- this lease is what actually
+       serializes them (#5439). Returns $true if acquired (or a no-op in
+       legacy mode); $false if another live process already holds it, OR the
+       lease file itself couldn't be opened for some OTHER reason (a
+       permission/path/storage failure) -- callers must treat both exactly
+       like a dirty slot and refuse to build, but should tell those two
+       causes apart in their own message: `$script:VersionedSlotLeaseFailureReason`
+       is 'contention' for a genuine sharing violation (ERROR_SHARING_VIOLATION
+       /ERROR_LOCK_VIOLATION), or the raw exception message for anything else --
+       catching bare `[System.IO.IOException]` would otherwise misreport every
+       cause (disk full, permission denied, path too long, ...) as "another
+       process is building this slot", sending an operator chasing a retry
+       loop instead of the real, persistent failure. Idempotent: a second call
+       while already held is a no-op. #>
+    $script:VersionedSlotLeaseFailureReason = $null
+    if (-not $VersionedRuntime) { return $true }
+    if ($script:VersionedSlotLeaseHandle) { return $true }
+    $leasePath = Get-VersionedSlotLeasePath
+    try {
+        $script:VersionedSlotLeaseHandle = [System.IO.File]::Open(
+            $leasePath, [System.IO.FileMode]::OpenOrCreate,
+            [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        return $true
+    } catch [System.IO.IOException] {
+        $ERROR_SHARING_VIOLATION = 32
+        $ERROR_LOCK_VIOLATION = 33
+        $nativeCode = $_.Exception.HResult -band 0xFFFF
+        if ($nativeCode -eq $ERROR_SHARING_VIOLATION -or $nativeCode -eq $ERROR_LOCK_VIOLATION) {
+            $script:VersionedSlotLeaseFailureReason = 'contention'
+        } else {
+            $script:VersionedSlotLeaseFailureReason = $_.Exception.Message
+        }
+        return $false
+    } catch {
+        # `File.Open` reports other persistent failures -- an ACL denial,
+        # for one -- as `UnauthorizedAccessException` or another exception
+        # type entirely, NOT `IOException`. Catching only IOException let
+        # those bypass this function's own error-reason bookkeeping and
+        # throw out of it uncaught instead of returning $false with a
+        # real reason the caller can report.
+        $script:VersionedSlotLeaseFailureReason = $_.Exception.Message
+        return $false
+    }
+}
+
+function Exit-VersionedSlotLease {
+    <# Release a lease acquired by Enter-VersionedSlotLease, if any is held.
+       Safe to call unconditionally (no-op) when no lease was acquired --
+       e.g. Test-SlotAlreadyComplete skipped the build entirely this run. #>
+    if ($script:VersionedSlotLeaseHandle) {
+        try { $script:VersionedSlotLeaseHandle.Dispose() } catch {}
+        $script:VersionedSlotLeaseHandle = $null
+    }
+}
+
 function Invoke-VersionedSlotClean {
     <# Toss an INCOMPLETE prior slot before building so we never `uv venv
        --allow-existing` over a corpse (#935); the current/active slot is never
@@ -1300,14 +1418,21 @@ function Invoke-VersionedSlotClean {
 
        Returns $true iff the slot is confirmed clean (or cleaning was a no-op);
        $false when the underlying `slot --clean-incomplete` call failed (e.g.
-       "incomplete runtime slot is still in use") -- callers must not build a
-       signed-Python venv straight into a slot this reports dirty (#2413): a
-       still-populated $VenvDir predictably fails `--copies` and silently
-       downgrades to an unsigned uv-built interpreter. #>
+       "incomplete runtime slot is still in use"), OR when an EXISTING slot
+       can't be verified at all because no bootstrap Python could be
+       resolved (an absent slot needs no validation and is trivially clean)
+       -- callers must not build a signed-Python venv straight into a slot
+       this reports dirty (#2413): a still-populated $VenvDir predictably
+       fails `--copies` and silently downgrades to an unsigned uv-built
+       interpreter. Uses -ExcludeVenvDir: running the census with the
+       TARGET slot's own interpreter would make the helper process itself
+       show up as "a live process running from this slot", permanently
+       self-reporting an incomplete slot with a stale python.exe as still
+       in use on every retry. #>
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) { return $true }
+    $py = Get-BootstrapPython -ExcludeVenvDir
+    if (-not $py) { return -not (Test-Path $VenvDir) }
     & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
         ForEach-Object { Write-Host "  ...    $_" }
     return ($LASTEXITCODE -eq 0)
@@ -2073,7 +2198,77 @@ function Invoke-UvVenvWithRetry {
 }
 
 function Deploy-Venv {
-    <# Create venv and install pyyaml via uv. #>
+    <# Create venv and install pyyaml via uv.
+
+       $script:DeployVenvAlreadyComplete is reset here and set by the
+       lease-protected re-check below: a concurrent process may have
+       already finished building AND activating this exact slot while we
+       waited for the lease (#5439) -- the pre-lease
+       Test-SlotAlreadyComplete check every caller already does is a
+       check-then-act gap on its own. Callers must check this flag after
+       a $true return to tell "built fresh" apart from "already complete,
+       nothing to do" (and so skip Deploy-Package in the latter case). #>
+    $script:DeployVenvAlreadyComplete = $false
+
+    # Acquire the exclusive build lease FIRST, before any slot inspection or
+    # mutation below -- a competing installer could otherwise observe
+    # $VenvPython after a lease holder creates it (and skip straight past
+    # this function into concurrent package deployment), or remove an
+    # in-progress slot out from under an active builder.
+    if (-not (Enter-VersionedSlotLease)) {
+        # Another live process already holds the exclusive build lease for
+        # this exact version -- it's actively building (or about to), so
+        # treat this exactly like a dirty slot and refuse to race it.
+        # Enter-VersionedSlotLease distinguishes that genuine contention
+        # from any OTHER lease-file failure (permission/path/storage) via
+        # $script:VersionedSlotLeaseFailureReason -- never attribute the
+        # latter to "another process" and send an operator chasing a
+        # retry loop instead of the real, persistent failure.
+        if ($script:VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention') {
+            Write-ServiceErr "Could not acquire the build lease for runtime slot ($SrcVersion): $script:VersionedSlotLeaseFailureReason"
+        } else {
+            Write-ServiceErr "Another process is already building this runtime slot ($SrcVersion) -- refusing to race it. Re-run update once the other build finishes."
+        }
+        return $false
+    }
+
+    # Re-check completeness NOW, under the just-acquired lease: see the
+    # $script:DeployVenvAlreadyComplete doc comment above for why the
+    # pre-lease check alone isn't enough.
+    if (Test-SlotAlreadyComplete) {
+        $script:DeployVenvAlreadyComplete = $true
+        return $true
+    }
+
+    # Validate the slot's liveness/cleanliness immediately after acquiring
+    # the lease, UNCONDITIONALLY -- regardless of whether $VenvPython
+    # already exists. An incomplete slot from a crashed prior build can
+    # still contain a stale python.exe, which would otherwise let it skip
+    # this check entirely and be deleted or handed to Deploy-Package without
+    # ever confirming no live process still owns it.
+    $slotClean = Invoke-VersionedSlotClean
+    if (-not $slotClean) {
+        # "Still in use" is typically a transient Windows file-handle race
+        # (a just-exited process hasn't released the slot yet) -- retry
+        # briefly before giving up.
+        for ($i = 0; $i -lt 3 -and -not $slotClean; $i++) {
+            Start-Sleep -Milliseconds 750
+            $slotClean = Invoke-VersionedSlotClean
+        }
+    }
+    if (-not $slotClean) {
+        # A still-dirty slot after retries means another process may
+        # genuinely own (or still be building into) $VenvDir right now.
+        # Building ANYTHING here -- signed or unsigned -- races that
+        # writer and risks a corrupted, partially-overlapping venv, which
+        # is a worse outcome than failing this deploy and leaving the
+        # previously-installed, working version in place untouched.
+        # Signing status is irrelevant to this hazard (#5416): refuse to
+        # write into a contended slot at all, rather than silently
+        # downgrading to an unsigned uv-built interpreter (#2413).
+        Write-ServiceErr "Runtime slot still in use after retries -- refusing to build into a possibly-contended slot: $VenvDir. This is a concurrent-writer safety guard, not a code-signing fallback. Re-run update once the prior process has exited."
+        return $false
+    }
 
     # Rebuild an existing venv whose python.exe is unsigned (Smart App Control
     # blocks it) when a signed base Python is available to rebuild from.
@@ -2093,22 +2288,9 @@ function Deploy-Venv {
     # (the signed python.exe is embedded in the venv); fall back to uv when no
     # signed Python is present (fine on machines without Smart App Control).
     if (-not (Test-Path $VenvPython)) {
-        $slotClean = Invoke-VersionedSlotClean
-        if (-not $slotClean) {
-            # "Still in use" is typically a transient Windows file-handle race
-            # (a just-exited process hasn't released the slot yet) -- retry
-            # briefly rather than immediately falling through to a doomed
-            # signed-Python `--copies` attempt against the still-dirty
-            # $VenvDir, which would otherwise silently downgrade to an
-            # unsigned uv-built interpreter (#2413).
-            for ($i = 0; $i -lt 3 -and -not $slotClean; $i++) {
-                Start-Sleep -Milliseconds 750
-                $slotClean = Invoke-VersionedSlotClean
-            }
-        }
         $signedBase = Get-SignedBasePython
         $created = $false
-        if ($signedBase -and $slotClean) {
+        if ($signedBase) {
             $result = Invoke-NativeCapture {
                 & $signedBase -m venv --copies $VenvDir
             }
@@ -2122,12 +2304,6 @@ function Deploy-Venv {
         if (-not $created) {
             if (-not $signedBase) {
                 Write-ServiceWarn "No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.11+ and re-run update."
-            } elseif (-not $slotClean) {
-                # Loud, not a soft warning: a signed Python IS available, but
-                # the stale slot couldn't be cleared, so this venv is being
-                # built UNSIGNED instead. Silently downgrading the SAC
-                # guarantee here is the exact failure mode of #2413.
-                Write-ServiceErr "Runtime slot still in use after retries -- building an UNSIGNED uv Python venv instead of the signed system Python. Smart App Control compatibility is NOT guaranteed for $VenvDir; re-run update once the prior process has exited."
             }
             # Run uv from a trusted CWD (SystemDrive root), never the profile
             # mount -- launching the WinGet uv.exe reparse shim with the profile
@@ -2170,6 +2346,26 @@ prompt = .venv
 
     Write-ServiceOk "Venv ready"
     return $true
+}
+
+function Deploy-VenvAndPackage {
+    <# Shared by every call site that builds+installs the runtime. The
+       completeness check happens EXACTLY ONCE, inside Deploy-Venv itself,
+       under the lease it just acquired (#5439): a concurrent
+       process could finish building AND activating this exact slot in the
+       window between an outer, pre-lease check and actually acquiring the
+       lease, so a check made before the lease can never be authoritative
+       on its own. There is deliberately no second, OUTER pre-check as a
+       "fast path" either: Test-SlotAlreadyComplete hashes the full payload
+       tree, which is not cheap enough to pay twice on every call -- paying
+       it exactly once, protected, is simultaneously correct and no slower
+       than before. #>
+    if (-not (Deploy-Venv)) { exit 1 }
+    if ($script:DeployVenvAlreadyComplete) {
+        Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
+        return
+    }
+    if (-not (Deploy-Package)) { exit 1 }
 }
 
 function Deploy-Wrappers {
@@ -3436,12 +3632,7 @@ switch ($Action) {
         Ensure-UvIndex
         foreach ($dir in @($InstallDir, $BinDir, $LocalBin)) { Ensure-InstallDir $dir }
         if (-not (Deploy-RuntimeResolvers)) { exit 1 }
-        if (Test-SlotAlreadyComplete) {
-            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-        } else {
-            if (-not (Deploy-Venv)) { exit 1 }
-            if (-not (Deploy-Package)) { exit 1 }
-        }
+        Deploy-VenvAndPackage
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-GlobalBinstub
         Write-V3Manifest
@@ -3489,12 +3680,7 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if (Test-SlotAlreadyComplete) {
-            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-        } else {
-            if (-not (Deploy-Venv)) { exit 1 }
-            if (-not (Deploy-Package)) { exit 1 }
-        }
+        Deploy-VenvAndPackage
         if (-not (Deploy-Wrappers)) { exit 1 }
         if ($ContextualInstall -and -not (Test-ContextGovernanceUnchanged)) {
             Write-ServiceErr 'Installation governance changed before runtime cutover'
@@ -3835,12 +4021,7 @@ switch ($Action) {
             foreach ($dir in @($InstallDir, $BinDir)) {
                 Ensure-InstallDir $dir
             }
-            if (Test-SlotAlreadyComplete) {
-                Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-            } else {
-                if (-not (Deploy-Venv)) { exit 1 }
-                if (-not (Deploy-Package)) { exit 1 }
-            }
+            Deploy-VenvAndPackage
             if (-not (Deploy-Wrappers)) { exit 1 }
             if (-not (Test-ContextGovernanceUnchanged)) {
                 Write-ServiceErr 'Installation governance changed before runtime cutover'
@@ -3858,12 +4039,7 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if (Test-SlotAlreadyComplete) {
-            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-        } else {
-            if (-not (Deploy-Venv)) { exit 1 }
-            if (-not (Deploy-Package)) { exit 1 }
-        }
+        Deploy-VenvAndPackage
         if (-not (Deploy-Wrappers)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-CopilotPlugin

@@ -136,8 +136,11 @@ treating it as settled:
 2. **Cross-check via the PR's own attribution marker**, when one is present
    (`pr.source_attribution` in `"codename"` mode -- see the `worktree`
    skill's `references/pr-attribution.md`): read the PR body's `<!--
-   agent-worktrees:source codename=<name> -->` marker and run `resolve
-   --codename <name> --dry-run`. A codename match that agrees with the
+   agent-worktrees:source codename=<name> -->` marker (it may also carry
+   an optional `root=<name>` field -- another worktree's own codename,
+   present when this one is itself claimed as an outbound resource by a
+   different calling worktree) and run `resolve --codename <name>
+   --dry-run`. A codename match that agrees with the
    match's own `codename` field is a **third, independent** confirmation
    (local claim record, live PR state, and the PR's own self-declared
    source all agreeing) -- valuable because it doesn't depend on the local

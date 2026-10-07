@@ -259,7 +259,7 @@ def test_posix_context_install_bootstraps_uv_before_runtime_build() -> None:
     assert "_ensure_uv || exit 1" in install
     assert "_ensure_uv_index" in install
     assert install.index("_ensure_uv || exit 1") < install.index(
-        "deploy_venv || exit 1"
+        "_deploy_venv_and_package"
     )
     update = sh.split("    update)", 1)[1].split("    *)", 1)[0]
     assert "_ensure_uv || exit 1" in update

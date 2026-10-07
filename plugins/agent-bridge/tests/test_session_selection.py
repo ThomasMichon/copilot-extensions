@@ -845,6 +845,40 @@ def test_cmd_end_reports_error_without_traceback(monkeypatch, capsys):
     assert "boom" in out
 
 
+def test_cmd_stop_treats_404_as_already_stopped(monkeypatch, capsys):
+    """Regression: agent-dispatch's cool_dormant_bodies() calls
+    bridge.stop_worker() -> `agent-bridge stop --reap-host`, and treats any
+    nonzero exit as "still busy, retry later" -- with no way to distinguish
+    that from "already gone, nothing to stop". Before this fix, `_cmd_stop`
+    let a 404 propagate as an uncaught exception (unlike its `_cmd_end`
+    sibling just above, which already special-cases it), so a reservation
+    whose backing session had already ended retried this exact call every
+    60s forever, permanently starving its whole exclusive-key pool
+    (confirmed live: a 3+ hour stall on a single machine)."""
+    class _C:
+        def stop_session(self, sid, *, force=False, reap_host=False):
+            raise BridgeClientError(404, f"Session {sid} not found")
+
+    monkeypatch.setattr(m, "_get_client", lambda: _C())
+    # Must be a clean no-op success -- no SystemExit, no traceback.
+    m._cmd_stop(argparse.Namespace(session_id="abc", force=False, reap_host=True))
+    assert "already stopped" in capsys.readouterr().out
+
+
+def test_cmd_stop_reports_error_without_traceback(monkeypatch, capsys):
+    class _C:
+        def stop_session(self, sid, *, force=False, reap_host=False):
+            raise BridgeClientError(500, "boom")
+
+    monkeypatch.setattr(m, "_get_client", lambda: _C())
+    with pytest.raises(SystemExit) as ei:
+        m._cmd_stop(argparse.Namespace(session_id="abc", force=False, reap_host=False))
+    assert ei.value.code == 1
+    out = capsys.readouterr().out
+    assert "[FAIL]" in out
+    assert "boom" in out
+
+
 # -- send concurrent-dispatch guard (#21) ------------------------------------
 
 

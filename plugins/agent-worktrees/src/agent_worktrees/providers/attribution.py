@@ -60,7 +60,7 @@ def build_marker(
     return f"<!-- agent-worktrees:source {' '.join(parts)} -->"
 
 
-def build_codename_marker(codename: str) -> str:
+def build_codename_marker(codename: str, *, root: str | None = None) -> str:
     """Build the codename-only source-attribution comment (``codename``
     mode). Carries **no** machine, worktree id, session id, or timestamp --
     only the assigned codename, which decodes to nothing without local
@@ -70,8 +70,19 @@ def build_codename_marker(codename: str) -> str:
     :mod:`agent_worktrees.codename_reverse_lookup`) -- an author explicitly
     asking every other known, ssh-ready machine whether its own tracking
     store has that codename.
+
+    *root* optionally names the ROOT-ancestor worktree's own codename --
+    the worktree at the top of this worktree's ``owner_ref`` chain, i.e. the
+    worktree that actually kicked off the work (see
+    :mod:`agent_worktrees.root_chain`). Just as public-safe as *codename*
+    itself (another worktree's codename, never a raw identifier); omitted
+    entirely when there is no resolvable chain, so a childless worktree's
+    marker is unchanged from before this field existed.
     """
-    return f"<!-- agent-worktrees:source codename={codename} -->"
+    marker = f"<!-- agent-worktrees:source codename={codename}"
+    if root:
+        marker += f" root={root}"
+    return f"{marker} -->"
 
 
 def may_publish_codename(

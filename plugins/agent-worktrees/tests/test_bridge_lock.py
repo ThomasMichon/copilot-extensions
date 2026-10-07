@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from agent_worktrees import __main__ as cli
-from agent_worktrees import locks, reclaim
+from agent_worktrees import locks, reclaim, sessions
 
 
 # ── cmd_session_lock: write / remove into the session-state dir ──
@@ -241,7 +241,7 @@ def test_build_active_paths_unions_bridge_live(tmp_path):
          patch("agent_worktrees.reclaim.live_bridge_worktrees",
                return_value={"wt-aaaa"}):
         active = cli._build_active_paths([rec], session_ctx=ctx)
-    assert active == {cli._normalize_path("/tmp/a")}
+    assert active == {sessions._normalize_path("/tmp/a")}
 
 
 def test_build_active_paths_no_bridge_is_noop(tmp_path):

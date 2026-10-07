@@ -49,6 +49,7 @@ from . import (
     obligations,
     output,
     permissions,
+    push_diagnostics,
     procs,
     sessions,
     tracking,
@@ -561,8 +562,9 @@ def push_changes(
             # Both streams matter -- git's own protocol error lands on
             # stderr, but a hook's own check output (e.g. a module-size-cap
             # violation's `[FAIL] ...` detail) commonly lands on stdout.
-            if res.failure_detail:
-                output.err(res.failure_detail.lstrip("\n"))
+            detail = push_diagnostics.push_failure_detail(res)
+            if detail:
+                output.err(detail.lstrip("\n"))
             # Only a non-fast-forward race is fixed by fetch+rebase+retry.
             # Everything else recurs identically -- fail fast with the real
             # reason above rather than burning three doomed attempts.
@@ -732,20 +734,20 @@ def _push_changes_pr(
     *,
     dry_run: bool = False,
 ) -> bool:
-    """PR-mode push-changes: update the PR head branch, not master.
+    """PR-mode push-changes: incrementally update the open PR head, not master.
 
     Feedback commits ride on ``worktree/{id}`` (create-pr leaves HEAD there at
-    the squashed commit, #1804).  Rebase ``worktree/{id}`` onto upstream,
-    snapshot the active PR's feature branch to its tip, and force-with-lease
-    push that branch.  Mirrors the refspec push-changes; only the publish step
-    differs (a named ``feature/`` branch vs a refspec to ``pr/<slug>``).  A
-    worktree still checked out on a tracked feature branch (legacy flow) is
-    accepted too, and that branch is rebased + pushed as-is.  Never touches
-    master or the worktree base branch on the remote.
+    the published PR tip, #1804). Publish that tip incrementally -- never
+    rebase it onto newer upstream here -- so already-reviewed commits keep
+    their SHAs while new feedback commits fast-forward on top (#5300). The
+    snapshot path mirrors refspec: only the publish mechanism differs (a named
+    ``feature/`` branch vs a refspec to ``pr/<slug>``). A worktree still
+    checked out on a tracked feature branch (legacy flow) is accepted too and
+    pushed as-is. Never touches master or the worktree base branch on the
+    remote.
     """
     repo = config.default_repo
     remote = repo.remote
-    upstream = f"{remote}/{repo.default_branch}"
     wt_branch = f"worktree/{worktree_id}"
     feature = record.pr.branch
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
@@ -817,15 +819,13 @@ def _push_changes_pr(
     if dry_run:
         if on_wt:
             print(
-                f"[dry-run] Would rebase {wt_branch} onto {upstream}, snapshot "
-                f"{feature} to its tip, then push {feature} to {remote} "
-                f"(--force-with-lease)."
+                f"[dry-run] Would snapshot {feature} to {wt_branch}'s current "
+                f"tip, then push {feature} to {remote}."
             )
         else:
             print(
-                f"[dry-run] Would rebase {wt_branch} onto {upstream}, rebase "
-                f"{feature} onto {wt_branch}, then push {feature} to {remote} "
-                f"(--force-with-lease)."
+                f"[dry-run] Would push the current tracked PR branch "
+                f"{feature} to {remote}."
             )
         return True
 
@@ -842,45 +842,33 @@ def _push_changes_pr(
         if record.repo:
             tracking.record_repo_fetch_confirmed(record.repo)
 
-        if git_ops.ref_exists(upstream, cwd=worktree_path):
-            if on_wt:
-                # HEAD is on worktree/<id>: rebase it forward, then snapshot the
-                # feature branch to the new tip. No checkout dance -- HEAD never
-                # leaves the worktree branch.
-                if not git_ops.rebase(upstream, cwd=worktree_path):
-                    output.err(
-                        f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
-                        f"Resolve them on '{wt_branch}' and retry push-changes."
-                    )
-                    return False
-                git_ops.git(
-                    "branch", "-f", feature, "HEAD", cwd=worktree_path, check=False
-                )
-            else:
-                # Legacy: HEAD on the feature branch. Old two-step rebase chain
-                # (base onto master, then feature onto the updated base).
-                git_ops.checkout(wt_branch, cwd=worktree_path)
-                if not git_ops.rebase(upstream, cwd=worktree_path):
-                    output.err(
-                        f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
-                        f"Resolve them and retry push-changes."
-                    )
-                    git_ops.checkout(feature, cwd=worktree_path)
-                    return False
-                git_ops.checkout(feature, cwd=worktree_path)
-                if not git_ops.rebase(wt_branch, cwd=worktree_path):
-                    output.err(
-                        f"Rebase of {feature} onto {wt_branch} hit conflicts. "
-                        f"Resolve them and retry push-changes."
-                    )
-                    return False
+        if on_wt:
+            git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
 
+        # push-changes always updates an already-published PR head -- lease
+        # the push against its LAST-OBSERVED tip, never a live re-query
+        # (#5298; see pr_ops.create_pr's matching guard for the rationale).
+        lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
+        if not lease_expect:
+            output.err(push_diagnostics.missing_expected_sha_error(
+                feature_branch=feature, retry_command="agent-worktrees push-changes"))
+            return False
         with hooks.allow_pr_push():
-            pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
+            pushed = git_ops.push(
+                remote, feature, cwd=worktree_path,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=True,
+            )
         if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
-            if pushed.failure_detail:
-                output.err(pushed.failure_detail.lstrip("\n"))
+            if pushed.retryable:
+                output.err(
+                    push_diagnostics.pr_branch_non_fast_forward_hint(
+                        retry_command="agent-worktrees push-changes"
+                    )
+                )
+            detail = push_diagnostics.push_failure_detail(pushed)
+            if detail:
+                output.err(detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
@@ -921,7 +909,11 @@ def _push_changes_pr(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
         )
         output.ok(
-            f"Pushed {feature} to {remote} (--force-with-lease). "
+            f"Preserved the published PR tip on '{feature}' and pushed "
+            f"incremental updates from '{wt_branch}'."
+        )
+        output.ok(
+            f"Pushed {feature} to {remote}. "
             f"The open PR is updated."
         )
         return True
@@ -939,17 +931,16 @@ def _push_changes_pr_refspec(
     *,
     dry_run: bool = False,
 ) -> bool:
-    """Refspec-mode push-changes (#1815): update the PR head ref directly.
+    """Refspec-mode push-changes (#1815): incrementally update the PR head ref.
 
     The work lives on ``worktree/<id>`` (the only local branch); the PR head is
-    a remote-only ref.  Rebase ``worktree/<id>`` onto upstream -- so it picks up
-    the default branch and any feedback commits ride on top -- then push it to
-    the PR head ref via a refspec.  No checkout dance; HEAD never leaves
-    ``worktree/<id>``.  Never touches master or the base branch on the remote.
+    a remote-only ref. Publish the current worktree tip directly to that ref
+    without rebasing the already-published PR history onto newer upstream.
+    No checkout dance; HEAD never leaves ``worktree/<id>``. Never touches
+    master or the base branch on the remote.
     """
     repo = config.default_repo
     remote = repo.remote
-    upstream = f"{remote}/{repo.default_branch}"
 
     head = git_ops._get_current_branch_safe(worktree_path)
     if head != wt_branch:
@@ -991,8 +982,8 @@ def _push_changes_pr_refspec(
 
     if dry_run:
         print(
-            f"[dry-run] Would rebase {wt_branch} onto {upstream}, then push "
-            f"{wt_branch}:refs/heads/{feature} to {remote} (--force-with-lease)."
+            f"[dry-run] Would push "
+            f"{wt_branch}:refs/heads/{feature} to {remote}."
         )
         return True
 
@@ -1009,25 +1000,30 @@ def _push_changes_pr_refspec(
         if record.repo:
             tracking.record_repo_fetch_confirmed(record.repo)
 
-        # Rebase the worktree branch forward onto the default branch; feedback
-        # commits ride on top. HEAD stays on wt_branch throughout.
-        if git_ops.ref_exists(upstream, cwd=worktree_path):
-            if not git_ops.rebase(upstream, cwd=worktree_path):
-                output.err(
-                    f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
-                    f"Resolve them on '{wt_branch}' and retry push-changes."
-                )
-                return False
-
+        # Same reuse-lease guard as `_push_changes_pr` above (#5298).
+        lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
+        if not lease_expect:
+            output.err(push_diagnostics.missing_expected_sha_error(
+                feature_branch=feature, retry_command="agent-worktrees push-changes"))
+            return False
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 remote, f"{wt_branch}:refs/heads/{feature}",
-                cwd=worktree_path, force_with_lease=True,
+                cwd=worktree_path,
+                force_with_lease_expect=(lease_expect or None),
+                force_with_lease=True,
             )
         if not pushed:
             output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
-            if pushed.failure_detail:
-                output.err(pushed.failure_detail.lstrip("\n"))
+            if pushed.retryable:
+                output.err(
+                    push_diagnostics.pr_branch_non_fast_forward_hint(
+                        retry_command="agent-worktrees push-changes"
+                    )
+                )
+            detail = push_diagnostics.push_failure_detail(pushed)
+            if detail:
+                output.err(detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
@@ -1068,7 +1064,11 @@ def _push_changes_pr_refspec(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
         )
         output.ok(
-            f"Pushed {wt_branch} to {remote}/{feature} (--force-with-lease). "
+            f"Preserved the published PR tip and pushed incremental updates "
+            f"directly to PR head '{feature}'."
+        )
+        output.ok(
+            f"Pushed {wt_branch} to {remote}/{feature}. "
             f"The open PR is updated."
         )
         return True

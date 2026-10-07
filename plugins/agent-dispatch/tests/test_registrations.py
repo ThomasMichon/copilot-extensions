@@ -1123,6 +1123,11 @@ def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
     from agent_dispatch import __main__ as cli
     from agent_dispatch import procutil
 
+    # This suite's own hermeticity fixture now pins AGENT_DISPATCH_INSTALL_DIR
+    # suite-wide (isolating against a real machine's installed service.env);
+    # clear it here so install_dir() falls through to the Path.home() this
+    # test patches below, exactly as it did before that pin existed.
+    monkeypatch.delenv("AGENT_DISPATCH_INSTALL_DIR", raising=False)
     monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
     install_dir = tmp_path / ".agent-dispatch"
     slot_py = install_dir / "versions" / "0.1.2-dev49" / "Scripts" / "python.exe"

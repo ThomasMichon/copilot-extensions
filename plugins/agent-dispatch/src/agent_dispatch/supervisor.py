@@ -955,6 +955,99 @@ class Supervisor:
 
         return _r(self, now=now)
 
+    def _reserving_worktree_confirmed_absent(
+        self, res: dict, task: dict, worktree: str
+    ) -> bool:
+        """Whether ``worktree`` can be **positively** confirmed absent from
+        the local ``agent-worktrees`` registry, as a safe escalation path for
+        a ``reserving`` reservation whose ``verdict_fn`` liveness check stays
+        ``UNKNOWN`` forever.
+
+        Mirrors the identical, already-reviewed escalation
+        :meth:`release_requested_bodies` already uses for exactly this tri-
+        state gap (confirmed 2026-10-06, reviewed live):
+        a bare timeout cannot safely convert ``UNKNOWN`` into permission to
+        release, because ``UNKNOWN`` also covers an ordinary resolver
+        timeout/transient probe failure, not just genuine absence -- the
+        original worker may still be live, and ``reserve_spawn()`` treats a
+        failed reservation as immediately retryable, so an unconditional
+        release on elapsed time alone risks a second worker launching
+        against (or destructively cleaning up) a still-live created
+        worktree. Only act on a **positive, identity-bound absence signal**:
+        this reservation's own worktree was created by agent-dispatch itself
+        on THIS host (never a different supervisor's/machine's worktree --
+        checking a remote host's filesystem from here would be meaningless),
+        carries no session handle yet (a spawned-but-unclaimed body's real
+        liveness is resolved through its own recorded handle elsewhere, never
+        bypassed by this worktree-directory-only shortcut), and the local
+        ``agent-worktrees`` registry (never ``verdict_fn``'s general owner-
+        identity-keyed probe) confirms the directory itself no longer
+        exists.
+        """
+        if (
+            res.get("session_handle")
+            or task.get("owner") is not None
+            or task.get("owner_session_id") is not None
+            or res.get("worktree") != worktree
+            or res.get("worktree_ownership") != "created"
+            or not isinstance(res.get("creating_host"), str)
+            or res["creating_host"].casefold() != (self.machine or "").casefold()
+        ):
+            return False
+        from . import embody
+
+        try:
+            probe_project = self._spawn_attribute(
+                task,
+                "allocation_project",
+                embody.project_for_task(task) or "",
+            ) or None
+            present = self.worktree_directory_present_fn(worktree, probe_project)
+        except Exception:
+            present = None
+        return present is False
+
+    def _fail_unresolved_reserving(
+        self, res: dict, reason: str, *, worktree: str | None = None
+    ) -> bool:
+        """Release a ``reserving`` reservation whose worktree is positively
+        confirmed absent (see :meth:`_reserving_worktree_confirmed_absent`)
+        so a fresh attempt may be reserved (confirmed live, 2026-10-05: a
+        worktree-backed reservation whose target worktree never materialized
+        on disk at all left ``verdict_fn`` unable to ever return ``gone`` --
+        the GONE/LIVE tri-state's own "never treat ignorance as death"
+        safety guarantee meant no sweep ever revisited it, holding the
+        task's ``exclusive_key`` reservation slot indefinitely).
+
+        ``worktree`` -- the exact worktree whose absence was actually probed
+        -- fences ``request_spawn_release``'s atomic mismatch check against
+        ``record_spawn_worktree`` replacing the reservation's worktree
+        between the probe and this call (the reservation stays ``reserving``
+        throughout, so that race is live, not theoretical).
+        """
+        try:
+            age = time.time() - float(res.get("reserved_at") or 0)
+        except (TypeError, ValueError):
+            age = 0.0
+        detail = f"{reason} after {age:.0f}s"
+        try:
+            if res.get("worktree_ownership") == "created":
+                self.client.request_spawn_release(
+                    res["key"],
+                    detail=detail,
+                    disposition="failed",
+                    worktree=worktree,
+                )
+            else:
+                self.client.fail_spawn(res["key"], detail=detail)
+        except DispatchError:
+            log.exception(
+                "failed to release unresolved-liveness reserving allocation %s",
+                res["key"],
+            )
+            return False
+        return True
+
     def reconcile_reserving(self) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
 
@@ -1115,6 +1208,15 @@ class Supervisor:
             except Exception:
                 verdict = _tracking().UNKNOWN
             if verdict == _tracking().UNKNOWN:
+                if self._reserving_worktree_confirmed_absent(res, task, worktree):
+                    if self._fail_unresolved_reserving(
+                        res,
+                        "reserved worktree confirmed absent from the local "
+                        "agent-worktrees registry while its owner liveness "
+                        "stayed unknown",
+                        worktree=worktree,
+                    ):
+                        reconciled += 1
                 continue
             if verdict == _tracking().GONE:
                 try:

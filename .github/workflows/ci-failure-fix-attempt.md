@@ -569,8 +569,13 @@ post-steps:
             VIOLATIONS="$VIOLATIONS
       - $FILE (an explicitly out-of-scope path -- already excluded from the safe-output patch, but its presence here means the agent attempted it)"
             ;;
-          plugins/*|libs/*|tools/*|docs/*|.changefiles/*)
-            : # the ordinary source-contribution surface
+          plugins/*|libs/*|tools/*|docs/*|.changefiles/*|worktree-manager/*)
+            : # the ordinary source-contribution surface -- worktree-manager
+              # lives at repo root (not under plugins/), same as libs/tools,
+              # confirmed via tools/module-size-baseline.json's own top-level
+              # prefixes (real review finding, issue #5475: a genuine fix
+              # targeting this tree failed the gate outright instead of
+              # landing, because this allowlist omitted it)
             ;;
           *)
             VIOLATIONS="$VIOLATIONS
@@ -862,7 +867,11 @@ safe-outputs:
      what the agent can touch during its own run). The gate diffs the agent's
      actual commits against the default branch and FAILS the agent job (which
      transitively skips the downstream safe-outputs job) if anything outside
-     `plugins/**`/`libs/**`/`tools/**`/`docs/**`/`.changefiles/**` changed --
+     `plugins/**`/`libs/**`/`tools/**`/`docs/**`/`.changefiles/**`/
+     `worktree-manager/**` changed (the last one added later, issue #5475 --
+     `worktree-manager` is a real top-level source tree living outside
+     `plugins/`, confirmed via `tools/module-size-baseline.json`'s own
+     tracked prefixes) --
      coarse, but a genuine machine-enforced boundary the charter's own "entire
      scope" rule needed and didn't have.
   9. (Found on round 11, resolving #2) NUMBER VALIDATION BYPASSABLE VIA EMBEDDED
@@ -1228,8 +1237,10 @@ instruction alone as the reason they're safe to avoid.)
 
 ## Changefile requirement
 
-If your fix touches any file under `plugins/**`, add a pending changefile for
-it exactly like any other contributor would: run
+If your fix touches any file under `plugins/**` or `worktree-manager/**` (a
+real source tree living at the repo root, not under `plugins/` -- see
+`tools/module-size-baseline.json`'s own tracked prefixes), add a pending
+changefile for it exactly like any other contributor would: run
 `python tools/changefile.py add ...` (see `docs/pipelines.md` for the exact
 usage) before opening your pull request. A plugin change without one fails
 this repository's own `Changefile presence` check and can never be promoted,

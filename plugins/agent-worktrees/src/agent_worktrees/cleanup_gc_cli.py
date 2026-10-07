@@ -31,7 +31,6 @@ def _build_active_paths(*args, **kwargs): return _core()._build_active_paths(*ar
 def _hosted_session_blocks_cleanup(*args, **kwargs): return _core()._hosted_session_blocks_cleanup(*args, **kwargs)
 def _local_claimant_alive(*args, **kwargs): return _core()._local_claimant_alive(*args, **kwargs)
 def _make_pr_lookup(*args, **kwargs): return _core()._make_pr_lookup(*args, **kwargs)
-def _normalize_path(*args, **kwargs): return _core()._normalize_path(*args, **kwargs)
 def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwargs)
 def reap_one(*args, **kwargs): return _core().reap_one(*args, **kwargs)
 def reap_orphan_launcher_shells(*args, **kwargs): return reap_cli.reap_orphan_launcher_shells(*args, **kwargs)
@@ -331,7 +330,7 @@ def _revalidate_cleanup_safety(
                     failures=failures, warnings=warnings, reaped=reap is not None,
                 )
 
-            norm = _normalize_path(latest.worktree_path) if latest.worktree_path else ""
+            norm = sessions._normalize_path(latest.worktree_path) if latest.worktree_path else ""
             turns = session_ctx.turn_count.get(norm, 0)
             disp = prune.cleanup_disposition(
                 latest,
@@ -440,7 +439,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
         # Compute prune-safety verdict (combines git state, PR records, and
         # session activity) -- drives the cleanup decision and enriches display.
-        norm = _normalize_path(rec.worktree_path)
+        norm = sessions._normalize_path(rec.worktree_path)
         turns = session_ctx.turn_count.get(norm, 0)
 
         # Heal stale PR state from the provider before assessing (opt-in).

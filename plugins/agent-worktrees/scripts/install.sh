@@ -593,7 +593,7 @@ print((entry.local_path() if entry else "") or "")
     fi
 fi
 
-_versioned_activate() {
+_versioned_activate_inner() {
     # CLI (no daemon): health-gate the freshly-built slot, publish the
     # `current-version` marker (junction-free, `--no-link`: no `.venv` symlink is
     # laid; the marker is the SINGLE source of truth and any stale legacy link is
@@ -652,8 +652,8 @@ _versioned_activate() {
     fi
     # Determine the just-superseded slot by calling the CANONICAL resolver
     # (resolve-runtime.sh) directly, rather than reimplementing its tiered
-    # marker/last-known-good/newest-slot validity logic here (review finding,
-    # round 5): reading `current`/last-known-good as raw strings only checks
+    # marker/last-known-good/newest-slot validity logic here: reading
+    # `current`/last-known-good as raw strings only checks
     # for EMPTINESS, not whether the resolver actually considers that slot
     # valid/complete -- a nonempty but incomplete marker or last-known-good
     # value makes the resolver reject it and fall through to a further tier,
@@ -663,8 +663,8 @@ _versioned_activate() {
     # resolve()/launch would use, so whatever slot it returns here is exactly
     # what a plan resolved moments earlier would have pinned.
     #
-    # MUST run BEFORE _versioned_mark_complete (review finding, round 6):
-    # marking $SRC_VERSION complete makes IT a valid tier-3 candidate too: if
+    # MUST run BEFORE _versioned_mark_complete: marking $SRC_VERSION
+    # complete makes IT a valid tier-3 candidate too: if
     # both the marker and last-known-good are invalid at this exact moment,
     # a resolve AFTER mark-complete could have the newest-slot scan pick the
     # brand-new $SRC_VERSION itself (its own version number sorts newest)
@@ -697,7 +697,7 @@ _versioned_activate() {
     fi
     _versioned_mark_complete
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
-    # BEFORE activate() runs (review finding on #4451): installs run
+    # BEFORE activate() runs (see #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
     # where a CONCURRENT installer can activate the NEXT generation and run
@@ -763,6 +763,27 @@ PY
 }
 # === end install-contract:v3 versioned-venv ===
 
+_versioned_activate() {
+    # Thin wrapper: releases the exclusive build lease (if one is held --
+    # harmless no-op otherwise, e.g. when _test_slot_already_complete skipped
+    # the build entirely) regardless of how _versioned_activate_inner
+    # returns, so a lease acquired in deploy_venv is held through package
+    # deployment and completion-marker publication and ALWAYS released
+    # afterward -- never leaked past this run (#5439).
+    #
+    # `_versioned_activate_inner` as a bare command would trip `set -e` on
+    # its nonzero return (e.g. a genuine health-gate failure) and exit the
+    # whole installer BEFORE `local rc=$?`/`_release_versioned_slot_lease`
+    # next ever ran -- the release would be skipped entirely on exactly
+    # the failure path this wrapper exists to cover. `&& rc=0 || rc=$?` is
+    # itself a compound command, exempt from errexit.
+    local rc
+    _versioned_activate_inner && rc=0 || rc=$?
+    _release_versioned_slot_lease
+    return "$rc"
+}
+
+
 # ── Status output helpers ────────────────────────────────────────────────
 
 ok()      { echo "  ✓ $*"; }
@@ -777,10 +798,48 @@ _bootstrap_python() {
     # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
     # python, then python3/python on PATH. Prints nothing + returns 1 if none
     # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
+    #
+    # Pass "exclude-venv-dir" when the caller is about to INSPECT $VENV_DIR
+    # itself (the slot-clean liveness census, and the lease's own resident
+    # helper process, which must never itself run from inside the slot
+    # being censused) -- using that slot's own interpreter would make the
+    # calling process itself show up as "a live process running from this
+    # slot", permanently self-reporting an incomplete slot with a stale
+    # python as still in use on every retry. Compares REAL
+    # (symlink-resolved) paths rather than the LINK_DIR/VENV_DIR variable
+    # strings: `.venv` can physically resolve into the target slot
+    # mid-migration even when the two variables hold different literal
+    # strings. This exclusion covers EVERY candidate, including the
+    # python3/python PATH fallback below -- not just the explicit
+    # $LINK_DIR/bin/python candidate -- since an installer launched with
+    # the target venv's own bin/ on PATH could otherwise still resolve
+    # straight back into $VENV_DIR and defeat the whole exclusion.
+    local exclude_venv_dir="${1:-}" use_link_python=1 venv_real=""
+    if [[ "$exclude_venv_dir" == "exclude-venv-dir" ]] && [[ -d "$VENV_DIR" ]]; then
+        venv_real="$(cd "$VENV_DIR" 2>/dev/null && pwd -P)"
+        if [[ -d "$LINK_DIR" ]]; then
+            local link_real
+            link_real="$(cd "$LINK_DIR" 2>/dev/null && pwd -P)"
+            [[ -n "$link_real" && -n "$venv_real" && "$link_real" == "$venv_real" ]] && use_link_python=0
+        fi
+    fi
+    if [[ "$use_link_python" == 1 ]] && [[ -x "$LINK_DIR/bin/python" ]]; then
+        echo "$LINK_DIR/bin/python"
+        return 0
+    fi
+    local __c __resolved __resolved_bin_real
     for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+        command -v "$__c" >/dev/null 2>&1 || continue
+        __resolved="$(command -v "$__c")"
+        if [[ -n "$venv_real" ]]; then
+            # The executable resolved via PATH lives in $VENV_DIR's bin/
+            # (one level under the directory venv_real points at), not AT
+            # venv_real itself -- compare with a prefix match, not equality.
+            __resolved_bin_real="$(cd "$(dirname "$__resolved")" 2>/dev/null && pwd -P)"
+            [[ -n "$__resolved_bin_real" && "$__resolved_bin_real" == "$venv_real"/* ]] && continue
+        fi
+        echo "$__resolved"
+        return 0
     done
     return 1
 }
@@ -822,6 +881,411 @@ _payload_hash() {
     printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
 }
 
+# fd holding the exclusive build-lease lock for this process's lifetime (set
+# by _acquire_versioned_slot_lease; cleared by _release_versioned_slot_lease,
+# or automatically by the OS the instant this process exits/crashes).
+_VERSIONED_SLOT_LEASE_FD=""
+# pid of the resident python helper holding a real fcntl.flock for us when
+# the `flock` CLI isn't available (e.g. stock macOS), and the write-end fd
+# of the pipe feeding its stdin -- see
+# _acquire_versioned_slot_lease_python_fallback. The helper blocks reading
+# that stdin pipe for as long as this fd stays open; closing it (release)
+# is what lets the helper see EOF, exit, and have the kernel release its
+# flock.
+_VERSIONED_SLOT_LEASE_PY_PID=""
+_VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
+# Lock directory held by the mkdir-based last-resort fallback (see
+# _acquire_versioned_slot_lease_mkdir_fallback) -- used only when BOTH
+# `flock` and a bootstrap python are unavailable.
+_VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+# An EXIT trap (registered once, unconditionally) is the only reliable way
+# to guarantee the lease is released on EVERY post-acquisition exit path --
+# a dirty-slot/uv/package build failure, a governance check failure, or any
+# other `exit 1` between acquiring the lease and reaching
+# `_versioned_activate`'s own release-on-every-outcome wrapper all bypass
+# that wrapper entirely (an `exit` terminates the whole script before the
+# caller's next line, let alone `_versioned_activate`, ever runs).
+# `_release_versioned_slot_lease` is already idempotent/safe to call with
+# nothing held, so registering it unconditionally here -- rather than only
+# once a lease is actually acquired -- is simplest and cannot double-release
+# anything. The flock/fcntl strengthening layers are released by the kernel
+# on process exit regardless; the universal mkdir gate has no such
+# auto-release, so without this trap a process that exits abnormally here
+# leaves it for a later contender's bounded stale-reclaim to clear instead.
+trap '_release_versioned_slot_lease' EXIT
+# Human-readable reason the most recent _acquire_versioned_slot_lease call
+# failed, so callers can tell genuine contention (another live process
+# already holds the lease) apart from a persistent lease-machinery failure
+# (lease file/FIFO couldn't be created, helper didn't respond, ...) --
+# conflating the two would send an operator chasing a retry loop instead of
+# the real, persistent failure. "contention" is the one reserved value with
+# special meaning; anything else is a literal description of what broke.
+_VERSIONED_SLOT_LEASE_FAILURE_REASON=""
+
+_versioned_slot_lease_path() {
+    printf '%s/.build-lease-%s.lock' "$INSTALL_DIR" "$SRC_VERSION"
+}
+
+_acquire_versioned_slot_lease_mkdir_fallback() {
+    # The UNIVERSAL cross-mode gate: every acquirer, regardless of whether
+    # `flock`/python end up available to it, contends on this ONE `mkdir`
+    # first (#5439: two concurrent invocations with DIFFERENT flock/python
+    # visibility -- e.g. the full launcher's PATH vs. the confined
+    # first-use binstub's restricted PATH -- must not each silently pick a
+    # different, non-communicating lock primitive and both build the same
+    # slot). `flock`/fcntl are layered ON TOP of this gate purely as an
+    # optional crash-safety strengthening (see _acquire_versioned_slot_lease),
+    # never as an alternate gate of their own.
+    #
+    # `mkdir` is POSIX-atomic and needs neither `flock` nor python, making
+    # it the correct universal primitive. This is a BOUNDED retry loop: the
+    # reclaim sentinel below adds exactly ONE extra, FLAT identity-bound
+    # staleness check of its own (never a deeper, recursive chain of
+    # sentinels guarding sentinels) so that a crash mid-reclaim can still
+    # be recovered from, rather than an unbounded chain of narrowing TOCTOU
+    # windows (a nested dotlock where each reclaim tier needs its OWN new
+    # staleness primitive is exactly that trap -- this reuses the same
+    # pid-liveness primitive one level down instead of inventing a new
+    # one). The happy path (no earlier attempt, no stale lock) is a single
+    # atomic `mkdir` with zero ambiguity; the only residual race is "is the
+    # recorded holder still alive", and losing that race just means
+    # looping and retrying (bounded by the loop), never a permanent
+    # deadlock or false acquisition.
+    local lock_file="$1"
+    local lock_dir="${lock_file}.d" attempt holder_pid
+    local reclaim_dir="${lock_file}.reclaiming"
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if mkdir "$lock_dir" 2>/dev/null; then
+            printf '%s' "$$" > "$lock_dir/pid" 2>/dev/null || true
+            _VERSIONED_SLOT_LEASE_MKDIR_DIR="$lock_dir"
+            return 0
+        fi
+        if [[ ! -d "$lock_dir" ]]; then
+            # mkdir failed for a reason OTHER than "the dir already
+            # exists" (permission denied, parent directory missing, ...)
+            # -- a genuine, persistent machinery failure, not contention;
+            # retrying would not help.
+            _VERSIONED_SLOT_LEASE_FAILURE_REASON="could not create the lease lock directory ($lock_dir)"
+            return 1
+        fi
+        holder_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+        if [[ -n "$holder_pid" ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
+            # Holder's process is dead -- reclaim. This is itself a
+            # second check-then-act gap: two contenders can both observe
+            # the SAME dead pid and both decide to reclaim, and a bare
+            # `rm -rf` + retry-`mkdir` sequence lets one of them wipe out
+            # the OTHER's freshly-created, perfectly valid lock (#5439) --
+            # both then believe they hold the lease.
+            #
+            # `mkdir` on a SEPARATE, short-lived sentinel directory is the
+            # atomic gate for "permission to reclaim": only ONE contender
+            # can ever win it at a time, so only one of them ever touches
+            # `lock_dir`. Re-reading the holder pid again AFTER winning the
+            # sentinel (not just trusting the read from before the
+            # sentinel) closes the remaining gap where the original holder
+            # released normally, or a third contender already reclaimed
+            # and republished, between our first read and winning the
+            # sentinel. The sentinel itself records ITS OWN pid the instant
+            # it's created, the same way `lock_dir` does -- so if THIS
+            # process is killed mid-reclaim (after winning the sentinel but
+            # before clearing it), a later contender can apply the exact
+            # same identity-bound staleness test to the sentinel as it does
+            # to the main lock: a recorded pid that's provably dead means
+            # genuinely safe to clear, never a guess. This is what makes
+            # the sentinel itself crash-recoverable rather than a
+            # permanent, un-reclaimable deadlock the one time it matters.
+            if mkdir "$reclaim_dir" 2>/dev/null; then
+                printf '%s' "$$" > "$reclaim_dir/pid" 2>/dev/null || true
+                local recheck_pid
+                recheck_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+                if [[ -n "$recheck_pid" && "$recheck_pid" == "$holder_pid" ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
+                    rm -rf "$lock_dir" 2>/dev/null || true
+                fi
+                rm -rf "$reclaim_dir" 2>/dev/null || true
+            else
+                # Someone else already holds the sentinel -- either a live
+                # concurrent reclaimer (normal, just retry next loop
+                # iteration) or one that was killed between creating it and
+                # clearing it. Apply the SAME identity-bound test used for
+                # the main lock above: only ever clear it when its
+                # recorded pid is read successfully and that process is
+                # provably dead, never on a guess (an empty/missing pid
+                # read -- e.g. the reclaimer was killed in the sliver of
+                # time between winning the sentinel and writing its own
+                # pid into it -- is treated as "can't yet prove it's
+                # stale", not as license to clear it; the bounded retry
+                # loop keeps revisiting it on the next iteration instead).
+                local reclaim_holder_pid
+                reclaim_holder_pid="$(cat "$reclaim_dir/pid" 2>/dev/null || true)"
+                if [[ -n "$reclaim_holder_pid" ]] && ! kill -0 "$reclaim_holder_pid" 2>/dev/null; then
+                    rm -rf "$reclaim_dir" 2>/dev/null || true
+                fi
+            fi
+            continue
+        fi
+        sleep 1
+    done
+    _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
+    return 1
+}
+
+_release_versioned_slot_lease_mkdir_fallback() {
+    if [[ -n "$_VERSIONED_SLOT_LEASE_MKDIR_DIR" ]]; then
+        rm -rf "$_VERSIONED_SLOT_LEASE_MKDIR_DIR" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+    fi
+}
+
+_acquire_versioned_slot_lease_python_fallback() {
+    # Used only when the `flock` CLI is unavailable. Hand-rolling a dotlock
+    # protocol in pure shell (create-if-absent, detect-and-reclaim stale
+    # owners, ...) runs into the exact class of TOCTOU race flock/fcntl
+    # exist specifically to avoid -- every userspace "is it safe to
+    # reclaim?" check is itself a second check-then-act window one level
+    # down, however narrow. Delegate to Python's fcntl.flock instead: the
+    # SAME real kernel advisory lock the `flock` CLI path above uses, with
+    # none of those races, and Python is already a hard dependency here
+    # (versioned_runtime.py). A resident helper process holds the lock
+    # (acquired non-blocking, so it fails fast like `flock -n`) for exactly
+    # as long as this shell holds open its write end of a FIFO the helper
+    # blocks reading -- closing that fd (release) or this process exiting
+    # for any reason closes the pipe, the helper sees EOF on its blocking
+    # read and exits, and the kernel releases its flock automatically.
+    #
+    # `coproc` would give the same keep-alive shape with less code, but
+    # `coproc` is a bash-4.0+ reserved word (and its dynamic-FD array needs
+    # 4.1+) while stock macOS -- the one platform this fallback exists
+    # for -- ships bash 3.2. Bash parses `coproc` at script-LOAD time, so
+    # using it here would fail the ENTIRE installer with a syntax error on
+    # exactly the host this path is supposed to support. A pair of FIFOs
+    # plus a literal fd number (no dynamic `{fd}` allocation either) is
+    # bash-3.2-safe. The second FIFO carries the helper's OK/LOCKED status
+    # back via a blocking `read` (no polling): it unblocks the instant the
+    # helper opens its own write end.
+    #
+    # Returns 0 (helper pid + keep-alive fd recorded), 1 (lock held by
+    # another process), or 2 (no bootstrap python resolvable at all --
+    # distinct from 1 so the caller can treat a fresh, nothing-installed-
+    # yet machine differently from genuine contention).
+    local lock_file="$1" py tmp_dir in_fifo out_fifo pid line
+    # exclude-venv-dir: this helper process holds the lease/flock, but it
+    # still runs an actual python.exe -- if that interpreter were resolved
+    # from inside $VENV_DIR, the helper itself would show up as "a live
+    # process running from this slot" the next time _versioned_slot_clean
+    # censuses it, same as the direct census call above.
+    py="$(_bootstrap_python exclude-venv-dir)" || return 2
+    [[ -n "$py" ]] || return 2
+    tmp_dir="$(mktemp -d 2>/dev/null)" || {
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="could not create a temp dir for the lease fallback"
+        return 1
+    }
+    in_fifo="$tmp_dir/in"
+    out_fifo="$tmp_dir/out"
+    if ! mkfifo "$in_fifo" "$out_fifo" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="could not create the lease fallback's FIFOs"
+        return 1
+    fi
+
+    # Open OUR OWN read-write fd on out_fifo FIRST, before the helper ever
+    # starts. A read-write open of a FIFO never blocks (unlike a read-only
+    # open, which waits for a writer) -- so the `read -t 10` below is
+    # bounded by its own timeout even if the helper never reaches the
+    # point of opening its write end at all (e.g. python itself fails to
+    # start, or `import fcntl` raises before `out = open(...)` runs). Without
+    # this, `read ... <"$out_fifo"` would perform its OWN blocking
+    # read-only open before `read`'s timeout ever started counting, and a
+    # helper that never starts would hang the installer forever.
+    if ! exec 7<>"$out_fifo"; then
+        rm -rf "$tmp_dir"
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="could not open the lease status FIFO"
+        return 1
+    fi
+
+    "$py" -c '
+import errno, fcntl, sys
+out = open(sys.argv[2], "w")
+f = open(sys.argv[1], "a")
+try:
+    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError as e:
+    # Only the standard nonblocking-contention errnos mean "someone else
+    # holds it" -- anything else (ENOLCK: kernel lock table full, a
+    # filesystem/mount that does not support locking, ...) is a genuine,
+    # persistent failure of the locking primitive itself, not contention,
+    # and must not tell an operator to just retry.
+    if e.errno in (errno.EAGAIN, errno.EACCES):
+        out.write("LOCKED\n")
+    else:
+        out.write("ERROR:%s\n" % (e,))
+    out.close()
+    sys.exit(1)
+out.write("OK\n")
+out.close()
+sys.stdin.read()  # block until the parent closes fd 9 (release)
+' "$lock_file" "$out_fifo" <"$in_fifo" &
+    pid=$!
+
+    # A fixed fd number is required here (bash 3.2 has no dynamic `{fd}`
+    # allocation); this function runs at most once per process lifetime
+    # (guarded by the caller), so fd 9 can't collide with another live
+    # lease in this same process.
+    if ! exec 9>"$in_fifo"; then
+        exec 7>&- || true
+        rm -rf "$tmp_dir"
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="could not open the lease keep-alive FIFO"
+        return 1
+    fi
+
+    if ! IFS= read -r -t 10 -u 7 line; then
+        line=""
+    fi
+    exec 7>&- || true
+    rm -rf "$tmp_dir"
+
+    if [[ "$line" == "OK" ]]; then
+        _VERSIONED_SLOT_LEASE_PY_PID="$pid"
+        _VERSIONED_SLOT_LEASE_PY_STDIN_FD=9
+        return 0
+    fi
+    exec 9>&- || true
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    if [[ "$line" == "LOCKED" ]]; then
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
+    elif [[ "$line" == ERROR:* ]]; then
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="${line#ERROR:}"
+    else
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="the lease helper did not respond (timed out or failed to start)"
+    fi
+    return 1
+}
+
+_acquire_versioned_slot_lease() {
+    # Acquire an exclusive lock for building THIS version's slot, held for
+    # the remainder of this process's lifetime. A slot-clean liveness check
+    # alone is check-then-act: two concurrent installer invocations could
+    # both observe a clean slot (neither has started its external build
+    # yet) and then both build into it -- this lease is what actually
+    # serializes them (#5439). Returns 0 if acquired (or a no-op in legacy
+    # mode); 1 if another live process already holds it, or the lease
+    # machinery itself is unusable.
+    #
+    # The mkdir-based gate (_acquire_versioned_slot_lease_mkdir_fallback) is
+    # ALWAYS the first and authoritative acquisition, regardless of
+    # flock/python availability: two concurrent processes can have
+    # DIFFERENT visibility of those (e.g. the full launcher's PATH vs. the
+    # plugin's own first-use binstub's restricted PATH), so a tier picked
+    # per-process rather than one shared gate would let each side acquire a
+    # different, non-communicating lock and both build the same slot.
+    # `flock` (or, lacking that, a resident Python fcntl.flock helper) is
+    # layered ON TOP of the already-held gate purely as an optional
+    # crash-safety strengthening -- a kernel-held lock is released by the
+    # OS the instant ITS holder exits/crashes, giving a later contender
+    # faster, more certain proof that a reported holder is really gone than
+    # the gate's own pid-liveness heuristic alone. Failing to strengthen is
+    # NOT itself a failure: the gate alone is already sufficient mutual
+    # exclusion. `_VERSIONED_SLOT_LEASE_FAILURE_REASON` distinguishes
+    # genuine contention from a persistent lease-machinery failure for the
+    # caller's error message. Idempotent: a second call while already held
+    # is a no-op success.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    [[ -n "$_VERSIONED_SLOT_LEASE_MKDIR_DIR" ]] && return 0
+    _VERSIONED_SLOT_LEASE_FAILURE_REASON=""
+    local lease_path
+    lease_path="$(_versioned_slot_lease_path)"
+
+    if ! _acquire_versioned_slot_lease_mkdir_fallback "$lease_path"; then
+        return 1
+    fi
+
+    if command -v flock >/dev/null 2>&1; then
+        # A literal fd number is required here (not the dynamic `{fd}`
+        # allocation syntax, bash 4.1+): this function runs at most once
+        # per process lifetime (guarded above), so fd 8 can't collide with
+        # another live lease in this same process. The bare `exec 8>...`
+        # MUST be wrapped in a `{ ...; }` group before attaching its own
+        # `2>/dev/null`: a bare exec with no command makes EVERY listed
+        # redirection permanent for the rest of this shell (the exact
+        # footgun documented in bin/agent-worktrees) -- attaching
+        # `2>/dev/null` directly to it would silently null ALL subsequent
+        # stderr for the rest of the install, not just this exec's own
+        # failure message. The group scopes the stderr suppression to
+        # just the exec's own potential error while still leaving fd 8
+        # itself open in the current shell (groups run in-place, not a
+        # subshell).
+        if { exec 8>"$lease_path"; } 2>/dev/null; then
+            if flock -n 8 2>/dev/null; then
+                _VERSIONED_SLOT_LEASE_FD=8
+            else
+                # flock explicitly REFUSED: hard kernel evidence of a live
+                # writer, not a benign "couldn't strengthen". A surviving
+                # CHILD of a crashed original holder (e.g. a `uv`/package-
+                # install process that inherited this fd) can still hold
+                # the kernel lock even after our mkdir gate reclaim
+                # succeeded -- the gate's pid-liveness check only tracks
+                # the ORIGINAL holder's own pid, never any children it may
+                # have spawned. Silently proceeding here would build into
+                # a slot that process is still actively using. Release the
+                # gate we just took and fail closed rather than silently
+                # tolerating this the way a mere machinery failure is
+                # tolerated below.
+                exec 8>&- || true
+                _release_versioned_slot_lease_mkdir_fallback
+                _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
+                return 1
+            fi
+        fi
+        # The fd-open itself failing (couldn't even attempt flock) is
+        # tolerated -- the universal gate alone is already sufficient.
+    else
+        _acquire_versioned_slot_lease_python_fallback "$lease_path" >/dev/null 2>&1
+        local fallback_rc=$?
+        if [[ "$fallback_rc" -eq 1 && "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]]; then
+            # Same hard-evidence case as the primary flock path above,
+            # reached via the no-flock resident-helper fallback instead.
+            _release_versioned_slot_lease_mkdir_fallback
+            return 1
+        fi
+        # Any OTHER fallback outcome (rc 2 no bootstrap python, or a
+        # machinery failure such as "couldn't create the FIFOs") is
+        # tolerated the same way a flock open failure is above -- the
+        # universal gate alone remains sufficient.
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON=""
+    fi
+    return 0
+}
+
+_release_versioned_slot_lease() {
+    # Safe to call unconditionally (no-op) when no lease was acquired -- e.g.
+    # _test_slot_already_complete skipped the build entirely this run.
+    # Release order matters: the strengthening layer (flock fd / python
+    # helper) first, the universal mkdir gate LAST, so the gate stays held
+    # for the entire time this process could still be building -- never a
+    # window where the gate is gone but a strengthening layer still is (or
+    # vice versa in a way that matters).
+    if [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]]; then
+        exec 8>&- || true
+        _VERSIONED_SLOT_LEASE_FD=""
+    fi
+    if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then
+        # Closing bash's held write-end of the helper's stdin pipe is the
+        # release: the helper sees EOF on its blocking stdin.read(), exits,
+        # and the kernel releases its fcntl.flock automatically -- exactly
+        # like closing the `flock` fd does on the primary path above.
+        if [[ -n "$_VERSIONED_SLOT_LEASE_PY_STDIN_FD" ]]; then
+            eval "exec ${_VERSIONED_SLOT_LEASE_PY_STDIN_FD}>&-" 2>/dev/null || true
+            _VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
+        fi
+        wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_PY_PID=""
+    fi
+    # The universal gate is released LAST (see the ordering note above).
+    _release_versioned_slot_lease_mkdir_fallback
+}
+
 _versioned_slot_clean() {
     # #935: ensure the target slot exists, tossing it first if a prior build left
     # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
@@ -831,9 +1295,26 @@ _versioned_slot_clean() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    py="$(_bootstrap_python exclude-venv-dir)"
+    if [[ -z "$py" ]]; then
+        # No bootstrap python to run the actual census with (e.g. a
+        # uv-only machine with no system python on PATH yet and no prior
+        # `venv` link to borrow from). An ABSENT slot needs no validation
+        # at all -- genuinely clean, return 0. But an EXISTING slot (e.g.
+        # abandoned/incomplete from a prior attempt) must fail CLOSED here
+        # rather than silently reporting "clean": returning success would
+        # let the caller proceed straight to `uv venv --allow-existing`
+        # over it without ever having actually validated it, defeating the
+        # whole point of this check.
+        [[ -e "$VENV_DIR" ]] && return 1
+        return 0
+    fi
+    # Propagate the underlying python call's real exit code (never the
+    # trailing `sed`'s, and never force-succeed via `|| true`) -- callers
+    # must be able to tell a genuinely dirty/contended slot from a clean one
+    # (#5416).
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'
+    return "${PIPESTATUS[0]}"
 }
 
 _versioned_mark_complete() {
@@ -1072,7 +1553,55 @@ PYEOF
 deploy_venv() {
     # Create venv via uv (--allow-existing handles re-install). Deps come from
     # pyproject at package install time -- no ad-hoc pyyaml here.
-    _versioned_slot_clean
+    if ! _acquire_versioned_slot_lease; then
+        # Another live process already holds the exclusive build lease for
+        # this exact version -- it's actively building (or about to), so
+        # treat this exactly like a dirty slot and refuse to race it.
+        # _VERSIONED_SLOT_LEASE_FAILURE_REASON distinguishes that genuine
+        # contention from any OTHER lease-machinery failure (lease file/
+        # FIFOs couldn't be created, helper didn't respond, ...) -- never
+        # attribute the latter to "another process" and send an operator
+        # chasing a retry loop instead of the real, persistent failure.
+        if [[ -n "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" && "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" != "contention" ]]; then
+            err "Could not acquire the build lease for runtime slot ($SRC_VERSION): $_VERSIONED_SLOT_LEASE_FAILURE_REASON"
+        else
+            err "Another process is already building this runtime slot ($SRC_VERSION) -- refusing to race it. Re-run update once the other build finishes."
+        fi
+        return 1
+    fi
+    # Re-check completeness NOW, under the just-acquired lease: a concurrent
+    # process may have already finished building AND activating this exact
+    # slot while we were waiting for the lease (#5439) -- the pre-lease
+    # check every caller already does is a check-then-act gap on its own.
+    # Without this re-check we'd still act on our stale "incomplete, must
+    # build" observation and overwrite a slot that may already be the
+    # published, possibly-running one. Returns 2 (distinct from the 0
+    # success / 1 failure a caller already branches on) so a caller can
+    # skip `deploy_package` too -- there is genuinely nothing left to do.
+    if _test_slot_already_complete; then
+        return 2
+    fi
+    local slot_clean=0
+    _versioned_slot_clean && slot_clean=1
+    if [[ "$slot_clean" -ne 1 ]]; then
+        # "Still in use" is typically a transient file-handle race (a just-
+        # exited process hasn't released the slot yet) -- retry briefly
+        # before giving up.
+        local _i
+        for _i in 1 2 3; do
+            sleep 0.75
+            _versioned_slot_clean && { slot_clean=1; break; }
+        done
+    fi
+    if [[ "$slot_clean" -ne 1 ]]; then
+        # A still-dirty slot after retries means another process may
+        # genuinely own (or still be building into) $VENV_DIR right now.
+        # Building into it here races that writer and risks a corrupted,
+        # partially-overlapping venv -- fail instead of racing it, leaving
+        # the previously-installed, working version in place (#5416).
+        err "Runtime slot still in use after retries -- refusing to build into a possibly-contended slot: $VENV_DIR. Re-run update once the prior process has exited."
+        return 1
+    fi
     if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
         if ! uv venv "$VENV_DIR" --allow-existing 2>/dev/null; then
             err "Failed to create venv at $VENV_DIR"
@@ -1080,6 +1609,37 @@ deploy_venv() {
         fi
     fi
     ok "Venv created at $VENV_DIR"
+}
+
+_deploy_venv_and_package() {
+    # Shared by every call site that builds+installs the runtime. The
+    # completeness check happens EXACTLY ONCE, inside `deploy_venv` itself,
+    # under the lease it just acquired (#5439): a concurrent process
+    # could finish building AND activating this exact slot in the window
+    # between an outer, pre-lease check and actually acquiring the lease,
+    # so a check made before the lease can never be authoritative on its
+    # own -- it must be re-verified (or, as here, verified for the only
+    # time) under the lease's protection. There is deliberately no second,
+    # OUTER pre-check as a "fast path": `_test_slot_already_complete`
+    # hashes the full payload tree, which is NOT cheap enough to pay
+    # twice on every call (confirmed directly: real-world runs under
+    # ~15s for this payload) -- paying it exactly once, protected, is
+    # simultaneously correct and no slower than before.
+    #
+    # `deploy_venv` as a bare command would trip `set -e` on ANY nonzero
+    # return (rc 1 failure, or the intentional rc-2 "already complete"
+    # signal) and exit the whole installer BEFORE `rc=$?` next line ever
+    # ran -- a bare simple command's exit status is exactly what errexit
+    # watches, regardless of what follows it. `deploy_venv && rc=0 ||
+    # rc=$?` is itself a compound (`&&`/`||`) command, which is exempt.
+    local rc
+    deploy_venv && rc=0 || rc=$?
+    if [[ "$rc" -eq 2 ]]; then
+        skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
+        return 0
+    fi
+    [[ "$rc" -eq 0 ]] || exit 1
+    deploy_package || exit 1
 }
 
 # --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
@@ -2017,12 +2577,7 @@ case "$ACTION" in
         _ensure_uv_index
         mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
         deploy_runtime_resolvers || exit 1
-        if _test_slot_already_complete; then
-            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-        else
-            deploy_venv || exit 1
-            deploy_package || exit 1
-        fi
+        _deploy_venv_and_package
         _versioned_activate || exit 1
         deploy_tool_binstub
         write_deploy_manifest
@@ -2071,12 +2626,7 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if _test_slot_already_complete; then
-            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-        else
-            deploy_venv || exit 1
-            deploy_package || exit 1
-        fi
+        _deploy_venv_and_package
         deploy_wrappers || exit 1
         if $CONTEXTUAL_INSTALL && ! context_governance_unchanged; then
             err "Installation governance changed before runtime cutover"
@@ -2338,12 +2888,7 @@ case "$ACTION" in
             _ensure_uv || exit 1
             _ensure_uv_index
             mkdir -p "$INSTALL_DIR" "$BIN_DIR"
-            if _test_slot_already_complete; then
-                skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-            else
-                deploy_venv || exit 1
-                deploy_package || exit 1
-            fi
+            _deploy_venv_and_package
             deploy_wrappers || exit 1
             if ! context_governance_unchanged; then
                 err "Installation governance changed before runtime cutover"
@@ -2362,12 +2907,7 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if _test_slot_already_complete; then
-            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-        else
-            deploy_venv || exit 1
-            deploy_package || exit 1
-        fi
+        _deploy_venv_and_package
         deploy_wrappers || exit 1
         _versioned_activate || exit 1
         remove_legacy_scripts

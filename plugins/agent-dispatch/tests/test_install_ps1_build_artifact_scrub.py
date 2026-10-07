@@ -78,6 +78,12 @@ def _run_harness(plugin_dir: Path, stub_body: str, extra_script: str) -> subproc
     harness = plugin_dir / "harness.ps1"
     harness.write_text(
         f'$PluginDir = "{plugin_dir}"\n'
+        # Install-Runtime now builds from $BuildSrcDir (New-PluginBuildSnapshot's
+        # durable per-version snapshot), never from the live $PluginDir -- see
+        # that function's docstring. These tests only exercise scrub
+        # correctness, so point $BuildSrcDir at the same fixture directory
+        # $installPkg's extracted block actually reads/writes.
+        f'$BuildSrcDir = "{plugin_dir}"\n'
         '$VenvPython = "python3"\n'
         + stub_body
         + "\n\n"
@@ -338,9 +344,10 @@ function Write-Ok {{ param($m) Write-Output "OK: $m" }}
 function Write-Fail {{ param($m) Write-Output "FAIL: $m" }}
 function Write-Skip {{ param($m) Write-Output "SKIP: $m" }}
 function Get-Command {{ [CmdletBinding()] param($Name) return $null }}
-function Resolve-Zdd {{ return "{zdd_dir}" }}
+function Resolve-Zdd {{ param($LibRoot) return "{zdd_dir}" }}
 $VenvPython = "python3"
 $PluginDir = "{plugin_dir}"
+$BuildSrcDir = "{plugin_dir}"
 $prevEAP = $ErrorActionPreference
 function python3 {{
     param()
@@ -392,9 +399,10 @@ function Write-Ok {{ param($m) Write-Output "OK: $m" }}
 function Write-Fail {{ param($m) Write-Output "FAIL: $m" }}
 function Write-Skip {{ param($m) Write-Output "SKIP: $m" }}
 function Get-Command {{ [CmdletBinding()] param($Name) return $null }}
-function Resolve-Zdd {{ return "{external_zdd_dir}" }}
+function Resolve-Zdd {{ param($LibRoot) return "{external_zdd_dir}" }}
 $VenvPython = "python3"
 $PluginDir = "{plugin_dir}"
+$BuildSrcDir = "{plugin_dir}"
 $prevEAP = $ErrorActionPreference
 function python3 {{
     param()

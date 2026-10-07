@@ -1,10 +1,16 @@
-"""picker-new-session-prompt-and-composer: ``resolve --new --seed`` must be
-rejected when combined with a remote ``--machine`` target, in BOTH the JSON
-and non-JSON dispatch paths -- the non-JSON path checks ``use_new`` before
-``requested_machine`` and would otherwise silently create a LOCAL seeded
-worktree instead of honoring (or rejecting) ``--machine``; the JSON path's
-remote dispatch additionally relays a naively space-joined command string
-with no shell quoting, unsafe for a value that can contain arbitrary text.
+"""picker-new-session-prompt-and-composer /
+resume-prompt-durable-seed-and-mux-fix: ``resolve --seed`` guard behavior.
+
+``--seed`` is valid with either ``--new`` (persisted onto the new record) or
+``--worktree-id`` (appended directly to the resume launch's own argv -- see
+``resolve_launch_cli._resolve_resume_context``) -- but never with ``--base``
+(no worktree record, no launch argv builder for the seed to reach), and never
+combined with a remote ``--machine`` target in either mode: the non-JSON path
+checks ``use_new``/``worktree_id`` before ``requested_machine`` and would
+otherwise silently create/resume LOCALLY instead of honoring (or rejecting)
+``--machine``; the JSON path's remote dispatch additionally relays a naively
+space-joined command string with no shell quoting, unsafe for a value that
+can contain arbitrary text.
 """
 from __future__ import annotations
 
@@ -108,3 +114,87 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
 
     assert rc == 0
     assert called
+
+
+def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
+    """The same remote-target rejection applies to a --worktree-id resume
+    seed, not only --new."""
+    rc = resolve_cli.cmd_resolve(
+        _args(new_worktree=False, worktree_id="some-wt", seed="do the thing")
+    )
+
+    assert rc != 0
+    out = json.loads(capfd.readouterr().out)
+    assert "seed" in out.get("error", "").lower()
+    assert "machine" in out.get("error", "").lower()
+
+
+def test_resolve_worktree_id_with_seed_and_no_machine_is_accepted(capfd):
+    """resume-prompt-durable-seed-and-mux-fix: --seed is now valid alongside
+    --worktree-id (not only --new) -- the guard must not reject this
+    combination merely because --new is absent."""
+    rc = resolve_cli.cmd_resolve(
+        _args(
+            new_worktree=False, worktree_id="some-wt", seed="do the thing",
+            machine=None,
+        )
+    )
+
+    # Past the seed guard entirely -- the call proceeds to resolve the
+    # worktree (and fails for an unrelated reason: no such tracked worktree
+    # in this test's environment), never the "--seed is only valid with"
+    # rejection this guard owns.
+    assert rc != 0
+    out = json.loads(capfd.readouterr().out)
+    assert "seed" not in out.get("error", "").lower()
+
+
+def test_resolve_base_with_seed_is_still_rejected_json(capfd):
+    """--base has no worktree record and no resume-context launch argv for
+    a seed to reach -- the guard must keep rejecting this combination."""
+    rc = resolve_cli.cmd_resolve(
+        _args(new_worktree=False, base=True, seed="do the thing", machine=None)
+    )
+
+    assert rc != 0
+    out = json.loads(capfd.readouterr().out)
+    assert "seed" in out.get("error", "").lower()
+
+
+def test_resolve_worktree_id_with_bare_resume_and_seed_is_rejected_json(capfd):
+    """--bare-resume launches Copilot in HOME with no --resume at all
+    (dodging a cwd-start bug) -- there is no resumed conversation, and
+    arguably no well-defined worktree session, for a seed to join. Without
+    this guard the combination used to exit 0 while silently discarding
+    the prompt; it must now be rejected explicitly, the same as --base and
+    a remote --machine target."""
+    rc = resolve_cli.cmd_resolve(
+        _args(
+            new_worktree=False, worktree_id="some-wt", seed="do the thing",
+            machine=None, bare_resume=True,
+        )
+    )
+
+    assert rc != 0
+    out = json.loads(capfd.readouterr().out)
+    assert "seed" in out.get("error", "").lower()
+    assert "bare" in out.get("error", "").lower()
+
+
+def test_resolve_worktree_id_with_bare_resume_and_no_seed_is_unaffected(capfd):
+    """The new bare-resume guard must only fire when --seed is actually
+    requested -- an ordinary --bare-resume call (no --seed) must proceed
+    past the guard untouched."""
+    rc = resolve_cli.cmd_resolve(
+        _args(
+            new_worktree=False, worktree_id="some-wt", seed=None,
+            machine=None, bare_resume=True,
+        )
+    )
+
+    # Past the seed guard entirely -- fails for an unrelated reason (no
+    # such tracked worktree in this test's environment), never the
+    # "--bare-resume" rejection this guard owns.
+    assert rc != 0
+    out = json.loads(capfd.readouterr().out)
+    assert "bare" not in out.get("error", "").lower()

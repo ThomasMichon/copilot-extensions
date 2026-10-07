@@ -29,6 +29,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from agent_procutil import no_window_kwargs
+
+from .._exec import expand_python_token
 from ._catalog import tool_call_args, tool_call_name
 from ._jsonutil import (
     MISSING,
@@ -307,11 +310,12 @@ class StorageDecorator(Decorator):
         return out
 
     async def _summarize_command(self, value, command) -> Any:
-        argv = [str(c) for c in command]
+        argv = expand_python_token([str(c) for c in command])
         try:
             proc = await asyncio.to_thread(
                 subprocess.run, argv, input=json.dumps(value),
-                capture_output=True, text=True, timeout=self.command_timeout)
+                capture_output=True, text=True, timeout=self.command_timeout,
+                **no_window_kwargs())
         except (OSError, subprocess.SubprocessError) as exc:
             return {"error": f"summary command failed: {exc}"}
         out = (proc.stdout or "").strip()

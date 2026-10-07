@@ -1,0 +1,89 @@
+# Baseline/path allowlist for tools/check-headless-launch.py's rules 3 (an
+# unsuppressed console-program spawn) and 4 (the same, declared in JSON/YAML).
+#
+# One "relative/path.ext:line  reason" entry per line (whitespace-separated;
+# the reason is free text, required only for a human reviewer's benefit --
+# the checker itself just matches the "path:line" token). Blank lines and
+# lines starting with "#" are ignored.
+#
+# Rule 4 (JSON) has no inline-comment escape hatch (JSON has no comment
+# syntax), so this file is its only option there; a YAML file may instead
+# carry an inline "# headless-guard: allow <why>" comment. Rule 3 (Python)
+# normally uses that same inline-comment escape hatch too -- this file's
+# entries below are a ONE-TIME BASELINE seeded when the rule first shipped
+# (ThomasMichon/copilot-extensions#789), not meant to accumulate further:
+# triage each one (ThomasMichon/copilot-extensions#5518) into either a real
+# fix (remove the entry) or a reviewed, specific inline comment (remove the
+# entry here, add the comment at the call site instead). Do not add a new
+# baseline-style entry here for freshly-written code -- use the inline
+# comment for that.
+plugins/agent-codespaces/scripts/service.yaml:27  pre-existing at rule introduction, see #5518
+plugins/agent-codespaces/src/agent_codespaces/config.py:1400  pre-existing at rule introduction, see #5518
+plugins/agent-codespaces/src/agent_codespaces/config.py:1970  pre-existing at rule introduction, see #5518
+plugins/agent-dispatch/scripts/stamp_build_info.py:58  pre-existing at rule introduction, see #5518
+plugins/agent-index/scripts/cell-runtime.py:1363  pre-existing at rule introduction, see #5518
+plugins/agent-index/scripts/cell-runtime.py:1371  pre-existing at rule introduction, see #5518
+plugins/agent-index/scripts/cell-runtime.py:1380  pre-existing at rule introduction, see #5518
+plugins/agent-index/src/agent_index/config.py:400  pre-existing at rule introduction, see #5518
+plugins/agent-logger/src/agent_logger/aggregate.py:827  pre-existing at rule introduction, see #5518
+plugins/agent-logger/src/agent_logger/chronicle/sink.py:162  pre-existing at rule introduction, see #5518
+plugins/agent-logger/src/agent_logger/repo_trust.py:95  pre-existing at rule introduction, see #5518
+plugins/agent-logger/src/agent_logger/segmenter/ramp_up.py:236  pre-existing at rule introduction, see #5518
+plugins/agent-vault/src/agent_vault/cli.py:639  pre-existing at rule introduction, see #5518
+plugins/agent-vault/src/agent_vault/prompt.py:71  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/scripts/service.yaml:16  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/__main__.py:3670  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/__main__.py:5193  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/__main__.py:5285  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/anchor_hygiene.py:55  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/claim_handoff_accept_support.py:126  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/claim_history_mirror.py:521  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/claimant.py:351  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/codename_reverse_lookup.py:178  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/context_cli.py:392  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/delegate_cli.py:344  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/effort_focus.py:165  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/finalize.py:492  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/front_door_cli.py:279  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:100  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1189  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1208  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1212  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1224  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1228  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1232  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1236  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:307  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:442  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:567  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:714  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:757  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installer.py:1362  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installer.py:1368  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installer.py:1374  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installer.py:284  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installer.py:294  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installer.py:580  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/installer.py:74  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/lease_store.py:763  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/list_views_cli.py:160  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:240  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:887  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/manager_launch_cli.py:327  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:58  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:69  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:76  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:86  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/pr_ops.py:324  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/pr_ops.py:353  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/pr_ops.py:367  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/related_cli.py:85  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/repos.py:1004  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/repos.py:1319  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/repos.py:999  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/state_root.py:201  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/state_root.py:443  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/validate.py:109  pre-existing at rule introduction, see #5518
+plugins/ai-attribution/scripts/write_session_guidance.py:110  pre-existing at rule introduction, see #5518
+plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py:141  pre-existing at rule introduction, see #5518
+plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py:155  pre-existing at rule introduction, see #5518

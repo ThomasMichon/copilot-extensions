@@ -95,6 +95,7 @@ def _plan(tmp_path: Path) -> LaunchPlan:
         post_exit=True,
         no_mux=True,
         exit_code=0,
+        seed_claimed=False,
         raw={},
     )
 

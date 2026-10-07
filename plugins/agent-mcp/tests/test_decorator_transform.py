@@ -86,6 +86,49 @@ async def test_command_filter():
     assert json.loads(resp["result"]["content"][0]["text"]) == 4
 
 
+async def test_command_filter_expands_python_token():
+    # ``${python}`` in a transform `command` resolves to agent-mcp's own
+    # interpreter, the same cross-platform token `server.command`/
+    # `auth.command` already support.
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"value": [1, 2, 3]})})
+    cmd = ["${python}", "-c",
+           "import sys, json; d = json.load(sys.stdin); print(json.dumps(len(d['value'])))"]
+    dec = _transform(rules=[{"tool": "g", "command": cmd}])
+    resp = await run(dec, up, call_req("g"))
+    assert json.loads(resp["result"]["content"][0]["text"]) == 3
+
+
+async def test_command_filter_passes_no_window_creationflags(monkeypatch):
+    # The transform-command spawn must carry whatever agent_procutil.
+    # no_window_kwargs() returns (copilot-extensions#5425) -- stub it to a
+    # sentinel so this proves the production code actually calls it and
+    # merges its result in, rather than comparing against a value that is
+    # also `0`/absent off Windows and would pass identically even if the
+    # real `**no_window_kwargs()` call were deleted. Fakes the spawn
+    # entirely (never calls the real subprocess.run) because a non-zero
+    # sentinel `creationflags` is only accepted by Windows -- forwarding it
+    # to a real POSIX Popen raises ValueError.
+    sentinel = {"creationflags": 0xFEEDFACE}
+    monkeypatch.setattr("agent_mcp.decorators.transform.no_window_kwargs", lambda: sentinel)
+
+    captured: dict = {}
+    import subprocess as _subprocess
+
+    def fake_run(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _subprocess.CompletedProcess(args, 0, stdout="[1, 2]", stderr="")
+
+    monkeypatch.setattr("agent_mcp.decorators.transform.subprocess.run", fake_run)
+
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"value": [1, 2]})})
+    cmd = [sys.executable, "-c", "print('[1, 2]')"]
+    dec = _transform(rules=[{"tool": "g", "command": cmd}])
+    await run(dec, up, call_req("g"))
+    assert captured["kwargs"].get("creationflags") == 0xFEEDFACE
+
+
 async def test_no_rule_match_passes_through():
     up = FakeUpstream([tool("other")],
                       handlers={"other": lambda a: _json_result({"value": [1]})})

@@ -401,27 +401,29 @@ risk wedging everything").
       duplicated `@pytest.mark.skipif` decorator on one POSIX-only test
       in `test_procutil.py` left the *next* POSIX-only test unmarked,
       so it ran (and failed) on Windows.
-- [ ] A newly-surfaced class of intermittent, host-environment flakes in
-      `agent-dispatch`, each reproducing cleanly in isolation but failing
-      once under real full-matrix back-to-back load, in a *different*
-      test/sub-suite each run -- not fixed this leg, out of the wall-clock
-      budget item's own scope:
-      - `test_namespaced_peer_from_windowless_parent` (sub-suite 4):
-        asserts no window becomes visible/focused while a windowless
-        subprocess runs; failed once with one surfaced window, passed
-        cleanly in isolation 3x.
-      - `test_managed_companion.py::test_prepare_failure_never_stops_healthy_companion[install]`
-        and `test_managed_retention.py::test_managed_retention_count_and_age_bounds_do_not_count_protected_cells`
-        (both sub-suite 3, on a separate run): both failed on Windows
-        `[WinError 5] Access is denied` during a file rename/move inside
-        the test's own temp sandbox -- consistent with transient external
-        interference (e.g. AV/indexing) briefly holding a file handle,
-        not a deterministic product bug.
-      Needs its own root-cause pass (desktop/AV interference from
-      concurrently running heavy sub-suites under full-matrix load, vs. a
-      genuine production race) before deciding whether to harden these
-      tests, add retry-on-WinError-5 at the containment layer, or mark
-      them host-state-sensitive.
+- [x] `agent-dispatch`'s intermittent `[WinError 5] Access is denied`
+      flakes on managed-runtime directory renames (`test_managed_companion.py::test_prepare_failure_never_stops_healthy_companion[install]`,
+      `test_managed_retention.py::test_managed_retention_count_and_age_bounds_do_not_count_protected_cells`),
+      each reproducing cleanly in isolation but failing under real
+      full-matrix back-to-back load. **Root-caused and fixed, 2026-10-06**
+      (operator's own hypothesis, confirmed): `managed_runtime.py`'s
+      `_validate_imports()` runs the newly-materialized venv's own
+      `python.exe` with its subprocess **`cwd` set to the exact staging/
+      cell directory** that gets `os.replace()`'d moments later to
+      publish/quarantine/unpublish it -- the identical class of Windows
+      Defender-vs-just-written-file race already root-caused for
+      version-dir GC in `libs/versioned-runtime/versioned_runtime.py`
+      (dotfiles #911). Fixed with a new `windows_replace_retry.py`
+      module (AV-tolerant retry around `os.replace`, same pattern as the
+      precedent) used at all three managed-runtime directory-rename call
+      sites (publish, quarantine, unpublish). Confirmed: a full
+      `agent-dispatch` suite run (all 7 sub-suites, 4250 tests) completed
+      with **zero failures** for the first time this effort.
+      `test_namespaced_peer_from_windowless_parent`'s separate
+      window-visibility flake (sub-suite 4) also did not reoccur in that
+      same clean run, further supporting it was unrelated desktop noise,
+      not a regression -- left unaddressed (no reproducible, attributable
+      cause found) rather than speculatively "fixed."
 - [ ] Complete a full `--all` run once the Phase 3.5 items above
       are addressed, to reach the ~13 plugins never attempted across either
       prior attempt (`agent-machines`, `agent-mcp`,
@@ -514,6 +516,58 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-06 — Phase 3.5: agent-dispatch's WinError 5 flakes root-caused and fixed (operator's CWD-locking hypothesis confirmed)
+Operator, given the two newly-found "Access is denied" flakes logged in
+the previous entry, hypothesized "improper CWD locking when running the
+code under test." Investigated and confirmed exactly that, with a
+precedent already in the codebase for the identical failure class.
+
+**Root cause:** `managed_runtime.py`'s `ManagedRuntimeMaterializer`
+publishes a runtime cell with `os.replace(staging, cell)` (and similarly
+quarantines/unpublishes with `os.replace()` elsewhere) -- but immediately
+before each of these renames, `_validate_imports()` runs the
+just-materialized venv's own `python.exe` as a subprocess with its **`cwd`
+set to that exact directory** (`cwd=staging` / `cwd=cell`). Even though
+`subprocess.run()` is synchronous and the child has fully exited by the
+time the rename is attempted, Windows Defender (or another on-access
+scanner) can still briefly hold a handle open on a file the subprocess
+just touched inside that same directory tree, making the directory
+rename transiently fail with `WinError 5`. This is the **identical**
+failure class already root-caused and fixed for version-dir GC in
+`libs/versioned-runtime/versioned_runtime.py` (`_is_transient_lock`/
+`_rmtree_deferrable`, dotfiles #911) -- agent-dispatch's own
+managed-runtime code just never got the same treatment.
+
+**Fix:** added `plugins/agent-dispatch/src/agent_dispatch/
+windows_replace_retry.py` (a new sibling module, not an addition to
+`managed_runtime.py`/`managed_retention.py` -- both were already sitting
+exactly at their `tools/module-size-baseline.json` shrink-only ceiling;
+each file's own net line delta was kept at or below zero via a one-line
+`raise` consolidation and a removed redundant blank line, confirmed with
+`python tools/check-module-size.py`). `replace_with_retry()` mirrors the
+precedent's exact retry-then-give-up pattern (4 attempts, linear backoff,
+recognizes `PermissionError`/`errno.EACCES`/`winerror in (5, 32, 33)` as
+transient). Wired into all three managed-runtime directory-rename call
+sites: `managed_runtime.py`'s publish (`os.replace(staging, cell)`) and
+quarantine (`_quarantine_cell`'s `os.replace(cell, target)`), and
+`managed_retention.py`'s unpublish (`os.replace(cell, staging)`, inside
+its existing `except OSError` "preserve as protected" fallback, which
+still applies unchanged if the lock is NOT transient or outlives all
+retries).
+
+**Validation:** targeted re-run
+(`python tools/run-plugin-tests.py agent-dispatch -k
+"test_managed_retention or test_managed_companion or test_managed_runtime"`)
+-- 183 passed, 2 skipped, 0 failed. Then a **full, unmodified**
+`python tools/run-plugin-tests.py agent-dispatch` run (all 7 sub-suites,
+no explicit flags) completed with **4250 passed, 0 failed** -- the first
+fully clean full-matrix run of this plugin's entire suite this effort.
+The separate `test_namespaced_peer_from_windowless_parent` window-
+visibility flake (logged in the previous entry) also did not reoccur in
+this same run, further supporting it was unrelated desktop noise rather
+than a regression -- left as-is (no reproducible, attributable cause
+found), not speculatively "fixed" alongside this one.
 
 ### 2026-10-05 — Phase 3.5: agent-dispatch wall-clock budget root-caused and fixed; a masked skip-marker bug caught too
 Picked up the handoff for the sole remaining open item: `agent-dispatch`'s

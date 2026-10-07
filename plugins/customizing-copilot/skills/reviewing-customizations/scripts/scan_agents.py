@@ -19,8 +19,32 @@ from scan_skills import (
 # `.ps1`/`.cmd`) is unusable without it.
 SHELL_EXECUTION_TOOL = "execute"
 
+# Inline-comment escape hatch for a deliberately narrowed per-server tools
+# allow-list -- same convention as tools/check-headless-launch.py's own
+# `headless-guard: allow <reason>` marker.
+_MCP_TOOLS_ALLOW_MARKER = "mcp-tools-allowlist: allow"
+
 BLOCKING = "blocking"
 WARNING = "warning"
+
+
+def _mcp_tools_allow_reason(raw_value: str) -> str | None:
+    """Return the stated reason if ``raw_value`` carries the allow marker.
+
+    Mirrors ``check-headless-launch.py``'s ``_allowed`` comment contract: the
+    marker must be followed by ``:``/space and a non-empty reason, or it does
+    not count -- a bare marker with no reason still trips the finding.
+    """
+    if "#" not in raw_value:
+        return None
+    comment = raw_value.split("#", 1)[1].strip()
+    if not comment.startswith(_MCP_TOOLS_ALLOW_MARKER):
+        return None
+    suffix = comment[len(_MCP_TOOLS_ALLOW_MARKER):]
+    if not suffix or suffix[0] not in " :":
+        return None
+    reason = suffix.lstrip(" :").strip()
+    return reason or None
 
 
 def plugin_root_for_agent(
@@ -68,6 +92,114 @@ def agent_can_invoke_shell(frontmatter: str) -> bool:
     """
     tools = frontmatter_tool_names(frontmatter)
     return tools is None or bool({"*", SHELL_EXECUTION_TOOL} & tools)
+
+
+def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
+    """Return ``(server_name, raw tools value)`` for each ``mcp-servers.<name>.tools``.
+
+    Walks the ``mcp-servers:`` block by indentation (this scanner stays
+    regex/indentation-based rather than taking a YAML dependency, matching
+    every other parser in this module): a line at the block's own indent
+    that is just ``<name>:`` opens a server entry. Within a server entry,
+    only a line at that server's own **direct-field** indent (the indent of
+    its first field, e.g. ``type``/``command``) is considered for a
+    ``tools:`` match -- a more deeply indented line (a nested ``env:``
+    mapping's own children, for example) is skipped, so a coincidentally
+    named nested key can never be mistaken for the server's own ``tools``
+    field. A full-line comment (any indentation) is structurally
+    transparent and skipped before any indentation tracking sees it --
+    never consulted for ``field_indent``, server detection, or pending
+    block-sequence state, so a stray commented line can never corrupt
+    parsing of the real fields around it. Both an inline value
+    (``tools: ["*"]``) and a block sequence (``tools:`` followed by
+    indented ``- name`` items) are captured; a folded/multi-line scalar is
+    not, since every shipped example writes this field as one of those two
+    short forms.
+    """
+    lines = frontmatter.splitlines()
+    out: list[tuple[str, str]] = []
+    in_mcp_servers = False
+    mcp_indent = 0
+    server_name: str | None = None
+    server_indent: int | None = None
+    field_indent: int | None = None
+    pending_indent: int | None = None
+    pending_items: list[str] = []
+    pending_comment = ""
+
+    def flush_pending() -> None:
+        nonlocal pending_indent, pending_items, pending_comment
+        if server_name is not None and pending_items:
+            joined = " ".join(pending_items)
+            if pending_comment:
+                joined += "  " + pending_comment
+            out.append((server_name, joined))
+        pending_indent = None
+        pending_items = []
+        pending_comment = ""
+
+    for line in lines:
+        if not line.strip():
+            continue
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue  # a full-line comment is structurally transparent --
+                      # never affects pending-sequence state, field_indent,
+                      # or any other indentation tracking below
+        indent = len(line) - len(line.lstrip(" "))
+
+        if pending_indent is not None:
+            seq_match = re.match(r"^-\s*(.+)$", stripped)
+            if seq_match and indent > pending_indent:
+                pending_items.append(seq_match.group(1).strip())
+                continue
+            flush_pending()
+
+        if indent == 0 and re.match(r"(?i)^mcp-servers\s*:\s*(?:#.*)?$", stripped):
+            in_mcp_servers = True
+            mcp_indent = indent
+            server_name = None
+            server_indent = None
+            field_indent = None
+            continue
+        if not in_mcp_servers:
+            continue
+        if indent <= mcp_indent:
+            in_mcp_servers = False
+            server_name = None
+            server_indent = None
+            field_indent = None
+            continue
+
+        server_match = re.match(
+            r"^(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z0-9_.-]+))\s*:\s*(?:#.*)?$", stripped
+        )
+        if server_match and (server_indent is None or indent <= server_indent):
+            server_name = (
+                server_match.group(1) or server_match.group(2) or server_match.group(3)
+            )
+            server_indent = indent
+            field_indent = None
+            continue
+        if server_name is None:
+            continue
+        if field_indent is None:
+            field_indent = indent
+        if indent != field_indent:
+            continue  # more deeply nested than the server's own fields
+
+        tools_match = re.match(r"(?i)^tools\s*:\s*(.*)$", stripped)
+        if not tools_match:
+            continue
+        value = tools_match.group(1).strip()
+        if value and not value.startswith("#"):
+            out.append((server_name, value))
+        else:
+            pending_indent = indent
+            pending_items = []
+            pending_comment = value if value.startswith("#") else ""
+    flush_pending()
+    return out
 
 
 def has_anti_self_delegation(text: str, agent_name: str) -> bool:
@@ -326,4 +458,31 @@ def scan_agents(
                 "`*`) entry -- the fallback shells out to a `.ps1`/`.cmd` "
                 "stub and is unusable without shell/PowerShell execution, no "
                 "matter how thoroughly the body documents it",
+            )
+
+        for server_name, raw_tools in mcp_server_tool_entries(frontmatter):
+            without_comments = raw_tools.split("#", 1)[0]
+            tokens = {
+                token.lower()
+                for token in re.findall(r"[A-Za-z*][A-Za-z0-9_.*:/-]*", without_comments)
+            }
+            if "*" in tokens or _mcp_tools_allow_reason(raw_tools):
+                continue
+            rendered = ", ".join(sorted(tokens)) if tokens else "(none)"
+            add(
+                "mcp-server-tools-allowlist",
+                f"mcp-servers.{server_name}.tools is a hand-enumerated "
+                f"list ({rendered}) instead of [\"*\"] "
+                "-- the upstream server's own tool catalog can add, "
+                "rename, or retire tools independent of this repo's "
+                "release cycle, and a stale/misspelled entry can make "
+                "the whole allow-list reject every name in it, silently "
+                "denying the agent that server's tools entirely (a real "
+                "regression seen in the wild: two agents hand-"
+                "enumerating one MCP server's tools drifted out of sync "
+                "with its catalog and broke MCP session startup for "
+                "both). Use [\"*\"] unless withholding one specific tool "
+                "for a documented reason (add a trailing "
+                "`# mcp-tools-allowlist: allow <reason>` comment to "
+                "suppress this finding).",
             )

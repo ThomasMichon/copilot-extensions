@@ -119,13 +119,55 @@ for the full design.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
-- [ ] Repeat Phase 2's pilot shape for the other 11 plugins currently
+- [ ] Repeat Phase 2's pilot shape for the other 12 plugins currently
       vendoring `versioned_runtime.py` (see `tools/sync-versioned-runtime.py`'s
-      target list) as their own installers need it -- not a mandatory
-      blanket rollout on day one.
+      target list; 13 vendoring plugins total, `agent-codespaces` is the
+      one Phase 2 pilot) as their own installers need it -- not a mandatory
+      blanket rollout on day one. This includes `budget-guidance`, the one
+      vendoring plugin that isn't `agent-*` and so isn't named in the
+      audit-prioritized list below -- it's still owed this same rollout
+      under this generic bullet.
+- [ ] **Prioritize the plugins a separate invariant audit
+      (`ThomasMichon/copilot-extensions#5472`, `#5468`,
+      `efforts/active/vision-backport-sweep/`) found still silently
+      mutating a completed numbered slot in place for a same-version,
+      changed-content update — exactly the anti-pattern this whole effort
+      exists to replace.** These need BOTH the ordinary-installer refusal
+      guard (see `docs/patterns/mutable-dev-slot.md`'s new *Ordinary
+      installers* section) AND a wired `dev`/`dev-release` verb pair as the
+      sanctioned alternative, not just one or the other:
+      `agent-dispatch` (`#5356`), `agent-vault`, `agent-worktrees`,
+      `agent-mcp`, `agent-index`, `agent-bridge`, `agent-logger`,
+      `agent-ssh`, `agent-containers`, `agent-machines`. (`agent-codespaces`
+      is the Phase 2 pilot, already wired for `dev`/`dev-release`, but per
+      that same audit still needs the ordinary-installer refusal guard
+      layered on top -- the two are independent, and wiring one does not
+      imply the other.) `agent-pull-requests` already has the refusal
+      **control flow** but needs its own `Get-PayloadHash`/`_payload_hash`
+      widened to cover the full runtime install input (currently only
+      `pyproject.toml` files, missing `src/` -- see
+      `docs/patterns/mutable-dev-slot.md`'s *Ordinary installers* section)
+      before it can be held up as done, and has not adopted
+      `dev`/`dev-release`.
 
 ## Validation Plan
 
+- [ ] **Phase 3, per adopting plugin, on both installer entrypoints
+      (`install.ps1`/`install.sh` for most of the list; `init.ps1`/`init.sh`
+      for `agent-mcp`, `agent-containers`, and `agent-machines`):** a
+      matching-content same-version run is a true no-op (no rebuild, no
+      reinstall, normal out-of-slot reconciliation still runs); a
+      changed-content same-version run is refused even under
+      `-Force`/`--force`; a direct-health-check failure (not merely a
+      content mismatch) cuts over to a distinct, correctly-propagated
+      generation per *Repairing a broken numbered slot*'s contract, rather
+      than falling back to the old `--force` rebuild-in-place recovery; the
+      `dev`/`dev-release` cycle builds, activates, and then correctly
+      restores the prior `current-version`. Not satisfied by implementing
+      only some of these for a given plugin -- the refusal guard, the
+      distinct-generation repair path (and its operator-guidance
+      reconciliation), and `dev`/`dev-release` are all required before
+      checking that plugin off above.
 - [x] `python tools/run-plugin-tests.py agent-bridge -k dev` -- new
       dev-slot primitive tests pass.
 - [x] `python tools/run-plugin-tests.py agent-bridge` (full suite) -- no
@@ -142,6 +184,35 @@ for the full design.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-06 — Cross-linked from a separate invariant audit
+- A separate `vision-backport-sweep` effort's design/service-invariant
+  audit (`ThomasMichon/copilot-extensions#5472`, `#5468`) independently
+  found that almost every `agent-*` plugin's ordinary `install`/`update`
+  path still silently mutates a completed numbered slot in place for a
+  same-version, changed-content update -- the exact anti-pattern this
+  effort's `dev`/`dev-release` mechanism exists to replace, still reachable
+  because most plugins' ordinary paths don't *refuse* it (`agent-pull-requests`
+  is the one exception already carrying the refusal control flow, though
+  review on that same PR found its own payload-hash scope too narrow --
+  `pyproject.toml` only, missing `src/` -- so it still needs a fix before
+  being complete, and it hasn't adopted the `dev`/`dev-release` redirect
+  either). Added two new sections to
+  `docs/patterns/mutable-dev-slot.md` (*Ordinary installers: refuse, never
+  silently mutate a numbered slot*, and *Repairing a broken numbered slot is
+  a cutover, not a delete-and-rebuild* -- reworked after review correctly
+  flagged that an earlier delete-and-rebuild-same-version draft of the
+  latter still violated `immutable-versioned-runtime`'s rollback guarantee;
+  it now reuses `graceful-daemon-cutover`'s existing serialize/promote-
+  before-retire/drain contract (plus its commit-forward fallback for a
+  repair target too unhealthy to drain cleanly) under a distinct
+  generation identity, with that identity required to propagate through
+  any running-version comparison too) and prioritized Phase 3's rollout
+  list with the specific plugins that audit identified, plus a new Phase 3
+  validation item requiring all three pieces (refusal guard,
+  distinct-generation repair path with its operator-guidance
+  reconciliation, and `dev`/`dev-release`) per plugin before checking it
+  off.
 
 ### 2026-09-23 — Phase 1 landed
 - Core primitive, tests, GC protection, finalize warning hook, and design

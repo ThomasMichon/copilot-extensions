@@ -198,6 +198,54 @@ async def test_command_summarizer(tmp_path):
     assert doc["items"]["summary"] == {"n": 4}
 
 
+async def test_command_summarizer_expands_python_token(tmp_path):
+    # ``${python}`` in a `summary.command` resolves to agent-mcp's own
+    # interpreter, the same cross-platform token `server.command`/
+    # `auth.command` already support.
+    items = [1, 2, 3]
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"items": items})})
+    cmd = ["${python}", "-c",
+           "import sys, json; d = json.load(sys.stdin); print(json.dumps({'n': len(d)}))"]
+    dec = _storage(tmp_path, rules=[
+        {"tool": "g", "outputs": [{"path": "items", "summary": {"command": cmd}}]}])
+    resp = await run(dec, up, call_req("g"))
+    doc = json.loads(resp["result"]["content"][0]["text"])
+    assert doc["items"]["summary"] == {"n": 3}
+
+
+async def test_command_summarizer_passes_no_window_creationflags(tmp_path, monkeypatch):
+    # The summary-command spawn must carry whatever agent_procutil.
+    # no_window_kwargs() returns (copilot-extensions#5425) -- stub it to a
+    # sentinel so this proves the production code actually calls it and
+    # merges its result in, rather than comparing against a value
+    # (`no_window_creationflags()`) that is also `0`/absent off Windows and
+    # would pass identically even if the real `**no_window_kwargs()` call
+    # were deleted. Fakes the spawn entirely (never calls the real
+    # subprocess.run) because a non-zero sentinel `creationflags` is only
+    # accepted by Windows -- forwarding it to a real POSIX Popen raises
+    # ValueError.
+    sentinel = {"creationflags": 0xFEEDFACE}
+    monkeypatch.setattr("agent_mcp.decorators.storage.no_window_kwargs", lambda: sentinel)
+
+    captured: dict = {}
+    import subprocess as _subprocess
+
+    def fake_run(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _subprocess.CompletedProcess(args, 0, stdout='{"n": 2}', stderr="")
+
+    monkeypatch.setattr("agent_mcp.decorators.storage.subprocess.run", fake_run)
+
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"items": [1, 2]})})
+    cmd = [sys.executable, "-c", "import sys, json; print(json.dumps({'n': 2}))"]
+    dec = _storage(tmp_path, rules=[
+        {"tool": "g", "outputs": [{"path": "items", "summary": {"command": cmd}}]}])
+    await run(dec, up, call_req("g"))
+    assert captured["kwargs"].get("creationflags") == 0xFEEDFACE
+
+
 async def test_rule_tool_glob_no_match_falls_back_to_blanket(tmp_path):
     big = "y" * 5000
     up = FakeUpstream([tool("other")],

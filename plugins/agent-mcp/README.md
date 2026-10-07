@@ -668,6 +668,10 @@ and stdout becomes the summary:
           summary: { command: ["jq", "{count: length, ids: [.[].id]}"] }
 ```
 
+A command summarizer's `argv` supports the same `${python}` portable-interpreter
+token described above (not `${config_dir}` -- this location has no bridge-file
+`base_dir` to resolve it against).
+
 **Input param → stream URL.** For each `inputs[].path`, that property's schema in
 `tools/list` is rewritten to a stream-URL string and its description annotated
 (*"URL to a stream containing a JSON-serialized object…"*), preserving the
@@ -699,7 +703,8 @@ and/or a JSON text block):
 - `pick: [paths]` — keep only these dotted paths (matched key shape preserved).
 - `drop: [paths]` — remove these dotted paths.
 - `command: [argv]` — pipe the result JSON to a filter's stdin; its stdout
-  (parsed as JSON) replaces the result.
+  (parsed as JSON) replaces the result. Supports the same `${python}` token as
+  the `storage` decorator's command summarizer above.
 
 Dotted paths match **literal dotted keys** too (e.g. ADO `fields.System.Title`
 where `fields` is `{"System.Title": …}`) as well as genuine nesting. Ops apply

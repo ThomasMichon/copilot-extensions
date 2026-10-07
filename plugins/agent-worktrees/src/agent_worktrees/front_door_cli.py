@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import config as cfg, git_ops
 from . import installer as inst
+from . import sessions
 
 
 def _core():
@@ -560,12 +561,12 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
 
     matched: str | None = None
     if cwd_anchor is not None:
-        cwd_norm = _core()._normalize_path(str(cwd_anchor))
+        cwd_norm = sessions._normalize_path(str(cwd_anchor))
         for name, entry in projects.items():
             anchor = entry.get("anchor") if isinstance(entry, dict) else None
             if not anchor:
                 continue
-            if _core()._normalize_path(str(Path(anchor).resolve())) == cwd_norm:
+            if sessions._normalize_path(str(Path(anchor).resolve())) == cwd_norm:
                 matched = name
                 break
 
