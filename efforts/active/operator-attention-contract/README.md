@@ -209,16 +209,27 @@ an empty queue.
   **registered interactive CLI sessions** (`agent-bridge --json live-sessions
   list`, live rows only; `--json` is the bridge's global option, so it comes first). A session that appears in both is one entity
   (`entity_ref` is its session id). Every candidate is classified from its
-  result snapshot and its presence, as listed above. If either listing fails or
+  **attention state** and its presence, as listed above. The attention state is
+  the reason agent-bridge's own attention evaluator would settle a `wait
+  --attention` on -- the only place `policy_required` (and, for bridge-managed
+  sessions, `permission_required`) is observable today; result snapshots alone
+  miss them. This slice therefore adds a bounded, non-blocking read of that
+  evaluator to agent-bridge for both registry types (`agent-bridge --json
+  attention <session>`: the current reason or `null`, never a wait), and the
+  adapter reads it per candidate. A candidate whose attention can't be read
+  counts toward `uncertain`. If either listing fails or
   times out, the bridge source is `failed`, never `ok` on the other alone: a
   parked session in the registry that wasn't read must not read as `clear`.
   With `--include-remote`, each remote venue's registry is a further candidate
   set under the same rule, and a venue that can't be read makes the source
   `failed` too.
-- [ ] **pr** (`pr bar`, on `dev` since #5566): tracked open PRs whose `pr bar` exit is 11
-  (`failed`) → `failed` (the author has something to do). Exit 12 (`unknown`)
-  counts toward the source's status, not as an item. **Candidates:** the open
-  PRs tracked by agent-worktrees across **every project registered on this
+- [ ] **pr** (`pr bar`, on `dev` since #5566): a PR whose `pr bar` JSON reports it
+  **`OPEN`** with verdict `failed` (exit 11) → `failed` (the author has something
+  to do). The live state decides, never the tracked record's: a closed or merged
+  PR is no item even when its record still says `open`, and a reopened PR is a
+  candidate even when its record says `closed`. Exit 12 (`unknown`)
+  counts toward the source's status, not as an item. **Candidates:** every
+  PR tracked by agent-worktrees, whatever its local state, across **every project registered on this
   machine**, not just the one the caller's CWD belongs to. They're enumerated
   through agent-worktrees' own CLI (never by reading its files), and each one is
   read with explicit project context (`agent-worktrees -p <project> pr bar
@@ -320,7 +331,11 @@ an empty queue.
   as `ok`; a missing `schema` and `schema: 2` are each `failed`; a self-reported
   `status: failed` without an `error` gets the aggregator's fallback error; each
   contradiction in the failure contract is `failed`.
-- [ ] Unit, the bridge adapter: every `AttentionReason` value maps as listed
+- [ ] Unit, the bridge adapter: a bridge-managed session parked on
+  `permission_required` and one parked on `policy_required` each yield an
+  `awaiting_input` item through `agent-bridge --json attention`, and so does a
+  registered interactive one; an attention read that fails counts as
+  `uncertain`. Every `AttentionReason` value maps as listed
   (`policy_required` is an item; `unreachable`, `contract_changed` and an unknown
   reason count as `uncertain`); a session with both a represented
   `permission_required` and transcript `awaiting_input` yields one `reported`
@@ -338,7 +353,9 @@ an empty queue.
   --source dispatch` parses with the flags after `next`.
 - [ ] Unit, the pr adapter: from a CWD outside any project, two registered
   projects each tracking a PR with a failing bar give both items; a project
-  whose tracked PRs can't be enumerated makes the source `failed`.
+  whose tracked PRs can't be enumerated makes the source `failed`; a record
+  still saying `open` for a PR the provider reports closed gives no item, and a
+  record saying `closed` for a reopened, failing PR gives one.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded` with the others
