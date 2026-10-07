@@ -336,7 +336,8 @@ def summary(target: str, *, now: datetime | None = None) -> dict:
 class Dial:
     """Times one attempt: ``with Dial(target, "config_fetch", attempt=1) as d: ...;
     d.outcome = "ok"``. An exception escaping the block records ``error`` (with its
-    message as the reason) unless an outcome was already set, and propagates."""
+    message as the reason), or ``cancelled`` for a cancellation, unless an outcome was
+    already set, and propagates."""
 
     def __init__(self, target: str, kind: str, *, attempt: int | None = None, account: str = ""):
         self.target, self.kind, self.attempt, self.account = target, kind, attempt, account
@@ -348,7 +349,12 @@ class Dial:
 
     def __exit__(self, exc_type, exc, _tb) -> bool:
         if exc is not None and not self.outcome:
-            self.outcome, self.reason = "error", f"{exc_type.__name__}: {exc}"
+            import asyncio
+
+            if isinstance(exc, asyncio.CancelledError):  # the caller gave up: not a failed dial
+                self.outcome, self.reason = "cancelled", "cancelled"
+            else:
+                self.outcome, self.reason = "error", f"{exc_type.__name__}: {exc}"
         record(self.target, kind=self.kind, outcome=self.outcome or "unknown",
                elapsed_s=time.monotonic() - self._start, attempt=self.attempt,
                reason=self.reason, stderr=self.stderr, account=self.account)

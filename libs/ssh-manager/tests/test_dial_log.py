@@ -343,8 +343,13 @@ async def test_a_direct_mode_stdio_channel_is_a_logged_dial(win_platform, source
     with patch("ssh_manager.proxy.spawn_in_kill_on_close_job", side_effect=OSError("spawn failed")):
         with pytest.raises(OSError):
             await manager.open_stdio_channel("stdio-host", "copilot --acp")
+    import asyncio
+
+    with patch("ssh_manager.proxy.spawn_in_kill_on_close_job", side_effect=asyncio.CancelledError()):
+        with pytest.raises(asyncio.CancelledError):
+            await manager.open_stdio_channel("stdio-host", "copilot --acp")
     assert [(e["kind"], e["outcome"]) for e in dial_log.read("stdio-host")] == [
-        ("stdio_channel", "spawned"), ("stdio_channel", "error")]
+        ("stdio_channel", "spawned"), ("stdio_channel", "error"), ("stdio_channel", "cancelled")]
 
 
 def test_a_spawned_stdio_channel_is_neither_ok_nor_a_failure():
