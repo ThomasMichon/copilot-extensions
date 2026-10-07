@@ -1,0 +1,9 @@
+{
+  "comment": "finalize's open-PR gate heals a merged PR on an older record that keeps the project name (not owner/name) and no PR-level repo: every provider read of a tracked PR resolves the hosting repo from its PR URL through one shared tracked_pr_slug, and healing the active PR no longer skips the next open entry",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

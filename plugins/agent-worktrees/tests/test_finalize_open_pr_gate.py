@@ -28,7 +28,7 @@ def _config():
     )
 
 
-def _record(tmp_path, monkeypatch, worktree_id, *, prs=None):
+def _record(tmp_path, monkeypatch, worktree_id, *, prs=None, repo="o/r"):
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(
         tracking, "_owning_tracking_dir",
@@ -36,7 +36,7 @@ def _record(tmp_path, monkeypatch, worktree_id, *, prs=None):
     )
     rec = tracking.WorktreeRecord(
         worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
-        worktree_path=str(tmp_path / worktree_id), repo="o/r", machine="m",
+        worktree_path=str(tmp_path / worktree_id), repo=repo, machine="m",
         platform="linux", started_at="2026-06-01T10:00:00",
         last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
         status="active", completed_at=None, sessions=None,
@@ -223,3 +223,89 @@ class TestReconcileEveryLivePr:
         _patch_provider(monkeypatch, _BoomProvider())
         _reconcile_every_live_pr(rec, _config())  # must not raise
         assert next(p for p in rec.prs if p.number == 3).state == "open"
+
+
+class _SlugCheckingProvider:
+    """Answers only for the hosting ``o/r`` slug, as a real provider does: a
+    project-name slug is an unknown repository."""
+
+    name = "gitea"
+
+    def __init__(self, by_number):
+        self._by_number = by_number
+
+    def get_pull(self, repo, number, *, api_base="", token=None):
+        if repo != "o/r":
+            raise RuntimeError(f"404: no repository {repo!r}")
+        return self._by_number[number]
+
+    def find_pull_by_head(self, repo, head, *, api_base="", token=None):
+        return None
+
+
+class TestLegacyProjectNameRecords:
+    """An older record keeps the project name as its ``repo`` and no PR-level repo;
+    only the PR URL names the hosting repository. A PR merged long ago must heal,
+    not read as open forever."""
+
+    def _legacy(self, tmp_path, monkeypatch, worktree_id, numbers):
+        prs = [tracking.PRRecord(state="open", number=n, url=f"https://x/o/r/pulls/{n}")
+               for n in numbers]
+        return _record(tmp_path, monkeypatch, worktree_id, prs=prs, repo="ext")
+
+    def test_a_merged_pr_tracked_by_url_heals_and_finalize_proceeds(self, tmp_path, monkeypatch):
+        from agent_worktrees.providers import PullResult
+
+        rec = self._legacy(tmp_path, monkeypatch, "wt-legacy", [7])
+        _patch_provider(monkeypatch, _SlugCheckingProvider(
+            {7: PullResult(number=7, state="closed", merged=True)}))
+        assert _assert_no_live_pr(rec, _config(), "wt-legacy") is True
+        assert tracking.load_record(rec.yaml_path).active_pr().state == "merged"
+
+    def test_every_tracked_legacy_pr_heals(self, tmp_path, monkeypatch):
+        from agent_worktrees.providers import PullResult
+
+        rec = self._legacy(tmp_path, monkeypatch, "wt-legacy2", [7, 8])
+        _patch_provider(monkeypatch, _SlugCheckingProvider({
+            7: PullResult(number=7, state="closed", merged=True),
+            8: PullResult(number=8, state="closed", merged=True)}))
+        assert _assert_no_live_pr(rec, _config(), "wt-legacy2") is True
+        assert [p.state for p in tracking.load_record(rec.yaml_path).prs] == ["merged", "merged"]
+
+    def test_a_url_naming_another_pr_is_never_trusted(self, tmp_path, monkeypatch):
+        from agent_worktrees.providers import PullResult
+
+        rec = _record(tmp_path, monkeypatch, "wt-mismatch", repo="ext", prs=[
+            tracking.PRRecord(state="open", number=7, url="https://x/o/r/pulls/9")])
+        _patch_provider(monkeypatch, _SlugCheckingProvider(
+            {7: PullResult(number=7, state="closed", merged=True)}))
+        assert _assert_no_live_pr(rec, _config(), "wt-mismatch") is False
+
+
+def test_tracked_pr_slug():
+    from agent_worktrees.pr_reconcile import tracked_pr_slug
+
+    def pr(**kw):
+        return tracking.PRRecord(**{"number": 7, **kw})
+
+    assert tracked_pr_slug(pr(repo="o/r")) == "o/r"
+    assert tracked_pr_slug(pr(), "o/r") == "o/r"
+    assert tracked_pr_slug(pr(url="https://x/o/r/pulls/7"), "ext") == "o/r"
+    assert tracked_pr_slug(pr(repo="ext", url="https://x/o/r/pulls/7")) == "o/r"
+    assert tracked_pr_slug(pr(url="https://x/o/r/pulls/9"), "ext") is None   # another PR
+    assert tracked_pr_slug(pr(), "ext") is None                              # nothing to resolve by
+    assert tracked_pr_slug(pr()) == ""                                       # nothing recorded
+    assert tracked_pr_slug(pr(url="https://h/gitea/o/r/pulls/7"), "ext", "https://h/gitea") == "o/r"
+
+
+def test_healing_the_active_pr_does_not_skip_the_next_one(tmp_path, monkeypatch):
+    """Two open entries, both merged on the provider: reconciling the active one
+    makes the other the new active entry, and it must still be read."""
+    from agent_worktrees.providers import PullResult
+
+    rec = _record(tmp_path, monkeypatch, "wt-two", prs=[
+        tracking.PRRecord(state="open", number=n, provider="gitea", repo="o/r") for n in (7, 8)])
+    _patch_provider(monkeypatch, _FakeProvider({
+        7: PullResult(number=7, state="closed", merged=True),
+        8: PullResult(number=8, state="closed", merged=True)}))
+    assert _assert_no_live_pr(rec, _config(), "wt-two") is True

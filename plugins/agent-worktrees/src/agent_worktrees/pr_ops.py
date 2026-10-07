@@ -1755,8 +1755,11 @@ def _reconcile_active_pr(
         return
     prcfg = config.default_repo.pr
     provider_name = active.provider or prcfg.provider
-    target_repo = active.repo or (record.repo or "")
     api_base = getattr(prcfg, "api_base", "") or ""
+    from .pr_reconcile import tracked_pr_slug
+    target_repo = tracked_pr_slug(active, record.repo or "", api_base)
+    if not target_repo:
+        return  # a project-name repo that can't be resolved: keep the local state
     try:
         from . import providers
 

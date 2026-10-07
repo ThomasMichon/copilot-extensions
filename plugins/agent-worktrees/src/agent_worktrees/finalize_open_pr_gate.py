@@ -233,23 +233,12 @@ def pull_for(pr, repo):
     configured authority, or the read failed. The one guarded read shared by the
     merge lookup and :func:`pr_base_ref`."""
     number = getattr(pr, "number", None)
-    slug = getattr(pr, "repo", "") or ""
-    if slug and "/" not in slug:
-        # Older records keep the project name ("my-project"), not the
-        # hosting owner/name the provider needs: asking for it fails and
-        # leaves a merged, aligned worktree unfinalizable forever. The tracked
-        # PR URL names the real repository (its authority is checked below).
-        # The URL and the number are stored separately, so they must name the
-        # same PR: otherwise a stale record could certify a different change.
-        import re
-
-        from .pr_ops import _repo_slug_from_pr_url
-
-        url = (getattr(pr, "url", "") or "").strip()
-        url_number = re.search(r"/pulls?/(\d+)/?$", url)
-        if url_number is None or (number and int(url_number.group(1)) != int(number)):
-            return None
-        slug = _repo_slug_from_pr_url(url, getattr(repo.pr, "api_base", "") or "") or slug
+    # An older record's project-name (or missing) repo resolves from its PR URL
+    # (tracked_pr_slug); the URL's authority is checked below.
+    from .pr_reconcile import tracked_pr_slug
+    slug = tracked_pr_slug(pr, api_base=getattr(repo.pr, "api_base", "") or "")
+    if slug is None:
+        return None
     if not number and not slug:
         return False
     if not number or not slug:
@@ -809,12 +798,15 @@ def reconcile_every_live_pr(
     skipped. Best-effort throughout: any provider/network failure for one entry
     leaves that entry's local state untouched and moves on -- never raises.
     """
+    # The entry the active-only reconcile reads, taken BEFORE it runs: healing it
+    # makes ``active_pr()`` name the next non-terminal entry, which must not then
+    # be skipped as "already reconciled".
+    active = record.active_pr()
     try:
         from . import pr_reconcile
         pr_reconcile.reconcile_pr_state(record, config)
     except Exception:
         pass
-    active = record.active_pr()
     others = [
         p for p in record.prs
         if p is not active and not tracking._pr_is_terminal(p) and p.number
@@ -825,7 +817,10 @@ def reconcile_every_live_pr(
     changed = False
     for entry in others:
         provider_name = entry.provider or prcfg.provider
-        target_repo = entry.repo or (record.repo or "")
+        from .pr_reconcile import tracked_pr_slug
+        target_repo = tracked_pr_slug(entry, record.repo or "", getattr(prcfg, "api_base", "") or "")
+        if not target_repo:
+            continue
         try:
             from . import providers
             provider = providers.get_provider(provider_name)
