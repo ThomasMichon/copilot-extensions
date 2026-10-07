@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a release-blocking regression from #5595: explicitly gate the launch-command.ps1 dot-source fast path to Windows only (this optimization never applied on POSIX, which already execs directly) instead of relying on an incidental binary-path identity mismatch (Process.MainModule.FileName vs Get-Command) that happened to disable it there too -- that mismatch failed the feature's own regression test on Linux CI",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

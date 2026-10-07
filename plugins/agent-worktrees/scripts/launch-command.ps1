@@ -51,56 +51,70 @@ $usesDefaultSetup = $false
 # original spawn-and-wait, which honors the requested executable/
 # options/script exactly as before.
 $ownDefaultSetupScript = Join-Path $PSScriptRoot 'default-setup.ps1'
+# This whole optimization is Windows-specific (copilot-extensions#5579): on
+# POSIX, Python's own launch layer already uses a real os.execvp (no extra
+# process at all), so there is nothing to collapse here, and binary-path
+# identity resolution below (Process.MainModule.FileName vs Get-Command)
+# has been observed to disagree on Linux even for the SAME nominal `pwsh`
+# (e.g. a symlink resolving differently), which would silently -- and
+# harmlessly, since it only ever degrades to the pre-existing
+# spawn-and-wait -- skip the optimization there anyway. Gate on Windows
+# explicitly rather than relying on that incidental mismatch. `$IsWindows`
+# does not exist in Windows PowerShell 5.1 (Desktop edition, always
+# Windows), only in PowerShell 7+ (Core, cross-platform).
+$onWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows
 $currentHostExecutablePath = $null
-try {
-    $currentHostExecutablePath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-} catch { }
-$requestedExecutablePath = $null
-try {
-    if ([IO.Path]::IsPathRooted($executable)) {
-        $requestedExecutablePath = [IO.Path]::GetFullPath($executable)
-    } else {
-        $resolvedCommand = Get-Command $executable -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($resolvedCommand) { $requestedExecutablePath = $resolvedCommand.Source }
-    }
-} catch { }
-$isCurrentHostExecutable = (
-    $currentHostExecutablePath -and $requestedExecutablePath -and
-    [string]::Equals($requestedExecutablePath, $currentHostExecutablePath, [StringComparison]::OrdinalIgnoreCase)
-)
-if ($isCurrentHostExecutable) {
-    for ($index = 0; $index -lt ($remainingArgs.Count - 1); $index++) {
-        if (
-            [string]::Equals(
-                $remainingArgs[$index],
-                '-File',
-                [StringComparison]::OrdinalIgnoreCase
-            )
-        ) {
-            $requestedScript = $remainingArgs[$index + 1]
-            $isOwnScript = $false
-            try {
-                $isOwnScript = [string]::Equals(
-                    [IO.Path]::GetFullPath($requestedScript),
-                    [IO.Path]::GetFullPath($ownDefaultSetupScript),
+if ($onWindows) {
+    try {
+        $currentHostExecutablePath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    } catch { }
+    $requestedExecutablePath = $null
+    try {
+        if ([IO.Path]::IsPathRooted($executable)) {
+            $requestedExecutablePath = [IO.Path]::GetFullPath($executable)
+        } else {
+            $resolvedCommand = Get-Command $executable -CommandType Application -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($resolvedCommand) { $requestedExecutablePath = $resolvedCommand.Source }
+        }
+    } catch { }
+    $isCurrentHostExecutable = (
+        $currentHostExecutablePath -and $requestedExecutablePath -and
+        [string]::Equals($requestedExecutablePath, $currentHostExecutablePath, [StringComparison]::OrdinalIgnoreCase)
+    )
+    if ($isCurrentHostExecutable) {
+        for ($index = 0; $index -lt ($remainingArgs.Count - 1); $index++) {
+            if (
+                [string]::Equals(
+                    $remainingArgs[$index],
+                    '-File',
                     [StringComparison]::OrdinalIgnoreCase
                 )
-            } catch { }
-            if ($isOwnScript) {
-                $precedingHostOptions = if ($index -gt 0) { $remainingArgs[0..($index - 1)] } else { @() }
-                $hasNoProfile = @($precedingHostOptions | Where-Object {
-                    [string]::Equals($_, '-NoProfile', [StringComparison]::OrdinalIgnoreCase)
-                }).Count -eq 1
-                $hasNoLogo = @($precedingHostOptions | Where-Object {
-                    [string]::Equals($_, '-NoLogo', [StringComparison]::OrdinalIgnoreCase)
-                }).Count -eq 1
-                $exactlyInertOptions = $hasNoProfile -and $hasNoLogo -and $precedingHostOptions.Count -eq 2
-                if ($exactlyInertOptions) {
-                    $usesDefaultSetup = $true
+            ) {
+                $requestedScript = $remainingArgs[$index + 1]
+                $isOwnScript = $false
+                try {
+                    $isOwnScript = [string]::Equals(
+                        [IO.Path]::GetFullPath($requestedScript),
+                        [IO.Path]::GetFullPath($ownDefaultSetupScript),
+                        [StringComparison]::OrdinalIgnoreCase
+                    )
+                } catch { }
+                if ($isOwnScript) {
+                    $precedingHostOptions = if ($index -gt 0) { $remainingArgs[0..($index - 1)] } else { @() }
+                    $hasNoProfile = @($precedingHostOptions | Where-Object {
+                        [string]::Equals($_, '-NoProfile', [StringComparison]::OrdinalIgnoreCase)
+                    }).Count -eq 1
+                    $hasNoLogo = @($precedingHostOptions | Where-Object {
+                        [string]::Equals($_, '-NoLogo', [StringComparison]::OrdinalIgnoreCase)
+                    }).Count -eq 1
+                    $exactlyInertOptions = $hasNoProfile -and $hasNoLogo -and $precedingHostOptions.Count -eq 2
+                    if ($exactlyInertOptions) {
+                        $usesDefaultSetup = $true
+                    }
                 }
+                break
             }
-            break
         }
     }
 }
