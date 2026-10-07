@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
+| [Resume Prompt: Durable `--interactive` Seed Delivery, No-Mux Parity](active/resume-prompt-durable-seed-and-mux-fix/README.md) | Active (Phase 1 done) | #5415 |
 | [Compatibility-Root Decoupling](active/compatibility-root-decoupling/README.md) | Draft | #5293 |
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
 | [ai-attribution Audience-Based Disclosure Policy](active/ai-attribution-audience-policy/README.md) | Active (Phase 1 done) | #2965 |
@@ -18,6 +19,7 @@ that pattern to this repository.
 | [Pivot Streaming Transport & Render Performance](active/pivot-streaming-transport/README.md) | Active | #4762 |
 | [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Active | #4691 |
 | [agent-dispatch Recipe Composability](active/agent-dispatch-recipe-composability/README.md) | Active | #4959 |
+| [agent-dispatch Workers Configuration Section](active/agent-dispatch-workers-config-section/README.md) | Draft | See effort |
 | [Configurable token-command sourcing](active/token-command-sourcing/README.md) | Draft | _pending_ |
 | [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Active | #3923 |
 | [CI Reliability & Flakiness Telemetry](active/ci-flakiness-telemetry-and-reliability/README.md) | Active | _pending_ |

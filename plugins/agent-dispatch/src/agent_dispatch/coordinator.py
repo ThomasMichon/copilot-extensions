@@ -639,8 +639,8 @@ def create_app(
         # Live self-update: periodically checks whether a newer, fully
         # installed version is now published (``current-version`` marker) and,
         # once confirmed stale at a safe cutover point, spawns a self-triggered
-        # ``deploy`` from that version's own interpreter. Opt-in
-        # (``AGENT_DISPATCH_SELF_UPDATE=1``) -- see ``_self_update_settings``.
+        # ``deploy`` from that version's own interpreter. Default-on; opt out
+        # with ``AGENT_DISPATCH_SELF_UPDATE=0`` -- see ``_self_update_settings``.
         self_update_task = None
         _su_enabled, _su_poll, _su_confirmations, _su_cooldown = _self_update_settings()
         if _su_enabled:

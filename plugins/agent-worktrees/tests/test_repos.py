@@ -35,6 +35,28 @@ def _init_repo(path: Path, branch: str = "main") -> None:
     _git(path, "commit", "-m", "init")
 
 
+def _bare_anchor_from_clone(upstream: Path, dest: Path, branch: str = "main") -> None:
+    """Build a worktree-class bare anchor the way these anchors exist in
+    practice: a normal clone (so branch tracking + the standard
+    ``+refs/heads/*:refs/remotes/origin/*`` fetch refspec are set up exactly
+    like a real checkout), then flipped to ``core.bare = true`` -- the
+    anchor's ``refs/heads/<branch>`` then advances independently of any
+    work tree, exactly as agent-worktrees' real managed-project anchors do.
+    """
+    subprocess.run(["git", "clone", str(upstream), str(dest)],
+                   check=True, capture_output=True, text=True)
+    _git(dest, "checkout", branch)
+    _git(dest, "config", "core.bare", "true")
+    # A plain clone never inherits user.name/user.email -- unlike
+    # _init_repo's own repos, which set it explicitly. Under this
+    # test's own isolated-HOME containment (no global git identity
+    # available), a caller's later `git commit-tree` against this
+    # anchor silently fails (empty stdout, non-zero exit) without this,
+    # producing an empty commit SHA rather than a real one.
+    _git(dest, "config", "user.email", "t@example.com")
+    _git(dest, "config", "user.name", "Test")
+
+
 def test_migration_uses_adoptions_from_agent_home(home: Path, monkeypatch):
     legacy_source = home / ".git-repos"
     legacy_source.write_text(
@@ -1192,6 +1214,157 @@ def test_sync_repo_surfaces_git_ops_fetch_error(home: Path, tmp_path: Path):
     state, detail = repos.sync_repo(e, plat="windows")
     assert state == "error"
     assert detail
+
+
+def test_sync_repo_bare_anchor_already_up_to_date(home: Path, tmp_path: Path):
+    """A bare worktree-class anchor already level with its upstream must
+    report ``synced`` -- ``git merge --ff-only`` cannot run on a bare repo
+    (no work tree), so this path must never fall through to it and mistake
+    an already-synced anchor for a real divergence."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    anchor = tmp_path / "anchor"
+    _bare_anchor_from_clone(upstream, anchor, branch="main")
+
+    e = repos.RepoEntry(name="anchor-repo", repo_class="worktree",
+                        default_branch="main",
+                        paths={"windows": str(anchor)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    assert state == "synced"
+    assert detail == "main"
+
+
+def test_sync_repo_bare_anchor_fast_forwards(home: Path, tmp_path: Path):
+    """A bare anchor behind its upstream must have its branch ref moved
+    forward directly (no work tree to run `git merge` against)."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    anchor = tmp_path / "anchor"
+    _bare_anchor_from_clone(upstream, anchor, branch="main")
+
+    (upstream / "NEW.md").write_text("more\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "second")
+
+    e = repos.RepoEntry(name="anchor-repo", repo_class="worktree",
+                        default_branch="main",
+                        paths={"windows": str(anchor)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    assert state == "synced"
+    assert detail == "main"
+    head = subprocess.run(
+        ["git", "-C", str(anchor), "log", "-1", "--format=%s", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert head == "second"
+
+
+def test_sync_repo_bare_anchor_skips_detached_head(home: Path, tmp_path: Path):
+    """A detached-HEAD bare anchor (no branch to advance) must be skipped,
+    not raise -- `git checkout` itself can't run on a bare repo, so detach
+    by writing a raw commit id straight into `.git/HEAD`."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    anchor = tmp_path / "anchor"
+    _bare_anchor_from_clone(upstream, anchor, branch="main")
+    head_sha = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    (anchor / ".git" / "HEAD").write_text(head_sha + "\n")
+
+    e = repos.RepoEntry(name="anchor-repo", repo_class="worktree",
+                        default_branch="main",
+                        paths={"windows": str(anchor)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    assert state == "skipped"
+    assert "detached" in detail
+
+
+def test_sync_repo_bare_anchor_skips_when_diverged(home: Path, tmp_path: Path):
+    """A bare anchor's branch ref carrying a commit the real upstream never
+    saw (e.g. advanced out of band) must never be silently overwritten --
+    the same no-clobber contract the non-bare path already guarantees."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    anchor = tmp_path / "anchor"
+    _bare_anchor_from_clone(upstream, anchor, branch="main")
+
+    local_tree = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main^{tree}"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    local_commit = subprocess.run(
+        ["git", "-C", str(anchor), "commit-tree", local_tree, "-p", "main",
+         "-m", "local-only"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    _git(anchor, "update-ref", "refs/heads/main", local_commit)
+
+    (upstream / "NEW.md").write_text("more\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "second")
+
+    before = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    e = repos.RepoEntry(name="anchor-repo", repo_class="worktree",
+                        default_branch="main",
+                        paths={"windows": str(anchor)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    after = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert state == "skipped"
+    assert "diverged" in detail
+    assert before == after
+
+
+def test_sync_repo_bare_anchor_mirror_refspec_cannot_clobber_diverged_ref(
+    home: Path, tmp_path: Path,
+):
+    """A bare anchor configured with a mirror-style ``+refs/*:refs/*`` fetch
+    refspec (as a mirror clone can carry) must not have its diverged branch
+    ref force-overwritten by the fetch itself before the ancestry/CAS checks
+    ever run -- the fetch must land in a private scratch ref, never directly
+    into ``refs/heads/<target>``."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    anchor = tmp_path / "anchor"
+    _bare_anchor_from_clone(upstream, anchor, branch="main")
+    _git(anchor, "config", "remote.origin.fetch", "+refs/*:refs/*")
+
+    local_tree = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main^{tree}"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    local_commit = subprocess.run(
+        ["git", "-C", str(anchor), "commit-tree", local_tree, "-p", "main",
+         "-m", "local-only"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    _git(anchor, "update-ref", "refs/heads/main", local_commit)
+
+    (upstream / "NEW.md").write_text("more\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "second")
+
+    e = repos.RepoEntry(name="anchor-repo", repo_class="worktree",
+                        default_branch="main",
+                        paths={"windows": str(anchor)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    after = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert state == "skipped"
+    assert "diverged" in detail
+    # The mirror refspec would have force-written refs/heads/main straight to
+    # the upstream's new commit via a plain `git fetch`; confirm the local
+    # commit survived instead, proving the fetch never touched it directly.
+    assert after == local_commit
 
 
 def _write_inrepo_default_branch(path: Path, branch: str, *, commit: bool = False) -> None:

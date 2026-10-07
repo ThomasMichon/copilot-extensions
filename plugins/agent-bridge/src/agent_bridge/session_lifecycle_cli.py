@@ -24,12 +24,30 @@ def _core():
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
+    from .client import BridgeClientError
+
     client = _core()._get_client()
-    client.stop_session(
-        args.session_id,
-        force=getattr(args, "force", False),
-        reap_host=getattr(args, "reap_host", False),
-    )
+    try:
+        client.stop_session(
+            args.session_id,
+            force=getattr(args, "force", False),
+            reap_host=getattr(args, "reap_host", False),
+        )
+    except BridgeClientError as exc:
+        # Mirror _cmd_end's own 404 handling (confirmed asymmetric --
+        # copilot-extensions#<TODO-issue>): a session already gone is this
+        # command's success case, not a failure -- a caller like
+        # agent-dispatch's cool_dormant_bodies() treats a nonzero exit as
+        # "could not stop it, retry later" with no way to tell "genuinely
+        # still busy" apart from "already gone, nothing to stop", which
+        # left a resume-failed reservation retrying this exact call every
+        # 60s forever since there was never anything left to successfully
+        # stop.
+        if exc.status == 404:
+            print(f"[OK] Session {args.session_id} already stopped")
+            return
+        print(f"[FAIL] Could not stop session {args.session_id}: {exc.detail}")
+        sys.exit(1)
     print(f"[OK] Session {args.session_id} stopped")
 
 

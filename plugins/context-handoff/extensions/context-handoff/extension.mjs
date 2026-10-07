@@ -597,8 +597,28 @@ const session = await joinSession({
             "   when genuinely none exist.",
             "2. Distinguish the trigger BEFORE saving:",
             "   - If context pressure is the reason for the handoff and work",
-            "     remains: sync the worktree onto the latest default branch",
-            "     NOW, before saving. First inspect the tree -- never",
+            "     remains: quiesce owned background work FIRST, before",
+            "     syncing -- capture whatever partial results any background",
+            "     agent/async shell this session still owns has produced,",
+            "     then stop an owned shell directly",
+            "     (`stop_powershell`/`stop_bash`) or wait for an owned agent",
+            "     to actually finish (no stop primitive exists for it --",
+            "     observe its completion, a sent closing message is not",
+            "     enough); if waiting/stopping cleanly isn't safe in the time",
+            "     available, note in the brief that it was left running and",
+            "     why (same escape hatch as an unresolved sync conflict).",
+            "     This escape hatch is for agents/shells ONLY -- ALWAYS stop",
+            "     any `manage_schedule` entry this session created, with no",
+            "     exception for one the brief plans to ask the successor to",
+            "     re-arm (see the skill's 'Quiesce owned background work",
+            "     before triggering' section) -- a stopped schedule can be",
+            "     named for re-arming afterward; a schedule left running",
+            "     because it will supposedly be re-armed can race the",
+            "     successor instead. Quiesce BEFORE sync because a",
+            "     still-running task can keep writing into this worktree",
+            "     while the sync below inspects, commits, or rebases it.",
+            "     THEN sync the worktree onto the latest default branch --",
+            "     first inspect the tree -- never",
             "     blanket-commit (`git add -A`/`git commit -a`); stage and",
             "     commit only paths you recognize as your own reviewed,",
             "     intentional changes this session. If anything looks",
@@ -611,25 +631,40 @@ const session = await joinSession({
             "     context-handoff skill's 'Sync before triggering' section",
             "     for the exact invocation; it shares the same lock and",
             "     rebase guard as the force-tier path. Note any conflict in",
-            "     the brief rather than blocking on it. ALWAYS call",
-            "     generate_handoff_prompt again after the sync (even if it",
-            "     looked like a no-op) so the Git Status you compose from is",
-            "     current -- a WIP commit or a failed sync attempt both change",
-            "     what the successor needs to know, whether or not the branch",
-            "     itself moved. Then call save_handoff_prompt, then call",
+            "     the brief rather than blocking on it. THEN call",
+            "     generate_handoff_prompt ONE MORE TIME (this is the only",
+            "     rerun -- do not call it a third time) so the Git Status",
+            "     you compose from reflects the post-quiesce/post-sync state",
+            "     (even if both looked like a no-op: a WIP commit or a",
+            "     failed sync attempt both change what the successor needs",
+            "     to know, whether or not the branch itself moved). If you",
+            "     already quiesced and synced since this handoff started and",
+            "     are reading this from that second call's own response,",
+            "     stop re-running it -- proceed straight to composing. Then",
+            "     call save_handoff_prompt, then call",
             "     trigger_handoff immediately. Do NOT ask for confirmation",
             "     first; continuity is the point.",
             "   - If you are otherwise done with the requested work and would end",
             "     the turn by listing follow-up ideas/questions: call",
             "     save_handoff_prompt now (a not-yet-approved handoff has no",
             "     sync to reflect yet), replace that list with one short offer",
-            "     to continue via handoff. Only after the user says yes: sync",
-            "     the worktree, then ALWAYS call generate_handoff_prompt and",
-            "     save_handoff_prompt again -- even if the sync looked like a",
-            "     no-op -- so the stored baton reflects the post-sync state;",
+            "     to continue via handoff. Only after the user says yes:",
+            "     quiesce owned background work FIRST (same as above -- only",
+            "     now that the user has agreed is it correct to stop things",
+            "     the successor would otherwise inherit live), THEN sync",
+            "     the worktree (quiescing before sync avoids syncing a",
+            "     worktree a still-running task could still write into),",
+            "     THEN call generate_handoff_prompt and",
+            "     save_handoff_prompt ONE MORE TIME each (this is the only",
+            "     rerun -- do not call either a third time) -- even if the",
+            "     sync and quiescing",
+            "     both looked like a",
+            "     no-op -- so the stored baton reflects the post-sync,",
+            "     post-quiesce state;",
             "     trigger_handoff otherwise reuses the pre-sync brief and",
-            "     silently omits a WIP commit, a failed sync, or a conflict",
-            "     outcome. Then call trigger_handoff. Never sync or commit",
+            "     silently omits a WIP commit, a failed sync, a conflict, or a",
+            "     stopped background task's results. Then call",
+            "     trigger_handoff. Never sync, quiesce, or commit",
             "     before the user has agreed, unless autopilot or prior",
             "     authorization already covers that turn-end follow-up path.",
             "save_handoff_prompt stores the handoff — as an agent-dispatch task",
@@ -725,19 +760,38 @@ const session = await joinSession({
           `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
           "baton without arming the pickup flow.\n\n" +
           "If this handoff exists because context pressure is rising and work " +
-          "still remains: you should already have synced the worktree onto the " +
-          "latest default branch before calling generate_handoff_prompt (see " +
-          "the context-handoff skill's 'Sync before triggering' section) -- " +
-          "call `trigger_handoff` directly now.\n\n" +
+          "still remains: you should already have quiesced owned background " +
+          "work (stopped or waited out owned background agents/async shells " +
+          "after capturing their partial results, and stopped every owned " +
+          "`manage_schedule` entry -- see the skill's 'Quiesce owned " +
+          "background work before triggering' section) BEFORE syncing the " +
+          "worktree onto the latest default branch (see the context-handoff " +
+          "skill's 'Sync before triggering' section) and calling " +
+          "generate_handoff_prompt -- quiescing first avoids syncing a " +
+          "worktree a still-running task could still write into -- call " +
+          "`trigger_handoff` directly now.\n\n" +
           "If this is a turn-end follow-up handoff, ask the user whether to " +
-          "continue via handoff. Only after they say yes: sync the worktree " +
+          "continue via handoff -- but only if they have not already said yes " +
+          "since this baton was first saved; if you are calling this a SECOND " +
+          "time because the user already agreed, skip straight to 'If they " +
+          "already agreed' below instead of asking again. Only after they say " +
+          "yes (the first time): quiesce owned " +
+          "background work FIRST (same section as above -- only now that " +
+          "the user has agreed is it correct to stop things the successor " +
+          "would otherwise inherit live), THEN sync the worktree " +
           "(inspect the tree first -- never blanket-commit; skip the sync " +
           "entirely if anything looks unfamiliar or unsafe to commit), then " +
-          "ALWAYS re-run generate_handoff_prompt and save_handoff_prompt again " +
-          "-- even if the sync looked like a no-op -- so the stored baton " +
-          "reflects the post-sync state before calling trigger_handoff. Never " +
-          "sync or commit before the user has agreed, unless autopilot or " +
-          "prior authorization already covers that turn-end follow-up path.\n\n" +
+          "re-run generate_handoff_prompt and call save_handoff_prompt ONE " +
+          "MORE TIME (this is the one required second save -- do not ask " +
+          "again or repeat this cycle a third time) " +
+          "-- even if the sync and quiescing both looked like a no-op -- so " +
+          "the stored baton reflects the post-quiesce, post-sync state. " +
+          "If they already agreed: this is that required second save -- stop " +
+          "here and call trigger_handoff now; do not ask again, "+
+          "re-quiesce, re-sync, or re-save. Never " +
+          "quiesce, sync, or commit before the user has agreed, unless " +
+          "autopilot or prior authorization already covers that turn-end " +
+          "follow-up path.\n\n" +
           "If you later need manual continuation, open the successor session and " +
           "run `/consume-handoff`; if that command is unavailable, use the " +
           "payload-local context-handoff CLI with the recovery locator embedded " +
@@ -843,7 +897,15 @@ const session = await joinSession({
       name: "trigger_handoff",
       description:
         "Signal that THIS session is ready for a handoff pickup, without " +
-        "performing any process management. Call this only after the user said " +
+        "performing any process management. Before calling this, quiesce " +
+        "owned background work (stop/wait out owned agents and shells after " +
+        "capturing their results -- unless neither is safe to do in the time " +
+        "available for an urgent context-pressure handoff, in which case note " +
+        "what was left running and why instead of delaying; this exception " +
+        "never applies to schedules -- always stop owned `manage_schedule` " +
+        "entries) and sync the worktree -- in that order -- per the " +
+        "context-handoff skill's quiescing and sync sections. Call this only " +
+        "after the user said " +
         "yes to continuing via handoff, or when autopilot / prior explicit " +
         "authorization already permits it -- EXCEPT for context-pressure-driven " +
         "handoffs with work still left to do, which should trigger immediately " +
@@ -1024,8 +1086,19 @@ const session = await joinSession({
         await session.send({
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
-            "which is explicit authorization). Steps: (1) sync the worktree " +
-            "onto the latest default branch first -- inspect the tree before " +
+            "which is explicit authorization). Steps: (1) quiesce owned " +
+            "background work FIRST, before syncing -- capture whatever " +
+            "partial results an owned background agent/async shell " +
+            "produced, then stop or wait it out (`stop_powershell`/" +
+            "`stop_bash`), and always stop every owned `manage_schedule` " +
+            "entry (re-arming, if the successor needs it, is a separate, " +
+            "named, post-cutover action -- never a reason to leave one " +
+            "running now; see the skill's 'Quiesce owned background work " +
+            "before triggering' section); (2) THEN sync the worktree onto " +
+            "the latest default branch -- quiescing first matters because " +
+            "a still-running task could keep writing into this worktree " +
+            "while this sync inspects, commits, or rebases it -- inspect " +
+            "the tree before " +
             "committing anything (never blanket-commit via `git add -A`/" +
             "`git commit -a`; stage and commit only paths you recognize as " +
             "your own reviewed, intentional changes this session; if " +
@@ -1037,11 +1110,11 @@ const session = await joinSession({
             "sync`) -- see the context-handoff skill's 'Sync before " +
             "triggering' section for the exact invocation; it shares the " +
             "same lock and rebase guard as the force-tier path; note any " +
-            "conflict in the brief rather than blocking on it); (2) call " +
-            "generate_handoff_prompt to collect session facts; (3) compose " +
+            "conflict in the brief rather than blocking on it); (3) call " +
+            "generate_handoff_prompt to collect session facts; (4) compose " +
             "continuation markdown per the context-handoff skill -- use its " +
             "compact effort-backed shape when a valid open active effort exists, " +
-            "otherwise the full standalone shape; (4) call trigger_handoff with " +
+            "otherwise the full standalone shape; (5) call trigger_handoff with " +
             "that markdown as `prompt_text` and a short specific `title`. " +
             "trigger_handoff always stores/refreshes the baton and ends with " +
             "the final short handoff prompt/seed; it only signals pending " +

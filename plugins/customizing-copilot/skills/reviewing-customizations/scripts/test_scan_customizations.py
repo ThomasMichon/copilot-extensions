@@ -1576,6 +1576,378 @@ def test_agent_mcp_agent_with_unrestricted_tools_never_needs_shell_flag(
     )
 
 
+@pytest.mark.guard
+def test_mcp_server_narrow_tool_list_is_flagged(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['*']\n"
+        "  svc-b:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search', 'example_status']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "svc-b" in findings[0].message
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_wildcard_tool_list_passes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['*']\n"
+        "  svc-b:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['*']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-server-tools-allowlist" for f in report.findings
+    )
+
+
+@pytest.mark.guard
+def test_mcp_server_block_sequence_tool_list_is_flagged(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools:\n"
+        "      - example_read\n"
+        "      - example_write\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_read" in findings[0].message
+    assert "example_write" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_block_sequence_with_leading_comment_is_flagged(tmp_path: Path):
+    # A comment line before (or between) the sequence items must not cause
+    # the parser to flush the pending list early and lose the items that
+    # follow it.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools:\n"
+        "      # a comment before the first item\n"
+        "      - example_read\n"
+        "      - example_write\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_read" in findings[0].message
+    assert "example_write" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_empty_tool_list_is_flagged(tmp_path: Path):
+    # An explicit empty allow-list grants zero tools -- strictly narrower
+    # than ["*"], so it must be flagged too, not treated as "nothing to see."
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: []\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+
+
+@pytest.mark.guard
+def test_mcp_server_block_sequence_with_comment_on_opener_line_is_consumed(
+    tmp_path: Path,
+):
+    # A comment on the `tools:` opener line itself (not a leading comment
+    # inside the sequence) must not be mistaken for an inline comment-only
+    # value -- the real items that follow must still be consumed, and a
+    # wildcard item there must not produce a false positive.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools:  # explanation\n"
+        '      - "*"\n'
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-server-tools-allowlist" for f in report.findings
+    )
+
+
+@pytest.mark.guard
+def test_mcp_server_narrow_tool_list_with_reasoned_marker_is_suppressed(tmp_path: Path):
+    # The documented escape hatch: a narrowed list with a trailing reasoned
+    # `# mcp-tools-allowlist: allow <reason>` comment is not flagged.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search']  # mcp-tools-allowlist: allow admin-tool gating\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-server-tools-allowlist" for f in report.findings
+    )
+
+
+@pytest.mark.guard
+def test_mcp_server_narrow_tool_list_with_bare_marker_still_flags(tmp_path: Path):
+    # A marker with no stated reason does not count -- same contract as
+    # check-headless-launch.py's own escape-hatch comment.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search']  # mcp-tools-allowlist: allow\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert any(f.check == "mcp-server-tools-allowlist" for f in report.findings)
+
+
+@pytest.mark.guard
+def test_mcp_server_tools_entries_parsed_despite_trailing_comments(tmp_path: Path):
+    # A trailing YAML comment on either the `mcp-servers:` opener or a
+    # server-name line must not prevent the parser from entering that block
+    # at all -- every narrowed list beneath it would otherwise silently
+    # bypass the check entirely, not just the commented line itself.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:  # agent-mcp bridges\n"
+        "  svc-a:  # the example service\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search', 'example_status']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_quoted_name_is_recognized(tmp_path: Path):
+    # A quoted YAML mapping key (`"svc-a":` or `'svc-a':`) is a valid server
+    # name, but the server-entry regex previously accepted only bare names --
+    # a quoted key meant `mcp_server_tool_entries()` returned no entry at
+    # all, so a narrowed tools list beneath it silently bypassed the check.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        '  "svc-a":\n'
+        "    command: agent-mcp\n"
+        "    tools: ['example_search', 'example_status']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_deeply_indented_comment_does_not_corrupt_field_indent(
+    tmp_path: Path,
+):
+    # A standalone full-line comment indented deeper than the server's real
+    # fields must not be mistaken for establishing `field_indent` -- that
+    # would make the real `tools:` line (at the server's actual field
+    # indent) look "more deeply nested than the server's own fields" and
+    # get silently skipped.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "        # a deeply indented standalone comment\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_nested_env_key_is_not_mistaken_for_tools(tmp_path: Path):
+    # A same-named key nested one level deeper than the server's own direct
+    # fields (e.g. inside an `env:` mapping) must never be mistaken for the
+    # server's own `tools:` field.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    env:\n"
+        "      TOOLS: enabled\n"
+        "    tools: ['*']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-server-tools-allowlist" for f in report.findings
+    )
+
+
 def test_external_plugin_agent_guard_is_origin_version_advisory(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

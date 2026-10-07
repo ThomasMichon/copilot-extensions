@@ -8,7 +8,7 @@ import platform
 import sys
 import threading
 
-from . import activity, output, profile_assignment, sessions, tracking, worktree_identity
+from . import activity, embody_resume, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
@@ -319,15 +319,19 @@ def add_parsers(sub) -> None:
     parser.add_argument(
         "--seed",
         default=None,
-        help="With --new (not supported alongside --machine): an optional "
-        "prompt queued as the session's first interactive turn once "
-        "Copilot is actually ready, fire-and-forget past the "
-        "auto-update/bootstrap flow. Persisted on the new record (this "
-        "command never launches Copilot itself, so it can only be "
-        "stored here); delivered and cleared by `agent-worktrees "
-        "embody`/`copilot` on the first attach -- an arbitrary direct "
-        "tmux/psmux attach, or a launch that bypasses embody, will not "
-        "deliver it.",
+        help="With --new or --worktree-id (not supported alongside "
+        "--machine or --bare-resume): a prompt delivered as the session's "
+        "first (--new) or next (--worktree-id resume) interactive turn "
+        "once Copilot is actually ready. With --worktree-id, carried "
+        "durably as a `--interactive` argument on the resume launch's own "
+        "Copilot command line -- works identically whether the launch is "
+        "muxed or --no-mux, since it never depends on a mux pane to type "
+        "into. With --new, this command does not launch Copilot itself, "
+        "so the seed is only ever persisted on the record (never embedded "
+        "in a returned launch plan): delivered and cleared by "
+        "`agent-worktrees embody`/`copilot` on a later first attach, or by "
+        "a subsequent `resolve --worktree-id` resume re-resolve picking up "
+        "the same persisted value.",
     )
     parser.add_argument("copilot_args", nargs="*", default=[])
 
@@ -341,30 +345,47 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         return exc.exit_code
 
     requested_seed = getattr(state.args, "seed", None)
-    if requested_seed and not state.use_new:
-        # --seed is documented as valid only with --new (it persists onto
-        # a NEWLY created worktree's record) -- without it, --worktree-id/
-        # --base resolve calls would otherwise silently succeed and
-        # discard the value.
-        message = "--seed is only valid with --new."
+    if requested_seed and not state.use_new and not state.worktree_id:
+        # --seed is valid with --new (persisted onto a newly created
+        # record -- resume-prompt-durable-seed-and-mux-fix) and with
+        # --worktree-id (appended directly to the resume launch's own argv
+        # -- see below); without either, --base and the interactive picker
+        # path would otherwise silently succeed and discard the value.
+        message = "--seed is only valid with --new or --worktree-id."
         if state.use_json:
             return output._json_error(message)
         output.err(message)
         return 2
 
-    if state.use_new and state.requested_machine and requested_seed:
+    if state.requested_machine and requested_seed:
         # Validated here, before the JSON/non-JSON split: the non-JSON
         # dispatcher checks state.use_new before state.requested_machine
-        # (below) and would otherwise silently create a LOCAL seeded
-        # worktree instead of honoring (or rejecting) --machine -- a
-        # confusing result regardless of --seed. The JSON path's own
+        # (below) and would otherwise silently create/resume a LOCAL
+        # seeded worktree instead of honoring (or rejecting) --machine --
+        # a confusing result regardless of --seed. The JSON path's own
         # reason still applies too: its remote dispatch relays a naively
         # space-joined command string with zero shell quoting, unsafe for
-        # an arbitrary --seed value.
+        # an arbitrary --seed value. Applies to both --new and
+        # --worktree-id (resume) targets alike.
         message = (
             "--seed is not yet supported for a remote --machine target; "
             "use --seed on this machine only, or omit --machine."
         )
+        if state.use_json:
+            return output._json_error(message)
+        output.err(message)
+        return 2
+
+    if requested_seed and getattr(state.args, "bare_resume", False):
+        # --bare-resume deliberately skips seed injection in BOTH resume
+        # code paths (it launches Copilot in HOME with no --resume at all,
+        # to dodge a cwd-start bug -- there is no resumed conversation, and
+        # arguably no well-defined "worktree session," for the seed to
+        # join). Without this guard, a caller combining --bare-resume with
+        # --seed got a silent, confusing partial success: the command
+        # exits 0 but the prompt is quietly dropped. Reject the
+        # combination explicitly instead.
+        message = "--seed is not supported together with --bare-resume."
         if state.use_json:
             return output._json_error(message)
         output.err(message)
@@ -639,6 +660,92 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     elif not no_resume:
         _emit_parent_context_hint(record, to_stderr=True)
 
+    # Durable seed delivery (resume-prompt-durable-seed-and-mux-fix): a
+    # `--interactive` argument on this SAME returned command line, never a
+    # mux pane send-keys side-channel -- works identically whether the real
+    # launcher (launch-session.{ps1,sh}, which wraps or doesn't wrap this
+    # exact `cmd` in a mux pane independently of anything decided here)
+    # ends up muxed or `--no-mux`, since there is no pane to target either
+    # way. `bare_resume` skips claiming/injecting entirely (mirrors
+    # `resolve_launch_cli._resolve_resume_context`'s identical guard) --
+    # there is no resumed conversation, and arguably no well-defined
+    # "worktree session," for a seed to join, and a persisted
+    # `pending_seed` must stay queued for a later real resume rather than
+    # being silently consumed here. An explicit `--seed` on this call wins;
+    # either way, any record-persisted `pending_seed` (queued at creation
+    # time by `resolve --new --seed`, for the Picker's own two-hop
+    # new-worktree flow, which re-resolves by --worktree-id here) is
+    # claimed (cleared) under the existing race-safe write-guard so
+    # `agent-worktrees embody`'s own fallback claim-and-send-keys delivery
+    # never finds it again and double-delivers the same turn.
+    #
+    # Known, accepted scope boundary: claiming happens here, at
+    # PLAN-BUILD time -- before the external launcher
+    # (launch-session.{ps1,sh}) has actually exec'd this `cmd`. That script
+    # still performs its own update/preflight work and (for a muxed launch)
+    # mux-session creation AFTER this process already returned; a failure
+    # there, before `cmd` ever starts, loses the claimed seed with no
+    # restore. Deliberately not solved here: a true fix needs the launcher
+    # itself to report "I failed before exec" back through
+    # `pending_seed.restore_pending_seed` (the exact primitive `embody`'s
+    # own mux-pane delivery already uses for its own post-attempt restore),
+    # which means teaching the launcher scripts about this contract --
+    # explicitly out of this phase's scope (tracked as a Phase 3 follow-up
+    # in this effort's own README). Accepted because `resolve` already
+    # performs several other irreversible side effects before returning
+    # (`mark_resumed`/`save_record`, activity logging) with the same
+    # "the external launcher might still fail after this" exposure, so this
+    # is a known risk class for this function, not a new one introduced
+    # here, and the alternative (never clearing a pending seed from this
+    # function at all) reintroduces real double-delivery on every
+    # subsequent successful resume instead of this narrow, infrequent loss
+    # window.
+    #
+    # Live-mux parity with `resolve_launch_cli._resolve_resume_context`:
+    # the JSON path is the Picker's own real code path, and both launcher
+    # scripts (`launch-session.{sh,ps1}`) probe for an existing live mux
+    # session themselves BEFORE this `cmd` would ever run -- if one exists,
+    # they reattach it and never exec `cmd` at all, exactly the scenario
+    # the non-JSON path's own `verdict.mux_live` branch already guards.
+    # Without the identical check here, a seed claimed/embedded above would
+    # be silently discarded on every JSON-mode live-mux reattach, which is
+    # worse than the non-JSON path's own narrow, queued-but-delayed
+    # limitation -- here the seed was never queued at all.
+    #
+    # A degraded probe is NOT the same as a confirmed "no live mux": it
+    # means genuinely unknown, and claiming/embedding the seed on an
+    # uncertain verdict risks the exact same silent loss a real live mux
+    # would cause. Treat "uncertain" the same as "live" here -- the safer,
+    # queue-not-embed branch -- rather than only gating on the narrower
+    # `mux_live` flag. Specifically `mux_probe_ok` (the MUX probe's own
+    # success), never the aggregate `probes_ok` (which also goes False on
+    # an UNRELATED reclaim/lock-probe failure): a reclaim failure with a
+    # conclusive "no mux" from the mux probe itself is not mux uncertainty,
+    # and wrongly queuing in that case loses the prompt entirely on a
+    # `--no-mux` launch (which execs the seedless command directly -- there
+    # is no pane to later deliver a queued seed to).
+    try:
+        verdict = sessions.verify_worktree_active(record)
+    except Exception:
+        verdict = None
+    live_or_uncertain_mux = verdict is None or not getattr(verdict, "mux_probe_ok", True) or getattr(verdict, "mux_live", False)
+    seed_claimed = False
+    seed_queue_failed = False
+    if not getattr(state.args, "bare_resume", False) and not live_or_uncertain_mux:
+        explicit_seed = getattr(state.args, "seed", None)
+        claimed_seed = pending_seed_mod.claim_pending_seed(yaml_path)
+        delivered_seed = explicit_seed or claimed_seed
+        if delivered_seed:
+            launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
+            seed_claimed = True
+    elif not getattr(state.args, "bare_resume", False) and live_or_uncertain_mux:
+        explicit_seed = getattr(state.args, "seed", None)
+        if explicit_seed:
+            seed_queue_failed = not pending_seed_mod.set_pending_seed(yaml_path, explicit_seed)
+        # A persisted `pending_seed` (no explicit one given) is deliberately
+        # left untouched here too -- never claimed, so it stays queued for
+        # whatever next attach actually delivers it.
+
     launch = {
         "action": "exec",
         "work_dir": record.worktree_path,
@@ -647,7 +754,24 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         "worktree_id": record.worktree_id,
         "post_exit": True,
         "no_mux": True,
+        # Explicit provenance: a delegated caller (the Worktree Manager's
+        # relocated-launch re-invocation) must not GUESS whether `cmd`'s
+        # trailing `--interactive <value>` pair is the seed
+        # this call claimed, versus a configured launch/profile argument
+        # that coincidentally ends the same way -- `_build_launch_cmd` can
+        # legitimately produce either shape. True only when THIS call
+        # itself appended the seed via `embody_resume.with_seed` above.
+        "seed_claimed": seed_claimed,
     }
+    if seed_queue_failed:
+        # Honest, non-fatal degradation: `set_pending_seed` failed (lock
+        # contention, an unreadable record, or a write failure) while
+        # queuing an explicit seed for later delivery on a live-mux
+        # reattach. The launch itself still proceeds (losing only the
+        # seed, not the whole resume) -- surfaced here so a caller (the
+        # Picker) can tell the operator their prompt did not make it in,
+        # rather than silently discarding it with no signal at all.
+        launch["seed_queue_failed"] = True
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     project = config.repo_name

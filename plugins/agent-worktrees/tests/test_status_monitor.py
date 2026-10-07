@@ -23,9 +23,11 @@ from unittest.mock import patch
 
 import agent_procutil
 import pytest
+import single_instance_lease
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import output
+from agent_worktrees import session_catalog
 from agent_worktrees import worktree_identity
 
 
@@ -36,6 +38,177 @@ def test_status_monitor_registered():
     # and the launcher reap must never kill the resident tracker.
     assert "status-monitor" in m._NO_PROJECT_COMMANDS
     assert "status-monitor" in m._LAUNCHER_REAP_VETOES
+
+
+def test_status_monitor_exits_immediately_when_lease_already_held(monkeypatch, tmp_path):
+    """The atomic exclusivity gate must run BEFORE the existing lock-file
+    liveness check, and losing the race must return before any lock-file
+    write or further setup -- a losing caller exits in microseconds instead
+    of running on as an undetected duplicate until some later periodic
+    re-check happens to notice a sibling."""
+
+    class _AlwaysHeld:
+        def __init__(self, *_a, **_kw) -> None:
+            pass
+
+        def acquire(self) -> None:
+            raise single_instance_lease.AlreadyRunningError(tmp_path / "status-monitor.lock", 999)
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _AlwaysHeld)
+    write_calls: list = []
+    monkeypatch.setattr(m.locks, "write_lock", lambda *a, **kw: write_calls.append((a, kw)))
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None)
+    assert m.cmd_status_monitor(args) == 0
+    assert write_calls == [], "must return before the lock-file write, not just before the main loop"
+
+
+def test_status_monitor_proceeds_when_lease_is_won(monkeypatch, tmp_path):
+    """The inverse: winning the atomic gate must not itself block the
+    existing lock-file publish (so other tooling -- the status bar, a
+    sibling's supersession check -- still sees this monitor's metadata)."""
+    acquired: list = []
+
+    class _AlwaysWins:
+        def __init__(self, *_a, **_kw) -> None:
+            pass
+
+        def acquire(self) -> None:
+            acquired.append(True)
+
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _AlwaysWins)
+    write_calls: list = []
+    monkeypatch.setattr(m.locks, "write_lock", lambda *a, **kw: write_calls.append((a, kw)) or True)
+    # No OTHER monitor owns the lock-file side either, so `_other_current_
+    # monitor` is False and we reach the write.
+    monkeypatch.setattr(m.locks, "read_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *a, **kw: False)
+
+    def _raise_to_exit_before_the_loop(*_a, **_kw):
+        raise RuntimeError("reached the resident loop -- test stops here by design")
+
+    # `session_catalog.ResidentSessionReconciler` is the first real
+    # object construction reached AFTER the gate + lock-file write this
+    # test cares about, well before the actual indefinite sweep loop
+    # (`threading.Event()`, used for `shutdown_requested`, fires much
+    # EARLIER in this function -- before the gate even runs -- so it can't
+    # serve as a "stop here" marker for this test).
+    monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None)
+    with pytest.raises(RuntimeError, match="reached the resident loop"):
+        m.cmd_status_monitor(args)
+    assert acquired == [True], "must acquire the ownership lease exactly once"
+    assert len(write_calls) == 1
+    assert write_calls[0][0][0] == m._monitor_lock_path(), "wrote the real monitor lock path"
+
+
+def test_status_monitor_passive_mode_skips_the_lease_entirely(monkeypatch):
+    """Passive mode never competes for ownership (matches the pre-existing
+    `_other_current_monitor` early return for `passive_mode`) -- it must not
+    even attempt to acquire the lease."""
+    constructed: list = []
+
+    class _Tracking:
+        def __init__(self, *a, **kw) -> None:
+            constructed.append((a, kw))
+
+        def acquire(self) -> None:
+            raise AssertionError("passive mode must never acquire the lease")
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _Tracking)
+
+    def _raise_to_exit_before_the_loop(*_a, **_kw):
+        raise RuntimeError("reached the resident loop -- test stops here by design")
+
+    monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
+    monkeypatch.setattr(m.locks, "read_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *a, **kw: False)
+
+    args = argparse.Namespace(interval=15, passive=True, control_port=None)
+    with pytest.raises(RuntimeError, match="reached the resident loop"):
+        m.cmd_status_monitor(args)
+    assert constructed == [], "passive mode must not construct a SingleInstance at all"
+
+
+def test_status_monitor_lease_does_not_collide_with_metadata_file(tmp_path):
+    """Real-interaction regression for a High-severity review finding
+    (PR #5412): the ownership lease and the pre-existing metadata lock file
+    must be genuinely separate files. `SingleInstance.acquire()` writes its
+    own pid bytes into the first bytes of whatever file it locks, and
+    `_locks.write_lock()` separately replaces its target file's entire
+    contents via `os.replace` (a new inode at the same path) -- sharing one
+    path would have either write corrupt the other, and on POSIX a metadata
+    replace would strand the held flock on the old inode, silently
+    defeating the gate for the next contender that opens the replacement.
+    No mocking of `single_instance_lease` here -- this exercises the real
+    primitive against a real temp directory, exactly as the review
+    requested."""
+    lease = single_instance_lease.SingleInstance(
+        tmp_path, service="status-monitor", lock_name="status-monitor-singleton.lock"
+    )
+    lease.acquire()
+    try:
+        metadata_path = tmp_path / "status-monitor.lock"
+        assert metadata_path != lease.lock_path, "lease and metadata must be distinct files"
+
+        # Metadata writes (and the repeated os.replace churn a live monitor
+        # does on every sweep) must never disturb the held lease.
+        assert m.locks.write_lock(metadata_path, extra={"prefix": "/fake", "mux": True})
+        data = m.locks.read_lock(metadata_path)
+        assert data is not None and data["prefix"] == "/fake", "metadata must survive acquisition"
+
+        # A second attempt on the SAME lease name, while the first is held,
+        # must be rejected -- the actual exclusivity guarantee under test.
+        contender = single_instance_lease.SingleInstance(
+            tmp_path, service="status-monitor", lock_name="status-monitor-singleton.lock"
+        )
+        with pytest.raises(single_instance_lease.AlreadyRunningError):
+            contender.acquire()
+
+        # ... and a further metadata write/read after the contention attempt
+        # must still work -- proving the earlier replace never touched the
+        # lease's inode.
+        assert m.locks.write_lock(metadata_path, extra={"prefix": "/fake2", "mux": False})
+        data2 = m.locks.read_lock(metadata_path)
+        assert data2 is not None and data2["prefix"] == "/fake2"
+    finally:
+        lease.release()
+
+
+def test_status_monitor_aborts_startup_when_publication_write_fails(monkeypatch):
+    """Regression for a High-severity review finding (PR #5412):
+    `locks.write_lock()` is best-effort and returns ``False`` (never
+    raises) on an I/O failure. Continuing anyway after a failed publish
+    would leave us believing we're the published owner when no metadata
+    actually says so. Startup must abort (nonzero exit) rather than
+    proceed on a failed write, and must still release the lease it
+    acquired."""
+    released: list[str] = []
+
+    class _TrackRelease:
+        def __init__(self, *_a, lock_name=None, **_kw) -> None:
+            self._lock_name = lock_name
+
+        def acquire(self) -> None:
+            pass
+
+        def release(self) -> None:
+            released.append(self._lock_name)
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _TrackRelease)
+    monkeypatch.setattr(m.locks, "read_lock", lambda *_a, **_kw: None)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *_a, **_kw: False)
+    monkeypatch.setattr(m.locks, "write_lock", lambda *_a, **_kw: False)
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None)
+    assert m.cmd_status_monitor(args) != 0, "a failed publish must abort startup, not continue"
+    assert released == ["status-monitor-singleton.lock"], (
+        "the ownership lease must still be released on this failure path"
+    )
 
 
 def test_resident_lifecycle_requests_wait_for_their_deadline():
@@ -2992,7 +3165,7 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     monkeypatch.setattr(
         m.locks,
         "write_lock",
-        lambda _path, extra=None: writes.append(extra),
+        lambda _path, extra=None: writes.append(extra) or True,
     )
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
@@ -3039,7 +3212,7 @@ def test_status_monitor_binds_and_unbinds_resident_push(tmp_path, monkeypatch):
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
-    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
@@ -3111,7 +3284,7 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     monkeypatch.setattr(
         m.locks,
         "write_lock",
-        lambda _path, extra=None: writes.append(extra),
+        lambda _path, extra=None: writes.append(extra) or True,
     )
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
@@ -3191,7 +3364,7 @@ def test_self_retire_softly_closes_admission_before_hard_closing_on_final_exit(
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
-    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     # A fixed, non-None generation makes `self_retire_generation` non-None

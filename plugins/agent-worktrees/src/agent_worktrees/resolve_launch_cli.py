@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import activity, codename_tracking, git_ops, local_cache_refresh, output, profile_assignment, sessions, tracking
+from . import activity, codename_tracking, embody_resume, git_ops, local_cache_refresh, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking
 from . import config as cfg
 
 
@@ -353,7 +353,9 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
 
     interactive = not getattr(args, "json", False) and not getattr(args, "base", False)
     verdict = None
+    liveness_checked = False
     if interactive and not args.dry_run:
+        liveness_checked = True
         try:
             verdict = sessions.verify_worktree_active(record)
         except Exception:
@@ -513,6 +515,91 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         merged_env[_session_bind_project_key()] = config.repo_name
         merged_env[_session_bind_worktree_key()] = record.worktree_id
         merged_env[_session_bind_session_key()] = resume_target
+
+    # Seed delivery (resume-prompt-durable-seed-and-mux-fix): carried
+    # durably as a `--interactive` argument on the Copilot command line
+    # itself, never a mux pane send-keys side-channel -- works identically
+    # muxed or `--no-mux` since there is no pane to target either way.
+    # `bare_resume` + `--seed` is rejected earlier, in `cmd_resolve` (shared
+    # by both the JSON and this non-JSON dispatch path), matching
+    # `bare_resume`'s existing minimal/manual "no auto-resume, run /resume
+    # yourself" contract -- there is no resumed conversation, and arguably
+    # no well-defined "worktree session," for a seed to join -- so this
+    # branch only ever runs with a seed when `bare_resume` is already False.
+    # An explicit `--seed` on THIS call wins; either way, any
+    # record-persisted `pending_seed` (queued at creation time by
+    # `resolve --new --seed`, for the Picker's own two-hop new-worktree
+    # flow, which re-resolves by --worktree-id here) is claimed (cleared)
+    # under the existing race-safe write-guard so `agent-worktrees embody`'s
+    # own fallback claim-and-send-keys delivery never finds it again and
+    # double-delivers the same turn.
+    #
+    # A live mux session (`verdict.mux_live`, set above) is the one case
+    # where this returned `launch_cmd` is NEVER actually exec'd at all --
+    # the external launcher reattaches the existing pane instead (see
+    # `worktree-manager/bin/launch-session.{sh,ps1}`'s own live-mux
+    # handling). Embedding/claiming a seed into an argv that will never run
+    # would silently lose it, so this falls back to the OLDER
+    # persisted-`pending_seed`-plus-mux-send-keys mechanism instead, which
+    # CAN reach an already-live pane: an explicit `--seed` on this call is
+    # persisted (never embedded) so a later attach/send-keys delivery can
+    # still pick it up, and an already-persisted `pending_seed` is left
+    # untouched (never claimed here) for the same reason.
+    #
+    # Known, accepted scope boundary: outside the live-mux case above,
+    # claiming happens here, at PLAN-BUILD time -- before the external
+    # launcher (launch-session.{ps1,sh}) has actually exec'd this
+    # `launch_cmd`. See the identical note at `resolve_cli.py`'s own claim
+    # site for the full rationale; this is the same accepted, narrow,
+    # Phase-3-deferred risk, not a new one introduced by this sibling
+    # non-JSON path.
+    # A degraded probe (the liveness check was attempted but raised, leaving
+    # `verdict` None, or `verdict.mux_probe_ok` is false) is NOT the same as
+    # a confirmed "no live mux" -- it means genuinely unknown, and treating
+    # it as "not live" risks the exact same silent loss a real live mux
+    # would cause. Treat "uncertain" the same as "live" here too -- but
+    # ONLY when the check was actually attempted (`liveness_checked`): a
+    # skipped check (non-interactive dispatch, or `--dry-run`, which never
+    # mutates `pending_seed` regardless) must not be mistaken for this.
+    # Specifically `mux_probe_ok` (the MUX probe's own success), never the
+    # aggregate `probes_ok` (which also goes False on an UNRELATED
+    # reclaim/lock-probe failure) -- a reclaim failure with a conclusive
+    # "no mux" from the mux probe itself is not mux uncertainty, and a
+    # `--no-mux` launch execs the seedless command directly on a wrongly
+    # queued seed (no pane to later deliver it to).
+    live_mux = (
+        (liveness_checked and verdict is None)
+        or (verdict is not None and not getattr(verdict, "mux_probe_ok", True))
+        or getattr(verdict, "mux_live", False)
+    )
+    explicit_seed = getattr(args, "seed", None)
+    delivered_seed = explicit_seed
+    if not bare_resume and not live_mux:
+        if args.dry_run:
+            delivered_seed = explicit_seed or getattr(record, "pending_seed", None)
+        else:
+            claimed = pending_seed_mod.claim_pending_seed(record.yaml_path)
+            delivered_seed = explicit_seed or claimed
+        if delivered_seed:
+            launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
+            print("   Seeding first turn once ready.")
+    elif not bare_resume and live_mux and explicit_seed:
+        # `set_pending_seed` (never `restore_pending_seed`, a rollback
+        # primitive that deliberately never overwrites an existing queued
+        # seed): this is a genuinely NEW, never-yet-claimed explicit seed
+        # that must take priority over whatever was queued before, and its
+        # success must be confirmed before reporting it as queued -- a
+        # False return (lock contention) means the seed was NOT stored.
+        if pending_seed_mod.set_pending_seed(record.yaml_path, explicit_seed):
+            print(
+                "   Live mux session found -- queuing the seed for delivery "
+                "on reattach instead of this unused launch command."
+            )
+        else:
+            print(
+                "   Live mux session found -- could not queue the seed for "
+                "later delivery (contention); it has been dropped."
+            )
 
     print()
 

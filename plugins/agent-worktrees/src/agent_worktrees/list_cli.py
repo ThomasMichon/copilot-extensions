@@ -43,14 +43,6 @@ def _classify_records(*args, **kwargs):
     return _core()._classify_records(*args, **kwargs)
 
 
-
-
-
-
-def _normalize_path(*args, **kwargs):
-    return _core()._normalize_path(*args, **kwargs)
-
-
 def _status_monitor_enabled(*args, **kwargs):
     return _core_helper("_status_monitor_enabled", status_monitor_runtime._status_monitor_enabled)(*args, **kwargs)
 
@@ -200,7 +192,7 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         )
         title = wt.get("title")
         if not title or title == "null":
-            wt["title"] = session_ctx.latest_summary.get(_normalize_path(rec.worktree_path))
+            wt["title"] = session_ctx.latest_summary.get(sessions._normalize_path(rec.worktree_path))
         return wt
 
     emit({"type": "begin", "version": getattr(_core(), "_JSON_SCHEMA_VERSION"), "count": len(records)})
@@ -377,7 +369,7 @@ def _build_list_json_payload(
         for wt_dict, rec in zip(worktrees, records, strict=True):
             title = wt_dict.get("title")
             if not title or title == "null":
-                norm = _normalize_path(rec.worktree_path)
+                norm = sessions._normalize_path(rec.worktree_path)
                 title = session_ctx.latest_summary.get(norm)
             wt_dict["title"] = title
         from . import delegate_cli
@@ -529,7 +521,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         short_id = rec.worktree_id[-12:] if len(rec.worktree_id) > 12 else rec.worktree_id
         title = rec.title if (rec.title and rec.title != "null") else None
         if not title:
-            norm = _normalize_path(rec.worktree_path)
+            norm = sessions._normalize_path(rec.worktree_path)
             title = session_ctx.latest_summary.get(norm)
         if not title:
             title = "(none)"

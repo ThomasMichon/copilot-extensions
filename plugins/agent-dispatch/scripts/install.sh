@@ -45,6 +45,38 @@
 
 set -euo pipefail
 
+# Raise the shared self-stage watchdog's deadline for THIS plugin
+# specifically, via the exact per-plugin override hook the byte-identical
+# install-contract:v4 self-stage block below already reads
+# (__ss_dl_var="<PLUGIN>_INSTALL_DEADLINE_SEC") -- deliberately set OUTSIDE
+# that block (never edit its literal "480" default: tools/check-install-
+# contract.py enforces it byte-identical across every plugin's own copy;
+# mirrors the identical install.ps1 override just above its own
+# byte-identical self-stage block). agent-dispatch specifically can
+# legitimately chain THREE sequential spans in its own worst case, not just
+# the lock-wait alone: its own build (30-120s) PLUS waiting up to ~450s on
+# its own cross-version activation/cutover lock (_versioned_activate's
+# lock) for ANOTHER invocation's reconciliation to finish, PLUS -- once
+# THIS invocation finally acquires that lock -- its OWN cutover/
+# reconciliation work (a real _coordinator_cutover call, whose own
+# zdd.cutover defaults allow up to health_timeout(60s) + drain_timeout
+# (300s) + 60s of its own internal cutover-lease wait, ~420s). A genuine
+# ~990s worst case (120 + 450 + 420) the shared 480s default -- or an
+# under-sized override -- would kill mid-cutover, terminating a perfectly
+# healthy install. An operator's own explicit override (env var already
+# set before this script runs) always wins -- only supply a default when
+# none is present. Checks BOTH the plugin-specific AND the documented
+# generic cross-plugin override (docs/install-contract.md's resolution
+# order: <NAME>_INSTALL_DEADLINE_SEC -> COPILOT_PLUGIN_INSTALL_DEADLINE_SEC
+# -> default): setting only the plugin-specific variable here would mask
+# an operator-provided generic value -- including 0 to disable the
+# watchdog entirely -- since the self-stage block always resolves the
+# plugin-specific name first.
+if [ -z "${AGENT_DISPATCH_INSTALL_DEADLINE_SEC:-}" ] && [ -z "${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}" ]; then
+    AGENT_DISPATCH_INSTALL_DEADLINE_SEC=1050
+fi
+export AGENT_DISPATCH_INSTALL_DEADLINE_SEC
+
 _ok()   { printf '  [OK]   %s\n' "$1"; }
 _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
@@ -369,14 +401,127 @@ _versioned_activate() {
     # legacy mode. On POSIX a rename tolerates the daemons' open files, and
     # _install_service / _install_supervisor_service `systemctl restart` onto the
     # new slot, so no stop is needed.
+    #
+    # Cross-version ordering guard (parity with install.ps1's
+    # Invoke-VersionedActivate): two concurrent POSIX installs for DIFFERENT
+    # versions can legitimately build fully in parallel (nothing here
+    # serializes the build itself), so a slower, older-version invocation
+    # could still reach this activate call AFTER a faster, newer-version
+    # invocation already activated -- silently regressing current-version.
+    # versioned_runtime.py's own `activate` performs no version comparison of
+    # its own, so the guard lives here, under a global (version-independent)
+    # lock so the compare-then-publish sequence is atomic against another
+    # concurrent activate call. `flock` is absent by default on macOS (a
+    # plugin this installer explicitly supports), so a bare `command -v
+    # flock` fallback would silently degrade to NO mutual exclusion there --
+    # fall back to the same PID-symlink lock used by
+    # plugins/agent-machines/scripts/init.sh's stamp lock and
+    # plugins/agent-worktrees/scripts/invoke-payload-runtime.sh's provision
+    # lock (an atomic `ln -s $$ <path>`, reclaimed only once its recorded
+    # owner PID is confirmed dead) so every platform gets REAL mutual
+    # exclusion, not a best-effort no-op.
+    #
+    # ACTIVATION_SUPERSEDED is a POINT-IN-TIME signal set here, at the
+    # moment this call either skips or succeeds -- it is NOT, by itself, a
+    # sufficient guarantee for a caller that acts LATER (manifest write,
+    # coordinator cutover): this invocation can genuinely WIN its own
+    # activation (nothing newer was current yet), release this lock, and
+    # only THEN have a separate, slower-to-build newer version activate
+    # before this invocation reaches its own downstream action -- the lock
+    # here only serializes the compare-then-publish step itself, it cannot
+    # serialize everything a caller does afterward. Callers must re-validate
+    # LIVE immediately before acting via _activation_superseded_now (below)
+    # rather than trusting this variable alone.
+    ACTIVATION_SUPERSEDED=0
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    mkdir -p "$INSTALL_DIR"
+    local _activate_lock_link=""
+    _unlock_activate() {
+        if [[ -n "$_activate_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_activate_lock_link"
+        else
+            flock -u 8 2>/dev/null || true
+            exec 8>&- 2>/dev/null || true
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$INSTALL_DIR/.activate.lock"
+        flock 8
+    else
+        _activate_lock_link="$INSTALL_DIR/.activate.lock.pid"
+        local owner
+        until ln -s "$$" "$_activate_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif ln -s "$$" "$_activate_lock_link.reap" 2>/dev/null; then
+                # A plain readlink-then-rm is a TOCTOU race: another process
+                # could reap the same stale link and create its own live one
+                # between the two readlink calls, and this rm -f would then
+                # delete THAT live lock. A PID-bearing symlink (NOT a bare
+                # `mkdir`) as a SEPARATE reap mutex is atomic AND
+                # self-healing (mirrors plugins/agent-machines/scripts/
+                # init.sh's stamp lock): only the process that wins this
+                # `ln -s .reap` may remove the main lock, and only after
+                # re-verifying it is still the SAME stale value observed
+                # above.
+                if [[ "$(readlink "$_activate_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_activate_lock_link"
+                fi
+                rm -f "$_activate_lock_link.reap"
+            elif owner="$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" &&
+                 [[ "$owner" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$owner" 2>/dev/null; then
+                # The reap mutex itself is stale (its owner died mid-reap) --
+                # reclaim it so the main lock can never wedge permanently.
+                # Same TOCTOU hazard (and same re-verify fix) as the main
+                # lock's own reap above: re-check the symlink still points
+                # at the SAME stale PID immediately before removing --
+                # another process could already have reaped and replaced it
+                # with a live reaper between the staleness check and here.
+                if [[ "$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_activate_lock_link.reap" 2>/dev/null || true
+                fi
+            else
+                sleep 0.1
+            fi
+        done
+    fi
+    local current_active
+    current_active="$(_versioned_current)"
+    # Dual-authority comparison baseline, mirroring do_stamp's own guard:
+    # stamped-version is a SEPARATE authority a concurrent `stamp` action
+    # can publish WITHOUT ever activating (current-version stays untouched)
+    # -- comparing against current-version alone would let a delayed OLDER
+    # install still activate and overwrite current-version even though a
+    # NEWER version is already the intended/stamped one, stranding that
+    # newer snapshot. Read stamped-version directly (no interpreter needed)
+    # and activate against whichever of the two authorities is newer.
+    local activate_stamped=""
+    if [[ -f "$INSTALL_DIR/stamped-version" ]]; then
+        activate_stamped="$(cat "$INSTALL_DIR/stamped-version" 2>/dev/null || true)"
+    fi
+    local newest_published="$current_active"
+    if [[ -n "$activate_stamped" ]] && { [[ -z "$newest_published" ]] || _version_lt "$newest_published" "$activate_stamped"; }; then
+        newest_published="$activate_stamped"
+    fi
+    if [[ -n "$newest_published" ]] && _version_lt "$SRC_VERSION" "$newest_published" && [[ "$FORCE" -ne 1 ]]; then
+        _skip "Not activating: source $SRC_VERSION is older than already-published $newest_published (a newer build activated or stamped first; --force to override)"
+        ACTIVATION_SUPERSEDED=1
+        _unlock_activate
+        return 0
+    fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
+        _unlock_activate
         return 1
     fi
+    _unlock_activate
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
 }
 
@@ -387,6 +532,26 @@ _versioned_current() {
     [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || { echo ""; return 0; }
     "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
+}
+
+_activation_superseded_now() {
+    # True (0) iff THIS invocation should NOT proceed with its own
+    # downstream publication/cutover -- re-validated LIVE at the moment of
+    # the call, not merely a replay of _versioned_activate's own
+    # point-in-time ACTIVATION_SUPERSEDED snapshot. That snapshot alone is
+    # insufficient: this invocation can genuinely WIN its own (lock-
+    # protected) activation -- nothing newer was current yet -- release the
+    # lock, and only THEN have a separate, slower-to-build newer version
+    # activate before this invocation reaches _write_manifest or
+    # _coordinator_cutover. Re-reading _versioned_current here catches that
+    # window too: if the live current-version has since moved on to
+    # something other than this invocation's own SRC_VERSION, treat it as
+    # superseded regardless of how the earlier activation call itself went.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 1
+    [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]] && return 0
+    local now
+    now="$(_versioned_current)"
+    [[ -n "$now" && "$now" != "$SRC_VERSION" ]]
 }
 
 _versioned_gc() {
@@ -931,7 +1096,12 @@ _ensure_runtime() {
             --package-dir "$pkg_dir" --plugin-dir "$PLUGIN_DIR" --git-dir "$repo_root" >/dev/null 2>&1 || true
     fi
 
-    deploy_binstub
+    # -- binstub (self-provisioning) -- moved to AFTER the versioned
+    # activation + supersession check below (not immediately after the
+    # build): a superseded (older, losing) invocation must not republish the
+    # shared binstub/resolver surface over whatever a newer, already-active
+    # build already published there -- same reasoning as the manifest/
+    # verify/PATH/pivot steps this guard already protects.
 
     # Versioned layout (#581): health-gate the freshly-built slot in isolation,
     # then swap the stable `.venv` symlink onto it. Everything below (manifest,
@@ -962,9 +1132,109 @@ _ensure_runtime() {
         fi
         _versioned_mark_complete
         _versioned_activate || exit 1
+        # The supersession check and the shared publication it protects
+        # (the binstub + deploy-manifest, both readable/overwritable by any
+        # OTHER concurrent invocation) are NOT atomic unless the SAME global
+        # lock spans both: checking, then releasing, then publishing still
+        # leaves a gap where a newer installer (or stamp) could activate and
+        # publish in between, and this older invocation would still
+        # overwrite that newer content with its own stale one. Hold the
+        # same global (.activate.lock) lock _versioned_activate itself uses
+        # through the check AND deploy_binstub AND _write_manifest -- the
+        # two steps that actually publish shared, version-sensitive content
+        # another invocation could race.
+        local _publish_lock_link=""
+        _unlock_publish() {
+            if [[ -n "$_publish_lock_link" ]]; then
+                local owner
+                owner="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                [[ "$owner" != "$$" ]] || rm -f "$_publish_lock_link"
+            else
+                flock -u 8 2>/dev/null || true
+                exec 8>&- 2>/dev/null || true
+            fi
+        }
+        if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+            exec 8>"$INSTALL_DIR/.activate.lock"
+            flock 8
+        else
+            _publish_lock_link="$INSTALL_DIR/.activate.lock.pid"
+            local owner
+            until ln -s "$$" "$_publish_lock_link" 2>/dev/null; do
+                owner="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                    sleep 1
+                elif ln -s "$$" "$_publish_lock_link.reap" 2>/dev/null; then
+                    if [[ "$(readlink "$_publish_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                        rm -f "$_publish_lock_link"
+                    fi
+                    rm -f "$_publish_lock_link.reap"
+                elif owner="$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" &&
+                     [[ "$owner" =~ ^[0-9]+$ ]] &&
+                     ! kill -0 "$owner" 2>/dev/null; then
+                    # Same TOCTOU hazard (and re-verify fix) as the
+                    # activation lock's own reap -- see its comment.
+                    if [[ "$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                        rm -f "$_publish_lock_link.reap" 2>/dev/null || true
+                    fi
+                else
+                    sleep 0.1
+                fi
+            done
+        fi
+        if _activation_superseded_now; then
+            # This invocation's own build lost the cross-version activation
+            # race -- either caught immediately by _versioned_activate
+            # itself, or discovered only now via the LIVE re-check inside
+            # _activation_superseded_now (this invocation could have WON its
+            # own activation and released the lock, only for a separate,
+            # slower-to-build newer version to activate afterward, before
+            # reaching this exact point -- see that function's own comment).
+            # Everything below (manifest, verify, PATH, pivot, gc) resolves
+            # or reports through THIS invocation's own VENV_PYTHON/
+            # LINK_PYTHON -- publishing it now would overwrite the newer
+            # build's already-correct manifest with this older build's
+            # stale one. Stop here; the already-active newer slot remains
+            # fully installed and untouched.
+            _skip "Build $SRC_VERSION superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
+            _unlock_publish
+            return 0
+        fi
+        # Dual-authority re-check, mirroring do_stamp's own guard but for
+        # the OPPOSITE direction: _activation_superseded_now above only
+        # re-reads current-version, which do_stamp never touches (stamping
+        # deliberately defers activation). A newer concurrent stamp can
+        # therefore publish a newer stamped-version plus its own
+        # binstub/manifest/pivot entirely unnoticed by the check above, and
+        # this older install -- having already passed its own activation --
+        # would otherwise overwrite that newer launcher surface with its
+        # own stale one. Read stamped-version directly (no interpreter
+        # needed) UNDER this same lock so this observes the true latest
+        # stamp, not a stale snapshot.
+        local publish_stamped_version=""
+        if [[ -f "$INSTALL_DIR/stamped-version" ]]; then
+            publish_stamped_version="$(cat "$INSTALL_DIR/stamped-version" 2>/dev/null || true)"
+        fi
+        if [[ -n "$publish_stamped_version" ]] && _version_lt "$SRC_VERSION" "$publish_stamped_version" && [[ "$FORCE" -ne 1 ]]; then
+            _skip "Not publishing: source $SRC_VERSION is older than already-stamped $publish_stamped_version (a newer stamp published first; --force to override)"
+            _unlock_publish
+            return 0
+        fi
+        deploy_binstub
+        _write_manifest
+        # _register_pivot ALSO writes shared, version-sensitive content
+        # (pivots/agent-dispatch.json, from THIS invocation's own
+        # PLUGIN_DIR) another invocation could race the exact same way as
+        # the binstub/manifest above -- keep it inside this same protected
+        # span rather than letting it run after the lock is released.
+        _register_pivot
+        _unlock_publish
+    else
+        # Legacy (non-versioned) mode: no supersession concept, no lock.
+        deploy_binstub
+        _write_manifest
+        _register_pivot
     fi
-
-    _write_manifest
 
     if "$LINK_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
         _ok 'Verification: module imports successfully'
@@ -982,8 +1252,6 @@ _ensure_runtime() {
         *":$LOCAL_BIN:"*) _ok "PATH: $LOCAL_BIN is on PATH" ;;
         *) _step "Add $LOCAL_BIN to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
     esac
-
-    _register_pivot
 }
 
 _write_manifest() {
@@ -1645,14 +1913,110 @@ _install_supervisor_service() {
 do_stamp() {
     echo ''; echo '=== agent-dispatch stamp (defer runtime to first use) ==='; echo ''
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    # Serialized under the SAME global activation lock _versioned_activate/
+    # _ensure_runtime's own post-supersession-check deploy_binstub use: this
+    # fast path's deploy_binstub call still writes the identical shared
+    # binstub/resolver surface a concurrent real install/update's own
+    # (correctly version-ordered) deploy_binstub call writes -- without this
+    # lock the two writes could interleave with no defined winner at all.
+    local _stamp_lock_link=""
+    _unlock_stamp_binstub() {
+        if [[ -n "$_stamp_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_stamp_lock_link"
+        else
+            flock -u 8 2>/dev/null || true
+            exec 8>&- 2>/dev/null || true
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$INSTALL_DIR/.activate.lock"
+        flock 8
+    else
+        _stamp_lock_link="$INSTALL_DIR/.activate.lock.pid"
+        local owner
+        until ln -s "$$" "$_stamp_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
+                if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_stamp_lock_link"
+                fi
+                rm -f "$_stamp_lock_link.reap"
+            elif owner="$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" &&
+                 [[ "$owner" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$owner" 2>/dev/null; then
+                # Same TOCTOU hazard (and re-verify fix) as the activation
+                # lock's own reap -- see its comment.
+                if [[ "$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_stamp_lock_link.reap" 2>/dev/null || true
+                fi
+            else
+                sleep 0.1
+            fi
+        done
+    fi
+    # Version-ordering guard, UNDER this same lock (parity with install.ps1's
+    # Invoke-Stamp): unlike that PowerShell path, this fast stamp previously
+    # recorded and compared NO version at all, so a delayed stamp from an
+    # older payload could acquire this lock after a newer install/update (or
+    # a newer stamp) had already published and silently overwrite the shared
+    # resolver/binstub surface. Check BOTH authorities a real install/update
+    # or a prior stamp could have advanced -- the live active version and
+    # this dedicated stamped-version marker -- mirroring _downgrade_guard's
+    # own --force/AGENT_DISPATCH_ALLOW_DOWNGRADE override for a deliberate
+    # rollback.
+    local stamped_version_marker="$INSTALL_DIR/stamped-version"
+    local current_stamped=""
+    [[ -f "$stamped_version_marker" ]] && current_stamped="$(cat "$stamped_version_marker" 2>/dev/null || true)"
+    # Read `current-version` DIRECTLY as a plain marker file rather than via
+    # _versioned_current: that helper resolves an interpreter from
+    # $LINK_DIR/bin/python or $VENV_DIR/bin/python, both of which name THIS
+    # invocation's OWN source-version slot -- a `stamp` deliberately defers
+    # provisioning that slot (that's the whole point of the fast path), so
+    # it may not exist at all, and _versioned_current would silently return
+    # empty even when a newer direct install HAS published current-version,
+    # defeating this exact guard for the realistic stamp scenario it exists
+    # to protect. The marker is a plain atomically-written text file
+    # (versioned_runtime.py's own CURRENT_VERSION_FILE) -- reading it needs
+    # no interpreter at all.
+    local current_version_marker="$INSTALL_DIR/current-version"
+    local current_active=""
+    [[ -f "$current_version_marker" ]] && current_active="$(cat "$current_version_marker" 2>/dev/null || true)"
+    if [[ -n "$current_active" ]] && _version_lt "$SRC_VERSION" "$current_active" && [[ "$FORCE" -ne 1 ]]; then
+        _skip "Not publishing: source $SRC_VERSION is older than already-active $current_active (a newer install/update activated first; --force to override)"
+        _unlock_stamp_binstub
+        return 0
+    fi
+    if [[ -n "$current_stamped" ]] && _version_lt "$SRC_VERSION" "$current_stamped" && [[ "$FORCE" -ne 1 ]]; then
+        _skip "Not publishing: source $SRC_VERSION is older than already-stamped $current_stamped (a newer stamp arrived first; --force to override)"
+        _unlock_stamp_binstub
+        return 0
+    fi
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    printf '%s' "$SRC_VERSION" > "$stamped_version_marker"
     deploy_binstub
+    _unlock_stamp_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 
 do_install() {
     echo ''; echo '=== agent-dispatch install ==='; echo ''
     _ensure_runtime
+    if _activation_superseded_now; then
+        # A concurrent, newer install already activated -- either caught at
+        # _ensure_runtime's own return, or only now via the LIVE re-check
+        # (see _activation_superseded_now's own comment: this invocation
+        # could have WON its own activation and only been overtaken
+        # afterward). _install_service/_install_supervisor_service are
+        # themselves version-agnostic (they write generic, marker-resolving
+        # systemd units), but running them from this invocation's own
+        # (older, losing) build is still unnecessary -- nothing left to do.
+        echo ''; echo '=== agent-dispatch install complete (superseded by a newer concurrent build) ==='
+        return 0
+    fi
     _install_service
     _install_supervisor_service
     echo ''; echo '=== agent-dispatch install complete ==='
@@ -1670,6 +2034,23 @@ do_update() {
     trap _clear_update_marker EXIT
     _downgrade_guard
     _ensure_runtime
+    if _activation_superseded_now; then
+        # This invocation's own build lost the cross-version activation race
+        # -- either caught immediately inside _ensure_runtime, or only
+        # discovered HERE via the LIVE re-check (this invocation could have
+        # WON its own activation and released the lock, only for a newer
+        # version to activate before reaching this exact point -- see
+        # _activation_superseded_now's own comment for why a one-time
+        # snapshot right after activation is not sufficient).
+        # _coordinator_cutover below spawns the new coordinator from THIS
+        # invocation's own VENV_PYTHON/LINK_PYTHON -- proceeding would cut
+        # the ALREADY-newer, already-active coordinator OVER to this
+        # invocation's older build, a silent rollback. Nothing to update:
+        # the newer build's own update already did (or will do) the real
+        # cutover.
+        _skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/unit refresh for this invocation'
+        return 0
+    fi
     # Thread B (parity with install.ps1): a version update must never kill an
     # in-flight claim. _ensure_runtime built + activated the new slot WITHOUT
     # stopping the daemon; now, if a live Thread-B coordinator is serving, cut it
@@ -1678,12 +2059,83 @@ do_update() {
     # _install_service's SIGTERM-graceful `systemctl restart` (uvicorn drains
     # in-flight requests, so the invariant holds either way). The supervisor is a
     # SEPARATE unit -- never stopped here; it outlives the swap + re-adopts.
+    #
+    # Hold the SAME global (version-independent) lock _versioned_activate
+    # itself uses to publish current-version, across BOTH the live re-check
+    # AND the entire cutover call below -- not just the re-check alone. A
+    # re-check immediately before calling _coordinator_cutover still leaves
+    # a gap: this invocation's own cutover subprocess has its own internal
+    # cross-version cutover lease, and a NEWER invocation could activate and
+    # complete its ENTIRE cutover while this (older) invocation is merely
+    # queued waiting on that internal lease -- once it finally acquires it,
+    # it would route the coordinator back to this invocation's own stale
+    # build. Holding this lock across the whole span means a newer
+    # invocation's own _versioned_activate call (which needs this identical
+    # lock) cannot even START publishing its activation until this
+    # invocation's cutover attempt has fully finished and released it --
+    # closing the window rather than merely narrowing it.
+    local _cutover_lock_link=""
+    _unlock_cutover() {
+        if [[ -n "$_cutover_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_cutover_lock_link"
+        else
+            flock -u 8 2>/dev/null || true
+            exec 8>&- 2>/dev/null || true
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$INSTALL_DIR/.activate.lock"
+        flock 8
+    else
+        _cutover_lock_link="$INSTALL_DIR/.activate.lock.pid"
+        local owner
+        until ln -s "$$" "$_cutover_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif ln -s "$$" "$_cutover_lock_link.reap" 2>/dev/null; then
+                if [[ "$(readlink "$_cutover_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_cutover_lock_link"
+                fi
+                rm -f "$_cutover_lock_link.reap"
+            elif owner="$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" &&
+                 [[ "$owner" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$owner" 2>/dev/null; then
+                # Same TOCTOU hazard (and re-verify fix) as the activation
+                # lock's own reap -- see its comment.
+                if [[ "$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_cutover_lock_link.reap" 2>/dev/null || true
+                fi
+            else
+                sleep 0.1
+            fi
+        done
+    fi
+    if _activation_superseded_now; then
+        _skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/unit refresh for this invocation'
+        _unlock_cutover
+        return 0
+    fi
+    # _unlock_cutover is deliberately deferred until AFTER _install_service
+    # has fully run (not released right after _coordinator_cutover itself):
+    # releasing it earlier still leaves a race -- a newer invocation could
+    # activate and complete ITS OWN cutover in the gap before this
+    # invocation reaches _install_service, whose existing-unit path does a
+    # `systemctl restart` using THIS invocation's own stale $VENV_PYTHON,
+    # rolling the coordinator back or starting a second instance. A newer
+    # invocation's own _versioned_activate call (needing this identical
+    # lock) cannot even start publishing until this invocation's ENTIRE
+    # cutover/fallback action -- cutover attempt AND the unit reconciliation
+    # that completes it -- has fully finished and released it.
     if _coordinator_cutover; then
         _install_service --no-restart
     else
         _install_service
     fi
     _install_supervisor_service
+    _unlock_cutover
     echo ''; echo '=== agent-dispatch update complete ==='
 }
 

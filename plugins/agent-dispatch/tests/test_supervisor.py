@@ -1130,8 +1130,12 @@ def test_cold_resume_preserves_worktree_on_stat_error(q, client, monkeypatch):
     q.record_cold(reservation.key)
     q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
 
-    def deny_stat(_path):
-        raise PermissionError("temporarily inaccessible")
+    real_stat = supervisor_module.Path.stat
+
+    def deny_stat(path, *args, **kwargs):
+        if str(path) == "/inaccessible/worktree":
+            raise PermissionError("temporarily inaccessible")
+        return real_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(supervisor_module.Path, "stat", deny_stat)
     resumed: list[str] = []
@@ -6723,6 +6727,203 @@ def test_reconcile_stale_foreign_reserving_worktree_with_no_session_stays_reserv
 
     assert sup.reconcile_reserving() == 0
     assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_reserving_worktree_confirmed_absent_fails(q, client):
+    """Regression for a confirmed field incident (PR #8133, 2026-10-05): a
+    worktree-backed reservation whose target worktree never materialized on
+    disk at all left ``verdict_fn`` unable to ever resolve to ``live`` or
+    ``gone`` -- it stayed ``unknown`` forever, and a bare elapsed-time bound
+    cannot safely treat that as permission to release, since ``UNKNOWN`` also
+    covers an ordinary resolver timeout where the original worker may still
+    be live. Only a **positive** absence signal -- the local
+    ``agent-worktrees`` registry confirming the directory itself never
+    existed, the same escalation :meth:`release_requested_bodies` already
+    uses for this identical gap -- may release it, never elapsed time alone.
+    """
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-never-materialized",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=lambda _wt, _project: False,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 1
+    failed = q.get_reservation(reservation.key)
+    assert failed.state == SpawnState.RELEASING
+    assert "confirmed absent" in failed.detail
+
+
+@pytest.mark.parametrize("present", [True, None])
+def test_reconcile_reserving_worktree_unresolved_absence_stays_reserved(
+    q, client, present
+):
+    """Neither a confirmed-PRESENT directory nor a still-unresolvable probe
+    (``None``, e.g. the registry itself is unreachable) authorizes a
+    release -- only a confirmed-absent (``False``) verdict ever does."""
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-maybe-present",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=lambda _wt, _project: present,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_reserving_worktree_unknown_verdict_on_foreign_host_stays_reserved(
+    q, client
+):
+    """A reservation's worktree created on a DIFFERENT host must never be
+    checked against this supervisor's own local registry -- that would
+    probe the wrong machine's filesystem entirely and could wrongly
+    conclude a still-live remote worktree is absent."""
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-on-other-host",
+        ownership="created",
+        creating_host="host-b",
+        driver="agent-dispatch",
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=lambda _wt, _project: pytest.fail(
+            "must never probe a worktree created on a different host"
+        ),
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_reserving_worktree_confirmed_absent_but_owner_claimed_stays_reserved(
+    q, client
+):
+    """A task may already carry a captured owner/session even while its OWN
+    reservation still sits ``reserving`` (e.g. a suspended task's own owner
+    survives into a fresh re-reservation) -- confirmed absence of the
+    worktree directory must never release a reservation whose task already
+    has a live owner captured."""
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-confirmed-absent-but-owned",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.claim_one("some-owner", task_id=task.id)
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=lambda _wt, _project: False,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_reserving_worktree_replaced_between_probe_and_release_is_fenced(
+    q, client, monkeypatch
+):
+    """``request_spawn_release``'s atomic worktree-mismatch check only fires
+    when the probed worktree is passed through -- fence the release to the
+    exact worktree that was actually confirmed absent, since
+    ``record_spawn_worktree`` may replace a ``reserving`` reservation's
+    worktree between the probe and the subsequent release call. The real
+    ``DispatchClient`` surfaces this server-side mismatch as a
+    ``DispatchError`` (an HTTP error response); emulate that translation
+    here since the in-process ``QueueBackedClient`` test double calls the
+    queue directly and would otherwise let the underlying ``TaskError``
+    propagate uncaught."""
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-original",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    original_release = client.request_spawn_release
+
+    def translating_release(*args, **kwargs):
+        try:
+            return original_release(*args, **kwargs)
+        except Exception as exc:  # the queue's own TaskError
+            raise DispatchError(409, str(exc)) from exc
+
+    monkeypatch.setattr(client, "request_spawn_release", translating_release)
+
+    def present_fn(_wt, _project):
+        # Simulate a concurrent replacement landing between the probe and
+        # the subsequent release call.
+        q.record_spawn_worktree(
+            reservation.key,
+            "wt-replaced",
+            ownership="created",
+            creating_host="host-a",
+            driver="agent-dispatch",
+        )
+        return False
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=present_fn,
+        nudge=False,
+    )
+
+
+    assert sup.reconcile_reserving() == 0
+    unchanged = q.get_reservation(reservation.key)
+    assert unchanged.state == SpawnState.RESERVING
+    assert unchanged.worktree == "wt-replaced"
 
 
 @pytest.mark.parametrize(

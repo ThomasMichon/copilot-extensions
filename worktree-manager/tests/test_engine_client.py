@@ -1089,6 +1089,32 @@ def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
     assert all("--seed" in c and "fix the thing" in c for c in calls)
 
 
+def test_resolve_bare_resume_plus_seed_rejection_is_not_treated_as_skew(monkeypatch):
+    """The engine's own deliberate ``--seed is not supported together with
+    --bare-resume`` rejection mentions the literal substring
+    ``--bare-resume`` in its error text, same as a genuine version-skew
+    "unrecognized arguments" error would -- but it is NOT an
+    unsupported-flag signal, and must not trigger the compatibility-fallback
+    retry. Retrying would silently convert this rejected combination into
+    an ordinary seeded (non-bare) resume instead of surfacing the engine's
+    real error, exactly the semantic the rejection exists to prevent."""
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(list(cmd))
+        return _fake_completed(
+            cmd, returncode=2,
+            stderr="--seed is not supported together with --bare-resume.",
+        )
+
+    _install_fake(monkeypatch, handler)
+    with pytest.raises(ec.EngineError):
+        ec.resolve_launch_plan(
+            "dotfiles", worktree_id="x", bare_resume=True, seed="do the thing")
+    # Only the original attempt ran -- no silent retry without --bare-resume.
+    assert len(calls) == 1
+
+
 def test_importing_engine_execution_leg_directly_before_engine_client_works():
     """A genuine cold-import-order regression test for the lazy
     `__getattr__` re-export: every OTHER test in this suite (including this

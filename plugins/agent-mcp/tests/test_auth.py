@@ -111,7 +111,7 @@ class _FakeProc:
         self._stderr = stderr
         self.returncode = returncode
 
-    async def communicate(self):
+    async def communicate(self, input=None):
         return self._stdout, self._stderr
 
 
@@ -589,6 +589,61 @@ async def test_command_success_skips_repair(tmp_path):
     }))
     assert await inj.child_env() == {"API_KEY": "ok"}
     assert not rcalls.exists()  # repair never runs when the mint succeeds
+
+
+# -- Windows no-window creationflags on the mint/repair spawns ---------------
+
+async def test_command_mint_passes_windowless_daemon_kwargs(monkeypatch):
+    # The mint spawn must carry whatever agent_procutil.
+    # windowless_daemon_kwargs() returns (copilot-extensions#5425; tree-reap
+    # follow-up) -- captured via the same fake_exec monkeypatch pattern used
+    # for EntraInjector above. Stub the helper to a sentinel rather than
+    # asserting a specific key, since its shape legitimately differs by
+    # platform (`creationflags` on Windows, `start_new_session` on POSIX).
+    sentinel = {"sentinel-no-window-flag": True}
+    monkeypatch.setattr("agent_mcp.auth.injectors.windowless_daemon_kwargs", lambda: sentinel)
+
+    captured: dict = {}
+
+    async def fake_exec(*argv, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeProc(b"token=abc\n", b"", 0)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_command_cfg({
+        "command": _py("print('token=abc')"),
+        "target_env": "API_KEY",
+    }))
+    assert await inj.child_env() == {"API_KEY": "abc"}
+    assert captured["kwargs"]["sentinel-no-window-flag"] is True
+
+
+async def test_command_repair_passes_windowless_daemon_kwargs(monkeypatch):
+    # Same requirement on the separate `auth.repair` spawn path.
+    sentinel = {"sentinel-no-window-flag": True}
+    monkeypatch.setattr("agent_mcp.auth.injectors.windowless_daemon_kwargs", lambda: sentinel)
+
+    captured: list[dict] = []
+
+    async def fake_exec(*argv, **kwargs):
+        captured.append(kwargs)
+        if argv and argv[0] == "definitely-not-a-real-cmd-xyz":
+            raise FileNotFoundError(argv[0])  # mint hard-fails -> triggers repair
+        return _FakeProc(b"", b"", 0)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_command_cfg({
+        "command": ["definitely-not-a-real-cmd-xyz"],
+        "repair": ["definitely-fine"],
+        "target_env": "API_KEY",
+    }))
+    await inj.child_env()
+    # The mint attempt(s) raise before create_subprocess_exec returns, but the
+    # call itself is still captured; the repair spawn is the other argv.
+    assert len(captured) >= 2
+    assert all(kw.get("sentinel-no-window-flag") is True for kw in captured)
 
 
 # -- composite (multi-secret) injector --------------------------------------

@@ -35,10 +35,6 @@ def _age_str(*args, **kwargs):
     return _core()._age_str(*args, **kwargs)
 
 
-def _normalize_path(*args, **kwargs):
-    return _core()._normalize_path(*args, **kwargs)
-
-
 def _run_machine_menu(*args, **kwargs):
     return _core()._run_machine_menu(*args, **kwargs)
 
@@ -349,7 +345,7 @@ def _system_status(config: cfg.Config) -> int | None:
         state_str = info.state.value
 
         label = f"{icon} …{short_id}  {state_str:<10} {age}"
-        norm = _normalize_path(record.worktree_path)
+        norm = sessions._normalize_path(record.worktree_path)
         title = record.title if (record.title and record.title != "null") else None
         if not title and norm in session_ctx.latest_summary:
             title = session_ctx.latest_summary[norm]
@@ -412,7 +408,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
 
         items: list[MenuItem] = []
         for record in records:
-            live = _normalize_path(record.worktree_path) in active_paths
+            live = sessions._normalize_path(record.worktree_path) in active_paths
             gone = not (record.worktree_path and Path(record.worktree_path).exists())
             owner = record.owner or "?"
             if live:
@@ -447,7 +443,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
         selected = next((record for record in records if record.worktree_id == choice), None)
         if selected is None:
             continue
-        live = _normalize_path(selected.worktree_path) in active_paths
+        live = sessions._normalize_path(selected.worktree_path) in active_paths
         warn = (
             "  ⚠ has a LIVE session -- removing may disrupt a running daemon" if live else ""
         )

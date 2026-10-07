@@ -70,10 +70,6 @@ def add_parsers(sub) -> None:
     )
 
 
-def _normalize_path(path: str) -> str:
-    return _core()._normalize_path(path)
-
-
 def _apply_tracking_override(record, info):
     return _core()._apply_tracking_override(record, info)
 
@@ -144,9 +140,9 @@ def _find_record_for_path(path: str) -> tracking.WorktreeRecord | None:
     if override is not _find_record_for_path:
         return override(path)
     try:
-        norm = _normalize_path(path)
+        norm = sessions._normalize_path(path)
         for r in tracking.list_records(cfg.tracking_dir()):
-            if r.worktree_path and _normalize_path(r.worktree_path) == norm:
+            if r.worktree_path and sessions._normalize_path(r.worktree_path) == norm:
                 return r
     except Exception:
         pass
@@ -268,7 +264,7 @@ def _resolve_segment_title(
         try:
             if ctx is None:
                 ctx = sessions.scan_sessions_fast([rec])
-            title = ctx.latest_summary.get(_normalize_path(path), "") or ""
+            title = ctx.latest_summary.get(sessions._normalize_path(path), "") or ""
         except Exception:
             title = ""
     if not title:
@@ -308,7 +304,7 @@ def _persist_segment_title(
         return  # agent-asserted --title is authoritative -- don't clobber
     if (rec.status or "").lower() in ("finalized", "complete", "completed"):
         return  # curated title -- don't clobber
-    summary = ctx.latest_summary.get(_normalize_path(path), "")
+    summary = ctx.latest_summary.get(sessions._normalize_path(path), "")
     if not summary or summary == "null":
         return
     if (rec.title or "") == summary:
@@ -427,7 +423,7 @@ def _render_status_segment(
     if rec is not None:
         try:
             ctx = sessions.scan_sessions_fast([rec])
-            turns = ctx.turn_count.get(_normalize_path(target), 0)
+            turns = ctx.turn_count.get(sessions._normalize_path(target), 0)
         except Exception:
             ctx, turns = None, 0
 
@@ -573,7 +569,7 @@ def _status_segment_json(path: str | None = None, fetch: bool = False) -> dict |
     if rec is not None:
         try:
             ctx = sessions.scan_sessions_fast([rec])
-            turns = ctx.turn_count.get(_normalize_path(target), 0)
+            turns = ctx.turn_count.get(sessions._normalize_path(target), 0)
         except Exception:
             turns = 0
 

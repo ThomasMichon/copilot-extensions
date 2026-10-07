@@ -29,7 +29,7 @@ def _exec_plan(**over) -> LaunchPlan:
     base = dict(action="exec", cmd=["copilot", "--resume=abc"], work_dir="/w/x",
                 status_path="/w/x", env={"FOO": "bar"},
                 worktree_id="m-win-1200-ab12", post_exit=True, no_mux=True,
-                exit_code=0, raw={})
+                exit_code=0, seed_claimed=False, raw={})
     base.update(over)
     return LaunchPlan(**base)
 

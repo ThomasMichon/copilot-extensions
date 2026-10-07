@@ -216,3 +216,207 @@ def test_getattr_string_flag_flagged(repo):
                body='import subprocess\n'
                     'x = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)\n')
     assert any("CREATE_NEW_PROCESS_GROUP" in p for p in guard.verify())
+
+
+# -- Rule 3: unsuppressed console-program spawn (#789) -----------------------
+
+
+def test_flags_unsuppressed_spawn_list_literal(repo):
+    _mk_plugin(repo, "agent-spawn", adopts=False,
+               body='import subprocess\n'
+                    'subprocess.run(["cmd.exe", "/c", "dir"], check=False)\n')
+    problems = guard.verify()
+    assert any("unsuppressed console spawn of 'cmd'" in p for p in problems)
+
+
+def test_flags_unsuppressed_spawn_regardless_of_adoption(repo):
+    _mk_plugin(repo, "agent-spawn2", adopts=True,
+               body='import subprocess\n'
+                    'subprocess.Popen(["powershell.exe", "-Command", "x"])\n')
+    assert any("powershell" in p for p in guard.verify())
+
+
+def test_allows_spawn_with_creationflags(repo):
+    _mk_plugin(repo, "agent-ok-flags", adopts=False,
+               body='import subprocess\n'
+                    'subprocess.run(["cmd.exe", "/c", "x"], creationflags=0x08000000)\n')
+    assert guard.verify() == []
+
+
+def test_allows_spawn_splatting_no_window_kwargs(repo):
+    _mk_plugin(repo, "agent-ok-splat", adopts=True,
+               body='import subprocess\n'
+                    'from agent_procutil import no_window_kwargs\n'
+                    'subprocess.run(["pwsh", "-c", "x"], **no_window_kwargs())\n')
+    assert guard.verify() == []
+
+
+def test_allows_spawn_via_kwargs_dict_update_in_same_function(repo):
+    _mk_plugin(
+        repo, "agent-ok-update", adopts=True,
+        body=(
+            "import subprocess\n"
+            "from agent_procutil import detached_kwargs\n"
+            "def spawn(cmd):\n"
+            "    kwargs = {}\n"
+            "    kwargs.update(detached_kwargs())\n"
+            "    subprocess.Popen(cmd, **kwargs)\n"
+        ),
+    )
+    assert guard.verify() == []
+
+
+def test_flags_literal_argv_wrapped_in_a_safety_dead_function(repo):
+    """The real production incident this rule generalizes from
+    (ThomasMichon/copilot-extensions#789): a bare list-literal argv reaching
+    ``subprocess.run`` with no window handling anywhere in its function."""
+    _mk_plugin(
+        repo, "agent-bad-fn", adopts=True,
+        body=(
+            "import subprocess\n"
+            "def runner():\n"
+            "    proc = subprocess.run(['cmd.exe', '/c', 'dir'], check=False)\n"
+            "    return proc.returncode\n"
+        ),
+    )
+    problems = guard.verify()
+    assert any("unsuppressed console spawn of 'cmd'" in p for p in problems)
+
+
+def test_known_limitation_does_not_resolve_argv_rebuilt_via_list_call(repo):
+    """Documented scope boundary, not a bug: ``list(cmd)``/``tuple(cmd)``
+    wraps a *call* expression, not a literal, so its elements are opaque to
+    this guard -- exactly the shape of the real incident's own
+    ``subprocess.run(list(cmd), check=False)``, where ``cmd`` was a
+    caller-supplied ``tuple[str, ...]`` parameter. Resolving this would need
+    real interprocedural data-flow analysis this guard deliberately doesn't
+    attempt, to keep its false-positive rate low across two large codebases;
+    the companion literal-argv rule above is what actually generalizes from
+    that incident."""
+    _mk_plugin(
+        repo, "agent-dynamic-wrap", adopts=False,
+        body=(
+            "import subprocess\n"
+            "def runner(cmd):\n"
+            "    proc = subprocess.run(list(cmd), check=False)\n"
+            "    return proc.returncode\n"
+        ),
+    )
+    assert guard.verify() == []
+
+
+def test_ignores_dynamic_unresolvable_argv(repo):
+    _mk_plugin(repo, "agent-dynamic", adopts=False,
+               body='import subprocess\n'
+                    'def spawn(cmd):\n'
+                    '    subprocess.run(cmd, check=False)\n')
+    assert guard.verify() == []
+
+
+def test_ignores_non_console_program(repo):
+    _mk_plugin(repo, "agent-benign", adopts=False,
+               body='import subprocess\n'
+                    'subprocess.run(["gh", "pr", "view"], check=False)\n')
+    assert guard.verify() == []
+
+
+def test_ignores_pythonw_gui_subsystem(repo):
+    _mk_plugin(repo, "agent-pythonw", adopts=False,
+               body='import subprocess\n'
+                    'subprocess.Popen(["pythonw.exe", "-m", "x"])\n')
+    assert guard.verify() == []
+
+
+def test_flags_os_system_console_program(repo):
+    _mk_plugin(repo, "agent-ossystem", adopts=False,
+               body='import os\nos.system("cmd.exe /c dir")\n')
+    assert any("unsuppressed console spawn of 'cmd'" in p for p in guard.verify())
+
+
+def test_allow_comment_suppresses_unsuppressed_spawn(repo):
+    _mk_plugin(
+        repo, "agent-spawn-allow", adopts=False,
+        body=(
+            "import subprocess\n"
+            'subprocess.run(["ssh", "host", "cmd"], '
+            f"check=False)  # {guard._ALLOW}: interactive\n"
+        ),
+    )
+    assert guard.verify() == []
+
+
+def test_flags_imported_run_alias(repo):
+    _mk_plugin(repo, "agent-bare-run", adopts=False,
+               body='from subprocess import run\n'
+                    'run(["git", "status"])\n')
+    # "git" IS a watched program (ssh/scp wrappers often shell out via it);
+    # confirm the bare-imported-name form resolves identically to the
+    # subprocess.run(...) form.
+    assert any("unsuppressed console spawn of 'git'" in p for p in guard.verify())
+
+
+# -- Rule 4: declarative (JSON/YAML) console-program spawn (#789) ------------
+
+
+def test_flags_declarative_json_spawn(repo):
+    plugin = repo / "plugins" / "agent-json"
+    (plugin / "scripts").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text('[project]\nname = "agent-json"\n', encoding="utf-8")
+    (plugin / "scripts" / "task.json").write_text(
+        '{"cmd": ["powershell.exe", "-File", "x.ps1"]}', encoding="utf-8",
+    )
+    assert any("declarative spawn of 'powershell'" in p for p in guard.verify())
+
+
+def test_json_repeated_identical_literal_maps_to_distinct_occurrences(repo):
+    """Regression: multiple arrays sharing an identical literal argv[0]
+    (e.g. several "python ..." prerequisite entries) must not all collapse
+    onto the first occurrence's position."""
+    plugin = repo / "plugins" / "agent-json-repeat"
+    (plugin / "scripts").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname = "agent-json-repeat"\n', encoding="utf-8")
+    (plugin / "scripts" / "task.json").write_text(
+        '{\n  "a": ["python", "x"],\n  "b": ["python", "y"]\n}\n', encoding="utf-8",
+    )
+    problems = [p for p in guard.verify() if "agent-json-repeat" in p]
+    assert len(problems) == 2
+    linenos = sorted(int(p.split(":")[1]) for p in problems)
+    assert linenos == [2, 3]
+
+
+def test_flags_declarative_yaml_spawn(repo):
+    plugin = repo / "plugins" / "agent-yaml"
+    (plugin / "scripts").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text('[project]\nname = "agent-yaml"\n', encoding="utf-8")
+    (plugin / "scripts" / "task.yaml").write_text(
+        "cmd:\n  - cmd.exe\n  - /c\n  - dir\n", encoding="utf-8",
+    )
+    assert any("declarative spawn of 'cmd'" in p for p in guard.verify())
+
+
+def test_declarative_yaml_allow_comment_suppresses(repo):
+    plugin = repo / "plugins" / "agent-yaml-ok"
+    (plugin / "scripts").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text('[project]\nname = "agent-yaml-ok"\n', encoding="utf-8")
+    (plugin / "scripts" / "task.yaml").write_text(
+        f"cmd:\n  - cmd.exe  # {guard._ALLOW}: reviewed, consumer applies no_window_kwargs\n",
+        encoding="utf-8",
+    )
+    assert guard.verify() == []
+
+
+def test_declarative_json_allowlist_file_suppresses(repo, monkeypatch):
+    plugin = repo / "plugins" / "agent-json-ok"
+    (plugin / "scripts").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text('[project]\nname = "agent-json-ok"\n', encoding="utf-8")
+    (plugin / "scripts" / "task.json").write_text(
+        '{"cmd": ["pwsh", "-c", "x"]}', encoding="utf-8",
+    )
+    rel = "plugins/agent-json-ok/scripts/task.json:1"
+    allow = repo / "tools" / "headless-guard.allow"
+    allow.parent.mkdir(parents=True, exist_ok=True)
+    allow.write_text(f"{rel}  reviewed, consumer applies no_window_kwargs\n", encoding="utf-8")
+    monkeypatch.setattr(guard, "HEADLESS_GUARD_ALLOWLIST", allow)
+    assert guard.verify() == []
+

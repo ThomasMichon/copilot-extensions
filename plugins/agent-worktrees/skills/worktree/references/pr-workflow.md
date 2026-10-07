@@ -393,12 +393,15 @@ through to merge. Never skip the PR entirely when `pr-required` is `true`.
 ### Head scheme + branch topology (PR mode)
 
 **Invariant (both schemes): a worktree is always checked out on its own
-`worktree/{id}` branch, and it always lands on the squashed commit.**
-`create-pr` squashes the worktree's commits in place on `worktree/{id}`, rebases
-onto upstream, and leaves HEAD there at that squashed commit — it is **never
-reset off it** (#1804). `worktree/{id}` sits one commit ahead of the default branch while
-the PR is open; a later `git sync` (or the finalize reconcile) realigns it clean
-on merge.
+`worktree/{id}` branch.** The **initial** `create-pr` squashes the worktree's
+commits in place on `worktree/{id}`, rebases onto upstream, and leaves HEAD
+there at that squashed commit — it is **never reset off it** (#1804). A **later
+`create-pr` update on the same still-open PR** reuses that published PR head
+without re-squashing or rebasing the already-pushed tip onto newer upstream;
+it publishes any newer commits incrementally on top. `worktree/{id}` therefore
+lands on the squashed commit on first publish, then accumulates later feedback
+commits on top while the PR stays open; a later `git sync` (or the finalize
+reconcile) realigns it clean on merge.
 
 `pr.head_scheme` selects **only how the PR head is published** — its name +
 push mechanism — never the local worktree state:
@@ -452,13 +455,16 @@ may configure `pr.required_body_sections` (for example `Intent`, `Changes`, and
 Markdown section contains visible text. A hidden source marker never satisfies
 the human-readable body requirement.
 
-Squashes the worktree's commits into one and rebases onto upstream, leaving HEAD
-on `worktree/{id}` at the squashed commit (both schemes — it is never reset off
-it, #1804). Under the default **refspec** scheme it pushes `worktree/{id}`
-straight to the provider-resolved PR head ref (`pr/{slug}-{suffix}` for
+On the **initial** publish, squashes the worktree's commits into one and
+rebases onto upstream, leaving HEAD on `worktree/{id}` at the squashed commit
+(both schemes — it is never reset off it, #1804). A **later** `create-pr`
+against the same still-open PR instead reuses that published head without
+re-squashing or rebasing it onto newer upstream — see "Head scheme + branch
+topology" above. Under the default **refspec** scheme it pushes
+`worktree/{id}` straight to the provider-resolved PR head ref (`pr/{slug}-{suffix}` for
 non-Azure-DevOps repos; `user/{username}/{slug}-{suffix}` for Azure DevOps) —
-no local feature branch. Under **snapshot** it instead copies the squashed
-commit onto a local snapshot branch (`feature/{slug}-{suffix}` by default;
+no local feature branch. Under **snapshot** it instead copies the current
+PR-head commit onto a local snapshot branch (`feature/{slug}-{suffix}` by default;
 Azure DevOps still defaults to `user/{username}/{slug}-{suffix}`) and pushes
 that (no reset, no checkout dance). Either way HEAD never leaves
 `worktree/{id}`. Records `pr.state` and prints the
@@ -502,9 +508,13 @@ credentials (`pr.api_base`, `pr.token_command`/`pr.token_env`) and
 -- via the provider CLI (`curl` for Gitea, `gh` for GitHub, `az` for Azure
 DevOps) -- and **auto-records** the url/number on the worktree (no manual
 `set-pr`). By default (codename-attribution-by-default), `create-pr` embeds a
-public-safe marker carrying **only** the worktree's assigned codename --
-resolve it back via `resolve --codename` (or `embody --codename`) on the same
-machine, or on a *different* machine it now runs a cross-machine SSH scan
+public-safe marker carrying the worktree's assigned codename -- plus an
+optional `root=<name>` field (another worktree's own codename, never a raw
+identifier) when this worktree is itself claimed as an outbound resource by a
+different, calling worktree; see `docs/architecture.md`'s *PR Attribution &
+Codenames* section for the full detail -- resolve the primary codename back
+via `resolve --codename` (or `embody --codename`) on the same machine, or on a
+*different* machine it now runs a cross-machine SSH scan
 automatically (effort `pr-attribution-codenames` Phase 3): every other known,
 ssh-ready machine is asked over SSH whether its own tracking store has that
 codename. A match on a different machine still fails closed -- it reports the
@@ -554,14 +564,16 @@ replaces the authored PR description.
 
 > **Never run `create-pr`/`push-changes` for the same worktree from two
 > actors at once -- not even a delegated sub-agent "helping" with the exact
-> PR you're already driving.** `create-pr` squashes commits and rebases IN
-> PLACE on `worktree/{id}`'s own checkout; a second actor (a spawned sub-agent
-> given the same worktree path, or a second session bound to it) committing,
-> stashing, or pushing concurrently corrupts the other's in-flight edits
-> invisibly -- a mid-flight multi-step edit can land half-applied with no
-> error, and commits already safely pushed to an open PR can vanish from
-> `git log` the moment the other actor's own `create-pr` run rebases past
-> them, with nothing to suggest why. Confirmed live: a background sub-agent
+> PR you're already driving.** The initial `create-pr` squashes and rebases
+> IN PLACE on `worktree/{id}`'s own checkout, and later `create-pr` updates
+> still rewrite that same local branch in place as they publish. A second
+> actor (a spawned sub-agent given the same worktree path, or a second session
+> bound to it) committing, stashing, or pushing concurrently corrupts the
+> other's in-flight edits invisibly -- a mid-flight multi-step edit can land
+> half-applied with no error, and commits already safely pushed to an open PR
+> can vanish from `git log` the moment the other actor's own `create-pr` run
+> rewrites past them, with nothing to suggest why. Confirmed live: a
+> background sub-agent
 > mistakenly delegated the SAME repo/worktree (rather than its own,
 > independently created one) ran for 3+ hours alongside the delegating
 > session, pushing its own commits and `git stash`-ing the other session's
@@ -740,14 +752,14 @@ then update the PR branch with:
 ```
 
 In PR mode `push-changes` updates the PR head, never the default branch. Feedback commits
-ride on `worktree/{id}` (create-pr leaves HEAD there); `push-changes` rebases
-`worktree/{id}` onto the default branch and then publishes per scheme — under **refspec**
-(default) it force-with-lease pushes `worktree/{id}` to the provider-resolved PR
-head ref (`pr/{slug}-{suffix}` for non-Azure-DevOps repos;
+ride on `worktree/{id}` (create-pr leaves HEAD there); `push-changes` preserves
+that published PR tip and then publishes the newer commits incrementally per
+scheme — under **refspec** (default) it pushes `worktree/{id}` to the
+provider-resolved PR head ref (`pr/{slug}-{suffix}` for non-Azure-DevOps repos;
 `user/{username}/{slug}-{suffix}` for Azure DevOps); under **snapshot** it
 snapshots the local publish branch (`feature/{slug}-{suffix}` by default;
 Azure DevOps still defaults to `user/{username}/{slug}-{suffix}`) to the new
-tip and force-with-lease pushes that.
+tip and pushes that.
 Either way HEAD stays on
 `worktree/{id}` — just commit there and run `push-changes`. (A worktree still
 checked out on a legacy feature branch is accepted too and pushed as-is.) It

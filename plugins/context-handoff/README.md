@@ -106,18 +106,23 @@ That is the routine, safe, non-committal step. It preserves the baton before
 context gets tighter, but it does **not** arm pickup or request that any
 external system create a successor. **This sequence is not the
 context-pressure-driven trigger path** -- when context pressure is rising and
-you intend to trigger a handoff now, see section 2 below instead, which syncs
-*before* composing so the stored baton reflects the synced state.
+you intend to trigger a handoff now, see section 2 below instead, which
+quiesces and syncs *before* composing so the stored baton reflects that state.
 
 ### 2. Context-pressure-driven handoff: trigger directly
 
 If the reason for the handoff is **context pressure** and the objective still
-has more work left to do, the agent should sync the worktree onto the latest
-default branch first (see "Sync before triggering" in the `context-handoff`
-skill -- never blanket-commits, and skips cleanly rather than blocking if
-anything looks unsafe), *then* compose/save the brief so it reflects the
-synced (or un-synced/conflicted) state, then call `trigger_handoff`. This
-path does **not** ask for confirmation first.
+has more work left to do, the agent should **quiesce owned background work
+first** (stop or wait out owned background agents/async shells after
+capturing their partial results, and stop every owned `manage_schedule`
+entry -- see "Quiesce owned background work before triggering" in the
+skill), *then* sync the worktree onto the latest default branch (see "Sync
+before triggering" in the `context-handoff` skill -- never blanket-commits,
+and skips cleanly rather than blocking if anything looks unsafe; quiescing
+first matters because a still-running task could keep writing into the
+worktree while the sync inspects, commits, or rebases it), then compose/save
+the brief so it reflects the quiesced and synced state, then call
+`trigger_handoff`. This path does **not** ask for confirmation first.
 
 ### 3. Turn-end follow-ups ask before triggering
 
@@ -126,11 +131,14 @@ listing follow-up ideas or questions, the flow is different:
 
 - **compose + save** the baton,
 - **ask the user** whether to continue via handoff,
-- only after a brief yes (for example, "sure"), **sync the worktree** (same
-  rule as above), then **always recompose and re-save** the baton -- even if
-  the sync looked like a no-op, since a WIP commit or a failed sync still
-  changes what the successor needs to know -- so it reflects the post-sync
-  state, then call `trigger_handoff`.
+- only after a brief yes (for example, "sure"), **quiesce owned background
+  work** (same rule as above -- only correct once the user has actually
+  agreed to hand off), then **sync the worktree** (same rule as above),
+  then **always recompose and re-save** the baton -- even if the sync and
+  quiescing both looked like a no-op, since a WIP commit, a failed sync, or
+  a stopped background task's results still change what the successor needs
+  to know -- so it reflects the post-sync, post-quiesce state, then call
+  `trigger_handoff`.
 
 Only this turn-end follow-up path is skipped by autopilot mode or prior user
 pre-authorization.
@@ -733,7 +741,7 @@ predecessor and successor ids.
 |-----------|----------|
 | 55% of window | Soft reminder: compose/store a baton at the next clean boundary and trigger directly if work still remains |
 | 70% of window | Urgent reminder: preserve the baton now and trigger directly; compaction remains at ~80% |
-| 79% of window | **Force tier** (only when `mode: auto`; a no-op under the default `manual-only`): the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
+| 79% of window | **Force tier** (only when `mode: auto`; a no-op under the default `manual-only`): the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session. **Known exception:** this path runs with no agent turn in the loop, so it cannot quiesce owned background agents/shells or schedules (those are agent-tool primitives, not something the extension's own background code can invoke) -- see the skill's "Known exception: the automatic force tier does not quiesce" |
 
 An owning repository may override these defaults in `.context-handoff/config.yaml`,
 and a user may set lower-priority personal defaults in

@@ -632,7 +632,6 @@ def _spawn_detached(argv: list[str]) -> bool:
         return False
 
 
-
 def _ensure_status_monitor() -> bool:
     """Start the resident monitor unless one is already live on the CURRENT
     runtime.  Returns whether a current monitor is believed running (already
@@ -700,7 +699,6 @@ def _restart_status_monitor() -> dict:
                 # would otherwise linger up to a full tick) and clear its lock so
                 # the fresh monitor doesn't defer to a ghost owner.
                 from . import procs as _procs
-
                 if _procs.terminate_pid(pid):
                     result["reaped"] = pid
                 _locks.remove_lock(lock)
@@ -716,7 +714,6 @@ def _restart_status_monitor() -> dict:
         pass
     result["spawned"] = _spawn_detached([sys.executable, "-m", "agent_worktrees", "status-monitor"])
     return result
-
 
 
 def cmd_status_monitor_restart(args: argparse.Namespace) -> int:

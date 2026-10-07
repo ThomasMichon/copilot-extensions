@@ -359,7 +359,7 @@ def _run_backfill(
     if title_targets:
         tctx = sessions.scan_sessions_fast(title_targets)
         for rec in title_targets:
-            summary = tctx.latest_summary.get(_core()._normalize_path(rec.worktree_path), "")
+            summary = tctx.latest_summary.get(sessions._normalize_path(rec.worktree_path), "")
             if summary and summary != "null":
                 rec.title = summary
                 tracking.save_record(rec)

@@ -1157,6 +1157,17 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             # session picks up the current bar without us owning the global.
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}"
+            # resume-prompt-durable-seed-and-mux-fix Phase 3: this is the
+            # ONE ground-truth point that knows a reattach (not a fresh
+            # launch) is happening -- the engine's own `resolve --json`
+            # call, run earlier in a separate process, can only guess at
+            # mux liveness and conservatively leaves an explicit seed
+            # QUEUED (`pending_seed`) rather than embedding it into a
+            # `cmd` this script discards right here. Deliver it now, the
+            # same way a worktree's first-ever session creation below
+            # already does -- `_aw_deliver_pending_seed` is a no-op when
+            # nothing is queued.
+            _aw_deliver_pending_seed "$WORKTREE_ID"
             set +e
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"

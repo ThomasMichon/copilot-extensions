@@ -70,16 +70,17 @@ def supervisor_lease_scope(machine: str | None, env: str) -> str:
 # marker or an incomplete slot.
 #
 # Default-ON / opt-out, like the coordinator's generation self-retire
-# (``AGENT_DISPATCH_SELF_RETIRE``) -- NOT opt-in like the coordinator's own
-# self-update loop. There is no operator-facing protocol in this harness's
-# launch paths to set an opt-in env var before a daemon's first boot, so an
-# opt-in flag here would simply never get flipped and the gap in #2259 would
-# persist unfixed for everyone. ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0`` (or
-# false/no/off) is the escape hatch. Deliberately a *separate* flag from the
-# coordinator's ``AGENT_DISPATCH_SELF_UPDATE`` -- one arms the coordinator's
-# routing-table cutover, the other this daemon's respawn; sharing a flag would
-# couple two independently-soaked mechanisms. Validated end-to-end (real
-# process spawn, real single-instance lease handoff) by the clean-room
+# (``AGENT_DISPATCH_SELF_RETIRE``) and, since it has since soaked too, the
+# coordinator's own self-update loop. There is no operator-facing protocol in
+# this harness's launch paths to set an opt-in env var before a daemon's
+# first boot, so an opt-in flag here would simply never get flipped and the
+# gap in #2259 would persist unfixed for everyone.
+# ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0`` (or false/no/off) is the escape
+# hatch. Deliberately a *separate* flag from the coordinator's
+# ``AGENT_DISPATCH_SELF_UPDATE`` -- one arms the coordinator's routing-table
+# cutover, the other this daemon's respawn; sharing a flag would couple two
+# independently-controllable mechanisms. Validated end-to-end (real process
+# spawn, real single-instance lease handoff) by the clean-room
 # ``agent-dispatch-supervisor-self-update`` scenario before defaulting on.
 _SELF_UPDATE_DEFAULT_POLL_S = 60.0
 _SELF_UPDATE_DEFAULT_COOLDOWN_S = 900.0
@@ -163,13 +164,12 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
     """
     import os
 
-    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+    from agent_procutil import windowless_daemon_kwargs
 
-    cmd = [windowless_python(python_path), "-m", "agent_dispatch", *respawn_argv]
+    cmd = [python_path, "-m", "agent_dispatch", *respawn_argv]
     env = {
         k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")
     }
-    env.update(windowless_python_env(python_path))
     kwargs: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -182,7 +182,18 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
         # plugin payload" rule, generalized to every deletable checkout).
         "cwd": os.path.expanduser("~"),
     }
-    kwargs.update(detached_kwargs(breakaway=True))
+    # NOT windowless_python()/detached_kwargs(): this supervisor daemon has
+    # RECURRING console-subsystem descendants (it embodies workers, spawning
+    # headless CLI/script sessions on every claimed task). A DETACHED_PROCESS
+    # root has no console for those children to inherit, so each one
+    # allocates its own fresh, visible Default Terminal window (confirmed via
+    # a live controlled comparison -- see
+    # docs/patterns/windows-background-process-launch.md and
+    # efforts/active/windows-launch-hardening/README.md). Keep the
+    # console-subsystem interpreter (`python_path`, not `pythonw.exe`) and use
+    # CREATE_NO_WINDOW so this process's own console stays hidden while still
+    # being inheritable by its children.
+    kwargs.update(windowless_daemon_kwargs(breakaway=True))
     subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
 

@@ -124,3 +124,21 @@ def resolve_spawn(
                     "-File", ps1, *out[1:]]
     # Last resort: a .cmd/.exe via PATHEXT (may mangle args -- see module docs).
     return resolve_argv(out)
+
+
+def expand_python_token(argv: list[str]) -> list[str]:
+    """Expand the ``${python}`` token in ``argv`` to agent-mcp's own interpreter.
+
+    Public reuse point for a config surface that accepts a bare ``command`` but
+    has no bridge-file ``base_dir`` to resolve the sibling ``${config_dir}``
+    token against -- e.g. the ``transform``/``storage`` decorators' own
+    ``command:`` option. Gives every command-accepting config location the
+    same cross-platform interpreter token as ``server.command``/
+    ``auth.command`` (see ``config._expand_command_vars``), so an author never
+    has to hardcode a bare ``python``/``python3`` that may not even be the
+    interpreter running agent-mcp, let alone resolve correctly on every OS.
+    Imported locally to avoid a module-load-time dependency on :mod:`.config`.
+    """
+    from .config import _expand_command_vars
+
+    return _expand_command_vars(argv, base_dir=None)

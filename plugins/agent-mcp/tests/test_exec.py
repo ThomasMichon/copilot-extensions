@@ -108,3 +108,27 @@ def test_no_window_creationflags_win32_branch(monkeypatch):
     monkeypatch.setattr(agent_procutil.os, "name", "nt")
     monkeypatch.setattr(agent_procutil, "_CREATE_NO_WINDOW", 0x08000000)
     assert ex.no_window_creationflags() == 0x08000000
+
+
+def test_expand_python_token_replaces_python_placeholder(monkeypatch):
+    from agent_mcp._exec import expand_python_token
+
+    monkeypatch.setattr("agent_mcp.config._resolve_python", lambda: "/fake/python")
+    out = expand_python_token(["${python}", "-c", "pass"])
+    assert out == ["/fake/python", "-c", "pass"]
+
+
+def test_expand_python_token_ignores_config_dir_token(monkeypatch):
+    # No base_dir seam exists for this entry point -- a stray ${config_dir}
+    # is left untouched rather than silently dropped or erroring.
+    from agent_mcp._exec import expand_python_token
+
+    monkeypatch.setattr("agent_mcp.config._resolve_python", lambda: "/fake/python")
+    out = expand_python_token(["${config_dir}/helper.py"])
+    assert out == ["${config_dir}/helper.py"]
+
+
+def test_expand_python_token_empty():
+    from agent_mcp._exec import expand_python_token
+
+    assert expand_python_token([]) == []

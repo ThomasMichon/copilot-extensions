@@ -160,7 +160,7 @@ class CleanupHarness:
         return self.tracking_dir / f"{wt_id}.yaml"
 
     def norm(self, path: str) -> str:
-        return cli._normalize_path(path)
+        return sessions._normalize_path(path)
 
     def seed(self, rec: tracking.WorktreeRecord) -> Path:
         return save_record(self.tracking_dir, rec)
