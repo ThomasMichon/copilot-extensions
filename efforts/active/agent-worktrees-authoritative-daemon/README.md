@@ -23,12 +23,14 @@
   `worktree_status_daemon.py`, `work_coalescing_singleton`) as its starting
   infrastructure rather than building a third daemon.
   [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)
-  — names the exact consolidation gap this effort's write-through authority
-  closes: `classify_daemon` and `worktree_status_daemon` today independently
-  compute overlapping git-state facts for the same worktree and both write
-  back to the same tracking record, which is the oscillation that issue
-  describes. Folding both into this effort's single authoritative daemon is
-  the fix, not a separate piece of work.
+  — names a consolidation gap this effort would be a natural home for:
+  `classify_daemon` and `worktree_status_daemon` today independently compute
+  overlapping git-state facts for the same worktree and both write back to
+  the same tracking record, which is the oscillation that issue describes.
+  **Not yet in scope here** — this effort's own Plan explicitly left both
+  kinds unchanged/unrestructured and its Validation Plan has no consolidation
+  check; folding them into one authoritative compute path would need to be
+  added as new Plan/Validation Plan items, not assumed as already underway.
   `module-componentization-discipline`
   (`efforts/active/module-componentization-discipline/README.md`) — has
   already split `tracking.py`'s write surface into `tracking_claims.py` /

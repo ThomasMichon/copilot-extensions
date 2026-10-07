@@ -23,9 +23,10 @@
   flags that this daemon and `#2323`'s `classify_daemon` now independently
   compute overlapping git-state facts for the same worktree and both write
   back to the tracking record — the cause of a real Picker row-oscillation
-  bug. `agent-worktrees-authoritative-daemon` is where that consolidation is
-  being designed; this effort's own output is the second data source being
-  folded in, not where the fix lands.
+  bug. `agent-worktrees-authoritative-daemon` is a **proposed**, not yet
+  committed, destination for that consolidation (its Plan/Validation Plan
+  don't cover it today); this effort's own output is the second data source
+  that would need folding in, not a place the fix currently lands.
 
 ## Guiding Intent
 

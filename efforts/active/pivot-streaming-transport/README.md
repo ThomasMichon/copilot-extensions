@@ -25,10 +25,12 @@
   that effort's completed Phase 3c non-blocking-I/O work, but is scoped
   narrowly to transport/diffing, not a restatement of that larger campaign).
   [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)
-  (the cross-cutting restatement of this effort's Phase 3 direction as a
-  four-layer acceptance criteria, plus the Worktrees-pivot dual-daemon
-  oscillation bug this effort doesn't itself cover — see that issue's
-  cross-link comment for the full disposition).
+  (a **partial** overlap, not a restatement: Phase 3 here only fast-paths
+  agent-dispatch's and agent-bridge's CLI feeds, whereas #5555's acceptance
+  criteria require a sole-authority daemon for all four layers — Worktrees,
+  Tasks, Codespaces, Containers — plus no pivot's row state ever oscillating
+  between two values for one fact, a case this effort doesn't itself cover.
+  See that issue's cross-link comment for the full disposition.)
 
 ## Guiding Intent
 
