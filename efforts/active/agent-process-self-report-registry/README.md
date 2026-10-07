@@ -132,14 +132,22 @@ effort (this document is (c); (a) and (b) are already done — see Journal).
 ## Plan
 
 ### Phase 1 — Design the inventory-consumer contract (on the existing seam)
-- [ ] Confirm the `process_spawn` event kind (plugin, command/verb, source
-      tag, parent lineage, resource figures) carries, or is extended to
-      carry, everything the operator asked for: role, **owning plugin +
+- [ ] **Implement the `process_spawn` event kind** — it does not exist yet.
+      `agent_dispatch.telemetry`/`agent_bridge.telemetry` today only ship the
+      generic sink/`emit` seam plus their own `task_lifecycle_event`/
+      `producer_fence_event` builders; `visions/process-telemetry` states the
+      *intent* to add a `process_spawn` kind but the producer-side helper
+      (a `process_spawn_event(...)` builder, shaped like those two existing
+      ones) has not been built in either plugin. Build it as a prerequisite
+      before Phase 3 can wire any launch site to it — carrying plugin,
+      command/verb, source tag, parent lineage, resource figures, and
+      everything the operator asked for: role, **owning plugin +
       installation-cell/marketplace provenance** (not name+version alone —
       see Context), pid (+ start-time token to guard against PID reuse),
       owner session id (when known), cwd, worktree id (when known),
-      started_at. Extend the event shape via the vision's own process, not a
-      parallel schema, if a field is missing.
+      started_at. Land this through the vision's own stated process (it's
+      already named in `visions/process-telemetry`'s own Concepts &
+      Components section), not as a parallel schema.
 - [ ] Design the **inventory sink**: a consumer-side sink (registered via the
       seam's existing `set_telemetry_sink`/config-file wiring, nothing new
       on the producer side) that maintains a live "currently running" table
@@ -246,3 +254,12 @@ _Pending — Phase 1 design decisions above need to land here once settled._
   independent-per-slice-worktrees branch binding; rewrote Context from a
   review-response transcript into plain current-state prose (this Journal
   entry now carries that history instead).
+- **Round 3 (2 findings):** corrected a factual error — the `process_spawn`
+  event kind `visions/process-telemetry` *names* does not exist in either
+  `agent_dispatch.telemetry` or `agent_bridge.telemetry` yet (only the
+  generic sink/`emit` seam and each plugin's own `task_lifecycle_event`/
+  `producer_fence_event` builders are built); added implementing that event
+  kind's producer-side helper as an explicit Phase 1 prerequisite, before
+  Phase 3 wires any launch site to it. Also updated the umbrella issue
+  (#5559), which still described the superseded "new agent-procutil hook" +
+  "healthy/current" proposal, to match this reconciled plan.
