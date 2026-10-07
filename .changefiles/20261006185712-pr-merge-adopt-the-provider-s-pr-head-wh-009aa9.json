@@ -1,0 +1,9 @@
+{
+  "comment": "pr-merge: adopt the provider's PR head when it is the tracking worktree's own HEAD pushed outside push-changes, instead of failing with 'Head branch was modified'",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

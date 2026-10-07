@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import types
+
+import pytest
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
@@ -4939,6 +4941,82 @@ class TestPRStatusLive:
         assert main._tracked_pr_pushed_head(
             config, rec.repo, 7, "gitea",
         ) == "just-pushed-sha"
+
+    def test_adopt_pushed_head_takes_only_the_worktrees_own_head(self, pr_repo):
+        """A plain `git push` of the worktree's HEAD leaves the record a head
+        behind, so `pr-merge` refused with "Head branch was modified". The
+        provider's head is adopted (and recorded) only when it is that HEAD:
+        a head someone else pushed is never taken."""
+        from agent_worktrees import pr_cli
+
+        config, wid, wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "recorded-before-a-manual-push"
+        tracking.save_record(rec)
+        head = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+
+        assert pr_cli._adopt_pushed_head(config, rec.repo, 7, "gitea", "f" * 40) == ""
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.active_pr().head_sha == "recorded-before-a-manual-push"
+
+        rec.active_pr().head_observed_api_base = "https://stale.example"
+        tracking.save_record(rec)
+        assert pr_cli._adopt_pushed_head(config, rec.repo, 7, "gitea", head) == head
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.active_pr().head_sha == head
+        # The whole provider-observation tuple goes with the old head.
+        assert (rec.active_pr().head_observed_at, rec.active_pr().head_observed_api_base) == ("", "")
+
+    @pytest.mark.parametrize("vanishes", ["record", "worktree"])
+    def test_adopt_pushed_head_keeps_the_expectation_when_local_state_vanishes(
+            self, pr_repo, monkeypatch, vanishes):
+        """The record or the worktree disappears mid-call: nothing raises, so
+        pr-merge still goes ahead against the recorded head."""
+        from agent_worktrees import pr_cli
+
+        config, wid, wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.active_pr().head_sha = "recorded-before-a-manual-push"
+        tracking.save_record(rec)
+        head = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+        real_git = git_ops.git
+
+        def git(*args, **kw):
+            if vanishes == "record":
+                path.unlink()
+                return real_git(*args, **kw)
+            raise OSError(2, "No such file or directory")
+
+        monkeypatch.setattr(git_ops, "git", git)
+        assert pr_cli._adopt_pushed_head(config, rec.repo, 7, "gitea", head) == ""
+
+    def test_adopt_pushed_head_rereads_the_record_under_its_lock(self, pr_repo, monkeypatch):
+        """Another process updates the record between the scan and the write:
+        the write is a fresh read-modify-write that sees it, never a stale save."""
+        from agent_worktrees import pr_cli
+
+        config, wid, wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.active_pr().head_sha = "recorded-before-a-manual-push"
+        tracking.save_record(rec)
+        head = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+        real_git = git_ops.git
+
+        def git(*args, **kw):  # meanwhile, another process retitles the worktree
+            other = tracking.load_record(path)
+            other.title = "changed elsewhere"
+            tracking.save_record(other)
+            return real_git(*args, **kw)
+
+        monkeypatch.setattr(git_ops, "git", git)
+        assert pr_cli._adopt_pushed_head(config, rec.repo, 7, "gitea", head) == head
+        rec = tracking.load_record(path)
+        assert rec.title == "changed elsewhere" and rec.active_pr().head_sha == head
 
     def test_tracked_pr_pushed_head_falls_back_when_cwd_worktree_is_wrong_project(
         self, pr_repo, monkeypatch
