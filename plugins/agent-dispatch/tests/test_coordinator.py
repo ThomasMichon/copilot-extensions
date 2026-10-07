@@ -1604,6 +1604,101 @@ def test_client_omits_none_result_for_older_coordinator():
     assert "result" not in seen
 
 
+def test_default_connect_retries_env_override(monkeypatch):
+    """``AGENT_DISPATCH_HTTP_CONNECT_RETRIES`` tunes the default; an absent,
+    empty, or malformed value falls back to the built-in default (2) rather
+    than raising or disabling retry entirely."""
+    from agent_dispatch.client_transport import default_connect_retries
+
+    monkeypatch.delenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", raising=False)
+    assert default_connect_retries() == 2
+
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "5")
+    assert default_connect_retries() == 5
+
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "-3")
+    assert default_connect_retries() == 0  # clamped, never negative
+
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "not-a-number")
+    assert default_connect_retries() == 2
+
+
+def test_connect_retry_client_preserves_environment_proxy_routing(monkeypatch):
+    """``ConnectRetryClient`` must build the exact same proxy mounts a plain
+    ``httpx.Client()`` would for the same environment -- unlike passing a
+    custom ``transport=`` (which disables ``HTTP_PROXY``/``HTTPS_PROXY``/
+    ``NO_PROXY`` discovery entirely, since ``httpx.Client`` only computes
+    ``allow_env_proxies`` when ``transport is None``), overriding ``send()``
+    changes nothing about how Client resolves or mounts proxies."""
+    from agent_dispatch.client_transport import ConnectRetryClient
+
+    # Isolate from whatever proxy variables the test runner's own environment
+    # happens to carry -- an inherited HTTP_PROXY/ALL_PROXY/lowercase variant
+    # would otherwise change the expected mount count underneath this test.
+    for name in (
+        "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+        "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
+
+    plain = httpx.Client()
+    retrying = ConnectRetryClient()
+    try:
+        assert len(retrying._mounts) == len(plain._mounts) == 1
+        (pattern, transport) = next(iter(retrying._mounts.items()))
+        assert isinstance(transport, httpx.HTTPTransport)
+    finally:
+        plain.close()
+        retrying.close()
+
+
+def test_client_survives_transient_connection_refused(monkeypatch, tmp_path):
+    """A coordinator supersession cutover can leave a brief window where the
+    old generation has released its socket and the new one hasn't bound yet:
+    the liveness probe a CLI command runs just before constructing its client
+    (``has_live_local_coordinator``) can observe "live", then the very next
+    request still lands in that gap and gets ``ConnectionRefusedError``.
+
+    This failure mode showed up as an operator-reported Picker steering-card
+    delivery failure: a one-shot CLI client with no retry turns a purely
+    transient, nothing-was-ever-sent condition into an operator-visible,
+    silently-dropped answer. Proven here with exactly ONE ``client.health()``
+    call spanning the whole refused-then-listening window -- no outer
+    polling/retry loop on the test's side, so a broken transport-level retry
+    cannot be masked by the test quietly re-trying on its own behalf.
+    """
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "8")
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()  # nothing listening yet -- connecting now refuses
+    url = f"http://127.0.0.1:{port}"
+
+    import uvicorn
+
+    app = create_app(TaskQueue(tmp_path / "tasks.db"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+
+    def _start_late():
+        time.sleep(0.3)  # give the client's first connect attempt(s) time to refuse
+        server.run()
+
+    thread = threading.Thread(target=_start_late, daemon=True)
+    thread.start()
+    try:
+        # A single call, with a timeout generous enough to cover the delayed
+        # bind plus every retry's backoff -- its success proves the client's
+        # own default transport absorbed the refused window unaided.
+        with DispatchClient(url, timeout=5.0) as client:
+            result = client.health()
+            assert isinstance(result, dict)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_client_detects_coordinator_that_drops_structured_result():
     def handler(request):
         return httpx.Response(

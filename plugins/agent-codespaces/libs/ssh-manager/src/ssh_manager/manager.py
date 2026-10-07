@@ -7,6 +7,7 @@ that need SSH go through this manager to share multiplexed connections.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -15,6 +16,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -367,7 +369,7 @@ class ConnectionManager:
 
         if self._platform.supports_control_master:
             proc = await self._connect_with_retry(
-                config, socket, port_forwards, env=env,
+                config, socket, port_forwards, env=env, target=host,
             )
         else:
             # Direct mode -- no persistent master process
@@ -405,14 +407,22 @@ class ConnectionManager:
         *,
         env: dict[str, str] | None = None,
         attempts: int = 3,
+        target: str = "",
     ) -> asyncio.subprocess.Process:
-        """Start the ControlMaster, retrying a transient tunnel reset (2 s, 4 s)."""
+        """Start the ControlMaster, retrying a transient tunnel reset (2 s, 4 s).
+        Each attempt is one dial-log line for *target*."""
+        from .dial_log import Dial, account_of
+
         delay = 2.0
         for attempt in range(1, attempts + 1):
             try:
-                return await self._start_control_master(
-                    config, socket, port_forwards, env=env,
-                )
+                with Dial(target or config.ssh_target, "control_master", attempt=attempt,
+                          account=account_of(env)) as dial:
+                    proc = await self._start_control_master(
+                        config, socket, port_forwards, env=env,
+                    )
+                    dial.outcome = "ok"
+                    return proc
             except ConnectionError as exc:
                 if attempt >= attempts:
                     raise
@@ -563,47 +573,70 @@ class ConnectionManager:
 
         log.debug("exec_command on %s: %s", host, command)
 
-        proc = await create_ssh_subprocess(
-            *args,
-            config=info.config,
-            stdin=(
-                asyncio.subprocess.PIPE
-                if input_bytes is not None
-                else asyncio.subprocess.DEVNULL
-            ),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=info.env,
-        )
-
-        timed_out = False
+        started = time.monotonic()
         try:
-            info.child_processes.append(proc)
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(input=input_bytes), timeout=timeout
-                )
-            finally:
-                if proc in info.child_processes and proc.returncode is not None:
-                    info.child_processes.remove(proc)
-        except (TimeoutError, asyncio.TimeoutError):
-            await _terminate_process_tree(proc)
-            stdout_bytes, stderr_bytes = await proc.communicate()
-            timed_out = True
-            if proc in info.child_processes:
-                info.child_processes.remove(proc)
-        except asyncio.CancelledError:
-            await _terminate_process_tree(proc)
-            if proc in info.child_processes:
-                info.child_processes.remove(proc)
-            raise
+            proc = await create_ssh_subprocess(
+                *args,
+                config=info.config,
+                stdin=(
+                    asyncio.subprocess.PIPE
+                    if input_bytes is not None
+                    else asyncio.subprocess.DEVNULL
+                ),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=info.env,
+            )
 
-        return CommandResult(
-            stdout=stdout_bytes.decode(errors="replace").rstrip(),
-            stderr=stderr_bytes.decode(errors="replace").rstrip(),
-            exit_code=proc.returncode if proc.returncode is not None else -1,
-            timed_out=timed_out,
-        )
+            timed_out = False
+            try:
+                info.child_processes.append(proc)
+                try:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        proc.communicate(input=input_bytes), timeout=timeout
+                    )
+                finally:
+                    if proc in info.child_processes and proc.returncode is not None:
+                        info.child_processes.remove(proc)
+            except (TimeoutError, asyncio.TimeoutError):
+                await _terminate_process_tree(proc)
+                stdout_bytes, stderr_bytes = await proc.communicate()
+                timed_out = True
+                if proc in info.child_processes:
+                    info.child_processes.remove(proc)
+            except asyncio.CancelledError:
+                await _terminate_process_tree(proc)
+                if proc in info.child_processes:
+                    info.child_processes.remove(proc)
+                raise
+
+            result = CommandResult(
+                stdout=stdout_bytes.decode(errors="replace").rstrip(),
+                stderr=stderr_bytes.decode(errors="replace").rstrip(),
+                exit_code=proc.returncode if proc.returncode is not None else -1,
+                timed_out=timed_out,
+            )
+        except BaseException as exc:
+            # Direct mode: a spawn that raises, or a cancelled exec, is still a logged dial.
+            if not info.multiplexed:
+                from .dial_log import account_of, record
+
+                record(host, kind="direct_exec", elapsed_s=time.monotonic() - started,
+                       outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "error",
+                       reason=f"{type(exc).__name__}: {exc}", stderr=str(exc),
+                       account=account_of(info.env))
+            raise
+        if not info.multiplexed:  # direct mode: every exec is a fresh connection
+            from .dial_log import account_of, record
+
+            transient = is_transient_ssh_failure(result)
+            record(host, kind="direct_exec", elapsed_s=time.monotonic() - started,
+                   outcome="timeout" if timed_out else "transient" if transient else "ok",
+                   reason="" if not transient else (
+                       f"exit {result.exit_code}: looks like a transport failure (ssh can't "
+                       "tell a remote command's own exit 255 from one)"),
+                   stderr=result.stderr if transient else "", account=account_of(info.env))
+        return result
 
     async def open_stdio_channel(
         self,
@@ -630,22 +663,32 @@ class ConnectionManager:
 
         log.debug("open_stdio_channel on %s: %s", host, remote_cmd)
 
-        proc = await create_ssh_subprocess(
-            *args,
-            config=info.config,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=(
-                asyncio.subprocess.DEVNULL
-                if discard_stderr
-                else asyncio.subprocess.PIPE
-            ),
-            env=info.env,
-            # POSIX: give the ssh child its own session/process group so
-            # teardown signals only the ssh process tree -- never the parent's
-            # group. Windows uses taskkill /T against the root pid.
-            limit=_STDIO_CHANNEL_LIMIT_BYTES,
-        )
+        from .dial_log import Dial, account_of
+
+        # Direct mode: opening the channel is itself a fresh connection -- one dial line
+        # (its spawn; the long-lived channel's later life is the caller's).
+        dial = Dial(host, "stdio_channel", account=account_of(info.env)) if not info.multiplexed else None
+        with dial or contextlib.nullcontext():
+            proc = await create_ssh_subprocess(
+                *args,
+                config=info.config,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=(
+                    asyncio.subprocess.DEVNULL
+                    if discard_stderr
+                    else asyncio.subprocess.PIPE
+                ),
+                env=info.env,
+                # POSIX: give the ssh child its own session/process group so
+                # teardown signals only the ssh process tree -- never the parent's
+                # group. Windows uses taskkill /T against the root pid.
+                limit=_STDIO_CHANNEL_LIMIT_BYTES,
+            )
+            if dial is not None:
+                # Only the spawn is known here: ssh hasn't connected yet, so not "ok"
+                # (an auth/tunnel failure can still end the child moments later).
+                dial.outcome = "spawned"
 
         info.child_processes.append(proc)
         return proc

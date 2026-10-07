@@ -3854,7 +3854,7 @@ def test_dispatch_client_skips_tls_setup_only_for_plain_http(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr(client_module.httpx, "Client", FakeHttpClient)
+    monkeypatch.setattr(client_module, "ConnectRetryClient", FakeHttpClient)
 
     DispatchClient("http://127.0.0.1:9847").close()
     DispatchClient("https://dispatch.example.com").close()

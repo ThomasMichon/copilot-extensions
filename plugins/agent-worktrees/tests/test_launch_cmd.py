@@ -932,6 +932,279 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
     assert marker.read_text(encoding="utf-8").strip() == "launched"
 
 
+def _stage_launch_command(tmp_path: Path) -> Path:
+    """Copy the real launch-command.ps1 into *tmp_path* so a fake
+    default-setup.ps1 placed alongside it resolves as launch-command.ps1's
+    OWN canonical script (`Join-Path $PSScriptRoot 'default-setup.ps1'`) --
+    required since the fast path now only fires for that exact resolved
+    path, not merely a same-named file anywhere on disk."""
+    real_scripts = Path(__file__).resolve().parents[1] / "scripts"
+    staged = tmp_path / "launch-command.ps1"
+    staged.write_text(
+        (real_scripts / "launch-command.ps1").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    return staged
+
+
+def test_launch_command_dot_sources_default_setup_without_extra_process(tmp_path):
+    """copilot-extensions#5579: launch-command.ps1's common `pwsh -File
+    default-setup.ps1 ...` case must dot-source default-setup.ps1 into its
+    own host process rather than spawning a second pwsh.exe for it -- one
+    fewer resident process per worktree launch, with identical argument
+    binding (including switch parameters, values with spaces, and
+    GNU-style double-dash passthrough args) -- on Windows, where the fast
+    path activates. On non-Windows, the fast path is intentionally never
+    taken (POSIX already execs directly, with no extra process to collapse
+    in the first place), so this same invocation must instead fall back to
+    a genuinely separate process, which this test asserts explicitly rather
+    than skipping -- exercising the `$onWindows` gate itself on every
+    platform the suite runs on, not only on Windows."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+
+    staged_launch_command = _stage_launch_command(tmp_path)
+    marker = tmp_path / "result.txt"
+    fake_default_setup = tmp_path / "default-setup.ps1"
+    fake_default_setup.write_text(
+        "param(\n"
+        "    [string]$Machine,\n"
+        "    [switch]$Recovery,\n"
+        "    [Parameter(ValueFromRemainingArguments)]\n"
+        "    [string[]]$CopilotArgs\n"
+        ")\n"
+        "Set-Content -LiteralPath $env:RESULT_MARKER -Value "
+        "(\"$PID|$Machine|$Recovery|\" + ($CopilotArgs -join ','))\n"
+        "exit 17\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["RESULT_MARKER"] = str(marker)
+    # Isolate from this machine's own reconcile-machine-settings.ps1 side
+    # effects -- already covered by test_machine_settings_reconcile.py.
+    env["AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED"] = "1"
+
+    proc = subprocess.Popen(
+        [
+            shell, "-NoProfile", "-NoLogo", "-File", str(staged_launch_command),
+            "--", shell, "-NoProfile", "-NoLogo", "-File", str(fake_default_setup),
+            "-Machine", "a machine with spaces", "-Recovery",
+            "--allow-all", "--model", "foo",
+        ],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    outer_pid = proc.pid
+    _stdout, stderr = proc.communicate(timeout=30)
+
+    assert proc.returncode == 17, stderr
+    inner_pid_str, machine, recovery, copilot_args = (
+        marker.read_text(encoding="utf-8").strip().split("|", 3)
+    )
+    assert machine == "a machine with spaces"
+    assert recovery == "True"
+    assert copilot_args == "--allow-all,--model,foo"
+    if os.name == "nt":
+        assert int(inner_pid_str) == outer_pid, (
+            "default-setup.ps1 ran in a separate process instead of being "
+            "dot-sourced into launch-command.ps1's own host process"
+        )
+    else:
+        assert int(inner_pid_str) != outer_pid, (
+            "the dot-source fast path must never activate on non-Windows -- "
+            "POSIX already execs directly with no extra process to collapse"
+        )
+
+
+def _run_launch_command_for_pid_check(
+    shell: str, staged_launch_command: Path, tmp_path: Path, inner_argv: list[str]
+) -> tuple[int, int, int]:
+    """Run the staged launch-command.ps1 with *inner_argv* as the forwarded
+    command and return (returncode, outer_pid, inner_pid) so a caller can
+    assert whether the dot-source fast path fired (inner_pid == outer_pid)
+    or the original child-process fallback ran (inner_pid != outer_pid)."""
+    marker = tmp_path / f"result-{os.getpid()}-{len(inner_argv)}.txt"
+    env = os.environ.copy()
+    env["RESULT_MARKER"] = str(marker)
+    env["AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED"] = "1"
+    proc = subprocess.Popen(
+        [shell, "-NoProfile", "-NoLogo", "-File", str(staged_launch_command), "--"]
+        + inner_argv,
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    outer_pid = proc.pid
+    _stdout, stderr = proc.communicate(timeout=30)
+    assert proc.returncode == 17, stderr
+    inner_pid = int(marker.read_text(encoding="utf-8").strip())
+    return proc.returncode, outer_pid, inner_pid
+
+
+def _fake_default_setup_pid_only(directory: Path, name: str = "default-setup.ps1") -> Path:
+    fake_default_setup = directory / name
+    fake_default_setup.write_text(
+        "param([string]$Machine,[Parameter(ValueFromRemainingArguments)]"
+        "[string[]]$CopilotArgs)\n"
+        'Set-Content -LiteralPath $env:RESULT_MARKER -Value "$PID"\n'
+        "exit 17\n",
+        encoding="utf-8",
+    )
+    return fake_default_setup
+
+
+def test_launch_command_falls_back_on_unrecognized_host_option(tmp_path):
+    """An unreviewed host option before `-File` (e.g. -ExecutionPolicy
+    Bypass) must not silently be dropped by the fast path -- fall back to
+    the original child-process relaunch, which actually honors it."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    staged_launch_command = _stage_launch_command(tmp_path)
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+
+    _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
+        shell, staged_launch_command, tmp_path,
+        [
+            shell, "-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass",
+            "-File", str(fake_default_setup), "-Machine", "testbox",
+        ],
+    )
+    assert inner_pid != outer_pid, (
+        "an unrecognized host option before -File must not take the "
+        "dot-source fast path"
+    )
+
+
+def test_launch_command_falls_back_when_noprofile_is_omitted(tmp_path):
+    """A requested child that OMITS -NoProfile is explicitly asking for a
+    profile-loading session. launch-command.ps1's own host process is
+    already running without a profile (every real call site starts it with
+    -NoProfile) -- dot-sourcing can't retroactively load one, so the fast
+    path must not silently coerce this request into its own profile-less
+    host; fall back to a real child process that actually loads one."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    staged_launch_command = _stage_launch_command(tmp_path)
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+
+    _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
+        shell, staged_launch_command, tmp_path,
+        [shell, "-NoLogo", "-File", str(fake_default_setup), "-Machine", "testbox"],
+    )
+    assert inner_pid != outer_pid, (
+        "omitting -NoProfile must not take the dot-source fast path"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="powershell.exe (Desktop edition) is Windows-only")
+def test_launch_command_falls_back_when_requested_engine_differs_from_host(tmp_path):
+    """Requesting `powershell.exe` (Windows PowerShell) while the current
+    host is `pwsh` (PowerShell Core) -- or vice versa -- must not silently
+    run default-setup.ps1 under the wrong binary; fall back so the
+    requested binary is actually used."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    if not shutil.which("powershell"):
+        pytest.skip("powershell.exe (Windows PowerShell) is unavailable")
+    staged_launch_command = _stage_launch_command(tmp_path)
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+
+    # Host is pwsh (Core); requested binary is powershell.exe (Desktop).
+    _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
+        shell, staged_launch_command, tmp_path,
+        [
+            "powershell.exe", "-NoProfile", "-NoLogo",
+            "-File", str(fake_default_setup), "-Machine", "testbox",
+        ],
+    )
+    assert inner_pid != outer_pid, (
+        "a requested binary that differs from the current host must not "
+        "take the dot-source fast path"
+    )
+
+
+def test_launch_command_falls_back_for_an_alternate_pwsh_binary(tmp_path):
+    """An explicitly requested, alternate `pwsh.exe` install (e.g. a
+    different pinned version or architecture) must get exactly that
+    binary -- never silently run under whatever binary happens to host
+    launch-command.ps1, even though both resolve to the same basename."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    staged_launch_command = _stage_launch_command(tmp_path)
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+    marker = tmp_path / "result.txt"
+
+    # A same-named but nonexistent alternate pwsh.exe: a rooted path never
+    # requires an existence check in the guard (only a string comparison
+    # against the current host's own resolved executable path), so this
+    # alone proves the match is by actual binary identity, not merely by
+    # basename. The attempted fallback exec then legitimately fails
+    # (confirming it really was attempted, not silently skipped) --
+    # covering a real, resolvable alternate install is the concern of the
+    # ordinary non-fast-path tests elsewhere in this file, not this guard.
+    alternate_pwsh = tmp_path / "alternate-install" / "pwsh.exe"
+    env = os.environ.copy()
+    env["RESULT_MARKER"] = str(marker)
+    env["AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED"] = "1"
+    proc = subprocess.run(
+        [
+            shell, "-NoProfile", "-NoLogo", "-File", str(staged_launch_command), "--",
+            str(alternate_pwsh), "-NoProfile", "-NoLogo",
+            "-File", str(fake_default_setup), "-Machine", "testbox",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode != 0, "a nonexistent alternate binary should fail, not silently succeed"
+    assert not marker.exists(), (
+        "an alternate pwsh.exe binary distinct from the current host must "
+        "not take the dot-source fast path (default-setup.ps1 must never "
+        "have actually run)"
+    )
+
+
+def test_launch_command_falls_back_for_a_custom_same_named_script(tmp_path):
+    """A repo's own authoritative launch template can point at its OWN
+    custom script that merely shares the 'default-setup.ps1' basename.
+    Dot-sourcing is not generally equivalent to `pwsh -File` for arbitrary
+    script content, so only launch-command.ps1's own canonical sibling
+    script (Join-Path $PSScriptRoot 'default-setup.ps1') may use the fast
+    path; any other same-named script must fall back to the original
+    child-process relaunch."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    staged_launch_command = _stage_launch_command(tmp_path)
+    custom_dir = tmp_path / "custom-repo-launch-template"
+    custom_dir.mkdir()
+    custom_default_setup = _fake_default_setup_pid_only(custom_dir)
+
+    _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
+        shell, staged_launch_command, tmp_path,
+        [
+            shell, "-NoProfile", "-NoLogo",
+            "-File", str(custom_default_setup), "-Machine", "testbox",
+        ],
+    )
+    assert inner_pid != outer_pid, (
+        "a same-named script that isn't launch-command.ps1's own canonical "
+        "sibling must not take the dot-source fast path"
+    )
+
+
 def test_default_setup_launches_absolute_copilot_with_empty_path(
     tmp_path,
 ):

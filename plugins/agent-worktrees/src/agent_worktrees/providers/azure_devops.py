@@ -622,6 +622,10 @@ class AzureDevOpsProvider:
             status = 0
         return status, body
 
+    def get_bar_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None):
+        from ..pr_bar import unsupported  # no merge-bar read here yet: every clause is unknown
+        return unsupported(repo, number, self.name)
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:

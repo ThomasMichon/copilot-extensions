@@ -33,7 +33,27 @@ def _bash() -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return candidate if probe.returncode == 7 else None
+    if probe.returncode != 7:
+        return None
+    if os.name == "nt":
+        # Every test in this file resolves tmp_path through _bash_path(),
+        # which shells out to `cygpath` -- a resolved `bash.EXE` that
+        # satisfies the exit-code probe above (the WSL launcher stub does,
+        # even with no distro registered) is NOT necessarily a conformant
+        # POSIX environment with `cygpath` on its own PATH. Probe it here so
+        # an unusable bash degrades to a clean skip, matching the WindowsApps
+        # shadow-alias guard above, instead of every test asserting a
+        # `cygpath: command not found` failure.
+        try:
+            cygpath_probe = subprocess.run(
+                [candidate, "-c", "cygpath -u -- /"],
+                capture_output=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if cygpath_probe.returncode != 0:
+            return None
+    return candidate
 
 
 def _prune_functions_source() -> str:

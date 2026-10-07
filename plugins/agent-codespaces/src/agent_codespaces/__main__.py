@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import capture_cli
+from . import capture_cli, dial_log_cli
 from . import claim_provider_cli
 from . import pool as pool_mod
 from . import relay_launch
@@ -367,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
 
     claim_provider_cli.add_claim_provider_parsers(sub)
     capture_cli.add_capture_parser(sub)
+    dial_log_cli.add_dial_log_parser(sub)
     # --- finalize ---
     finalize_parser = sub.add_parser(
         "finalize",
@@ -884,7 +885,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        if args.command and args.command not in {"doctor", "status", "version", "installer-readiness", "dev-release", "dev-status"}:
+        if args.command and args.command not in {"doctor", "status", "version", "installer-readiness", "dev-release", "dev-status", "dial-log"}:
             validate_context()
     except ContextRefused as error:
         print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
