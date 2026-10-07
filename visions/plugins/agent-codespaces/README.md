@@ -282,18 +282,14 @@ A CodeSpace agent is reachable **both** headlessly (an orchestrator drives it
 as a fabric participant, JSON handles, no terminal) and **interactively** (a
 human's own terminal session, muxed inside the venue) through the **same
 provider** under its one coordination contract — the same venue, the same
-credentialed door, addressed and reached by the same resolver, whatever the
-reach-mode-specific code path underneath does. A reference artifact a human
-supplies for the worker (a trace, transcript, log, or screenshot) reaches the
-venue **without the orchestrator ever reading it** — a pure hand-off, not a
-pass-through. A host port the venue's work needs (a browser's live DevTools
-endpoint) and a venue port the host needs to reach (a worker's dev server)
-are each bridgeable on request, so verifying work that spans the host/venue
-boundary does not require a second, ad hoc transport. **Not yet fully
-realized:** reality today routes a detached session and an attached one
-through separate code paths (`copilot_detach.cmd_detach` vs.
-`interactive_ssh`); unifying them behind one implementation is a
-north-star-ahead refinement, not something already shipped.
+credentialed door, and the same resolver address both reach modes. A
+reference artifact a human supplies for the worker (a trace, transcript,
+log, or screenshot) reaches the venue **without the orchestrator ever
+reading it** — a pure hand-off, not a pass-through. A host port the venue's
+work needs (a browser's live DevTools endpoint) and a venue port the host
+needs to reach (a worker's dev server) are each bridgeable on request, so
+verifying work that spans the host/venue boundary does not require a
+second, ad hoc transport.
 
 ### config-by-adoption
 A repo's venue policy lives **in that repo** and is **read live** (no generated
@@ -705,33 +701,27 @@ tooling.)
   from the plugin's current `README.md` and `docs/patterns/
   codespace-repo-provenance.md`: *repo-sourced-provenance* (a venue policy can
   be declared by the **active plugin** itself, at lower precedence than
-  adoption, with no adoption step required) and *in-venue-plugin-injection*
-  (the governing harness plugin can declare which plugins land **inside** the
-  venue, scoped per product/workspace repo, staged from a local marketplace
-  when the venue can't resolve a repo-relative path). Added
-  *dual-mode-session-reach* capturing the already-shipped interactive
-  (`copilot <name>`) vs. headless (`--detach`) CLI-mode sessions, the
-  orchestrator-blind reference-file hand-off (`--ref-file`), and the
-  host↔venue port bridging (`--reverse-forward` / `--forward`) — none of which
-  the *coordination-layer-provider* feature had stated. Also corrected the
-  stale *agent-containers* sibling-leaf reference (authored since this vision
-  was first written) and widened the reality-docs skill list to include
-  `recovering-codespaces` and `cleaning-codespaces`. All additions are
-  **fold-back** (reality already does these things; the vision simply hadn't
-  stated them) — no Non-Goal reality violates and no scaling-back occurred.
-  No new conformance gap was found requiring an issue; the three mechanisms
-  above are additive capability, not invariant violations. Phase 3's
-  cutover/immutable-runtime conformance audit already covers this plugin's
-  `install.ps1` separately (see `#5472`) and is unaffected by this slice.
-  **Review correction (PR #5575):** the initial wording over-claimed
-  *dual-mode-session-reach* as "never two divergent code paths" — reality
-  routes a detached session through `copilot_detach.cmd_detach` and an
-  attached one through a separate `interactive_ssh` path; reworded to scope
-  the guarantee to the shared coordination contract/venue/credentialed
-  door, not a shared implementation, and flagged the code-path unification
-  itself as a north-star-ahead refinement rather than already-shipped.
-  Review also caught that *repo-sourced-provenance*'s "no adoption step"
-  directly contradicted *config-by-adoption*'s "adoption is the one act"
-  wording; both sections were reworded to scope the older claim to the
-  **repo-owned policy lane** specifically, with the two provenance lanes
-  stated as composing (lower-precedence, not competing).
+  adoption, with no adoption step required — a second provenance lane that
+  composes with, rather than replaces, the pre-existing *config-by-adoption*
+  repo-owned lane) and *in-venue-plugin-injection* (the governing harness
+  plugin can declare which plugins land **inside** the venue, scoped per
+  product/workspace repo, staged from a local marketplace when the venue
+  can't resolve a repo-relative path). Added *dual-mode-session-reach*
+  stating the should-be shared-contract guarantee behind the already-shipped
+  interactive (`copilot <name>`) vs. headless (`--detach`) CLI-mode
+  sessions, the orchestrator-blind reference-file hand-off (`--ref-file`),
+  and the host↔venue port bridging (`--reverse-forward` / `--forward`) —
+  none of which the *coordination-layer-provider* feature had stated, and
+  deliberately scoped to the contract (venue/credentialed door/resolver),
+  not to whether the underlying code happens to share one implementation
+  path, which stays unpinned per this vision's own "Not a specification"
+  boundary. Also corrected the stale *agent-containers* sibling-leaf
+  reference (authored since this vision was first written) and widened the
+  reality-docs skill list to include `recovering-codespaces` and
+  `cleaning-codespaces`. All additions are **fold-back** (reality already
+  does these things; the vision simply hadn't stated them) — no Non-Goal
+  reality violates and no scaling-back occurred. No conformance gap was
+  found requiring an issue; the mechanisms above are additive capability,
+  not invariant violations. Phase 3's cutover/immutable-runtime conformance
+  audit already covers this plugin's `install.ps1` separately (see `#5472`)
+  and is unaffected by this slice.

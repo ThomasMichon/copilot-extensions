@@ -394,4 +394,26 @@ then rather than assuming either answer.
 - No conformance gap was found requiring a new issue — this slice is
   fold-back only, distinct from Phase 3's separate `install.ps1`
   conformance audit (`#5472` already covers agent-codespaces there and is
-  unaffected). PR pending; worktree not yet finalized as of this entry.
+  unaffected).
+- **PR #5575 review, round 1:** caught two real contradictions in the first
+  draft: *dual-mode-session-reach* over-claimed "never two divergent code
+  paths" when reality actually routes a detached session through
+  `copilot_detach.cmd_detach` and an attached one through a separate
+  `interactive_ssh` path; and *repo-sourced-provenance*'s "no adoption
+  step" directly contradicted *config-by-adoption*'s pre-existing "adoption
+  is the one act" wording. Fixed by scoping the adoption claim to the
+  repo-owned policy lane specifically (the two provenance lanes compose,
+  they don't compete) and by narrowing the dual-mode-reach claim to the
+  shared contract rather than a shared implementation.
+- **PR #5575 review, round 2:** the round-1 fix for the code-path finding
+  overcorrected — it added a "not yet fully realized... north-star-ahead
+  refinement" sentence that (a) pinned implementation wiring the vision's
+  own "Not a specification" boundary explicitly excludes, and (b) quietly
+  turned a no-gap fold-back slice into one with an untracked vision→reality
+  delta, contradicting the PR's own no-gap claim. Also flagged the PR
+  description was missing this repo's required **Documentation impact**
+  statement (`CONTRIBUTING.md`'s pre-PR checklist). Fixed by dropping the
+  offending sentence entirely (the behavior now states only the should-be
+  contract guarantee, leaving the implementation-path question genuinely
+  unpinned) and by adding the statement to the PR description.
+- Worktree not yet finalized as of this entry; PR pending merge.
