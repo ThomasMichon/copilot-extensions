@@ -9897,7 +9897,6 @@ def test_steer_confirm_shows_blocking_progress_overlay_until_delivered(tmp_path,
 
     from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
     from worktree_manager.production_picker.picker_tui.engine import (
-        PivotFormScreen,
         ProgressScreen,
         _AutoExpandTextArea,
     )
@@ -9982,7 +9981,6 @@ def test_steer_confirm_failure_replaces_progress_overlay_with_error_screen(tmp_p
     showing the bare 'failed' state itself."""
     from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
     from worktree_manager.production_picker.picker_tui.engine import (
-        PivotFormScreen,
         ProgressScreen,
         SubmitErrorScreen,
         _AutoExpandTextArea,
