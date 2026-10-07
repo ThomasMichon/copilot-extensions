@@ -513,16 +513,32 @@ def _ensure_fork_and_remote(
         )}
     real_owner, clone_url = fork
     owner = prcfg.fork.owner or real_owner
-    if not git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path):
+    from . import pr_publish
+
+    # Under the publication lock: never repoint the remote while another worktree pushes through it.
+    # The identity is read under the same lock: once it's released, another worktree may repoint
+    # the remote, so the push later checks against this one rather than a fresh read.
+    head_identity = ""
+    try:
+        with pr_publish.publish_lock(worktree_path):
+            pointed = git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path)
+            if pointed:
+                head_identity = pr_publish.push_identity(prcfg.fork.remote, cwd=worktree_path)
+    except pr_publish.PublishLockTimeout as exc:
+        return {"error": str(exc)}
+    if not pointed:
         return {"error": (
             f"Could not point local git remote '{prcfg.fork.remote}' at "
             f"'{clone_url}'."
         )}
-    return {"owner": owner, "real_owner": real_owner}
+    repo_name = repo_slug.rsplit("/", 1)[-1]
+    head_repo = git_ops.slug_from_url(clone_url) or f"{real_owner}/{repo_name}"
+    return {"owner": owner, "real_owner": real_owner, "head_repo": head_repo,
+            "head_identity": head_identity}
 
 
 def resolve_fork_publish(
-    worktree_path: str, default_pr_repo: str, prcfg, *, confirm_fork: bool,
+    worktree_path: str, default_pr_repo: str, prcfg, *, confirm_fork: bool, repo_remote: str = "",
 ) -> dict:
     """Resolve ``pr.fork``'s confirmation gate and, once cleared, the actual
     fork/remote bootstrap for one ``create_pr`` call.
@@ -533,11 +549,20 @@ def resolve_fork_publish(
       -- nothing was mutated; relay ``message`` to the human and re-run with
       ``confirm_fork=True`` once they agree.
     - ``{"error": "..."}`` -- a hard failure; nothing further was mutated
-      beyond what the error message itself describes.
+      beyond what the error message itself describes. ``pr.fork.remote`` naming
+      the repo's own remote (*repo_remote*) is one: a fork's publication target
+      is recognized by its remote name, so sharing the repo's would leave the
+      fork's identity unrecorded and its later updates unchecked.
     - ``{"publish_remote", "fork_owner", "warning": <optional str>}`` on
       success -- the fork/remote are ready; ``warning`` is set only when the
       fork succeeded but persisting the confirmation itself failed.
     """
+    if repo_remote and prcfg.fork.remote == repo_remote:
+        return {"error": (
+            f"pr.fork.remote is '{prcfg.fork.remote}', the repository's own remote. "
+            f"A fork needs a remote of its own (e.g. 'fork'); set pr.fork.remote to "
+            f"another name. Nothing was changed."
+        )}
     # This registry is not scoped by GitHub authority (host) -- the same
     # owner/repo slug can identify unrelated repositories on github.com vs.
     # a GitHub Enterprise host (via an explicit pr.api_base OR ambient
@@ -671,7 +696,12 @@ def resolve_fork_publish(
             f"--confirm-fork (or confirm_fork=True) to approve recording "
             f"that as the new confirmed identity."
         )}
-    result = {"publish_remote": prcfg.fork.remote, "fork_owner": fork_owner}
+    result = {
+        "publish_remote": prcfg.fork.remote,
+        "fork_owner": fork_owner,
+        "fork_head_repo": fork_setup["head_repo"],
+        "fork_head_identity": fork_setup.get("head_identity", ""),
+    }
     # Re-persist whenever this is the first confirmation OR an EXPLICIT
     # confirm_fork=True call's result differs from what was stored (the
     # self-heal path for a stale entry the pre-check above caught on a
