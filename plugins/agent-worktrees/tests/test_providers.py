@@ -3472,7 +3472,8 @@ class TestRerunAutoOpen:
         assert fake.create_calls == 1                       # no duplicate PR opened
 
     def test_no_open_says_why_and_still_reports_an_existing_pr(self, pr_repo, monkeypatch):
-        """``--no-open`` touches no provider: a first run records why no PR was
+        """``--no-open`` opens and changes nothing on the provider (it still reads the
+        tracked PR's state, so a merged PR's branch is never reused): a first run records why no PR was
         opened, and a re-run on an already-open PR still reports it (never "none")."""
         config, wid, _wt_path, _ = pr_repo
         config = self._enable_open(config)

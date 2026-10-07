@@ -1634,7 +1634,8 @@ def _finish_auto_open(
             result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
         return
     if not want_open:
-        # Nothing on the provider is touched; say what exists so no caller is told
+        # Nothing is opened or changed on the provider (create-pr already read the tracked
+        # PR's state, so a merged PR's branch is never reused); say what exists so no caller is told
         # a PR was created when none was, or that none exists when one does.
         if target_pr.number is None:
             result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
