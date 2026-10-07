@@ -19,6 +19,17 @@
   `docs/patterns/work-coalescing-singleton.md` (the shared pattern this
   effort's daemon is the **second** concrete implementation of, after
   `#2323`'s classify/list accelerator).
+  [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)
+  flags that this daemon and `#2323`'s `classify_daemon` now independently
+  compute overlapping git-state facts for the same worktree via two separate
+  compute paths — this daemon's own `worktree_status_compute.py` only
+  assembles a read-only bundle (it does not stamp `WorktreeRecord.git_state`;
+  `picker_support/data_local.py` is the path that does) — which #5555
+  proposes consolidating into one. `agent-worktrees-authoritative-daemon` is
+  a **proposed**, not yet committed, destination for that consolidation (its
+  Plan/Validation Plan don't cover it today); this effort's own output is the
+  second compute path that would need folding in, not a place the fix
+  currently lands.
 
 ## Guiding Intent
 
