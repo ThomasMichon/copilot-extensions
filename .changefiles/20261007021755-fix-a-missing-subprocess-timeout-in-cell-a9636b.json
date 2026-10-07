@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a missing subprocess timeout in cell-runtime.py's _run_cell_deploy (could hang forever on a stuck launcher); fix test_installer_uv_editable_lib_preinstall_ps1.py's have_uv=False PATH-removal simulation to strip every uv-carrying PATH directory, not just the first.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

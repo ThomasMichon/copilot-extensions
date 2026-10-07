@@ -88,9 +88,26 @@ _CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
 # default's fast-fail protection against a genuinely wedged test.
 _SUBSUITE_TIMEOUT_OVERRIDES: dict[str, float] = {
     "agent-dispatch": 600.0,
+    # agent-index's 2nd 25-file sub-suite carries several real PowerShell/
+    # venv-heavy installer tests (Phase 3.5, 2026-10-07): measured at
+    # ~374s under real full-matrix host load, past the global 300s default
+    # but a real, passing runtime rather than a hang.
+    "agent-index": 600.0,
 }
 _PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {
     "agent-dispatch": 1800.0,
+    "agent-index": 1800.0,
+}
+# Several agent-index installer tests genuinely need real PowerShell/venv
+# subprocess work that can exceed the global blanket 30s-per-test
+# pytest-timeout default under real full-matrix host load (Phase 3.5,
+# 2026-10-07; e.g. test_runtime_gate.py's own internal subprocess timeout
+# is itself well past 30s). Scoped to this one plugin for the same
+# fast-fail-elsewhere reason as the other overrides above. A test whose
+# own real work is exceptionally long still carries its own explicit
+# @pytest.mark.timeout(N), which always wins over this plugin default.
+_TEST_TIMEOUT_OVERRIDES: dict[str, float] = {
+    "agent-index": 90.0,
 }
 
 # The runner is a repository tool, so consume the canonical shared source
@@ -474,8 +491,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="aggregate wall-clock budget per plugin (default: 900, higher "
                          "for certain plugins -- see _PLUGIN_TIMEOUT_OVERRIDES; an "
                          "explicit value here always wins)")
-    ap.add_argument("--test-timeout", type=float, default=30.0, metavar="SECONDS",
-                    help="timeout for each individual pytest item (default: 30)")
+    ap.add_argument("--test-timeout", type=float, default=None, metavar="SECONDS",
+                    help="timeout for each individual pytest item (default: 30, higher "
+                         "for certain plugins -- see _TEST_TIMEOUT_OVERRIDES; an "
+                         "explicit value here always wins)")
     ap.add_argument("--max-files-per-sub-suite", type=int, default=25,
                     metavar="COUNT",
                     help="maximum test files per sequential sub-suite (default: 25)")
@@ -502,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("subsuite_timeout must be positive")
         if args.plugin_timeout is not None and args.plugin_timeout <= 0:
             raise ValueError("plugin_timeout must be positive")
-        if args.test_timeout <= 0:
+        if args.test_timeout is not None and args.test_timeout <= 0:
             raise ValueError("test_timeout must be positive")
         if args.max_files_per_sub_suite <= 0:
             raise ValueError("max_files_per_sub_suite must be positive")
@@ -581,6 +600,11 @@ def main(argv: list[str] | None = None) -> int:
                     if args.plugin_timeout is not None
                     else _PLUGIN_TIMEOUT_OVERRIDES.get(name, 900.0)
                 )
+                effective_test_timeout = (
+                    args.test_timeout
+                    if args.test_timeout is not None
+                    else _TEST_TIMEOUT_OVERRIDES.get(name, 30.0)
+                )
                 plugin_limits = Limits(
                     wall_seconds=effective_subsuite_timeout,
                     max_processes=limits.max_processes,
@@ -595,7 +619,7 @@ def main(argv: list[str] | None = None) -> int:
                     kexpr=args.kexpr,
                     limits=plugin_limits,
                     plugin_timeout=effective_plugin_timeout,
-                    test_timeout=args.test_timeout,
+                    test_timeout=effective_test_timeout,
                     max_files_per_subsuite=args.max_files_per_sub_suite,
                     guards=args.guards,
                     collect_only=args.collect_only,

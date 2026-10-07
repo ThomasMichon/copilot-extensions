@@ -1382,6 +1382,17 @@ def test_cell_launchers_are_installation_local_and_context_validating(
     assert command_launcher.is_file()
 
 
+@pytest.mark.timeout(150)
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-07): this test runs two full cell-deploy cycles, each spinning
+# up a real venv and invoking a generated launcher subprocess (now bounded
+# internally at LOCK_TIMEOUT_SECONDS=120s by cell-runtime.py's own
+# _run_cell_deploy) -- with no @pytest.mark.timeout override,
+# run-plugin-tests.py's blanket 30s-per-test pytest-timeout default can
+# fire first under real full-matrix host contention, same false-positive
+# class test_installer_powershell51.py::test_powershell_51_corrupt_cached_
+# uv_fails_cleanly already hit and fixed the same way: real headroom
+# above the test's own internal subprocess ceiling, not a global bump.
 def test_parent_lock_reenters_through_generated_launcher_for_recovery(
     tmp_path: Path,
 ) -> None:
