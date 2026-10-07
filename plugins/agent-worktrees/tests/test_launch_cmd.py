@@ -932,6 +932,68 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
     assert marker.read_text(encoding="utf-8").strip() == "launched"
 
 
+def test_launch_command_dot_sources_default_setup_without_extra_process(tmp_path):
+    """copilot-extensions#5579: launch-command.ps1's common `pwsh -File
+    default-setup.ps1 ...` case must dot-source default-setup.ps1 into its
+    own host process rather than spawning a second pwsh.exe for it -- one
+    fewer resident process per worktree launch, with identical argument
+    binding (including switch parameters, values with spaces, and
+    GNU-style double-dash passthrough args)."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    marker = tmp_path / "result.txt"
+    fake_default_setup = tmp_path / "default-setup.ps1"
+    fake_default_setup.write_text(
+        "param(\n"
+        "    [string]$Machine,\n"
+        "    [switch]$Recovery,\n"
+        "    [Parameter(ValueFromRemainingArguments)]\n"
+        "    [string[]]$CopilotArgs\n"
+        ")\n"
+        "Set-Content -LiteralPath $env:RESULT_MARKER -Value "
+        "(\"$PID|$Machine|$Recovery|\" + ($CopilotArgs -join ','))\n"
+        "exit 17\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["RESULT_MARKER"] = str(marker)
+    # Isolate from this machine's own reconcile-machine-settings.ps1 side
+    # effects -- already covered by test_machine_settings_reconcile.py.
+    env["AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED"] = "1"
+
+    proc = subprocess.Popen(
+        [
+            shell, "-NoProfile", "-NoLogo", "-File", str(scripts / "launch-command.ps1"),
+            "--", "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(fake_default_setup),
+            "-Machine", "a machine with spaces", "-Recovery",
+            "--allow-all", "--model", "foo",
+        ],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    outer_pid = proc.pid
+    _stdout, stderr = proc.communicate(timeout=30)
+
+    assert proc.returncode == 17, stderr
+    inner_pid_str, machine, recovery, copilot_args = (
+        marker.read_text(encoding="utf-8").strip().split("|", 3)
+    )
+    assert machine == "a machine with spaces"
+    assert recovery == "True"
+    assert copilot_args == "--allow-all,--model,foo"
+    assert int(inner_pid_str) == outer_pid, (
+        "default-setup.ps1 ran in a separate process instead of being "
+        "dot-sourced into launch-command.ps1's own host process"
+    )
+
+
 def test_default_setup_launches_absolute_copilot_with_empty_path(
     tmp_path,
 ):
