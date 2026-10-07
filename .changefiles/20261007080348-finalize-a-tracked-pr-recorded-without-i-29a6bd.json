@@ -1,0 +1,9 @@
+{
+  "comment": "finalize: a tracked PR recorded without its head branch (set-pr with only --url/--number) is still decided as a PR -- its merge and base read from the provider, its content the live checkout -- so finalize no longer refuses work that --explain-landing reports landed on the PR's base; one shared tracks_pr predicate decides both",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

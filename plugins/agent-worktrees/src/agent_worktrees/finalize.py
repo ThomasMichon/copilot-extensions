@@ -1112,7 +1112,7 @@ def _pr_finalize_precondition(
     # (3) DETACHED mode only: "code is upstream in an OPEN PR" (feature branch on
     #     the remote) is an early ok. keep-alive never consults the feature
     #     branch -- it tracks only alignment with origin/<default>.
-    if strategy == "detach" and git_ops.remote_branch_exists(remote, feature, cwd=cwd):
+    if strategy == "detach" and feature and git_ops.remote_branch_exists(remote, feature, cwd=cwd):
         local = git_ops.git("rev-parse", feature, cwd=cwd, check=False)
         remote_ref = git_ops.git("rev-parse", f"{remote}/{feature}", cwd=cwd, check=False)
         if local.returncode == 0 and remote_ref.returncode == 0:
@@ -1559,9 +1559,8 @@ def validate_and_finalize(
         return False
 
     wt_exists = Path(worktree_path).exists()
-    pr_mode = bool(
-        repo.pr.enabled and record and record.pr and record.pr.branch
-    )
+    from . import finalize_landing
+    pr_mode = finalize_landing.tracks_pr(record, repo)
 
     if dry_run:
         _dry_run_finalize_preview(
@@ -1660,7 +1659,9 @@ def validate_and_finalize(
         if not ok:
             output.err(err or "PR finalize precondition not met.")
             return False
-        print(f"Verified: feature branch '{record.pr.branch}' is safely on {repo.remote}.")
+        print(f"Verified: feature branch '{record.pr.branch}' is safely on {repo.remote}."
+              if record.pr.branch else
+              f"Verified: tracked PR #{record.pr.number}'s work is safely on {repo.remote}.")
     elif wt_exists:
         # Validate against the worktree's ACTUAL current checkout, not just
         # the possibly-stale tracked `record.branch` name (#7723). A worktree

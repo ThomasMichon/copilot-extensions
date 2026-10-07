@@ -217,7 +217,9 @@ ancestry, by each commit's patch, by the whole branch as one patch (a squash
 merge, even after upstream edits the same files again), or by file content.
 Commits a branch was created on top of from a remote-tracking branch (its
 reflog's `Created from origin/...`) are published history, never its own
-work. A refusal lists the checks it ran;
+work. A PR tracked only by its URL and number (`set-pr` without `--branch`,
+for work pushed from a hand-made branch) is still decided this way, from the
+live checkout. A refusal lists the checks it ran;
 `<agent-worktrees catalog argv[0]> finalize --explain-landing [--json]` reports
 them read-only, without finalizing.
 

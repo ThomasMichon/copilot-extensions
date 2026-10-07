@@ -25,6 +25,18 @@ def remote_ref(repo, branch: str) -> str:
     return f"refs/remotes/{repo.remote}/{branch}"
 
 
+def tracks_pr(record, repo) -> bool:
+    """Whether ``finalize`` decides this worktree through its tracked PR: PRs are
+    enabled and a PR is tracked by its head branch **or** its number. A PR recorded
+    without its branch (``set-pr`` with only ``--url``/``--number``, for work pushed
+    from a hand-made branch) is still a PR: its merge and its base are read from the
+    provider, and the content is the live checkout. Shared by ``finalize`` and
+    ``--explain-landing`` so the two never disagree."""
+    pr = getattr(record, "pr", None) if record else None
+    return bool(getattr(getattr(repo, "pr", None), "enabled", False) and pr
+                and ((getattr(pr, "branch", "") or "").strip() or getattr(pr, "number", None)))
+
+
 def pr_base(record, repo) -> str:
     """The PR's base on the remote (:func:`remote_ref`) when the tracked PR targets
     a branch other than the configured default one (read from the provider); ""
@@ -115,7 +127,8 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
     bases = [b for b in (remote_ref(repo, repo.default_branch), pr_base(record, repo)) if b]
     checks = [landing(content_ref, b, cwd, explain=True).to_dict()
               for b in bases if content_ref and git_ops.ref_exists(b, cwd=cwd)]
-    ok, message, _ = pr_content_landed(record, repo, content_ref, cwd=cwd) if pr else (None, None, [])
+    ok, message, _ = (pr_content_landed(record, repo, content_ref, cwd=cwd)
+                      if tracks_pr(record, repo) else (None, None, []))
     return {
         "worktree_id": record.worktree_id,
         "content_ref": content_ref,
