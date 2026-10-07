@@ -19,6 +19,13 @@
   `docs/patterns/work-coalescing-singleton.md` (the shared pattern this
   effort's daemon is the **second** concrete implementation of, after
   `#2323`'s classify/list accelerator).
+  [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)
+  flags that this daemon and `#2323`'s `classify_daemon` now independently
+  compute overlapping git-state facts for the same worktree and both write
+  back to the tracking record — the cause of a real Picker row-oscillation
+  bug. `agent-worktrees-authoritative-daemon` is where that consolidation is
+  being designed; this effort's own output is the second data source being
+  folded in, not where the fix lands.
 
 ## Guiding Intent
 

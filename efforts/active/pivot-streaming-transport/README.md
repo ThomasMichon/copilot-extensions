@@ -24,6 +24,11 @@
   broader engine-boundary retirement — this effort's Phase 4 builds directly on
   that effort's completed Phase 3c non-blocking-I/O work, but is scoped
   narrowly to transport/diffing, not a restatement of that larger campaign).
+  [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)
+  (the cross-cutting restatement of this effort's Phase 3 direction as a
+  four-layer acceptance criteria, plus the Worktrees-pivot dual-daemon
+  oscillation bug this effort doesn't itself cover — see that issue's
+  cross-link comment for the full disposition).
 
 ## Guiding Intent
 
