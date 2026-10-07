@@ -359,12 +359,43 @@ class PickerScreenPivotActionsMixin:
         invalidate the cached list so the row reflects the new state. The command
         (e.g. ``agent-dispatch steer submit``) is a subprocess, so it runs OFF the
         render flow via :meth:`_run_bg` -- Confirm returns instantly and the UI
-        stays live while the coordinator round-trip completes."""
+        stays live while the coordinator round-trip completes.
+
+        A blocking (but async -- the render flow is never frozen) modal
+        progress overlay covers that whole round-trip (operator report,
+        2026-10-07): Confirm used to dismiss straight back to the list with
+        only a footer status line as evidence anything was happening, so a
+        slow or hung coordinator looked indistinguishable from 'it worked'
+        until the result eventually, silently, landed. Reuses the existing
+        ``action-stream`` :class:`ProgressScreen` kind
+        (``_run_task_action_progress``'s own shape): a spinner while
+        in-flight, then an explicit done state the operator dismisses
+        themselves (Enter/Esc/Space, same as every other action-stream run)
+        -- so a successful delivery is *seen*, not just inferred from the
+        overlay's absence. On failure the overlay hands off to the richer,
+        full-detail :class:`SubmitErrorScreen` (draft-recovery guidance an
+        action-stream run's own terse inline error can't carry) instead of
+        rendering the failure itself."""
         from . import pivots as _pivots
 
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
         task_id = ctx.get("task_id")
+
+        prog = {
+            "kind": "action-stream",
+            "verb": action.label,
+            "title": str(title),
+            "msg": "delivering…",
+            "pct": None,
+            "done": False,
+            "error": "",
+            "armed": True,
+            "items": [],
+            "cancel": None,
+        }
+        self.progress = prog
+        self._open_progress()
 
         def _work():
             try:
@@ -410,14 +441,24 @@ class PickerScreenPivotActionsMixin:
                     pass
                 self.refresh()
                 self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
+                if self.progress is prog:
+                    prog["done"] = True
+                    prog["msg"] = short or "delivered"
             else:
                 # Fail-fast (#2453): a delivery failure must never be reducible
                 # to this easily-missed footer line alone -- a blocking modal
                 # names exactly where the answer is still safely recoverable
                 # from (the local draft this method deliberately did NOT
-                # delete above).
+                # delete above). Pop the in-flight progress overlay first
+                # (synchronously -- it's still the top screen; nothing could
+                # have interjected during Confirm's own round-trip) so the
+                # richer error surface replaces it instead of stacking on
+                # top of it.
                 self.debug = f"{action.label} failed · {short or 'see command output'}"
                 draft_path = _steer_draft_path(str(task_id)) if task_id else None
+                if self.progress is prog:
+                    self.progress = None
+                    self.app.pop_screen()
                 self.app.push_screen(
                     SubmitErrorScreen(action.label, msg or short, draft_path)
                 )
