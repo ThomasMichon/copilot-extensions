@@ -547,7 +547,10 @@ def test_an_app_change_request_stands_until_that_app_answers_it():
 
 def test_the_providers_own_change_request_decision_fails_the_policy():
     assert _status(_bar(FakeGh(review_decision="CHANGES_REQUESTED")))["merge_policy"] == "failed"
-    assert _status(_bar(FakeGh(review_decision="REVIEW_REQUIRED")))["merge_policy"] == "met"
+    required = FakeGh(review_decision="REVIEW_REQUIRED")
+    assert _status(_bar(required))["merge_policy"] == "pending"  # not shown to be bypassable
+    bypass = {**NO_APPROVAL, "review_bypass": True}
+    assert _status(_bar(FakeGh(review_decision="REVIEW_REQUIRED"), policy=bypass))["merge_policy"] == "met"
 
 
 def test_checks_for_another_commit_are_unknown_not_the_heads():
@@ -592,7 +595,7 @@ def test_the_mock_treats_every_terminal_thread_status_as_resolved(status):
 _REAL_READ = github_bar.read_bar
 
 
-def _cli_bar(monkeypatch, capsys, flow, reviews):
+def _cli_bar(monkeypatch, capsys, flow, reviews, **fake):
     from types import SimpleNamespace
 
     from agent_worktrees import config as cfg
@@ -604,7 +607,7 @@ def _cli_bar(monkeypatch, capsys, flow, reviews):
     monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, p: "t")
     monkeypatch.setattr(pr_config, "resolve_actor_pr_flow", lambda *_a, **_k: flow)
     monkeypatch.setattr(github_bar, "read_bar", lambda repo, number, *, host, token: _REAL_READ(
-        repo, number, host=host, token=token, run=FakeGh(reviews=reviews)))
+        repo, number, host=host, token=token, run=FakeGh(reviews=reviews, **fake)))
     pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7", "--json"])
     return {c["id"]: c["status"] for c in json.loads(capsys.readouterr().out)["clauses"]}
 
@@ -651,4 +654,18 @@ def test_reviews_in_the_same_second_are_ordered_by_id():
     for reviews in ([old, new], [new, old]):
         status = _status(_bar(FakeGh(reviews=reviews)))
         assert status["review_on_head"] == "met" and status["review_findings_zero"] == "met"
+
+
+@pytest.mark.parametrize("gate, expected", [((True, True), "met"), ((True, None), "pending"),
+                                             ((True, False), "pending")])
+def test_a_required_review_counts_unless_the_provider_affirms_a_bypass(monkeypatch, capsys, gate, expected):
+    from types import SimpleNamespace
+
+    from agent_worktrees.providers.github import GitHubProvider
+
+    monkeypatch.setattr(GitHubProvider, "pull_review_gate", lambda self, *a, **k: gate)
+    base = SimpleNamespace(approval_required=False, review_blocking=False, hold_labels=(), wip_title_prefixes=())
+    flow = SimpleNamespace(pr_config=base, resolution="actor-role")
+    status = _cli_bar(monkeypatch, capsys, flow, [_review()], review_decision="REVIEW_REQUIRED")
+    assert status["merge_policy"] == expected
 

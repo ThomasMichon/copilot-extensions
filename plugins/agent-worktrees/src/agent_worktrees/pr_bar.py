@@ -284,6 +284,11 @@ def _policy(snap: Snapshot, policy: dict | None) -> Clause:
         return Clause("merge_policy", "failed", f"changes requested by {', '.join(asking)} (their latest verdict)")
     if snap.review_decision == "CHANGES_REQUESTED":
         return Clause("merge_policy", "failed", "the provider reports an outstanding change request")
+    if snap.review_decision == "REVIEW_REQUIRED" and policy.get("review_bypass") is not True:
+        # A required-review rule still blocks, unless the provider affirms this actor
+        # may bypass it (unknown is not yes) -- the same rule the merge path uses.
+        return Clause("merge_policy", "pending", "the provider still requires a review "
+                      "(this actor isn't shown to be able to bypass it)")
     if state.verdict == "CHANGES_REQUESTED":
         return Clause("merge_policy", "failed", "the provider's review verdict is changes requested")
     if policy.get("human_approval_required"):

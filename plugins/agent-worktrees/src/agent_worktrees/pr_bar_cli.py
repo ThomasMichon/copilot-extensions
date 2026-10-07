@@ -110,6 +110,12 @@ def cmd_pr_bar(argv: list[str]) -> int:
               "hold_labels": tuple(getattr(policy_cfg, "hold_labels", ()) or ()),
               "wip_title_prefixes": tuple(getattr(policy_cfg, "wip_title_prefixes", ()) or ()),
               "review_blocking": review_blocking}
+    gate = getattr(providers.get_provider(name), "pull_review_gate", None)
+    if snap.review_decision == "REVIEW_REQUIRED" and gate is not None:
+        try:  # the provider's live answer to "may this actor bypass the required review?"
+            policy["review_bypass"] = gate(slug, number, api_base=api_base, token=token)[1] is True
+        except Exception:
+            policy["review_bypass"] = False
     bar = pr_bar.evaluate(snap, reviewer=args.reviewer or pr_bar.COPILOT_REVIEWER, policy=policy)
     if args.json:
         print(json.dumps(bar.to_dict(), indent=2))
