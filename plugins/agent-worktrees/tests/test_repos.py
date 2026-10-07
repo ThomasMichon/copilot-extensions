@@ -47,6 +47,14 @@ def _bare_anchor_from_clone(upstream: Path, dest: Path, branch: str = "main") ->
                    check=True, capture_output=True, text=True)
     _git(dest, "checkout", branch)
     _git(dest, "config", "core.bare", "true")
+    # A plain clone never inherits user.name/user.email -- unlike
+    # _init_repo's own repos, which set it explicitly. Under this
+    # test's own isolated-HOME containment (no global git identity
+    # available), a caller's later `git commit-tree` against this
+    # anchor silently fails (empty stdout, non-zero exit) without this,
+    # producing an empty commit SHA rather than a real one.
+    _git(dest, "config", "user.email", "t@example.com")
+    _git(dest, "config", "user.name", "Test")
 
 
 def test_migration_uses_adoptions_from_agent_home(home: Path, monkeypatch):

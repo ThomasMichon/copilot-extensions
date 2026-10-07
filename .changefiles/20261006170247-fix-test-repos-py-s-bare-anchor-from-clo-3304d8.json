@@ -1,0 +1,9 @@
+{
+  "comment": "Fix test_repos.py's _bare_anchor_from_clone helper missing user.name/user.email config on the cloned anchor, causing git commit-tree to silently fail (empty stdout) under isolated-HOME containment with no global git identity -- blocking dev->main promotion.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
