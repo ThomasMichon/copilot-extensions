@@ -697,6 +697,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             )
             if result.get("pr_opened"):
                 output.ok(
+                    f"PR #{result.get('number')} is already open via '{provider}': {result.get('url')}"
+                    if result.get("pr_existing") else
                     f"Opened PR #{result.get('number')} via '{provider}': {result.get('url')}"
                 )
                 if result.get("draft"):

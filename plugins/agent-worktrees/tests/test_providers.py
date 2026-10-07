@@ -3489,6 +3489,7 @@ class TestRerunAutoOpen:
         assert r3.get("rerun") is True, r3
         assert (r3["pr_opened"], r3["number"]) == (True, n) and "pr_open_skipped" not in r3
         assert r3["draft"] is False  # nothing was opened, so no draft was created
+        assert r3["pr_existing"] is True
         assert fake.create_calls == 1
 
     def test_auto_open_off_says_so(self, pr_repo, monkeypatch):

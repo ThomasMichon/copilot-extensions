@@ -432,3 +432,15 @@ def test_a_dry_run_never_says_it_pushed(pr_repo, monkeypatch, capsys):
     assert "would push" in text and "pushed to" not in text
     assert "set-pr" not in text  # no branch exists, so no "open it and record it" advice
 
+
+def test_a_no_open_rerun_reports_the_existing_pr_as_already_open(pr_repo, monkeypatch, capsys):
+    config, wid, _wt_path, _ = pr_repo
+    monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(m.pr_ops, "create_pr", lambda *_a, **_k: {
+        **_PUSHED, "pr_open_skipped": None, "pr_opened": True, "pr_existing": True, "number": 7,
+        "url": "https://h/o/r/pull/7"})
+    assert m.cmd_create_pr(_args(["create-pr", wid, "--title", "x", "--no-open"])) == 0
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "PR #7 is already open" in text and "Opened PR" not in text
+

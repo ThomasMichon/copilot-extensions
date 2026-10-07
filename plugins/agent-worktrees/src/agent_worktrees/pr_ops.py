@@ -1641,6 +1641,7 @@ def _finish_auto_open(
             result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
         else:
             result["pr_opened"] = True
+            result["pr_existing"] = True  # it was already open: this run opened nothing
             result["number"] = target_pr.number
             result["draft"] = False  # nothing was opened here, so no draft was created
             if target_pr.url:
