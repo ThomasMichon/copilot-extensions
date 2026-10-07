@@ -14,6 +14,7 @@ import shlex
 from pathlib import Path
 
 from . import git_ops, tracking
+from .finalize_ref import landing
 from .config import Config
 from .tracking import PRRecord
 
@@ -94,6 +95,13 @@ def pull_forward_recommendation(
             # -- share this fetch with every other worktree of the repo.
             if record.repo:
                 tracking.record_repo_fetch_confirmed(record.repo)
+    # Only once the base is verified to hold the merged PR (a cached base that predates
+    # the merge -- a failed fetch -- would move the branch onto it and drop the PR's work).
+    if argv and not landing(merged_head, f"refs/remotes/{upstream}", path).landed:
+        argv, command = [], ""
+        stale_base = True
+    else:
+        stale_base = False
     behind: int | None = None
     branch = git_ops._get_current_branch_safe(path)
     if branch and git_ops.ref_exists(f"refs/remotes/{upstream}", cwd=path):
@@ -121,6 +129,8 @@ def pull_forward_recommendation(
     safe = not other_base or bool(_SAFE_BRANCH.fullmatch(base))
     onto = upstream if safe else "the PR's base branch"
     shown = command or ("the structured pull_forward_argv" if argv else
+                        "a fetch, then a re-run of pr-status (this checkout's copy of the base doesn't "
+                        "hold the merged PR yet, so no rebase is generated)" if stale_base else
                         "a rebase that replays only the commits made after the merge "
                         "(the merged head isn't a verified ancestor of HEAD here, so none is generated)")
     why = (f" It merged into {onto}, not the configured default branch "

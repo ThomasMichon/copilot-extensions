@@ -86,9 +86,10 @@ def _pr_content_landed(
     if fopg.pr_merge_status(record, repo) is not True:
         return None, None, evidence
     bases = [b for b in (default, other) if b and git_ops.ref_exists(b, cwd=cwd)] or [default]
-    for upstream in bases:
-        if not fopg.merged_content_exceeds(record, content_ref, upstream, cwd=cwd, repo=repo):
-            return True, None, evidence
+    # Every validated base at once: a commit on any of them is published, so branches
+    # pulled forward onto different bases (one PR onto main, another onto dev) all pass.
+    if not fopg.merged_content_exceeds(record, content_ref, tuple(bases), cwd=cwd, repo=repo):
+        return True, None, evidence
     message = fopg.merged_pr_block_message(record, content_ref, bases[-1], cwd=cwd)
     detail = describe(evidence)
     return False, f"{message}\n{detail}" if detail else message, evidence

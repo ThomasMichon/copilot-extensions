@@ -690,12 +690,14 @@ def _cleanup_branch_refs(record: tracking.WorktreeRecord) -> list[tuple[str, str
 
 
 def _extra_commit_count(
-    content_ref: str, head_sha: str, upstream: str, *, cwd: str,
+    content_ref: str, head_sha: str, upstream: str | tuple[str, ...], *, cwd: str,
 ) -> int | None:
     """Count of commits on ``content_ref`` beyond ``head_sha``/``upstream``,
     or ``None`` when the count itself couldn't be determined (unresolvable
     ``content_ref``, or a failed ``rev-list`` -- including an unresolvable
     ``upstream``). Callers must treat ``None`` as inconclusive, never zero.
+    ``upstream`` may be several published bases: a commit on any of them is
+    upstream (a branch pulled forward onto one base, another onto a second).
     """
     from . import git_ops
     from .finalize_ref import creation_point
@@ -703,7 +705,8 @@ def _extra_commit_count(
         return None
     created = creation_point(content_ref, cwd)  # already published when the branch was made
     extra = git_ops.git(
-        "rev-list", "--count", content_ref, f"^{head_sha}", f"^{upstream}",
+        "rev-list", "--count", content_ref, f"^{head_sha}",
+        *(f"^{u}" for u in ((upstream,) if isinstance(upstream, str) else upstream)),
         *([f"^{created}"] if created else []), cwd=cwd, check=False,
     )
     if extra.returncode != 0:

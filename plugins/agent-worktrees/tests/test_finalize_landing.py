@@ -322,6 +322,7 @@ def test_pull_forward_targets_the_base_a_pr_merged_into(env, provider):
     assert "not the configured default branch origin/main" in rec["next_action"]
 
     provider.base_ref = "dev;id"  # a legal branch name that is shell syntax
+    _git("update-ref", "refs/remotes/origin/dev;id", "refs/remotes/origin/dev", cwd=env.clone)
     rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)
     assert rec["pull_forward_command"] == ""
     assert rec["pull_forward_argv"][-2] == "refs/remotes/origin/dev;id"
@@ -387,3 +388,57 @@ def test_explain_with_an_empty_worktree_path_reads_the_anchor(env, provider):
     instead of failing on a git call with an empty working directory."""
     report = finalize_landing.explain(_record(env), _repo(), "", str(env.clone))
     assert report["content_ref"] and report["bases"][0] == "origin/main"
+
+
+def test_branches_pulled_forward_onto_different_bases_are_all_published(env, provider):
+    """An older merged PR's branch was pulled forward onto main, the current checkout
+    onto dev; each carries a commit only the other base lacks. Every commit is on some
+    published base, so the work is landed."""
+    _git("checkout", "-q", "-b", "pr/old", "origin/main", cwd=env.clone)
+    old_head = _commit(env.clone, "old.txt", "the older PR\n", "older PR")
+    _git("checkout", "-q", "main", cwd=env.seed)
+    _commit(env.seed, "old.txt", "the older PR\n", "the older PR, squashed into main")
+    _git("push", "-q", "origin", "main", cwd=env.seed)
+    _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    head = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    _git("branch", "-f", "pr/old", "origin/main", cwd=env.clone)       # pulled forward onto main
+    _git("reset", "-q", "--hard", "origin/dev", cwd=env.clone)          # pulled forward onto dev
+    provider.head_sha, provider.base_ref = head, "dev"
+    old = SimpleNamespace(branch="pr/old", state="merged", head_sha=old_head, number=6,
+                          repo="owner/repo", provider="github", url="", opened_at="2026-10-01")
+    current = SimpleNamespace(branch=env.slug, state="merged", head_sha=head, number=7,
+                              repo="owner/repo", provider="github", url="", opened_at="2026-10-05")
+    record = SimpleNamespace(worktree_id=env.worktree_id, pr=current, prs=[old, current],
+                             branch="", repo="owner/repo")
+
+    ok, err = finalize._pr_finalize_precondition(record, _repo(), str(env.clone), str(env.clone))
+
+    assert (ok, err) == (True, None)
+
+
+def test_no_pull_forward_command_onto_a_stale_base_after_a_failed_fetch(env, provider, monkeypatch):
+    """The fetch fails and this checkout's copy of dev predates the merge (it holds an
+    unrelated commit instead): moving onto it would drop the PR's work, so no command."""
+    from agent_worktrees import git_ops, pr_pull_forward
+    from agent_worktrees.tracking import PRRecord
+
+    head = _two_commit_change(env.clone)
+    _git("checkout", "-q", "dev", cwd=env.seed)
+    _commit(env.seed, "b.txt", "unrelated\n", "an unrelated dev commit")
+    _git("push", "-q", "origin", "dev", cwd=env.seed)
+    _git("fetch", "-q", "origin", cwd=env.clone)                         # dev has b.txt, not the PR
+    _squash_onto(env.seed, "dev", SQUASHED)                              # merged later, never fetched
+
+    def no_fetch(*_a, **_k):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(git_ops, "fetch", no_fetch)
+    provider.head_sha, provider.base_ref = head, "dev"
+    rec = pr_pull_forward.pull_forward_recommendation(
+        SimpleNamespace(worktree_path=str(env.clone), repo=""),
+        PRRecord(state="merged", number=7, repo="owner/repo", provider="github"),
+        SimpleNamespace(default_repo=_repo()), live=True)
+    assert rec["pull_forward_argv"] == [] and rec["pull_forward_command"] == ""
+    assert "fetch" in rec["next_action"]
