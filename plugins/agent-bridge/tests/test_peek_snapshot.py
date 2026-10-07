@@ -391,6 +391,12 @@ def test_usage_at_shutdown_carries_tokens_and_each_figure_is_its_newest_report(t
                          "cache_read": {"tokenCount": 30}}}}
     u = _usage(tmp_path / "a", [*_events(), shutdown])
     assert (u["source"], u["premium_requests"], u["nano_aiu"]) == ("shutdown", 7.5, 11346730000)
+    # each figure says where it came from: the AIU is the older checkpoint's, not the shutdown's
+    assert u["from"]["premium_requests"] == {"at": "2026-08-14T00:09:00Z", "source": "shutdown"}
+    assert u["from"]["nano_aiu"] == {"at": "2026-08-14T00:00:05Z", "source": "checkpoint"}
+    from agent_bridge import session_maintenance_cli as cli
+    line = cli._usage_line(u)
+    assert "as of 2026-08-14 00:09:00, shutdown" in line and "nanoAiu as of 2026-08-14 00:00:05, checkpoint" in line
     assert u["tokens"] == {"input": 10, "output": 20, "cache_read": 30, "cache_write": None}
     only = {"type": "session.usage_checkpoint", "timestamp": "t", "data": {"totalPremiumRequests": 1}}
     u = _usage(tmp_path / "b", [_ev("session.start", 0), only])
@@ -433,4 +439,13 @@ def test_usage_cli_rolls_up_only_what_was_reported(monkeypatch, capsys):
     parser = core.build_parser()
     assert parser.parse_args(["--json", "usage", "x"]).json is True
     assert parser.parse_args(["usage", "x", "y"]).targets == ["x", "y"]
+
+
+def test_usage_is_found_beyond_the_presence_scan_cap(tmp_path, monkeypatch):
+    """A long stretch with no usage report after the last one must not read as
+    'never reported': the usage lookup reads back to the start of the transcript."""
+    monkeypatch.setenv("AGENT_BRIDGE_PRESENCE_SCAN_CAP", "4096")
+    filler = [_ev("assistant.message", 10 + i % 40, content="x" * 200) for i in range(60)]
+    u = _usage(tmp_path, [*_events(), *filler])
+    assert u["reported"] is True and u["premium_requests"] == 2
 

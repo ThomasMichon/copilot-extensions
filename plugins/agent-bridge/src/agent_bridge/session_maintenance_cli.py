@@ -208,8 +208,12 @@ def _usage_line(usage: dict) -> str:
     shown = lambda v: "not reported" if v is None else v  # noqa: E731
     tokens = usage.get("tokens")
     toks = (", tokens " + " ".join(f"{k}={shown(v)}" for k, v in tokens.items())) if tokens else ""
+    newest = (usage.get("reported_at"), usage.get("source"))
+    older = [f"{label} as of {_peek_iso(o.get('at'))}, {o.get('source')}"
+             for key, label in (("premium_requests", "premium"), ("nano_aiu", "nanoAiu"))
+             if (o := (usage.get("from") or {}).get(key)) and (o.get("at"), o.get("source")) != newest]
     return (f"premium={shown(usage.get('premium_requests'))} nanoAiu={shown(usage.get('nano_aiu'))}"
-            f"{toks} (as of {_peek_iso(usage.get('reported_at'))}, {usage.get('source')})")
+            f"{toks} (as of {_peek_iso(newest[0])}, {newest[1]}{''.join('; ' + n for n in older)})")
 
 
 def _cmd_usage(args: argparse.Namespace) -> None:

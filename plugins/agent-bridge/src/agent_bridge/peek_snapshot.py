@@ -43,8 +43,9 @@ transcripts.
 **Usage** (``snapshot["usage"]``): Copilot's ``totalPremiumRequests`` /
 ``totalNanoAiu`` are cumulative over the session's life (across resumes), so each
 figure is the newest ``session.usage_checkpoint`` / ``session.shutdown`` that
-reports it, read backward like presence; token counts come only from a shutdown that
-is the newest report. Unreported is ``None`` or ``{"reported": false}``, never zero.
+reports it, read backward to the start of the transcript if need be (no cap), and
+keeps its own provenance (``from``); token counts come only from a shutdown that is
+the newest report. Unreported is ``None`` or ``{"reported": false}``, never zero.
 """
 
 from __future__ import annotations
@@ -200,13 +201,14 @@ SCAN_BLOCK = 1 << 20
 # How far back to look for the session boundary (overridable for tests).
 SCAN_CAP = int(os.environ.get("AGENT_BRIDGE_PRESENCE_SCAN_CAP", 64 << 20))
 
-def _lines_back(ef, size):
-    """The transcript's lines, newest first, read backward in blocks (at most
-    :data:`SCAN_CAP` bytes)."""
+def _lines_back(ef, size, cap=None):
+    """The transcript's lines, newest first, read backward in blocks (at most *cap*
+    bytes, :data:`SCAN_CAP` by default)."""
+    cap = SCAN_CAP if cap is None else cap
     pos, carry, scanned = size, b"", 0
     with open(ef, "rb") as fh:
-        while pos > 0 and scanned < SCAN_CAP:
-            n = min(SCAN_BLOCK, pos, SCAN_CAP - scanned)
+        while pos > 0 and scanned < cap:
+            n = min(SCAN_BLOCK, pos, cap - scanned)
             pos -= n
             fh.seek(pos)
             chunk = fh.read(n) + carry
@@ -216,10 +218,10 @@ def _lines_back(ef, size):
             for raw in reversed(parts[1:] if pos > 0 else parts):
                 yield raw.decode("utf-8", "replace")
 
-def _events_back(ef, size, types):
+def _events_back(ef, size, types, cap=None):
     """Events of *types*, newest first. A cheap substring prefilter, then the parsed
     ``type`` decides -- an event name appearing as a payload value is not that event."""
-    for ln in _lines_back(ef, size):
+    for ln in _lines_back(ef, size, cap):
         if not any('"' + t + '"' in ln for t in types):
             continue
         try:
@@ -256,29 +258,35 @@ def _num(value):
 def usage_of(ef, size):
     """What the session reported spending so far. Copilot's totals are cumulative over
     the session's whole life (they carry across resumes), so each figure is the newest
-    ``session.usage_checkpoint`` / ``session.shutdown`` that reports it. A figure no
-    event reports is ``None`` (not reported), never zero; token counts come only from
-    a shutdown that is itself the newest report."""
-    newest, found = None, {}
-    for e in _events_back(ef, size, USAGE):
+    ``session.usage_checkpoint`` / ``session.shutdown`` that reports it -- read back to
+    the start of the transcript if need be (no cap: a long stretch with no report must
+    not read as none), stopping once every figure is found. Each figure keeps its own
+    provenance (``from``: when and which kind of report). A figure no event reports is
+    ``None`` (not reported), never zero; token counts come only from a shutdown that is
+    itself the newest report."""
+    newest, found, origin = None, {}, {}
+    for e in _events_back(ef, size, USAGE, cap=size):
         d = e.get("data") if isinstance(e.get("data"), dict) else {}
+        kind = "shutdown" if e.get("type") == "session.shutdown" else "checkpoint"
         if newest is None:
             newest, details = e, d.get("tokenDetails")
         for key, field in (("premium_requests", "totalPremiumRequests"), ("nano_aiu", "totalNanoAiu")):
             if key not in found and _num(d.get(field)) is not None:
                 found[key] = _num(d.get(field))
+                origin[key] = {"at": e.get("timestamp"), "source": kind}
         if len(found) == 2:
             break
     if newest is None:
-        return {"reported": False, "reason": "no usage checkpoint or shutdown in the transcript (read "
-                "back up to %%d bytes)" %% SCAN_CAP}
+        return {"reported": False, "reason": "no usage checkpoint or shutdown in the transcript"}
     shutdown = newest.get("type") == "session.shutdown"
     tokens = {k: _num((details.get(k) or {}).get("tokenCount") if isinstance(details.get(k), dict) else None)
               for k in TOKENS} if shutdown and isinstance(details, dict) else None
+    if tokens is not None:
+        origin["tokens"] = {"at": newest.get("timestamp"), "source": "shutdown"}
     return {"reported": True, "reported_at": newest.get("timestamp"),
             "source": "shutdown" if shutdown else "checkpoint",
             "premium_requests": found.get("premium_requests"), "nano_aiu": found.get("nano_aiu"),
-            "tokens": tokens}
+            "tokens": tokens, "from": origin}
 
 def presence_of(ef, size, last_line_bad):
     evs, complete = scan_back(ef, size)
