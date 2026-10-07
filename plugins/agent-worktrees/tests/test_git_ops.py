@@ -1488,6 +1488,36 @@ class TestClassifyGitProcessCount:
             "status", "rev-list", "merge-base",
         ]
 
+    def test_failed_count_with_shared_history_reports_unknown_not_completed(
+        self, monkeypatch,
+    ):
+        """A transient `rev-list` failure (lock contention, a racing fetch
+        from a sibling worktree of the same repo) must never be conflated
+        with "genuinely zero commits ahead" -- that conflation previously
+        let an actively-WIP branch with prior commit history fall into the
+        squash-merge reflog heuristic and misreport COMPLETED, flapping the
+        Worktree Manager between MERGED and WIP with no real state change.
+        A resolvable merge-base means this isn't ORPHAN either; the honest
+        answer is UNKNOWN, re-resolved by a later, uncontended pass."""
+        def responses(args):
+            if args[:1] == ("status",):
+                return types.SimpleNamespace(
+                    returncode=0, stdout="", stderr="")
+            if args[:1] == ("rev-list",):
+                return types.SimpleNamespace(
+                    returncode=128, stdout="", stderr="fatal: lock contention")
+            if args[:1] == ("merge-base",):
+                return types.SimpleNamespace(
+                    returncode=0, stdout="deadbeef\n", stderr="")
+            raise AssertionError(f"unexpected git call: {args}")
+
+        info, calls = self._run(monkeypatch, responses)
+
+        assert info.state == WorktreeState.UNKNOWN
+        assert [call[0] for call in calls] == [
+            "status", "rev-list", "merge-base",
+        ]
+
     def test_patch_equivalent_ahead_branch_never_needs_merge_base(
         self, monkeypatch,
     ):

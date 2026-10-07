@@ -495,6 +495,7 @@ def _classify_git_state(
         ahead = int(ahead_s) if counts_ok else 0
         behind = int(behind_s) if counts_ok else 0
     except (AttributeError, TypeError, ValueError):
+        counts_ok = False
         ahead = behind = 0
 
     merge_base: str | None = None
@@ -511,6 +512,27 @@ def _classify_git_state(
     if (not counts_ok or (ahead > 0 and behind > 0)) and _merge_base() is None:
         return WorktreeStateInfo(
             state=WorktreeState.ORPHAN, dirty=dirty_count,
+            current_branch=actual_branch, branch_drift=drift,
+            fetch_requested=fetch, fetch_failed=fetch_failed,
+        )
+
+    if not counts_ok:
+        # `rev-list` itself failed (lock contention, a slow pack read, a
+        # racing fetch from a sibling worktree of the same repo -- all
+        # sharing one `.git`) but a merge-base DOES exist, so this isn't a
+        # genuinely unrelated-history ORPHAN either. `ahead`/`behind` above
+        # were coerced to 0 only because the count couldn't be read -- that
+        # is NOT the same fact as "genuinely zero commits ahead". Falling
+        # through previously conflated the two, landing in the `ahead == 0`
+        # squash-merge reflog heuristic below, which reports COMPLETED for
+        # ANY branch with prior commit history (true of virtually every real
+        # WIP branch) whenever this one git call transiently failed --
+        # observed live as the Worktree Manager flapping MERGED <-> WIP with
+        # no actual change underneath. Report UNKNOWN instead, exactly like
+        # the top-level timeout fallback in `classify_worktree`; a later,
+        # uncontended pass re-resolves it correctly.
+        return WorktreeStateInfo(
+            state=WorktreeState.UNKNOWN, dirty=dirty_count,
             current_branch=actual_branch, branch_drift=drift,
             fetch_requested=fetch, fetch_failed=fetch_failed,
         )
