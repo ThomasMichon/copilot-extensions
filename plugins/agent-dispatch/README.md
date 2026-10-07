@@ -1958,7 +1958,12 @@ in seconds; `0` disables), `AGENT_DISPATCH_RUN_DIR` /
 (client override), `AGENT_DISPATCH_SHARED_URL` /
 `AGENT_DISPATCH_SHARED_TOKEN` / `AGENT_DISPATCH_SHARED_CONTROL_TOKEN` (opt-in
 shared coordinator), `AGENT_DISPATCH_NO_AUTOSTART` (disable lazy local
-coordinator start), and `AGENT_DISPATCH_ENFORCE_REGISTERED_REPOS` (opt-in,
+coordinator start), `AGENT_DISPATCH_HTTP_CONNECT_RETRIES` (client-side;
+connection-refused/reset retries every `DispatchClient` request absorbs on
+its default transport before raising -- default `2`; covers the brief window
+between a CLI command's own liveness probe and its next request, e.g. a
+self-retire-on-supersession coordinator cutover in between), and
+`AGENT_DISPATCH_ENFORCE_REGISTERED_REPOS` (opt-in,
 default off: refuse task creation against a repo lane with no registered
 `repo`-kind registrar pointer alias -- a repo with no pointer has no
 coordinator/supervisor of its own watching it, so a task queued against it
