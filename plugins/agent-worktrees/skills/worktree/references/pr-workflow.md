@@ -776,8 +776,13 @@ converging. After **each** new review from the bound reviewer lands on your
 head, and before you start fixing it, run:
 
 ```
-<agent-worktrees catalog argv[0]> pr rounds [<owner/name> <n> | <n> | <worktree-id>] --json
+<agent-worktrees catalog argv[0]> pr rounds [<owner/name> <n> | <n> | <worktree-id>] [--reviewer <login>] --json
 ```
+
+`--reviewer` defaults to GitHub Copilot's review account. When the repo's
+bound reviewer is anything else (`pr.reviewer: agent:<name>` or `external`),
+pass that reviewer's account login: otherwise its reviews aren't counted and
+every read shows zero rounds.
 
 Act on its exit code:
 
@@ -806,9 +811,11 @@ Act on its exit code:
   round) and the remaining findings. Resume only on the operator's answer.
   The answer steers the review loop only: it never waives the repo's merge
   gates (its verdict rules, required approvals, `pr bar`).
-- **12** (`unknown`) -- the reviews couldn't be read, or the PR moved while
-  they were read. Re-run it; never treat `unknown` as permission to continue
-  or as a stop.
+- **12** (`unknown`) -- never permission to continue, and never a stop. Read
+  its `reason`: a read that moved under it (the head moved, the PR changed)
+  is transient, so re-run once. Anything else (the reviews couldn't be read,
+  a provider without this read, the same `unknown` again) is not going to
+  clear by retrying: stop and escalate as for a plateau, with the reason.
 
 `--max-rounds` and `--plateau-passes` override the defaults (6 and 3) when the
 operator sets a different budget for this PR.
