@@ -315,7 +315,8 @@ def test_pull_forward_targets_the_base_a_pr_merged_into(env, provider):
     config = SimpleNamespace(default_repo=_repo())
 
     rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)
-    assert rec["pull_forward_argv"] == ["git", "-C", str(env.clone), "rebase", "refs/remotes/origin/dev"]
+    assert rec["pull_forward_argv"] == ["git", "-C", str(env.clone), "rebase", "--onto",
+                                        "refs/remotes/origin/dev", head]
     assert rec["pull_forward_command"] == " ".join(shlex.quote(a) for a in rec["pull_forward_argv"])
     assert rec["pull_forward_base"] == "origin/dev" and rec["behind"] == 2
     assert "not the configured default branch origin/main" in rec["next_action"]
@@ -323,7 +324,7 @@ def test_pull_forward_targets_the_base_a_pr_merged_into(env, provider):
     provider.base_ref = "dev;id"  # a legal branch name that is shell syntax
     rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)
     assert rec["pull_forward_command"] == ""
-    assert rec["pull_forward_argv"][-1] == "refs/remotes/origin/dev;id"
+    assert rec["pull_forward_argv"][-2] == "refs/remotes/origin/dev;id"
     assert "dev;id" not in rec["next_action"] and "pull_forward_argv" in rec["next_action"]
 
     provider.base_ref = "main"
@@ -333,3 +334,56 @@ def test_pull_forward_targets_the_base_a_pr_merged_into(env, provider):
     assert "pull_forward_base" not in (pr_pull_forward.pull_forward_recommendation(
         record, active, config) or {})
     assert provider.calls == calls  # not live: the provider isn't asked
+
+
+def test_the_pull_forward_advice_runs_cleanly_past_a_squash_that_a_plain_rebase_conflicts_on(env, provider):
+    """Two PR commits edit the same line; the PR squash-merges into dev, which then
+    edits that line again; one commit is made locally after the merge. Replaying the
+    PR's own commits would conflict although all of them landed: the advice replays
+    only the post-merge commit, and actually running it succeeds."""
+    from agent_worktrees import pr_pull_forward
+    from agent_worktrees.tracking import PRRecord
+
+    first = _commit(env.clone, "a.txt", SQUASHED.replace("ONE", "one!"), "first")
+    head = _commit(env.clone, "a.txt", SQUASHED.replace("ONE", "ONE!"), "second")
+    assert first != head
+    _squash_onto(env.seed, "dev", SQUASHED.replace("ONE", "ONE!"))
+    _commit(env.seed, "a.txt", SQUASHED.replace("ONE", "ONE!!"), "a later dev edit to the same line")
+    _git("push", "-q", "origin", "dev", cwd=env.seed)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    _commit(env.clone, "post.txt", "made after the merge\n", "post-merge work")
+    provider.head_sha, provider.base_ref = head, "dev"
+    record = SimpleNamespace(worktree_path=str(env.clone), repo="")
+    active = PRRecord(state="merged", number=7, repo="owner/repo", provider="github")
+
+    rec = pr_pull_forward.pull_forward_recommendation(
+        record, active, SimpleNamespace(default_repo=_repo()), live=True)
+    done = subprocess.run(rec["pull_forward_argv"], capture_output=True, text=True)
+
+    assert done.returncode == 0, done.stderr
+    assert (env.clone / "post.txt").exists()
+    assert (env.clone / "a.txt").read_text().startswith("ONE!!")
+    assert subprocess.run(["git", "merge-base", "--is-ancestor", "origin/dev", "HEAD"],
+                          cwd=str(env.clone)).returncode == 0
+
+
+def test_no_command_is_generated_without_a_verified_merge_boundary(env, provider):
+    from agent_worktrees import pr_pull_forward
+    from agent_worktrees.tracking import PRRecord
+
+    _merge_into_dev_and_pull_forward(env)
+    provider.head_sha, provider.base_ref = "f" * 40, "dev"  # not in this checkout's history
+    _git("reset", "-q", "--hard", "HEAD~1", cwd=env.clone)
+    rec = pr_pull_forward.pull_forward_recommendation(
+        SimpleNamespace(worktree_path=str(env.clone), repo=""),
+        PRRecord(state="merged", number=7, repo="owner/repo", provider="github"),
+        SimpleNamespace(default_repo=_repo()), live=True)
+    assert rec["pull_forward_argv"] == [] and rec["pull_forward_command"] == ""
+    assert "none is generated" in rec["next_action"]
+
+
+def test_explain_with_an_empty_worktree_path_reads_the_anchor(env, provider):
+    """A tracking record can carry an empty path: the report comes from the anchor
+    instead of failing on a git call with an empty working directory."""
+    report = finalize_landing.explain(_record(env), _repo(), "", str(env.clone))
+    assert report["content_ref"] and report["bases"][0] == "origin/main"

@@ -107,7 +107,7 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
     from pathlib import Path
 
     from . import finalize_open_pr_gate as fopg
-    cwd = worktree_path if Path(worktree_path).exists() else anchor
+    cwd = worktree_path if worktree_path and Path(worktree_path).exists() else anchor
     pr = getattr(record, "pr", None)
     content_ref = fopg.resolve_precondition_ref(
         getattr(pr, "branch", "") or "", record.worktree_id, worktree_path, cwd=cwd)

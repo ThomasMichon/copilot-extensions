@@ -286,7 +286,8 @@ def _explain_landing(worktree_id: str, config, use_json: bool) -> int:
         output.err(msg)
         return 1
     repo = config.default_repo
-    report = finalize_landing.explain(record, repo, record.worktree_path, repo.anchor)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
+    report = finalize_landing.explain(record, repo, worktree_path, repo.anchor)
     if use_json:
         output._json_output(report)
         return 0

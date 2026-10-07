@@ -22,13 +22,20 @@ from .tracking import PRRecord
 _SAFE_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 
 
-def _pr_base(active: PRRecord, repo) -> str:
-    """The branch *active* merged into, from the provider; "" when unknown."""
+def _pr_base_and_head(active: PRRecord, repo) -> tuple[str, str]:
+    """The branch *active* merged into and its merged head, from one provider
+    read; ``("", "")`` when unknown, and no head unless the provider says merged."""
     from . import finalize_open_pr_gate as fopg
     try:
-        return fopg.pr_base_ref(active, repo)
+        pulled = fopg.pull_for(active, repo)
     except Exception:
-        return ""
+        pulled = None
+    if not pulled:
+        return "", ""
+    result = pulled[4]
+    base = (getattr(result, "base_ref", "") or "").strip().removeprefix("refs/heads/")
+    merged = bool(getattr(result, "merged", False)) or (getattr(result, "state", "") or "").lower() == "merged"
+    return base, (getattr(result, "head_sha", "") or "").strip() if merged else ""
 
 
 def pull_forward_recommendation(
@@ -47,11 +54,15 @@ def pull_forward_recommendation(
     upstream fetch aside): any git hiccup falls back to recommending, since the
     agent's ``git sync`` is a safe no-op when already current.
 
-    With ``live``, the provider is asked which branch the PR merged into; when
-    that isn't the configured default branch, the advice targets it instead
-    (``git -C <worktree> rebase refs/remotes/<remote>/<base>``, also as structured
-    ``pull_forward_argv``), with ``pull_forward_base`` naming it. A base name that
-    isn't plainly shell-safe gets no command text, only the argv.
+    With ``live``, the provider is asked which branch the PR merged into, and its
+    merged head; when that isn't the configured default branch, the advice targets
+    it instead: ``git -C <worktree> rebase --onto refs/remotes/<remote>/<base>
+    <merged head>`` (also as structured ``pull_forward_argv``), which replays only
+    the commits made after the merge -- replaying the PR's own commits onto their
+    squash can conflict although all of it landed -- and simply moves the branch
+    to the base when there are none. Offered only when the merged head is a
+    verified ancestor of the worktree's HEAD; ``pull_forward_base`` names the base.
+    A base name that isn't plainly shell-safe gets no command text, only the argv.
     """
     if active.state != "merged":
         return None
@@ -60,13 +71,16 @@ def pull_forward_recommendation(
         return None
     repo = config.default_repo
     remote = repo.remote
-    base = _pr_base(active, repo) if live else ""
+    base, merged_head = _pr_base_and_head(active, repo) if live else ("", "")
     other_base = bool(base) and base != repo.default_branch
     upstream = f"{remote}/{base if other_base else repo.default_branch}"
-    # A provider-supplied name never reaches executable text unquoted, and the advice
-    # runs in the tracked worktree, not wherever the caller happens to be.
-    argv = ["git", "-C", path, "rebase", f"refs/remotes/{upstream}"] if other_base else []
-    command = (" ".join(shlex.quote(a) for a in argv) if _SAFE_BRANCH.fullmatch(base) else "") \
+    # A provider-supplied name never reaches executable text unquoted, the advice runs
+    # in the tracked worktree, and only commits after the verified merge boundary replay.
+    bounded = bool(merged_head) and git_ops.git(
+        "merge-base", "--is-ancestor", merged_head, "HEAD", cwd=path, check=False).returncode == 0
+    argv = ["git", "-C", path, "rebase", "--onto", f"refs/remotes/{upstream}", merged_head] \
+        if other_base and bounded else []
+    command = (" ".join(shlex.quote(a) for a in argv) if argv and _SAFE_BRANCH.fullmatch(base) else "") \
         if other_base else "agent-worktrees git sync"
     # Refresh the upstream ref so "behind" reflects the just-landed merge.
     if git_ops.has_remote(remote, cwd=path):
@@ -104,7 +118,11 @@ def pull_forward_recommendation(
     if behind:
         rec["behind"] = behind
     # An unsafe base name never appears inside advice people paste: only in the data fields.
-    shown, onto = (command, upstream) if command else ("the structured pull_forward_argv", "the PR's base branch")
+    safe = not other_base or bool(_SAFE_BRANCH.fullmatch(base))
+    onto = upstream if safe else "the PR's base branch"
+    shown = command or ("the structured pull_forward_argv" if argv else
+                        "a rebase that replays only the commits made after the merge "
+                        "(the merged head isn't a verified ancestor of HEAD here, so none is generated)")
     why = (f" It merged into {onto}, not the configured default branch "
            f"{remote}/{repo.default_branch} that `agent-worktrees git sync` rebases onto."
            if other_base else "")
