@@ -265,6 +265,11 @@ be discarded (or the cancel signature *persists* across sends). See the
 # Check context window usage for a session
 <agent-bridge catalog argv[0]> session-usage <session-id>
 
+# What sessions reported spending (premium requests, AIU; tokens once shut down),
+# read from their own transcripts. Unreported reads "not reported", never 0; the
+# total sums only the reports and says how many sessions they cover.
+<agent-bridge catalog argv[0]> usage <session|agent> [<session|agent> ...] [--json]
+
 # Compact one-screen status: state, in-flight tool + elapsed, and how far
 # behind your delivery cursor is (head/acked) -- without dumping the feed.
 <agent-bridge catalog argv[0]> status <session-id>
