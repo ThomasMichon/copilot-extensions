@@ -1,0 +1,9 @@
+{
+  "comment": "PR attribution: encrypted identity marker (enc=<token>) -- a third, OneDrive-keyed AES-256-GCM layer alongside codename=/root=, via a new agent_worktrees.identity_marker module",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -520,6 +520,12 @@ ssh-ready machine is asked over SSH whether its own tracking store has that
 codename. A match on a different machine still fails closed -- it reports the
 resolving machine and worktree id rather than attempting a remote launch; SSH
 there directly (or use a future agent-bridge dispatch) to actually resume it.
+The marker may also carry a third, independent `enc=<token>` field --
+an AES-256-GCM-encrypted full identity, decryptable only by the holder of a
+shared symmetric key, emitted automatically whenever one is configured (see
+`docs/architecture.md`'s *PR Attribution & Codenames* section for key
+custody and the decode command). Opaque ciphertext to anyone else, so it
+needs no additional config to appear.
 (This is the *author's* path back to their own worktree; a maintainer or
 reviewer tracing a PR they didn't open should instead read
 [pr-attribution.md](pr-attribution.md), written from that side.)

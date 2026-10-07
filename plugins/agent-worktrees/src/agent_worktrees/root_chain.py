@@ -567,19 +567,45 @@ def root_codename_for_marker(record: tracking.WorktreeRecord, config) -> str | N
         return None
 
 
+def _identity_field_for_marker(
+    record: tracking.WorktreeRecord | None, config, *, head: str = "",
+) -> str | None:
+    """Best-effort ``enc=<identity>`` field for a publish site -- never
+    raises; a resolution failure (missing key, missing ``cryptography``,
+    bad record) just omits the field, matching ``root=``'s own degrade
+    shape. *record* may be ``None`` (an untracked worktree), in which case
+    there is nothing to encrypt.
+    """
+    if record is None:
+        return None
+    try:
+        from . import identity_marker
+
+        project = getattr(config, "repo_name", None) or ""
+        return identity_marker.identity_marker_field_for_record(
+            record, project=project, head=head,
+        )
+    except Exception:
+        return None
+
+
 def build_codename_marker_with_root(
-    codename: str, record: tracking.WorktreeRecord, config,
+    codename: str, record: tracking.WorktreeRecord, config, head: str = "",
 ) -> str:
     """One-call convenience for a PR-marker publish site: builds the
     ``codename`` marker augmented with a best-effort ``root=<codename>``
-    field from :func:`root_codename_for_marker`. Never raises -- a
-    resolution failure just omits the ``root`` field, matching the marker
-    shape from before this field existed.
+    field from :func:`root_codename_for_marker` and a best-effort
+    ``enc=<identity>`` field from
+    :func:`agent_worktrees.identity_marker.identity_marker_field_for_record`.
+    Never raises -- a resolution failure just omits the affected field,
+    matching the marker shape from before that field existed.
     """
     from .providers import attribution as attr
 
     return attr.build_codename_marker(
-        codename, root=root_codename_for_marker(record, config),
+        codename,
+        root=root_codename_for_marker(record, config),
+        identity=_identity_field_for_marker(record, config, head=head),
     )
 
 
@@ -589,22 +615,27 @@ def compose_codename_body(
     marker_published: bool,
     record: tracking.WorktreeRecord | None,
     config,
+    *,
+    head: str = "",
 ) -> str:
     """Compose a PR body's ``codename``-mode source marker in one call.
 
-    Collapses "build+append the (root-augmented) codename marker when
-    publishable, else strip any stale marker" into a single call, so a
-    publish-site caller (``pr_ops._open_via_provider``) needs no local
-    multi-line ternary. Never leaves a stale/caller-supplied source marker
-    in place when publication is skipped -- it could still carry raw
+    Collapses "build+append the (root- and identity-augmented) codename
+    marker when publishable, else strip any stale marker" into a single
+    call, so a publish-site caller (``pr_ops._open_via_provider``) needs no
+    local multi-line ternary. Never leaves a stale/caller-supplied source
+    marker in place when publication is skipped -- it could still carry raw
     identifiers from some other source (a copy-pasted body, an older
     template). *record* may be ``None`` (an untracked worktree): publication
     is then never requested by the caller, but this degrades safely either
-    way by treating it the same as "no root to resolve".
+    way by treating it the same as "no root/identity to resolve".
     """
     from .providers import attribution as attr
 
     if not marker_published:
         return attr.strip_marker(body or "")
     root = root_codename_for_marker(record, config) if record is not None else None
-    return attr.append_marker(body or "", attr.build_codename_marker(codename, root=root))
+    identity = _identity_field_for_marker(record, config, head=head)
+    return attr.append_marker(
+        body or "", attr.build_codename_marker(codename, root=root, identity=identity),
+    )

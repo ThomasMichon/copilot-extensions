@@ -23,6 +23,22 @@ def _clear_project_configs():
     _PROJECT_CONFIGS.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_identity_key_by_default(monkeypatch):
+    """Force "no identity key configured" for every test in this module
+    unless it explicitly overrides ``identity_marker.load_identity_key``
+    itself. Without this, a test run on a machine that already has a real
+    OneDrive-rooted (or env-var-overridden) identity key provisioned would
+    non-deterministically gain an ``enc=`` field these marker-composition
+    tests don't expect -- the whole point of
+    ``TestIdentityMarkerIntegration`` below is to test that field
+    deliberately, with its own explicit key.
+    """
+    monkeypatch.setattr(
+        "agent_worktrees.identity_marker.load_identity_key", lambda: None,
+    )
+
+
 def _cfg(machine="anomalous-potato", *, source_attribution_configured=False,
          pr_enabled=True, wordlist_path="", wordlist_path_configured=False):
     return types.SimpleNamespace(
@@ -751,3 +767,77 @@ class TestMarkerComposition:
         )
         assert "codename=harbor-lattice" in result
         assert "root=amber-thicket" in result
+
+
+class TestIdentityMarkerIntegration:
+    """``enc=<identity>`` is a THIRD, independent layer (effort
+    ``pr-attribution-codenames``, encrypted-identity-marker slice) -- these
+    tests use a real (ephemeral, test-only) key via
+    ``identity_marker.load_identity_key`` so the full encrypt round-trip
+    through ``build_codename_marker_with_root``/``compose_codename_body``
+    is exercised, not just the marker-shape plumbing.
+    """
+
+    @pytest.fixture
+    def _with_identity_key(self, monkeypatch):
+        pytest.importorskip("cryptography")
+        from agent_worktrees import identity_marker
+
+        key = b"\x11" * identity_marker.KEY_BYTES
+        monkeypatch.setattr(
+            "agent_worktrees.identity_marker.load_identity_key", lambda: key,
+        )
+        return key
+
+    def test_build_codename_marker_with_root_includes_identity_field(
+        self, tmp_path, monkeypatch, _with_identity_key,
+    ):
+        from agent_worktrees import identity_marker
+
+        child = _seed(tmp_path, monkeypatch, "ext", "wt-child", machine="my-machine")
+        config = types.SimpleNamespace(repo_name="ext")
+        marker = root_chain.build_codename_marker_with_root(
+            "harbor-lattice", child, config, "deadbeef",
+        )
+        assert "codename=harbor-lattice" in marker
+        parsed = attribution_parse_marker(marker)
+        assert "enc" in parsed
+        payload = identity_marker.decrypt_identity_payload(
+            parsed["enc"], key=_with_identity_key,
+        )
+        assert payload["worktree_id"] == "wt-child"
+        assert payload["machine"] == "my-machine"
+        assert payload["head"] == "deadbeef"
+        assert payload["project"] == "ext"
+
+    def test_compose_codename_body_includes_identity_field(
+        self, tmp_path, monkeypatch, _with_identity_key,
+    ):
+        child = _seed(tmp_path, monkeypatch, "ext", "wt-child")
+        config = types.SimpleNamespace(repo_name="ext")
+        result = root_chain.compose_codename_body(
+            "hello", "harbor-lattice", True, child, config,
+        )
+        assert "enc=" in result
+
+    def test_no_identity_field_without_a_key(self, tmp_path, monkeypatch):
+        child = _seed(tmp_path, monkeypatch, "ext", "wt-child")
+        config = types.SimpleNamespace(repo_name="ext")
+        marker = root_chain.build_codename_marker_with_root(
+            "harbor-lattice", child, config,
+        )
+        assert "enc=" not in marker
+
+    def test_no_identity_field_for_untracked_worktree(self, _with_identity_key):
+        result = root_chain.compose_codename_body(
+            "hello", "harbor-lattice", True, None, None,
+        )
+        assert "enc=" not in result
+
+
+def attribution_parse_marker(marker: str) -> dict[str, str]:
+    from agent_worktrees.providers import attribution
+
+    parsed = attribution.parse_marker(marker)
+    assert parsed is not None
+    return parsed

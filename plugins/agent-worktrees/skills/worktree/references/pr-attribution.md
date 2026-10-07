@@ -34,7 +34,12 @@ repo's `pr.source_attribution` config key. Its shape depends on the mode:
   whole chain resolves safely (see `docs/architecture.md`'s *PR
   Attribution & Codenames* section for the full detail: same-machine-only
   resolution, each root's own provenance gate, and the `false` anonymous
-  opt-out always withholding a root's codename too).
+  opt-out always withholding a root's codename too). A third, independent
+  `enc=<token>` field may also be present: an AES-256-GCM-encrypted blob
+  decryptable only by the holder of a shared symmetric identity key (see
+  *Decrypting the `enc=` field* below) -- opaque ciphertext to anyone else,
+  so it is emitted automatically whenever that key is configured, on any
+  repo, regardless of `pr.source_attribution` mode.
 - **`true` (raw marker, closed-circuit repos only).** Embeds the full raw
   worktree id, machine name, session id, and head SHA directly. Never used
   on a public repo.
@@ -73,6 +78,29 @@ resuming from there means SSHing to that machine directly (a future
 inter-agent dispatch mechanism may automate this further). This is
 deliberate: a cross-machine resolve should never silently open a live
 session on a machine you didn't expect.
+
+## Decrypting the `enc=` field
+
+If the marker carries an `enc=<token>` field, it is a self-contained
+AES-256-GCM-encrypted blob of the FULL raw identity (worktree id, machine,
+session, head SHA, project, timestamp) -- the same information the raw
+`true` marker carries in plaintext, just encrypted. Only the holder of the
+matching symmetric identity key can decrypt it; no SSH scan, no tracking
+store, and no network access needed:
+
+```bash
+python -m agent_worktrees.identity_marker decode "<token>"
+```
+
+The key resolves from `AGENT_WORKTREES_IDENTITY_KEY` (an explicit path) or,
+by default, a OneDrive-rooted location (`<OneDrive root>/Apps/agent-worktrees/identity.key`)
+so the SAME key file works from any of the key holder's machines --
+provision one with `python -m agent_worktrees.identity_marker generate`.
+This is a lighter-weight, lower-assurance mechanism than a real secrets
+vault (a plain file, not machine-bound, not MFA-gated) -- a convenience for
+low-stakes reverse lookup, not a security boundary. Without a configured
+key, the `enc=` field is simply absent from every marker; nothing else
+about the `codename=`/`root=` fields changes.
 
 ## When there's no marker at all
 
