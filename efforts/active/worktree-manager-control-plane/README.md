@@ -1265,7 +1265,29 @@ claiming discipline alone.
   genuinely terminates it, one confirming a stale/wrong token leaves it
   alive, both with explicit cleanup in either outcome. Expanded
   `test_kill_pid_identity.py` to 15 tests. Full targeted suite re-run
-  after the split: 57 passed, 20 skipped.
+  after the split: 57 passed, 20 skipped. A FOURTH review round found 2
+  more real findings: (j) the Windows census still ran AFTER the root
+  kill in one path, leaving a window where the root's own pid, freed by
+  the kill, could be reused before the census ran, misattributing an
+  unrelated replacement's children as descendants -- reordered so the
+  census always runs FIRST (while the root is still guaranteed alive and
+  verified), with the root kill following; a bare numeric
+  parent-pid-match also couldn't detect the DEEPER case of *the child
+  pid itself* being reused between census and kill (even if the
+  replacement happened to share the same parent by coincidence) -- added
+  a cheap generation fingerprint using WMI's own `CreationDate`, captured
+  for every pid in the SAME bulk census query, and re-verified alongside
+  ancestry immediately before each descendant's kill (natural process
+  reparenting after an ancestor's death also fails this check, which is
+  the conservative/correct outcome: skip rather than risk killing a
+  reparented process); (k) the two new real-process tests ran
+  unconditionally, but `_kill_pid` legitimately supports platforms with
+  no identity-bound primitive (macOS/BSD, or a Linux kernel without
+  pidfd) where `process_start_time`/`terminate_pid_if_identity` return
+  `None`/unavailable by design -- gated both tests on
+  `_identity_termination_available()` so they skip (not fail) on those
+  platforms. Expanded `test_kill_pid_identity.py` to 17 tests. Full
+  targeted suite re-run: 59 passed, 20 skipped.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR

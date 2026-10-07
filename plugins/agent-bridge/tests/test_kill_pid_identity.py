@@ -19,6 +19,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 import agent_bridge._kill_pid_identity as m
 from zdd import diagnostics
 
@@ -216,11 +218,13 @@ def test_kill_pid_windows_terminates_root_and_live_descendants(monkeypatch):
     monkeypatch.setattr(
         m,
         "_enumerate_descendant_pids_windows",
-        lambda pid: ([(5001, 4242), (5002, 4242)], True),
+        lambda pid: ([(5001, 4242, "c1"), (5002, 4242, "c2")], True),
     )
     verified = {5001: "aaa", 5002: "bbb"}
     monkeypatch.setattr(
-        m, "_verify_descendant_identity_windows", lambda child, parent: verified.get(child)
+        m,
+        "_verify_descendant_identity_windows",
+        lambda child, parent, creation: verified.get(child),
     )
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
     terminated = []
@@ -241,6 +245,32 @@ def test_kill_pid_windows_terminates_root_and_live_descendants(monkeypatch):
     assert (5001, "aaa") in terminated
     assert (5002, "bbb") in terminated
     assert taskkill_called == []  # never a bare taskkill once identity-bound succeeded
+
+
+def test_kill_pid_windows_census_runs_before_root_kill(monkeypatch):
+    """The descendant census must run BEFORE the root is killed -- never
+    after -- so the root's own pid (still guaranteed alive and verified at
+    census time) cannot be freed and reused by an unrelated process in the
+    window between killing it and enumerating its children."""
+    monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda pid: True)
+    monkeypatch.setattr(m.sys, "platform", "win32")
+    order: list[str] = []
+    monkeypatch.setattr(
+        m,
+        "_enumerate_descendant_pids_windows",
+        lambda pid: (order.append("census") or [], True),
+    )
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
+    monkeypatch.setattr(
+        diagnostics,
+        "terminate_pid_if_identity",
+        lambda pid, start_time: order.append("root-kill")
+        or {"killed": True, "identity_verified": True, "method": "windows-verified-handle"},
+    )
+
+    m._kill_pid(4242)
+
+    assert order == ["census", "root-kill"]
 
 
 def test_kill_pid_windows_census_failure_still_kills_root_and_warns(monkeypatch, capsys):
@@ -266,16 +296,17 @@ def test_kill_pid_windows_census_failure_still_kills_root_and_warns(monkeypatch,
 
 
 def test_verify_descendant_identity_windows_captures_token_before_ancestry(monkeypatch):
-    """The identity token must be captured FIRST, before the ancestry
-    re-check -- mirroring ``_kill_pid``'s own root-level ordering -- so a
-    pid reused during the (slower) ancestry check is still caught by
-    ``terminate_pid_if_identity``'s own final re-verification at the kill,
-    rather than this function instead capturing a replacement's token."""
+    """The identity token must be captured FIRST, before the ancestry/
+    generation re-check -- mirroring ``_kill_pid``'s own root-level
+    ordering -- so a pid reused during the (slower) WMI lookup is still
+    caught by ``terminate_pid_if_identity``'s own final re-verification at
+    the kill, rather than this function instead capturing a replacement's
+    token."""
     import subprocess as sp
 
     class _Result:
         returncode = 0
-        stdout = "4242"  # matches recorded_parent_pid
+        stdout = "4242\tC1"  # matches recorded parent + creation date
 
     order: list[str] = []
     monkeypatch.setattr(
@@ -283,7 +314,7 @@ def test_verify_descendant_identity_windows_captures_token_before_ancestry(monke
     )
     monkeypatch.setattr(sp, "run", lambda *a, **k: order.append("ancestry") or _Result())
 
-    result = m._verify_descendant_identity_windows(5001, 4242)
+    result = m._verify_descendant_identity_windows(5001, 4242, "C1")
 
     assert result == "zzz"
     assert order == ["token", "ancestry"]
@@ -292,27 +323,52 @@ def test_verify_descendant_identity_windows_captures_token_before_ancestry(monke
 def test_verify_descendant_identity_windows_rejects_parent_mismatch(monkeypatch):
     """A census-recorded ancestry relationship that no longer holds at
     re-check time (the child's current parent differs, e.g. the pid was
-    reused) must be rejected -- the already-captured token is discarded,
-    never returned to the caller for use in a kill."""
+    reused, or an ancestor died and Windows reparented it) must be
+    rejected -- the already-captured token is discarded, never returned to
+    the caller for use in a kill."""
     import subprocess as sp
 
     class _Result:
         returncode = 0
-        stdout = "9999"  # a different parent than recorded
+        stdout = "9999\tC1"  # a different parent than recorded
 
     monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
 
-    result = m._verify_descendant_identity_windows(5001, 4242)
+    result = m._verify_descendant_identity_windows(5001, 4242, "C1")
 
     assert result is None
 
 
-def test_kill_pid_tree_windows_skips_descendants_when_root_identity_fails(monkeypatch):
-    """If the root's own identity verification fails (a reused pid), the
-    census -- taken from that same, now-wrong pid -- could describe an
-    unrelated replacement process's children. Descendant cleanup must be
-    skipped entirely rather than killing them anyway."""
+def test_verify_descendant_identity_windows_rejects_generation_mismatch(monkeypatch):
+    """A matching numeric parent pid is NOT sufficient on its own: if
+    *child_pid* was reused by an unrelated process between the census and
+    now, its current WMI ``CreationDate`` will differ from the
+    census-captured one even when the replacement happens to share the
+    same parent pid by coincidence -- this generation fingerprint re-check
+    is what actually closes that gap."""
+    import subprocess as sp
+
+    class _Result:
+        returncode = 0
+        stdout = "4242\tC2"  # parent matches, but creation date does not
+
+    monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
+
+    result = m._verify_descendant_identity_windows(5001, 4242, "C1")
+
+    assert result is None
+
+
+def test_kill_pid_tree_windows_skips_descendant_termination_when_root_identity_fails(
+    monkeypatch,
+):
+    """If the root's own identity verification fails (a reused pid), no
+    descendant must be terminated -- even though the census (which now
+    runs BEFORE the root kill, precisely to avoid being fooled by the
+    root's own pid being freed and reused) did complete and return
+    entries."""
     monkeypatch.setattr(
         diagnostics,
         "terminate_pid_if_identity",
@@ -322,14 +378,19 @@ def test_kill_pid_tree_windows_skips_descendants_when_root_identity_fails(monkey
             "method": "windows-handle-identity-mismatch",
         },
     )
-    census_called = []
     monkeypatch.setattr(
-        m, "_enumerate_descendant_pids_windows", lambda pid: census_called.append(pid) or ([], True)
+        m, "_enumerate_descendant_pids_windows", lambda pid: ([(5001, 4242, "c1")], True)
+    )
+    verify_called = []
+    monkeypatch.setattr(
+        m,
+        "_verify_descendant_identity_windows",
+        lambda child, parent, creation: verify_called.append(child) or "zzz",
     )
 
     m._kill_pid_tree_windows_if_identity(4242, "stale-token")
 
-    assert census_called == []  # census never even attempted once root verification failed
+    assert verify_called == []  # no descendant identity check, let alone a kill
 
 
 def _spawn_sleeper() -> subprocess.Popen:
@@ -343,6 +404,18 @@ def _spawn_sleeper() -> subprocess.Popen:
     )
 
 
+_IDENTITY_TERMINATION_UNAVAILABLE_REASON = (
+    "no identity-bound termination primitive on this platform (e.g. "
+    "macOS/BSD, or a Linux kernel without pidfd support) -- "
+    "terminate_pid_if_identity/process_start_time intentionally return "
+    "None/unavailable there, which these direct-primitive tests would "
+    "otherwise misreport as a safety failure"
+)
+
+
+@pytest.mark.skipif(
+    not m._identity_termination_available(), reason=_IDENTITY_TERMINATION_UNAVAILABLE_REASON
+)
 def test_terminate_pid_if_identity_kills_a_real_process_with_matching_token():
     """Direct, unmocked exercise of the actual OS-bound termination
     primitive: a real child process, terminated through
@@ -365,6 +438,9 @@ def test_terminate_pid_if_identity_kills_a_real_process_with_matching_token():
             proc.wait(timeout=10)
 
 
+@pytest.mark.skipif(
+    not m._identity_termination_available(), reason=_IDENTITY_TERMINATION_UNAVAILABLE_REASON
+)
 def test_terminate_pid_if_identity_leaves_a_real_process_alive_with_stale_token():
     """A stale/wrong start-time token (simulating pid reuse: the token
     belongs to a different process generation than the live one) must
