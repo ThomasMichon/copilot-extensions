@@ -99,48 +99,60 @@ class CodespaceConfigSource:
         return self._config
 
     def _fetch_gh_config(self) -> str:
+        from .dial_log import Dial, account_of
+
         args = ["gh", "codespace", "ssh", "--config", "-c", self._codespace_name]
         last_error: Exception | None = None
+        account = account_of(self._gh_env)
         for attempt, timeout in enumerate(_FETCH_TIMEOUTS, 1):
-            try:
-                result = subprocess.run(
-                    args, capture_output=True, text=True, timeout=timeout,
-                    creationflags=_creation_flags(), env=self._gh_env,
-                )
-            except FileNotFoundError:
-                raise RuntimeError(
-                    "gh CLI not found. Install it: https://cli.github.com/"
-                ) from None
-            except subprocess.TimeoutExpired:
-                log.info(
-                    "gh codespace ssh --config attempt %d/%d timed out (%ds) "
-                    "for %s (CodeSpace may be starting)",
-                    attempt, len(_FETCH_TIMEOUTS), timeout, self._codespace_name,
-                )
-                last_error = RuntimeError(
-                    f"Timed out fetching SSH config for codespace "
-                    f"{self._codespace_name} after {attempt} attempt(s)."
-                )
-                continue
-            if result.returncode != 0:
-                from .manager import TRANSIENT_SSH_STDERR
-
-                stderr = (result.stderr or "").strip()
-                last_error = RuntimeError(
-                    f"gh codespace ssh --config failed (rc={result.returncode}): {stderr}"
-                )
-                # A dev-tunnel reset is retried; a genuine gh error (unknown
-                # CodeSpace, auth) fails at once.
-                if attempt < len(_FETCH_TIMEOUTS) and TRANSIENT_SSH_STDERR.search(stderr):
-                    log.info(
-                        "gh codespace ssh --config attempt %d/%d hit a transient "
-                        "tunnel error for %s; retrying: %s",
-                        attempt, len(_FETCH_TIMEOUTS), self._codespace_name, stderr[:200],
+            # One dial-log line per attempt (it can cold-start a stopped CodeSpace).
+            with Dial(self._codespace_name, "config_fetch", attempt=attempt, account=account) as dial:
+                try:
+                    result = subprocess.run(
+                        args, capture_output=True, text=True, timeout=timeout,
+                        creationflags=_creation_flags(), env=self._gh_env,
                     )
-                    time.sleep(2.0 * attempt)
+                except FileNotFoundError:
+                    dial.outcome, dial.reason = "error", "gh CLI not found"
+                    raise RuntimeError(
+                        "gh CLI not found. Install it: https://cli.github.com/"
+                    ) from None
+                except subprocess.TimeoutExpired:
+                    dial.outcome, dial.reason = "timeout", f"no answer in {timeout}s"
+                    log.info(
+                        "gh codespace ssh --config attempt %d/%d timed out (%ds) "
+                        "for %s (CodeSpace may be starting)",
+                        attempt, len(_FETCH_TIMEOUTS), timeout, self._codespace_name,
+                    )
+                    last_error = RuntimeError(
+                        f"Timed out fetching SSH config for codespace "
+                        f"{self._codespace_name} after {attempt} attempt(s)."
+                    )
                     continue
-                raise last_error
-            return result.stdout
+                if result.returncode != 0:
+                    from .manager import TRANSIENT_SSH_STDERR
+
+                    stderr = (result.stderr or "").strip()
+                    dial.stderr = stderr
+                    last_error = RuntimeError(
+                        f"gh codespace ssh --config failed (rc={result.returncode}): {stderr}"
+                    )
+                    # A dev-tunnel reset is retried; a genuine gh error (unknown
+                    # CodeSpace, auth) fails at once.
+                    if attempt < len(_FETCH_TIMEOUTS) and TRANSIENT_SSH_STDERR.search(stderr):
+                        dial.outcome, dial.reason = "transient", f"rc={result.returncode}"
+                        log.info(
+                            "gh codespace ssh --config attempt %d/%d hit a transient "
+                            "tunnel error for %s; retrying: %s",
+                            attempt, len(_FETCH_TIMEOUTS), self._codespace_name, stderr[:200],
+                        )
+                    else:
+                        dial.outcome, dial.reason = "error", f"rc={result.returncode}"
+                        raise last_error
+                else:
+                    dial.outcome = "ok"
+                    return result.stdout
+            time.sleep(2.0 * attempt)
         raise last_error  # type: ignore[misc]
 
     @staticmethod

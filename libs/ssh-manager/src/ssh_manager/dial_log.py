@@ -1,0 +1,213 @@
+"""Bounded, structured dial log: every connection attempt to a target, one line each.
+
+Observe-only telemetry for diagnosing dial storms and relay drops without
+cross-layer SSH forensics. Each layer that opens a connection -- the
+``gh codespace ssh --config`` fetch (which cold-starts a stopped CodeSpace), a
+ControlMaster start, a direct-mode exec (each one is a fresh connection), and a
+health-check reconnect -- records one JSON line per attempt:
+``{at, target, kind, outcome, elapsed_s, attempt, reason, account, stderr}``.
+
+- **Bounded.** One file per target under :func:`log_dir`, trimmed to its newest
+  :data:`KEEP_LINES` lines whenever it passes :data:`MAX_LINES` lines or
+  :data:`MAX_BYTES`, by an atomic replace under the same per-file lock writers
+  take, so concurrent writers never interleave a line or lose the trim.
+- **Redacted.** Only a short stderr tail is kept, with token-like strings and
+  authorization values replaced; the account is recorded as ``pinned`` or
+  ``ambient``, never anything derived from a credential. No command lines.
+- **Never in the way.** Recording is best-effort: a lock that can't be had
+  quickly, or any I/O error, drops that one line and never raises into the dial.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import logging
+import os
+import re
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+log = logging.getLogger("ssh-manager.dial-log")
+
+#: Overrides where the per-target logs live (default ``~/.ssh-manager/dial-log``).
+DIAL_LOG_ENV = "SSH_MANAGER_DIAL_LOG_DIR"
+MAX_LINES = 5000
+MAX_BYTES = 1024 * 1024
+KEEP_LINES = 4000
+STDERR_TAIL = 300
+LOCK_WAIT_S = 2.0
+#: Outcomes that are a connection attempt reaching (or failing to reach) the target.
+DIAL_KINDS = ("config_fetch", "control_master", "direct_exec", "reconnect")
+
+_SECRET = re.compile(
+    r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}"
+    r"|(?i:authorization:\s*\S+(?:\s+\S+)?)|(?i:bearer\s+\S+)"
+    r"|(?i:(?:token|password|secret)\s*[=:]\s*\S+)"
+)
+
+
+def log_dir() -> Path:
+    override = os.environ.get(DIAL_LOG_ENV, "").strip()
+    return Path(override) if override else Path.home() / ".ssh-manager" / "dial-log"
+
+
+def _file_for(target: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", target or "unknown")[:120] or "unknown"
+    return log_dir() / f"{safe}.jsonl"
+
+
+def redact(text: str) -> str:
+    return _SECRET.sub("[REDACTED]", text or "")
+
+
+def account_of(env: dict | None) -> str:
+    """``pinned`` when the dial runs under an explicit account token, else ``ambient``."""
+    return "pinned" if (env or {}).get("GH_TOKEN") else "ambient"
+
+
+@contextlib.contextmanager
+def _locked(path: Path):
+    """An exclusive per-file lock, waited for at most :data:`LOCK_WAIT_S`; yields
+    whether it was had."""
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    fh = open(lock_path, "a+b")
+    try:
+        deadline = time.monotonic() + LOCK_WAIT_S
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.02)
+        try:
+            yield True
+        finally:
+            if os.name == "nt":
+                import msvcrt
+
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
+def _trim(path: Path) -> None:
+    with path.open("rb") as fh:
+        lines = fh.read().splitlines(keepends=True)
+    if len(lines) <= MAX_LINES and sum(map(len, lines)) <= MAX_BYTES:
+        return
+    keep = lines[-KEEP_LINES:]
+    while keep and sum(map(len, keep)) > MAX_BYTES * 3 // 4:
+        keep = keep[len(keep) // 4:]
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(b"".join(keep))
+    os.replace(tmp, path)
+
+
+def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: int | None = None,
+           reason: str = "", stderr: str = "", account: str = "") -> None:
+    """Append one dial attempt to *target*'s log; best-effort, never raises."""
+    try:
+        entry = {
+            "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "target": target, "kind": kind, "outcome": outcome,
+            "elapsed_s": round(max(elapsed_s, 0.0), 3), "attempt": attempt,
+            "reason": redact(reason)[:200], "account": account,
+            "stderr": redact((stderr or "").strip())[-STDERR_TAIL:],
+        }
+        path = _file_for(target)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+        with _locked(path) as held:
+            if not held:
+                return
+            with path.open("ab") as fh:
+                fh.write(line)
+            if path.stat().st_size > MAX_BYTES or _approx_lines(path) > MAX_LINES:
+                _trim(path)
+    except Exception as exc:  # noqa: BLE001 -- telemetry must never break a dial
+        log.debug("dial log write for %s failed: %s", target, exc)
+
+
+def _approx_lines(path: Path) -> int:
+    # Cheap: only count when the file could plausibly hold MAX_LINES short lines.
+    if path.stat().st_size < MAX_LINES * 64:
+        return 0
+    with path.open("rb") as fh:
+        return sum(1 for _ in fh)
+
+
+def read(target: str, *, last: int = 50) -> list[dict]:
+    """The newest *last* entries for *target* (oldest first); unreadable lines skipped."""
+    path = _file_for(target)
+    if not path.exists():
+        return []
+    out = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines()[-max(last, 0):]:
+        with contextlib.suppress(ValueError):
+            entry = json.loads(raw)
+            if isinstance(entry, dict):
+                out.append(entry)
+    return out
+
+
+def summary(target: str, *, now: datetime | None = None) -> dict:
+    """Dial counts by outcome over the last 10 minutes and hour, and the last failure."""
+    now = now or datetime.now(timezone.utc)
+    entries = read(target, last=MAX_LINES)
+    windows = {"last_10m": 600, "last_1h": 3600}
+    counts: dict[str, dict] = {w: {"dials": 0, "by_outcome": {}} for w in windows}
+    last_failure = None
+    for e in entries:
+        try:
+            age = (now - datetime.fromisoformat(e.get("at", ""))).total_seconds()
+        except ValueError:
+            continue
+        if e.get("outcome") != "ok":
+            last_failure = e
+        for w, span in windows.items():
+            if 0 <= age <= span and e.get("kind") in DIAL_KINDS:
+                counts[w]["dials"] += 1
+                by = counts[w]["by_outcome"]
+                by[e.get("outcome", "?")] = by.get(e.get("outcome", "?"), 0) + 1
+    return {"target": target, "log": str(_file_for(target)), **counts, "last_failure": last_failure,
+            "entries": len(entries)}
+
+
+class Dial:
+    """Times one attempt: ``with Dial(target, "config_fetch", attempt=1) as d: ...;
+    d.outcome = "ok"``. An exception escaping the block records ``error`` (with its
+    message as the reason) unless an outcome was already set, and propagates."""
+
+    def __init__(self, target: str, kind: str, *, attempt: int | None = None, account: str = ""):
+        self.target, self.kind, self.attempt, self.account = target, kind, attempt, account
+        self.outcome, self.reason, self.stderr = "", "", ""
+
+    def __enter__(self) -> "Dial":
+        self._start = time.monotonic()
+        return self
+
+    def __exit__(self, exc_type, exc, _tb) -> bool:
+        if exc is not None and not self.outcome:
+            self.outcome, self.reason = "error", f"{exc_type.__name__}: {exc}"
+        record(self.target, kind=self.kind, outcome=self.outcome or "unknown",
+               elapsed_s=time.monotonic() - self._start, attempt=self.attempt,
+               reason=self.reason, stderr=self.stderr, account=self.account)
+        return False

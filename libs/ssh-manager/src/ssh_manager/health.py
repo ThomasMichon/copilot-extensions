@@ -136,15 +136,23 @@ async def ensure_healthy(
             delay = backoff_base * (2 ** (attempt - 1))
             await asyncio.sleep(delay)
 
-        try:
-            await manager.ensure_connected(host, config_source, port_forwards)
-            status = await check_health(manager, host)
-            if status.ok:
-                log.info("Reconnected to %s successfully", host)
-                return status
-        except (ConnectionError, OSError) as e:
-            log.warning("Reconnect attempt %d failed for %s: %s", attempt + 1, host, e)
-            status = HealthStatus(ok=False, reason="check_failed", stderr=str(e))
+        from .dial_log import Dial, account_of
+
+        with Dial(host, "reconnect", attempt=attempt + 1,
+                  account=account_of(getattr(config_source, "gh_env", None))) as dial:
+            dial.reason = status.reason
+            try:
+                await manager.ensure_connected(host, config_source, port_forwards)
+                status = await check_health(manager, host)
+                if status.ok:
+                    dial.outcome = "ok"
+                    log.info("Reconnected to %s successfully", host)
+                    return status
+                dial.outcome, dial.stderr = "unhealthy", status.stderr or ""
+            except (ConnectionError, OSError) as e:
+                dial.outcome = "error"
+                log.warning("Reconnect attempt %d failed for %s: %s", attempt + 1, host, e)
+                status = HealthStatus(ok=False, reason="check_failed", stderr=str(e))
 
     log.error("Failed to reconnect to %s after %d attempts", host, max_retries)
     return status
