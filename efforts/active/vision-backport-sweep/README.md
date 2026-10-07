@@ -202,7 +202,7 @@ Operator, end of a long multi-repo session:
             cross-link to `remote-interactive-sessions`, matching the
             ownership split already established there for
             agent-codespaces/agent-ssh. No conformance gap found requiring
-            a new issue — `install.ps1`'s nonconformance is already
+            a new issue — `init.ps1`'s nonconformance is already
             tracked by `#5472` (Phase 3).
 
 ### Phase 3 — Full design/service-invariant audit
@@ -627,7 +627,17 @@ then rather than assuming either answer.
 - No vision-text contradiction this time (unlike `agent-ssh`'s Non-Goal
   rework) and no genuine code gap found requiring a new issue — every
   fold-back traces to real, working, already-documented capability.
-  `install.ps1`'s nonconformance is already tracked by `#5472`.
+  `init.ps1`'s nonconformance is already tracked by `#5472`.
+- **PR #5631 review** caught three real nits: an `install.ps1` →
+  `init.ps1` reference mix-up (agent-containers' own installer script, not
+  the other plugins' `install.ps1`); an implementation-progress phrase
+  ("not yet every fleet...") that didn't belong in the vision's standing
+  intent (moved here, removed there); and an inaccurate claim that both
+  CLI-mode reach modes share one forward-keeper owner — corrected to
+  distinguish attached (forwards on the interactive SSH process itself)
+  from detached (a separate host-side keeper, independent of the
+  launcher's lifetime), verified against `copilot_venue.py`/
+  `copilot_detach.py`.
 - Next: continue Phase 2 with the next vision in the index not yet swept
   (the three stale-high-traffic candidates from the original ranking are
   now all reconciled — `agent-codespaces`, `agent-ssh`,

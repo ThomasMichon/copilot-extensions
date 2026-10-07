@@ -112,26 +112,29 @@ conventions.
 A trusted-development fleet aims to be a **full harness node**, not a minimal
 runner. The host projects its **launch parity** (model, the repo's own
 local-marketplace plugins/skills, concrete workspace cwd), the **credential
-relay**, **host-backed persistence and self-maintenance** (a trusted,
-image-backed fleet can retain its workspace/home across container recreation
-and run its own real timer/service units, the same self-maintaining posture a
-normal machine has — not yet every fleet, but no longer unavailable), and —
-as the capability matures — **multiple repositories and their worktrees
-created container-local** inside the venue, so agent-bridge drives a trusted
-container as seamlessly as any other venue. The goal is to make the container
-transport *invisible*: as much of the system as can be projected, is.
-Restricted fleets deliberately receive none of this by default (see
-`restricted-credential-boundary` / `harness-and-tool-latitude`).
+relay**, **host-backed persistence and self-maintenance** for an image-backed
+fleet (retaining its workspace/home across container recreation and running
+its own real timer/service units, the same self-maintaining posture a normal
+machine has), and — as the capability matures — **multiple repositories and
+their worktrees created container-local** inside the venue, so agent-bridge
+drives a trusted container as seamlessly as any other venue. The goal is to
+make the container transport *invisible*: as much of the system as can be
+projected, is. Restricted fleets deliberately receive none of this by default
+(see `restricted-credential-boundary` / `harness-and-tool-latitude`).
 
 ### interactive-venue-reach-trusted
 A trusted venue is reachable as an attended, muxed, interactive Copilot CLI
 session — or its detached, orchestrator-facing counterpart — under the exact
 same contract agent-codespaces/agent-ssh venues use: a worktree-keyed
-reservation, registration into the coordination layer's `live_sessions`, and
-a host-side forward keeper carrying the session's bridge and credential-relay
-reverse forwards for as long as it runs. Restricted venues are deliberately
-excluded — their reduced authority envelope never extends to an interactive
-session.
+reservation and registration into the coordination layer's `live_sessions`.
+The two reach modes carry the session's bridge and credential-relay reverse
+forwards on different owners with different lifetimes: an attached session
+carries them on its own interactive SSH process, for as long as that process
+stays connected; a detached session carries them on a separate, host-side
+forward keeper, independent of any one launcher's lifetime, so an
+orchestrator's dispatch can end without starving the session it started.
+Restricted venues are deliberately excluded — their reduced authority
+envelope never extends to an interactive session.
 
 ### restricted-venue-picker-discovery
 A restricted venue's identity, current instance, lease assignment, readiness,
@@ -325,3 +328,13 @@ only after inspecting a running process.
   `interactive-venue-reach-trusted` realizes. All additions are fold-back
   (reality already does these things); no Non-Goal reality violates and no
   scaling-back occurred. No conformance gap was found requiring a new issue.
+  **Review correction (PR #5631):** removed an implementation-progress
+  phrase ("not yet every fleet, but no longer unavailable") from
+  `full-harness-projection-trusted` — a vision states enduring intent, not
+  rollout status; that detail now lives only in the effort journal.
+  Corrected *interactive-venue-reach-trusted* to distinguish the two reach
+  modes' actual forward ownership: an attached session carries its
+  forwards on its own interactive SSH process (ending when that process
+  disconnects), while a detached session carries them on a separate,
+  host-side keeper independent of the launcher's lifetime — the original
+  wording wrongly attributed both to one keeper.
