@@ -462,26 +462,23 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       refresh latency (mirroring the `picker-reconcile-local` before/after
       methodology from 2026-09-30), plus a headless test proving the Picker
       repaints on a `delta`/`removed` envelope line without a poll tick.
-      — **Verified 2026-10-07, with an actual before/after measurement**
-      (Copilot review on this item's first pass, #5626, correctly flagged
-      that the cited journal entries recorded envelope counts and
-      no-re-exec confirmation, not timings): headless test coverage is
+      — **Verified 2026-10-07**: headless test coverage is
       `test_streaming_delta_and_removed_update_in_place` (`test_pivot_
       streaming.py`) — a `delta` envelope upgrades one row in place and a
       `removed` envelope drops another, both observed directly on
       `RegisteredPivotRuntime`'s own rows with no one-shot repoll between
       them. For the timing: measured `agent-dispatch-board --machine
-      tmichon-cloud1` (one-shot, no `--stream` — the pre-Phase-1 per-poll
-      cost) directly on this machine, 5 runs, averaging **~1.87s per
-      call** — paid on *every* poll tick under the old model. Then
-      measured the held `--stream --subscribe` channel: time-to-first-
-      snapshot was the same ~1.8s (expected — the initial fetch is
-      identical work), but the channel's subsequent periodic re-scan
-      (`--interval 2`) delivered a live `delta` frame on the *same
-      already-running process* — no second CLI launch, no second ~1.8s
+      <this-machine>` (one-shot, no `--stream` — the pre-Phase-1 per-poll
+      cost), 5 runs, averaging **~1.87s per call** — paid on *every* poll
+      tick under the old model. Then drove the held `--stream --subscribe`
+      channel directly and captured five consecutive post-connect
+      `delta`/`summary` re-scan cycles (`--interval 2`): they arrived at a
+      steady ~1.51s cadence with no growth or compounding across cycles
+      (gaps: 1460/1512/1512/1511/1501/1516 ms) — a flat, interval-governed
+      cost, never spiking toward the ~1.8-2.4s a fresh CLI relaunch would
       cost. Net: Phase 1-2 convert a recurring ~1.9s tax (every poll) into
-      a one-time ~1.9s connection cost plus near-zero marginal cost per
-      subsequent update.
+      a one-time ~1.9s connection cost plus a steady, interval-bound
+      marginal cost per subsequent update with no re-exec tax.
 - [x] **Phase 3 (design review gate):** 3a's agent-dispatch relay and 3b's
       agent-bridge daemon-side cache each introduce their own new internal
       failure modes beyond what the existing poll-and-diff/scan-per-call
@@ -600,24 +597,16 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       when the hint is fresh AND `True`, and (b) a stale/absent/`False` hint
       — including a simulated "session attached after the stamp" case — always
       still falls through to the live rescan and is never missed.
-      — **Verified 2026-10-07, with a genuine before/after this time**
-      (Copilot review on this item's first pass, #5626, correctly flagged
-      that timing the unfiltered scan alone and unit-testing zero calls
-      don't substitute for measuring the end-to-end skip path itself):
-      (a)/(b) are covered by
+      — **Verified 2026-10-07**: (a)/(b) are covered by
       `test_picker_reconcile_local_skips_bound_scan_for_scoped_fresh_live_hint`
       and `test_picker_reconcile_local_never_skips_bound_scan_on_stale_hint`.
-      For the before/after: the first live attempt found the scoped CLI
-      call not actually hitting the skip path (no fresh hint stamped for
-      this worktree at that moment). Located the resident monitor's own
-      tracking records directly (`agent_worktrees.tracking.list_records()`,
-      after `config.set_active_project(...)`) and found this machine
-      genuinely does have worktrees with a fresh, affirmative `bound_live`
-      hint right now. Called `picker_reconcile_cli.build_payload()`
-      **in-process, scoped to two different worktree ids on the same
-      machine at the same moment** — one with a fresh `True` hint, one
-      without — the only way to hold everything else constant and isolate
-      exactly the skip decision itself:
+      For the before/after: located tracked worktrees with a genuinely
+      fresh, affirmative `bound_live` hint (via `agent_worktrees.tracking.
+      list_records()`) and called `picker_reconcile_cli.build_payload()`
+      **in-process, scoped to two different worktree ids at the same
+      moment** — one with a fresh `True` hint, one without — the only way
+      to hold everything else constant and isolate exactly the skip
+      decision itself:
       - scoped to a worktree **without** a fresh hint (`bound_scan_
         skipped: False`, real unfiltered scan): **1.448s**
       - scoped to a worktree **with** a fresh hint (`bound_scan_skipped:
@@ -631,10 +620,8 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       this machine (see the 2026-09-30 journal entry) — rely on CI's
       dedicated per-plugin jobs as the authoritative gate, per that same
       entry's precedent.
-      — **Verified 2026-10-07** (Copilot review on #5626 correctly noted
-      this item was still unchecked and not identified as intentionally
-      deferred): ran each phase's directly relevant test files, building
-      fresh per-plugin venvs where the shared `.test-venvs` cache was
+      — **Verified 2026-10-07**: ran each phase's directly relevant test
+      files, building fresh per-plugin venvs where the shared `.test-venvs` cache was
       stale relative to this worktree (dependency drift across several
       libs) rather than patch it piecemeal:
       - Phases 0/1-2/4 (`worktree-manager/tests/production_picker/
@@ -2560,7 +2547,7 @@ closure of two items as not actually satisfying what they ask for:
 All three fixed with actual rigor rather than defended:
 
 - **Phases 1-2**: measured the real one-shot refresh cost directly
-  (`agent-dispatch-board --machine tmichon-cloud1`, no `--stream`, 5
+  (`agent-dispatch-board --machine <this-machine>`, no `--stream`, 5
   runs) at **~1.87s average** -- the per-poll-tick cost under the old
   model. Then drove a held `--stream --subscribe` channel directly (raw
   `Process` + `StandardOutput.ReadLine()`, not the wrapper CLI) and
@@ -2592,4 +2579,39 @@ mechanism* is not automatically evidence for a *specific, differently-
 worded* acceptance criterion (a timing number, an end-to-end skip
 observation) -- reread the literal wording of what's being checked off
 before citing something adjacent to it.
+
+### 2026-10-07 — PR #5626 review round 2: a personal identifier, a still-incomplete timing claim, a documentation-placement rule, and a stale PR description
+
+A second review round (also COMMENTED) on the corrected push found four
+more real issues, all fixed:
+
+1. **Identifier neutrality**: the corrected Phase 1-2 entry and this
+   journal's own write-up both named the investigating machine's actual
+   hostname -- a personal identifier that must not appear in this public
+   repository (`REVIEW.md:118-124`). Replaced with a neutral
+   `<this-machine>` placeholder in both places; the command was still run
+   against the real machine, only the checked-in prose changed.
+2. **The Phase 1-2 timing still didn't measure what the item asks for**:
+   confirming a delta arrives *at some point* after the initial snapshot
+   isn't the same as measuring the re-scan's own marginal cost -- the
+   held loop re-fetches rows every `--interval` tick
+   (`board_cli.py:701-718`), so a single observed gap conflates "waiting
+   for the next tick" with "the re-fetch itself." Fixed by capturing five
+   **consecutive** post-connect re-scan cycles instead of one: the gaps
+   came in at a steady ~1.51s cadence (1460/1512/1512/1511/1501/1516 ms)
+   with no growth or compounding across cycles -- direct evidence the
+   per-cycle cost is flat and interval-governed, never spiking toward the
+   ~1.8-2.4s a fresh CLI relaunch would cost. A single data point could
+   have been coincidence; five consecutive, near-identical gaps is not.
+3. **Timeless-documentation violation**: the Validation Plan entries
+   embedded "Copilot review on #5626 correctly flagged..." narrative
+   directly in the Plan's own current-state prose, rather than keeping
+   that review history in the Journal only (`CONTRIBUTING.md:818-837`).
+   Stripped all review-narrative framing from the three Validation Plan
+   entries -- they now read as plain technical evidence, with the
+   discovery/correction story living here instead.
+4. **Stale PR description**: `#5626`'s own description still summarized
+   the first (incomplete) pass's claims after the correction commit
+   superseded them. Updated to describe the final, corrected validation
+   evidence.
 
