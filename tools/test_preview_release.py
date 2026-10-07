@@ -67,17 +67,15 @@ def test_build_unknown_plugin_raises(isolated: Path):
 
 
 def test_build_ignores_a_local_dev_venv_in_the_plugin_source(isolated: Path):
-    """Regression: a local dev `.venv` sitting in a plugin's own source
-    directory (very common -- a contributor ran `uv venv`/`uv sync` there
-    directly) must never be copied into the preview or walked by
-    find_file_pointers(). Before this fix, `_ignore()` only excluded
-    __pycache__/.pytest_cache/.ruff_cache/build/dist -- unlike every sibling
-    ignore-set in this codebase (materialize_main.py, uv_editable_ref.py,
-    nested_uv_editable_ref.py all include `.venv`/`.git`) -- so a present
-    `.venv` (hundreds to thousands of files, several of them binary) got
-    fully copied and then scanned file-by-file for vendor-pointer markers:
-    needlessly slow, and the actual cause of an observed multi-minute test
-    hang when a plugin happened to have one on disk.
+    """A local dev `.venv` sitting in a plugin's own source directory (very
+    common -- a contributor ran `uv venv`/`uv sync` there directly) must
+    never be copied into the preview or walked by find_file_pointers().
+    `_ignore()` must exclude `.venv`/`.git` the same way every sibling
+    ignore-set in this codebase does (materialize_main.py,
+    uv_editable_ref.py, nested_uv_editable_ref.py): a present `.venv`
+    (hundreds to thousands of files, several of them binary) getting fully
+    copied and then scanned file-by-file for vendor-pointer markers is
+    needlessly slow, and can turn into a multi-minute hang.
     """
     plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
     venv = plugin_dir / ".venv"

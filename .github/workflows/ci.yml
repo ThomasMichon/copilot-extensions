@@ -1019,7 +1019,7 @@ jobs:
       - name: Test Windows status-loop launch
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          -k status_daemon_console_root_contains_psmux_descendants
+          -k "status_daemon_console_root_contains_psmux_descendants or test_default_setup_ps1_double_dash_copilot_args_not_mis_bound_positionally"
       - name: Stop psmux test session
         if: always()
         shell: pwsh

@@ -18,7 +18,7 @@
     no ambient WORKTREE_PROJECT is required.
 #>
 # PositionalBinding=$false is required here: forwarded Copilot CLI flags
-# (-- allow-all, --model, --reasoning-effort, --context, --resume=...) use a
+# (--allow-all, --model, --reasoning-effort, --context, --resume=...) use a
 # single or double leading dash that PowerShell's named-parameter matcher
 # does not recognize as this script's own named parameters (which need an
 # exact `-Name` match). Without this, PowerShell falls back to binding them

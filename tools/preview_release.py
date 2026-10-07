@@ -61,11 +61,11 @@ def _ignore(_dir: str, names: list[str]) -> set[str]:
     # Mirrors the sibling ignore-sets used everywhere else dev/build/cache
     # artifacts must never leak into a materialized tree (e.g.
     # materialize_main.py's own `_ignore`, uv_editable_ref.py,
-    # nested_uv_editable_ref.py): without `.venv`/`.git` here, a plugin
-    # directory with a local dev venv on disk gets that whole venv (often
-    # 1000+ files) copied into the preview AND walked file-by-file by
-    # find_file_pointers() below -- needlessly slow, and the actual cause of
-    # an observed multi-minute hang in this test.
+    # nested_uv_editable_ref.py): a plugin directory with a local dev venv
+    # on disk would otherwise get that whole venv (often 1000+ files)
+    # copied into the preview AND walked file-by-file by
+    # find_file_pointers() below -- needlessly slow, and a potential
+    # multi-minute hang.
     return {n for n in names if n in {
         ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
         "build", "dist",
