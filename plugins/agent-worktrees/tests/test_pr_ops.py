@@ -4819,6 +4819,37 @@ class TestPRFinalizeAndPush:
         rec = tracking.load_record(path)
         assert (rec.pr.provider, rec.pr.remote, rec.pr.head_repo) == ("ado", "", "")
 
+    @pytest.mark.parametrize("change", [{"provider": "ado"}, {"number": 99}])
+    def test_a_stale_writer_saving_after_a_reassignment_never_restores_the_old_pr(self, pr_repo, change):
+        """A process that loaded the record before set_pr reassigned it saves an unrelated
+        change afterwards: the reassignment (a newer revision) wins, fork target included."""
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.pr.provider, rec.pr.number, rec.pr.head_repo = "github", 7, "alice/ext"
+        tracking.save_record(rec)
+        stale = tracking.load_record(path)
+        pr_ops.set_pr(wid, config=config, **change)
+        stale.title = "an unrelated update"
+        tracking.save_record(stale)
+        rec = tracking.load_record(path)
+        assert (rec.pr.provider, rec.pr.number) == (change.get("provider", "github"), change.get("number", 7))
+        assert (rec.pr.remote, rec.pr.head_repo, rec.title) == ("", "", "an unrelated update")
+
+    def test_set_pr_correcting_only_the_repo_slug_case_keeps_the_fork(self, pr_repo):
+        """GitHub slugs are case-insensitive: re-entering the same PR's URL in another case
+        is the same PR, so its fork target and its head observation stay."""
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.pr.number, rec.pr.repo, rec.pr.head_repo, rec.pr.head_owner = 7, "acme/ext", "alice/ext", "alice"
+        rec.pr.head_observed_at = "2026-10-06T00:00:00Z"
+        tracking.save_record(rec)
+        pr_ops.set_pr(wid, url="https://github.com/ACME/Ext/pull/7", number=7, config=config)
+        rec = tracking.load_record(path)
+        assert (rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner) == ("fork", "alice/ext", "alice")
+        assert rec.pr.head_observed_at == "2026-10-06T00:00:00Z"
+
     def test_the_repo_remote_fallbacks_refuse_a_push_url_naming_another_repo(self, pr_repo):
         """The repo's own remote is the target of a PR with no fork configured, and of
         one no configured fork holds: like a fork, it must push where it fetches from,

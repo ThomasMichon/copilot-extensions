@@ -2107,12 +2107,12 @@ def _set_pr_locked(
             api_base = ""
         parsed_repo = _repo_slug_from_pr_url(url, api_base)
 
-    reassigned = ((number is not None and pr.number is not None and number != pr.number) or bool(parsed_repo and pr.repo and parsed_repo != pr.repo)
+    reassigned = ((number is not None and pr.number is not None and number != pr.number) or bool(parsed_repo and pr.repo and parsed_repo.lower() != pr.repo.lower())
                   or bool(provider and pr.provider and provider != pr.provider))  # attaching a first one keeps the PR
     identity_changed = (
         (number is not None and number != pr.number)
         or (provider is not None and provider != pr.provider)
-        or (parsed_repo and parsed_repo != pr.repo)
+        or (parsed_repo and parsed_repo.lower() != (pr.repo or "").lower())
     )
     if url is not None:
         pr.url = url
@@ -2131,8 +2131,9 @@ def _set_pr_locked(
         pr.number = number
     if provider is not None:
         pr.provider = provider
-    if reassigned:  # its old fork target isn't this PR's
+    if reassigned:  # its old fork target isn't this PR's; the revision outranks stale snapshots
         pr.remote = pr.head_repo = pr.head_identity = pr.head_owner = ""
+        pr.pr_revision += 1
     if identity_changed:
         pr.attribution_head = ""
         pr.head_observed_at = ""
