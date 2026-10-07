@@ -10,6 +10,8 @@ refuses finalize while any of them is still genuinely open.
 
 from __future__ import annotations
 
+import pytest
+
 from agent_worktrees import config as cfg
 from agent_worktrees import tracking
 from agent_worktrees.finalize_open_pr_gate import (
@@ -239,6 +241,9 @@ class _SlugCheckingProvider:
             raise RuntimeError(f"404: no repository {repo!r}")
         return self._by_number[number]
 
+    def authority_endpoint(self, api_base=""):
+        return "https://x"
+
     def find_pull_by_head(self, repo, head, *, api_base="", token=None):
         return None
 
@@ -309,3 +314,33 @@ def test_healing_the_active_pr_does_not_skip_the_next_one(tmp_path, monkeypatch)
         7: PullResult(number=7, state="closed", merged=True),
         8: PullResult(number=8, state="closed", merged=True)}))
     assert _assert_no_live_pr(rec, _config(), "wt-two") is True
+
+
+class TestUntrustedLegacyRecordsStayOpen:
+    """A URL-derived slug is read only from the configured provider at the PR URL's
+    own authority: a stale provider or another host never confirms a merge."""
+
+    def _merged_provider(self, monkeypatch):
+        from agent_worktrees.providers import PullResult
+
+        _patch_provider(monkeypatch, _SlugCheckingProvider({
+            7: PullResult(number=7, state="closed", merged=True),
+            8: PullResult(number=8, state="closed", merged=True)}))
+
+    @pytest.mark.parametrize("numbers", [[7], [7, 8]])  # the active entry, and a parallel one
+    def test_another_authority_is_never_queried(self, tmp_path, monkeypatch, numbers):
+        self._merged_provider(monkeypatch)
+        rec = _record(tmp_path, monkeypatch, "wt-host", repo="ext", prs=[
+            tracking.PRRecord(state="open", number=n, url=f"https://elsewhere/o/r/pulls/{n}")
+            for n in numbers])
+        assert _assert_no_live_pr(rec, _config(), "wt-host") is False
+        assert {p.state for p in tracking.load_record(rec.yaml_path).prs} == {"open"}
+
+    @pytest.mark.parametrize("numbers", [[7], [7, 8]])
+    def test_another_provider_is_never_queried(self, tmp_path, monkeypatch, numbers):
+        self._merged_provider(monkeypatch)
+        rec = _record(tmp_path, monkeypatch, "wt-prov", repo="ext", prs=[
+            tracking.PRRecord(state="open", number=n, provider="github", url=f"https://x/o/r/pulls/{n}")
+            for n in numbers])
+        assert _assert_no_live_pr(rec, _config(), "wt-prov") is False
+        assert {p.state for p in tracking.load_record(rec.yaml_path).prs} == {"open"}
