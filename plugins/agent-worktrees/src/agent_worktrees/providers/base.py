@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from ..pr_bar import Snapshot
     from ..pr_contract import PRDiff, PRSnapshot, ReviewNudgeResult, ThreadsResult
 
 
@@ -425,6 +426,14 @@ class PRProvider(Protocol):
         Never raises: unsupported provider or a failed API call both
         collapse to ``None``.
         """
+        ...
+
+    def get_bar_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> "Snapshot":
+        """One fail-closed read of everything ``pr bar`` evaluates (``pr_bar.Snapshot``):
+        every list paged to its end, unreadable parts named in ``errors``; never raises.
+        A provider that can't read it returns ``pr_bar.unsupported(...)`` (all unknown)."""
         ...
 
     def get_comment_threads(

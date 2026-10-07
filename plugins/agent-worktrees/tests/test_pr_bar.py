@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 from agent_worktrees import pr_bar
-
+from agent_worktrees.providers import github_bar
 HEAD, OLD = "a" * 40, "b" * 40
 COPILOT = pr_bar.COPILOT_REVIEWER
 APPROVED_BODY = ("<!-- ccr-overview-v2 -->\n\n### \U0001f7e2 Approved\n\nLooks right.\n\n"
@@ -100,7 +100,7 @@ NO_APPROVAL = {"approval_required": False, "hold_labels": ("do-not-merge",),
 
 
 def _bar(fake, **kw):
-    snap = pr_bar.read_github("owner/repo", 7, host="github.com", token="t", run=fake)
+    snap = github_bar.read_bar("owner/repo", 7, host="github.com", token="t", run=fake)
     kw.setdefault("policy", NO_APPROVAL)
     return pr_bar.evaluate(snap, now="2026-10-06T12:00:00+00:00", **kw)
 
@@ -307,7 +307,7 @@ def test_pr_bar_cli_reports_the_verdict_as_its_exit_code(monkeypatch, capsys):
         resolved=slug in registered, repo_config=registered.get(slug)))
     monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, p: "t")
     seen = {}
-    real_read = pr_bar.read_github
+    real_read = github_bar.read_bar
 
     def read(repo, number, *, host, token):
         seen.update(repo=repo, number=number, host=host, token=token)
@@ -315,7 +315,7 @@ def test_pr_bar_cli_reports_the_verdict_as_its_exit_code(monkeypatch, capsys):
                          run=FakeGh(reviews=[_review(body=CHANGES_BODY)],
                                     threads=[_thread(resolved=False)] * 2))
 
-    monkeypatch.setattr(pr_bar, "read_github", read)
+    monkeypatch.setattr(github_bar, "read_bar", read)  # reached through GitHubProvider.get_bar_snapshot
     assert pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7", "--json"]) == pr_bar.EXIT["failed"]
     payload = json.loads(capsys.readouterr().out)
     assert payload["verdict"] == "failed" and payload["head"] == HEAD
@@ -323,8 +323,71 @@ def test_pr_bar_cli_reports_the_verdict_as_its_exit_code(monkeypatch, capsys):
     assert seen == {"repo": "owner/repo", "number": 7, "host": "github.com", "token": "t"}
     assert pr_cli.cmd_pr_dispatch(["bar", "a", "b", "c"]) == 2
     assert pr_cli.cmd_pr_dispatch(["bar", "someone/else", "7"]) == 2  # unregistered: no borrowed binding
-    prcfg.provider = "azure-devops"
-    assert pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7"]) == 2
+    capsys.readouterr()
+    prcfg.provider = "azure-devops"  # no merge-bar read there yet: every clause unknown, never met
+    assert pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7", "--json"]) == pr_bar.EXIT["unknown"]
+    payload = json.loads(capsys.readouterr().out)
+    assert {c["status"] for c in payload["clauses"]} == {"unknown"}
+    assert "azure-devops" in json.dumps(payload)
+
+
+def test_a_provider_whose_bar_read_raises_reads_unknown(monkeypatch, capsys):
+    """A provider read that raises (despite its never-raises contract) is unknown, never met."""
+    from types import SimpleNamespace
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import pr_cli, pr_config, providers
+
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: SimpleNamespace())
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda _c, slug: SimpleNamespace(
+        resolved=True, repo_config=SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))))
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, p: "t")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("gh exploded")
+
+    monkeypatch.setattr(github_bar, "read_bar", boom)
+    assert pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7", "--json"]) == pr_bar.EXIT["unknown"]
+    payload = json.loads(capsys.readouterr().out)
+    assert {c["status"] for c in payload["clauses"]} == {"unknown"}
+    assert "gh exploded" in json.dumps(payload)
+
+
+@pytest.mark.parametrize("name", ["github", "gitea", "azure-devops", "mock"])
+def test_every_provider_offers_the_bar_read(name):
+    from agent_worktrees import providers
+
+    assert callable(getattr(providers.get_provider(name), "get_bar_snapshot", None))
+
+
+@pytest.mark.parametrize("name", ["gitea", "azure-devops"])
+def test_a_provider_without_a_bar_read_is_all_unknown(name):
+    from agent_worktrees import providers
+
+    snap = providers.get_provider(name).get_bar_snapshot("owner/repo", 7)
+    bar = pr_bar.evaluate(snap, policy=NO_APPROVAL)
+    assert bar.verdict == "unknown" and set(_status(bar).values()) == {"unknown"}
+
+
+def test_the_mock_provider_bar_read_round_trips_its_pr():
+    from agent_worktrees.providers import PRScope
+    from agent_worktrees.providers.mock import MockPRProvider
+
+    mock = MockPRProvider()
+    pr = mock.create_pull(PRScope(repo="owner/repo", head="feat", base="main", title="t", body=""))
+    fake = mock._get("owner/repo", pr.number)
+    fake.checks_state = "success"
+    mock.add_review("owner/repo", pr.number, id=1, state="COMMENTED", user=COPILOT)
+    mock.add_thread("owner/repo", pr.number, status="active", file_path="src/x.py")
+    snap = mock.get_bar_snapshot("owner/repo", pr.number)
+    assert (snap.state, snap.head, snap.head_after) == ("OPEN", pr.head_sha, pr.head_sha)
+    assert snap.mergeable == "MERGEABLE" and not snap.errors
+    assert snap.reviews[0]["commit"] == pr.head_sha and snap.reviews[0]["author"] == COPILOT
+    status = _status(pr_bar.evaluate(snap, policy=NO_APPROVAL))
+    assert status["ci_green"] == "met" and status["threads_unresolved_zero"] == "failed"
+    mock.resolve_threads("owner/repo", pr.number)
+    assert _status(pr_bar.evaluate(mock.get_bar_snapshot("owner/repo", pr.number),
+                                   policy=NO_APPROVAL))["threads_unresolved_zero"] == "met"
 
 
 @pytest.mark.parametrize("conn", [

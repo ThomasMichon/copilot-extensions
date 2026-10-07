@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from .base import ProviderError, PRScope, PullResult
 
 if TYPE_CHECKING:
+    from ..pr_bar import Snapshot
     from ..pr_contract import PRDiff, PRSnapshot, ReviewNudgeResult, ThreadsResult
 
 
@@ -311,6 +312,29 @@ class MockPRProvider:
         """Non-mutating counterpart to :meth:`ensure_fork` -- the mock
         always resolves to the same fixed login regardless of ``repo``."""
         return "mock-owner"
+
+    def get_bar_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> "Snapshot":
+        """The merge-bar read from the in-memory PR: its fabricated reviews, threads,
+        labels and ``checks_state`` (one synthetic check; none when unset)."""
+        from ..pr_bar import Snapshot
+
+        pr = self._get(repo, number)
+        state = "MERGED" if pr.merged else ("CLOSED" if pr.state == "closed" else "OPEN")
+        conclusion = {"success": "SUCCESS", "failure": "FAILURE"}.get(pr.checks_state, "")
+        checks = [{"name": "mock-ci", "status": "COMPLETED" if conclusion else "IN_PROGRESS",
+                   "conclusion": conclusion}] if pr.checks_state else []
+        reviews = [{"id": r.id, "author": r.user, "state": "DISMISSED" if r.dismissed else r.state,
+                    "commit": r.commit_id, "body": getattr(r, "body", ""), "at": r.submitted_at}
+                   for r in pr.reviews]
+        threads = [{"resolved": t.status == "resolved", "outdated": t.status == "outdated",
+                    "path": t.file_path, "author": t.comments[0].author if t.comments else ""}
+                   for t in pr.threads]
+        return Snapshot(repo=repo, number=number, state=state, head=pr.head_sha,
+                        head_after=pr.head_sha, author=pr.author, draft=pr.draft, title=pr.title,
+                        labels=sorted(pr.labels), checks=checks, reviews=reviews, threads=threads,
+                        mergeable={True: "MERGEABLE", False: "CONFLICTING"}.get(pr.mergeable, "UNKNOWN"))
 
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None

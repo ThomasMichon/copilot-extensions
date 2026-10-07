@@ -28,7 +28,6 @@ _GH_TRANSIENT_HTTP = ("http 408", "http 429", "http 500", "http 502",
 
 def _gh_detail_is_transient(detail: str) -> bool:
     """True when a ``gh`` failure string names a retryable condition.
-
     Scans the CLI error text for a transient HTTP status marker or a network-level
     hiccup (timeout / connection reset). Everything else -- a 4xx, a bad token, a
     missing PR -- is permanent, so ``pr-watch`` fails fast instead of hanging the
@@ -350,14 +349,13 @@ class GitHubProvider:
         self, repo: str, number: int, token: str | None, *,
         host: str = "github.com",
     ) -> tuple[Review, ...]:
-        """Fetch every review as ``pr_contract.Review``s, paging the endpoint.
-
-        GitHub's REST ``/pulls/{n}/reviews`` paginates (default 30) in ascending
-        id order; the watcher keys off the highest review id, so a missed later
-        page would make the newest reviews invisible and hang the wait. Pages at
-        an explicit ``per_page`` until a short/empty page. Best-effort: a page
-        that fails to read stops paging with what was gathered rather than
-        breaking the whole snapshot.
+        """Fetch every review as ``pr_contract.Review``s, paging the endpoint. GitHub's
+        REST ``/pulls/{n}/reviews`` paginates (default 30) in ascending id order; the
+        watcher keys off the highest review id, so a missed later page would make the
+        newest reviews invisible and hang the wait. Pages at an explicit ``per_page``
+        until a short/empty page. Best-effort: a page that fails to read stops paging
+        with what was gathered rather than breaking the whole snapshot (``pr bar``'s
+        read is fail-closed instead: ``github_bar``).
         """
         reviews: list[Review] = []
         page = 1
@@ -1008,14 +1006,16 @@ class GitHubProvider:
         except json.JSONDecodeError as exc:
             return {}, f"bad GraphQL JSON: {exc}"
 
+    def get_bar_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None):
+        from .github_bar import read_bar  # every list paged to its end, fail closed (pr bar)
+        return read_bar(repo, number, host=self.authority_endpoint(api_base), token=token)
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
-        """List PR review threads via GraphQL (GitHub's irritating detail).
-
-        GitHub review threads have opaque node ids, so the returned
-        ``CommentThread.id`` is a display index; :meth:`resolve_threads` resolves
-        by re-fetching node ids (it resolves all active threads, not by index).
+        """List PR review threads via GraphQL (GitHub's irritating detail). Thread ids are
+        opaque node ids, so ``CommentThread.id`` is a display index; :meth:`resolve_threads`
+        re-fetches node ids (it resolves all active threads, not by index).
         """
         _ = api_base
         owner, name = self._split_owner_name(repo)

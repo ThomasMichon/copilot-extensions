@@ -84,16 +84,18 @@ def cmd_pr_bar(argv: list[str]) -> int:
                    "host and token are used. Refusing to use another repo's binding.")
         return 2
     prcfg = resolution.repo_config.pr
-    if (prcfg.provider or "github") != "github":
-        output.err(f"pr bar reads GitHub pull requests; this repo's provider is '{prcfg.provider}'.")
-        return 2
-    host = providers.get_provider("github").authority_endpoint(getattr(prcfg, "api_base", "") or "")
+    name = prcfg.provider or "github"
+    api_base = getattr(prcfg, "api_base", "") or ""
     try:
         token = providers.account_token_for_slug(slug, prcfg)
     except Exception as exc:
         output.err(f"Couldn't resolve the account for {slug}: {exc}")
         return 12
-    snap = pr_bar.read_github(slug, number, host=host, token=token)
+    try:  # the read goes through the repo's PRProvider; a provider without one reads unknown
+        snap = providers.get_provider(name).get_bar_snapshot(slug, number, api_base=api_base, token=token)
+    except Exception as exc:
+        snap = pr_bar.unsupported(slug, number, name)
+        snap.errors["pr"] = f"the {name} provider's merge-bar read failed: {exc}"
     try:  # the acting identity's role-specific policy, as pr-watch resolves it
         policy_cfg = pr_config.resolve_actor_pr_flow(resolution.repo_config, slug, token=token).pr_config
     except Exception:
