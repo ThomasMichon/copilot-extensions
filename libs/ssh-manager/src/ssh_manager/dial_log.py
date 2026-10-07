@@ -14,7 +14,13 @@ health-check reconnect -- records one JSON line per attempt:
   count is kept beside the log (``.count``), so an append never rescans it.
 - **Redacted.** Only a short stderr tail is kept, with token-like strings and
   authorization values replaced; the account is recorded as ``pinned`` or
-  ``ambient``, never anything derived from a credential. No command lines.
+  ``ambient`` (anything else a caller passes is stored as ``other``), never anything
+  derived from a credential. No command lines.
+- **Outcomes.** ``ok``; ``transient`` -- what the retry logic treats as a transport
+  failure (ssh's exit 255, or a connection-reset message): ssh reports a remote
+  command's own exit 255 the same way, so for a direct exec this can include one;
+  ``timeout``; ``error`` / ``cancelled`` (the dial raised); ``spawned`` (a direct-mode
+  stdio channel's ssh started; not a connection result).
 - **Never in the way.** Recording is best-effort: a lock that can't be had
   quickly, or any I/O error, drops that one line and never raises into the dial.
 """
@@ -41,6 +47,8 @@ KEEP_LINES = 4000
 STDERR_TAIL = 300
 FIELD_CAP = 200
 LOCK_WAIT_S = 2.0
+#: The only account values recorded (see :func:`account_of`).
+ACCOUNTS = ("pinned", "ambient")
 #: Outcomes that are a connection attempt reaching (or failing to reach) the target.
 DIAL_KINDS = ("config_fetch", "control_master", "direct_exec", "stdio_channel", "reconnect")
 #: Outcomes that aren't failures: ``ok`` (connected), and ``spawned`` (a direct-mode
@@ -198,7 +206,8 @@ def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: i
             "target": str(target)[:FIELD_CAP], "kind": str(kind)[:FIELD_CAP],
             "outcome": str(outcome)[:FIELD_CAP],
             "elapsed_s": round(max(elapsed_s, 0.0), 3), "attempt": attempt,
-            "reason": redact(reason)[:FIELD_CAP], "account": str(account)[:FIELD_CAP],
+            "reason": redact(reason)[:FIELD_CAP],
+            "account": account if account in ACCOUNTS else ("other" if account else ""),
             "stderr": redact((stderr or "").strip())[-STDERR_TAIL:],
         }
         path = _file_for(target)

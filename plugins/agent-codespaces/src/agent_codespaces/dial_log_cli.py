@@ -42,7 +42,7 @@ def cmd_dial_log(args) -> int:
     if args.json:
         print(json.dumps({**summary, "recent": entries}, indent=2))
         return 0
-    print(f"{args.name}: {summary['entries']} logged attempt(s)  [{summary['log']}]")
+    print(f"{_safe(args.name)}: {summary['entries']} logged attempt(s)  [{_safe(summary['log'])}]")
     for window in ("last_10m", "last_1h"):
         counts = summary[window]
         by = ", ".join(f"{_safe(k)} {v}" for k, v in sorted(counts["by_outcome"].items())) or "none"

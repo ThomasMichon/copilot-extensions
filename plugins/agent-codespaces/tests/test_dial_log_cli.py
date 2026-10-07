@@ -64,3 +64,13 @@ def test_text_output_never_replays_control_sequences(tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     assert "\x1b" not in out and "\x07" not in out
     assert "\\x1b[2J" in out and "\\x1b]0;owned\\x07" in out
+
+
+def test_the_header_escapes_the_target_name_too(tmp_path, monkeypatch, capsys):
+    from ssh_manager import dial_log
+
+    monkeypatch.setenv(dial_log.DIAL_LOG_ENV, str(tmp_path))
+    assert main(["dial-log", "cs\x1b]0;owned\x07"]) == 0
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\x07" not in out and "cs\\x1b]0;owned\\x07" in out
+

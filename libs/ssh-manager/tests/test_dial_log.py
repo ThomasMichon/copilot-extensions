@@ -138,6 +138,8 @@ async def test_a_direct_mode_exec_is_a_logged_dial(win_platform, source):
     with patch("ssh_manager.proxy.spawn_in_kill_on_close_job", return_value=(proc, None)):
         await manager.exec_command("direct-host", "true")
     assert _kinds("direct-host") == [("direct_exec", "transient"), ("direct_exec", "ok")]
+    # ssh can't tell a remote command's own 255 from a dropped link: the reason says so.
+    assert "transport failure" in dial_log.read("direct-host")[0]["reason"]
 
 
 @pytest.mark.asyncio
@@ -385,3 +387,12 @@ def test_a_stale_line_count_is_recounted(monkeypatch):
     dial_log.record("cs-o2", kind="reconnect", outcome="ok", elapsed_s=0)
     dial_log.record("cs-o2", kind="reconnect", outcome="ok", elapsed_s=0)  # the 6th line trims
     assert len(dial_log.read("cs-o2", last=100)) <= 5
+
+
+def test_only_pinned_or_ambient_is_ever_stored_as_the_account():
+    """The log's guarantee holds at the write, not by trusting each caller."""
+    for given, stored in (("pinned", "pinned"), ("ambient", "ambient"),
+                          ("ghp_abcdefghijklmnopqrstuvwxyz", "other"), ("someone@corp", "other"), ("", "")):
+        dial_log.record("cs-acct", kind="reconnect", outcome="ok", elapsed_s=0, account=given)
+        assert dial_log.read("cs-acct", last=1)[0]["account"] == stored
+

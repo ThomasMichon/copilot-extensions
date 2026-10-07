@@ -632,7 +632,9 @@ class ConnectionManager:
             transient = is_transient_ssh_failure(result)
             record(host, kind="direct_exec", elapsed_s=time.monotonic() - started,
                    outcome="timeout" if timed_out else "transient" if transient else "ok",
-                   reason="" if not transient else f"exit {result.exit_code}",
+                   reason="" if not transient else (
+                       f"exit {result.exit_code}: looks like a transport failure (ssh can't "
+                       "tell a remote command's own exit 255 from one)"),
                    stderr=result.stderr if transient else "", account=account_of(info.env))
         return result
 
