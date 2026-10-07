@@ -245,6 +245,37 @@ def test_a_partial_last_line_is_unknown(tmp_path):
     assert p["state"] == "unknown" and "partial" in p["reason"]
 
 
+def test_a_unicode_line_separator_inside_a_record_is_not_a_record_break(tmp_path):
+    """JSONL records end at ``\\n`` only: a raw U+2028/U+2029 in a valid final message
+    is part of that record, not a malformed fragment -- and non-ASCII text (U+2603)
+    survives the driver's stdout whatever its encoding."""
+    line = json.dumps(_ev("assistant.message", 3, content="a\u2028b\u2029c \u2603"), ensure_ascii=False)
+    p = _presence(tmp_path, _TURN, raw_tail=line + "\n")
+    assert p["state"] == "busy", p
+
+
+def test_a_sub_agent_turn_end_does_not_settle_the_session(tmp_path):
+    """A nested ``assistant.turn_end`` (``data.agentId``) leaves the parent turn busy;
+    only the parent's own turn end settles it."""
+    nested = [_ev("tool.execution_start", 3, agentId="sub-1"),
+              _ev("assistant.turn_end", 4, turnId="s1", agentId="sub-1")]
+    p = _presence(tmp_path / "a", _TURN + nested)
+    assert (p["state"], p["last_event"]) == ("busy", "assistant.turn_end")
+    p = _presence(tmp_path / "b", _TURN + nested + [_ev("assistant.turn_end", 5, turnId="1")])
+    assert p["state"] == "awaiting_input"
+
+
+def test_the_top_level_json_flag_reaches_presence():
+    """``agent-bridge --json presence <t>`` stays JSON: the subcommand's own ``--json``
+    must not overwrite the top-level flag with its default."""
+    from agent_bridge import __main__ as m
+
+    parser = m.build_parser()
+    assert parser.parse_args(["--json", "presence", "x"]).json is True
+    assert parser.parse_args(["presence", "x", "--json"]).json is True
+    assert parser.parse_args(["presence", "x"]).json is False
+
+
 def test_no_presence_bearing_event_is_unknown(tmp_path):
     p = _presence(tmp_path, [_ev("session.start", 0), _ev("session.model_change", 1)])
     assert p["state"] == "unknown"

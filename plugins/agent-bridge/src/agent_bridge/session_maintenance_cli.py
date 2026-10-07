@@ -298,7 +298,8 @@ def register_session_maintenance_commands(sub: argparse._SubParsersAction) -> No
     presence_p.add_argument("target", help="Session ID or agent name (e.g. codespace:<name>)")
     presence_p.add_argument("--tail", type=int, default=400, help="Trailing events.jsonl lines to scan (default 400)")
     presence_p.add_argument("--timeout", type=float, default=90.0, help="Remote read timeout seconds for a codespace target (default 90)")
-    presence_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    # SUPPRESS: never overwrite the top-level --json ('agent-bridge --json presence <t>').
+    presence_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON.")
     presence_p.set_defaults(func=_cmd_presence, recent=1, message_chars=1)
 
     gc_p = sub.add_parser("gc", help="Garbage-collect aged terminal/disconnected sessions and compact the sessions.db (reclaims freelist bloat)")

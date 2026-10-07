@@ -23,7 +23,8 @@ Files range ~66 KB–2.2 MB, so the driver reads only the **tail**.
 the transcript since its last ``session.start``/``session.resume`` -- never from
 self-reported activity. ``busy`` when the last presence-bearing event is
 ``user.message``, ``assistant.turn_start``, ``tool.execution_start``/``complete``
-or ``permission.completed``; ``awaiting_input`` while a ``permission.requested``
+or ``permission.completed`` (or is a sub-agent's ``assistant.turn_end``, carrying
+``data.agentId``: the parent turn is still taking in its result); ``awaiting_input`` while a ``permission.requested``
 is unanswered (paired by ``requestId``), or when a turn ended
 (``assistant.turn_end``) in an interactive session; ``idle`` when a turn ended in
 an autopilot (or headless) session -- the mode is the latest of
@@ -70,7 +71,8 @@ import sys, os, json, collections
 MARKER = "%(marker)s"
 
 def emit(obj):
-    print(MARKER + json.dumps(obj, ensure_ascii=False))
+    # ASCII-escaped: survives any stdout encoding (a Windows child's is often cp1252).
+    print(MARKER + json.dumps(obj))
 
 def main():
     sdir = sys.argv[1]
@@ -98,7 +100,7 @@ def main():
         emit({"ok": False, "reason": "events.jsonl read error", "session_dir": sdir})
         return
 
-    all_lines = [ln for ln in raw.splitlines() if ln.strip()]
+    all_lines = [ln for ln in raw.split("\n") if ln.strip()]  # JSONL: "\n" only, not U+2028 etc.
     lines = all_lines[-tail_lines:]
     evs = []
     last_line_bad = False
@@ -252,6 +254,7 @@ def presence(evs, last_line_bad, complete=True):
     mode = None
     pending = {}
     last = None
+    busy = False
     for e in evs[start:]:
         t = e.get("type"); d = e.get("data") or {}
         if t == "session.mode_changed" and d.get("newMode"):
@@ -264,6 +267,9 @@ def presence(evs, last_line_bad, complete=True):
             pending.pop(d.get("requestId"), None)
         if t in BUSY or t in SETTLED or t == "session.shutdown" or t == "permission.requested":
             last = e
+            # A sub-agent's turn end (``data.agentId``) doesn't settle the session: the
+            # parent turn is still taking in its result.
+            busy = t in BUSY or (t in SETTLED and bool(isinstance(d, dict) and d.get("agentId")))
     if last is None:
         return out("unknown", "no presence-bearing event since the session started", mode=mode)
     kind = last.get("type")
@@ -271,7 +277,7 @@ def presence(evs, last_line_bad, complete=True):
         return out("absent", "the session shut down", last, mode)
     if pending:
         return out("awaiting_input", "a permission request is unanswered", last, mode, len(pending))
-    if kind in BUSY:
+    if busy:
         return out("busy", "mid-turn", last, mode)
     if mode in ("autopilot", "headless"):
         return out("idle", "the turn ended (autopilot: nothing is asked of a human)", last, mode)
