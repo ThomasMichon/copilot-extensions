@@ -8,7 +8,7 @@ import platform
 import sys
 import threading
 
-from . import activity, embody_resume, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
+from . import activity, embody_resume, machine_identity, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
@@ -524,6 +524,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # machine's own alias round-tripped through SSH back to itself instead of
     # resolving locally.
     #
+    # Canonicalized through `machine_identity.is_local_machine` (not a raw
+    # `== config.machine` string compare) so a case variant, registry key,
+    # alias, display name, or hostname spelling of this same machine is still
+    # recognized as local -- the same reason `_load_remote_machines` uses it.
+    #
     # BUT self-targeting is only truly a no-op when the requested
     # --environment (if any) also matches *this process's own* platform. A
     # same-machine, cross-environment ask (e.g. a native Windows process
@@ -535,7 +540,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # local worktree registry instead of WSL's, producing a false "Worktree
     # not found" for a worktree that only exists on the other side (observed
     # live via Worktree Manager's WSL resume flow, copilot-extensions#5554).
-    same_machine = state.requested_machine == getattr(config, "machine", None)
+    same_machine = bool(state.requested_machine) and machine_identity.is_local_machine(
+        state.requested_machine, config
+    )
     cross_environment = _env_label_differs_from_current_platform(
         getattr(state.args, "environment", None)
     )

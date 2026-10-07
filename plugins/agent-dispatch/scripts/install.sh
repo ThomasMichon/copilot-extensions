@@ -1437,6 +1437,12 @@ EOF
         _ok "Coordinator unit refreshed ($SYSTEMD_UNIT); not restarted -- the graceful cutover already brought the new coordinator up"
         return 0
     fi
+    # Once StartLimitBurst is hit, systemd latches the unit 'failed' and a bare
+    # `restart` will NOT clear that latch -- reconciling onto a fixed build
+    # during the 120s StartLimitIntervalSec window would otherwise silently
+    # stay down (the warning below would fire even though the new build is
+    # fine). Explicit recovery: clear the start-rate counter first.
+    systemctl --user reset-failed "$SYSTEMD_UNIT" 2>/dev/null || true
     systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
     if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
         _ok "Coordinator service installed + started ($SYSTEMD_UNIT)"
@@ -1760,6 +1766,9 @@ EOF
     local mode; mode="$(_supervisor_mode "$env_file")"
     if [[ "$mode" == "serve" ]] || _supervisor_labels_configured "$env_file"; then
         systemctl --user enable "$unit" 2>/dev/null || true
+        # See the matching reset-failed comment on $SYSTEMD_UNIT above: the
+        # same StartLimit latch applies here.
+        systemctl --user reset-failed "$unit" 2>/dev/null || true
         systemctl --user restart "$unit" 2>/dev/null || true
         if systemctl --user is-active "$unit" &>/dev/null; then
             if [[ "$mode" == "serve" ]]; then
