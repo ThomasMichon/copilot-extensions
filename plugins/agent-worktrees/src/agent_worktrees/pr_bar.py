@@ -8,7 +8,11 @@ A PR clears the bar when, **on one head**, every clause is ``met``:
   findings, and doesn't disagree with the review threads;
 - ``threads_unresolved_zero`` -- no review thread is unresolved;
 - ``human_reviews_answered`` -- no human reviewer's latest verdict requests changes;
-- ``mergeable`` -- the provider sees no merge conflict.
+- ``mergeable`` -- the provider sees no merge conflict;
+- ``merge_policy`` -- the repo's own merge policy, through the shared
+  ``pr_contract.classify_state`` classifier: no hold label, not a draft or WIP
+  title, no provider-level change request, and an approval on the head where the
+  policy requires one. Without a supplied policy it is ``unknown``.
 
 Each clause is ``met`` | ``pending`` (waiting on someone else) | ``failed`` (the
 author has something to do) | ``unknown`` (it couldn't be read). The rules that
@@ -38,7 +42,7 @@ COPILOT_REVIEWER = "copilot-pull-request-reviewer"
 #: Each clause's evidence is a short tail, never a dump.
 EVIDENCE_CAP = 600
 CLAUSES = ("ci_green", "review_on_head", "review_findings_zero",
-           "threads_unresolved_zero", "human_reviews_answered", "mergeable")
+           "threads_unresolved_zero", "human_reviews_answered", "mergeable", "merge_policy")
 #: Exit codes of ``pr bar``.
 EXIT = {"met": 0, "merged": 0, "pending": 10, "failed": 11, "unknown": 12}
 
@@ -71,6 +75,9 @@ class Snapshot:
     head_after: str = ""       # the head re-read after everything else
     author: str = ""
     mergeable: str = ""        # MERGEABLE | CONFLICTING | UNKNOWN
+    draft: bool = False
+    title: str = ""
+    labels: list[str] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)    # {name, status, conclusion}
     reviews: list[dict] = field(default_factory=list)   # {author, state, commit, body, at}
     threads: list[dict] = field(default_factory=list)   # {resolved, outdated, path, author}
@@ -210,8 +217,47 @@ def _mergeable(snap: Snapshot) -> Clause:
     return Clause("mergeable", "pending", f"the provider hasn't computed mergeability ({value or 'unset'})")
 
 
-def evaluate(snap: Snapshot, *, reviewer: str = COPILOT_REVIEWER, now: str = "") -> Bar:
-    """The bar for one snapshot -- pure, so recorded snapshots replay exactly."""
+def _policy(snap: Snapshot, policy: dict | None) -> Clause:
+    """The repo's merge policy (``approval_required``, ``hold_labels``,
+    ``wip_title_prefixes``, ``review_blocking``) through the shared classifier."""
+    if policy is None:
+        return Clause("merge_policy", "unknown", "no merge policy was supplied")
+    if "reviews" in snap.errors:
+        return Clause("merge_policy", "unknown", error=snap.errors["reviews"])
+    from .pr_contract import PRSnapshot, Review, classify_state
+    reviews = tuple(
+        Review(id=int(r.get("id") or i + 1), state=r.get("state") or "", user=r.get("author") or "",
+               submitted_at=r.get("at") or "", commit_id=r.get("commit") or "",
+               dismissed=r.get("state") == "DISMISSED")
+        for i, r in enumerate(snap.reviews))
+    state = classify_state(
+        PRSnapshot(pr_state="closed" if snap.state in ("CLOSED", "MERGED") else "open",
+                   merged=snap.state == "MERGED", head_sha=snap.head, reviews=reviews,
+                   author=snap.author, labels=tuple(snap.labels), title=snap.title, draft=snap.draft,
+                   mergeable={"MERGEABLE": True, "CONFLICTING": False}.get((snap.mergeable or "").upper())),
+        hold_labels=policy.get("hold_labels") or (),
+        wip_title_prefixes=policy.get("wip_title_prefixes") or (),
+        approval_required=bool(policy.get("approval_required", True)),
+        review_blocking=bool(policy.get("review_blocking", True)),
+    )
+    if state.held:
+        return Clause("merge_policy", "failed", f"hold label: {', '.join(state.held)}")
+    if state.wip:
+        return Clause("merge_policy", "failed", "a draft, or a WIP title")
+    if state.verdict == "CHANGES_REQUESTED":
+        return Clause("merge_policy", "failed", "the provider's review verdict is changes requested")
+    if policy.get("approval_required", True) and state.verdict != "APPROVED":
+        return Clause("merge_policy", "pending", f"the repo's policy requires an approval on "
+                      f"{_short(snap.head)} (verdict: {state.verdict or 'none'})")
+    required = "approved" if policy.get("approval_required", True) else "no approval required"
+    return Clause("merge_policy", "met", f"no hold, not a draft or WIP, {required}")
+
+
+def evaluate(snap: Snapshot, *, reviewer: str = COPILOT_REVIEWER, now: str = "",
+             policy: dict | None = None) -> Bar:
+    """The bar for one snapshot -- pure, so recorded snapshots replay exactly. *policy*
+    is the repo's merge policy (see :func:`_policy`); without it ``merge_policy``
+    is ``unknown``, so the bar can't be met by default."""
     observed = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
     if "pr" in snap.errors or not snap.head:
         clauses = [Clause(c, "unknown", error=snap.errors.get("pr", "no head read")) for c in CLAUSES]
@@ -221,7 +267,7 @@ def evaluate(snap: Snapshot, *, reviewer: str = COPILOT_REVIEWER, now: str = "")
         clauses = [Clause(c, "unknown", moved) for c in CLAUSES]
         return Bar(snap.repo, snap.number, snap.head_after, snap.state, "unknown", clauses, observed)
     clauses = [_ci(snap), _review_on_head(snap, reviewer), _findings(snap, reviewer),
-               _threads(snap), _humans(snap, reviewer), _mergeable(snap)]
+               _threads(snap), _humans(snap, reviewer), _mergeable(snap), _policy(snap, policy)]
     if snap.state == "MERGED":
         verdict = "merged"
     else:
@@ -233,14 +279,15 @@ def evaluate(snap: Snapshot, *, reviewer: str = COPILOT_REVIEWER, now: str = "")
 # -- the GitHub read ---------------------------------------------------------------------
 
 _PR_QUERY = """query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-pullRequest(number:$number){state mergeable headRefOid author{login}}}}"""
+pullRequest(number:$number){state mergeable headRefOid isDraft title author{login}
+labels(first:100){nodes{name}}}}}"""
 _CHECKS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){commits(last:1){nodes{commit{oid
 statusCheckRollup{contexts(first:100,after:$after){pageInfo{hasNextPage endCursor}
 nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}}}"""
 _REVIEWS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(first:100,after:$after){
-pageInfo{hasNextPage endCursor} nodes{author{login} state submittedAt body commit{oid}}}}}}"""
+pageInfo{hasNextPage endCursor} nodes{databaseId author{login} state submittedAt body commit{oid}}}}}}"""
 _THREADS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$after){
 pageInfo{hasNextPage endCursor} nodes{isResolved isOutdated path comments(first:1){nodes{author{login}}}}}}}}"""
@@ -319,6 +366,8 @@ def read_github(repo: str, number: int, *, host: str, token: str | None = None, 
         pr = _graphql(run, _PR_QUERY, **kw)
         snap.state, snap.mergeable = pr.get("state") or "", pr.get("mergeable") or ""
         snap.head, snap.author = pr.get("headRefOid") or "", (pr.get("author") or {}).get("login", "")
+        snap.draft, snap.title = bool(pr.get("isDraft")), pr.get("title") or ""
+        snap.labels = [n.get("name", "") for n in ((pr.get("labels") or {}).get("nodes") or []) if n]
     except ReadError as exc:
         snap.errors["pr"] = str(exc)
         return snap
@@ -328,6 +377,7 @@ def read_github(repo: str, number: int, *, host: str, token: str | None = None, 
             "status": n.get("status") or n.get("state") or "",
             "conclusion": n.get("conclusion") or ""}),
         ("reviews", _REVIEWS_QUERY, lambda pr: pr.get("reviews"), lambda n: {
+            "id": n.get("databaseId"),
             "author": (n.get("author") or {}).get("login", ""), "state": n.get("state") or "",
             "commit": (n.get("commit") or {}).get("oid", ""), "body": n.get("body") or "",
             "at": n.get("submittedAt") or ""}),

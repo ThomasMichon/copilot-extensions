@@ -93,7 +93,15 @@ def cmd_pr_bar(argv: list[str]) -> int:
         output.err(f"Couldn't resolve the account for {slug}: {exc}")
         return 12
     snap = pr_bar.read_github(slug, number, host=host, token=token)
-    bar = pr_bar.evaluate(snap, reviewer=args.reviewer or pr_bar.COPILOT_REVIEWER)
+    try:  # the acting identity's role-specific policy, as pr-watch resolves it
+        policy_cfg = pr_config.resolve_actor_pr_flow(resolution.repo_config, slug, token=token).pr_config
+    except Exception:
+        policy_cfg = prcfg  # the configured base policy
+    policy = {"approval_required": getattr(policy_cfg, "approval_required", True),
+              "hold_labels": tuple(getattr(policy_cfg, "hold_labels", ()) or ()),
+              "wip_title_prefixes": tuple(getattr(policy_cfg, "wip_title_prefixes", ()) or ()),
+              "review_blocking": bool(getattr(policy_cfg, "review_blocking", True))}
+    bar = pr_bar.evaluate(snap, reviewer=args.reviewer or pr_bar.COPILOT_REVIEWER, policy=policy)
     if args.json:
         print(json.dumps(bar.to_dict(), indent=2))
     else:
