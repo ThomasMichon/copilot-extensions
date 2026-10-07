@@ -30,7 +30,10 @@
   criteria require a sole-authority daemon for all four layers — Worktrees,
   Tasks, Codespaces, Containers — plus no pivot's row state ever oscillating
   between two values for one fact, a case this effort doesn't itself cover.
-  See that issue's cross-link comment for the full disposition.)
+  See the corrected 2026-10-07 addendum on that issue's cross-link comment —
+  not its original paragraph — for the precise Worktrees-pivot mechanism:
+  two independently-computed compute paths, not two confirmed tracking-record
+  writers.)
 
 ## Guiding Intent
 
