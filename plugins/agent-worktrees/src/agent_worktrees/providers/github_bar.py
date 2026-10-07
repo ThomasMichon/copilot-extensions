@@ -51,6 +51,18 @@ def _s(value) -> str:
     return value if isinstance(value, str) else ""
 
 
+_STATES, _MERGEABLE = ("OPEN", "CLOSED", "MERGED"), ("MERGEABLE", "CONFLICTING", "UNKNOWN")
+
+
+def _field(pr: dict, key: str, valid) -> object:
+    """A core field the bar decides on, or :class:`ReadError`: a malformed lifecycle
+    state, head, draft flag or title must never read as a clean PR."""
+    value = pr.get(key)
+    if not valid(value):
+        raise ReadError(f"an unreadable {key}: {value!r}"[:200])
+    return value
+
+
 def _login(node) -> str:
     """The author's login; ``""`` for a deleted user (``null``). Any other shape is
     unreadable: the author decides who counts as a human reviewer."""
@@ -125,7 +137,10 @@ def _core(run, **kw) -> dict:
         raise ReadError("labels: a page without readable nodes or pagination info")
     if info["hasNextPage"]:
         page = _pages(run, _LABELS_QUERY, lambda pr: pr.get("labels"), what="labels", **kw)
-    return {**pr, "labels": sorted(n.get("name") or "" for n in page)}
+    names = [n.get("name") for n in page]
+    if not all(isinstance(name, str) and name for name in names):
+        raise ReadError("labels: a label without a readable name")
+    return {**pr, "labels": sorted(names)}
 
 
 def _checks_conn(pr: dict):
@@ -150,10 +165,12 @@ def read_bar(repo: str, number: int, *, host: str, token: str | None = None, run
     snap = Snapshot(repo=repo, number=int(number))
     try:
         pr = _core(run, **kw)
-        snap.state, snap.mergeable = _s(pr.get("state")), _s(pr.get("mergeable"))
-        snap.head, snap.author = _s(pr.get("headRefOid")), _login(pr)
-        snap.draft, snap.title = pr.get("isDraft") is True, _s(pr.get("title"))
-        snap.labels = [_s(n) for n in pr["labels"]]
+        snap.state = _field(pr, "state", lambda v: v in _STATES)
+        snap.mergeable = _field(pr, "mergeable", lambda v: v in _MERGEABLE)
+        snap.head = _field(pr, "headRefOid", lambda v: isinstance(v, str) and bool(v))
+        snap.draft = _field(pr, "isDraft", lambda v: isinstance(v, bool))
+        snap.title = _field(pr, "title", lambda v: isinstance(v, str))
+        snap.author, snap.labels = _login(pr), list(pr["labels"])
     except _SHAPE_ERRORS as exc:
         snap.errors["pr"] = _unreadable(exc)
         return snap
@@ -177,14 +194,14 @@ def read_bar(repo: str, number: int, *, host: str, token: str | None = None, run
             snap.errors[part] = _unreadable(exc)
     try:  # the same core again: any change since the first read means a mixed view
         after = _core(run, **kw)
-        snap.head_after = _s(after.get("headRefOid"))
+        snap.head_after = _field(after, "headRefOid", lambda v: isinstance(v, str) and bool(v))
         changed = [f for f in ("state", "isDraft", "title", "labels") if after.get(f) != pr.get(f)]
         # GitHub computes mergeability lazily: UNKNOWN first, then the answer. Only a
         # flip between two answers is a change; otherwise the latest read stands.
         known = {pr.get("mergeable"), after.get("mergeable")} <= {"MERGEABLE", "CONFLICTING"}
         if known and after.get("mergeable") != pr.get("mergeable"):
             changed.append("mergeable")
-        snap.mergeable = _s(after.get("mergeable"))
+        snap.mergeable = _field(after, "mergeable", lambda v: v in _MERGEABLE)
         snap.changed = ", ".join(changed)
     except _SHAPE_ERRORS as exc:
         snap.errors["pr"] = f"re-reading the PR: {_unreadable(exc)}"

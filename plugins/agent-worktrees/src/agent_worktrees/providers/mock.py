@@ -56,6 +56,7 @@ class _FakePR:
     mergeable: bool | None = True
     checks_state: str = ""
     reviews: list = field(default_factory=list)
+    review_bodies: dict = field(default_factory=dict)  # review id -> body (Review has none)
     threads: list = field(default_factory=list)
     source_marker: str = ""
     auto_complete: bool = False
@@ -318,15 +319,20 @@ class MockPRProvider:
     ) -> "Snapshot":
         """The merge-bar read from the in-memory PR: its fabricated reviews, threads,
         labels and ``checks_state`` (one synthetic check; none when unset)."""
-        from ..pr_bar import Snapshot
+        from ..pr_bar import Snapshot, unsupported
 
-        pr = self._get(repo, number)
+        try:
+            pr = self._get(repo, number)
+        except ProviderError as exc:  # the read never raises: an unreadable PR is named
+            snap = unsupported(repo, number, self.name)
+            snap.errors["pr"] = str(exc)
+            return snap
         state = "MERGED" if pr.merged else ("CLOSED" if pr.state == "closed" else "OPEN")
         conclusion = {"success": "SUCCESS", "failure": "FAILURE"}.get(pr.checks_state, "")
         checks = [{"name": "mock-ci", "status": "COMPLETED" if conclusion else "IN_PROGRESS",
                    "conclusion": conclusion}] if pr.checks_state else []
         reviews = [{"id": r.id, "author": r.user, "state": "DISMISSED" if r.dismissed else r.state,
-                    "commit": r.commit_id, "body": getattr(r, "body", ""), "at": r.submitted_at}
+                    "commit": r.commit_id, "body": pr.review_bodies.get(r.id, ""), "at": r.submitted_at}
                    for r in pr.reviews]
         threads = [{"resolved": t.status == "resolved", "outdated": t.status == "outdated",
                     "path": t.file_path, "author": t.comments[0].author if t.comments else ""}
@@ -442,12 +448,15 @@ class MockPRProvider:
 
     def add_review(
         self, repo: str, number: int, *, id: int, state: str, user: str,
-        submitted_at: str = "", commit_id: str = "", dismissed: bool = False,
+        submitted_at: str = "", commit_id: str = "", dismissed: bool = False, body: str = "",
     ) -> None:
-        """Fabricate a review on an existing PR (conformance-test setup only)."""
+        """Fabricate a review on an existing PR (conformance-test setup only); *body*
+        is what ``get_bar_snapshot`` reports as the review's summary."""
         from ..pr_contract import Review
 
         pr = self._get(repo, number)
+        if body:
+            pr.review_bodies[id] = body
         pr.reviews.append(
             Review(
                 id=id, state=state, user=user, submitted_at=submitted_at,

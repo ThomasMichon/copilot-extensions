@@ -492,3 +492,39 @@ def test_a_malformed_nested_response_is_unknown_never_raised(kind, body, part):
     assert snap.errors
     bar = pr_bar.evaluate(snap, now="2026-10-06T12:00:00+00:00", policy=NO_APPROVAL)
     assert _status(bar)[part] == "unknown"
+
+
+@pytest.mark.parametrize("fake", [
+    {"state": 5}, {"state": "WEIRD"}, {"mergeable": None}, {"draft": "no"}, {"title": None},
+    {"heads": ("", "")}, {"labels": (5,)},
+], ids=["state-int", "state-unknown", "mergeable-null", "draft-str", "title-null", "head-empty", "label-int"])
+def test_a_malformed_core_field_is_unknown_never_a_clean_pr(fake):
+    """A lifecycle state, head, draft flag, title or label the bar decides on that isn't
+    readable must not read as an open, clean PR."""
+    bar = _bar(FakeGh(**fake))
+    assert bar.verdict == "unknown" and set(_status(bar).values()) == {"unknown"}
+
+
+def test_the_mock_bar_read_names_a_missing_pr_instead_of_raising():
+    from agent_worktrees.providers.mock import MockPRProvider
+
+    snap = MockPRProvider().get_bar_snapshot("owner/repo", 404)
+    assert "no such PR" in snap.errors["pr"]
+    assert pr_bar.evaluate(snap, policy=NO_APPROVAL).verdict == "unknown"
+
+
+def test_a_mock_pr_can_meet_the_whole_bar():
+    """The mock proves a complete flow: green CI, the reviewer's clean review (its
+    summary body round-trips) on the head, no threads, mergeable."""
+    from agent_worktrees.providers import PRScope
+    from agent_worktrees.providers.mock import MockPRProvider
+
+    mock = MockPRProvider()
+    pr = mock.create_pull(PRScope(repo="owner/repo", head="feat", base="main", title="t", body=""))
+    mock._get("owner/repo", pr.number).checks_state = "success"
+    mock.add_review("owner/repo", pr.number, id=1, state="COMMENTED", user=COPILOT,
+                    submitted_at="2026-10-06T10:00:00Z", body=APPROVED_BODY)
+    bar = pr_bar.evaluate(mock.get_bar_snapshot("owner/repo", pr.number),
+                          now="2026-10-06T12:00:00+00:00", policy=NO_APPROVAL)
+    assert bar.verdict == "met", _status(bar)
+
