@@ -137,18 +137,19 @@ class CodespaceConfigSource:
                     last_error = RuntimeError(
                         f"gh codespace ssh --config failed (rc={result.returncode}): {stderr}"
                     )
-                    # A dev-tunnel reset is retried; a genuine gh error (unknown
-                    # CodeSpace, auth) fails at once.
-                    if attempt < len(_FETCH_TIMEOUTS) and TRANSIENT_SSH_STDERR.search(stderr):
-                        dial.outcome, dial.reason = "transient", f"rc={result.returncode}"
-                        log.info(
-                            "gh codespace ssh --config attempt %d/%d hit a transient "
-                            "tunnel error for %s; retrying: %s",
-                            attempt, len(_FETCH_TIMEOUTS), self._codespace_name, stderr[:200],
-                        )
-                    else:
-                        dial.outcome, dial.reason = "error", f"rc={result.returncode}"
+                    # A dev-tunnel reset is recorded as transient (even on the last
+                    # attempt) and retried while attempts remain; a genuine gh error
+                    # (unknown CodeSpace, auth) fails at once.
+                    transient = bool(TRANSIENT_SSH_STDERR.search(stderr))
+                    dial.outcome = "transient" if transient else "error"
+                    dial.reason = f"rc={result.returncode}"
+                    if not (transient and attempt < len(_FETCH_TIMEOUTS)):
                         raise last_error
+                    log.info(
+                        "gh codespace ssh --config attempt %d/%d hit a transient "
+                        "tunnel error for %s; retrying: %s",
+                        attempt, len(_FETCH_TIMEOUTS), self._codespace_name, stderr[:200],
+                    )
                 else:
                     dial.outcome = "ok"
                     return result.stdout

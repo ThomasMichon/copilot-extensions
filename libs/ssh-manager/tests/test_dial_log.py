@@ -450,3 +450,17 @@ def test_a_fresh_lock_file_is_seeded_before_it_is_locked():
     lock = dial_log._file_for("cs-seed").with_suffix(".jsonl.lock")
     assert lock.stat().st_size >= 1 and len(dial_log.read("cs-seed")) == 1
 
+
+def test_a_tunnel_reset_on_the_last_config_fetch_is_still_transient(monkeypatch, tmp_path):
+    """The outcome comes from what failed, not from whether a retry is left: a reset on
+    the final attempt is 'transient' (and then raises), never a generic 'error'."""
+    from ssh_manager import codespace_source as cs_mod
+
+    monkeypatch.setattr(cs_mod, "_FETCH_TIMEOUTS", (5,))
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess(
+        ["gh"], 1, "", "kex_exchange_identification: Connection reset by peer"))
+    src = CodespaceConfigSource("cs-last", config_dir=tmp_path)
+    with pytest.raises(RuntimeError):
+        src._fetch_gh_config()
+    assert _kinds("cs-last") == [("config_fetch", "transient")]
+
