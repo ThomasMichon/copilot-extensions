@@ -1,0 +1,9 @@
+{
+  "comment": "Bound the agent roster cache's per-request opportunistic join to a short, independent budget instead of the far more generous watchdog timeout, so a namespace provider slower than the refresh cadence (observed: GitHub Codespaces/Docker enumeration, 10-16s) no longer makes every GET /api/v1/agents caller pay its full scan cost.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

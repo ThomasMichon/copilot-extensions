@@ -302,6 +302,91 @@ async def test_get_snapshot_bounds_the_join_so_a_hung_scan_cannot_hang_the_reque
 
 
 @pytest.mark.asyncio
+async def test_get_snapshot_opportunistic_join_is_bounded_well_under_watchdog_timeout():
+    """Production regression (pivot-streaming-transport investigation,
+    2026-10-06): a namespace provider that is *reliably* slower than this
+    cache's own refresh cadence -- not merely hung once, but consistently
+    slow on every attempt (observed: `agent-codespaces`/`agent-containers`
+    `namespace-list`, each a CLI subprocess with no result cache of its
+    own, taking 10-16s) -- made EVERY `GET /api/v1/agents` call pay that
+    namespace's full scan cost every single time, because the join used to
+    be bounded at the far more generous `_watchdog_timeout` (background-
+    supervision headroom, minutes-scale by default) rather than a budget
+    sized for a live request. `_opportunistic_join_budget` is a short,
+    independent bound: even with a large (production-realistic, unset)
+    `watchdog_timeout`, a slow-but-eventually-successful scan must not
+    make `get_snapshot()` wait anywhere near that long."""
+    resolver, ns = _make_resolver_with_namespace()
+    release = asyncio.Event()
+
+    async def _slow_but_succeeds():
+        await release.wait()
+        return [_agent("eventually")]
+
+    ns.outcomes = [_slow_but_succeeds]
+    # No explicit watchdog_timeout -- exercise the real production default,
+    # which the old code used directly as the join bound.
+    cache = AgentRosterCache(resolver, refresh_interval=60.0)
+    assert cache._watchdog_timeout > 10.0  # sanity: the old bound really was generous
+    assert cache._opportunistic_join_budget <= 1.5
+
+    start = time.monotonic()
+    snapshot = await asyncio.wait_for(cache.get_snapshot(), timeout=5.0)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0  # well under the old, far larger watchdog bound
+    assert "ns" in snapshot.incomplete_namespaces
+    assert snapshot.complete is False
+
+    # The scan is NOT abandoned by the timed-out join -- it keeps running in
+    # the background, and a later caller observes its eventual result
+    # without needing to trigger (or wait for) a second scan itself.
+    release.set()
+    await asyncio.sleep(0)  # let the still-running task actually publish
+    await asyncio.wait_for(cache._inflight["ns"], timeout=2.0) if "ns" in cache._inflight else None
+    later = await cache.get_snapshot()
+    assert ns.call_count == 1  # no second scan was needed
+    assert any(r["name"] == "ns:eventually" for r in later.rows)
+    assert later.complete is True
+
+    await cache.stop()
+
+
+@pytest.mark.asyncio
+async def test_explicit_opportunistic_join_budget_is_still_clamped_to_watchdog_timeout():
+    """`opportunistic_join_budget` is an explicit constructor override, not
+    just a derived default -- the clamp against `_watchdog_timeout` must
+    apply to it too (Copilot review, PR #5585): an override larger than
+    `_watchdog_timeout` would otherwise let a request wait longer than the
+    watchdog bound the cache's own orphaned-task story depends on."""
+    resolver, ns = _make_resolver_with_namespace()
+    hang_forever = asyncio.Event()
+
+    async def _hang():
+        await hang_forever.wait()
+        return [_agent("never")]  # pragma: no cover - never reached
+
+    ns.outcomes = [_hang]
+    cache = AgentRosterCache(
+        resolver,
+        refresh_interval=60.0,
+        watchdog_timeout=0.1,
+        opportunistic_join_budget=30.0,  # deliberately larger than watchdog_timeout
+    )
+    assert cache._opportunistic_join_budget == 0.1  # clamped down, not 30.0
+
+    start = time.monotonic()
+    snapshot = await asyncio.wait_for(cache.get_snapshot(), timeout=2.0)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 1.0  # bounded by watchdog_timeout, not the 30s override
+    assert "ns" in snapshot.incomplete_namespaces
+
+    hang_forever.set()
+    await cache.stop()
+
+
+@pytest.mark.asyncio
 async def test_force_fail_uninitialized_namespaces_cancels_a_hung_scan():
     """A namespace resolver with its own timeout disabled can hang past
     `wait_until_warm`'s bound entirely, leaving it genuinely UNINITIALIZED
