@@ -1608,19 +1608,19 @@ def test_default_connect_retries_env_override(monkeypatch):
     """``AGENT_DISPATCH_HTTP_CONNECT_RETRIES`` tunes the default; an absent,
     empty, or malformed value falls back to the built-in default (2) rather
     than raising or disabling retry entirely."""
-    from agent_dispatch.client import _default_connect_retries
+    from agent_dispatch.client_transport import default_connect_retries
 
     monkeypatch.delenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", raising=False)
-    assert _default_connect_retries() == 2
+    assert default_connect_retries() == 2
 
     monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "5")
-    assert _default_connect_retries() == 5
+    assert default_connect_retries() == 5
 
     monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "-3")
-    assert _default_connect_retries() == 0  # clamped, never negative
+    assert default_connect_retries() == 0  # clamped, never negative
 
     monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "not-a-number")
-    assert _default_connect_retries() == 2
+    assert default_connect_retries() == 2
 
 
 def test_client_survives_transient_connection_refused(monkeypatch):
