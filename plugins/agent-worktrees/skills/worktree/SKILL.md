@@ -211,6 +211,16 @@ if the stale tracked branch still has content of its own not on upstream
 (possible orphaned work worth a manual look) and preserves that branch
 ref through cleanup instead of deleting it alongside the checkout.
 
+**A PR's work counts as landed on the default branch or on the PR's own base**
+(read from the provider, e.g. `dev` when the default branch is `main`): by
+ancestry, by each commit's patch, by the whole branch as one patch (a squash
+merge, even after upstream edits the same files again), or by file content.
+Commits a branch was created on top of from a remote-tracking branch (its
+reflog's `Created from origin/...`) are published history, never its own
+work. A refusal lists the checks it ran;
+`<agent-worktrees catalog argv[0]> finalize --explain-landing [--json]` reports
+them read-only, without finalizing.
+
 ### Decision table
 
 | Situation | Command |
