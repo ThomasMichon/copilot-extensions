@@ -22,6 +22,18 @@
   same resident-daemon precedent (`classify_daemon.py`,
   `worktree_status_daemon.py`, `work_coalescing_singleton`) as its starting
   infrastructure rather than building a third daemon.
+  [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)
+  — names a consolidation gap this effort would be a natural home for:
+  `classify_daemon` and `worktree_status_daemon` today independently compute
+  overlapping git-state facts for the same worktree via two separate compute
+  paths (`worktree_status_compute.py` only assembles a read-only bundle;
+  `picker_support/data_local.py` is the path that actually stamps
+  `WorktreeRecord.git_state`). #5555 proposes consolidating those two compute
+  paths into one. **Not yet in scope here** — this effort's own Plan
+  explicitly left both kinds unchanged/unrestructured and its Validation Plan
+  has no consolidation check; folding them into one authoritative compute
+  path would need to be added as new Plan/Validation Plan items, not assumed
+  as already underway.
   `module-componentization-discipline`
   (`efforts/active/module-componentization-discipline/README.md`) — has
   already split `tracking.py`'s write surface into `tracking_claims.py` /
