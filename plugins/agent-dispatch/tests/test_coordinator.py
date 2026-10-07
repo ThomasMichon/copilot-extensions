@@ -1604,6 +1604,78 @@ def test_client_omits_none_result_for_older_coordinator():
     assert "result" not in seen
 
 
+def test_default_connect_retries_env_override(monkeypatch):
+    """``AGENT_DISPATCH_HTTP_CONNECT_RETRIES`` tunes the default; an absent,
+    empty, or malformed value falls back to the built-in default (2) rather
+    than raising or disabling retry entirely."""
+    from agent_dispatch.client import _default_connect_retries
+
+    monkeypatch.delenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", raising=False)
+    assert _default_connect_retries() == 2
+
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "5")
+    assert _default_connect_retries() == 5
+
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "-3")
+    assert _default_connect_retries() == 0  # clamped, never negative
+
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "not-a-number")
+    assert _default_connect_retries() == 2
+
+
+def test_client_survives_transient_connection_refused(monkeypatch):
+    """A coordinator supersession cutover can leave a brief window where the
+    old generation has released its socket and the new one hasn't bound yet:
+    the liveness probe a CLI command runs just before constructing its client
+    (``has_live_local_coordinator``) can observe "live", then the very next
+    request still lands in that gap and gets ``ConnectionRefusedError``.
+
+    This is exactly the failure behind the Picker steering-card "could not be
+    delivered" report: a one-shot CLI client with no retry turns a purely
+    transient, nothing-was-ever-sent condition into an operator-visible,
+    silently-dropped answer. ``DispatchClient``'s default transport must
+    absorb a short refused-connection window on its own, with no caller-side
+    retry loop, as long as ``AGENT_DISPATCH_HTTP_CONNECT_RETRIES`` permits it.
+    """
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "5")
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()  # nothing listening yet -- connecting now refuses
+    url = f"http://127.0.0.1:{port}"
+
+    def _start_late():
+        import uvicorn
+
+        time.sleep(0.3)  # give the client's first connect attempt(s) time to refuse
+        app = create_app(TaskQueue_for_test())
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.Server(config).run()
+
+    def TaskQueue_for_test():
+        import tempfile
+        from pathlib import Path
+
+        return TaskQueue(Path(tempfile.mkdtemp()) / "tasks.db")
+
+    thread = threading.Thread(target=_start_late, daemon=True)
+    thread.start()
+
+    with DispatchClient(url, timeout=2.0) as client:
+        deadline = time.time() + 10
+        last_exc = None
+        result = None
+        while time.time() < deadline:
+            try:
+                result = client.health()
+                break
+            except Exception as exc:  # httpx.HTTPTransport's own retry can still
+                last_exc = exc  # exhaust under extreme scheduling jitter; poll.
+                time.sleep(0.1)
+        assert result is not None, f"client never recovered: {last_exc}"
+
+
 def test_client_detects_coordinator_that_drops_structured_result():
     def handler(request):
         return httpx.Response(

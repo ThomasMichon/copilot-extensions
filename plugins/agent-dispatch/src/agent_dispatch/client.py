@@ -46,6 +46,31 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
+#: Default connection-level retries for every request this client makes
+#: (``httpx.HTTPTransport(retries=...)``). This is narrowly scoped to
+#: *connection* failures -- refused/reset/unreachable before any byte of the
+#: request body was sent -- never to a request that reached the server (a
+#: slow/hung response past ``timeout`` is a read failure, not a connect
+#: failure, and is never retried here). That is exactly the safe-to-retry
+#: window: the CLI's own ``_client()`` already confirms a coordinator is live
+#: (``has_live_local_coordinator()``) immediately before constructing a
+#: client, but a coordinator self-retire-on-supersession cutover can land in
+#: the gap between that check and this request's actual connect, producing a
+#: bare ``ConnectError`` the operator sees as an opaque, silent "Steer could
+#: not be delivered" (odsp-web-harness steering-card delivery-failure report)
+#: with no automatic recovery -- even though nothing was ever sent to the old
+#: generation and retrying against the new one is always safe. Overridable
+#: for tests (an explicit ``transport=`` skips this default entirely) and via
+#: ``AGENT_DISPATCH_HTTP_CONNECT_RETRIES`` for an operator who wants it tuned.
+def _default_connect_retries() -> int:
+    import os
+
+    try:
+        return max(0, int(os.environ.get("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "2")))
+    except (TypeError, ValueError):
+        return 2
+
+
 class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin):
     """A synchronous client for one coordinator base URL."""
 
@@ -61,12 +86,18 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
     ):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         verify = not base_url.lower().startswith("http://")
+        if transport is None:
+            # Bake `verify` into the transport we build ourselves; an
+            # explicitly-supplied transport (tests, a mock) is left exactly
+            # as given, with no retry wrapping imposed on it.
+            transport = httpx.HTTPTransport(
+                verify=verify, retries=_default_connect_retries()
+            )
         self._http = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers=headers,
             timeout=timeout,
             transport=transport,
-            verify=verify,
         )
         self._control_token = control_token
         # An optional owned resource (e.g. an SSH failover port-forward) closed
