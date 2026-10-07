@@ -8,7 +8,7 @@ import platform
 import sys
 import threading
 
-from . import activity, embody_resume, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
+from . import activity, embody_resume, machine_identity, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
@@ -46,6 +46,25 @@ def _emit_plan(*args, **kwargs):
 
 def _emit_remote_plan_for_env(*args, **kwargs):
     return _core()._emit_remote_plan_for_env(*args, **kwargs)
+
+
+def _env_label_differs_from_current_platform(env_label: str | None) -> bool:
+    """True when ``--environment`` names a platform other than this process's
+    own (e.g. ``WSL`` while this process is running natively on Windows).
+
+    Shares :data:`resolve_machine_cli._ENV_LABEL_TO_NAME`'s Picker-label ->
+    ``cfg.detect_platform()`` vocabulary so the two stay in lockstep.
+    """
+    from .resolve_machine_cli import _ENV_LABEL_TO_NAME
+
+    label = (env_label or "").strip().lower()
+    if not label:
+        return False
+    want = _ENV_LABEL_TO_NAME.get(label)
+    # An unrecognized label isn't "the current platform" either -- let the
+    # remote dispatch path below be the one to reject it with a clear error,
+    # rather than silently falling through to a local (same-platform) resolve.
+    return want != cfg.detect_platform()
 
 
 def _heal_stale_anchor_if_self_missing(*args, **kwargs):
@@ -504,7 +523,46 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # `agent-worktrees copilot`/Worktree Manager flow invoked with this
     # machine's own alias round-tripped through SSH back to itself instead of
     # resolving locally.
-    if state.requested_machine and state.requested_machine != getattr(config, "machine", None):
+    #
+    # Canonicalized through `machine_identity.is_local_machine` (not a raw
+    # `== config.machine` string compare) so a case variant, registry key,
+    # alias, display name, or hostname spelling of this same machine is still
+    # recognized as local -- the same reason `_load_remote_machines` uses it.
+    #
+    # BUT self-targeting is only truly a no-op when the requested
+    # --environment (if any) also matches *this process's own* platform. A
+    # same-machine, cross-environment ask (e.g. a native Windows process
+    # resolving `--machine lambda-core --environment WSL`) is not "never
+    # passed" -- it is exactly the case `_load_remote_machines` carves out
+    # ("local machine: only include *other-platform* environments") for the
+    # interactive picker's own "Other Machines" menu. Skipping the remote
+    # dispatch here for that case silently resolves against *this* platform's
+    # local worktree registry instead of WSL's, producing a false "Worktree
+    # not found" for a worktree that only exists on the other side (observed
+    # live via Worktree Manager's WSL resume flow, copilot-extensions#5554).
+    #
+    # Exact-match fast path first (no machines.yaml I/O, tolerates a minimal
+    # Config-like object with only a `.machine` attribute -- what several
+    # existing call sites' test fixtures provide); `is_local_machine`'s own
+    # alias/case-variant canonicalization only runs for a non-exact name, and
+    # is itself wrapped since it additionally needs `config.default_repo` --
+    # a minimal test fixture lacking that must fall back to "not local"
+    # (dispatch remote), never raise.
+    requested = state.requested_machine
+    config_machine = getattr(config, "machine", None)
+    if requested and config_machine and requested.lower() == config_machine.lower():
+        same_machine = True
+    elif requested:
+        try:
+            same_machine = machine_identity.is_local_machine(requested, config)
+        except AttributeError:
+            same_machine = False
+    else:
+        same_machine = False
+    cross_environment = _env_label_differs_from_current_platform(
+        getattr(state.args, "environment", None)
+    )
+    if state.requested_machine and (not same_machine or cross_environment):
         remote_args: list[str] = []
         if state.use_base:
             remote_args.append("--base")

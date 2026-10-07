@@ -1404,6 +1404,16 @@ ENVEOF
 [Unit]
 Description=agent-dispatch -- portable agent task-queue coordinator
 After=network.target
+# A persistent failure (e.g. a non-passive 'serve' repeatedly refusing to
+# start because another coordinator is already live -- exit code 2) must
+# actually trip systemd's circuit breaker and surface as 'failed'. Without
+# an explicit StartLimit*, systemd's own defaults (burst=5 / interval=10s)
+# are evaded by RestartSec=5: at most ~2 restarts ever land in any rolling
+# 10s window, so the unit can restart indefinitely -- observed climbing
+# into the thousands over several days -- while 'systemctl --failed' stays
+# silent the whole time.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -1427,6 +1437,12 @@ EOF
         _ok "Coordinator unit refreshed ($SYSTEMD_UNIT); not restarted -- the graceful cutover already brought the new coordinator up"
         return 0
     fi
+    # Once StartLimitBurst is hit, systemd latches the unit 'failed' and a bare
+    # `restart` will NOT clear that latch -- reconciling onto a fixed build
+    # during the 120s StartLimitIntervalSec window would otherwise silently
+    # stay down (the warning below would fire even though the new build is
+    # fine). Explicit recovery: clear the start-rate counter first.
+    systemctl --user reset-failed "$SYSTEMD_UNIT" 2>/dev/null || true
     systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
     if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
         _ok "Coordinator service installed + started ($SYSTEMD_UNIT)"
@@ -1723,6 +1739,12 @@ _install_supervisor_unit() {
 Description=agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)
 After=network.target $SYSTEMD_UNIT
 Wants=$SYSTEMD_UNIT
+# See the StartLimit* comment on $SYSTEMD_UNIT: without an explicit
+# StartLimit*, RestartSec=10 evades systemd's own default circuit breaker
+# (burst=5/interval=10s) the same way, letting a persistent reconcile-cycle
+# failure restart indefinitely instead of surfacing as 'failed'.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -1744,6 +1766,9 @@ EOF
     local mode; mode="$(_supervisor_mode "$env_file")"
     if [[ "$mode" == "serve" ]] || _supervisor_labels_configured "$env_file"; then
         systemctl --user enable "$unit" 2>/dev/null || true
+        # See the matching reset-failed comment on $SYSTEMD_UNIT above: the
+        # same StartLimit latch applies here.
+        systemctl --user reset-failed "$unit" 2>/dev/null || true
         systemctl --user restart "$unit" 2>/dev/null || true
         if systemctl --user is-active "$unit" &>/dev/null; then
             if [[ "$mode" == "serve" ]]; then

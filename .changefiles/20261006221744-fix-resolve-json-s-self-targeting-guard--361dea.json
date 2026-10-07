@@ -1,0 +1,9 @@
+{
+  "comment": "Fix resolve --json's self-targeting guard to also dispatch remotely when --environment differs from the current platform, instead of misresolving a same-machine cross-environment worktree (e.g. --machine <self> --environment WSL) against the wrong platform's local registry (#5554)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
