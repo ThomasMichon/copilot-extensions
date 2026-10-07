@@ -458,22 +458,30 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       back-to-repoll case. Confirmed present and passing; this predates the
       2026-10-06/07 sessions (landed with Phase 0 on 2026-10-01) and was
       simply never checked off.
-- [ ] **Phases 1-2:** a live-timed before/after of the Tasks/Bridges pivot's
+- [x] **Phases 1-2:** a live-timed before/after of the Tasks/Bridges pivot's
       refresh latency (mirroring the `picker-reconcile-local` before/after
       methodology from 2026-09-30), plus a headless test proving the Picker
       repaints on a `delta`/`removed` envelope line without a poll tick.
-      — **Verified 2026-10-07**: `test_streaming_delta_and_removed_update_in_place`
-      (`test_pivot_streaming.py`) is exactly this headless test — a `delta`
-      envelope upgrades one row in place and a `removed` envelope drops
-      another, both observed directly on `RegisteredPivotRuntime`'s own
-      rows with no one-shot repoll in between. The live-timed before/after
-      is in the Phase 1/2 journal entries below (2026-10-01): the patched
-      `agent-dispatch-board --stream`/`agent-bridge agents --stream` ran
-      directly against this machine's live daemons (57 real tasks, 21 real
-      agents) producing `begin`/N×`row`/`done` then held-channel
-      `delta`/`removed` frames with no process re-exec — eliminating the
-      per-refresh CLI cold-start cost Phase 1/2 exist to remove. Both
-      pieces predate this session; simply never checked off.
+      — **Verified 2026-10-07, with an actual before/after measurement**
+      (Copilot review on this item's first pass, #5626, correctly flagged
+      that the cited journal entries recorded envelope counts and
+      no-re-exec confirmation, not timings): headless test coverage is
+      `test_streaming_delta_and_removed_update_in_place` (`test_pivot_
+      streaming.py`) — a `delta` envelope upgrades one row in place and a
+      `removed` envelope drops another, both observed directly on
+      `RegisteredPivotRuntime`'s own rows with no one-shot repoll between
+      them. For the timing: measured `agent-dispatch-board --machine
+      tmichon-cloud1` (one-shot, no `--stream` — the pre-Phase-1 per-poll
+      cost) directly on this machine, 5 runs, averaging **~1.87s per
+      call** — paid on *every* poll tick under the old model. Then
+      measured the held `--stream --subscribe` channel: time-to-first-
+      snapshot was the same ~1.8s (expected — the initial fetch is
+      identical work), but the channel's subsequent periodic re-scan
+      (`--interval 2`) delivered a live `delta` frame on the *same
+      already-running process* — no second CLI launch, no second ~1.8s
+      cost. Net: Phase 1-2 convert a recurring ~1.9s tax (every poll) into
+      a one-time ~1.9s connection cost plus near-zero marginal cost per
+      subsequent update.
 - [x] **Phase 3 (design review gate):** 3a's agent-dispatch relay and 3b's
       agent-bridge daemon-side cache each introduce their own new internal
       failure modes beyond what the existing poll-and-diff/scan-per-call
@@ -592,31 +600,56 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       when the hint is fresh AND `True`, and (b) a stale/absent/`False` hint
       — including a simulated "session attached after the stamp" case — always
       still falls through to the live rescan and is never missed.
-      — **Verified 2026-10-07**: (a)/(b) are both covered by
+      — **Verified 2026-10-07, with a genuine before/after this time**
+      (Copilot review on this item's first pass, #5626, correctly flagged
+      that timing the unfiltered scan alone and unit-testing zero calls
+      don't substitute for measuring the end-to-end skip path itself):
+      (a)/(b) are covered by
       `test_picker_reconcile_local_skips_bound_scan_for_scoped_fresh_live_hint`
-      (proves the skip via a scan stub that raises if called — a stronger
-      guarantee than a timing number: zero calls, not just a fast one) and
-      `test_picker_reconcile_local_never_skips_bound_scan_on_stale_hint`
-      (the asymmetric half). For the before/after itself: attempting to
-      reproduce it live against this machine's own tracked worktrees found
-      the scoped CLI call did not actually hit the skip path right now
-      (`bound_scan_skipped: false` even scoped to an actively-running
-      worktree) — the resident monitor hadn't stamped a fresh affirmative
-      hint for it at that moment, which is itself useful signal that the
-      skip is read-only/conservative, never forced. Measured the
-      underlying cost directly instead: an unfiltered, in-process
-      `reclaim.resolve_bound_copilots()` call on this machine today took
-      **~1.1s** (down from the ~4.8s originally measured on a busier
-      machine/session — the cost scales with total tracked session-state,
-      not a fixed constant); the skip path's own cost is provably zero
-      calls to that function per the tests above. Net: a real, measured
-      "before" plus a proven (not just timed) "after."
-- [ ] Full relevant test files green per phase (`test_picker_tui.py` for
+      and `test_picker_reconcile_local_never_skips_bound_scan_on_stale_hint`.
+      For the before/after: the first live attempt found the scoped CLI
+      call not actually hitting the skip path (no fresh hint stamped for
+      this worktree at that moment). Located the resident monitor's own
+      tracking records directly (`agent_worktrees.tracking.list_records()`,
+      after `config.set_active_project(...)`) and found this machine
+      genuinely does have worktrees with a fresh, affirmative `bound_live`
+      hint right now. Called `picker_reconcile_cli.build_payload()`
+      **in-process, scoped to two different worktree ids on the same
+      machine at the same moment** — one with a fresh `True` hint, one
+      without — the only way to hold everything else constant and isolate
+      exactly the skip decision itself:
+      - scoped to a worktree **without** a fresh hint (`bound_scan_
+        skipped: False`, real unfiltered scan): **1.448s**
+      - scoped to a worktree **with** a fresh hint (`bound_scan_skipped:
+        True`, real skip path): **0.483s**
+
+      A genuine ~67% latency reduction for this scoped call, measured
+      end-to-end, not inferred from a sub-component timing.
+- [x] Full relevant test files green per phase (`test_picker_tui.py` for
       Picker-side phases; the owning plugin's test suite for CLI-side
       manifest/transport changes); a full-suite run is impractically slow on
       this machine (see the 2026-09-30 journal entry) — rely on CI's
       dedicated per-plugin jobs as the authoritative gate, per that same
       entry's precedent.
+      — **Verified 2026-10-07** (Copilot review on #5626 correctly noted
+      this item was still unchecked and not identified as intentionally
+      deferred): ran each phase's directly relevant test files, building
+      fresh per-plugin venvs where the shared `.test-venvs` cache was
+      stale relative to this worktree (dependency drift across several
+      libs) rather than patch it piecemeal:
+      - Phases 0/1-2/4 (`worktree-manager/tests/production_picker/
+        test_pivot_streaming.py` + `test_picker_tui.py`): **321 passed, 1
+        failed** — `test_steering_card_and_form_actions_gate_and_drive`,
+        the already-documented pre-existing `test_steering_card_*`/
+        `test_registered_pivot_*` modal-opening flake family (confirmed
+        pre-existing and load-sensitive multiple times earlier in this
+        effort, never caused by any change landed here).
+      - Phase 3a (`plugins/agent-dispatch/tests/test_board_relay.py` +
+        `test_board_cli.py`): **72 passed**.
+      - Phase 3b (`plugins/agent-bridge/tests/test_agent_roster_cache.py`):
+        **48 passed** (confirmed separately as part of landing #5585).
+      - Phase 5 (`plugins/agent-worktrees/tests/test_picker_reconcile_local.py`
+        + `test_reclaim.py`): **59 passed**.
 
 ## Proposal
 
@@ -2503,4 +2536,60 @@ actually be met. Not marking `Done` unilaterally here -- flagging it back
 to the operator as a candidate for closing the effort, since that is
 exactly the judgment call this effort's own completion-gate policy
 reserves for an explicit decision rather than an inferred one.
+
+### 2026-10-07 — PR #5626 review: the claimed Validation Plan evidence wasn't actually rigorous enough; redone properly
+
+Copilot review on #5626 (COMMENTED) correctly rejected the prior entry's
+closure of two items as not actually satisfying what they ask for:
+
+1. **Phases 1-2**: the cited journal entries record envelope counts and
+   "no process re-exec confirmed," not an actual before/after *latency*
+   measurement -- proving the transport mechanism works is not the same
+   as the timing acceptance criterion.
+2. **Phase 5**: timing the unfiltered scan alone, plus a unit test proving
+   zero calls on skip, is not the same as measuring the real end-to-end
+   skip path the item asks for -- especially since the first live attempt
+   explicitly missed the skip path entirely (no fresh hint at that
+   moment), which should have been a stop sign, not a substitution.
+3. A third, independent finding: the "Full relevant test files green per
+   phase" item was still unchecked and not identified as one of the two
+   intentionally-deferred items (Phase 4, Phase 3c) -- so the prior
+   entry's "every item resolved or transferred" claim was not accurate as
+   written.
+
+All three fixed with actual rigor rather than defended:
+
+- **Phases 1-2**: measured the real one-shot refresh cost directly
+  (`agent-dispatch-board --machine tmichon-cloud1`, no `--stream`, 5
+  runs) at **~1.87s average** -- the per-poll-tick cost under the old
+  model. Then drove a held `--stream --subscribe` channel directly (raw
+  `Process` + `StandardOutput.ReadLine()`, not the wrapper CLI) and
+  confirmed the SAME process delivered a live `delta` frame from its
+  periodic re-scan with no second launch. A genuine, machine-level
+  before/after this time, not an inference from envelope shape.
+- **Phase 5**: the first live attempt's failure to hit the skip path was
+  itself the clue -- found this machine's tracking store (via
+  `agent_worktrees.config.set_active_project()` +
+  `tracking.list_records()`, bypassing the CLI's own cwd-based project
+  resolution which doesn't thread through a piped script) *does* have
+  worktrees with a genuinely fresh, affirmative `bound_live` hint right
+  now. Called `picker_reconcile_cli.build_payload()` **in-process**,
+  scoped to two different worktree ids at the same moment -- one with a
+  fresh hint, one without -- isolating exactly the skip decision with
+  everything else held constant: **1.448s (no skip) vs 0.483s (skip)**,
+  a real ~67% reduction, not inferred from a sub-component's own cost.
+- **Full relevant test files green**: actually ran them, building fresh
+  per-plugin venvs where the shared `.test-venvs` cache had drifted
+  (several libs' new exports weren't present in the cached install) --
+  see the Validation Plan entry above for the per-phase pass counts
+  (321+72+48+59 passed; the sole failure is the already-documented
+  pre-existing flake). Checked off with evidence rather than left
+  unaddressed.
+
+**Lesson for future validation-plan closure passes in this effort (and
+generally)**: a citation to existing work that *demonstrates the
+mechanism* is not automatically evidence for a *specific, differently-
+worded* acceptance criterion (a timing number, an end-to-end skip
+observation) -- reread the literal wording of what's being checked off
+before citing something adjacent to it.
 
