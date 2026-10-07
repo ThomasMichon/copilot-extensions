@@ -4940,6 +4940,28 @@ class TestPRStatusLive:
             config, rec.repo, 7, "gitea",
         ) == "just-pushed-sha"
 
+    def test_adopt_pushed_head_takes_only_the_worktrees_own_head(self, pr_repo):
+        """A plain `git push` of the worktree's HEAD leaves the record a head
+        behind, so `pr-merge` refused with "Head branch was modified". The
+        provider's head is adopted (and recorded) only when it is that HEAD:
+        a head someone else pushed is never taken."""
+        from agent_worktrees import pr_cli
+
+        config, wid, wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "recorded-before-a-manual-push"
+        tracking.save_record(rec)
+        head = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+
+        assert pr_cli._adopt_pushed_head(config, rec.repo, 7, "gitea", "f" * 40) == ""
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.active_pr().head_sha == "recorded-before-a-manual-push"
+
+        assert pr_cli._adopt_pushed_head(config, rec.repo, 7, "gitea", head) == head
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.active_pr().head_sha == head
+
     def test_tracked_pr_pushed_head_falls_back_when_cwd_worktree_is_wrong_project(
         self, pr_repo, monkeypatch
     ):

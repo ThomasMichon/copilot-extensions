@@ -260,6 +260,48 @@ def _tracked_pr_pushed_head(
     return cwd_match
 
 
+def _adopt_pushed_head(
+    config: cfg.Config, repo: str, number: int, provider: str, live_head: str,
+) -> str:
+    """*live_head* when the PR's provider head moved past its recorded
+    ``head_sha`` only because the worktree tracking it pushed its own ``HEAD``
+    outside ``push-changes`` (a plain ``git push``): that head is recorded and
+    returned, so ``pr-merge`` merges what the worktree holds. "" otherwise --
+    another record also claims the PR, or the head isn't this worktree's own
+    commit (someone else pushed): the stale expectation stands and the merge
+    refuses, as it should.
+    """
+    tracking_dir = cfg.tracking_dir(getattr(config, "repo_name", None))
+    found = []
+    try:
+        paths = sorted(tracking_dir.glob("*.yaml"))
+    except Exception:
+        return ""
+    for path in paths:
+        try:
+            record = tracking.load_record(path)
+        except Exception:
+            continue
+        repo_lower = repo.lower()
+        for pr in record.prs:
+            if (pr.number == number and (pr.repo or record.repo).lower() == repo_lower
+                    and (pr.provider or provider) == provider):
+                found.append((record, pr))
+    if len(found) != 1:
+        return ""
+    record, pr = found[0]
+    worktree = record.worktree_path
+    if not worktree or not Path(worktree).is_dir():
+        return ""
+    local = git_ops.git("rev-parse", "HEAD", cwd=worktree, check=False)
+    if local.returncode != 0 or local.stdout.strip() != live_head:
+        return ""
+    pr.head_sha = live_head
+    pr.head_observed_at = ""  # no provider-clock observation of it yet
+    tracking.save_record(record)
+    return live_head
+
+
 def _find_tracked_pr_head(
     record: tracking.WorktreeRecord, repo: str, number: int, provider: str,
 ) -> str:
