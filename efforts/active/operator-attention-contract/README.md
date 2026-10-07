@@ -195,7 +195,15 @@ an empty queue.
   read with explicit project context (`agent-worktrees -p <project> pr bar
   <worktree-id> --json`), so the result is the same from any CWD. A project whose
   tracked PRs can't be enumerated makes the source `failed`: a partial list
-  can't claim to be complete.
+  can't claim to be complete. **Dependency:** no CLI enumerates this today
+  (`list` is project-scoped, `repos list` is the repo catalog, not the adopted
+  projects, and `claims find pr` needs a known repo), so this slice adds one to
+  agent-worktrees: `agent-worktrees list --all-projects --tracked-prs --json`,
+  returning `{"schema": 1, "projects": [{"project", "status": "ok" | "failed",
+  "error"?, "prs": [{"worktree_id", "repo", "number", "state"}]}]}` over every
+  adopted project on the machine. It exits non-zero only when the project
+  registry itself can't be read. Tests cover two projects, one project failing
+  while the other still lists, and an empty registry.
 - [ ] Each adapter is bounded by a per-source timeout. A timeout is that source's
   `status: failed` (with the timeout as its `error`), not a hang.
 
