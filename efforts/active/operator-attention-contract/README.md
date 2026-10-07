@@ -54,7 +54,7 @@ needs you" and "a source couldn't be read" are never confused.
 | agent-dispatch | task `hold_reason` (operator pause) | task record; board group "Paused" | `inbox --board` |
 | agent-dispatch | self-tracked task `submitted`: a completion claim awaiting confirmation (`confirm` moves it to the terminal `completed`; `task_state_machine.py`) | task status | `inbox --board` |
 | agent-dispatch | backlog buildup: `oldest_queued_age`, `oldest_held_live_age` (raw numbers, no policy) | `TaskQueue.backlog_health()` (`queue_liveness.py`) | the coordinator's `GET /health` (`backlog`) |
-| agent-bridge | `attention.value`: `input_required` (with `pending_input[0].message`), `permission_required`, `failed` | result snapshot (`result_snapshot.py`) | `agent-bridge result <s>`, `wait --attention input_required` |
+| agent-bridge | `attention.value`: `input_required` (with `pending_input[0].message`), `permission_required`, `policy_required`, `failed` (the full `AttentionReason` set also has `unreachable`, `contract_changed` and settled reasons) | result snapshot (`result_snapshot.py`), `models.AttentionReason` | `agent-bridge result <s>`, `wait --attention <reason>` |
 | agent-bridge | `presence`: `awaiting_input` / `unknown` (+ confidence) | transcript (`peek_snapshot.py`) | `agent-bridge presence <s> --json` |
 | agent-worktrees | merge bar `failed` / `unknown` | provider read through `PRProvider.get_bar_snapshot` (`pr_bar.py`; landed on `dev` in #5566) | `agent-worktrees pr bar <repo> <n> --json` (exit 0 met/merged, 10 pending, 11 failed, 12 unknown) |
 
