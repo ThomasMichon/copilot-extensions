@@ -1623,21 +1623,22 @@ def test_default_connect_retries_env_override(monkeypatch):
     assert default_connect_retries() == 2
 
 
-def test_client_survives_transient_connection_refused(monkeypatch):
+def test_client_survives_transient_connection_refused(monkeypatch, tmp_path):
     """A coordinator supersession cutover can leave a brief window where the
     old generation has released its socket and the new one hasn't bound yet:
     the liveness probe a CLI command runs just before constructing its client
     (``has_live_local_coordinator``) can observe "live", then the very next
     request still lands in that gap and gets ``ConnectionRefusedError``.
 
-    This is exactly the failure behind the Picker steering-card "could not be
-    delivered" report: a one-shot CLI client with no retry turns a purely
+    This failure mode showed up as an operator-reported Picker steering-card
+    delivery failure: a one-shot CLI client with no retry turns a purely
     transient, nothing-was-ever-sent condition into an operator-visible,
-    silently-dropped answer. ``DispatchClient``'s default transport must
-    absorb a short refused-connection window on its own, with no caller-side
-    retry loop, as long as ``AGENT_DISPATCH_HTTP_CONNECT_RETRIES`` permits it.
+    silently-dropped answer. Proven here with exactly ONE ``client.health()``
+    call spanning the whole refused-then-listening window -- no outer
+    polling/retry loop on the test's side, so a broken transport-level retry
+    cannot be masked by the test quietly re-trying on its own behalf.
     """
-    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "5")
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_CONNECT_RETRIES", "8")
 
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -1645,35 +1646,27 @@ def test_client_survives_transient_connection_refused(monkeypatch):
     sock.close()  # nothing listening yet -- connecting now refuses
     url = f"http://127.0.0.1:{port}"
 
+    import uvicorn
+
+    app = create_app(TaskQueue(tmp_path / "tasks.db"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+
     def _start_late():
-        import uvicorn
-
         time.sleep(0.3)  # give the client's first connect attempt(s) time to refuse
-        app = create_app(TaskQueue_for_test())
-        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-        uvicorn.Server(config).run()
-
-    def TaskQueue_for_test():
-        import tempfile
-        from pathlib import Path
-
-        return TaskQueue(Path(tempfile.mkdtemp()) / "tasks.db")
+        server.run()
 
     thread = threading.Thread(target=_start_late, daemon=True)
     thread.start()
-
-    with DispatchClient(url, timeout=2.0) as client:
-        deadline = time.time() + 10
-        last_exc = None
-        result = None
-        while time.time() < deadline:
-            try:
-                result = client.health()
-                break
-            except Exception as exc:  # httpx.HTTPTransport's own retry can still
-                last_exc = exc  # exhaust under extreme scheduling jitter; poll.
-                time.sleep(0.1)
-        assert result is not None, f"client never recovered: {last_exc}"
+    try:
+        # A single call, with a timeout generous enough to cover the delayed
+        # bind plus every retry's backoff -- its success proves the client's
+        # own default transport absorbed the refused window unaided.
+        with DispatchClient(url, timeout=5.0) as client:
+            result = client.health()
+            assert isinstance(result, dict)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 def test_client_detects_coordinator_that_drops_structured_result():

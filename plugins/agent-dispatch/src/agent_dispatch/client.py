@@ -66,7 +66,7 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
             base_url=base_url.rstrip("/"),
             headers=headers,
             timeout=timeout,
-            transport=transport or default_transport(verify=verify),
+            transport=transport if transport is not None else default_transport(verify=verify),
         )
         self._control_token = control_token
         # An optional owned resource (e.g. an SSH failover port-forward) closed
