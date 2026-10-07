@@ -204,34 +204,84 @@ is this effort's actual Phase 1 deliverable.)
       (confirming it does NOT embed the seed), and `headless_new_session`'s
       updated flag.
 
-### Phase 2 — Picker UI: "Resume prompt…" Actions-menu entry (Not started)
-- [ ] Add a "Resume prompt…" entry to the worktree row's Actions submenu
+### Phase 2 — Picker UI: "Resume prompt…" Actions-menu entry (In progress -- live validation pending)
+- [x] Add a "Resume prompt…" entry to the worktree row's Actions submenu
       (`engine_worktree_actions.py`, sibling to "Launch in new window"/"Bare
       resume"/"Messages"), offered for the same Open/Resume-eligible rows
-      "Launch in new window" already uses as a model (reuse its
-      `_run_bg`/thread-safety lessons from Phase 9 of
-      `worktree-manager-control-plane` if the dispatch ends up calling
-      `_run_launch` in-process from a live Picker thread again).
-- [ ] A lean prompt-composer dialog reusing `field_widgets.compose_field`'s
+      "Launch in new window" already uses as a model (dispatch runs through
+      the normal `_decide` -> app-exit -> `_run_launch` cycle, unlike
+      "Launch in new window"'s own in-process `_run_bg` path -- a resume
+      launch always exits the Picker the same way "Resume" itself does, so
+      none of Phase 9's in-process-thread lessons applied here). Both the
+      dialog (`PromptDlgScreen`) and the dispatch logic
+      (`open_resume_prompt`) live in their OWN new modules
+      (`engine_prompt_dialog.py`, `resume_prompt_actions.py`) -- not
+      inlined into `engine_worktree_actions.py`/`engine_dialogs.py`, both
+      of which were already within a few lines of this repo's flat
+      1000-line module-size cap (`tools/check-module-size.py`) before this
+      phase touched them at all, same reasoning `headed_actions.py`
+      documents for its own split.
+- [x] A lean prompt-composer dialog (`PromptDlgScreen`, its own
+      `engine_prompt_dialog.py` module) reusing `field_widgets.compose_field`'s
       textarea building block (the same one `ScopeDlgScreen(show_prompt=...)`
       already uses for "New worktree" -- see
-      `picker-new-session-prompt-and-composer` Phase A item 1's extraction),
-      confirming into the resume decision's `options["seed_prompt"]`.
-- [ ] Thread `seed_prompt` through `LaunchRequest` (field already exists,
+      `picker-new-session-prompt-and-composer` Phase A item 1's extraction)
+      -- WITHOUT that dialog's own option checklist, which Resume has no
+      equivalent use for (Anchor repo/Bare/No Mux don't apply; No Mux/AHP
+      are already separate, pre-existing submenu toggles on the Resume/Open
+      path). Confirming carries the collected text into the resume
+      decision's `options["seed_prompt"]` via `_resume_decision`'s new
+      `seed_prompt` parameter.
+- [x] Threaded `seed_prompt` through `LaunchRequest` (field already existed,
       added for "New worktree") to `engine_client.resolve_launch_plan()`'s
-      `seed` kwarg for the `worktree_id=` (resume) case -- confirm it isn't
-      still gated to `new=True` only at the Worktree Manager layer (Phase 1
-      only fixed the `agent-worktrees` CLI side's own guard).
-- [ ] Per the operator's own explicit scope-down ("let's just add the
-      prompt to align with 'New worktree', and give that a try"): do NOT
-      combine this with the existing "Messages" (recent-messages) viewer
-      into one screen for v1 -- they stay separate affordances.
+      `seed` kwarg for the `worktree_id=` (resume) case: confirmed
+      `engine_client.resolve_launch_plan`/`_resolve_for` were ALREADY
+      seed-aware for resume (Phase 1 wired the CLI-side guard generically,
+      not gated to `new=True`) -- the only Worktree-Manager-layer gap was
+      `__main__._run_production_picker`'s `action == "resume"` branch never
+      reading `opts.get("seed_prompt")` into the `LaunchRequest` it builds
+      (mirroring the `action == "new"` branch immediately below it, which
+      already did). Fixed with one added line.
+- [x] Per the operator's own explicit scope-down ("let's just add the
+      prompt to align with 'New worktree', and give that a try"): kept
+      entirely separate from the existing "Messages" (recent-messages)
+      viewer -- a distinct Actions-menu verb, distinct dialog class, no
+      shared screen.
+- [x] Tests: verb-offering parity with "Launch in new window" (local-only,
+      same Open/Resume eligibility, absent when neither applies); a full
+      Textual-pilot dispatch test driving the REAL `PromptDlgScreen` (typed
+      text, Enter-to-advance, Confirm) through to the resume decision's
+      `options["seed_prompt"]`; a cancel (Esc) test confirming the Picker
+      stays open; and `__main__`-layer tests confirming
+      `action: "resume"`'s `options["seed_prompt"]` reaches
+      `LaunchRequest.seed_prompt` (present and, separately, `None` when
+      absent/blank, mirroring the existing `action: "new"` coverage).
+  - **Validated beyond the unit-test tier covered above:** the full 1711-test
+      `worktree-manager` suite was run twice in full against this change
+      with no regressions (one incidental unrelated-test flake on one
+      prior run -- `test_registered_pivot_create_action_dynamic_options_...`,
+      a `TabbedContent` state leak across test order, confirmed
+      independent of this change: it fails identically on an unmodified
+      checkout's own full-suite run and passes in isolation either way).
+      The underlying engine mechanism this Picker wiring depends on was
+      additionally live-verified (not just unit-tested) on this very
+      worktree: `agent-worktrees resolve --worktree-id
+      <this-worktree-id> --seed "<text>" --json` against the REAL
+      installed `agent-worktrees` binary returned a `launch.cmd` carrying
+      `--interactive <text>` for a genuine resume target, confirming the
+      resume-mode seed contract Phase 2 wires the Picker onto is real, not
+      assumed.
 - [ ] Validate beyond unit tests (per `AGENTS.md`'s own policy, and this
       effort's own Phase 1 cautionary tale about trusting a CLI's
       self-reported success alone): an actual live "Resume…" launch from the
       real Picker with a typed prompt, confirmed via `recent-messages`/a
       genuine follow-up answer in the resumed conversation, not just a
-      green unit-test suite.
+      green unit-test suite. **Partially satisfied, not closed:** the
+      underlying engine mechanism was live-verified directly (see Journal),
+      and the Textual-pilot tests drive the real, unmocked `PromptDlgScreen`
+      and dispatch code -- but no actual compiled-Picker session has yet
+      exercised "Resume prompt…" end-to-end. This phase stays **in
+      progress** until that direct observation happens.
 
 ### Phase 3 — Migrate "New worktree"'s own delivery onto the durable path (Not started)
 - [ ] `_create_worktree_core`'s own plan deliberately does NOT carry the
@@ -740,3 +790,79 @@ _Pending._
   from the two still-open Phase 3 backlog items above, generalizing the
   same timeless-documentation principle the review applied to the fixed
   item.
+- **2026-10-07** — Picked up via context handoff (the prior leg answered an
+  operator question and fixed the live-mux-reattach bug above; Phase 2 had
+  not been started at all). Built the actual "Resume prompt…" Picker UI
+  feature in a fresh worktree:
+  - New `PromptDlgScreen` -- a lean composer dialog (prompt textarea +
+    Confirm/Cancel only, no options checklist), modeled on
+    `ScopeDlgScreen`'s folded-in `show_prompt` field but without its
+    option list, which Resume has no use for.
+  - `engine_worktree_actions.py`: a new "Resume prompt…" Actions-menu verb,
+    offered under the exact same local-only Open/Resume-eligibility
+    condition "Launch in new window" already uses; its dispatch handler
+    opens `PromptDlgScreen` and, on Confirm, decides the SAME ordinary
+    resume `_resume_decision` builds for "Resume"/"Open", carrying the
+    typed text as `options["seed_prompt"]`.
+  - **Discovered mid-implementation:** `engine_worktree_actions.py` (999
+    lines) and `engine_dialogs.py` (888 lines) were ALREADY within a
+    handful of lines of `tools/check-module-size.py`'s flat 1000-line cap
+    before this phase touched either -- the first version of this change
+    (dialog class inlined into `engine_dialogs.py`, dispatch method
+    inlined into `engine_worktree_actions.py`) tripped the guard in both
+    files. Fixed by splitting BOTH new pieces into their own modules
+    (`engine_prompt_dialog.py` for the dialog class,
+    `resume_prompt_actions.py` for the dispatch function), the exact same
+    pattern `headed_actions.py` already documents for "Launch in new
+    window" -- `engine_dialogs.py` ends this phase completely untouched
+    (net zero diff). `__main__.py`'s own already-grandfathered ceiling
+    (1714, shrink-only) also needed widening by the one line the
+    `seed_prompt` forward below actually requires -- a deliberate,
+    reviewed `tools/module-size-baseline.json` edit per that guard's own
+    documented "ordinary case" (manual widening in a reviewed PR), not the
+    separate `--allow-widen`-automated path it restricts to a
+    scheduled/post-merge job.
+  - `engine_maintenance_actions.py`: `_resume_decision` gained a
+    `seed_prompt` parameter, forwarded into `options` exactly like
+    `no_mux`/`ahp`/`bare_resume` already are.
+  - `__main__.py`: the ONE actual Worktree-Manager-layer gap -- the
+    `action == "resume"` branch of `_run_production_picker` built its
+    `LaunchRequest` without ever reading `opts.get("seed_prompt")`, unlike
+    the `action == "new"` branch right below it. `engine_client.
+    resolve_launch_plan`/`_resolve_for` were already seed-aware for resume
+    (Phase 1's CLI-side fix was generic, not gated to `new=True`), and
+    `engine_group_b.resolve_launch_plan` turned out to be dead code (no
+    callers at all) -- so this one added line closed the actual gap the
+    Phase 2 checklist's own "confirm it isn't still gated to `new=True`"
+    item was checking for.
+  - Tests: a verb-offering parity test, a full Textual-pilot dispatch test
+    (typed prompt through `PromptDlgScreen` -> `_resume_decision` ->
+    `app.result["options"]["seed_prompt"]`), a cancel test, and two
+    `__main__`-layer tests (`action: "resume"` with and without
+    `seed_prompt` reaching `LaunchRequest.seed_prompt`/`None`) -- 11 new/
+    updated assertions total across `test_picker_tui.py` and
+    `test_production_picker_transplant.py`, plus `engine.py`'s re-export
+    list gained `PromptDlgScreen` (now sourced from the new
+    `engine_prompt_dialog.py` module) for the same reason `ScopeDlgScreen`
+    etc. are already re-exported there (test helpers import dialog classes
+    through `.engine`, not the owning module, directly).
+  - Full `worktree-manager` suite (1711 tests) run twice: no regressions.
+    One incidental unrelated flake on an earlier run, confirmed
+    independent (reproduces identically on an unmodified checkout's own
+    full-suite run, passes in isolation either way -- a pre-existing
+    `TabbedContent` test-order leak, not touched by this change).
+    Additionally live-verified the underlying engine contract directly
+    (not just unit tests): `agent-worktrees resolve --worktree-id <id>
+    --seed "<text>" --json` against the real installed binary, on this
+    very worktree, returned a `launch.cmd` carrying `--interactive <text>`
+    for a genuine resume target.
+  - **Not yet done:** an actual live Picker session exercising "Resume
+    prompt…" end-to-end (build + run `worktree-manager`, type a prompt,
+    confirm delivery via `recent-messages`/direct observation) -- recorded
+    explicitly above as a deferred validation step, not silently skipped.
+    The two narrower Phase 3 backlog items (`claim_pending_seed`'s
+    ambiguous return contract; `_RecordLock`'s lock-primitive failure
+    mode) remain untouched, as planned (real design surgery, not rushed
+    into this session). Next: either the live-Picker spot-check above, or
+    pick up a Phase 3 backlog item, whichever the next session/operator
+    prioritizes.

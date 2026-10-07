@@ -8,6 +8,7 @@ import threading
 
 from .engine_dialogs import SubMenuScreen, WtDetailsScreen
 from .engine_live_screens import MsgViewScreen
+from .resume_prompt_actions import open_resume_prompt
 
 class PickerScreenWorktreeActionsMixin:
     @staticmethod
@@ -152,12 +153,10 @@ class PickerScreenWorktreeActionsMixin:
             # blank-start, #1026). A worktree that only *looks* sessionless
             # because tracking lost its head session is repaired by Refresh.
             acts = ["Open"]
-        # "Launch in new window" (Phase 9, #5210 -- a LaunchRequest.new_window
-        # modifier on the row's ordinary Open/Resume decision): whenever the
-        # row offers Open or Resume, also offer a brand-new visible window
-        # instead -- local-only (a new window pops on THIS machine).
+        # "Launch in new window" (#5210) / "Resume prompt…" (Phase 2):
+        # local-only decision modifiers riding Open/Resume eligibility.
         if rec.get("is_local", True) and ("Open" in acts or "Resume" in acts):
-            acts.append("Launch in new window")
+            acts += ["Launch in new window", "Resume prompt…"]
         # Read-only "Messages" peek -- an auxiliary, non-lifecycle verb offered
         # for any worktree that could have a session to peek (not positively
         # sessionless) and is not in the inconsistent WARNING state. Independent
@@ -421,6 +420,8 @@ class PickerScreenWorktreeActionsMixin:
             from .headed_actions import open_worktree_cli_headed
 
             open_worktree_cli_headed(self, rec, no_mux=no_mux, ahp=ahp)
+        elif cur == "Resume prompt…":
+            open_resume_prompt(self, rec, no_mux=no_mux, ahp=ahp)
         elif cur == "Bare resume":
             # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
             self._decide(self._resume_decision(rec, bare_resume=True))

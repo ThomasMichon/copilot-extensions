@@ -309,14 +309,18 @@ class PickerScreenMaintenanceActionsMixin:
         """
         self.app.result = decision
         self.app.exit()
-    def _resume_decision(self, rec, no_mux=False, ahp=False, bare_resume=False):
+    def _resume_decision(self, rec, no_mux=False, ahp=False, bare_resume=False,
+                          seed_prompt=""):
         """Build the resume decision for a worktree row/submenu selection.
 
         ``no_mux`` (the Open sub-menu toggle, #1343) launches directly without
         the PSMux/TMux wrapper. ``bare_resume`` (two-step restore) creates the
         worktree's mux but launches Copilot in HOME with no --resume, so a CLI
         bug that fails to start in a repo/worktree cwd is dodged; the operator
-        finishes with a manual ``/resume <id>``.
+        finishes with a manual ``/resume <id>``. ``seed_prompt``
+        (resume-prompt-durable-seed-and-mux-fix Phase 2, "Resume prompt…")
+        is an optional prompt queued as this resume's next interactive turn,
+        forwarded end-to-end the same way "New worktree…"'s own seed is.
         """
         raw = rec.get("raw") or {}
         m, e = rec.get("machine"), rec.get("env")
@@ -336,6 +340,8 @@ class PickerScreenMaintenanceActionsMixin:
             opts["ahp"] = True
         if bare_resume:
             opts["bare_resume"] = True
+        if seed_prompt:
+            opts["seed_prompt"] = seed_prompt
         if opts:
             decision["options"] = opts
         return decision

@@ -555,6 +555,41 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
     assert requests[0].worktree_id == "demo-1234"
     assert requests[0].mode == "bare-resume"
     assert requests[0].no_mux is True
+    assert requests[0].seed_prompt is None
+
+
+def test_manager_acts_on_production_picker_resume_decision_with_seed_prompt(
+    monkeypatch,
+):
+    """resume-prompt-durable-seed-and-mux-fix Phase 2 ("Resume prompt…"): a
+    resume decision's own ``options["seed_prompt"]`` (set by
+    ``_resume_decision``, same shape as a "New worktree…" decision's) must
+    thread through to ``LaunchRequest.seed_prompt`` for ``action: "resume"``
+    too -- not only ``action: "new"`` (covered separately by
+    ``test_manager_acts_on_production_picker_new_decision``).
+    """
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "resume",
+            "worktree_id": "demo-1234",
+            "title": "Resume me",
+            "is_local": True,
+            "options": {"seed_prompt": "sync, then status"},
+        },
+    )
+    requests = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_launch",
+        lambda request: requests.append(request) or 0,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert requests[0].worktree_id == "demo-1234"
+    assert requests[0].mode == "resume"
+    assert requests[0].seed_prompt == "sync, then status"
 
 
 def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
