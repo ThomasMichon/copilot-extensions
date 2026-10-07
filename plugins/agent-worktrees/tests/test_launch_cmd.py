@@ -1047,11 +1047,15 @@ def test_default_setup_ps1_double_dash_copilot_args_not_mis_bound_positionally(
     assert "Configured Copilot executable not found" not in proc.stderr
     assert proc.returncode == 0, proc.stderr
     assert marker.read_text(encoding="utf-8").strip() == "launched"
-    forwarded = argv_marker.read_text(encoding="utf-8").strip()
-    assert forwarded == (
-        "--allow-all --experimental --model claude-sonnet-5 "
-        "--reasoning-effort medium --context long_context"
-    )
+    # The two fake `copilot` stand-ins format argv differently (Windows
+    # `.cmd`'s `%*` is one space-joined line; the POSIX one prints one arg
+    # per line) -- split on any whitespace so the comparison is agnostic to
+    # which form produced it.
+    forwarded = argv_marker.read_text(encoding="utf-8").split()
+    assert forwarded == [
+        "--allow-all", "--experimental", "--model", "claude-sonnet-5",
+        "--reasoning-effort", "medium", "--context", "long_context",
+    ]
 
 
 def _stage_launch_command(tmp_path: Path) -> Path:
