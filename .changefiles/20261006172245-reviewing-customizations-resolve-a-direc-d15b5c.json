@@ -1,0 +1,9 @@
+{
+  "comment": "reviewing-customizations: resolve a directory marketplace registered under a settings key that differs from its catalog name",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
