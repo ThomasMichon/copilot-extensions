@@ -118,7 +118,7 @@ an empty queue.
   (read, but `uncertain` of its entities couldn't be classified -- e.g. presence
   `unknown`, a `pr bar` exit 12) or `disabled` (not installed). The aggregate's
   `status` is the first that applies, in this precedence: `degraded` when any
-  enabled source `failed`; `partial` when any is `uncertain` (with the counts);
+  enabled source `failed` or `config_errors[]` is non-empty; `partial` when any is `uncertain` (with the counts);
   `attention` when there are items; `clear` otherwise (every enabled source `ok`,
   no items). One read gives one status, however its sources fail -- so neither a failed nor a partly unreadable source can read
   as "all clear". `disabled` sources never change it.
@@ -136,11 +136,12 @@ an empty queue.
        "error": "<one line; only when failed>", "uncertain": 0,
        "items": 0, "read_at": "<ISO-8601 UTC>"}
     ],
+    "config_errors": [{"name": "<registered name>", "error": "<one line>"}],
     "items": ["<item>, in queue order"]
   }
   ```
 
-  `sources[]` lists every discovered or configured source, `disabled` ones
+  `sources[]` lists every discovered or validly configured source, `disabled` ones
   included, sorted by `name`; `uncertain` and `items` are counts. A **selective
   read** (`--source <name>...`) is scoped to the named sources: `sources[]` lists
   only them, `items` and the aggregate `status` cover only them, and the envelope
@@ -185,9 +186,11 @@ an empty queue.
     `wait --attention`; each waits on an operator decision) →
     `awaiting_input` (`reported`);
   - `failed` (a local result snapshot) → `failed` (`reported`);
-  - `unreachable` and `contract_changed` aren't items: the session's state
-    can't be read or trusted, so each counts toward the bridge source's
-    `uncertain` (never `clear`);
+  - `unreachable` → `failed` (`reported`): the bridge settles it only on
+    authoritative terminal evidence, after its reconnect policy is exhausted,
+    so it's a real operator boundary, not an unreadable observation;
+  - `contract_changed` isn't an item: the session's state can't be trusted, so
+    it counts toward the bridge source's `uncertain` (never `clear`);
   - `turn_complete`, `turn_cancelled`, `stopped` and `ended` are settled
     states, not operator asks: no item;
   - a reason this adapter doesn't know (a newer bridge) counts toward
@@ -263,8 +266,11 @@ an empty queue.
 - [ ] **External adapters:** a host project registers a source as a command (an
   `argv`) in config under a **name** that is the source's identity: it must be
   unique, match `[a-z0-9-]+`, and not be a built-in source's name (`dispatch`,
-  `bridge`, `pr`), or the registration is rejected (and listed as a `failed`
-  source naming the conflict). The aggregator **stamps** identity at the
+  `bridge`, `pr`), or the registration is rejected. A rejected registration is
+  **not** a source -- listing it under its colliding name would give two
+  `sources[]` entries one identity. It is reported in the envelope's
+  `config_errors[]` (`{"name", "error"}`, empty when none), and any config error
+  makes the aggregate `degraded`: a source that was meant to run didn't. The aggregator **stamps** identity at the
   boundary rather than trusting the command. A command item is the item schema
   with `source` and `id` **optional**; validation runs in this order: (1) a
   present `source` or `id` that differs from the registered name or the derived
@@ -308,6 +314,9 @@ an empty queue.
   sources naming the same PR), cross-kind non-collision (a task and a session
   with the same id), and an equal-severity tie resolved the same way in any
   adapter order — repeated reads keep a source's first-observed `created_at`,
+  including across processes (a fresh aggregator instance opening the same
+  persisted first-observed store returns the same `created_at`, as two separate
+  CLI invocations do),
   and so does an outage and recovery (the source reads `failed`, then `uncertain`
   without the item, then `ok` with it: the same `created_at` throughout), while
   an `ok` read without the item followed by its return gives a new one; two
@@ -336,7 +345,7 @@ an empty queue.
   `awaiting_input` item through `agent-bridge --json attention`, and so does a
   registered interactive one; an attention read that fails counts as
   `uncertain`. Every `AttentionReason` value maps as listed
-  (`policy_required` is an item; `unreachable`, `contract_changed` and an unknown
+  (`policy_required` and `unreachable` are items; `contract_changed` and an unknown
   reason count as `uncertain`); a session with both a represented
   `permission_required` and transcript `awaiting_input` yields one `reported`
   item whose reason names both, in any read order; a command source returning two
@@ -345,7 +354,8 @@ an empty queue.
   yield an item, one present in both yields a single item, and a failed listing
   of either registry makes the bridge source `failed`.
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
-  a duplicate name) is rejected; an item stating another `source` or a foreign
+  a duplicate name) is rejected into `config_errors[]` -- never a second
+  `sources[]` entry under that name -- and the aggregate is `degraded`; an item stating another `source` or a foreign
   `id` is invalid; an item omitting both is stamped and then validated; a
   stamped item's `id` and first-observed key are its own; an item arriving with a
   non-empty `also[]` fails its source. `--source bridgge` (an
