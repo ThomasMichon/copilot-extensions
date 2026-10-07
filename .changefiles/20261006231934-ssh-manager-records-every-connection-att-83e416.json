@@ -1,0 +1,21 @@
+{
+  "comment": "ssh-manager records each connection attempt (gh codespace ssh --config fetch, ControlMaster start, direct-mode exec, direct-mode stdio channel (spawned/error), health reconnect; port forwards and relay channels not yet) as one structured, redacted line in a bounded per-target dial log, best-effort and observe-only (on an event loop a background writer appends it, so the loop never does file I/O); 'agent-codespaces dial-log <name>' reports dials per outcome over the last 10 minutes and hour, the last failure, and the newest attempts.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
