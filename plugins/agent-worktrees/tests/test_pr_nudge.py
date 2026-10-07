@@ -5,13 +5,13 @@ from __future__ import annotations
 from agent_worktrees import config as cfg, pr_nudge_ops, pr_ops, tracking
 
 
-def _config_with_reviewer(base_config, reviewer: str):
+def _config_with_reviewer(base_config, reviewer: str, *, api_base: str = "https://api.github.com"):
     """Clone the fixture config with ``pr.reviewer`` set."""
     repo = base_config.default_repo
     pr = cfg.PRConfig(
         enabled=True, provider="github", branch_prefix="feature",
         head_scheme="snapshot", auto_open=False,
-        api_base="https://api.github.com",
+        api_base=api_base,
         reviewer=reviewer,
     )
     new_repo = cfg.RepoConfig(
@@ -67,13 +67,19 @@ class TestPRNudge:
         from agent_worktrees.providers.base import PullResult
 
         config, wid, _wt, _ = pr_repo
-        config = _config_with_reviewer(config, "copilot")
         # trusted_target() (copilot-extensions#5609) requires a resolvable
         # slug before reconciling: either pr.repo containing "/", or a PR
         # URL naming the same number at the configured provider/authority.
         # The fixture's own record.repo ("ext") is a legacy project name,
-        # not a slug, so a URL is required here -- it must resolve to the
-        # same authority _Prov.authority_endpoint() reports below.
+        # not a slug, so a URL is required here. The real
+        # GitHubProvider.authority_endpoint() returns its configured
+        # api_base's own host (e.g. "api.github.com" for the default
+        # "https://api.github.com"), not the PR-facing "github.com" the
+        # tracked URL below names -- override api_base here so the
+        # configuration, tracked URL, and fake provider all describe the
+        # SAME authority, matching what a real github.com-hosted repo
+        # configured with api_base="https://github.com" would see.
+        config = _config_with_reviewer(config, "copilot", api_base="https://github.com")
         pr_ops.set_pr(
             wid, number=7, url="https://github.com/acme/ext/pull/7",
             state="open", provider="github",
