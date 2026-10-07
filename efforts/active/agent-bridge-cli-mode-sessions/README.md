@@ -633,7 +633,8 @@ mechanism CLI mode binds through.
       (this closes existing intent) unless implementation surfaces a genuine
       should-be gap.
       **Done (2026-10-07), via `vision-backport-sweep`'s Phase 2 sweep
-      (external effort, cross-repo)** — not a new should-be gap, but the
+      (a separate, cross-effort contribution in this same repo)** — not a
+      new should-be gap, but the
       vision itself had drifted stale: it still described the daemon-port
       reverse-forward and `live_sessions` registration for a venue-launched
       CLI-mode session as a remaining gap, when Phase 4 above landed and
