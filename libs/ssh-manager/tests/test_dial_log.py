@@ -442,3 +442,11 @@ def test_only_pinned_or_ambient_is_ever_stored_as_the_account():
         dial_log.record("cs-acct", kind="reconnect", outcome="ok", elapsed_s=0, account=given)
         assert dial_log.read("cs-acct", last=1)[0]["account"] == stored
 
+
+def test_a_fresh_lock_file_is_seeded_before_it_is_locked():
+    """msvcrt.locking takes a byte range that should already exist: the first writer
+    seeds byte 0 of a new (empty) lock file, and the line is written."""
+    dial_log.record("cs-seed", kind="reconnect", outcome="ok", elapsed_s=0)
+    lock = dial_log._file_for("cs-seed").with_suffix(".jsonl.lock")
+    assert lock.stat().st_size >= 1 and len(dial_log.read("cs-seed")) == 1
+

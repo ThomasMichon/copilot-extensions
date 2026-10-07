@@ -128,6 +128,10 @@ def _locked(path: Path, *, wait: float = LOCK_WAIT_S):
     if not lock_path.exists():
         _open_private(lock_path, "ab").close()
     fh = open(lock_path, "a+b")
+    fh.seek(0, os.SEEK_END)
+    if fh.tell() == 0:  # msvcrt.locking locks a byte that should exist: seed byte 0
+        fh.write(b"\0")
+        fh.flush()
     try:
         deadline = time.monotonic() + wait
         while True:
