@@ -166,8 +166,7 @@ def _cmd_peek(args: argparse.Namespace) -> None:
     usage = snap.get("usage") or {}
     print(f"    turns:   {snap.get('turns')}    model: {snap.get('model') or '?'}    size: {(snap.get('size_bytes') or 0) // 1024}k")
     print(f"    life:    started={_peek_iso(life.get('started_at'))}  resumed={_peek_iso(life.get('resumed_at'))}  shutdown={(life.get('last_shutdown') or {}).get('type') or 'none'}")
-    if usage:
-        print(f"    usage:   premium={usage.get('premium_requests')} nanoAiu={usage.get('nano_aiu')}")
+    print(f"    usage:   {_usage_line(usage)}")
     recent = snap.get("recent_messages") or []
     if recent:
         print("    recent:")
@@ -201,6 +200,56 @@ def _cmd_presence(args: argparse.Namespace) -> None:
     when = f" since {_peek_iso(presence.get('last_event_at'))}" if presence.get("last_event_at") else ""
     mode = f", {presence['mode']}" if presence.get("mode") else ""
     print(f"  {sid}  ({agent}): {presence.get('state')}{when} -- {presence.get('reason')}{mode}")
+
+
+def _usage_line(usage: dict) -> str:
+    if not usage.get("reported"):
+        return f"not reported ({usage.get('reason') or 'no usage in the transcript'})"
+    shown = lambda v: "not reported" if v is None else v  # noqa: E731
+    tokens = usage.get("tokens")
+    toks = (", tokens " + " ".join(f"{k}={shown(v)}" for k, v in tokens.items())) if tokens else ""
+    return (f"premium={shown(usage.get('premium_requests'))} nanoAiu={shown(usage.get('nano_aiu'))}"
+            f"{toks} (as of {_peek_iso(usage.get('reported_at'))}, {usage.get('source')})")
+
+
+def _cmd_usage(args: argparse.Namespace) -> None:
+    """What sessions reported spending, from their own transcripts (cumulative over each
+    session's life). Unreported is shown as such, never as zero; the rollup sums only
+    what was reported and says how many sessions that covers."""
+    core = _core()
+    rows = []
+    for target in args.targets:
+        args.target = target
+        try:
+            _session, sid, agent, acp, snap = _peek_target(args)
+        except SystemExit:  # its reason is already on stderr; the other targets still count
+            rows.append({"session_id": "", "agent": target, "acp_session_id": None, "usage": {
+                "reported": False, "reason": "the session or its transcript couldn't be found or read"}})
+            continue
+        if snap is None:
+            usage = {"reported": False, "reason": "copilot hasn't written a transcript yet"}
+        elif not snap.get("ok"):
+            usage = {"reported": False, "reason": snap.get("reason", "the transcript couldn't be read")}
+        else:
+            usage = snap.get("usage") or {"reported": False, "reason": "the transcript reader reported no usage"}
+        rows.append({"session_id": sid, "agent": agent, "acp_session_id": acp, "usage": usage})
+    reported = [r["usage"] for r in rows if r["usage"].get("reported")]
+
+    def total(key):
+        values = [u.get(key) for u in reported if u.get(key) is not None]
+        return {"value": sum(values) if values else None, "coverage": f"{len(values)}/{len(rows)}"}
+
+    rollup = {"premium_requests": total("premium_requests"), "nano_aiu": total("nano_aiu"),
+              "sessions": len(rows), "reported": len(reported)}
+    if args.json:
+        core._json_out({"sessions": rows, "rollup": rollup})
+        return
+    for r in rows:
+        print(f"  {r['session_id']}  ({r['agent']}): {_usage_line(r['usage'])}")
+    if len(rows) > 1:
+        print(f"  total: premium={rollup['premium_requests']['value']} "
+              f"(reported by {rollup['premium_requests']['coverage']} sessions), "
+              f"nanoAiu={rollup['nano_aiu']['value']} ({rollup['nano_aiu']['coverage']})")
 
 
 def _cmd_drain(args: argparse.Namespace) -> None:
@@ -301,6 +350,20 @@ def register_session_maintenance_commands(sub: argparse._SubParsersAction) -> No
     # SUPPRESS: never overwrite the top-level --json ('agent-bridge --json presence <t>').
     presence_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON.")
     presence_p.set_defaults(func=_cmd_presence, recent=1, message_chars=1)
+
+    spend_p = sub.add_parser(
+        "usage",
+        help="What sessions reported spending (premium requests, AIU, and tokens at shutdown), from "
+             "their own events.jsonl; unreported is shown as such, never as zero (context-window "
+             "use is session-usage)",
+    )
+    spend_p.add_argument("targets", nargs="+", metavar="target",
+                         help="Session IDs or agent names (e.g. codespace:<name>)")
+    spend_p.add_argument("--timeout", type=float, default=90.0,
+                         help="Remote read timeout seconds per codespace target (default 90)")
+    # SUPPRESS: never overwrite the top-level --json ('agent-bridge --json usage <t>').
+    spend_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON.")
+    spend_p.set_defaults(func=_cmd_usage, tail=1, recent=1, message_chars=1)
 
     gc_p = sub.add_parser("gc", help="Garbage-collect aged terminal/disconnected sessions and compact the sessions.db (reclaims freelist bloat)")
     gc_p.set_defaults(func=_cmd_gc)

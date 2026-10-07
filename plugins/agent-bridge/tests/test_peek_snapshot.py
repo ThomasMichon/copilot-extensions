@@ -364,3 +364,73 @@ def test_a_transcript_without_any_session_boundary_is_unknown(tmp_path):
     p = _presence(tmp_path, [_ev("permission.completed", 1, requestId="r0"),
                              _ev("tool.execution_complete", 2)])
     assert p["state"] == "unknown" and "no session start or resume" in p["reason"]
+
+
+def _usage(tmp_path, events):
+    root = str(tmp_path)
+    _write_session(root, _ACP, events)
+    snap = ps.snapshot_local(_ACP, session_state_root=root)
+    assert snap["ok"] is True
+    return snap["usage"]
+
+
+def test_usage_is_the_newest_report_even_before_a_resume(tmp_path):
+    """Copilot's totals are cumulative over the session's life: a checkpoint written
+    before the latest resume is still the answer; a checkpoint carries no tokens."""
+    u = _usage(tmp_path, [*_events(resumed=True), _ev("user.message", 9, content="more")])
+    assert u["reported"] is True and u["source"] == "checkpoint"
+    assert (u["premium_requests"], u["nano_aiu"], u["tokens"]) == (2, 11346730000, None)
+
+
+def test_usage_at_shutdown_carries_tokens_and_each_figure_is_its_newest_report(tmp_path):
+    """A shutdown that doesn't carry a figure (an unreadable AIU here) leaves the
+    newest checkpoint's; a figure nothing reports stays None, never zero."""
+    shutdown = {"type": "session.shutdown", "timestamp": "2026-08-14T00:09:00Z", "data": {
+        "shutdownType": "routine", "totalPremiumRequests": 7.5, "totalNanoAiu": "lots",
+        "tokenDetails": {"input": {"tokenCount": 10}, "output": {"tokenCount": 20},
+                         "cache_read": {"tokenCount": 30}}}}
+    u = _usage(tmp_path / "a", [*_events(), shutdown])
+    assert (u["source"], u["premium_requests"], u["nano_aiu"]) == ("shutdown", 7.5, 11346730000)
+    assert u["tokens"] == {"input": 10, "output": 20, "cache_read": 30, "cache_write": None}
+    only = {"type": "session.usage_checkpoint", "timestamp": "t", "data": {"totalPremiumRequests": 1}}
+    u = _usage(tmp_path / "b", [_ev("session.start", 0), only])
+    assert (u["premium_requests"], u["nano_aiu"], u["tokens"]) == (1, None, None)
+
+
+def test_a_session_that_never_reported_usage_is_not_reported_never_zero(tmp_path):
+    u = _usage(tmp_path, [_ev("session.start", 0), _ev("user.message", 1, content="hi")])
+    assert u["reported"] is False and "premium_requests" not in u and "no usage" in u["reason"]
+
+
+def test_usage_cli_rolls_up_only_what_was_reported(monkeypatch, capsys):
+    """Two sessions reported, one didn't, one can't be found: the totals sum the
+    reports and say how many sessions they cover; nothing unreported reads as zero."""
+    import argparse
+
+    from agent_bridge import __main__ as core
+    from agent_bridge import session_maintenance_cli as cli
+
+    snaps = {
+        "a": {"ok": True, "usage": {"reported": True, "premium_requests": 3, "nano_aiu": 10,
+                                    "tokens": None, "reported_at": "t", "source": "checkpoint"}},
+        "b": {"ok": True, "usage": {"reported": True, "premium_requests": 4.5, "nano_aiu": None,
+                                    "tokens": None, "reported_at": "t", "source": "checkpoint"}},
+        "c": {"ok": True, "usage": {"reported": False, "reason": "no usage checkpoint"}},
+    }
+
+    def peek(args):
+        if args.target not in snaps:
+            raise SystemExit(1)
+        return {}, f"sid-{args.target}", args.target, "acp", snaps[args.target]
+
+    monkeypatch.setattr(cli, "_peek_target", peek)
+    out = {}
+    monkeypatch.setattr(core, "_json_out", lambda obj: out.update(obj))
+    cli._cmd_usage(argparse.Namespace(targets=["a", "b", "c", "gone"], json=True))
+    assert out["rollup"]["premium_requests"] == {"value": 7.5, "coverage": "2/4"}
+    assert out["rollup"]["nano_aiu"] == {"value": 10, "coverage": "1/4"}
+    assert [r["usage"]["reported"] for r in out["sessions"]] == [True, True, False, False]
+    parser = core.build_parser()
+    assert parser.parse_args(["--json", "usage", "x"]).json is True
+    assert parser.parse_args(["usage", "x", "y"]).targets == ["x", "y"]
+

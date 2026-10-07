@@ -1,0 +1,9 @@
+{
+  "comment": "agent-bridge usage: what sessions reported spending (premium requests, AIU, tokens at shutdown) from their own transcripts, cumulative across resumes; unreported reads 'not reported', never zero, and the rollup names its coverage. peek's usage block reads the same way.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -39,6 +39,12 @@ tail. Every other event carries no presence signal.
 Confidence is ``scanned``, except an ended turn with no mode signal since the
 boundary, which is assumed interactive and marked ``heuristic``. Event names verified against Copilot CLI 1.0.92
 transcripts.
+
+**Usage** (``snapshot["usage"]``): Copilot's ``totalPremiumRequests`` /
+``totalNanoAiu`` are cumulative over the session's life (across resumes), so each
+figure is the newest ``session.usage_checkpoint`` / ``session.shutdown`` that
+reports it, read backward like presence; token counts come only from a shutdown that
+is the newest report. Unreported is ``None`` or ``{"reported": false}``, never zero.
 """
 
 from __future__ import annotations
@@ -117,7 +123,6 @@ def main():
     last_ts = None
     recent = []
     tools = []
-    usage = {}
     for e in evs:
         t = e.get("type"); d = e.get("data") or {}; ts = e.get("timestamp")
         if ts:
@@ -131,8 +136,6 @@ def main():
         elif t == "session.shutdown":
             last_shutdown = {"at": ts, "type": d.get("shutdownType")}
         elif t == "session.usage_checkpoint":
-            usage = {"premium_requests": d.get("totalPremiumRequests"),
-                     "nano_aiu": d.get("totalNanoAiu")}
             if not model:
                 mcs = d.get("modelCacheState")
                 if isinstance(mcs, list) and mcs and isinstance(mcs[0], dict):
@@ -179,7 +182,7 @@ def main():
                       "resume_without_clean_shutdown": resume_after_shutdown},
         "recent_messages": recent[-n_recent:],
         "recent_tool_calls": tools[-n_recent:],
-        "usage": usage,
+        "usage": usage_of(ef, size),
         "presence": presence_of(ef, size, last_line_bad),
     })
 
@@ -197,16 +200,9 @@ SCAN_BLOCK = 1 << 20
 # How far back to look for the session boundary (overridable for tests).
 SCAN_CAP = int(os.environ.get("AGENT_BRIDGE_PRESENCE_SCAN_CAP", 64 << 20))
 
-def scan_back(ef, size):
-    """Presence-relevant events from the end of the transcript back to its latest
-    session boundary (newest last), read backward in blocks so a long session's
-    unanswered permission request or mode signal is never cut off by a fixed tail.
-    A cheap substring prefilter, then the parsed ``type`` decides -- an event name
-    appearing as a payload value is not that event. Returns ``(events, complete)``;
-    *complete* is True only when a boundary was found: with none (a truncated file,
-    or none within :data:`SCAN_CAP` bytes) the events since the session started are
-    not all known, and presence is ``unknown`` whatever the file's size."""
-    out = []
+def _lines_back(ef, size):
+    """The transcript's lines, newest first, read backward in blocks (at most
+    :data:`SCAN_CAP` bytes)."""
     pos, carry, scanned = size, b"", 0
     with open(ef, "rb") as fh:
         while pos > 0 and scanned < SCAN_CAP:
@@ -218,20 +214,71 @@ def scan_back(ef, size):
             parts = chunk.split(b"\n")
             carry = parts[0] if pos > 0 else b""
             for raw in reversed(parts[1:] if pos > 0 else parts):
-                ln = raw.decode("utf-8", "replace")
-                if not any('"' + t + '"' in ln for t in RELEVANT):
-                    continue
-                try:
-                    e = json.loads(ln)
-                except Exception:
-                    continue
-                if isinstance(e, dict) and e.get("type") in RELEVANT:
-                    out.append(e)
-                    if e.get("type") in BOUNDARY:
-                        out.reverse()
-                        return out, True
+                yield raw.decode("utf-8", "replace")
+
+def _events_back(ef, size, types):
+    """Events of *types*, newest first. A cheap substring prefilter, then the parsed
+    ``type`` decides -- an event name appearing as a payload value is not that event."""
+    for ln in _lines_back(ef, size):
+        if not any('"' + t + '"' in ln for t in types):
+            continue
+        try:
+            e = json.loads(ln)
+        except Exception:
+            continue
+        if isinstance(e, dict) and e.get("type") in types:
+            yield e
+
+def scan_back(ef, size):
+    """Presence-relevant events from the end of the transcript back to its latest
+    session boundary (newest last), read backward in blocks so a long session's
+    unanswered permission request or mode signal is never cut off by a fixed tail.
+    A cheap substring prefilter, then the parsed ``type`` decides -- an event name
+    appearing as a payload value is not that event. Returns ``(events, complete)``;
+    *complete* is True only when a boundary was found: with none (a truncated file,
+    or none within :data:`SCAN_CAP` bytes) the events since the session started are
+    not all known, and presence is ``unknown`` whatever the file's size."""
+    out = []
+    for e in _events_back(ef, size, RELEVANT):
+        out.append(e)
+        if e.get("type") in BOUNDARY:
+            out.reverse()
+            return out, True
     out.reverse()
     return out, False
+
+USAGE = ("session.usage_checkpoint", "session.shutdown")
+TOKENS = ("input", "output", "cache_read", "cache_write")
+
+def _num(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+def usage_of(ef, size):
+    """What the session reported spending so far. Copilot's totals are cumulative over
+    the session's whole life (they carry across resumes), so each figure is the newest
+    ``session.usage_checkpoint`` / ``session.shutdown`` that reports it. A figure no
+    event reports is ``None`` (not reported), never zero; token counts come only from
+    a shutdown that is itself the newest report."""
+    newest, found = None, {}
+    for e in _events_back(ef, size, USAGE):
+        d = e.get("data") if isinstance(e.get("data"), dict) else {}
+        if newest is None:
+            newest, details = e, d.get("tokenDetails")
+        for key, field in (("premium_requests", "totalPremiumRequests"), ("nano_aiu", "totalNanoAiu")):
+            if key not in found and _num(d.get(field)) is not None:
+                found[key] = _num(d.get(field))
+        if len(found) == 2:
+            break
+    if newest is None:
+        return {"reported": False, "reason": "no usage checkpoint or shutdown in the transcript (read "
+                "back up to %%d bytes)" %% SCAN_CAP}
+    shutdown = newest.get("type") == "session.shutdown"
+    tokens = {k: _num((details.get(k) or {}).get("tokenCount") if isinstance(details.get(k), dict) else None)
+              for k in TOKENS} if shutdown and isinstance(details, dict) else None
+    return {"reported": True, "reported_at": newest.get("timestamp"),
+            "source": "shutdown" if shutdown else "checkpoint",
+            "premium_requests": found.get("premium_requests"), "nano_aiu": found.get("nano_aiu"),
+            "tokens": tokens}
 
 def presence_of(ef, size, last_line_bad):
     evs, complete = scan_back(ef, size)
