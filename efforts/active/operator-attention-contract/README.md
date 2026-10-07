@@ -84,9 +84,9 @@ an empty queue.
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
   | `severity` | derived from `display_state`: `failed` > `stalled` > `awaiting_input` > `blocked` > `review` |
   | `reason` | one line, ≤ 200 chars |
-  | `created_at`, `updated_at` | when the condition began / was last observed |
+  | `created_at`, `updated_at` | when the condition began / was last observed. A source that only knows when it observed something (e.g. a `pr bar` read) gets `created_at` from the aggregator's persisted first-observed time for that `(entity, entity_ref, display_state)`, so repeated reads keep the same order; it resets when the condition clears |
   | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
-  | `actions[]` | `{verb, argv}`: the sanctioned CLI that resolves it, complete and runnable (e.g. `agent-dispatch steer submit <task-id> --field <key>=<value>`, `agent-dispatch card show <task-id>`) |
+  | `actions[]` | `{verb, argv}`: sanctioned commands that run **as-is**, with no placeholder to fill (e.g. `agent-dispatch card show <task-id>`, `agent-bridge result <session-id>`). An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
   | `source` | the adapter that produced it |
 
 - [ ] **Display, not lifecycle.** A `live`/`started` entity waiting on a human
@@ -100,9 +100,15 @@ an empty queue.
   severity, then `created_at`, then `id` -- so identical reads give identical
   results however the adapters' timeouts interleave: keep the highest severity; the others become `also[]` on the kept item,
   so nothing is silently dropped.
-- [ ] **Source result:** each adapter returns `{items[], ok, error?, read_at}`. The
-  aggregate carries `sources[]` with each one's status. Any `ok: false` makes the
-  aggregate `degraded: true`, never an empty queue that reads as "all clear".
+- [ ] **Source result:** each adapter returns `{items[], status, error?, uncertain, read_at}`
+  with `status` one of `ok` (fully read), `failed` (couldn't be read), `uncertain`
+  (read, but `uncertain` of its entities couldn't be classified -- e.g. presence
+  `unknown`, a `pr bar` exit 12) or `disabled` (not installed). The aggregate's
+  `status` is `clear` only when every enabled source is `ok` and there are no
+  items; `attention` when there are items and every enabled source is `ok`;
+  `degraded` when any enabled source `failed`; `partial` when any is `uncertain`
+  (with the counts) -- so neither a failed nor a partly unreadable source can read
+  as "all clear". `disabled` sources never change it.
 - [ ] **Only discovered sources take part** (standalone-first,
   [a-la-carte independence](../../../docs/patterns/a-la-carte-independence.md)):
   an optional sibling that isn't installed (agent-bridge, agent-worktrees) is
@@ -163,7 +169,9 @@ an empty queue.
 - [ ] Unit: contract, ordering, dedupe — cross-source dedupe of one entity (two
   sources naming the same PR), cross-kind non-collision (a task and a session
   with the same id), and an equal-severity tie resolved the same way in any
-  adapter order — degraded vs empty vs disabled, each adapter on fixtures.
+  adapter order — repeated reads keep a source's first-observed `created_at`,
+  and each aggregate status (`clear`, `attention`, `degraded`, `partial`) from
+  fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded: true` with the
