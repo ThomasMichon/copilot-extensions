@@ -390,6 +390,59 @@ def test_explain_with_an_empty_worktree_path_reads_the_anchor(env, provider):
     assert report["content_ref"] and report["bases"][0] == "origin/main"
 
 
+def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
+        env, provider, monkeypatch):
+    """The work was committed on a hand-made branch (the tracked ``worktree/<id>``
+    never moved) and the PR recorded by URL and number only, so its ``branch`` is
+    empty; it squash-merged into dev while main is behind. ``--explain-landing``
+    reads it as a PR and finds it landed on dev; finalize must decide it the same
+    way, not as a direct-push worktree checked against main alone."""
+    from agent_worktrees import config as cfg
+    from agent_worktrees import tracking
+
+    tracking_d = env.tmp_path / "tracking"
+    tracking_d.mkdir()
+    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tracking_d)
+    _git("checkout", "-q", "-b", "pr/hand-made", cwd=env.clone)
+    head = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    _git("checkout", "-q", "main", cwd=env.seed)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+
+    pr = tracking.PRRecord(state="merged", number=7, repo="owner/repo", provider="github")
+    record = tracking.WorktreeRecord(
+        worktree_id=env.worktree_id, branch=f"worktree/{env.worktree_id}",
+        worktree_path=str(env.clone), repo="repo", machine="test", platform="linux",
+        started_at="2026-10-01T00:00:00", last_resumed_at="2026-10-01T00:00:00",
+        resume_count=0, title=None, status="active", completed_at=None, prs=[pr])
+    tracking.save_record(record, tracking_d / f"{env.worktree_id}.yaml")
+    repo_cfg = cfg.RepoConfig(anchor=str(env.seed), worktree_root=str(env.tmp_path),
+                              default_branch="main", remote="origin",
+                              pr=cfg.PRConfig(enabled=True, required=True, provider="github"))
+    config = cfg.Config(srcroot=str(env.tmp_path), machine="test", platform="linux",
+                        repo_name="repo", repos={"repo": repo_cfg})
+
+    assert finalize_landing.tracks_pr(record, repo_cfg)
+    report = finalize_landing.explain(record, repo_cfg, str(env.clone), str(env.seed))
+    assert (report["content_ref"], report["landed"]) == ("pr/hand-made", True)
+
+    assert finalize.validate_and_finalize(env.worktree_id, config) is True
+
+
+def test_a_pr_is_tracked_by_its_branch_or_its_number_and_only_with_prs_enabled(env):
+    repo = _repo()
+    assert finalize_landing.tracks_pr(_record(env), repo)                    # branch only
+    nobranch = _record(env, number=7)
+    nobranch.pr.branch = ""
+    assert finalize_landing.tracks_pr(nobranch, repo)                        # number only
+    nobranch.pr.number = None
+    assert not finalize_landing.tracks_pr(nobranch, repo)                    # neither
+    assert not finalize_landing.tracks_pr(SimpleNamespace(pr=None), repo)    # no PR
+    repo.pr.enabled = False
+    assert not finalize_landing.tracks_pr(_record(env), repo)                # PRs off
+
+
 def test_branches_pulled_forward_onto_different_bases_are_all_published(env, provider):
     """An older merged PR's branch was pulled forward onto main, the current checkout
     onto dev; each carries a commit only the other base lacks. Every commit is on some
