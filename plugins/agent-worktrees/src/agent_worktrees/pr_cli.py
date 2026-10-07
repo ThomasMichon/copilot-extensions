@@ -271,6 +271,11 @@ def _adopt_pushed_head(
     commit (someone else pushed): the stale expectation stands and the merge
     refuses, as it should.
     """
+    def matching(record: tracking.WorktreeRecord):
+        return [pr for pr in record.prs
+                if pr.number == number and (pr.repo or record.repo).lower() == repo.lower()
+                and (pr.provider or provider) == provider]
+
     tracking_dir = cfg.tracking_dir(getattr(config, "repo_name", None))
     found = []
     try:
@@ -282,23 +287,26 @@ def _adopt_pushed_head(
             record = tracking.load_record(path)
         except Exception:
             continue
-        repo_lower = repo.lower()
-        for pr in record.prs:
-            if (pr.number == number and (pr.repo or record.repo).lower() == repo_lower
-                    and (pr.provider or provider) == provider):
-                found.append((record, pr))
+        found += [(path, record, pr) for pr in matching(record)]
     if len(found) != 1:
         return ""
-    record, pr = found[0]
+    path, record, seen = found[0]
     worktree = record.worktree_path
     if not worktree or not Path(worktree).is_dir():
         return ""
+    # Git outside the record lock (never held across I/O), then a fresh RMW under it.
     local = git_ops.git("rev-parse", "HEAD", cwd=worktree, check=False)
     if local.returncode != 0 or local.stdout.strip() != live_head:
         return ""
-    pr.head_sha = live_head
-    pr.head_observed_at = ""  # no provider-clock observation of it yet
-    tracking.save_record(record)
+    with tracking._RecordLock(path):
+        current = tracking.load_record(path)
+        prs = matching(current)
+        if len(prs) != 1 or prs[0].head_sha != seen.head_sha or current.worktree_path != worktree:
+            return ""  # changed since it was read: decide again on the next attempt
+        prs[0].head_sha = live_head
+        prs[0].head_observed_at = ""  # no provider observation of this head yet
+        prs[0].head_observed_api_base = ""
+        tracking.save_record(current)
     return live_head
 
 

@@ -318,6 +318,20 @@ def test_now_adopts_a_moved_head_only_when_it_is_the_worktrees_own(monkeypatch, 
     assert fake.calls[0]["expected_head_sha"] == expected
 
 
+def test_now_merges_against_the_recorded_head_when_the_live_head_is_unreadable(monkeypatch):
+    """A malformed provider read (here, bad JSON) is no usage error: the merge
+    goes ahead against the recorded expectation."""
+    from agent_worktrees import pr_cli
+
+    fake = _FakeProvider()
+    fake.get_pull = lambda *a, **kw: (_ for _ in ()).throw(ValueError("Expecting value"))
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head",
+                        lambda config, repo, number, provider: "just-pushed-sha")
+    rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True, config=object())
+    assert rc == 0 and fake.calls[0]["expected_head_sha"] == "just-pushed-sha"
+
+
 def test_now_omits_match_head_commit_without_config(monkeypatch):
     """No ``config`` (e.g. an older caller) must not crash and must not
     fabricate a safety check it has no evidence for."""

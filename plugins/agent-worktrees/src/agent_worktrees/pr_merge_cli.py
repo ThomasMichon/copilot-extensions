@@ -210,8 +210,8 @@ def _pr_merge_now(
             # head behind: adopt the provider's head when it is that HEAD.
             try:
                 live = provider.get_pull(args.repo, args.pr, api_base=base, token=tok).head_sha
-            except ProviderError:
-                live = ""
+            except (ProviderError, OSError, ValueError, AttributeError):
+                live = ""  # unreadable: merge against the recorded head, as before
             if live and live != expected_head_sha:
                 expected_head_sha = _pr_cli._adopt_pushed_head(
                     config, args.repo, args.pr, provider.name, live,
