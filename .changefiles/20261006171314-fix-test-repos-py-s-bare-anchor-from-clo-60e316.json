@@ -1,0 +1,9 @@
+{
+  "comment": "Fix test_repos.py's _bare_anchor_from_clone test helper to set git identity (user.email/user.name) on the cloned anchor before tests build commits directly against it -- a clone doesn't inherit the source's LOCAL identity config, so a clean CI runner with no global git identity made commit-tree fail silently (empty stdout), feeding an empty SHA into update-ref and failing test_sync_repo_bare_anchor_skips_when_diverged / test_sync_repo_bare_anchor_mirror_refspec_cannot_clobber_diverged_ref.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
