@@ -158,6 +158,13 @@ unanswered permission request, or an ended turn in an interactive session),
 to go on, or a partial last line) -- never from self-reported activity. `peek
 --json` carries the same `presence` block.
 
+**What has it spent?** `<agent-bridge catalog argv[0]> usage <session|agent> [...] [--json]`
+reads each transcript's newest usage report (Copilot's totals are cumulative across
+resumes): premium requests and AIU, plus token counts once a session has shut down.
+A figure the transcript doesn't carry is "not reported", never zero, and the total
+names how many sessions reported (`coverage`). `peek --json` carries the same `usage`
+block.
+
 ## The automatic recovery ladder (what the daemon does on its own)
 
 `resume_session` self-heals the race -- do **not** intervene manually while its
