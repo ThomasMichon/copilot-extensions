@@ -126,10 +126,12 @@ the cloud. (This is the parent's *uniform-venue-reach*, realized for CodeSpaces.
 ### Config by adoption — the repo owns its venue policy
 A repo's CodeSpace policy — machine size, region, credential sources, and
 setup hooks — lives **in the adopting repo** and is **read live**, with no
-generated intermediate copy to drift. **Adoption** is the one act that wires a
-repo to the provider; ordinary operation reads that policy without mutating the
-repo. (The parent service model's *install/adopt boundary*, seen from the venue
-side.)
+generated intermediate copy to drift. For this **repo-owned policy lane**,
+**adoption** is the one act that wires a repo in; ordinary operation reads
+that policy without mutating the repo. (The parent service model's
+*install/adopt boundary*, seen from the venue side.) A second, separate
+provenance lane needing no adoption step at all exists alongside it — see
+*Repo-sourced provenance* below.
 
 ### Repo-sourced provenance — a venue policy without a control-plane repo
 A repo's venue policy need not live in an *adopted* control-plane repo at all:
@@ -137,11 +139,12 @@ the **active plugin presiding over a session** may ship the policy with
 itself and declare where to find it, so a repo that only ever reaches its
 venue through a harness plugin gets a working policy with **no adoption
 step, no sessionStart hook, and no user-level pointer**. This is a second,
-**lower-precedence** provenance source alongside adoption — adopted/cwd
-config always wins when both exist — and it is resolved only from an
-**identity-verified** active plugin root, never a guessed or unverified path.
-Legacy and operator-owned pointers remain independently diagnosable
-alongside it rather than silently superseded.
+**lower-precedence** provenance source *composing with* (not replacing) the
+repo-owned lane above — adopted/cwd config always wins when both exist —
+and it is resolved only from an **identity-verified** active plugin root,
+never a guessed or unverified path. Legacy and operator-owned pointers
+remain independently diagnosable alongside it rather than silently
+superseded.
 
 ### In-venue plugin injection — the harness follows the agent into the venue
 The plugins a session needs are not only the ones installed on the host: the
@@ -277,24 +280,33 @@ CodeSpace agent is created, inspected, and reached exactly like a local one.
 ### dual-mode-session-reach
 A CodeSpace agent is reachable **both** headlessly (an orchestrator drives it
 as a fabric participant, JSON handles, no terminal) and **interactively** (a
-human's own terminal session, muxed inside the venue) through the same
-provider, never two divergent code paths. A reference artifact a human
+human's own terminal session, muxed inside the venue) through the **same
+provider** under its one coordination contract — the same venue, the same
+credentialed door, addressed and reached by the same resolver, whatever the
+reach-mode-specific code path underneath does. A reference artifact a human
 supplies for the worker (a trace, transcript, log, or screenshot) reaches the
 venue **without the orchestrator ever reading it** — a pure hand-off, not a
 pass-through. A host port the venue's work needs (a browser's live DevTools
 endpoint) and a venue port the host needs to reach (a worker's dev server)
 are each bridgeable on request, so verifying work that spans the host/venue
-boundary does not require a second, ad hoc transport.
+boundary does not require a second, ad hoc transport. **Not yet fully
+realized:** reality today routes a detached session and an attached one
+through separate code paths (`copilot_detach.cmd_detach` vs.
+`interactive_ssh`); unifying them behind one implementation is a
+north-star-ahead refinement, not something already shipped.
 
 ### config-by-adoption
 A repo's venue policy lives **in that repo** and is **read live** (no generated
 intermediate), with per-repo overrides. Provisioning and reach honor it without
-copying or mutating it; only **adoption** wires a repo in.
+copying or mutating it; for the **repo-owned policy lane**, only **adoption**
+wires a repo in — see *repo-sourced-provenance* for the separate,
+lower-precedence lane that needs no adoption step at all.
 
 ### repo-sourced-provenance
 A venue policy can originate from the **active plugin** presiding over a
-session instead of an adopted repo — declared, identity-verified, and
-resolved at **lower precedence** than adoption — so a repo reached only
+session instead of an adopted repo — a **second provenance lane**, composing
+with (not replacing) the repo-owned one above: declared, identity-verified,
+and resolved at **lower precedence** than adoption, so a repo reached only
 through a harness plugin gets working venue policy with no adoption step.
 Legacy and operator-owned pointers stay independently diagnosable rather
 than silently superseded by this source.
@@ -711,3 +723,15 @@ tooling.)
   above are additive capability, not invariant violations. Phase 3's
   cutover/immutable-runtime conformance audit already covers this plugin's
   `install.ps1` separately (see `#5472`) and is unaffected by this slice.
+  **Review correction (PR #5575):** the initial wording over-claimed
+  *dual-mode-session-reach* as "never two divergent code paths" — reality
+  routes a detached session through `copilot_detach.cmd_detach` and an
+  attached one through a separate `interactive_ssh` path; reworded to scope
+  the guarantee to the shared coordination contract/venue/credentialed
+  door, not a shared implementation, and flagged the code-path unification
+  itself as a north-star-ahead refinement rather than already-shipped.
+  Review also caught that *repo-sourced-provenance*'s "no adoption step"
+  directly contradicted *config-by-adoption*'s "adoption is the one act"
+  wording; both sections were reworded to scope the older claim to the
+  **repo-owned policy lane** specifically, with the two provenance lanes
+  stated as composing (lower-precedence, not competing).
