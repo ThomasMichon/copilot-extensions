@@ -152,8 +152,23 @@ $_py = Resolve-PayloadRuntime
 Write-BootTrace 'resolver-loaded'
 if ($_py) {
     Write-BootTrace 'dispatch' 'shim' '' '' '' 'fast'
+    # Relax EAP for just this forwarding call: the wrapped module's own
+    # exit code is the only contract this dispatcher relays, so a
+    # legitimate stderr diagnostic from a non-zero exit must never become
+    # a terminating exception here. Confirmed: when a CALLER further up
+    # the stack redirects this dispatcher's error stream (e.g. `2>$null`),
+    # 'Stop' at this scope converts that diagnostic into a terminating
+    # RemoteException/NativeCommandError that propagates past every
+    # ancestor's own EAP, silently killing the whole calling script
+    # (copilot-extensions#5494).
+    $_previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
 @@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_py -m $_module @args
-@@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
+@@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    } finally {
+        $ErrorActionPreference = $_previousEap
+    }
+    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
 }
 if (Test-Path "env:@@NO_SELFPROVISION_ENV@@") {
     [Console]::Error.WriteLine("[$_command] runtime not provisioned (@@NO_SELFPROVISION_ENV@@ set).")
@@ -226,8 +241,16 @@ if (-not $_hostExe) {
 if ($_provisionRc -ne 0) { exit $_provisionRc }
 if ($_provisionedPy) {
     Write-BootTrace 'dispatch' 'shim' '' '' '' 'provisioned'
+    # See the matching 'fast' dispatch path above for why EAP is relaxed
+    # around just this forwarding call (copilot-extensions#5494).
+    $_previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
 @@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_provisionedPy -m $_module @args
-@@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
+@@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    } finally {
+        $ErrorActionPreference = $_previousEap
+    }
+    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
 }
 [Console]::Error.WriteLine("[$_command] provisioning completed without a resolvable runtime.")
 exit 1

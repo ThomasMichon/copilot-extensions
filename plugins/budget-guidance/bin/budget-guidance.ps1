@@ -152,7 +152,22 @@ $_py = Resolve-PayloadRuntime
 Write-BootTrace 'resolver-loaded'
 if ($_py) {
     Write-BootTrace 'dispatch' 'shim' '' '' '' 'fast'
+    # Relax EAP for just this forwarding call: the wrapped module's own
+    # exit code is the only contract this dispatcher relays, so a
+    # legitimate stderr diagnostic from a non-zero exit must never become
+    # a terminating exception here. Confirmed: when a CALLER further up
+    # the stack redirects this dispatcher's error stream (e.g. `2>$null`),
+    # 'Stop' at this scope converts that diagnostic into a terminating
+    # RemoteException/NativeCommandError that propagates past every
+    # ancestor's own EAP, silently killing the whole calling script
+    # (copilot-extensions#5494).
+    $_previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
     & $_py -m $_module @args
+    } finally {
+        $ErrorActionPreference = $_previousEap
+    }
     exit $LASTEXITCODE
 }
 if (Test-Path "env:BUDGET_GUIDANCE_NO_SELFPROVISION") {
@@ -242,7 +257,15 @@ $_provisionRc = $LASTEXITCODE
 if ($_provisionRc -ne 0) { exit $_provisionRc }
 if ($_provisionedPy) {
     Write-BootTrace 'dispatch' 'shim' '' '' '' 'provisioned'
+    # See the matching 'fast' dispatch path above for why EAP is relaxed
+    # around just this forwarding call (copilot-extensions#5494).
+    $_previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
     & $_provisionedPy -m $_module @args
+    } finally {
+        $ErrorActionPreference = $_previousEap
+    }
     exit $LASTEXITCODE
 }
 [Console]::Error.WriteLine("[$_command] provisioning completed without a resolvable runtime.")

@@ -437,7 +437,23 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     } else {
         Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
     }
-    & $Python -m agent_worktrees @forwardArgs
+    # Relax EAP for just this forwarding call: the wrapped CLI's own exit
+    # code is the only contract this dispatcher relays (the very next line
+    # below), so a legitimate stderr diagnostic from a non-zero exit must
+    # never become a terminating exception here. Confirmed: when a CALLER
+    # further up the stack redirects this dispatcher's error stream (e.g.
+    # `2>$null`), 'Stop' at this scope converts that diagnostic into a
+    # terminating RemoteException/NativeCommandError that propagates past
+    # every ancestor's own EAP (including an ancestor that set 'Continue'),
+    # silently killing the whole calling script with no PASS/JAM line and
+    # no chance to branch on $LASTEXITCODE (copilot-extensions#5494).
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Python -m agent_worktrees @forwardArgs
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
     exit $LASTEXITCODE
 }
 
