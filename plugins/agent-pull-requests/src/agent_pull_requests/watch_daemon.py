@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
 from work_coalescing_singleton import CoalescingServer
 
 from .watch_contract import DEFAULT_UNTIL, PRSnapshot
@@ -133,15 +134,14 @@ def default_notify(event: FiredEvent) -> None:
         payload["review_decision"] = event.snapshot.review_decision
         payload["mergeable"] = event.snapshot.mergeable
         payload["checks_state"] = event.snapshot.checks_state
-    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
     subprocess.run(  # noqa: S603 -- caller-supplied notify argv, by design
         [str(a) for a in argv],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
-        creationflags=creationflags,
         timeout=30,
         check=False,
+        **no_window_kwargs(),
     )
 
 

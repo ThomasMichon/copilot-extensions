@@ -11,6 +11,8 @@ import sys
 import time
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from . import __version__
 
 _STATUS_QUERY = (
@@ -33,10 +35,6 @@ _WATCH_QUERY = (
 _PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
-
-
-def _creation_flags() -> int:
-    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def _parse_repo_slug(value: str) -> tuple[str, str]:
@@ -76,8 +74,8 @@ def _run_agent_worktrees_gh_raw(repo: str, gh_args: list[str]) -> subprocess.Com
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=_creation_flags(),
         check=False,
+        **no_window_kwargs(),
     )
 
 
@@ -251,8 +249,8 @@ def _run_agent_worktrees_raw(argv: list[str]) -> subprocess.CompletedProcess[str
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=_creation_flags(),
         check=False,
+        **no_window_kwargs(),
     )
 
 
@@ -454,21 +452,14 @@ def _watch_boot() -> None:
     daemon currently answers rendezvous. Windowless on Windows; races with
     another caller doing the same thing are harmless -- only one process
     wins the rendezvous-file write/bind, callers just re-dial."""
-    detached_kwargs: dict[str, Any] = {}
-    if sys.platform == "win32":
-        detached_kwargs["creationflags"] = int(
-            getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        )
-    else:
-        detached_kwargs["start_new_session"] = True
+    from agent_procutil import detached_kwargs
+
     subprocess.Popen(
         [sys.executable, "-m", "agent_pull_requests", "serve"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        **detached_kwargs,
+        **detached_kwargs(),
     )
 
 
