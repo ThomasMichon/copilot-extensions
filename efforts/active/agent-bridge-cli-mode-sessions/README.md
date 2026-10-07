@@ -628,10 +628,25 @@ mechanism CLI mode binds through.
 - [ ] Update `plugins/agent-bridge`, `agent-codespaces`, and
       `agent-containers` docs/architecture for the new mode and discovery
       mapping.
-- [ ] Confirm the realized behavior against
+- [x] Confirm the realized behavior against
       `visions/remote-interactive-sessions`; no vision revision expected
       (this closes existing intent) unless implementation surfaces a genuine
       should-be gap.
+      **Done (2026-10-07), via `vision-backport-sweep`'s Phase 2 sweep
+      (a separate, cross-effort contribution in this same repo)** — not a
+      new should-be gap, but the
+      vision itself had drifted stale: it still described the daemon-port
+      reverse-forward and `live_sessions` registration for a venue-launched
+      CLI-mode session as a remaining gap, when Phase 4 above landed and
+      live-clean-room-validated exactly that on 2026-09-20/22, before this
+      checklist item was ever picked up. Corrected the vision's Purpose &
+      Intent and "CLI mode needs no Session Host" concept section to state
+      the integration as realized (citing this effort's Phase 4/Validation
+      Plan as evidence), and corrected a matching stale claim this same
+      sweep had briefly (and mistakenly) introduced into
+      `visions/plugins/agent-codespaces`'s own vision one day earlier. The
+      remaining Phase 5 item above (plugin docs/architecture sync) is
+      unaffected and still open.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
