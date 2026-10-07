@@ -40,15 +40,24 @@ live one.
 
 This is not a new problem for *this suite*: the lighter
 [`service-lifecycle-supervision`](service-lifecycle-supervision.md)
-restart-in-place shape (the embody supervisor's `supervise serve`) already
-solves it for daemons with **no in-flight request to drain** — wind down owned
-units, release the single-instance lease, spawn a successor **with the same
-argv**, then exit with a sentinel code (`RELOAD_EXIT_CODE`) the service
-manager is configured to treat as "restart me, don't count this as a failure"
-(systemd: `SuccessExitStatus=`/`RestartForceExitStatus=`; Windows: the
-launcher's own restart-loop recognizes the code). That trick works precisely
-*because* there is only ever one process at a time — the successor **is** the
-thing the service manager restarts into.
+restart-in-place shape (the embody supervisor's `supervise serve`) is often
+described as solving it for daemons with **no in-flight request to drain** —
+wind down owned units, release the single-instance lease, spawn a successor
+**with the same argv**, then exit with a sentinel code
+(`SELF_UPDATE_EXIT_CODE`). **That description does not hold up under closer
+inspection, and this pattern does not rely on it being true:** the daemon
+pre-spawns its own successor *before* exiting, rather than the service
+manager performing the replacement — so unless the service manager is
+specifically configured to treat that exit code as success (confirmed
+absent from the real deployed systemd unit: no `SuccessExitStatus=`), its own
+native restart (`Restart=on-failure`) still fires against the *predecessor's*
+exit, starting a second, redundant instance that races the one already
+spawned. Whether that race is harmless in practice (the two instances'
+shared singleton lease serializes them) or itself a crash-loop (the loser
+re-exits non-zero every `RestartSec`, forever, on exactly the same shape this
+whole pattern exists to close) is an open question about *existing, already-
+shipped code* — out of scope to resolve here, but this pattern must not cite
+it as a proven safe exemplar to delegate to.
 
 A daemon that owns a shared endpoint and in-flight, non-resumable work (the
 coordinator) cannot collapse to that single-process shape — the whole point of
@@ -196,16 +205,24 @@ successor already running in my own tree?*
    image with the newer version's entry point: `execve` preserves the pid,
    open file descriptors, and (per the Linux `prctl(2)` manual page)
    subreaper status, so the service manager's own tracked identity never
-   changes and no handoff is needed at all. Windows has no pid-preserving
-   exec equivalent, so there the manager instead adopts
-   [`service-lifecycle-supervision`](service-lifecycle-supervision.md)'s own
-   existing restart-in-place shape directly: wind down, duplicate its Job
-   handle into a spawned successor (per item 4), spawn that successor on
-   the newer interpreter with the same argv, exit with the sentinel code its
-   attached launcher's own restart-loop recognizes (never bare Scheduled-Task
-   `RestartCount`, which retries the same stale interpreter, not a newer
-   slot) — the same mechanism the embody supervisor already uses, applied to
-   the manager rather than invented fresh.
+   changes and no handoff is needed at all — genuinely clean, no second
+   process, no race with anything.
+   Windows has no pid-preserving exec equivalent, so a spawn-successor-then-
+   exit shape is unavoidable there — but (see above: this same shape is why
+   the embody supervisor's own existing self-update is *not* a safe
+   exemplar to delegate to) that shape must not be adopted uncritically.
+   Reuse this pattern's **own already-defined adoption machinery** instead
+   of inventing a second one: the predecessor manager spawns the successor
+   manager, duplicates its Job handle into it (per item 4) so Job-based
+   crash coverage carries across the handoff, has the successor publish its
+   own liveness the same way the daemon does (`zdd.routing.publish_active`
+   against a manager-scoped `config_dir`, distinct from the daemon's own),
+   then exits. Windows' "service manager" for this purpose is the attached
+   launcher's own persistent restart-loop process (not the raw Scheduled
+   Task's native `RestartCount`, which this pattern already requires
+   avoiding for the daemon itself) — a loop that can simply check for a
+   live, Job-member successor before ever re-invoking, closing the exact
+   race the supervisor's own exit-42 path leaves open against systemd.
 
 > **Validation status.** This pattern is a **design, not yet an
 > implementation** — the code (the `zdd.singleton_manager` module, both
