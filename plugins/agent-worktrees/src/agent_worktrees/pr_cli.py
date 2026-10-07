@@ -728,6 +728,7 @@ def _pr_usage() -> None:
     print("  watch    Block until the PR moves (= pr-watch)", file=out)
     print("  merge    Signal merge consent on an approved PR (= pr-merge)", file=out)
     print("  status   Read tracked PR metadata (= pr-status)", file=out)
+    print("  bar      Check the PR against its merge bar, clause by clause, on one head", file=out)
     print("  complete Reconcile the worktree after merge (= pr-complete)", file=out)
     print("  ready    Move a PR out of draft, ready-for-review (= pr-ready)", file=out)
     print(
@@ -883,6 +884,9 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
         return cmd_pr_merge_dispatch(argv[1:])
     if verb == "research":
         return cmd_pr_research_dispatch(argv[1:])
+    if verb == "bar":
+        from . import pr_bar_cli
+        return pr_bar_cli.cmd_pr_bar(argv[1:])
     canonical = _PR_NAMESPACE.get(verb)
     if not canonical:
         output.err(f"Unknown pr subcommand: {verb}")

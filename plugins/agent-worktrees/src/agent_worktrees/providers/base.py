@@ -736,6 +736,11 @@ def run_cli(
             resolved,
             capture_output=True,
             text=True,
+            # Provider CLIs speak UTF-8 (review bodies carry emoji); the locale
+            # code page (cp1252 on Windows) would fail to decode them and mangle
+            # a piped body. An undecodable byte is replaced, never fatal.
+            encoding="utf-8",
+            errors="replace",
             input=input_text,
             env=full_env,
             timeout=timeout,

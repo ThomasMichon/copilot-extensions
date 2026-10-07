@@ -224,6 +224,19 @@ class TestRunCli:
         assert secret not in repr(result.args)
         assert result.args == ["provider", "--token", "[REDACTED]", "query"]
 
+    def test_utf8_output_and_input_survive_any_locale(self):
+        """Provider CLIs speak UTF-8 (Copilot review bodies carry emoji): the output
+        decodes and a piped body round-trips whatever the locale code page is, and
+        an undecodable byte is replaced rather than failing the read."""
+        import sys
+
+        text = "🟡 Changes recommended — ✓ résumé"
+        echo = ("import sys; data = sys.stdin.buffer.read(); "
+                "sys.stdout.buffer.write(data + b'\\xff')")
+        result = base.run_cli([sys.executable, "-c", echo], input_text=text)
+        assert result.returncode == 0
+        assert result.stdout == text + "\ufffd"
+
 
 class TestScopeFromResult:
     def test_builds_scope_and_templates_labels(self):
