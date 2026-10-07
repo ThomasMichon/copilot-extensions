@@ -9,7 +9,7 @@
   contract** as a local one.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-06
+- **Last revised:** 2026-10-07
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) (install
   topology, the credential-relay path, the `codespace:` resolver) · the plugin's
   [`README`](../../../plugins/agent-codespaces/README.md) and its skills
