@@ -11,6 +11,8 @@ import sys
 import time
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from . import __version__
 
 _STATUS_QUERY = (
@@ -21,13 +23,18 @@ _STATUS_QUERY = (
     "} } }"
 )
 
+_WATCH_QUERY = (
+    "query($owner: String!, $name: String!, $number: Int!) { "
+    "repository(owner: $owner, name: $name) { "
+    "pullRequest(number: $number) { "
+    "state merged mergeable reviewDecision headRefOid updatedAt "
+    "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } "
+    "} } }"
+)
+
 _PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
-
-
-def _creation_flags() -> int:
-    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def _parse_repo_slug(value: str) -> tuple[str, str]:
@@ -67,8 +74,8 @@ def _run_agent_worktrees_gh_raw(repo: str, gh_args: list[str]) -> subprocess.Com
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=_creation_flags(),
         check=False,
+        **no_window_kwargs(),
     )
 
 
@@ -116,6 +123,51 @@ def _parse_json_tail(stdout: str) -> dict[str, Any]:
                 idx = stripped.rfind(marker, 0, idx)
     raise RuntimeError(
         "agent-worktrees repos gh returned non-JSON output: " + stripped[:200]
+    )
+
+
+def _watch_github_snapshot(repo: str, number: int):
+    """Fetch one :class:`~agent_pull_requests.watch_contract.PRSnapshot` for
+    ``repo``#``number`` -- the richer query the watch daemon's poll loop
+    needs (merged flag, CI rollup), separate from ``status``'s own stable
+    human-facing query/output contract."""
+    from .watch_contract import PRSnapshot
+
+    owner, name = _parse_repo_slug(repo)
+    payload = _run_agent_worktrees_gh(
+        repo,
+        [
+            "api",
+            "graphql",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={number}",
+            "-f",
+            f"query={_WATCH_QUERY}",
+        ],
+    )
+    repository = payload.get("data", {}).get("repository")
+    pull_request = repository.get("pullRequest") if isinstance(repository, dict) else None
+    if not isinstance(pull_request, dict):
+        raise RuntimeError(f"GitHub did not return pull request #{number} for {repo}")
+    commits = pull_request.get("commits") or {}
+    nodes = commits.get("nodes") or []
+    checks_state = ""
+    if nodes and isinstance(nodes[0], dict):
+        commit = nodes[0].get("commit") or {}
+        rollup = commit.get("statusCheckRollup") or {}
+        checks_state = str(rollup.get("state") or "").lower()
+    return PRSnapshot(
+        pr_state=str(pull_request.get("state") or "open").lower(),
+        merged=bool(pull_request.get("merged", False)),
+        head_sha=str(pull_request.get("headRefOid") or ""),
+        mergeable=str(pull_request.get("mergeable") or ""),
+        review_decision=str(pull_request.get("reviewDecision") or ""),
+        checks_state=checks_state,
+        updated_at=str(pull_request.get("updatedAt") or ""),
     )
 
 
@@ -197,8 +249,8 @@ def _run_agent_worktrees_raw(argv: list[str]) -> subprocess.CompletedProcess[str
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=_creation_flags(),
         check=False,
+        **no_window_kwargs(),
     )
 
 
@@ -384,6 +436,143 @@ def _cmd_wait(args: argparse.Namespace) -> int:
     return 0 if status["state"] == "MERGED" else 1
 
 
+# ---------------------------------------------------------------------------
+# watch -- shared-daemon subscription for a long-poll waiter (#5530-follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _watch_dial() -> tuple[str, int, str] | None:
+    from .watch_daemon import endpoint_from_rendezvous, read_lock_data
+
+    return endpoint_from_rendezvous(read_lock_data())
+
+
+def _watch_boot() -> None:
+    """Best-effort: spawn a detached ``agent-pull-requests serve`` if no
+    daemon currently answers rendezvous. Windowless on Windows; races with
+    another caller doing the same thing are harmless -- only one process
+    wins the rendezvous-file write/bind, callers just re-dial."""
+    from agent_procutil import detached_kwargs
+
+    subprocess.Popen(
+        [sys.executable, "-m", "agent_pull_requests", "serve"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **detached_kwargs(),
+    )
+
+
+def _watch_request(kind: str, payload: dict, *, boot_wait_s: float = 6.0) -> dict:
+    from work_coalescing_singleton import call_with_fallback
+
+    def _fallback() -> dict:
+        return {"error": "no watch daemon reachable and no inline fallback for this kind"}
+
+    return call_with_fallback(
+        dial=_watch_dial,
+        boot=_watch_boot,
+        boot_wait_s=boot_wait_s,
+        kind=kind,
+        key=f"{payload.get('repo', '')}#{payload.get('number', '')}",
+        payload=payload,
+        request_deadline_s=5.0,
+        fallback=_fallback,
+    )
+
+
+def _cmd_watch_subscribe(args: argparse.Namespace) -> int:
+    from .watch_contract import DEFAULT_UNTIL
+
+    until = tuple(args.until) if args.until else DEFAULT_UNTIL
+    notify: dict[str, Any] = {}
+    if args.notify_argv:
+        notify["argv"] = args.notify_argv
+    result = _watch_request(
+        "register",
+        {
+            "repo": args.repo,
+            "number": args.number,
+            "subscriber_id": args.subscriber_id,
+            "until": list(until),
+            "notify": notify,
+            "timeout": args.timeout,
+        },
+    )
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(result)
+    return 0 if result.get("registered") else 1
+
+
+def _cmd_watch_unsubscribe(args: argparse.Namespace) -> int:
+    result = _watch_request(
+        "unregister",
+        {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id},
+    )
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(result)
+    return 0 if result.get("unregistered") else 1
+
+
+def _cmd_watch_status(args: argparse.Namespace) -> int:
+    result = _watch_request("status", {"repo": "", "number": 0}, boot_wait_s=0.0)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        subscribers = result.get("subscribers") or {}
+        if not subscribers:
+            print("no watch daemon reachable, or no active subscriptions")
+        for key, ids in subscribers.items():
+            print(f"{key}: {', '.join(ids)}")
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the resident PR-watch daemon in the foreground.
+
+    A long-lived host (Scheduled Task / systemd-user unit) is deferred to a
+    follow-up per ``docs/patterns/service-lifecycle-supervision.md`` -- this
+    first slice is manually invocable and auto-booted on demand by
+    ``_watch_boot`` (``call_with_fallback``'s own boot path), matching
+    ``agent-worktrees``' resident status-monitor's own bootstrap shape
+    before its own supervised-task wiring landed. The single-instance lease
+    (not just "last rendezvous-file write wins") is what actually makes two
+    racing ``_watch_boot`` callers safe: the loser raises
+    ``AlreadyRunningError`` and exits 0 immediately rather than silently
+    running a second, orphaned daemon nobody will ever discover.
+    """
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+    from work_coalescing_singleton import CoalescingServer
+
+    from .watch_daemon import WatchDaemon, rendezvous_fields, state_dir, write_lock_data
+
+    lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
+    try:
+        lease.acquire()
+    except AlreadyRunningError as exc:
+        print(f"agent-pull-requests: watch daemon already running (pid {exc.holder_pid})")
+        return 0
+
+    daemon = WatchDaemon(fetch=_watch_github_snapshot, poll_interval=args.poll_interval)
+    server = CoalescingServer(daemon.compute, on_idle=None)
+    server.start()
+    write_lock_data(rendezvous_fields(server))
+    print(f"agent-pull-requests: watch daemon listening ({server.rendezvous()['endpoint']})")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
+        lease.release()
+    return 0
+
+
 def _cmd_version(_args: argparse.Namespace) -> int:
     print(f"agent-pull-requests {__version__}")
     return 0
@@ -449,6 +638,63 @@ def build_parser() -> argparse.ArgumentParser:
     wait.add_argument("--timeout", type=float, default=600.0, help="give up after this many seconds")
     wait.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     wait.set_defaults(handler=_cmd_wait)
+
+    watch = subparsers.add_parser(
+        "watch", help="non-blocking subscription against the shared watch daemon"
+    )
+    watch_sub = watch.add_subparsers(dest="watch_command", required=True)
+
+    watch_subscribe = watch_sub.add_parser(
+        "subscribe",
+        help="register interest in a PR; returns immediately (boots the daemon if needed)",
+    )
+    watch_subscribe.add_argument("--repo", required=True, type=_validate_repo_slug)
+    watch_subscribe.add_argument("--number", required=True, type=int)
+    watch_subscribe.add_argument(
+        "--subscriber-id", required=True, help="caller-chosen unique id for this registration"
+    )
+    watch_subscribe.add_argument(
+        "--until",
+        action="append",
+        choices=["merged", "closed", "review_changed", "mergeable_changed", "checks_changed"],
+        help="transition(s) to wake on (default: merged, closed); repeatable",
+    )
+    watch_subscribe.add_argument(
+        "--timeout", type=float, default=None, help="also fire (timed_out) after this many seconds"
+    )
+    watch_subscribe.add_argument(
+        "--notify-argv",
+        nargs="+",
+        metavar="ARGV",
+        help="command to run (no agent-pull-requests-specific meaning; the "
+        "fired event is passed as JSON on its stdin) when this fires -- "
+        "e.g. a caller-supplied 'agent-dispatch resume <task-id>'",
+    )
+    watch_subscribe.add_argument("--json", action="store_true")
+    watch_subscribe.set_defaults(handler=_cmd_watch_subscribe)
+
+    watch_unsubscribe = watch_sub.add_parser(
+        "unsubscribe", help="cancel a registration before it fires"
+    )
+    watch_unsubscribe.add_argument("--repo", required=True, type=_validate_repo_slug)
+    watch_unsubscribe.add_argument("--number", required=True, type=int)
+    watch_unsubscribe.add_argument("--subscriber-id", required=True)
+    watch_unsubscribe.add_argument("--json", action="store_true")
+    watch_unsubscribe.set_defaults(handler=_cmd_watch_unsubscribe)
+
+    watch_status = watch_sub.add_parser(
+        "status", help="list active subscriptions, if a daemon answers"
+    )
+    watch_status.add_argument("--json", action="store_true")
+    watch_status.set_defaults(handler=_cmd_watch_status)
+
+    serve = subparsers.add_parser(
+        "serve", help="run the resident PR-watch daemon in the foreground"
+    )
+    serve.add_argument(
+        "--poll-interval", type=float, default=30.0, help="seconds between polls per watched PR"
+    )
+    serve.set_defaults(handler=_cmd_serve)
 
     version = subparsers.add_parser("version", help="print the agent-pull-requests version and exit")
     version.set_defaults(handler=_cmd_version)

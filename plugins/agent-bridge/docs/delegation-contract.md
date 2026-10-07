@@ -43,6 +43,7 @@ delegated-agent facade.
 | Read accumulated events | `read`, `read --since`, `--tail`, `--range`, or `--event` | `GET .../events` or `GET .../events/range` | Event records; random access does not move the caller cursor |
 | Read a bounded accumulated result | `result`, optionally from an opaque `--position` or with explicit `--expand` | `GET .../result` and `GET .../result/detail` | Current state, latest completed result, collapsed incremental work, and a cursor-neutral opaque next position |
 | Inspect the downstream transcript without launching ACP | `peek` | Target-execution helper, not a public session route | Bounded Copilot `events.jsonl` snapshot and reuse verdict |
+| Ask what a session is doing now | `presence` (also `peek --json`'s `presence` block) | Target-execution helper, not a public session route | `busy` \| `awaiting_input` \| `idle` \| `absent` \| `unknown`, read from the transcript (never self-reported), with the last event, mode, pending permissions and confidence |
 | Inspect current state | `status`, `session-usage`, `sessions` | Session, status, usage, queue, and cursor endpoints | Session/process/usage/progress fields |
 | Interrupt one turn | control API; destructive `send --force` is a separate replacement path | `POST .../interrupt` | Current turn receives ACP `session/cancel`; session remains usable |
 | Stop and preserve | `stop` | `POST .../stop` | Session becomes `stopped` and remains resumable |

@@ -136,6 +136,15 @@ def _scope_dlg_open(scr):
     return _scope_dlg(scr) is not None
 
 
+def _prompt_dlg(scr):
+    """The F4 PromptDlgScreen instance on the app's screen stack, or None."""
+    from worktree_manager.production_picker.picker_tui.engine import PromptDlgScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, PromptDlgScreen):
+            return s
+    return None
+
+
 def _progress_screen(scr):
     """The F4 ProgressScreen instance on the app's screen stack, or None."""
     from worktree_manager.production_picker.picker_tui.engine import ProgressScreen
@@ -2277,6 +2286,115 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
             assert scr.debug == "Opened in a new window"
             # The captured message never reached the real stdout.
             assert "Creating psmux session" not in capfd.readouterr().out
+
+    asyncio.run(run())
+
+
+def test_resume_prompt_offered_only_for_local_open_or_resume_rows():
+    """The "Resume prompt…" verb rides alongside Open/Resume under the
+    exact same local-only eligibility condition as "Launch in new window"
+    -- a seed is rejected by the engine's resolve CLI alongside a remote
+    ``--machine`` target."""
+    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
+        PickerScreenWorktreeActionsMixin as M,
+    )
+
+    local_mux_live = {
+        "source_kind": "machine-ssh", "is_local": True, "mux_live": True,
+        "cleanup_bucket": "wip",
+    }
+    acts = M._session_action_verbs(local_mux_live)
+    assert "Open" in acts
+    assert "Resume prompt…" in acts
+
+    remote_mux_live = dict(local_mux_live, is_local=False)
+    acts = M._session_action_verbs(remote_mux_live)
+    assert "Open" in acts
+    assert "Resume prompt…" not in acts
+
+    local_resumable = {
+        "source_kind": "machine-ssh", "is_local": True, "sessionless": False,
+        "cleanup_bucket": "unused",
+    }
+    acts = M._session_action_verbs(local_resumable)
+    assert "Resume" in acts
+    assert "Resume prompt…" in acts
+
+    reclaimable = {
+        "source_kind": "machine-ssh", "is_local": True,
+        "session_lock_live": True,
+    }
+    acts = M._session_action_verbs(reclaimable)
+    assert "Open" not in acts and "Resume" not in acts
+    assert "Resume prompt…" not in acts
+
+
+def test_resume_prompt_seed_carries_through_to_resume_decision():
+    """Selecting "Resume prompt…" opens the lean composer dialog; a typed
+    prompt, confirmed, reaches the SAME ordinary resume decision
+    ``_resume_decision`` builds for "Resume"/"Open", carried as
+    ``options["seed_prompt"]`` -- never a separate code path, and the
+    read-only "Messages" viewer remains a distinct, separate affordance."""
+    from worktree_manager.production_picker.picker_tui.field_widgets import (
+        _AutoExpandTextArea,
+    )
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            rec = next(
+                r for r in scr.list_records()
+                if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
+            )
+            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            await pilot.pause()
+
+            dlg = _prompt_dlg(scr)
+            assert dlg is not None
+            assert app.result is None  # the Picker has not exited yet
+            dlg.query_one("#q-0", _AutoExpandTextArea).text = "sync, then status"
+            await pilot.press("enter")   # the textarea's own accept + advance
+            await pilot.press("enter")   # confirm
+            await pilot.pause()
+
+        assert app.result is not None
+        assert app.result["action"] == "resume"
+        assert app.result["worktree_id"] == "anomalous-potato-win-20260627-aaaa"
+        assert app.result["options"]["seed_prompt"] == "sync, then status"
+
+    asyncio.run(run())
+
+
+def test_resume_prompt_cancel_leaves_the_picker_open():
+    """Cancel (Esc) on the composer dialog must NOT exit the Picker -- no
+    ``_decide`` call, ``app.result`` stays unset, same contract every other
+    cancelable Actions-menu dialog already honors."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            rec = next(
+                r for r in scr.list_records()
+                if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
+            )
+            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            await pilot.pause()
+
+            assert _prompt_dlg(scr) is not None
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert _prompt_dlg(scr) is None
+            assert app.result is None
 
     asyncio.run(run())
 
@@ -10687,7 +10805,7 @@ def test_submit_error_screen_survives_a_bracketed_error_detail():
                 SubmitErrorScreen(
                     "Steer",
                     "command failed: unexpected token near path/[/]/segment",
-                    Path("C:/Users/tmichon/.worktree-manager/steer-drafts/wt-one.json"),
+                    Path("C:/Users/operator/.worktree-manager/steer-drafts/wt-one.json"),
                 )
             )
             # The exact crash site: compositor layout/reflow of the pushed

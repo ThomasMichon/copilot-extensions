@@ -52,6 +52,26 @@ DEFAULT_FRESHNESS_MULTIPLIER = 3.0
 #: DEFAULT_TTL`, 12s) this cache supersedes as the authoritative scan cadence.
 DEFAULT_REFRESH_INTERVAL = 12.0
 
+#: Upper bound on how long a single `get_snapshot()` call will wait for an
+#: incomplete/stale namespace's opportunistic single-flight refresh before
+#: falling back to whatever last-known-good (or empty, if uninitialized)
+#: data is already cached. Deliberately much shorter than
+#: `_watchdog_timeout` (which bounds *background* supervision -- a hung
+#: periodic cycle, a stuck discovery scan -- not a live request): a
+#: namespace provider that is reliably slower than this cache's own
+#: refresh cadence (e.g. a CLI-subprocess-backed provider enumerating a
+#: remote service or local container runtime, with no result cache of its
+#: own) can never publish a fresh entry within one cycle -- without a
+#: short, independent bound here, EVERY caller of such a namespace pays
+#: that provider's full scan cost on every single request, the opposite
+#: of what a background-refreshed cache is for. The join still kicks off
+#: (or joins) the namespace's real single-flight scan regardless -- it
+#: keeps running in the background past this timeout -- so a later
+#: request (or the periodic refresh loop) still picks up its result once
+#: it actually finishes; this bound only governs how long any *one*
+#: caller waits for it inline.
+DEFAULT_OPPORTUNISTIC_JOIN_BUDGET = 1.5
+
 
 class _NamespaceState(str, Enum):
     #: Never completed a scan (new namespace, or one whose provider was just
@@ -145,6 +165,7 @@ class AgentRosterCache(_DiscoveryMixin):
         refresh_interval: float = DEFAULT_REFRESH_INTERVAL,
         freshness_multiplier: float = DEFAULT_FRESHNESS_MULTIPLIER,
         watchdog_timeout: float | None = None,
+        opportunistic_join_budget: float | None = None,
     ) -> None:
         self._resolver = resolver
         self._refresh_interval = max(1.0, refresh_interval)
@@ -185,6 +206,24 @@ class AgentRosterCache(_DiscoveryMixin):
         self._watchdog_timeout = (
             watchdog_timeout if watchdog_timeout is not None
             else self._default_watchdog_timeout()
+        )
+        #: Never longer than `_watchdog_timeout` itself (an explicitly
+        #: short watchdog -- as several tests configure -- must still
+        #: bound the per-request join at least that tightly), and never
+        #: longer than `DEFAULT_OPPORTUNISTIC_JOIN_BUDGET` regardless of
+        #: how generous `_watchdog_timeout` is configured (production's
+        #: default watchdog is minutes-scale background-supervision
+        #: headroom, not a live-request budget). This clamp applies
+        #: equally to an explicit `opportunistic_join_budget` override --
+        #: a caller-requested budget larger than `_watchdog_timeout` would
+        #: otherwise let a request outlive the very watchdog bound this
+        #: cache's own orphaned-task story depends on.
+        self._opportunistic_join_budget = min(
+            self._watchdog_timeout,
+            (
+                opportunistic_join_budget if opportunistic_join_budget is not None
+                else DEFAULT_OPPORTUNISTIC_JOIN_BUDGET
+            ),
         )
         #: Monotonic timestamp of the most recent *clean* discovery pass
         #: (``refresh_provider_resolvers()`` returning ``ok=True``) -- a
@@ -806,6 +845,15 @@ class AgentRosterCache(_DiscoveryMixin):
         one broken provider never makes every other, healthy namespace's
         provider re-run its scan on each bounded retry.
 
+        Each namespace's join is bounded at ``_opportunistic_join_budget``
+        (short, independent of ``_watchdog_timeout``) -- a namespace scan
+        is kicked off (or joined) regardless, but this request never waits
+        past that short budget for it: past it, the response falls back to
+        whatever last-known-good (or empty, if uninitialized) data is
+        already cached, with the namespace reported incomplete. The scan
+        itself keeps running in the background past this timeout; a later
+        request (or the periodic loop) still observes its eventual result.
+
         The discovery join itself is bounded at ``2 * _watchdog_timeout``
         (``max_wait``) -- a persistently hung discovery (every attempt
         hangs and gets abandoned-and-replaced, forever) must not keep this
@@ -837,25 +885,33 @@ class AgentRosterCache(_DiscoveryMixin):
             # the real task directly; shielding only protects it from a
             # caller-side cancellation it was never meant to control.
             #
-            # Each join is also bounded by `_watchdog_timeout`: a namespace
-            # single-flight task this request joined can be the *exact*
-            # task object the external watchdog later force-abandons (its
-            # own enclosing periodic cycle ran too long) if that resolver
-            # is cancellation-resistant -- the watchdog only untracks the
-            # abandoned task from `_inflight` for *future* callers
-            # (`_drop_unfinished_inflight`); it does nothing for a request
-            # already shielded-awaiting that exact task object, which would
-            # otherwise hang forever since the orphaned task never actually
-            # finishes. On timeout here, this request simply gives up on
-            # that namespace -- the freshness recheck below already treats
-            # a namespace whose scan never progressed as incomplete, so no
-            # retry loop is needed; a *later* request re-joins whatever
-            # scan is current for `ns` at that time, same as always.
+            # Each join is bounded by `_opportunistic_join_budget`, NOT the
+            # (far more generous) `_watchdog_timeout` -- a namespace whose
+            # own scan is reliably slower than this (a real, observed
+            # shape: GitHub Codespaces/Docker enumeration via a CLI
+            # subprocess with no cache of its own, 10-16s) must never make
+            # every single caller of `get_snapshot()` pay its full scan
+            # cost -- that is exactly the per-call cost this cache exists
+            # to eliminate. The task itself is NOT cancelled on this
+            # timeout (`asyncio.wait_for` only abandons *this* await, and
+            # the task is `asyncio.shield`-ed besides) -- it keeps running
+            # in the background exactly like any other in-flight scan, so
+            # a later request (or the periodic refresh loop) still picks
+            # up its result once it actually finishes; this bound only
+            # governs how long any *one* caller waits for it inline before
+            # falling back to whatever last-known-good (or empty, if
+            # uninitialized) data is already cached. It is ALSO the bound
+            # the external watchdog story above still applies to (an
+            # orphaned, cancellation-resistant task this request joined
+            # can still hang past its own abandonment) -- the freshness
+            # recheck below already treats a namespace whose scan never
+            # progressed as incomplete, so no retry loop is needed here
+            # either.
             await asyncio.gather(
                 *(
                     asyncio.wait_for(
                         asyncio.shield(self._refresh_namespace(ns)),
-                        timeout=self._watchdog_timeout,
+                        timeout=self._opportunistic_join_budget,
                     )
                     for ns in to_join
                 ),
