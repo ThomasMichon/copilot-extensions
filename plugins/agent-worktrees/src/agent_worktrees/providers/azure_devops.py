@@ -168,6 +168,7 @@ class AzureDevOpsProvider:
             state=state,
             merged=merged,
             head_sha=head_sha,
+            base_ref=str(data.get("targetRefName", "") or "").removeprefix("refs/heads/"),
         )
 
     def observe_head(

@@ -55,6 +55,13 @@ def add_parsers(sub) -> None:
         "Only for a confirmed superseded/abandoned PR -- there is no soft "
         "env-var bypass for this gate.",
     )
+    p.add_argument(
+        "--explain-landing",
+        action="store_true",
+        help="Read-only: report what finalize tests to decide whether a PR-mode "
+        "worktree's work landed (the content ref, every base -- the default "
+        "branch and the PR's own base -- and each check's verdict); finalizes nothing.",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
@@ -267,6 +274,40 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
     return 0
 
 
+def _explain_landing(worktree_id: str, config, use_json: bool) -> int:
+    """``finalize --explain-landing``: what finalize would test, read-only."""
+    from . import finalize_landing
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+    except Exception as exc:
+        msg = f"No readable tracking record for '{worktree_id}': {exc}"
+        if use_json:
+            return output._json_error(msg)
+        output.err(msg)
+        return 1
+    repo = config.default_repo
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
+    report = finalize_landing.explain(record, repo, worktree_path, repo.anchor)
+    if use_json:
+        output._json_output(report)
+        return 0
+    created = f" (created from {report['created_from'][:10]})" if report["created_from"] else ""
+    print(f"Content: {report['content_ref']}{created}")
+    missing = f"  (not fetched: {', '.join(report['missing_bases'])})" if report["missing_bases"] else ""
+    print(f"Bases: {', '.join(report['bases'])}{missing}")
+    for check in report["checks"]:
+        verdicts = ", ".join(f"{k} {({True: 'yes', False: 'no'}).get(check[k], '-')}"
+                             for k in ("ancestor", "cherry", "squash", "blobs"))
+        print(f"  {check['upstream']}: {'landed' if check['landed'] else 'not landed'} ({verdicts})")
+    pr = report["pr"]
+    if pr:
+        print(f"PR: #{pr['number']} {pr['state'] or '?'} head {(pr['head_sha'] or '?')[:10]}")
+    verdict = {True: "landed -- finalize's content check passes",
+               None: "undecided here -- the PR isn't confirmed merged; finalize's mode checks decide"}
+    print(f"Verdict: {verdict.get(report['landed']) or report['message']}")
+    return 0
+
+
 def cmd_finalize(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
     if use_json:
@@ -301,6 +342,8 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             output.err(msg)
             return 1
         worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
+        if getattr(args, "explain_landing", False):
+            return _explain_landing(worktree_id, config, use_json)
         abandon = getattr(args, "abandon", False)
         handoff_to = (getattr(args, "handoff_to", None) or "").strip()
         if abandon and not handoff_to:

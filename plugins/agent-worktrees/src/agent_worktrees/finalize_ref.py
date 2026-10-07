@@ -5,7 +5,140 @@ Split out of ``finalize.py`` (module-size guard) -- see ``resolve_finalize_ref``
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from . import git_ops, output
+
+#: The identity of the probe commit :func:`squash_landed` builds (never a ref's).
+_PROBE_IDENTITY = ("-c", "user.name=agent-worktrees", "-c", "user.email=agent-worktrees@localhost")
+
+
+@dataclass
+class Landing:
+    """Why a ref's content is (or isn't) on one upstream: each check's verdict,
+    ``None`` when it couldn't be read or wasn't needed."""
+
+    ref: str
+    upstream: str
+    ancestor: bool | None = None
+    cherry: bool | None = None
+    squash: bool | None = None
+    blobs: bool | None = None
+
+    @property
+    def landed(self) -> bool:
+        return any((self.ancestor, self.cherry, self.squash, self.blobs))
+
+    @property
+    def label(self) -> str:
+        """The upstream as people write it (``origin/dev``); checks use the full ref."""
+        return self.upstream.removeprefix("refs/remotes/")
+
+    def to_dict(self) -> dict:
+        return {"ref": self.ref, "upstream": self.label, "landed": self.landed,
+                "ancestor": self.ancestor, "cherry": self.cherry,
+                "squash": self.squash, "blobs": self.blobs}
+
+    def describe(self) -> str:
+        word = {True: "yes", False: "no", None: "-"}
+        checks = ", ".join(f"{name} {word[getattr(self, name)]}"
+                           for name in ("ancestor", "cherry", "squash", "blobs"))
+        return f"{self.ref} on {self.label}: {checks}"
+
+
+def squash_landed(branch: str, upstream: str, cwd: str) -> bool | None:
+    """Whether *branch*'s whole change since its merge-base with *upstream*, as one
+    patch, is already a commit on *upstream* -- a squash merge of a multi-commit
+    branch, which ``git cherry`` on the branch's own commits can't see. ``None``
+    when it can't be read, or when the branch makes no net change (the blob
+    comparison decides that). Writes one unreferenced probe commit object (no ref
+    moves; ``git gc`` collects it)."""
+    base = git_ops.git("merge-base", upstream, branch, cwd=cwd, check=False)
+    tree = git_ops.git("rev-parse", f"{branch}^{{tree}}", cwd=cwd, check=False)
+    if base.returncode != 0 or tree.returncode != 0:
+        return None
+    base_sha, tree_sha = base.stdout.strip(), tree.stdout.strip()
+    base_tree = git_ops.git("rev-parse", f"{base_sha}^{{tree}}", cwd=cwd, check=False)
+    if base_tree.returncode != 0 or not base_sha or not tree_sha:
+        return None
+    if base_tree.stdout.strip() == tree_sha:
+        return None
+    probe = git_ops.git(*_PROBE_IDENTITY, "commit-tree", "--no-gpg-sign", tree_sha,
+                        "-p", base_sha, "-m", "agent-worktrees landing probe",
+                        cwd=cwd, check=False)
+    probe_sha = probe.stdout.strip()
+    if probe.returncode != 0 or not probe_sha:
+        return None
+    cherry = git_ops.git("cherry", upstream, probe_sha, cwd=cwd, check=False)
+    lines = [ln for ln in cherry.stdout.splitlines() if ln.strip()]
+    if cherry.returncode != 0 or len(lines) != 1:
+        return None
+    return lines[0].startswith("-")
+
+
+def creation_point(ref: str, cwd: str) -> str:
+    """The commit local branch *ref* was created at, when it was created from a
+    remote-tracking branch (its reflog's oldest entry, ``branch: Created from
+    origin/main``) that is proven to have held that commit: everything reachable
+    from it was already published when the branch was made, so it is never this
+    branch's own work -- even after that remote rewrites its history.
+
+    The reflog message alone doesn't prove where the commit came from (a local
+    branch can be named ``origin/x``), so no local branch may share the source's
+    name, and the remote must be shown to have held that commit: the source's own
+    remote-tracking reflog, or the remote's ``HEAD`` reflog (which records a
+    clone), names it, or one of the remote's tracking refs contains it now. ""
+    when unknown or ambiguous: not a local branch, an expired or edited reflog,
+    any other source, or no such proof."""
+    full = git_ops.git("rev-parse", "--symbolic-full-name", ref, cwd=cwd, check=False)
+    name = full.stdout.strip()
+    if full.returncode != 0 or not name.startswith("refs/heads/"):
+        return ""
+    log = git_ops.git("reflog", "show", "--format=%H%x09%gs", name, "--", cwd=cwd, check=False)
+    entries = [ln for ln in log.stdout.splitlines() if ln.strip()]
+    if log.returncode != 0 or not entries:
+        return ""
+    sha, _, subject = entries[-1].partition("\t")
+    sha = sha.strip()
+    prefix = "branch: Created from "
+    if not subject.startswith(prefix) or not sha:
+        return ""
+    source = subject[len(prefix):].strip().removeprefix("refs/remotes/")
+    remotes = git_ops.git("remote", cwd=cwd, check=False).stdout.split()
+    if "/" not in source or source.partition("/")[0] not in remotes:
+        return ""
+    if git_ops.git("rev-parse", "--verify", "-q", f"refs/heads/{source}", cwd=cwd,
+                   check=False).returncode == 0:
+        return ""  # a local branch with that name: the message can't tell which it was
+    remote = source.partition("/")[0]
+    for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
+        tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
+        if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
+            return sha
+    held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
+                           f"refs/remotes/{remote}/", cwd=cwd, check=False)
+    return sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
+
+
+def landing(branch: str, upstream: str, cwd: str, *, explain: bool = False) -> Landing:
+    """Every check of :func:`is_content_on_upstream` for *branch* on *upstream*,
+    stopping at the first that proves it landed unless *explain* asks for all."""
+    result = Landing(branch, upstream)
+    result.ancestor = git_ops.git(
+        "merge-base", "--is-ancestor", branch, upstream, cwd=cwd, check=False,
+    ).returncode == 0
+    if result.landed and not explain:
+        return result
+    cherry_r = git_ops.git("cherry", upstream, branch, cwd=cwd, check=False)
+    if cherry_r.returncode == 0 and cherry_r.stdout.strip():
+        result.cherry = not [ln for ln in cherry_r.stdout.splitlines() if ln.startswith("+")]
+    if result.landed and not explain:
+        return result
+    result.squash = squash_landed(branch, upstream, cwd)
+    if result.landed and not explain:
+        return result
+    result.blobs = _blobs_on_upstream(branch, upstream, cwd)
+    return result
 
 
 def is_content_on_upstream(
@@ -18,27 +151,17 @@ def is_content_on_upstream(
     Uses multiple strategies in order of reliability:
     1. Ancestor check (branch is ancestor of upstream)
     2. git cherry (patch-id comparison)
+    2b. The whole branch as one patch (a squash merge; :func:`squash_landed`)
     3. Blob comparison of changed files
+
+    No ref moves; 2b may write an unreferenced probe commit object.
     """
-    # Strategy 1: branch is an ancestor of upstream (already merged)
-    r = git_ops.git(
-        "merge-base", "--is-ancestor", branch, upstream,
-        cwd=cwd, check=False,
-    )
-    if r.returncode == 0:
-        return True
+    return landing(branch, upstream, cwd).landed
 
-    # Strategy 2: git cherry -- all patches accounted for on upstream
-    cherry_r = git_ops.git(
-        "cherry", upstream, branch,
-        cwd=cwd, check=False,
-    )
-    if cherry_r.returncode == 0 and cherry_r.stdout.strip():
-        unmerged = [ln for ln in cherry_r.stdout.splitlines() if ln.startswith("+")]
-        if not unmerged:
-            return True
 
-    # Strategy 3: compare file blobs between branch and upstream
+def _blobs_on_upstream(branch: str, upstream: str, cwd: str) -> bool:
+    """Strategy 3: every file *branch* changed since its merge-base with
+    *upstream* has the same content on *upstream*."""
     merge_base_r = git_ops.git(
         "merge-base", branch, upstream,
         cwd=cwd, check=False,
