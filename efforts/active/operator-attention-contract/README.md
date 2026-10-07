@@ -80,7 +80,7 @@ an empty queue.
   | Field | Meaning |
   |---|---|
   | `schema` | the item's own version, `1`; carried on every item, separately from the envelope's |
-  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:<session-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's a sound tie-breaker and `--after` cursor |
+  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:<session-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
   | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
   | `entity_ref` | the canonical reference within its kind: a task id, a bridge session id, a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key), a queue as its canonical repo |
   | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...); `null` for an entity with no owner lifecycle (a `queue`) |
