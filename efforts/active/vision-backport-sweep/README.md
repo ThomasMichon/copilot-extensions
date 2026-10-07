@@ -144,7 +144,7 @@ Operator, end of a long multi-repo session:
       the actual state of each vision at reconciliation time, not guessed
       upfront).
       - [x] `visions/plugins/agent-codespaces/README.md` — reconciled against
-            ~312 commits of drift since its 2026-07-31 authoring. Folded back
+            313 commits of drift since its 2026-07-31 authoring. Folded back
             *repo-sourced-provenance* (active-plugin-declared venue policy,
             lower precedence than adoption) and *in-venue-plugin-injection*
             (the governing harness plugin injecting plugins into the venue
@@ -367,13 +367,13 @@ then rather than assuming either answer.
 ### 2026-10-06 — Phase 2 slice: `agent-codespaces` vision reconciliation
 - Picked Phase 2 (widen the vision sweep) off the four-option Next Slice
   menu from the prior handoff. Ranked candidate visions by staleness ×
-  recent commit traffic (`git log --since=<last-revised-date> -- plugins/
-  <name>` counts) rather than guessing; `agent-codespaces` (last revised
-  2026-07-31, ~312 commits of drift since, 923 commits in the last 30 days
-  — the heaviest-traffic plugin with a stale vision) ranked above the
-  other stale candidates (`agent-ssh` 2026-07-22/370 commits,
-  `agent-containers` 2026-08-27/573 commits — both legitimate follow-ups
-  for a future slice).
+  commit traffic since each one's own last-revised date (`git log
+  --since=<last-revised-date> --oneline -- plugins/<name>` counts, a
+  single consistent metric); `agent-codespaces` (last revised 2026-07-31,
+  313 commits since) ranked above the other stale candidates (`agent-ssh`,
+  last revised 2026-07-22, 139 commits since; `agent-containers`, last
+  revised 2026-08-27, 123 commits since — both legitimate follow-ups for a
+  future slice).
 - Read the vision in full against the plugin's current `README.md` and
   `docs/patterns/codespace-repo-provenance.md`. Found two substantial,
   already-shipped capabilities the vision never stated at all: the

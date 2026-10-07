@@ -322,15 +322,12 @@ headless session's mechanics do not actually extend to an attended one.
 
 ## Provenance
 
-- **2026-10-06** — Fold-back correction (`vision-backport-sweep` Phase 2,
-  via PR review on `agent-codespaces`' own vision reconciliation, #5575):
-  the Purpose & Intent framing had gone stale against this vision's own
-  later provenance — it still claimed a remote venue "is reached only
-  through venue-parity's headless, agent-bridge-driven dispatch core" and
-  an operator "has no first-class path" to an attended remote session,
-  when the venue-launch primitive itself (`copilot <name>` /
-  `copilot <name> --detach`) was already added by the 2026-09-20/09-22
-  entries below and is now stated as shipped in
+- **2026-10-06** — Corrected a stale Purpose & Intent claim: it still said
+  a remote venue "is reached only through venue-parity's headless,
+  agent-bridge-driven dispatch core" and an operator "has no first-class
+  path" to an attended remote session, when the venue-launch primitive
+  itself (`copilot <name>` / `copilot <name> --detach`) was already added
+  by the 2026-09-20/09-22 entries below and is now stated as shipped in
   [agent-codespaces](../plugins/agent-codespaces/README.md)'s own vision.
   Reworded the opening framing to name that primitive as already landed and
   scope this vision's remaining job precisely to the coordination-layer

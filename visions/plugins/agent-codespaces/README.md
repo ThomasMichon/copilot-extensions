@@ -706,7 +706,7 @@ tooling.)
   [#63](https://github.com/ThomasMichon/copilot-extensions/issues/63).
 
 - **2026-10-06** — Fold-back slice (`vision-backport-sweep` Phase 2): reconciled
-  against reality that had drifted ~312 commits past this vision's last
+  against reality that had drifted 313 commits past this vision's last
   revision. Added two previously-unstated concepts/features reverse-engineered
   from the plugin's current `README.md` and `docs/patterns/
   codespace-repo-provenance.md`: *repo-sourced-provenance* (a venue policy can
