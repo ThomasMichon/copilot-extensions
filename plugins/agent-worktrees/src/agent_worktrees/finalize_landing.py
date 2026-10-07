@@ -18,15 +18,23 @@ from . import git_ops
 from .finalize_ref import Landing, creation_point, landing
 
 
+def remote_ref(repo, branch: str) -> str:
+    """*branch* on the repo's remote, fully qualified: an abbreviated ``origin/dev``
+    resolves to a same-named local branch or tag first, which can hold unpublished
+    commits."""
+    return f"refs/remotes/{repo.remote}/{branch}"
+
+
 def pr_base(record, repo) -> str:
-    """``<remote>/<PR base>`` when the tracked PR targets a branch other than the
-    configured default one (read from the provider); "" otherwise or unknown."""
+    """The PR's base on the remote (:func:`remote_ref`) when the tracked PR targets
+    a branch other than the configured default one (read from the provider); ""
+    otherwise or unknown."""
     from . import finalize_open_pr_gate as fopg
     try:
         base = fopg.pr_base_ref(getattr(record, "pr", None), repo)
     except Exception:
         return ""
-    return f"{repo.remote}/{base}" if base and base != repo.default_branch else ""
+    return remote_ref(repo, base) if base and base != repo.default_branch else ""
 
 
 def describe(evidence: list[Landing]) -> str:
@@ -69,7 +77,7 @@ def _pr_content_landed(
         return result.landed and fopg.upstream_match_is_trustworthy(
             record, content_ref, upstream, cwd=cwd, repo=repo)
 
-    default = f"{repo.remote}/{repo.default_branch}"
+    default = remote_ref(repo, repo.default_branch)
     if fast(default):
         return True, None, evidence
     other = pr_base(record, repo)
@@ -103,8 +111,7 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
     pr = getattr(record, "pr", None)
     content_ref = fopg.resolve_precondition_ref(
         getattr(pr, "branch", "") or "", record.worktree_id, worktree_path, cwd=cwd)
-    default = f"{repo.remote}/{repo.default_branch}"
-    bases = [b for b in (default, pr_base(record, repo)) if b]
+    bases = [b for b in (remote_ref(repo, repo.default_branch), pr_base(record, repo)) if b]
     checks = [landing(content_ref, b, cwd, explain=True).to_dict()
               for b in bases if content_ref and git_ops.ref_exists(b, cwd=cwd)]
     ok, message, _ = pr_content_landed(record, repo, content_ref, cwd=cwd) if pr else (None, None, [])
@@ -112,8 +119,9 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
         "worktree_id": record.worktree_id,
         "content_ref": content_ref,
         "created_from": creation_point(content_ref, cwd) if content_ref else "",
-        "bases": bases,
-        "missing_bases": [b for b in bases if not git_ops.ref_exists(b, cwd=cwd)],
+        "bases": [b.removeprefix("refs/remotes/") for b in bases],
+        "missing_bases": [b.removeprefix("refs/remotes/") for b in bases
+                          if not git_ops.ref_exists(b, cwd=cwd)],
         "checks": checks,
         "pr": {"number": getattr(pr, "number", None), "state": getattr(pr, "state", ""),
                "head_sha": getattr(pr, "head_sha", "")} if pr else None,

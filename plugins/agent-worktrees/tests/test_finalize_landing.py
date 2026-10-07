@@ -14,6 +14,7 @@ Real temporary repositories, one per case:
 from __future__ import annotations
 
 import subprocess
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -268,6 +269,37 @@ def test_a_branch_created_from_a_local_branch_has_no_creation_point(env):
     assert finalize_ref.creation_point("HEAD~0", str(env.clone)) == ""
 
 
+def test_a_local_branch_named_like_a_remote_one_is_no_creation_point(env):
+    """'Created from origin/local-only' names a local branch holding unpublished work:
+    the remote-tracking ref never held that commit, so it is no creation point --
+    while the local branch exists, and after it is deleted."""
+    _git("checkout", "-q", "-b", "origin/local-only", cwd=env.clone)
+    _commit(env.clone, "unpublished.txt", "never pushed\n")
+    _git("checkout", "-q", "-b", "wt-2", "origin/local-only", cwd=env.clone)
+    assert "Created from origin/local-only" in _git("reflog", "show", "wt-2", cwd=env.clone)
+    assert finalize_ref.creation_point("wt-2", str(env.clone)) == ""
+    _git("branch", "-D", "origin/local-only", cwd=env.clone)
+    assert finalize_ref.creation_point("wt-2", str(env.clone)) == ""
+
+
+def test_a_local_branch_shadowing_the_pr_base_never_certifies_its_commits(env, provider):
+    """A local branch named 'origin/dev' (which an abbreviated 'origin/dev' resolves to
+    first) holds a commit made after the merge that was never published: the PR's base
+    is checked as the remote-tracking ref, so the commit still blocks."""
+    head = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    _commit(env.clone, "after.txt", "made after the merge, never pushed\n", "post-merge work")
+    _git("branch", "origin/dev", "HEAD", cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+
+    ok, err = finalize._pr_finalize_precondition(
+        _record(env, head_sha=head, state="merged", number=7), _repo(), str(env.clone), str(env.clone))
+
+    assert ok is False and "further commits" in err
+    assert "on origin/dev: ancestor no" in err
+
+
 # -- pr-status pull-forward advice -------------------------------------------------------
 
 
@@ -283,9 +315,16 @@ def test_pull_forward_targets_the_base_a_pr_merged_into(env, provider):
     config = SimpleNamespace(default_repo=_repo())
 
     rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)
-    assert rec["pull_forward_command"] == "git rebase origin/dev"
+    assert rec["pull_forward_argv"] == ["git", "-C", str(env.clone), "rebase", "refs/remotes/origin/dev"]
+    assert rec["pull_forward_command"] == " ".join(shlex.quote(a) for a in rec["pull_forward_argv"])
     assert rec["pull_forward_base"] == "origin/dev" and rec["behind"] == 2
     assert "not the configured default branch origin/main" in rec["next_action"]
+
+    provider.base_ref = "dev;id"  # a legal branch name that is shell syntax
+    rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)
+    assert rec["pull_forward_command"] == ""
+    assert rec["pull_forward_argv"][-1] == "refs/remotes/origin/dev;id"
+    assert "dev;id" not in rec["next_action"] and "pull_forward_argv" in rec["next_action"]
 
     provider.base_ref = "main"
     rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)

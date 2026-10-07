@@ -29,8 +29,13 @@ class Landing:
     def landed(self) -> bool:
         return any((self.ancestor, self.cherry, self.squash, self.blobs))
 
+    @property
+    def label(self) -> str:
+        """The upstream as people write it (``origin/dev``); checks use the full ref."""
+        return self.upstream.removeprefix("refs/remotes/")
+
     def to_dict(self) -> dict:
-        return {"ref": self.ref, "upstream": self.upstream, "landed": self.landed,
+        return {"ref": self.ref, "upstream": self.label, "landed": self.landed,
                 "ancestor": self.ancestor, "cherry": self.cherry,
                 "squash": self.squash, "blobs": self.blobs}
 
@@ -38,7 +43,7 @@ class Landing:
         word = {True: "yes", False: "no", None: "-"}
         checks = ", ".join(f"{name} {word[getattr(self, name)]}"
                            for name in ("ancestor", "cherry", "squash", "blobs"))
-        return f"{self.ref} on {self.upstream}: {checks}"
+        return f"{self.ref} on {self.label}: {checks}"
 
 
 def squash_landed(branch: str, upstream: str, cwd: str) -> bool | None:
@@ -72,12 +77,19 @@ def squash_landed(branch: str, upstream: str, cwd: str) -> bool | None:
 
 
 def creation_point(ref: str, cwd: str) -> str:
-    """The commit local branch *ref* was created at, when its reflog shows it was
-    created from a remote-tracking branch (``branch: Created from origin/main``):
-    everything reachable from it was already published when the branch was made,
-    so it is never this branch's own work -- even after that remote rewrites its
-    history. "" when unknown (not a local branch, an expired or edited reflog, or
-    created from anything but a remote-tracking branch)."""
+    """The commit local branch *ref* was created at, when it was created from a
+    remote-tracking branch (its reflog's oldest entry, ``branch: Created from
+    origin/main``) that is proven to have held that commit: everything reachable
+    from it was already published when the branch was made, so it is never this
+    branch's own work -- even after that remote rewrites its history.
+
+    The reflog message alone doesn't prove where the commit came from (a local
+    branch can be named ``origin/x``), so no local branch may share the source's
+    name, and the remote must be shown to have held that commit: the source's own
+    remote-tracking reflog, or the remote's ``HEAD`` reflog (which records a
+    clone), names it, or one of the remote's tracking refs contains it now. ""
+    when unknown or ambiguous: not a local branch, an expired or edited reflog,
+    any other source, or no such proof."""
     full = git_ops.git("rev-parse", "--symbolic-full-name", ref, cwd=cwd, check=False)
     name = full.stdout.strip()
     if full.returncode != 0 or not name.startswith("refs/heads/"):
@@ -87,12 +99,25 @@ def creation_point(ref: str, cwd: str) -> str:
     if log.returncode != 0 or not entries:
         return ""
     sha, _, subject = entries[-1].partition("\t")
+    sha = sha.strip()
     prefix = "branch: Created from "
-    if not subject.startswith(prefix):
+    if not subject.startswith(prefix) or not sha:
         return ""
     source = subject[len(prefix):].strip().removeprefix("refs/remotes/")
     remotes = git_ops.git("remote", cwd=cwd, check=False).stdout.split()
-    return sha.strip() if source.partition("/")[0] in remotes and "/" in source else ""
+    if "/" not in source or source.partition("/")[0] not in remotes:
+        return ""
+    if git_ops.git("rev-parse", "--verify", "-q", f"refs/heads/{source}", cwd=cwd,
+                   check=False).returncode == 0:
+        return ""  # a local branch with that name: the message can't tell which it was
+    remote = source.partition("/")[0]
+    for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
+        tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
+        if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
+            return sha
+    held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
+                           f"refs/remotes/{remote}/", cwd=cwd, check=False)
+    return sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
 
 
 def landing(branch: str, upstream: str, cwd: str, *, explain: bool = False) -> Landing:

@@ -9,11 +9,17 @@ rebases onto the configured default branch, so it isn't recommended there.
 
 from __future__ import annotations
 
+import re
+import shlex
 from pathlib import Path
 
 from . import git_ops, tracking
 from .config import Config
 from .tracking import PRRecord
+
+#: A branch name safe to show inside a copy-pasteable command; any other one is
+#: offered only as structured argv (``pull_forward_argv``).
+_SAFE_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 
 
 def _pr_base(active: PRRecord, repo) -> str:
@@ -43,7 +49,9 @@ def pull_forward_recommendation(
 
     With ``live``, the provider is asked which branch the PR merged into; when
     that isn't the configured default branch, the advice targets it instead
-    (``git rebase <remote>/<base>``), with ``pull_forward_base`` naming it.
+    (``git -C <worktree> rebase refs/remotes/<remote>/<base>``, also as structured
+    ``pull_forward_argv``), with ``pull_forward_base`` naming it. A base name that
+    isn't plainly shell-safe gets no command text, only the argv.
     """
     if active.state != "merged":
         return None
@@ -55,7 +63,11 @@ def pull_forward_recommendation(
     base = _pr_base(active, repo) if live else ""
     other_base = bool(base) and base != repo.default_branch
     upstream = f"{remote}/{base if other_base else repo.default_branch}"
-    command = f"git rebase {upstream}" if other_base else "agent-worktrees git sync"
+    # A provider-supplied name never reaches executable text unquoted, and the advice
+    # runs in the tracked worktree, not wherever the caller happens to be.
+    argv = ["git", "-C", path, "rebase", f"refs/remotes/{upstream}"] if other_base else []
+    command = (" ".join(shlex.quote(a) for a in argv) if _SAFE_BRANCH.fullmatch(base) else "") \
+        if other_base else "agent-worktrees git sync"
     # Refresh the upstream ref so "behind" reflects the just-landed merge.
     if git_ops.has_remote(remote, cwd=path):
         try:
@@ -70,9 +82,9 @@ def pull_forward_recommendation(
                 tracking.record_repo_fetch_confirmed(record.repo)
     behind: int | None = None
     branch = git_ops._get_current_branch_safe(path)
-    if branch and git_ops.ref_exists(upstream, cwd=path):
+    if branch and git_ops.ref_exists(f"refs/remotes/{upstream}", cwd=path):
         out = git_ops.git(
-            "rev-list", "--count", f"{branch}..{upstream}",
+            "rev-list", "--count", f"{branch}..refs/remotes/{upstream}",
             cwd=path, check=False,
         ).stdout.strip()
         try:
@@ -88,9 +100,12 @@ def pull_forward_recommendation(
     }
     if other_base:
         rec["pull_forward_base"] = upstream
+        rec["pull_forward_argv"] = argv
     if behind:
         rec["behind"] = behind
-    why = (f" It merged into {upstream}, not the configured default branch "
+    # An unsafe base name never appears inside advice people paste: only in the data fields.
+    shown, onto = (command, upstream) if command else ("the structured pull_forward_argv", "the PR's base branch")
+    why = (f" It merged into {onto}, not the configured default branch "
            f"{remote}/{repo.default_branch} that `agent-worktrees git sync` rebases onto."
            if other_base else "")
     if not git_ops.is_clean(cwd=path):
@@ -98,12 +113,12 @@ def pull_forward_recommendation(
         rec["next_action"] = (
             f"Active PR #{active.number} is merged, but this worktree has "
             "uncommitted changes. Commit or stash them, then run "
-            f"`{command}` to pull forward (rebase onto {upstream}).{why}"
+            f"`{shown}` to pull forward (rebase onto {onto}).{why}"
         )
     else:
         rec["next_action"] = (
             f"Active PR #{active.number} is merged. Pull this worktree forward: "
-            f"`{command}` (rebase onto {upstream}; the merged "
+            f"`{shown}` (rebase onto {onto}; the merged "
             f"commits drop as already-applied).{why}"
         )
     return rec
