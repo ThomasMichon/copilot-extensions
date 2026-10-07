@@ -18,6 +18,27 @@ mirroring how ``ai_plugin_staging`` ships a stdlib driver and reads a marker lin
 ``user.message``, ``assistant.turn_start``, ``assistant.message``,
 ``assistant.turn_end``, ``session.usage_checkpoint``, ``session.shutdown``}.
 Files range ~66 KB–2.2 MB, so the driver reads only the **tail**.
+
+**Presence** (``snapshot["presence"]``): what the session is doing now, read from
+the transcript since its last ``session.start``/``session.resume`` -- never from
+self-reported activity. ``busy`` when the last presence-bearing event is
+``user.message``, ``assistant.turn_start``, ``tool.execution_start``/``complete``
+or ``permission.completed`` (or is a sub-agent's ``assistant.turn_end``, carrying
+``data.agentId``: the parent turn is still taking in its result); ``awaiting_input`` while a ``permission.requested``
+is unanswered (paired by ``requestId``), or when a turn ended
+(``assistant.turn_end``) in an interactive session; ``idle`` when a turn ended in
+an autopilot (or headless) session -- the mode is the latest of
+``session.mode_changed``, and ``agentMode`` on ``user.message`` /
+``permission.requested``, defaulting to interactive; ``absent`` after
+``session.shutdown``; ``unknown`` when no such event follows the boundary, when
+no boundary is found at all (a truncated transcript) or within the newest 64 MiB
+(an older permission request or mode signal could be unread), or when the last
+line is partial or malformed. The
+transcript is read backward in blocks to that boundary, never cut at a fixed
+tail. Every other event carries no presence signal.
+Confidence is ``scanned``, except an ended turn with no mode signal since the
+boundary, which is assumed interactive and marked ``heuristic``. Event names verified against Copilot CLI 1.0.92
+transcripts.
 """
 
 from __future__ import annotations
@@ -50,7 +71,8 @@ import sys, os, json, collections
 MARKER = "%(marker)s"
 
 def emit(obj):
-    print(MARKER + json.dumps(obj, ensure_ascii=False))
+    # ASCII-escaped: survives any stdout encoding (a Windows child's is often cp1252).
+    print(MARKER + json.dumps(obj))
 
 def main():
     sdir = sys.argv[1]
@@ -78,13 +100,16 @@ def main():
         emit({"ok": False, "reason": "events.jsonl read error", "session_dir": sdir})
         return
 
-    lines = [ln for ln in raw.splitlines() if ln.strip()][-tail_lines:]
+    all_lines = [ln for ln in raw.split("\n") if ln.strip()]  # JSONL: "\n" only, not U+2028 etc.
+    lines = all_lines[-tail_lines:]
     evs = []
+    last_line_bad = False
     for ln in lines:
         try:
             evs.append(json.loads(ln))
+            last_line_bad = False
         except Exception:
-            pass
+            last_line_bad = True
 
     types = collections.Counter(e.get("type", "?") for e in evs)
     started = resumed = last_shutdown = None
@@ -155,7 +180,111 @@ def main():
         "recent_messages": recent[-n_recent:],
         "recent_tool_calls": tools[-n_recent:],
         "usage": usage,
+        "presence": presence_of(ef, size, last_line_bad),
     })
+
+
+# Presence from the transcript (see the module docstring's "Presence" section).
+BUSY = ("user.message", "assistant.turn_start", "tool.execution_start",
+        "tool.execution_complete", "permission.completed")
+SETTLED = ("assistant.turn_end",)
+BOUNDARY = ("session.start", "session.resume")
+
+RELEVANT = BUSY + SETTLED + BOUNDARY + ("session.shutdown", "permission.requested",
+                                       "session.mode_changed")
+
+SCAN_BLOCK = 1 << 20
+# How far back to look for the session boundary (overridable for tests).
+SCAN_CAP = int(os.environ.get("AGENT_BRIDGE_PRESENCE_SCAN_CAP", 64 << 20))
+
+def scan_back(ef, size):
+    """Presence-relevant events from the end of the transcript back to its latest
+    session boundary (newest last), read backward in blocks so a long session's
+    unanswered permission request or mode signal is never cut off by a fixed tail.
+    A cheap substring prefilter, then the parsed ``type`` decides -- an event name
+    appearing as a payload value is not that event. Returns ``(events, complete)``;
+    *complete* is True only when a boundary was found: with none (a truncated file,
+    or none within :data:`SCAN_CAP` bytes) the events since the session started are
+    not all known, and presence is ``unknown`` whatever the file's size."""
+    out = []
+    pos, carry, scanned = size, b"", 0
+    with open(ef, "rb") as fh:
+        while pos > 0 and scanned < SCAN_CAP:
+            n = min(SCAN_BLOCK, pos, SCAN_CAP - scanned)
+            pos -= n
+            fh.seek(pos)
+            chunk = fh.read(n) + carry
+            scanned += n
+            parts = chunk.split(b"\n")
+            carry = parts[0] if pos > 0 else b""
+            for raw in reversed(parts[1:] if pos > 0 else parts):
+                ln = raw.decode("utf-8", "replace")
+                if not any('"' + t + '"' in ln for t in RELEVANT):
+                    continue
+                try:
+                    e = json.loads(ln)
+                except Exception:
+                    continue
+                if isinstance(e, dict) and e.get("type") in RELEVANT:
+                    out.append(e)
+                    if e.get("type") in BOUNDARY:
+                        out.reverse()
+                        return out, True
+    out.reverse()
+    return out, False
+
+def presence_of(ef, size, last_line_bad):
+    evs, complete = scan_back(ef, size)
+    return presence(evs, last_line_bad, complete)
+
+def presence(evs, last_line_bad, complete=True):
+    def out(state, reason, last=None, mode=None, pending=0, confidence="scanned"):
+        return {"state": state, "confidence": confidence, "reason": reason,
+                "last_event": (last or {}).get("type"), "last_event_at": (last or {}).get("timestamp"),
+                "mode": mode, "pending_permissions": pending}
+    if last_line_bad:
+        return out("unknown", "the transcript's last line is partial or malformed")
+    if not complete:  # an older permission request or mode signal may be unread
+        return out("unknown", "no session start or resume found in the transcript (read back up "
+                   "to %%d bytes)" %% SCAN_CAP)
+    start = 0
+    for i, e in enumerate(evs):
+        if e.get("type") in BOUNDARY:
+            start = i
+    mode = None
+    pending = {}
+    last = None
+    busy = False
+    for e in evs[start:]:
+        t = e.get("type"); d = e.get("data") or {}
+        if t == "session.mode_changed" and d.get("newMode"):
+            mode = d.get("newMode")
+        elif t in ("user.message", "permission.requested") and d.get("agentMode"):
+            mode = d.get("agentMode")
+        if t == "permission.requested":
+            pending[d.get("requestId") or e.get("id")] = e
+        elif t == "permission.completed":
+            pending.pop(d.get("requestId"), None)
+        if t in BUSY or t in SETTLED or t == "session.shutdown" or t == "permission.requested":
+            last = e
+            # A sub-agent's turn end (``data.agentId``) doesn't settle the session: the
+            # parent turn is still taking in its result.
+            busy = t in BUSY or (t in SETTLED and bool(isinstance(d, dict) and d.get("agentId")))
+    if last is None:
+        return out("unknown", "no presence-bearing event since the session started", mode=mode)
+    kind = last.get("type")
+    if kind == "session.shutdown":
+        return out("absent", "the session shut down", last, mode)
+    if pending:
+        return out("awaiting_input", "a permission request is unanswered", last, mode, len(pending))
+    if busy:
+        return out("busy", "mid-turn", last, mode)
+    if mode in ("autopilot", "headless"):
+        return out("idle", "the turn ended (autopilot: nothing is asked of a human)", last, mode)
+    if mode is None:
+        return out("awaiting_input", "the turn ended; no mode signal, so assumed interactive", last,
+                   "interactive", confidence="heuristic")
+    return out("awaiting_input", "the turn ended and the session is interactive", last, mode)
 
 try:
     main()

@@ -72,6 +72,7 @@ from .inbox import Inbox
 from .engine_live_screens import MsgViewScreen, ProgressScreen, SessionsViewScreen
 from .engine_loading import PickerScreenLoadingMixin
 from .engine_maintenance_actions import PickerScreenMaintenanceActionsMixin
+from .engine_prompt_dialog import PromptDlgScreen
 from .engine_model import PickerScreenModelMixin
 from .engine_pivot_actions import PickerScreenPivotActionsMixin
 from .engine_pivots import PickerScreenPivotsMixin
@@ -134,6 +135,7 @@ __all__ = [
     "PivotFormScreen",
     "ProfConfirmScreen",
     "ProgressScreen",
+    "PromptDlgScreen",
     "QuitConfirmScreen",
     "ResetConfirmScreen",
     "ScopeDlgScreen",

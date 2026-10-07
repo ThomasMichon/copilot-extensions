@@ -18,14 +18,14 @@
     {
       "name": "agent-pull-requests",
       "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows, addressed directly by owner/repo with no local checkout required. Deployed as a self-contained versioned runtime via the shared vendored installer engine, with a real agent-pull-requests binstub; initially mediated through agent-worktrees account resolution.",
-      "version": "0.1.13-dev1",
+      "version": "0.2.0-dev1",
       "source": "plugins/agent-pull-requests",
       "defaultEnabled": false
     },
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.18-dev1",
+      "version": "0.9.19-dev1",
       "source": "plugins/agent-bridge"
     },
     {

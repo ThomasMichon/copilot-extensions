@@ -884,12 +884,46 @@ worktree-manager.
       `plugins/agent-bridge/src/agent_bridge/service_process_cli.py`'s
       `_kill_pid` (bare `taskkill`/`os.kill`, no identity-bound termination)
       called after a separate `_pid_is_agent_bridge` identity check — the
-      same check-then-bare-kill window, not yet remediated. Likely also
-      fixable with a freshly-captured `process_start_time` token rather
-      than the breadcrumb schema change (review feedback, PR #5473), but
-      that fix itself is not yet done. Left open on #5006, which now
-      records this specific remaining site rather than claiming none
-      exist; the audit was still not exhaustive across every plugin.
+      same check-then-bare-kill window. The audit was still not exhaustive
+      across every plugin.
+- [x] **PID-reuse-safe termination (agent-bridge `_kill_pid` site).** Fixed
+      the remaining site the 2026-10-05 audit above found:
+      `_kill_pid` captures its `process_start_time` identity token
+      **first**, before any other check (including its own
+      `_pid_is_agent_bridge` ownership re-verification) — so a pid reused
+      at any point after that capture is caught by
+      `zdd.diagnostics.terminate_pid_if_identity`'s own final
+      re-verification at the actual kill, rather than this function
+      racing to capture a replacement process's token during a slower
+      check. Mirrors `_terminate_mux_daemon_pid`'s design: identity
+      *mismatch* (pid reuse) skips the kill entirely; an unavailable
+      identity primitive falls back to the prior unconditional
+      signal/`taskkill`. That fallback only fires on genuine platform
+      incapability — `_identity_termination_available()` self-probes
+      `pidfd_open` against the caller's own pid rather than just checking
+      attribute existence, since an older kernel can expose the Python
+      binding yet still raise `ENOSYS` at call time. On Windows,
+      descendants are enumerated via one bulk census, but each
+      descendant's ancestry AND identity token are re-verified together,
+      immediately before its own kill (`_verify_descendant_identity_windows`)
+      — never a token sampled separately from a stale bulk snapshot; a
+      failed census (vs. a genuinely empty one) still kills the
+      identity-verified root but surfaces a stderr warning rather than
+      silently treating the gap as "no descendants". `_kill_pid` has
+      several callers (`_service_stop`'s victim loop,
+      `_force_kill_agent_bridge_tree`'s Windows path); fixing it in the
+      one shared function covers all of them, not just the specific
+      `_service_stop` call site the audit named. Landed via
+      [PR #5524](https://github.com/ThomasMichon/copilot-extensions/pull/5524)
+      after 2 rounds of Copilot review (9 findings total, all fixed).
+      **Does NOT close #5006 fully**: `_force_kill_agent_bridge_tree`'s
+      own POSIX path still has a bare, unverified `os.kill(pid, SIGKILL)`
+      fallback when `safe_killpg` fails — a separate call site `_kill_pid`
+      is never reached from on that path, needing its own SIGKILL-capable
+      identity-bound primitive (today's `terminate_pid_if_identity` only
+      supports SIGTERM) before it can close too. Left open on
+      [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006)
+      for that one remaining site.
 - **Background daemon rotation.** Resident per-version mux-daemons
       accumulate indefinitely: `activate_after_update()`'s cutover is only
       attempted opportunistically (at whichever session's `self_update()`
@@ -1133,6 +1167,229 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-06** — Claimed and landed Phase 7's remaining #5006 site:
+  `plugins/agent-bridge/src/agent_bridge/service_process_cli.py`'s
+  `_kill_pid` now routes through `zdd.diagnostics
+  .terminate_pid_if_identity` with a freshly-captured `process_start_time`
+  token, mirroring `worktree_manager.mux_daemon_cutover
+  ._terminate_mux_daemon_pid`'s #5060 design. Review (PR #5524) caught 4
+  real findings before merge, all fixed: (1) the ownership check
+  (`_pid_is_agent_bridge`) was only done by the caller, leaving a window
+  before this function's own token capture — `_kill_pid` now re-verifies
+  ownership itself, immediately before acting; (2) the identity-bound
+  Windows primitive only terminates the single named process, unlike the
+  `taskkill /T` it replaced, silently dropping tree-kill semantics — added
+  `_enumerate_descendant_pids_windows`/`_kill_pid_tree_windows_if_identity`
+  to enumerate and identity-verify live descendants (captured before the
+  root is killed) so the tree-kill guarantee is preserved, safely; (3) the
+  original fallback condition triggered on ANY non-"mismatch" failure,
+  including a per-pid lookup failure (e.g. `pidfd-open-failed`) that is
+  NOT platform incapability — narrowed to only fall back to a legacy kill
+  when `_identity_termination_available()` reports the platform has no
+  identity-bound primitive at all (always true on Windows; POSIX only
+  when `pidfd_open`/`pidfd_send_signal` exist), never on a per-pid lookup
+  failure; (4) the initial Plan/Journal text overclaimed #5006 fully
+  closed — narrowed to name the one still-open site,
+  `_force_kill_agent_bridge_tree`'s POSIX `os.kill(pid, SIGKILL)` fallback
+  (a different call site `_kill_pid` is never reached from, needing its
+  own SIGKILL-capable identity-bound primitive first). Added
+  `test_kill_pid_identity.py` covering ownership-recheck,
+  identity-verified kill, identity mismatch, per-pid lookup failure,
+  platform-incapability fallback, and Windows tree-descendant
+  termination. Full `agent-bridge` suite run locally: 3099 passed, 2
+  unrelated pre-existing timing flakes (`test_host_index_claims.py`,
+  `test_local_cache_refresh.py`, both process-timing assertions unrelated
+  to this change); `test_session_host.py` hits a pre-existing
+  pytest-capture `OSError: Bad file descriptor` teardown issue on this
+  machine even run alone, unrelated to this diff (no session-host code
+  touched). A second review round on the same PR (after pushing the
+  round-1 fixes) caught 5 more real findings, all fixed before merge: (a)
+  the Windows descendant-enumeration bulk census sampled each child's
+  identity token in a LATER, separate step — if a child exited and its
+  pid was reused in between, the replacement's token would be captured
+  and "verified" successfully — added `_verify_descendant_identity_windows`
+  to re-verify both ancestry (the recorded parent pid still matches,
+  freshly re-read) AND identity together, immediately before each child's
+  own kill, never trusting the stale bulk snapshot alone; (b) the root's
+  own `process_start_time` was still captured AFTER the (slow,
+  subprocess-based) `_pid_is_agent_bridge` ownership check — reordered so
+  the token is captured FIRST, before any other check, so a pid reused
+  during that slower check is caught by `terminate_pid_if_identity`'s own
+  final re-verification rather than racing to capture a replacement's
+  token; (c) `_identity_termination_available()` only checked that
+  `os.pidfd_open`/`signal.pidfd_send_signal` were callable, which doesn't
+  prove the running kernel actually supports the syscall (an older kernel
+  can expose the Python binding yet raise `ENOSYS`) — added a real
+  self-probe (`pidfd_open` against the caller's own, guaranteed-alive
+  pid) so genuine kernel incapability is distinguished from a per-victim
+  lookup failure; (d) the Windows descendant-census PowerShell launch
+  lacked the repo's standard no-window flags — added
+  `core.no_window_kwargs()`, matching this module's own existing pattern
+  elsewhere; (e) a failed census (the PowerShell query itself erroring or
+  timing out) was indistinguishable from a genuinely empty descendant
+  list, silently leaving live children unaccounted for — census now
+  returns an explicit success flag, and a failure surfaces a stderr
+  warning (root is still killed, best effort) rather than silently
+  proceeding as if there were no descendants. Expanded
+  `test_kill_pid_identity.py` to 10 tests covering token-before-ownership
+  ordering, descendant ancestry re-verification rejecting a stale/wrong
+  parent, the pidfd self-probe distinguishing missing-attribute from
+  kernel-ENOSYS, and census-failure visibility. A THIRD review round
+  found the new `_kill_pid_identity.py` module (split out after round 2
+  to stay under the 1000-line module-size cap) exceeded that very cap at
+  1042 lines -- split `_identity_termination_available`,
+  `_enumerate_descendant_pids_windows`, `_verify_descendant_identity_windows`,
+  `_kill_pid_tree_windows_if_identity`, and `_kill_pid` into their own
+  `_kill_pid_identity.py` (263 lines; `service_process_cli.py` now 820),
+  re-exported for existing callers, with thin lazy-import wrappers
+  avoiding a circular import. That same review round then found 4 MORE
+  real findings in the refactored code, all fixed: (f) the kernel-ENOSYS
+  self-probe treated ANY `OSError` as platform incapability, including
+  transient/unrelated resource errors (`EMFILE`/`EPERM`) that say nothing
+  about real kernel support -- narrowed to only treat a definite
+  `errno.ENOSYS` as capability absence, staying on the fail-closed
+  identity-bound path (skip-the-kill, not fall-back-to-bare-kill) for any
+  other self-probe failure; (g) `_verify_descendant_identity_windows`
+  still captured a child's identity token AFTER its ancestry re-check (a
+  separate, later lookup) -- reordered to capture the token FIRST, same
+  as the root-level fix, so a pid reused during the ancestry check is
+  still caught by `terminate_pid_if_identity`'s own final verification;
+  (h) if the ROOT's own identity verification failed (a reused pid), the
+  Windows tree-kill path still proceeded to enumerate and kill
+  "descendants" -- from a census that, taken from that same wrong pid,
+  could describe an unrelated replacement's children -- now returns
+  immediately on root-verification failure, before any census runs; (i)
+  the test suite only ever exercised mocked `terminate_pid_if_identity`
+  results, never the real OS-bound primitive -- added two tests using an
+  actual spawned child process: one confirming a matching token
+  genuinely terminates it, one confirming a stale/wrong token leaves it
+  alive, both with explicit cleanup in either outcome. Expanded
+  `test_kill_pid_identity.py` to 15 tests. Full targeted suite re-run
+  after the split: 57 passed, 20 skipped. A FOURTH review round found 2
+  more real findings: (j) the Windows census still ran AFTER the root
+  kill in one path, leaving a window where the root's own pid, freed by
+  the kill, could be reused before the census ran, misattributing an
+  unrelated replacement's children as descendants -- reordered so the
+  census always runs FIRST (while the root is still guaranteed alive and
+  verified), with the root kill following; a bare numeric
+  parent-pid-match also couldn't detect the DEEPER case of *the child
+  pid itself* being reused between census and kill (even if the
+  replacement happened to share the same parent by coincidence) -- added
+  a cheap generation fingerprint using WMI's own `CreationDate`, captured
+  for every pid in the SAME bulk census query, and re-verified alongside
+  ancestry immediately before each descendant's kill (natural process
+  reparenting after an ancestor's death also fails this check, which is
+  the conservative/correct outcome: skip rather than risk killing a
+  reparented process); (k) the two new real-process tests ran
+  unconditionally, but `_kill_pid` legitimately supports platforms with
+  no identity-bound primitive (macOS/BSD, or a Linux kernel without
+  pidfd) where `process_start_time`/`terminate_pid_if_identity` return
+  `None`/unavailable by design -- gated both tests on
+  `_identity_termination_available()` so they skip (not fail) on those
+  platforms. Expanded `test_kill_pid_identity.py` to 17 tests. Full
+  targeted suite re-run: 59 passed, 20 skipped. A FIFTH review round
+  found 2 more real findings, both fixed: (l) the round-4 fix's WMI
+  `CreationDate` fingerprint was read via default `ToString()`
+  interpolation, which silently truncates to whole-second precision --
+  two distinct process generations on the same reused pid within the
+  same displayed second would incorrectly compare equal. Switched both
+  the bulk census and the per-pid re-check to
+  `.ToUniversalTime().ToString('o')` (full-precision, invariant-culture
+  ISO-8601) in every WMI query; (m) round 4's own docstring claim that
+  "Windows reparents orphans" was **wrong** -- Windows does NOT
+  live-reparent an orphan the way POSIX does; a child's
+  `ParentProcessId` field keeps pointing at its original parent's pid
+  number forever, even after that parent has died and the OS has
+  recycled that exact pid number for an entirely unrelated process. A
+  bare numeric ancestry check can therefore never detect that the
+  *recorded parent itself* changed generation -- confirmed by the
+  reviewer's own focused check showing even a child created *before* the
+  current root could incorrectly pass. Fixed by tracking each
+  descendant's recorded PARENT's own census-time `CreationDate` too (the
+  census now fails outright if the root itself isn't present in its own
+  output, since that leaves no trustworthy anchor for ANY descendant),
+  and re-verifying it against the parent's CURRENT `CreationDate`
+  (`_query_pid_ancestry_windows`, a new shared helper) alongside the
+  child's own ancestry+generation check, immediately before the kill --
+  three independent checks must all agree: child's current parent pid,
+  child's own generation fingerprint, and the recorded parent's own
+  generation fingerprint. Added 4 more tests (now 20 total) covering a
+  BFS census correctly carrying each level's own parent `CreationDate`,
+  root-absent-from-census treated as census failure, and a stale-parent-
+  generation rejection with the exact query order asserted. Full targeted
+  suite re-run: 62 passed, 20 skipped. A SIXTH review round found 2 more
+  real findings, both fixed: (n) the census itself could already contain
+  a chronologically bogus edge BEFORE any of this module's code ran at
+  all: if an orphan's dead original parent's pid had already been
+  recycled by something else by census time, both ends' `CreationDate`
+  snapshots simply describe that *same* replacement process, so the
+  later re-check trivially passes — reject any census edge outright
+  where the recorded child does not postdate its recorded parent (a
+  genuine parent always exists, and is thus older, before any of its
+  real children; these fixed-width ISO-8601 UTC timestamps sort
+  correctly via plain string comparison), never adding such an edge to
+  the traversal at all; (o) the kill order itself was backwards: killing
+  the root first (or an intermediate parent before its own children, as
+  the prior breadth-first order did) left every one of its children
+  unverifiable afterward, since `_query_pid_ancestry_windows` on a dead
+  parent returns nothing — the exact bug the parent-generation check
+  was supposed to defend against, just triggered by this function's own
+  actions instead of external pid reuse. Restructured into a
+  **non-destructive root-identity gate** (compare current
+  `process_start_time` to the captured token, without killing), then
+  descendants verified and killed **deepest-first** (the census's own
+  breadth-first list, walked in reverse) so every descendant's recorded
+  parent is still alive and queryable when checked, with the root
+  terminated **last** of all. Added 2 more tests (22 total): a
+  chronologically-stale edge rejected at census time, and the exact
+  deepest-first-then-root kill order asserted end-to-end. Full targeted
+  suite re-run: 64 passed, 20 skipped. A SEVENTH review round found 1
+  more real finding (fixed) plus a metadata gap: (p) the round-6 fix's
+  `child_creation <= parent_creation` rejection treated EQUAL timestamps
+  as proof of staleness, but equality proves nothing either way -- a
+  genuinely legitimate, fast-spawning parent/child pair can tie at the
+  WMI provider's own timestamp resolution (`.ToString('o')` adds no
+  precision beyond what the provider actually reports). Narrowed the
+  bogus-edge rejection to strict `<` only; an equal-timestamp edge is
+  now tracked separately as *ambiguous* -- still excluded from traversal
+  (fail-closed, same as a bogus edge), but the census now reports itself
+  **incomplete** (not silently successful) whenever such an edge is
+  actually reachable from the requested root, so the existing
+  incomplete-census warning fires instead of silently omitting a real
+  subtree. Added 1 more test (23 total). The review's one remaining
+  (non-code) finding was this PR's own missing CONTRIBUTING.md-required
+  **Documentation impact** / **Graceful cutover impact** statements, and
+  an overclaiming title -- addressed directly on the PR description
+  rather than in this Journal (this effort's Plan item already correctly
+  scopes the claim to the `_kill_pid` call site, leaving the POSIX
+  `_force_kill_agent_bridge_tree` SIGKILL path open on #5006). Full
+  targeted suite re-run: 65 passed, 20 skipped. An EIGHTH review round
+  found 1 more real finding (fixed) plus a lower-severity efficiency
+  observation (also fixed): (q) the deepest-first kill loop could
+  terminate its OWN executing process before reaching the root kill --
+  Session Hosts are launched as children of the bridge daemon
+  (`session_host/launcher.py`), so a `service stop` invoked from inside
+  one of those descendants would see itself in the census as a verified
+  descendant of the root being stopped, and could kill itself mid-cleanup,
+  leaving the daemon running with no one left to finish stopping it.
+  `os.getpid()` is now explicitly excluded from the actual termination
+  call (its identity is still verified like any other descendant, so
+  traversal through any of its own further children stays correct --
+  only the kill itself is skipped). The lower-severity finding noted each
+  verified descendant cost two separate PowerShell round trips (child +
+  parent), uncapped by the caller's own `forced_timeout` (which only
+  starts counting after this function returns) -- combined both lookups
+  into one PowerShell invocation
+  (`_query_two_pid_ancestry_windows`, replacing the now-removed
+  `_query_pid_ancestry_windows`) and added an overall
+  `_DESCENDANT_CLEANUP_DEADLINE_S` (30s) wall-clock budget for the whole
+  descendant loop, independent of any one descendant's per-query timeout;
+  remaining descendants are left unprocessed (best effort, surfaced via a
+  stderr warning) once it elapses, with the root kill still proceeding
+  immediately. Added 2 more tests (25 total): self-protection against
+  killing the executing process, and the deadline actually stopping
+  further descendant processing. Full targeted suite re-run: 67 passed,
+  20 skipped.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR
