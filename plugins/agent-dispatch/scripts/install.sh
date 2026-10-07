@@ -1404,6 +1404,16 @@ ENVEOF
 [Unit]
 Description=agent-dispatch -- portable agent task-queue coordinator
 After=network.target
+# A persistent failure (e.g. a non-passive 'serve' repeatedly refusing to
+# start because another coordinator is already live -- exit code 2) must
+# actually trip systemd's circuit breaker and surface as 'failed'. Without
+# an explicit StartLimit*, systemd's own defaults (burst=5 / interval=10s)
+# are evaded by RestartSec=5: at most ~2 restarts ever land in any rolling
+# 10s window, so the unit can restart indefinitely -- observed climbing
+# into the thousands over several days -- while 'systemctl --failed' stays
+# silent the whole time.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -1723,6 +1733,12 @@ _install_supervisor_unit() {
 Description=agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)
 After=network.target $SYSTEMD_UNIT
 Wants=$SYSTEMD_UNIT
+# See the StartLimit* comment on $SYSTEMD_UNIT: without an explicit
+# StartLimit*, RestartSec=10 evades systemd's own default circuit breaker
+# (burst=5/interval=10s) the same way, letting a persistent reconcile-cycle
+# failure restart indefinitely instead of surfacing as 'failed'.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple

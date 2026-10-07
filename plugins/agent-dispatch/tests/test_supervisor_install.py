@@ -51,6 +51,43 @@ def test_supervisor_unit_name_and_launcher_defined():
     assert "_install_supervisor_service()" in text
 
 
+def test_both_systemd_units_set_an_explicit_start_limit():
+    """Both generated units must set StartLimitIntervalSec/StartLimitBurst
+    explicitly, in their ``[Unit]`` block (copilot-extensions#5551).
+
+    ``RestartSec=5`` (main unit) / ``RestartSec=10`` (supervisor unit) each
+    evade systemd's own *default* circuit breaker (burst=5 over a 10s
+    interval): at most ~2 restarts ever land inside any rolling 10-second
+    window at those paces, so a persistent failure -- e.g. a non-passive
+    ``serve`` repeatedly refusing to start because another coordinator is
+    already live -- can restart indefinitely instead of tripping to
+    'failed'. An explicit, wider StartLimit* closes that gap for both units.
+    A StartLimit* directive placed in ``[Service]`` instead of ``[Unit]`` is
+    silently ignored by systemd, so this also pins the placement.
+    """
+    text = _text()
+    assert text.count("StartLimitIntervalSec=120") == 2
+    assert text.count("StartLimitBurst=5") == 2
+
+    for description, exec_start in (
+        (
+            "Description=agent-dispatch -- portable agent task-queue coordinator",
+            "ExecStart=$VENV_PYTHON -m agent_dispatch serve",
+        ),
+        (
+            "Description=agent-dispatch -- embody spawn supervisor",
+            "ExecStart=$SUPERVISOR_LAUNCHER",
+        ),
+    ):
+        unit_start = text.index(description)
+        service_start = text.index("[Service]", unit_start)
+        exec_start_idx = text.index(exec_start, service_start)
+        unit_section = text[unit_start:service_start]
+        assert "StartLimitIntervalSec=120" in unit_section, description
+        assert "StartLimitBurst=5" in unit_section, description
+        assert exec_start_idx > service_start
+
+
 def test_shell_installer_scopes_service_identities_by_install_dir():
     text = _text()
     assert 'LEGACY_INSTALL_DIR="$HOME/.agent-dispatch"' in text

@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit StartLimitIntervalSec/StartLimitBurst to both generated systemd units so a persistent failure (e.g. a non-passive serve refusing to start because another coordinator is already live) trips to 'failed' instead of restarting indefinitely, evading systemd's own default circuit breaker (#5551)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
