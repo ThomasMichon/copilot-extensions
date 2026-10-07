@@ -81,18 +81,27 @@ def test_unreadable_reviews_are_unknown():
     assert pr_rounds.EXIT[result.verdict] == 12
 
 
+def test_a_clean_review_of_an_older_head_is_not_done():
+    reviews = [_review("h1", "2026-10-07T01:00:00Z", _body(2)), _review("h2", "2026-10-07T02:00:00Z", _body(0))]
+    stale = pr_rounds.evaluate(pr_bar.Snapshot(repo="o/r", number=1, head="h3", reviews=reviews))
+    assert stale.verdict == "continue" and "hasn't been reviewed yet" in stale.reason
+    assert pr_rounds.evaluate(pr_bar.Snapshot(repo="o/r", number=1, head="h2", reviews=reviews)).verdict == "done"
+
+
 @pytest.mark.parametrize("mixed, reason", [
     ({"head": ""}, "no head read"),
-    ({"head_after": "h9"}, "the head moved from h3 to h9 during the read"),
+    ({"head_after": "h9"}, "the head moved from {head} to h9 during the read"),
     ({"changed": "reviews"}, "the PR changed during the read: reviews"),
 ])
 def test_a_mixed_read_is_unknown_never_a_stale_stop(mixed, reason):
-    # Without the guard these reviews read as done, plateau and round_cap respectively.
-    for metrics in ((2, 0), (3, 4, 3, 5), (5, 4, 3, 2, 1, 1)):
+    # Without the guard these reviews (on the read's head) read as done, plateau and round_cap.
+    for metrics, expected in (((2, 0), "done"), ((3, 4, 3, 5), "plateau"), ((5, 4, 3, 2, 1, 1), "round_cap")):
         reviews = [_review(f"h{i}", f"2026-10-07T0{i}:00:00Z", _body(m)) for i, m in enumerate(metrics)]
-        snap = pr_bar.Snapshot(repo="o/r", number=1, reviews=reviews, **{"head": "h3", **mixed})
+        head = f"h{len(metrics) - 1}"
+        assert pr_rounds.evaluate(pr_bar.Snapshot(repo="o/r", number=1, head=head, reviews=reviews)).verdict == expected
+        snap = pr_bar.Snapshot(repo="o/r", number=1, reviews=reviews, **{"head": head, **mixed})
         result = pr_rounds.evaluate(snap)
-        assert (result.verdict, result.reason) == ("unknown", reason)
+        assert (result.verdict, result.reason) == ("unknown", reason.format(head=head))
         assert pr_rounds.EXIT[result.verdict] == 12
 
 

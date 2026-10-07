@@ -8,7 +8,8 @@ count is a round without a metric: it's excluded from the trend, never read as z
 
 The **guard** is pure (:func:`guard`):
 
-- ``done`` -- the latest round measured zero: nothing left to fix.
+- ``done`` -- the latest round measured zero, on the PR's current head: nothing left
+  to fix. A clean review of an older head is ``continue`` -- the new head is unreviewed.
 - ``plateau`` -- with at least ``plateau_passes + 1`` measured rounds, none of the last
   ``plateau_passes`` improved on the best (lowest) metric before them: the loop isn't
   converging, so stop and rethink (a lower-level fix, or a person) rather than run
@@ -75,12 +76,17 @@ def rounds_of(snap: pr_bar.Snapshot, reviewer: str) -> list[Round]:
 
 
 def guard(rounds: list[Round], *, max_rounds: int = DEFAULT_MAX_ROUNDS,
-          plateau_passes: int = DEFAULT_PLATEAU_PASSES) -> tuple[str, str]:
-    """``(verdict, reason)`` for *rounds* (oldest first); see the module docstring."""
+          plateau_passes: int = DEFAULT_PLATEAU_PASSES, head: str = "") -> tuple[str, str]:
+    """``(verdict, reason)`` for *rounds* (oldest first); see the module docstring.
+    *head*, when given, is the PR's current head: a clean round on an older head
+    isn't ``done`` -- the current head hasn't been reviewed yet."""
     n = len(rounds)
     measured = [r.metric for r in rounds if r.metric is not None]
     if rounds and rounds[-1].metric == 0:
-        return "done", f"round {n} reported nothing left to fix"
+        if not head or rounds[-1].head == head:
+            return "done", f"round {n} reported nothing left to fix"
+        return "continue", (f"the last review (round {n}, on {pr_bar._short(rounds[-1].head)}) was clean, "
+                            f"but the head {pr_bar._short(head)} hasn't been reviewed yet")
     if plateau_passes > 0 and len(measured) >= plateau_passes + 1:
         best_before, recent = min(measured[:-plateau_passes]), measured[-plateau_passes:]
         if min(recent) >= best_before:
@@ -108,7 +114,7 @@ def evaluate(snap: pr_bar.Snapshot, *, reviewer: str = pr_bar.COPILOT_REVIEWER,
     if stale:
         return Guard(snap.repo, snap.number, 0, max_rounds, plateau_passes, "unknown", stale)
     rounds = rounds_of(snap, reviewer)
-    verdict, reason = guard(rounds, max_rounds=max_rounds, plateau_passes=plateau_passes)
+    verdict, reason = guard(rounds, max_rounds=max_rounds, plateau_passes=plateau_passes, head=snap.head)
     return Guard(snap.repo, snap.number, len(rounds), max_rounds, plateau_passes, verdict, reason,
                  trend=[r.metric for r in rounds if r.metric is not None],
                  rounds=[{**asdict(r), "metric": r.metric} for r in rounds])

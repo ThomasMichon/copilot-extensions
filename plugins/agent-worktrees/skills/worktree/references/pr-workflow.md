@@ -781,9 +781,13 @@ head, and before you start fixing it, run:
 
 Act on its exit code:
 
-- **0** (`continue` or `done`) -- fix the findings and push the next round;
-  on `done` there is nothing left to fix, so check `pr bar` and merge when it
-  is met.
+- **0** (`continue` or `done`) -- the guard doesn't stop the loop. Whether to
+  run another round is still the target repo's own stopping policy (for
+  example, a repo may say not to spin a round only for low-severity findings
+  once its verdict condition is met): the finding count is advisory and
+  carries neither severity nor whether a finding was already dismissed. On
+  `done` there is nothing left to fix, so check `pr bar` and merge when it is
+  met.
 - **20** (`plateau`) or **21** (`round_cap`) -- **stop starting rounds.** The
   loop isn't converging; another round won't fix that. Look for the
   lower-level cause the findings share, or bring in a person. If this work
@@ -795,11 +799,13 @@ Act on its exit code:
     --title "PR <n>: review loop stopped (<verdict>)" \
     --status "Needs a decision on the remaining findings" --link "<PR url>" \
     --body @rounds.md \
-    --request-input "decision:choice[Rethink,Continue,Merge as is],notes:textarea"
+    --request-input "decision:choice[Rethink,Run more rounds,Stop here],notes:textarea"
   ```
 
   where `rounds.md` carries the guard's `reason`, its `trend` (findings per
   round) and the remaining findings. Resume only on the operator's answer.
+  The answer steers the review loop only: it never waives the repo's merge
+  gates (its verdict rules, required approvals, `pr bar`).
 - **12** (`unknown`) -- the reviews couldn't be read, or the PR moved while
   they were read. Re-run it; never treat `unknown` as permission to continue
   or as a stop.
