@@ -654,12 +654,20 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 result["viewer_permission"],
             )
             reminder_flow = pr_config._profile_for_pr_config(reminder_prcfg)
+        # "created" only when a PR was actually opened: a pushed branch with no PR
+        # (--no-open, a dry run, or a provider refusal) has nothing to merge yet.
+        opened = bool(result.get("pr_opened"))
+        why_not = ("" if opened else
+                   "dry run, nothing was pushed" if result.get("dry_run") else
+                   f"the provider refused: {result['pr_open_error']}" if result.get("pr_open_error") else
+                   f"the branch was pushed ({result['pr_open_skipped']})" if result.get("pr_open_skipped") else
+                   "the branch was pushed")
         reminder = context_cli._pr_reminder_for(
             config,
             "create-pr",
-            state=("created" if result.get("success") else ""),
+            state=(("created" if opened else "pushed") if result.get("success") else ""),
             ok=bool(result.get("success")),
-            reason=("" if result.get("success") else result.get("error", "")),
+            reason=(why_not if result.get("success") else result.get("error", "")),
             flow=reminder_flow,
         )
         if reminder is not None:

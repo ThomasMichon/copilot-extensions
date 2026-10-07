@@ -1,0 +1,9 @@
+{
+  "comment": "create-pr: when only the branch was pushed (--no-open, auto-open off, a dry run, or a provider refusal) the reminder reads 'no PR opened' (state pushed) and the result names why in pr_open_skipped, instead of 'PR created'; a --no-open re-run still reports an existing PR",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

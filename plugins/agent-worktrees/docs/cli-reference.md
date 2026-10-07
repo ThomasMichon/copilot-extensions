@@ -197,7 +197,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 
 | Subcommand | Description |
 |------------|-------------|
-| `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only), `--hold` (deprecated alias for `--draft`) |
+| `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only; the result's `pr_open_skipped` and a `no PR opened` reminder say no PR exists yet), `--hold` (deprecated alias for `--draft`) |
 | `pr-ready` | Move a draft PR **out of draft** — request review |
 | `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
 | `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state; prints the effective actor `flow:` plus the configured profile/resolution source and flags pull-forward once merged. `--no-live` stays offline and reports the configured profile. |
