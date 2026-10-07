@@ -10,7 +10,11 @@
   not one item); scoped so far:
   `visions/plugins/agent-dispatch/tasks-pane-ux` §Concepts/the-suspended-task-waiter,
   `visions/plugins/agent-dispatch/reviewer` §Behaviors/stagnation-escalates,
-  `visions/plugins/agent-dispatch` §Behaviors/inherits-runtime-service-invariants
+  `visions/plugins/agent-dispatch` §Behaviors/inherits-runtime-service-invariants,
+  `visions/plugins/agent-codespaces` (repo-sourced-provenance,
+  in-venue-plugin-injection, dual-mode-session-reach),
+  `visions/remote-interactive-sessions` §Purpose & Intent (stale-framing
+  correction, carried by the same slice's PR review)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -416,4 +420,21 @@ then rather than assuming either answer.
   offending sentence entirely (the behavior now states only the should-be
   contract guarantee, leaving the implementation-path question genuinely
   unpinned) and by adding the statement to the PR description.
+- **PR #5575 review, round 3:** caught a genuine cross-vision contradiction
+  the first two rounds missed: `visions/remote-interactive-sessions/
+  README.md`'s own Purpose & Intent framing still claimed (stale against
+  its *own* later provenance) that a remote venue "is reached only through
+  venue-parity's headless... dispatch core" and an operator "has no
+  first-class path" to an attended remote session — directly contradicting
+  *dual-mode-session-reach*'s now-documented `copilot <name>` /
+  `--detach` venue-launch primitive. Scoped *dual-mode-session-reach*
+  explicitly to the venue-launch layer, deferring the deeper
+  coordination-layer integration (reservation, `live_sessions`
+  discoverability, honest marking) to `remote-interactive-sessions`. Also
+  reconciled that vision's own stale framing in place (its Purpose & Intent
+  had not caught up with its own 2026-09-20/09-22 provenance entries that
+  already added the venue-launch primitive) and added a two-way See Also
+  cross-link naming the ownership split. This is itself a small, in-scope
+  Phase 2 fold-back on a second vision, carried by the same review round
+  rather than deferred to a separate slice.
 - Worktree not yet finalized as of this entry; PR pending merge.
