@@ -333,6 +333,46 @@ def test_directory_marketplace_honors_plugin_root_and_entry_source(
     assert sources[0].version == "2.0.0"
 
 
+def test_directory_marketplace_resolves_under_a_distinct_local_settings_key(
+    tmp_path: Path,
+):
+    # The CLI keys a directory marketplace by its settings entry, so a repo can
+    # register a catalog published as "repo-plugins" under a local-only id.
+    repo = tmp_path / "repo"
+    plugin = repo / ".ai" / "cap"
+    (plugin / "skills").mkdir(parents=True)
+    _skill(plugin / "skills", "cap")
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "3.0.0"}),
+        encoding="utf-8",
+    )
+    _marketplace(
+        repo / ".ai",
+        "repo-plugins",
+        entries=[{"name": "cap", "source": "cap"}],
+    )
+    _settings(
+        repo,
+        {"cap@repo-plugins-local": True},
+        {
+            "repo-plugins-local": {
+                "source": {"source": "directory", "path": "./.ai"},
+            },
+        },
+    )
+    installed = tmp_path / "installed"
+
+    sources = scan.assemble_enabled_plugins(
+        repo, installed_root=installed, home=tmp_path / "home"
+    )
+
+    assert len(sources) == 1
+    assert sources[0].origin == "repo-plugins-local/cap"
+    assert sources[0].payload_root == plugin.resolve()
+    assert sources[0].controlled is True
+    assert sources[0].version == "3.0.0"
+
+
 @pytest.mark.parametrize(
     ("entry_source", "manifest_name"),
     [
