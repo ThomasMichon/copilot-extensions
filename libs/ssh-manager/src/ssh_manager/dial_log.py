@@ -21,6 +21,7 @@ health-check reconnect -- records one JSON line per attempt:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ MAX_LINES = 5000
 MAX_BYTES = 1024 * 1024
 KEEP_LINES = 4000
 STDERR_TAIL = 300
+FIELD_CAP = 200
 LOCK_WAIT_S = 2.0
 #: Outcomes that are a connection attempt reaching (or failing to reach) the target.
 DIAL_KINDS = ("config_fetch", "control_master", "direct_exec", "reconnect")
@@ -54,8 +56,27 @@ def log_dir() -> Path:
 
 
 def _file_for(target: str) -> Path:
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", target or "unknown")[:120] or "unknown"
-    return log_dir() / f"{safe}.jsonl"
+    """One file per target: a readable prefix plus a digest of the exact target, so
+    targets that sanitize alike (``container:foo`` / ``container_foo``) never share one."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", target or "unknown")[:100] or "unknown"
+    digest = hashlib.sha256((target or "").encode("utf-8")).hexdigest()[:12]
+    return log_dir() / f"{safe}-{digest}.jsonl"
+
+
+def _private_dir(path: Path) -> None:
+    """The log directory, user-only (0700) on POSIX; a per-user profile dir on Windows."""
+    path.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        os.chmod(path, 0o700)
+
+
+def _open_private(path: Path, mode: str):
+    """Open *path* for writing, created user-only (0600) on POSIX."""
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if "a" in mode else os.O_TRUNC)
+    fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
+    if os.name != "nt":
+        os.fchmod(fd, 0o600)
+    return os.fdopen(fd, mode)
 
 
 def redact(text: str) -> str:
@@ -72,6 +93,8 @@ def _locked(path: Path):
     """An exclusive per-file lock, waited for at most :data:`LOCK_WAIT_S`; yields
     whether it was had."""
     lock_path = path.with_suffix(path.suffix + ".lock")
+    if not lock_path.exists():
+        _open_private(lock_path, "ab").close()
     fh = open(lock_path, "a+b")
     try:
         deadline = time.monotonic() + LOCK_WAIT_S
@@ -115,9 +138,10 @@ def _trim(path: Path) -> None:
         return
     keep = lines[-KEEP_LINES:]
     while keep and sum(map(len, keep)) > MAX_BYTES * 3 // 4:
-        keep = keep[len(keep) // 4:]
+        keep = keep[max(1, len(keep) // 4):]  # always progresses, even for a few huge lines
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(b"".join(keep))
+    with _open_private(tmp, "wb") as fh:
+        fh.write(b"".join(keep))
     os.replace(tmp, path)
 
 
@@ -127,18 +151,19 @@ def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: i
     try:
         entry = {
             "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-            "target": target, "kind": kind, "outcome": outcome,
+            "target": str(target)[:FIELD_CAP], "kind": str(kind)[:FIELD_CAP],
+            "outcome": str(outcome)[:FIELD_CAP],
             "elapsed_s": round(max(elapsed_s, 0.0), 3), "attempt": attempt,
-            "reason": redact(reason)[:200], "account": account,
+            "reason": redact(reason)[:FIELD_CAP], "account": str(account)[:FIELD_CAP],
             "stderr": redact((stderr or "").strip())[-STDERR_TAIL:],
         }
         path = _file_for(target)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        _private_dir(path.parent)
         line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
         with _locked(path) as held:
             if not held:
                 return
-            with path.open("ab") as fh:
+            with _open_private(path, "ab") as fh:
                 fh.write(line)
             if path.stat().st_size > MAX_BYTES or _approx_lines(path) > MAX_LINES:
                 _trim(path)
@@ -157,10 +182,10 @@ def _approx_lines(path: Path) -> int:
 def read(target: str, *, last: int = 50) -> list[dict]:
     """The newest *last* entries for *target* (oldest first); unreadable lines skipped."""
     path = _file_for(target)
-    if not path.exists():
+    if last <= 0 or not path.exists():
         return []
     out = []
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines()[-max(last, 0):]:
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines()[-last:]:
         with contextlib.suppress(ValueError):
             entry = json.loads(raw)
             if isinstance(entry, dict):

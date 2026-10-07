@@ -23,7 +23,8 @@ agent-codespaces) import this library instead of spawning SSH directly.
   redacted JSON line in a bounded per-target log under
   `~/.ssh-manager/dial-log/` (`SSH_MANAGER_DIAL_LOG_DIR` overrides it): kind,
   outcome, elapsed time, attempt, account `pinned`/`ambient`, and a short
-  stderr tail. Recording is best-effort and never raises into a dial;
+  stderr tail; user-only (0700 directory, 0600 files) on POSIX, one file per exact
+  target (a readable prefix plus a digest). Recording is best-effort and never raises into a dial;
   `ssh_manager.dial_log.summary()` counts dials per outcome over the last 10
   minutes and hour.
 

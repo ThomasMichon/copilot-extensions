@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 from datetime import datetime, timedelta, timezone
@@ -163,3 +164,51 @@ async def test_each_reconnect_attempt_is_logged():
         ("reconnect", "unhealthy", 1), ("reconnect", "ok", 2)]
     assert entries[0]["reason"] == "process_dead" and entries[0]["stderr"] == "socket gone"
     assert {e["account"] for e in entries} == {"pinned"}
+
+
+def test_trimming_always_progresses_even_for_a_few_huge_lines(monkeypatch):
+    """Lines larger than the byte budget: the trim drops them rather than looping."""
+    monkeypatch.setattr(dial_log, "MAX_BYTES", 600)
+    for i in range(3):
+        dial_log.record("cs-big", kind="config_fetch", outcome="error", elapsed_s=0, attempt=i,
+                        reason="r" * 500, stderr="e" * 500)
+    assert dial_log._file_for("cs-big").stat().st_size <= 600
+
+
+def test_targets_that_sanitize_alike_keep_separate_logs():
+    dial_log.record("container:foo", kind="direct_exec", outcome="ok", elapsed_s=0)
+    dial_log.record("container_foo", kind="direct_exec", outcome="timeout", elapsed_s=0)
+    assert [e["outcome"] for e in dial_log.read("container:foo")] == ["ok"]
+    assert [e["outcome"] for e in dial_log.read("container_foo")] == ["timeout"]
+
+
+def test_reading_zero_entries_reads_none():
+    dial_log.record("cs-z", kind="direct_exec", outcome="ok", elapsed_s=0)
+    assert dial_log.read("cs-z", last=0) == [] and dial_log.read("cs-z", last=-3) == []
+    assert len(dial_log.read("cs-z", last=1)) == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_the_log_is_user_only():
+    dial_log.record("cs-perm", kind="direct_exec", outcome="ok", elapsed_s=0)
+    path = dial_log._file_for("cs-perm")
+    assert (path.stat().st_mode & 0o777, path.parent.stat().st_mode & 0o777) == (0o600, 0o700)
+
+
+@pytest.mark.asyncio
+async def test_a_reconnect_whose_config_refresh_fails_is_still_logged():
+    from unittest.mock import MagicMock
+
+    from ssh_manager import health
+    from ssh_manager.health import HealthStatus
+
+    src = MagicMock()
+    src.gh_env = None
+    src.refresh.side_effect = RuntimeError("gh codespace ssh --config failed (rc=1)")
+    with patch.object(health, "check_health", new=AsyncMock(
+            return_value=HealthStatus(ok=False, reason="process_dead"))):
+        with pytest.raises(RuntimeError):
+            await health.ensure_healthy(AsyncMock(), "cs-refresh", src)
+    (entry,) = dial_log.read("cs-refresh")
+    assert (entry["kind"], entry["outcome"], entry["attempt"]) == ("reconnect", "error", 1)
+    assert "config failed" in entry["reason"]

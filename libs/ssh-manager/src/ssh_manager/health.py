@@ -119,28 +119,30 @@ async def ensure_healthy(
     if not status.needs_reconnect:
         return status
 
+    from .dial_log import Dial, account_of
+
+    account = account_of(getattr(config_source, "gh_env", None))
     for attempt in range(max_retries):
         log.info(
             "Reconnecting to %s (attempt %d/%d, reason: %s)",
             host, attempt + 1, max_retries, status.reason,
         )
-
-        # Disconnect stale connection
-        await manager.disconnect(host)
-
-        # Refresh config before reconnecting
-        config_source.refresh()
-
-        # Wait with exponential backoff
-        if attempt > 0:
-            delay = backoff_base * (2 ** (attempt - 1))
-            await asyncio.sleep(delay)
-
-        from .dial_log import Dial, account_of
-
-        with Dial(host, "reconnect", attempt=attempt + 1,
-                  account=account_of(getattr(config_source, "gh_env", None))) as dial:
+        # One dial-log line per attempt, from the disconnect through the check (a
+        # config refresh that raises is recorded as this attempt's error, then raised).
+        with Dial(host, "reconnect", attempt=attempt + 1, account=account) as dial:
             dial.reason = status.reason
+
+            # Disconnect stale connection
+            await manager.disconnect(host)
+
+            # Refresh config before reconnecting
+            config_source.refresh()
+
+            # Wait with exponential backoff
+            if attempt > 0:
+                delay = backoff_base * (2 ** (attempt - 1))
+                await asyncio.sleep(delay)
+
             try:
                 await manager.ensure_connected(host, config_source, port_forwards)
                 status = await check_health(manager, host)
