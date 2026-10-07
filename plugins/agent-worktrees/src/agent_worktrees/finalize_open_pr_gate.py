@@ -30,6 +30,8 @@ live.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 from urllib.parse import urlparse
 
 from . import output, tracking
@@ -183,13 +185,17 @@ def resolve_precondition_ref(
 def _tracked_branch_ahead(
     feature: str, worktree_id: str, current: str, *, cwd: str,
 ) -> bool:
-    """True iff either tracked branch name carries commits beyond ``current``."""
+    """True iff either tracked branch name carries commits beyond ``current``
+    (never counting what was already published when that branch was created)."""
     from . import git_ops
+    from .finalize_ref import creation_point
     for tracked in (feature, f"worktree/{worktree_id}"):
         if not tracked or not git_ops.ref_exists(tracked, cwd=cwd):
             continue
+        created = creation_point(tracked, cwd)
         ahead = git_ops.git(
-            "rev-list", "--count", f"{current}..{tracked}", cwd=cwd, check=False,
+            "rev-list", "--count", tracked, f"^{current}",
+            *([f"^{created}"] if created else []), cwd=cwd, check=False,
         )
         if ahead.returncode != 0 or ahead.stdout.strip() not in ("", "0"):
             return True
@@ -205,8 +211,8 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
 
     Also best-effort repairs every OTHER tracked PR's own missing
     ``head_sha`` (:func:`repair_other_tracked_pr_heads`) -- this is the ONE
-    call site every finalize path reaches unconditionally (``finalize.py``'s
-    ``_pr_is_merged`` always calls it before the per-branch boundary check
+    call site every finalize path reaches unconditionally (the merged step of
+    ``finalize_landing.pr_content_landed`` always calls it before the per-branch boundary check
     runs), so piggybacking the repair here, rather than requiring every
     caller to remember it separately, closes the gap for all of them.
     """
@@ -220,37 +226,12 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     return _pr_entry_merge_status(pr, repo)
 
 
-def _pr_entry_merge_status(pr, repo) -> bool | None:
-    """Tri-state merge lookup for a single tracked PR entry: ``True``
-    (confirmed merged), ``False`` (confirmed NOT merged -- neither
-    ``number`` nor ``repo`` recorded, meaning a PR was never even opened --
-    nothing that could have merged), ``None`` (indeterminate: a PR record
-    exists with identifying fields but is otherwise unqueryable -- exactly
-    ONE of ``number``/``repo`` present, or a provider/network error, #4400
-    rounds 13-14).
-
-    Generalized out of :func:`pr_merge_status` (which calls this for
-    ``record.pr``, the active PR) so :func:`repair_other_tracked_pr_heads`
-    can apply the SAME authority-validated repair to every OTHER tracked PR
-    entry too -- a worktree can carry more than one tracked
-    :class:`~agent_worktrees.tracking.PRRecord` (``record.prs``), and each
-    one's own merged ``head_sha`` is needed independently by
-    ``content_exceeds_merged_head_any``'s per-branch boundary check.
-
-    ``finalize._pr_is_merged`` collapses ``None`` into ``False`` for ITS OWN
-    fail-closed purpose (never certify unmerged-or-unknown work safe to
-    prune). That collapse is the wrong direction for a caller instead
-    proving "definitely NOT yet merged, safe to skip the merged-head check"
-    (:func:`upstream_match_is_trustworthy`) -- an indeterminate lookup
-    (unlike "no PR tracked at all") must never be read as a confirmed
-    non-merge. A record with only ONE of ``number``/``repo`` set is a
-    broken/partial write, not "never opened" -- treating it as confirmed
-    unmerged would let a tree-only upstream match certify and prune a
-    record whose merge boundary genuinely can't be checked.
-    """
-    head_sha = (getattr(pr, "head_sha", "") or "").strip()
-    if getattr(pr, "state", "") == "merged" and head_sha:
-        return True
+def pull_for(pr, repo):
+    """The configured provider's view of tracked *pr*: ``(provider, slug, number,
+    token, PullResult)``; ``False`` when no PR was ever opened (neither ``number``
+    nor ``repo``); ``None`` when it can't be trusted to name exactly this PR at the
+    configured authority, or the read failed. The one guarded read shared by the
+    merge lookup and :func:`pr_base_ref`."""
     number = getattr(pr, "number", None)
     slug = getattr(pr, "repo", "") or ""
     if slug and "/" not in slug:
@@ -270,7 +251,7 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
             return None
         slug = _repo_slug_from_pr_url(url, getattr(repo.pr, "api_base", "") or "") or slug
     if not number and not slug:
-        return None if getattr(pr, "state", "") == "merged" else False
+        return False
     if not number or not slug:
         return None
     prcfg = repo.pr
@@ -300,10 +281,86 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
                 # unrelated merged PR there and hand back the wrong head.
                 return None
         token = providers.account_token_for_slug(slug, prcfg)
-        result = provider.get_pull(
-            slug, int(number),
-            api_base=getattr(prcfg, "api_base", "") or "", token=token,
-        )
+        api_base = getattr(prcfg, "api_base", "") or ""
+        reads = _READS.get()
+        key = (prcfg.provider, api_base, slug.lower(), int(number))
+        if reads is not None and key in reads:
+            return reads[key]
+        result = provider.get_pull(slug, int(number), api_base=api_base, token=token)
+        pulled = provider, slug, int(number), token, result
+        if reads is not None:
+            reads[key] = pulled
+        return pulled
+    except Exception:
+        return None
+
+
+#: Within one decision (:func:`one_read_per_pr`), each tracked PR is read from the
+#: provider once: a merged head refresh and a base lookup share the same answer.
+_READS: contextvars.ContextVar[dict | None] = contextvars.ContextVar("pr_reads", default=None)
+
+
+@contextlib.contextmanager
+def one_read_per_pr():
+    if _READS.get() is not None:
+        yield
+        return
+    token = _READS.set({})
+    try:
+        yield
+    finally:
+        _READS.reset(token)
+
+
+def pr_base_ref(pr, repo) -> str:
+    """The branch tracked *pr* targets, from the provider (``dev`` for a repo whose
+    PRs land on ``dev`` while its default branch is ``main``); "" when unknown."""
+    pulled = pull_for(pr, repo) if pr is not None else None
+    if not pulled:
+        return ""
+    base = (getattr(pulled[4], "base_ref", "") or "").strip()
+    return base.removeprefix("refs/heads/")
+
+
+def _pr_entry_merge_status(pr, repo) -> bool | None:
+    """Tri-state merge lookup for a single tracked PR entry: ``True``
+    (confirmed merged), ``False`` (confirmed NOT merged -- neither
+    ``number`` nor ``repo`` recorded, meaning a PR was never even opened --
+    nothing that could have merged), ``None`` (indeterminate: a PR record
+    exists with identifying fields but is otherwise unqueryable -- exactly
+    ONE of ``number``/``repo`` present, or a provider/network error, #4400
+    rounds 13-14).
+
+    Generalized out of :func:`pr_merge_status` (which calls this for
+    ``record.pr``, the active PR) so :func:`repair_other_tracked_pr_heads`
+    can apply the SAME authority-validated repair to every OTHER tracked PR
+    entry too -- a worktree can carry more than one tracked
+    :class:`~agent_worktrees.tracking.PRRecord` (``record.prs``), and each
+    one's own merged ``head_sha`` is needed independently by
+    ``content_exceeds_merged_head_any``'s per-branch boundary check.
+
+    ``finalize_landing.pr_content_landed`` treats only ``True`` as merged, collapsing ``None`` into "not merged" for ITS OWN
+    fail-closed purpose (never certify unmerged-or-unknown work safe to
+    prune). That collapse is the wrong direction for a caller instead
+    proving "definitely NOT yet merged, safe to skip the merged-head check"
+    (:func:`upstream_match_is_trustworthy`) -- an indeterminate lookup
+    (unlike "no PR tracked at all") must never be read as a confirmed
+    non-merge. A record with only ONE of ``number``/``repo`` set is a
+    broken/partial write, not "never opened" -- treating it as confirmed
+    unmerged would let a tree-only upstream match certify and prune a
+    record whose merge boundary genuinely can't be checked.
+    """
+    head_sha = (getattr(pr, "head_sha", "") or "").strip()
+    if getattr(pr, "state", "") == "merged" and head_sha:
+        return True
+    pulled = pull_for(pr, repo)
+    if pulled is False:
+        return None if getattr(pr, "state", "") == "merged" else False
+    if pulled is None:
+        return None
+    provider, slug, number, token, result = pulled
+    prcfg = repo.pr
+    try:
         merged = bool(getattr(result, "merged", False)) or (
             (getattr(result, "state", "") or "").strip().lower() == "merged"
         )
@@ -641,11 +698,13 @@ def _extra_commit_count(
     ``upstream``). Callers must treat ``None`` as inconclusive, never zero.
     """
     from . import git_ops
+    from .finalize_ref import creation_point
     if not git_ops.ref_exists(content_ref, cwd=cwd):
         return None
+    created = creation_point(content_ref, cwd)  # already published when the branch was made
     extra = git_ops.git(
         "rev-list", "--count", content_ref, f"^{head_sha}", f"^{upstream}",
-        cwd=cwd, check=False,
+        *([f"^{created}"] if created else []), cwd=cwd, check=False,
     )
     if extra.returncode != 0:
         return None

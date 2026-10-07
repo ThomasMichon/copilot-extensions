@@ -1097,21 +1097,6 @@ def _resolve_content_ref(
     return None
 
 
-def _pr_is_merged(record: tracking.WorktreeRecord, repo) -> bool:
-    """Authoritative, squash-safe check that the tracked PR has merged.
-
-    The durable "did the work land" signal -- **branch-independent**
-    (survives a head branch deleted on merge) and **immune to version-file
-    churn** on the moving upstream tip. Fail-CLOSED: an indeterminate lookup
-    (see ``finalize_open_pr_gate.pr_merge_status``) collapses to ``False``
-    here so finalize never certifies unmerged-or-unknown work as safe to
-    prune. Delegates to that module (not module-size-capped, #4400 round 13)
-    for the tri-state lookup itself.
-    """
-    from . import finalize_open_pr_gate as fopg
-    return fopg.pr_merge_status(record, repo) is True
-
-
 def _pr_finalize_precondition(
     record: tracking.WorktreeRecord,
     repo,
@@ -1124,7 +1109,8 @@ def _pr_finalize_precondition(
     ``origin/<default>``* -- it does **not** consult the feature/PR branch,
     except in ``detach`` mode. Order:
 
-    1. **Fast path** -- content on origin/<default>, gated on a tracked merged head (#4400).
+    1. **Fast path** -- content on origin/<default>, or on the PR's own base when it
+       targets another branch (``finalize_landing``), gated on a tracked merged head (#4400).
     2. **Authoritative** -- PR merged AND content has no commits beyond its tracked head.
     3. **``detach`` mode only** -- an open PR (feature branch on the remote)
        is early-ok, since detached finalizes *before* merge. ``keep-alive``
@@ -1138,22 +1124,16 @@ def _pr_finalize_precondition(
     upstream = f"{remote}/{repo.default_branch}"
     strategy = (getattr(repo.pr, "strategy", "") or "keep-alive").strip().lower()
 
-    # (1) Fast path (#4400): content on origin/<default>, via the LIVE
-    #     checkout ref, never a frozen feature-branch snapshot.
+    # (1)-(2) Content on origin/<default> or the PR's own base, via the LIVE
+    #     checkout ref (#4400), or the PR merged with nothing beyond its head.
+    from . import finalize_landing
     from . import finalize_open_pr_gate as fopg
     content_ref = fopg.resolve_precondition_ref(
         feature, record.worktree_id, worktree_path, cwd=cwd)
-    if (
-        content_ref is not None
-        and git_ops.ref_exists(upstream, cwd=cwd)
-        and _is_content_on_upstream(content_ref, upstream, cwd=cwd)
-        and fopg.upstream_match_is_trustworthy(record, content_ref, upstream, cwd=cwd, repo=repo)
-    ):
-        return True, None
-    if _pr_is_merged(record, repo):
-        if not fopg.merged_content_exceeds(record, content_ref, upstream, cwd=cwd, repo=repo):
-            return True, None
-        return False, fopg.merged_pr_block_message(record, content_ref, upstream, cwd=cwd)
+    landed, why, evidence = finalize_landing.pr_content_landed(record, repo, content_ref, cwd=cwd)
+    if landed is not None:
+        return landed, why
+    evidence_note = f"\n{finalize_landing.describe(evidence)}" if evidence else ""
 
     # (3) DETACHED mode only: "code is upstream in an OPEN PR" (feature branch on
     #     the remote) is an early ok. keep-alive never consults the feature
@@ -1182,14 +1162,14 @@ def _pr_finalize_precondition(
             f"tracked PR is not merged and no feature branch is on '{remote}'. "
             f"Run 'agent-worktrees create-pr' (or push-changes) to put the work "
             f"in a PR; if the PR already merged, run 'agent-worktrees sync' to "
-            f"realign to {upstream}, then finalize."
+            f"realign to {upstream}, then finalize.{evidence_note}"
         )
     return False, (
         f"Work on worktree/{record.worktree_id} is not yet aligned with "
         f"'{upstream}' and the tracked PR is not merged. In '{strategy}' mode "
         f"finalize verifies only alignment with {upstream} (the feature branch "
         f"is not consulted): once the PR merges, run 'agent-worktrees sync' to "
-        f"realign, then finalize."
+        f"realign, then finalize.{evidence_note}"
     )
 
 

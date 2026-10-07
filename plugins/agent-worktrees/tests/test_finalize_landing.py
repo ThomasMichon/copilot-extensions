@@ -1,0 +1,296 @@
+"""Landing detection across a PR's bases (``finalize_landing`` / ``finalize_ref``).
+
+Real temporary repositories, one per case:
+
+- a multi-commit branch squash-merged, after which upstream edits the same file
+  (neither ``git cherry`` on the branch's own commits nor the blob comparison
+  can see it; the whole-branch patch can);
+- a PR merged into ``dev`` while the configured default branch ``main`` is
+  behind it (only the PR's own base, read from the provider, holds the work);
+- a worktree branch still at the commit it was created from, after the
+  remote rewrote that history (nothing on it is the worktree's own work).
+"""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from agent_worktrees import finalize, finalize_landing, finalize_ref
+
+
+def _git(*args: str, cwd: Path) -> str:
+    return subprocess.run(["git", *args], cwd=str(cwd), check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _identity(repo: Path) -> None:
+    _git("config", "user.email", "test@example.com", cwd=repo)
+    _git("config", "user.name", "Test", cwd=repo)
+
+
+def _commit(repo: Path, name: str, content: str, message: str = "") -> str:
+    (repo / name).write_text(content)
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", message or f"edit {name}", cwd=repo)
+    return _git("rev-parse", "HEAD", cwd=repo)
+
+
+@pytest.fixture
+def env(tmp_path: Path) -> SimpleNamespace:
+    """``origin.git`` with ``main`` and ``dev``; ``seed`` publishes upstream
+    changes; ``clone`` is the worktree checkout on ``worktree/<id>``."""
+    origin = tmp_path / "origin.git"
+    _git("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
+    seed = tmp_path / "seed"
+    _git("init", "-q", "-b", "main", str(seed), cwd=tmp_path)
+    _identity(seed)
+    _commit(seed, "a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n")
+    _git("remote", "add", "origin", str(origin), cwd=seed)
+    _git("push", "-q", "origin", "main", "main:dev", cwd=seed)
+    clone = tmp_path / "clone"
+    _git("clone", "-q", str(origin), str(clone), cwd=tmp_path)
+    _identity(clone)
+    worktree_id = "wt-landing"
+    _git("checkout", "-q", "-b", f"worktree/{worktree_id}", "origin/main", cwd=clone)
+    return SimpleNamespace(tmp_path=tmp_path, origin=origin, seed=seed, clone=clone,
+                           worktree_id=worktree_id, slug="pr/landing")
+
+
+def _two_commit_change(clone: Path) -> str:
+    _commit(clone, "a.txt", "ONE\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n", "first")
+    return _commit(clone, "a.txt", "ONE\ntwo\nthree\nFOUR\nfive\nsix\nseven\neight\n", "second")
+
+
+def _squash_onto(seed: Path, branch: str, content: str) -> None:
+    _git("checkout", "-q", branch, cwd=seed)
+    _git("pull", "-q", "--ff-only", "origin", branch, cwd=seed)
+    _commit(seed, "a.txt", content, "the squashed PR")
+    _git("push", "-q", "origin", branch, cwd=seed)
+
+
+SQUASHED = "ONE\ntwo\nthree\nFOUR\nfive\nsix\nseven\neight\n"
+
+
+def _record(env, *, head_sha: str = "", state: str = "", number=None):
+    pr = SimpleNamespace(branch=env.slug, state=state, head_sha=head_sha, number=number,
+                         repo="owner/repo" if number else "", provider="github", url="")
+    return SimpleNamespace(worktree_id=env.worktree_id, pr=pr, prs=[pr], branch="", repo="owner/repo")
+
+
+def _repo(default: str = "main"):
+    return SimpleNamespace(remote="origin", default_branch=default,
+                           pr=SimpleNamespace(enabled=True, provider="github", api_base=""))
+
+
+@pytest.fixture
+def provider(monkeypatch):
+    """A provider reporting the tracked PR merged into ``base_ref``."""
+    from agent_worktrees import providers
+    from agent_worktrees.providers.base import PullResult
+
+    state = SimpleNamespace(base_ref="", head_sha="", calls=0)
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            state.calls += 1
+            return PullResult(state="merged", merged=True, head_sha=state.head_sha,
+                              base_ref=state.base_ref)
+
+        def observe_head(self, repo, number, **kwargs):
+            return PullResult(head_sha=state.head_sha)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+    return state
+
+
+# -- the whole-branch squash probe ---------------------------------------------------
+
+
+def test_a_multi_commit_squash_later_edited_upstream_is_landed(env):
+    """Each branch commit's own patch isn't upstream, and upstream later changed the
+    file again, so cherry and the blob comparison both miss it: the branch's whole
+    change as one patch is the squash commit."""
+    tip = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "main", SQUASHED)
+    _commit(env.seed, "a.txt", SQUASHED.replace("eight", "EIGHT"), "a later upstream edit")
+    _git("push", "-q", "origin", "main", cwd=env.seed)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+
+    result = finalize_ref.landing(tip, "origin/main", str(env.clone), explain=True)
+
+    assert (result.ancestor, result.cherry, result.blobs) == (False, False, False)
+    assert result.squash is True and result.landed
+    assert finalize_ref.is_content_on_upstream(tip, "origin/main", str(env.clone))
+    ok, err = finalize._pr_finalize_precondition(_record(env), _repo(), str(env.clone), str(env.clone))
+    assert (ok, err) == (True, None)
+    assert not _git("for-each-ref", "refs/heads/pr", cwd=env.clone)  # the head branch is gone
+
+
+def test_the_probe_moves_no_ref(env):
+    tip = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "main", SQUASHED)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    refs = _git("for-each-ref", "--format=%(refname) %(objectname)", cwd=env.clone)
+    assert finalize_ref.squash_landed(tip, "origin/main", str(env.clone)) is True
+    assert _git("for-each-ref", "--format=%(refname) %(objectname)", cwd=env.clone) == refs
+
+
+def test_a_different_change_is_not_squash_landed(env):
+    tip = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "main", SQUASHED.replace("FOUR", "four (another fix)"))
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    result = finalize_ref.landing(tip, "origin/main", str(env.clone), explain=True)
+    assert result.squash is False and not result.landed
+
+
+def test_an_unreadable_upstream_is_never_landed(env):
+    tip = _two_commit_change(env.clone)
+    assert finalize_ref.squash_landed(tip, "origin/no-such-branch", str(env.clone)) is None
+    assert not finalize_ref.is_content_on_upstream(tip, "origin/no-such-branch", str(env.clone))
+
+
+# -- the PR's own base ---------------------------------------------------------------
+
+
+def _merge_into_dev_and_pull_forward(env) -> str:
+    """The PR squash-merges into dev (main stays behind); the worktree then pulls
+    forward onto dev, so its branch now carries dev's commits, not main's."""
+    head = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    _commit(env.seed, "b.txt", "another PR on dev\n", "another dev PR")
+    _git("push", "-q", "origin", "dev", cwd=env.seed)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    _git("reset", "-q", "--hard", "origin/dev", cwd=env.clone)
+    return head
+
+
+def test_a_pr_merged_into_dev_while_main_is_behind_is_landed_on_its_base(env, provider):
+    head = _merge_into_dev_and_pull_forward(env)
+    provider.head_sha, provider.base_ref = head, "dev"
+    record = _record(env, head_sha=head, state="merged", number=7)
+
+    ok, err = finalize._pr_finalize_precondition(record, _repo(), str(env.clone), str(env.clone))
+
+    assert (ok, err) == (True, None)
+
+
+def test_without_the_pr_base_a_dev_merge_is_refused_with_its_evidence(env, provider):
+    """The provider doesn't say where the PR went: only the default branch is
+    tested, and the refusal names what was checked."""
+    head = _merge_into_dev_and_pull_forward(env)
+    provider.head_sha, provider.base_ref = head, ""
+    record = _record(env, head_sha=head, state="merged", number=7)
+
+    ok, err = finalize._pr_finalize_precondition(record, _repo(), str(env.clone), str(env.clone))
+
+    assert ok is False
+    assert "further commits" in err
+    assert f"Landing checks: worktree/{env.worktree_id} on origin/main: ancestor no" in err
+    assert "origin/dev" not in err
+    assert provider.calls == 1  # the base lookup and the merged-head refresh share one read
+
+
+def test_the_pr_base_is_asked_only_when_the_default_branch_lacks_the_work(env, provider):
+    tip = _two_commit_change(env.clone)
+    _git("push", "-q", "origin", f"worktree/{env.worktree_id}:main", cwd=env.clone)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    record = _record(env, head_sha=tip, state="open", number=7)
+    ok, _err = finalize._pr_finalize_precondition(record, _repo(), str(env.clone), str(env.clone))
+    assert ok is True and provider.calls == 0
+
+
+def test_explain_reports_every_base_and_check(env, provider):
+    head = _merge_into_dev_and_pull_forward(env)
+    provider.head_sha, provider.base_ref = head, "dev"
+    report = finalize_landing.explain(
+        _record(env, head_sha=head, state="merged", number=7), _repo(), str(env.clone), str(env.clone))
+    assert report["bases"] == ["origin/main", "origin/dev"]
+    assert [c["landed"] for c in report["checks"]] == [False, True]
+    assert report["checks"][1]["ancestor"] is True
+    assert report["landed"] is True and report["content_ref"] == f"worktree/{env.worktree_id}"
+
+
+# -- the creation point ----------------------------------------------------------------
+
+
+def _rewrite_main(env) -> None:
+    """The remote rewrites main's history (a re-rooted release branch)."""
+    _git("checkout", "-q", "--orphan", "rewritten", cwd=env.seed)
+    _commit(env.seed, "a.txt", "rewritten history\n", "re-rooted")
+    _git("push", "-q", "-f", "origin", "rewritten:main", cwd=env.seed)
+
+
+def test_a_branch_still_at_its_creation_point_carries_no_work(env, provider):
+    """The worktree branch was created from origin/main and never moved; main was
+    then rewritten. The work was done on another branch, squash-merged into dev:
+    the creation point is published history, never the worktree's own work."""
+    _git("checkout", "-q", "-b", env.slug, "origin/dev", cwd=env.clone)
+    head = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    _rewrite_main(env)
+    _git("fetch", "-q", "-f", "origin", cwd=env.clone)
+    created = finalize_ref.creation_point(f"worktree/{env.worktree_id}", str(env.clone))
+    assert created == _git("rev-parse", f"worktree/{env.worktree_id}", cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+    record = _record(env, number=7, state="merged")
+
+    ok, err = finalize._pr_finalize_precondition(record, _repo(), str(env.clone), str(env.clone))
+
+    assert (ok, err) == (True, None)
+
+
+def test_work_past_the_creation_point_still_counts(env, provider):
+    _commit(env.clone, "mine.txt", "real local work\n", "never published")
+    _git("checkout", "-q", "-b", env.slug, "origin/dev", cwd=env.clone)
+    head = _two_commit_change(env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    _rewrite_main(env)
+    _git("fetch", "-q", "-f", "origin", cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+
+    ok, err = finalize._pr_finalize_precondition(
+        _record(env, number=7, state="merged"), _repo(), str(env.clone), str(env.clone))
+
+    assert ok is False and "further commits" in err
+
+
+def test_a_branch_created_from_a_local_branch_has_no_creation_point(env):
+    _git("branch", "local-base", cwd=env.clone)
+    _git("branch", "from-local", "local-base", cwd=env.clone)
+    assert finalize_ref.creation_point("from-local", str(env.clone)) == ""
+    _git("reflog", "expire", "--expire=now", "--all", cwd=env.clone)
+    assert finalize_ref.creation_point(f"worktree/{env.worktree_id}", str(env.clone)) == ""
+    assert finalize_ref.creation_point("HEAD~0", str(env.clone)) == ""
+
+
+# -- pr-status pull-forward advice -------------------------------------------------------
+
+
+def test_pull_forward_targets_the_base_a_pr_merged_into(env, provider):
+    from agent_worktrees import pr_pull_forward
+    from agent_worktrees.tracking import PRRecord
+
+    head = _merge_into_dev_and_pull_forward(env)
+    _git("reset", "-q", "--hard", head, cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+    record = SimpleNamespace(worktree_path=str(env.clone), repo="")
+    active = PRRecord(state="merged", number=7, repo="owner/repo", provider="github")
+    config = SimpleNamespace(default_repo=_repo())
+
+    rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)
+    assert rec["pull_forward_command"] == "git rebase origin/dev"
+    assert rec["pull_forward_base"] == "origin/dev" and rec["behind"] == 2
+    assert "not the configured default branch origin/main" in rec["next_action"]
+
+    provider.base_ref = "main"
+    rec = pr_pull_forward.pull_forward_recommendation(record, active, config, live=True)
+    assert rec is None or rec["pull_forward_command"] == "agent-worktrees git sync"
+    calls = provider.calls
+    assert "pull_forward_base" not in (pr_pull_forward.pull_forward_recommendation(
+        record, active, config) or {})
+    assert provider.calls == calls  # not live: the provider isn't asked
