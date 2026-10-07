@@ -77,6 +77,7 @@ class Snapshot:
     changed: str = ""          # what else about the PR changed between the first and last read
     author: str = ""
     mergeable: str = ""        # MERGEABLE | CONFLICTING | UNKNOWN
+    review_decision: str = ""  # the provider's aggregate (APPROVED | CHANGES_REQUESTED | ...), "" if none
     draft: bool = False
     title: str = ""
     labels: list[str] = field(default_factory=list)
@@ -221,6 +222,17 @@ def _mergeable(snap: Snapshot) -> Clause:
     return Clause("mergeable", "pending", f"the provider hasn't computed mergeability ({value or 'unset'})")
 
 
+def _outstanding_change_requests(snap: Snapshot) -> list[str]:
+    """Reviewers whose latest verdict (approve, request changes, dismissed) requests
+    changes: a later review by someone else doesn't answer it."""
+    latest: dict[str, str] = {}
+    for r in sorted(snap.reviews, key=lambda r: r.get("at") or ""):
+        if r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED") and r.get("author"):
+            latest[r["author"]] = r["state"]
+    me = (snap.author or "").lower()
+    return sorted(a for a, s in latest.items() if s == "CHANGES_REQUESTED" and a.lower() != me)
+
+
 def _policy(snap: Snapshot, policy: dict | None) -> Clause:
     """The repo's merge policy (``approval_required``, ``hold_labels``,
     ``wip_title_prefixes``, ``review_blocking``) through the shared classifier."""
@@ -248,6 +260,11 @@ def _policy(snap: Snapshot, policy: dict | None) -> Clause:
         return Clause("merge_policy", "failed", f"hold label: {', '.join(state.held)}")
     if state.wip:
         return Clause("merge_policy", "failed", "a draft, or a WIP title")
+    asking = _outstanding_change_requests(snap)
+    if asking:  # any reviewer's latest verdict -- an app's too: the provider blocks on it
+        return Clause("merge_policy", "failed", f"changes requested by {', '.join(asking)} (their latest verdict)")
+    if snap.review_decision == "CHANGES_REQUESTED":
+        return Clause("merge_policy", "failed", "the provider reports an outstanding change request")
     if state.verdict == "CHANGES_REQUESTED":
         return Clause("merge_policy", "failed", "the provider's review verdict is changes requested")
     if policy.get("approval_required", True) and state.verdict != "APPROVED":

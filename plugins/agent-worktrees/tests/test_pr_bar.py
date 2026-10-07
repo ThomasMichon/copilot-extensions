@@ -41,7 +41,8 @@ class FakeGh:
 
     def __init__(self, *, checks=None, reviews=None, threads=None, page=100, fail="",
                  heads=(HEAD, HEAD), state="OPEN", mergeable="MERGEABLE", stuck="", raw=None,
-                 draft=False, title="Add a thing", labels=(), final=None):
+                 draft=False, title="Add a thing", labels=(), final=None, review_decision=None,
+                 checks_oid=HEAD):
         self.data = {"checks": checks if checks is not None else [_check()],
                      "reviews": reviews if reviews is not None else [_review()],
                      "threads": threads if threads is not None else []}
@@ -49,6 +50,7 @@ class FakeGh:
         self.heads, self.state, self.mergeable = list(heads), state, mergeable
         self.draft, self.title, self.labels = draft, title, labels
         self.final, self.core_reads = final or {}, 0  # fields the last core read reports instead
+        self.review_decision, self.checks_oid = review_decision, checks_oid
         self.data["labels"] = [{"name": n} for n in labels]
         self.calls = []
         self.raw = raw or {}  # kind -> the literal response body for that list
@@ -70,7 +72,7 @@ class FakeGh:
                 return subprocess.CompletedProcess(args, 0, self.raw["core"], "")
             head = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
             self.core_reads += 1
-            core = {"state": self.state, "mergeable": self.mergeable,
+            core = {"state": self.state, "mergeable": self.mergeable, "reviewDecision": self.review_decision,
                     "headRefOid": head, "author": {"login": "author"},
                     "isDraft": self.draft, "title": self.title,
                     "labels": {"nodes": [{"name": n} for n in self.labels[:100]],
@@ -88,7 +90,7 @@ class FakeGh:
         cursor = after if kind == self.stuck and after else str(start + self.page)
         conn = {"pageInfo": {"hasNextPage": more, "endCursor": cursor}, "nodes": nodes}
         if kind == "checks":
-            return self._ok({"commits": {"nodes": [{"commit": {"oid": HEAD, "statusCheckRollup": {
+            return self._ok({"commits": {"nodes": [{"commit": {"oid": self.checks_oid, "statusCheckRollup": {
                 "contexts": conn}}}]}})
         return self._ok({{"threads": "reviewThreads", "reviews": "reviews", "labels": "labels"}[kind]: conn})
 
@@ -527,4 +529,28 @@ def test_a_mock_pr_can_meet_the_whole_bar():
     bar = pr_bar.evaluate(mock.get_bar_snapshot("owner/repo", pr.number),
                           now="2026-10-06T12:00:00+00:00", policy=NO_APPROVAL)
     assert bar.verdict == "met", _status(bar)
+
+
+
+
+def test_an_app_change_request_stands_until_that_app_answers_it():
+    """A later review by someone else doesn't answer an app's change request (the
+    provider still blocks on it); the app's own later approval does."""
+    asks = _review(author="some-app", state="CHANGES_REQUESTED", kind="Bot", at="2026-10-06T09:00:00Z")
+    approve = _review(state="APPROVED", at="2026-10-06T10:00:00Z")
+    status = _status(_bar(FakeGh(reviews=[asks, approve])))
+    assert status["merge_policy"] == "failed" and status["human_reviews_answered"] == "met"
+    answered = _review(author="some-app", state="APPROVED", kind="Bot", at="2026-10-06T11:00:00Z")
+    assert _status(_bar(FakeGh(reviews=[asks, approve, answered])))["merge_policy"] == "met"
+
+
+def test_the_providers_own_change_request_decision_fails_the_policy():
+    assert _status(_bar(FakeGh(review_decision="CHANGES_REQUESTED")))["merge_policy"] == "failed"
+    assert _status(_bar(FakeGh(review_decision="REVIEW_REQUIRED")))["merge_policy"] == "met"
+
+
+def test_checks_for_another_commit_are_unknown_not_the_heads():
+    """A head that moves and comes back between pages (A -> B -> A) can't pass B's
+    checks off as A's: every checks page must be for the head."""
+    assert _status(_bar(FakeGh(checks_oid=OLD)))["ci_green"] == "unknown"
 

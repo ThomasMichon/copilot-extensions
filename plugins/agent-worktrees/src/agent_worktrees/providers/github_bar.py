@@ -15,7 +15,7 @@ import json
 from ..pr_bar import Snapshot
 
 _PR_QUERY = """query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-pullRequest(number:$number){state mergeable headRefOid isDraft title author{login}
+pullRequest(number:$number){state mergeable reviewDecision headRefOid isDraft title author{login}
 labels(first:100){pageInfo{hasNextPage endCursor} nodes{name}}}}}"""
 _LABELS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){labels(first:100,after:$after){
@@ -52,6 +52,7 @@ def _s(value) -> str:
 
 
 _STATES, _MERGEABLE = ("OPEN", "CLOSED", "MERGED"), ("MERGEABLE", "CONFLICTING", "UNKNOWN")
+_DECISIONS = (None, "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED")
 
 
 def _field(pr: dict, key: str, valid) -> object:
@@ -143,13 +144,17 @@ def _core(run, **kw) -> dict:
     return {**pr, "labels": sorted(names)}
 
 
-def _checks_conn(pr: dict):
+def _checks_conn(pr: dict, head: str):
     """The head commit's check contexts; an empty list when the commit has no
-    rollup (nothing reported), ``None`` (unreadable) when the commit is missing."""
+    rollup (nothing reported), ``None`` (unreadable) when the commit is missing.
+    Every page must be for *head*: a head that moved and came back (A -> B -> A)
+    between pages would otherwise pass B's checks off as A's."""
     nodes = ((pr.get("commits") or {}).get("nodes") or [])
     commit = (nodes[-1] or {}).get("commit") if nodes else None
     if not isinstance(commit, dict):
         return None
+    if commit.get("oid") != head:
+        raise ReadError(f"checks: a page was for {str(commit.get('oid'))[:9]}, not the head {head[:9]}")
     rollup = commit.get("statusCheckRollup")
     return rollup.get("contexts") if isinstance(rollup, dict) else {"nodes": [], "pageInfo": {"hasNextPage": False}}
 
@@ -170,12 +175,13 @@ def read_bar(repo: str, number: int, *, host: str, token: str | None = None, run
         snap.head = _field(pr, "headRefOid", lambda v: isinstance(v, str) and bool(v))
         snap.draft = _field(pr, "isDraft", lambda v: isinstance(v, bool))
         snap.title = _field(pr, "title", lambda v: isinstance(v, str))
+        snap.review_decision = _field(pr, "reviewDecision", lambda v: v in _DECISIONS) or ""
         snap.author, snap.labels = _login(pr), list(pr["labels"])
     except _SHAPE_ERRORS as exc:
         snap.errors["pr"] = _unreadable(exc)
         return snap
     parts = (
-        ("checks", _CHECKS_QUERY, _checks_conn, lambda n: {
+        ("checks", _CHECKS_QUERY, lambda pr: _checks_conn(pr, snap.head), lambda n: {
             "name": _s(n.get("name")) or _s(n.get("context")) or "?",
             "status": _s(n.get("status")) or _s(n.get("state")), "conclusion": _s(n.get("conclusion"))}),
         ("reviews", _REVIEWS_QUERY, lambda pr: pr.get("reviews"), lambda n: {
@@ -195,7 +201,8 @@ def read_bar(repo: str, number: int, *, host: str, token: str | None = None, run
     try:  # the same core again: any change since the first read means a mixed view
         after = _core(run, **kw)
         snap.head_after = _field(after, "headRefOid", lambda v: isinstance(v, str) and bool(v))
-        changed = [f for f in ("state", "isDraft", "title", "labels") if after.get(f) != pr.get(f)]
+        changed = [f for f in ("state", "isDraft", "title", "labels", "reviewDecision")
+                   if after.get(f) != pr.get(f)]
         # GitHub computes mergeability lazily: UNKNOWN first, then the answer. Only a
         # flip between two answers is a change; otherwise the latest read stands.
         known = {pr.get("mergeable"), after.get("mergeable")} <= {"MERGEABLE", "CONFLICTING"}
