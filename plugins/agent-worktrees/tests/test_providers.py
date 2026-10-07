@@ -1390,6 +1390,23 @@ class TestGitHubProvider:
         res = github.GitHubProvider().get_pull("o/r", 7)
         assert res.head_sha == ""
 
+    @pytest.mark.parametrize("raw, expected", [("dev", "dev"), (None, ""), ("__missing__", "")])
+    def test_get_pull_reports_the_base_branch(self, monkeypatch, raw, expected):
+        """The PR's base (``baseRefName``) comes back from the same lightweight call;
+        null or absent is "" (unknown), never the string "None"."""
+        from agent_worktrees.providers import github
+        payload = {"url": "https://github.com/o/r/pull/7", "number": 7, "state": "MERGED"}
+        if raw != "__missing__":
+            payload["baseRefName"] = raw
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc(stdout=json.dumps(payload)))[1],
+        )
+        res = github.GitHubProvider().get_pull("o/r", 7)
+        assert res.base_ref == expected
+        assert "baseRefName" in captured["args"][captured["args"].index("--json") + 1]
+
     def test_get_pull_closed_is_not_merged(self, monkeypatch):
         from agent_worktrees.providers import github
         body = json.dumps({"url": "https://github.com/o/r/pull/7",
@@ -2359,6 +2376,22 @@ class TestAzureDevOpsProvider:
         assert res.merged is True
         assert res.state == "merged"
         assert res.head_sha == "merged-head"
+
+    @pytest.mark.parametrize("raw, expected", [
+        ("refs/heads/dev", "dev"), ("refs/heads/release/1.0", "release/1.0"), (None, ""),
+        ("__missing__", ""),
+    ])
+    def test_get_pull_reports_the_target_branch(self, monkeypatch, raw, expected):
+        """ADO's ``targetRefName`` is a full ref: the base is its branch name; null or
+        absent is "" (unknown)."""
+        from agent_worktrees.providers import azure_devops as azure
+        payload = {"status": "completed", "lastMergeSourceCommit": {"commitId": "h"}}
+        if raw != "__missing__":
+            payload["targetRefName"] = raw
+        monkeypatch.setattr(azure, "run_cli", lambda args, **kw: _proc(stdout=json.dumps(payload)))
+        res = azure.AzureDevOpsProvider().get_pull(
+            "proj/repo", 5, api_base="https://dev.azure.com/org")
+        assert res.base_ref == expected
 
     def test_observe_head_remains_unsupported(self, monkeypatch):
         # Azure has no separate server-clock observation endpoint; delegating
