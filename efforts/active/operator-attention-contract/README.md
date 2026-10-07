@@ -77,7 +77,7 @@ an empty queue.
 
   | Field | Meaning |
   |---|---|
-  | `id` | stable per (source, entity), e.g. `dispatch:task:<id>`, `bridge:session:<id>`, `pr:<owner/name>#<n>` |
+  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:<session-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's a sound tie-breaker and `--after` cursor |
   | `entity` | a shared kind -- `task` \| `session` \| `pr`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
   | `entity_ref` | the canonical reference within its kind: a task id, a bridge session id, a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key) |
   | `lifecycle_state` | the owner's own state (`started`, `live`, `open`, ...) |
@@ -88,6 +88,8 @@ an empty queue.
   | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
   | `actions[]` | `{verb, argv}`: sanctioned commands that run **as-is**, with no placeholder to fill (e.g. `agent-dispatch card show <task-id>`, `agent-bridge result <session-id>`). An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
   | `source` | the adapter that produced it |
+  | `input` | optional: the card's `request_input` form spec when resolving it needs an operator's answer (submitted with `agent-dispatch steer submit`) |
+  | `also[]` | the lower-ranked items deduplicated into this one (each a full item, in queue order); empty when none |
 
 - [ ] **Display, not lifecycle.** A `live`/`started` entity waiting on a human
   surfaces. `blocked` counts only when nothing inbound can still resolve it.
@@ -104,10 +106,10 @@ an empty queue.
   with `status` one of `ok` (fully read), `failed` (couldn't be read), `uncertain`
   (read, but `uncertain` of its entities couldn't be classified -- e.g. presence
   `unknown`, a `pr bar` exit 12) or `disabled` (not installed). The aggregate's
-  `status` is `clear` only when every enabled source is `ok` and there are no
-  items; `attention` when there are items and every enabled source is `ok`;
-  `degraded` when any enabled source `failed`; `partial` when any is `uncertain`
-  (with the counts) -- so neither a failed nor a partly unreadable source can read
+  `status` is the first that applies, in this precedence: `degraded` when any
+  enabled source `failed`; `partial` when any is `uncertain` (with the counts);
+  `attention` when there are items; `clear` otherwise (every enabled source `ok`,
+  no items). One read gives one status, however its sources fail -- so neither a failed nor a partly unreadable source can read
   as "all clear". `disabled` sources never change it.
 - [ ] **Only discovered sources take part** (standalone-first,
   [a-la-carte independence](../../../docs/patterns/a-la-carte-independence.md)):
@@ -142,7 +144,7 @@ an empty queue.
   counts toward the source's status, not as an item. Until `pr bar` lands, the
   adapter is `disabled`.
 - [ ] Each adapter is bounded by a per-source timeout. A timeout is that source's
-  `ok: false`, not a hang.
+  `status: failed` (with the timeout as its `error`), not a hang.
 
 ### Phase 3 — CLI + pluggable sources
 
@@ -170,8 +172,8 @@ an empty queue.
   sources naming the same PR), cross-kind non-collision (a task and a session
   with the same id), and an equal-severity tie resolved the same way in any
   adapter order — repeated reads keep a source's first-observed `created_at`,
-  and each aggregate status (`clear`, `attention`, `degraded`, `partial`) from
-  fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
+  and each aggregate status (`clear`, `attention`, `degraded`, `partial`, and a
+  mixed failed-plus-uncertain read resolving to `degraded`) from fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded: true` with the
