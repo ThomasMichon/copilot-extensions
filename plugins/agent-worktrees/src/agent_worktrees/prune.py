@@ -474,6 +474,17 @@ def cleanup_disposition(
     if v.category == "merged":
         return CleanupDisposition(True, "clean", v.reason)
     if v.category == "empty":
+        # An empty knowledge companion of a pair is a launch-time scaffold, not
+        # operator work. Reaching here with the probe injected means the
+        # BOTH-gate above already confirmed the harness sibling is finalized,
+        # so collect it without --include-unused; otherwise neither half ever
+        # converges (the harness waits on this half, which default cleanup
+        # preserves as "unused" forever).
+        if (paired_sibling_final is not None and rec.is_paired
+                and rec.pair_role == "knowledge"):
+            return CleanupDisposition(
+                True, "clean",
+                f"{v.reason} · empty paired companion of a finalized sibling")
         return CleanupDisposition(
             include_unused or include_conversations, "unused", v.reason)
     if v.category == "conversation-only":

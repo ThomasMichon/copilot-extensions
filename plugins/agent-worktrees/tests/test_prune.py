@@ -613,6 +613,52 @@ class TestPairedBothGate:
         )
         assert d.cleanable is False and d.bucket == "dirty"
 
+    def _knowledge_rec(self):
+        rec = _rec_paired(status="active",
+                          pair_ref="m/citadel-harness/wt-1")
+        rec.pair_role = "knowledge"
+        return rec
+
+    def test_empty_knowledge_companion_collected_when_sibling_final(self):
+        d = prune.cleanup_disposition(
+            self._knowledge_rec(), _info(S.UNUSED),
+            paired_sibling_final=lambda r: True,
+        )
+        assert d.cleanable is True and d.bucket == "clean"
+        assert "empty paired companion" in d.reason
+
+    def test_empty_knowledge_companion_held_when_sibling_not_final(self):
+        d = prune.cleanup_disposition(
+            self._knowledge_rec(), _info(S.UNUSED),
+            paired_sibling_final=lambda r: False,
+        )
+        assert d.cleanable is False and d.bucket == "paired-pending"
+
+    def test_knowledge_companion_with_conversation_preserved(self):
+        d = prune.cleanup_disposition(
+            self._knowledge_rec(), _info(S.UNUSED), turn_count=3,
+            paired_sibling_final=lambda r: True,
+        )
+        assert d.cleanable is False and d.bucket == "conversation"
+
+    def test_knowledge_companion_with_live_claim_preserved(self):
+        rec = self._knowledge_rec()
+        rec.resources = [tracking.ResourceClaim(
+            kind="worktree", ref="m/other/wt-x", state="active")]
+        d = prune.cleanup_disposition(
+            rec, _info(S.UNUSED),
+            paired_sibling_final=lambda r: True,
+        )
+        assert d.cleanable is False and d.bucket == "held-claims"
+
+    def test_empty_harness_half_still_needs_include_unused(self):
+        rec = _rec_paired(status="active")
+        d = prune.cleanup_disposition(
+            rec, _info(S.UNUSED),
+            paired_sibling_final=lambda r: True,
+        )
+        assert d.cleanable is False and d.bucket == "unused"
+
 
 class TestDefaultPairedSiblingFinal:
     """The default probe resolves the sibling from its project registry."""

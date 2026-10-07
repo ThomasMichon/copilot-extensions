@@ -1,0 +1,9 @@
+{
+  "comment": "cleanup: collect an empty paired knowledge companion once its harness sibling is finalized, so neither half is stranded behind the BOTH-gate",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
