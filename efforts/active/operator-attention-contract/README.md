@@ -2,7 +2,7 @@
 
 - **Slug:** `operator-attention-contract`
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`, sources in `agent-bridge` and `agent-worktrees`)
-- **Branch(es):** one implementation PR off `dev` for Phases 1-3; clients (Phase 4) land with their own repos
+- **Branch(es):** one implementation PR off `dev` for Phases 1-3; Phase 4 clients as separate PRs (the Tasks pane in this repository; a downstream dashboard in its own)
 - **Created:** 2026-10-07
 - **Status:** Draft
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md) §Behaviors *buildup-is-a-health-signal*, §Features *verify-the-completion-claim* (work "held for attention")
@@ -210,7 +210,9 @@ an empty queue.
 ### Phase 3 — CLI + pluggable sources
 
 - [ ] `agent-dispatch attention [--json] [--source <name>...] [--include-remote]`:
-  the ordered queue, with the degraded banner in text mode.
+  the ordered queue, with the degraded banner in text mode. `--source` names a
+  known source (built-in or registered); an unknown name is a usage error (exit
+  2, nothing read), never silently omitted -- a typo must not read as `clear`.
 - [ ] `agent-dispatch attention next [--after <cursor>]`: the oldest worst item (a
   keyboard walk in a UI is this, repeated). The cursor is opaque but carries the
   queue position -- `(severity, created_at, id)` of the item last shown -- not just
@@ -222,9 +224,12 @@ an empty queue.
   unique, match `[a-z0-9-]+`, and not be a built-in source's name (`dispatch`,
   `bridge`, `pr`), or the registration is rejected (and listed as a `failed`
   source naming the conflict). The aggregator **stamps** identity at the
-  boundary rather than trusting the command: each item's `source` is set to the
-  registered name and its `id` derived from `(source, entity, entity_ref)`; an
-  item that states a different `source` or `id` is invalid. So an external
+  boundary rather than trusting the command. A command item is the item schema
+  with `source` and `id` **optional**; validation runs in this order: (1) a
+  present `source` or `id` that differs from the registered name or the derived
+  id rejects the item; (2) the aggregator sets `source` to the registered name
+  and derives `id` from `(source, entity, entity_ref)`; (3) the completed item
+  is validated against the item schema. So an external
   source can never alias a built-in producer, mint a duplicate `id`, or clear
   another source's first-observed time. The command prints the same source-result envelope a
   built-in adapter returns, `{"schema": 1, "items": [...], "status"?,
@@ -288,7 +293,9 @@ an empty queue.
   reason count as `uncertain`).
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
   a duplicate name) is rejected; an item stating another `source` or a foreign
-  `id` is invalid; a stamped item's `id` and first-observed key are its own.
+  `id` is invalid; an item omitting both is stamped and then validated; a
+  stamped item's `id` and first-observed key are its own. `--source bridgge` (an
+  unknown name) exits 2 without reading anything.
 - [ ] Unit, the pr adapter: from a CWD outside any project, two registered
   projects each tracking a PR with a failing bar give both items; a project
   whose tracked PRs can't be enumerated makes the source `failed`.
