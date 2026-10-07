@@ -121,14 +121,22 @@ diagnostics`.
 
 ## Validation Plan
 
-- [ ] Registration proof (automatable): `list-keys -T root` on a real psmux
+- [x] Registration proof (automatable): `list-keys -T root` on a real psmux
       session shows the Ctrl+K bind after a fresh `agent-worktrees create`/
       `embody`; the popup command (`uv run ... companion`) runs cleanly when
-      invoked directly via `run-shell` against that session.
+      invoked directly via `run-shell` against that session. (Caveat: this
+      psmux build's `list-keys` is itself an unreliable signal — see the
+      2026-10-07 Journal entry; the bind's *registration* was instead
+      confirmed by it actually firing live.)
 - [ ] **Operator's own to exercise** (not automatable — see Validation
       constraint above): inside a real muxed worktree session, press Ctrl+K
       and confirm the Companion popup opens; click the status-right
-      `mux-companion` region and confirm the same.
+      `mux-companion` region and confirm the same. **Blocked** — see
+      2026-10-07 Journal entry: the keybind fires and the popup frame opens,
+      but `display-popup`'s content area never renders on this machine's
+      pinned psmux 3.3.5, independent of the Companion app itself. Needs the
+      psmux upgrade (deferred, machine-pin change, operator's call) or an
+      alternate summon mechanism before this item can pass.
 - [ ] Full `worktree-manager` test suite stays green.
 
 ## Proposal
@@ -157,3 +165,54 @@ reliably. Proceeding with Step 1 (Ctrl+K) as the high-confidence slice; Step
 2 (clickable region) implemented per best-practice tmux/psmux syntax but
 explicitly flagged as needing the operator's own live-click confirmation
 given this inconclusive automated signal.
+
+### 2026-10-07 — Operator report: Ctrl+K fires, popup content blank
+
+Operator's session (`wt-tmichon-cloud1-win-20260916-233618-927b`) predated
+the version that first stamped the Ctrl+K bind, so the automatic
+`Invoke-AwMuxCompanionBind` call never applied to it (expected "old session,
+new code" gap, not a code regression — see the companion handoff for that
+half of the investigation). A live manual `source-file` re-apply against
+that one session's psmux server fixed the missing bind: Ctrl+K now reliably
+opens a popup frame.
+
+**But the popup's content area stays blank** — the border/title renders,
+the inner body never does. Isolated to a **psmux-level bug, not this
+effort's code or the Companion app**, via three narrowing tests, each
+confirmed live by the operator:
+
+1. The Companion itself works correctly: run directly in a normal pane
+   (`uv run --quiet --project <ManagerRoot> -m worktree_manager companion`,
+   cwd'd into the actual worktree) renders the status/lineage/buttons view
+   exactly as designed. (An earlier attempt from `$HOME` instead showed a
+   correctly-rendered *error* box — also proof the app and its error path
+   both render fine outside a popup.)
+2. The same command via `Ctrl+K`'s `display-popup`, from the identical cwd,
+   stays blank.
+3. A throwaway `Ctrl+J` bind to a **trivial** popup command with zero
+   Python/Textual involved — `cmd /c echo HELLO-SIMPLE && timeout /t 6` —
+   was *also* blank: border shows, content area never paints a single
+   character.
+
+Conclusion: `display-popup`'s content area does not render output at all on
+this machine's psmux build (pinned `3.3.5`), for any command, Companion or
+otherwise. This is a `psmux`/`tmux`-compatibility-layer limitation external
+to this repo, not a defect in `Get-AwMuxCompanionKeybindFragment`,
+`Invoke-AwMuxCompanionBind`, or `mux_companion.py`. A `winget upgrade` to the
+available `3.3.8` was attempted but could not complete live (the pinned
+install directory's `psmux.exe` is locked by the running server(s) backing
+every attached session on this machine, including the one driving this
+investigation) — completing it would require stopping all psmux servers
+first, which the operator deferred rather than disconnect every live session
+mid-task. Re-pinned back to `3.3.5` (`winget pin add --id
+marlocarlo.psmux --version 3.3.5`) to leave the machine exactly as found.
+
+**Not yet done:** retry the upgrade (and retest `Ctrl+J`'s trivial-echo
+popup, then `Ctrl+K`) during a deliberate maintenance window when no live
+session needs to survive the psmux server restart; if `3.3.8` doesn't fix
+it, check `psmux/psmux`'s own issue tracker for this specific blank-popup-
+content symptom (the two closed issues found while researching this,
+#507 "cursor invisible" and #537 "cannot attach to another session," are
+adjacent but not an exact match) and consider filing a new one, or fall back
+to a `new-window`-based summon mechanism instead of `display-popup` if the
+upstream bug proves durable.
