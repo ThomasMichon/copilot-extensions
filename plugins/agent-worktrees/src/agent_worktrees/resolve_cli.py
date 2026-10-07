@@ -540,9 +540,25 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # local worktree registry instead of WSL's, producing a false "Worktree
     # not found" for a worktree that only exists on the other side (observed
     # live via Worktree Manager's WSL resume flow, copilot-extensions#5554).
-    same_machine = bool(state.requested_machine) and machine_identity.is_local_machine(
-        state.requested_machine, config
-    )
+    #
+    # Exact-match fast path first (no machines.yaml I/O, tolerates a minimal
+    # Config-like object with only a `.machine` attribute -- what several
+    # existing call sites' test fixtures provide); `is_local_machine`'s own
+    # alias/case-variant canonicalization only runs for a non-exact name, and
+    # is itself wrapped since it additionally needs `config.default_repo` --
+    # a minimal test fixture lacking that must fall back to "not local"
+    # (dispatch remote), never raise.
+    requested = state.requested_machine
+    config_machine = getattr(config, "machine", None)
+    if requested and config_machine and requested.lower() == config_machine.lower():
+        same_machine = True
+    elif requested:
+        try:
+            same_machine = machine_identity.is_local_machine(requested, config)
+        except AttributeError:
+            same_machine = False
+    else:
+        same_machine = False
     cross_environment = _env_label_differs_from_current_platform(
         getattr(state.args, "environment", None)
     )
