@@ -28,6 +28,7 @@ that pattern to this repository.
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
 | [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phase 7) | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
+| [Agent-Process Self-Report Registry](active/agent-process-self-report-registry/README.md) | Draft | #5559 |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
