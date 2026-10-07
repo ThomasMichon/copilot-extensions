@@ -8,9 +8,9 @@
 > [`process-slot-ownership`](process-slot-ownership.md) (generation self-retire
 > and abandoned-passive reap — the *daemon-side* half of staying reconciled;
 > this pattern is the *service-manager-side* half).
-> **Origin:** aperture-labs effort `agent-daemon-live-update`, Phase 4 — a live
-> incident where a coordinator's self-update cutover left its systemd unit
-> crash-looping against its own already-live, untracked successor.
+> **Origin:** a live incident where a coordinator's self-update cutover left
+> its systemd unit crash-looping against its own already-live, untracked
+> successor.
 
 ## The problem
 
@@ -32,9 +32,11 @@ tree, unreachable by it, and already live.
 
 The result: a restart loop that never resolves on its own. The cost is small
 (each refused start exits almost immediately), but the service manager's own
-bookkeeping is now **permanently wrong** — every future reboot inherits the
-same mismatch, since the manager has no record of which process, if any, is
-actually the live one.
+bookkeeping is now **wrong** until something external intervenes (a reboot, a
+manual stop/clean-restart, or the survivor itself eventually exiting) — every
+further restart attempt within that same window inherits the same mismatch,
+since the manager has no record of which process, if any, is actually the
+live one.
 
 This is not a new problem for *this suite*: the lighter
 [`service-lifecycle-supervision`](service-lifecycle-supervision.md)
@@ -54,13 +56,25 @@ coordinator) cannot collapse to that single-process shape — the whole point of
 gap for *that* case, without touching the already-correct cutover protocol
 itself.
 
+## Platform scope
+
+**Linux and Windows only.** `PR_SET_CHILD_SUBREAPER` and `/proc` (the Linux
+ancestry-walk mechanism below) are Linux-specific, not POSIX-general — macOS
+has neither. This pattern does not define macOS behavior; a macOS adopter
+needs an equivalent descendant-claiming primitive (there is no direct
+`PR_SET_CHILD_SUBREAPER` analog on Darwin) before this pattern applies there.
+Every mention of "POSIX" below means "Linux" specifically, kept as a shorthand
+only where it mirrors an existing POSIX-labeled primitive elsewhere in this
+suite (`agent_procutil`'s `detached_kwargs`, etc.) that itself degrades
+gracefully off Linux.
+
 ## The shape
 
 ```
 service manager (systemd unit / Scheduled Task)
       │  tracks this PID PERMANENTLY -- across every cutover, forever
       ▼
-versioned singleton manager        ← NEW: thin, version-agnostic, never itself updated
+versioned singleton manager        ← NEW: thin, self-updating in place (see below)
       │  spawns, as its own child
       ▼
 versioned daemon (coordinator)     ← the thing that actually gets replaced
@@ -77,7 +91,7 @@ drive, understand, or participate in the drain/flip/retire sequence. It only
 answers one question, each time its direct child exits: *is a live, legitimate
 successor already running in my own tree?*
 
-1. **Claim every descendant, regardless of how many hops deep.** On POSIX, mark
+1. **Claim every descendant, regardless of how many hops deep.** On Linux, mark
    itself a subreaper (`prctl(PR_SET_CHILD_SUBREAPER, 1)`) before spawning the
    daemon. A cutover's existing chain (old daemon → a detached `deploy`
    orchestrator → the new passive daemon, each spawned with its own
@@ -94,18 +108,48 @@ successor already running in my own tree?*
 2. **On child-exit, read the daemon's own liveness record** (`zdd.routing`'s
    `active.json` — already how every `zdd` consumer tracks "who is live"
    today): a `pid`/`generation` entry that resolves to a process still in the
-   manager's own tree (POSIX: still alive and still its descendant per
+   manager's own tree (Linux: still alive and still its descendant per
    `/proc`; Windows: still a member of the owned Job) means a **planned
    cutover** — adopt that pid as the new watched child and keep running, no
    exit. Anything else (no entry, a dead pid, a pid outside the tree) means a
-   **real crash** — the manager exits too, so the service manager's own
-   `Restart=on-failure` fires against a clean slate.
-3. **Never cache a version or a path.** The manager's only persistent
-   responsibility is "is my tree's current occupant of the active role still
-   alive" — it re-derives that from `active.json` every time, the same way the
-   stable binstub beneath it re-derives `current-version` every time. A stale
-   manager binary is never itself a staleness risk, since it carries no
-   daemon-specific logic to go stale.
+   **real crash**.
+3. **Reap every other live descendant before exiting on a real crash.**
+   Exiting the manager does **not** by itself clear its tree: a subreaper
+   claim or Job Object membership only governs *reparenting*, not lifetime —
+   a stray survivor from a half-finished cutover (an abandoned passive
+   candidate, an orphaned `deploy` orchestrator) stays alive and simply
+   reparents *again*, now untracked by anyone, the moment the manager exits.
+   Left alone, that stray can later collide with the *next* manager's freshly
+   spawned daemon on the same singleton guard or port bind — the identical
+   failure class this pattern exists to prevent, one level removed. Before
+   the manager actually exits on the real-crash path, it must enumerate every
+   remaining live member of its own tree (Linux: every descendant a full
+   `/proc` scan resolves as its own, via the same ancestry walk as above;
+   Windows: every remaining Job member via
+   `QueryInformationJobObject(JobObjectBasicProcessIdList)`) and terminate
+   them. On Linux, identity-bound (`zdd.diagnostics.terminate_pid_if_identity`
+   — never a bare kill-by-pid, for the same TOCTOU reason that primitive
+   already exists). On Windows this is simpler and needs no separate
+   identity check at all: `TerminateJobObject` kills every current job
+   member in one call, scoped by Job membership rather than a reused numeric
+   pid.
+4. **The manager updates itself in place, without the service manager ever
+   noticing.** "Version-agnostic" does not make a stale manager binary safe
+   on its own — it still needs an update path, just like the daemon it
+   watches. On Linux, the manager periodically re-checks the `current-version`
+   marker and, on a change, calls `os.execve` to replace its own process
+   image with the newer version's entry point: `execve` preserves the pid,
+   open file descriptors, and (per the Linux `prctl(2)` manual page)
+   subreaper status, so the service manager's own tracked identity never
+   changes and no handoff is needed at all. Windows has no pid-preserving
+   exec equivalent, so there the manager instead adopts
+   [`service-lifecycle-supervision`](service-lifecycle-supervision.md)'s own
+   existing restart-in-place shape directly: wind down, spawn a successor on
+   the newer interpreter with the same argv, exit with the sentinel code its
+   attached launcher's own restart-loop recognizes (never bare Scheduled-Task
+   `RestartCount`, which retries the same stale interpreter, not a newer
+   slot) — the same mechanism the embody supervisor already uses, applied to
+   the manager rather than invented fresh.
 
 ## What does **not** change
 
@@ -121,10 +165,31 @@ successor already running in my own tree?*
   manager's subreaper claim composes with that transparently.
 - The stable, register-once launcher beneath the service manager (the
   `serve-service.sh` / Scheduled-Task-launcher layer from
-  [`service-lifecycle-supervision`](service-lifecycle-supervision.md)) —
-  unchanged. The manager slots in as what that launcher execs, resolving and
-  spawning the real daemon itself rather than the launcher spawning the
-  daemon directly.
+  [`service-lifecycle-supervision`](service-lifecycle-supervision.md)) on
+  Linux — unchanged. The manager slots in as what that launcher execs,
+  resolving and spawning the real daemon itself rather than the launcher
+  spawning the daemon directly.
+
+## What **does** change: the Windows launch shape
+
+[`service-lifecycle-supervision`](service-lifecycle-supervision.md) documents
+that the existing Scheduled-Task launch runs the daemon under
+`conhost.exe --headless`, which **detaches** the actual
+`python -m <pkg> serve` process from the task's own tracked process tree —
+`Stop-ScheduledTask` does not kill it, and (the property this pattern
+actually needs) the task cannot observe it exit either. Dropping this manager
+in unchanged behind that same detached launch would silently defeat the whole
+pattern on Windows: the Scheduled Task would track `conhost.exe`, not the
+manager, so it could never restart the manager on a real crash in the first
+place. This pattern's Windows adoption **requires** launching the manager
+through a windowless-but-attached mechanism instead (mirroring
+`agent_procutil.windowless_python`/`no_window_kwargs` — a `pythonw.exe`-style
+direct launch with no console allocated and no `conhost` detachment hop), so
+the Scheduled Task's own tracked process **is** the manager. Do not adopt this
+pattern on Windows without first closing that gap for the manager's own
+launch path specifically — it does not need to be closed for every launcher
+in the suite, only for whichever one now carries the permanently-tracked
+manager.
 
 ## Consumer contract
 
