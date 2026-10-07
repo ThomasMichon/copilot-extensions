@@ -98,9 +98,17 @@ def _check_gpu_deps() -> bool:
 
 
 def _get_pipeline():
-    """Get or lazily create the EmbeddingPipeline."""
+    """Get or lazily create the EmbeddingPipeline, ensuring its model is
+    loaded before returning.
+
+    Model loading happens here, at whatever priority this process already
+    inherited (normal, unless an operator explicitly started it niced) --
+    the host good-citizen throttle (``_lower_own_priority``) is applied only
+    AFTER a successful first load, so the one-time load itself is never
+    throttled, only the ongoing embedding work that follows it.
+    """
     global _pipeline, _config
-    if _pipeline is not None:
+    if _pipeline is not None and _pipeline.is_loaded:
         return _pipeline
 
     if not _check_gpu_deps():
@@ -114,7 +122,11 @@ def _get_pipeline():
 
     if _config is None:
         _config = IndexConfig()
-    _pipeline = EmbeddingPipeline(_config)
+    if _pipeline is None:
+        _pipeline = EmbeddingPipeline(_config)
+
+    _pipeline.warm_up()
+    _lower_own_priority()
     return _pipeline
 
 
@@ -385,11 +397,22 @@ def _build_parser():
 
 
 def _lower_own_priority() -> None:
-    """Host good-citizen throttle, applied once before the server starts.
+    """Host good-citizen throttle, applied once the model has finished loading.
 
     On a CPU-only device this engine is the actual CPU-bound consumer during a
     large reindex (continuous model inference) -- distinct from the index
     worker's own ``indexer_nice`` throttle, which does not touch this process.
+
+    Deliberately NOT applied at process startup: model loading (the first
+    ``torch``/``sentence-transformers`` import + weight load) is a one-time,
+    latency-sensitive cost -- 20+ seconds even unthrottled -- that should run
+    at the process's normal inherited priority so it completes promptly even
+    under host contention. Throttling only the *ongoing* embedding work (the
+    actual sustained CPU consumer) after a successful load avoids starving
+    that one-time load itself, which an eagerly-applied throttle was observed
+    to do (a load that normally takes ~20s stalled indefinitely at Windows
+    IDLE_PRIORITY_CLASS under concurrent host load).
+
     Best-effort and never raises; see ``IndexConfig.engine_nice`` for the
     env var and default.
     """
@@ -404,7 +427,6 @@ def _lower_own_priority() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the engine worker from the command line."""
-    _lower_own_priority()
     parser = _build_parser()
     args = parser.parse_args(argv)
     run_engine(host=args.host, port=args.port)

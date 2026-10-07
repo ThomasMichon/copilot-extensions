@@ -100,6 +100,40 @@ compatibility entry points are inert in both installation modes, including
 when invoked directly. Absent/default/explicit-false installation policy keeps
 the legacy client layout, not legacy host provisioning authority.
 
+### Testing without an assigned indexer machine
+
+A repository's own checked-in `.agent-index/config.yaml` often carries no
+`indexer:`/`indexers:` designation at all -- correctly so for a stateless,
+shareable harness repo (e.g. `odsp-web-harness`): baking a machine-specific
+designation into shared, forkable config would defeat the point of sharing
+it. A real operator's bound **knowledge repo** supplies that designation at
+runtime (its own `.agent-index/config.yaml` carries the `indexers:` block,
+grafted in as a config layer -- see `config._knowledge_root_for_repo`). A
+container or CI run has neither a real knowledge repo nor a second real
+machine to designate, so `transport.plan_route()` resolves `unconfigured`/
+`client` there unless you supply one of these two stand-ins:
+
+1. **Pair a temporary, local-only knowledge repo.** Any directory with its
+   own `.agent-index/config.yaml` declaring `indexers:` works -- it never
+   needs to be a real git repo or genuinely bound. See
+   `tests/_indexer_assignment_fixtures.py`'s `paired_knowledge_repo_indexer`
+   fixture for the exact mechanics (it also marks the subject repo's
+   `.agent-worktrees/config.yaml` with `requires_external_state_root: true`,
+   which is what makes the knowledge-repo layer consulted at all).
+2. **A machine-local overlay.** Write
+   `<repo>/.copilot-extensions/agent-index/config.yaml` (gitignored, never
+   committed) with `indexer: {machine: <this-machine>}` directly -- no
+   knowledge repo or external-state resolution involved at all. See the
+   `machine_local_indexer_overlay` fixture in the same file.
+
+Both fixtures are drop-in `pytest` fixtures; import them and request by name.
+For a genuine index -> embed -> store -> search round trip without the heavy
+`torch`/`jinaai` model, pair either fixture with
+`tests/_fake_engine.py`'s `FakeEmbeddingEngineClient` -- a deterministic,
+in-process stand-in matching the real `EngineClient` interface (`embed_texts`,
+`embed_query`, `health`, `is_ready`). See
+`tests/test_indexer_assignment_workarounds.py` for both fully worked examples.
+
 ## Usage
 
 | Need | Use |
