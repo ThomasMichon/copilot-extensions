@@ -130,6 +130,7 @@ an empty queue.
     "schema": 1,
     "status": "clear | attention | partial | degraded",
     "read_at": "<ISO-8601 UTC>",
+    "selected": null,
     "sources": [
       {"name": "dispatch", "status": "ok | failed | uncertain | disabled",
        "error": "<one line; only when failed>", "uncertain": 0,
@@ -140,7 +141,12 @@ an empty queue.
   ```
 
   `sources[]` lists every discovered or configured source, `disabled` ones
-  included, sorted by `name`; `uncertain` and `items` are counts. `attention next`
+  included, sorted by `name`; `uncertain` and `items` are counts. A **selective
+  read** (`--source <name>...`) is scoped to the named sources: `sources[]` lists
+  only them, `items` and the aggregate `status` cover only them, and the envelope
+  carries `"selected": ["<name>", ...]` (`null` for a full read). A scoped
+  `clear` therefore says "nothing needs you *from these sources*", and a client
+  can tell it from a full read. `attention next`
   returns the same envelope with `item` (one item, or `null` when the queue is
   empty) and `cursor` in place of `items`. Adding a field is compatible; renaming,
   removing or retyping one bumps `schema`.
@@ -300,7 +306,9 @@ an empty queue.
   the exact documented shape (keys, types, `sources[]` order) and round-trip,
   including an item with `lifecycle_state: null` (a queue), and every item
   carries its own `schema: 1`;
-  `clear` and `degraded` with zero items stay distinguishable.
+  `clear` and `degraded` with zero items stay distinguishable; a `--source
+  dispatch` read lists only `dispatch` in `sources[]`, carries `"selected":
+  ["dispatch"]`, and its status ignores a failing unselected source.
 - [ ] Unit, the dispatch adapter: a `submitted` task is a `review` item and a
   `completed` one isn't; `stalled` at exactly the threshold isn't an item and one
   second over is; held tasks with an `unknown` or `gone` owner never count; a
