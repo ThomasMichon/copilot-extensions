@@ -20,8 +20,9 @@ CHANGES_BODY = ("### \U0001f7e1 Changes recommended\n\n<details open>\n<summary>
 
 
 def _review(author=COPILOT, state="COMMENTED", commit=HEAD, body=APPROVED_BODY, at="2026-10-06T10:00:00Z",
-            kind="User"):
-    return {"author": {"__typename": kind, "login": author}, "state": state, "commit": {"oid": commit},
+            kind="User", rid=None):
+    return {"databaseId": rid, "author": {"__typename": kind, "login": author}, "state": state,
+            "commit": {"oid": commit},
             "body": body, "submittedAt": at}
 
 
@@ -640,3 +641,14 @@ def test_a_person_named_as_the_reviewer_still_counts_as_human():
     asks = _review(author="alice", state="CHANGES_REQUESTED", body=CHANGES_BODY)
     bar = _bar(FakeGh(reviews=[_review(), asks]), reviewer="alice")
     assert _status(bar)["human_reviews_answered"] == "failed"
+
+
+def test_reviews_in_the_same_second_are_ordered_by_id():
+    """An old-head comment and an on-head comment submitted in the same second: the
+    later one (higher id) is the reviewer's latest, whatever the page order."""
+    old = _review(commit=OLD, rid=2001)
+    new = _review(rid=2002)
+    for reviews in ([old, new], [new, old]):
+        status = _status(_bar(FakeGh(reviews=reviews)))
+        assert status["review_on_head"] == "met" and status["review_findings_zero"] == "met"
+

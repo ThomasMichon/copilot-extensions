@@ -128,10 +128,17 @@ def _ci(snap: Snapshot) -> Clause:
 _EFFECTIVE = ("APPROVED", "CHANGES_REQUESTED", "COMMENTED")
 
 
+def _order(review: dict) -> tuple[str, int]:
+    """Review order: submission time, then the provider's review id (reviews can share
+    a second-level timestamp)."""
+    rid = review.get("id")
+    return (review.get("at") or "", rid if isinstance(rid, int) else 0)
+
+
 def _latest_by(snap: Snapshot, login: str) -> dict | None:
     mine = [r for r in snap.reviews if (r.get("author") or "").lower() == login.lower()
             and r.get("state") in _EFFECTIVE]
-    return max(mine, key=lambda r: r.get("at") or "") if mine else None
+    return max(mine, key=_order) if mine else None
 
 
 def _review_on_head(snap: Snapshot, reviewer: str) -> Clause:
@@ -205,7 +212,7 @@ def _humans(snap: Snapshot, reviewer: str) -> Clause:
     if "reviews" in snap.errors:
         return Clause("human_reviews_answered", "unknown", error=snap.errors["reviews"])
     verdicts: dict[str, dict] = {}
-    for r in sorted(snap.reviews, key=lambda r: r.get("at") or ""):
+    for r in sorted(snap.reviews, key=_order):
         if _is_human(r, snap, reviewer) and r.get("state") in (
                 "APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
             verdicts[r["author"]] = r
@@ -238,7 +245,7 @@ def _outstanding_change_requests(snap: Snapshot) -> list[str]:
     """Reviewers whose latest verdict (approve, request changes, dismissed) requests
     changes: a later review by someone else doesn't answer it."""
     latest: dict[str, str] = {}
-    for r in sorted(snap.reviews, key=lambda r: r.get("at") or ""):
+    for r in sorted(snap.reviews, key=_order):
         if r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED") and r.get("author"):
             latest[r["author"]] = r["state"]
     me = (snap.author or "").lower()
@@ -281,7 +288,7 @@ def _policy(snap: Snapshot, policy: dict | None) -> Clause:
         return Clause("merge_policy", "failed", "the provider's review verdict is changes requested")
     if policy.get("human_approval_required"):
         humans = {}
-        for r in sorted(snap.reviews, key=lambda r: r.get("at") or ""):
+        for r in sorted(snap.reviews, key=_order):
             if _is_human(r, snap, "") and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
                 humans[r["author"]] = r
         if not any(r.get("state") == "APPROVED" and r.get("commit") == snap.head for r in humans.values()):
