@@ -39,13 +39,14 @@ class FakeGh:
     is the head each successive PR-core read reports."""
 
     def __init__(self, *, checks=None, reviews=None, threads=None, page=100, fail="",
-                 heads=(HEAD, HEAD), state="OPEN", mergeable="MERGEABLE", stuck=""):
+                 heads=(HEAD, HEAD), state="OPEN", mergeable="MERGEABLE", stuck="", raw=None):
         self.data = {"checks": checks if checks is not None else [_check()],
                      "reviews": reviews if reviews is not None else [_review()],
                      "threads": threads if threads is not None else []}
         self.page, self.fail, self.stuck = page, fail, stuck
         self.heads, self.state, self.mergeable = list(heads), state, mergeable
         self.calls = []
+        self.raw = raw or {}  # kind -> the literal response body for that list
 
     def __call__(self, args, *, env=None):
         query = next(a[len("query="):] for a in args if a.startswith("query="))
@@ -61,6 +62,8 @@ class FakeGh:
             head = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
             return self._ok({"state": self.state, "mergeable": self.mergeable,
                              "headRefOid": head, "author": {"login": "author"}})
+        if kind in self.raw:
+            return subprocess.CompletedProcess(args, 0, self.raw[kind], "")
         start = int(after or 0)
         if kind == self.fail and start:
             return subprocess.CompletedProcess(args, 1, "", "HTTP 502: Bad Gateway")
@@ -172,6 +175,34 @@ def test_a_summary_that_disagrees_with_the_threads_is_unknown():
     assert status["review_findings_zero"] == "unknown"
 
 
+def test_a_summary_reporting_none_open_with_an_unresolved_reviewer_thread_is_unknown():
+    """Disagreement either way fails closed: 0 open in the summary, 1 open thread."""
+    status = _status(_bar(FakeGh(threads=[_thread(resolved=False)])))
+    assert status["review_findings_zero"] == "unknown"
+
+
+def test_a_closed_unmerged_pr_fails():
+    bar = _bar(FakeGh(state="CLOSED"))
+    assert _status(bar)["mergeable"] == "failed" and bar.verdict == "failed"
+
+
+@pytest.mark.parametrize("raw", [
+    "[1]",
+    json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": None}}}}),
+])
+def test_an_unexpected_response_shape_is_unknown(raw):
+    bar = _bar(FakeGh(raw={"threads": raw}))
+    assert _status(bar)["threads_unresolved_zero"] == "unknown" and bar.verdict == "unknown"
+
+
+def test_a_head_commit_without_a_check_rollup_has_no_checks():
+    raw = json.dumps({"data": {"repository": {"pullRequest": {"commits": {"nodes": [
+        {"commit": {"oid": HEAD, "statusCheckRollup": None}}]}}}}})
+    clause = next(c for c in _bar(FakeGh(raw={"checks": raw})).clauses if c.id == "ci_green")
+    assert (clause.status, clause.error) == ("unknown", "")
+    assert "no checks reported" in clause.evidence
+
+
 def test_a_summary_without_a_count_is_unknown():
     assert _status(_bar(FakeGh(reviews=[_review(body="LGTM")])))["review_findings_zero"] == "unknown"
 
@@ -222,10 +253,15 @@ def test_pr_bar_cli_reports_the_verdict_as_its_exit_code(monkeypatch, capsys):
     from agent_worktrees import config as cfg
     from agent_worktrees import pr_cli, providers
 
+    from agent_worktrees import pr_config
+
     prcfg = SimpleNamespace(provider="github", api_base="")
     monkeypatch.delenv("GH_HOST", raising=False)
     monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: SimpleNamespace(
-        default_repo=SimpleNamespace(pr=prcfg)))
+        default_repo=SimpleNamespace(pr=SimpleNamespace(provider="azure-devops", api_base=""))))
+    registered = {"owner/repo": SimpleNamespace(pr=prcfg)}  # the slug's own binding, not the active one
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda _c, slug: SimpleNamespace(
+        resolved=slug in registered, repo_config=registered.get(slug)))
     monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, p: "t")
     seen = {}
     real_read = pr_bar.read_github
@@ -243,5 +279,6 @@ def test_pr_bar_cli_reports_the_verdict_as_its_exit_code(monkeypatch, capsys):
     assert {c["id"] for c in payload["clauses"]} == set(pr_bar.CLAUSES)
     assert seen == {"repo": "owner/repo", "number": 7, "host": "github.com", "token": "t"}
     assert pr_cli.cmd_pr_dispatch(["bar", "a", "b", "c"]) == 2
+    assert pr_cli.cmd_pr_dispatch(["bar", "someone/else", "7"]) == 2  # unregistered: no borrowed binding
     prcfg.provider = "azure-devops"
     assert pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7"]) == 2

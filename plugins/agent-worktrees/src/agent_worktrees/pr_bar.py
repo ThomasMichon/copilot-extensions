@@ -157,9 +157,10 @@ def _findings(snap: Snapshot, reviewer: str) -> Clause:
     open_count, missed = counts
     reviewer_open = sum(1 for t in snap.threads
                         if not t.get("resolved") and (t.get("author") or "").lower() == reviewer.lower())
-    if open_count and not reviewer_open:
+    if open_count != reviewer_open:
         return Clause("review_findings_zero", "unknown",
-                      f"the summary reports {open_count} open findings but no thread by {reviewer} is unresolved")
+                      f"the summary reports {open_count} open findings but {reviewer_open} "
+                      f"thread(s) by {reviewer} are unresolved")
     if open_count or missed:
         return Clause("review_findings_zero", "failed",
                       f"{open_count} open, {missed} previously missed on {_short(snap.head)}")
@@ -199,6 +200,8 @@ def _humans(snap: Snapshot, reviewer: str) -> Clause:
 
 
 def _mergeable(snap: Snapshot) -> Clause:
+    if snap.state == "CLOSED":
+        return Clause("mergeable", "failed", "the PR is closed without being merged")
     value = (snap.mergeable or "").upper()
     if value == "MERGEABLE":
         return Clause("mergeable", "met", "no merge conflict")
@@ -262,8 +265,10 @@ def _graphql(run, query: str, *, host: str, env: dict, owner: str, name: str,
         data = json.loads(proc.stdout or "")
     except json.JSONDecodeError as exc:
         raise ReadError(f"non-JSON GraphQL response: {exc}") from exc
-    if not isinstance(data, dict) or data.get("errors"):
-        raise ReadError(f"GraphQL errors: {json.dumps((data or {}).get('errors'))[:300]}")
+    if not isinstance(data, dict):
+        raise ReadError(f"unexpected GraphQL response shape: {type(data).__name__}")
+    if data.get("errors"):
+        raise ReadError(f"GraphQL errors: {json.dumps(data.get('errors'))[:300]}")
     pr = ((data.get("data") or {}).get("repository") or {}).get("pullRequest")
     if not isinstance(pr, dict):
         raise ReadError("the pull request wasn't in the response")
@@ -277,8 +282,8 @@ def _pages(run, query: str, path, *, what: str, **kw) -> list[dict]:
     after = ""
     for _ in range(MAX_PAGES):
         conn = path(_graphql(run, query, after=after, **kw))
-        if conn is None:
-            return nodes
+        if not isinstance(conn, dict):
+            raise ReadError(f"{what}: the response had no readable list")
         nodes += [n for n in conn.get("nodes") or [] if isinstance(n, dict)]
         info = conn.get("pageInfo") or {}
         if not info.get("hasNextPage"):
@@ -291,10 +296,14 @@ def _pages(run, query: str, path, *, what: str, **kw) -> list[dict]:
 
 
 def _checks_conn(pr: dict):
+    """The head commit's check contexts; an empty list when the commit has no
+    rollup (nothing reported), ``None`` (unreadable) when the commit is missing."""
     nodes = ((pr.get("commits") or {}).get("nodes") or [])
     commit = (nodes[-1] or {}).get("commit") if nodes else None
-    rollup = (commit or {}).get("statusCheckRollup")
-    return (rollup or {}).get("contexts") if rollup else None
+    if not isinstance(commit, dict):
+        return None
+    rollup = commit.get("statusCheckRollup")
+    return rollup.get("contexts") if isinstance(rollup, dict) else {"nodes": [], "pageInfo": {}}
 
 
 def read_github(repo: str, number: int, *, host: str, token: str | None = None, run=None) -> Snapshot:

@@ -75,7 +75,14 @@ def cmd_pr_bar(argv: list[str]) -> int:
     if error or "/" not in slug:
         output.err(error or f"'{slug}' isn't an owner/name repo slug.")
         return 2
-    prcfg = config.default_repo.pr
+    from . import pr_config
+    resolution = pr_config.resolve_repo_config_for_slug(config, slug)
+    if not resolution.resolved:
+        output.err(f"pr bar: {slug!r} isn't a registered repo this machine can resolve a PR "
+                   "binding for; register it (agent-worktrees repos add) so its own provider, "
+                   "host and token are used. Refusing to use another repo's binding.")
+        return 2
+    prcfg = resolution.repo_config.pr
     if (prcfg.provider or "github") != "github":
         output.err(f"pr bar reads GitHub pull requests; this repo's provider is '{prcfg.provider}'.")
         return 2
