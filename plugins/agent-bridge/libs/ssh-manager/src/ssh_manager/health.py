@@ -119,32 +119,42 @@ async def ensure_healthy(
     if not status.needs_reconnect:
         return status
 
+    from .dial_log import Dial, account_of
+
+    account = account_of(getattr(config_source, "gh_env", None))
     for attempt in range(max_retries):
         log.info(
             "Reconnecting to %s (attempt %d/%d, reason: %s)",
             host, attempt + 1, max_retries, status.reason,
         )
+        # One dial-log line per attempt, from the disconnect through the check (a
+        # config refresh that raises is recorded as this attempt's error, then raised).
+        with Dial(host, "reconnect", attempt=attempt + 1, account=account) as dial:
+            dial.reason = status.reason
 
-        # Disconnect stale connection
-        await manager.disconnect(host)
+            # Disconnect stale connection
+            await manager.disconnect(host)
 
-        # Refresh config before reconnecting
-        config_source.refresh()
+            # Refresh config before reconnecting
+            config_source.refresh()
 
-        # Wait with exponential backoff
-        if attempt > 0:
-            delay = backoff_base * (2 ** (attempt - 1))
-            await asyncio.sleep(delay)
+            # Wait with exponential backoff
+            if attempt > 0:
+                delay = backoff_base * (2 ** (attempt - 1))
+                await asyncio.sleep(delay)
 
-        try:
-            await manager.ensure_connected(host, config_source, port_forwards)
-            status = await check_health(manager, host)
-            if status.ok:
-                log.info("Reconnected to %s successfully", host)
-                return status
-        except (ConnectionError, OSError) as e:
-            log.warning("Reconnect attempt %d failed for %s: %s", attempt + 1, host, e)
-            status = HealthStatus(ok=False, reason="check_failed", stderr=str(e))
+            try:
+                await manager.ensure_connected(host, config_source, port_forwards)
+                status = await check_health(manager, host)
+                if status.ok:
+                    dial.outcome = "ok"
+                    log.info("Reconnected to %s successfully", host)
+                    return status
+                dial.outcome, dial.stderr = "unhealthy", status.stderr or ""
+            except (ConnectionError, OSError) as e:
+                dial.outcome, dial.reason, dial.stderr = "error", f"{type(e).__name__}: {e}", str(e)
+                log.warning("Reconnect attempt %d failed for %s: %s", attempt + 1, host, e)
+                status = HealthStatus(ok=False, reason="check_failed", stderr=str(e))
 
     log.error("Failed to reconnect to %s after %d attempts", host, max_retries)
     return status

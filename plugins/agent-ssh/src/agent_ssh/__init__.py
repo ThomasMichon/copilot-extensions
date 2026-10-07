@@ -1,7 +1,7 @@
 """agent-ssh runtime package."""
 
 # Fallback only for running from a source tree with no installed distribution.
-_FALLBACK_VERSION = "0.1.31-dev1"
+_FALLBACK_VERSION = "0.1.32-dev1"
 
 
 def __getattr__(name: str) -> str:

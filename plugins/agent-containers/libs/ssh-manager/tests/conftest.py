@@ -12,3 +12,12 @@ sys.path.insert(0, str(LIB / "src"))
 # sibling canonical lib's src/ must be on sys.path too, or the import fails
 # outright.
 sys.path.insert(0, str(LIB.parent / "agent-procutil" / "src"))
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dial_log(tmp_path_factory, monkeypatch):
+    """Every dial a test makes is logged under a throwaway dir, never the real home."""
+    monkeypatch.setenv("SSH_MANAGER_DIAL_LOG_DIR", str(tmp_path_factory.mktemp("dial-log")))

@@ -25,12 +25,14 @@ async def test_open_stdio_channel_starts_new_session():
     """The ssh stdio child must lead its own process group on POSIX."""
     mgr = ConnectionManager.__new__(ConnectionManager)
     # Minimal state open_stdio_channel touches: a registered connection whose
-    # config exposes an ssh_target. Bypass real SSH arg construction.
+    # config exposes an ssh_target (multiplexed: no direct-mode dial-log line).
+    # Bypass real SSH arg construction.
     mgr._connections = {  # type: ignore[attr-defined]
         "host": SimpleNamespace(
             config=SimpleNamespace(ssh_target="user@host"),
             env={},
             child_processes=[],
+            multiplexed=True,
         ),
     }
     object.__setattr__(mgr, "_mux_ssh_args", lambda info: ["ssh"])

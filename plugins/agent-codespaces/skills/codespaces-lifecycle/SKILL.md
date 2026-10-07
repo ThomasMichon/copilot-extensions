@@ -300,7 +300,13 @@ The Owner usually runs headless, so it logs to
 `~/.agent-codespaces/logs/owner.log` (rotated when an Owner starts; under
 `AGENT_CODESPACES_HOME` when set): its start and stop, every relay or forward
 re-establish, and every failed cycle. Read it first when a worker's credential
-relay or a forward drops. Observe and steer it through agent-bridge
+relay or a forward drops. For how often a CodeSpace is being dialed, and how
+each attempt ended (config fetch, connect, direct exec, reconnect -- timeouts,
+transient tunnel resets, errors), run
+`<agent-codespaces catalog argv[0]> dial-log <name> [--json]`: counts per outcome
+over the last 10 minutes and hour, the last failure, and the newest attempts. It
+reads the shared ssh-manager's bounded, redacted dial log and never dials.
+Observe and steer it through agent-bridge
 (`live-sessions resolve`, `result`, `send`, `ui`). A detached launch keeps the
 CodeSpace claim active; `--stop` settles it like any finished connection and
 deregisters the stopped session from the host bridge at once. When close-out
