@@ -217,22 +217,26 @@ find the noisiest and blocking issues, and fix them"
   unfixed code, confirmed twice across two different intermediate fix
   attempts before the final one held). See that PR for the full
   reproduction methodology and trace evidence.
-- [x] Resolve the `identifier leak guard` noise **by driving the existing
-  `efforts/active/ci-identifier-leak-guard/` effort (#3923) to completion**,
-  not by re-planning it here — that effort already owns the
-  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` secret setup.
-  **Confirmed resolved, 2026-10-06:** that effort's own Validation Plan shows
-  the denylist secrets provisioned and live; spot-checked `identifier leak
-  guard` reporting `pass` across four recent merged PRs (#5553, #5440,
-  #5383, #5325) — no longer unconditionally red. Removed the now-stale
+- [x] Resolve the `identifier leak guard` noise **by confirming the check
+  no longer fires unconditionally red** — the original acceptance
+  criterion named driving `efforts/active/ci-identifier-leak-guard/`
+  (#3923) fully to completion, which is narrower than what's actually been
+  verified: that effort is still Active with two of its own Plan items
+  unchecked (migrating the harness-side secret source, re-provisioning
+  from the live sweep), so it is NOT yet Done. What this effort's own Plan
+  genuinely depended on — the denylist secrets existing and the check
+  reporting real pass/fail instead of permanent noise — **is** confirmed:
+  spot-checked `identifier leak guard` reporting `pass` across four recent
+  merged PRs (#5553, #5440, #5383, #5325). Removed the now-stale
   `identifier-leak-guard-unconfigured` entry from
   `tools/ci_telemetry.py`'s `KNOWN_NOISY_NONBLOCKING_CHECKS` (it hard-coded
-  the old "red on every PR" claim, which the live data now contradicts) and
-  updated its regression test accordingly; `ruff check` clean, 12/12 tests
-  pass. `#3923` itself still has two small unchecked items of its own
-  (migrating the harness-side secret source, re-provisioning from the live
-  sweep) — out of scope here; this effort's own dependency on it is
-  satisfied.
+  the old "red on every PR" claim, which the live data now contradicts),
+  removed `identifier leak guard` from `PR_SKIP_JOB_NAMES` (its only
+  rationale was avoiding double-counting against that now-removed entry;
+  a genuine future leak-guard failure should surface through ordinary
+  mining like any other check), and updated the regression test
+  accordingly; `ruff check` clean, 12/12 tests pass. #3923's own remaining
+  items are out of scope here and do not block this item.
 - [ ] Work down the Phase 2 ranking, opening one PR per fix (or a small
   batch when fixes are trivially related), closing/updating private-downstream-repo
   issues as each lands.

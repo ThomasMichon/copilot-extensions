@@ -337,15 +337,17 @@ def load_failures(conn: sqlite3.Connection) -> list[FailureRecord]:
 # Network I/O (GitHub Actions REST API via `gh`)
 # --------------------------------------------------------------------------
 
-# PR-triggered `ci.yml` runs carry two job names that must never become
-# per-run failure signatures of their own: `PR gate (required check)` is a
+# PR-triggered `ci.yml` runs carry a job name that must never become a
+# per-run failure signature of its own: `PR gate (required check)` is a
 # redundant aggregate of whatever real job already failed (double-counting
-# it), and `identifier leak guard` is the *already-known*, unconditionally
-# red, non-blocking check tracked once via `KNOWN_NOISY_NONBLOCKING_CHECKS`
-# above -- letting it in here would silently duplicate that entry under a
-# different (organically-mined) key instead of the one intentional,
-# hand-tracked row.
-PR_SKIP_JOB_NAMES = frozenset({"PR gate (required check)", "identifier leak guard"})
+# it). `identifier leak guard` used to be skipped here too, while it was
+# the *already-known*, unconditionally red, non-blocking check tracked
+# once via `KNOWN_NOISY_NONBLOCKING_CHECKS` above -- that rationale is gone
+# now that entry has been removed (2026-10-06, #3923 provisioned the
+# denylist secrets and the check reports real pass/fail): a genuine future
+# leak-guard failure should surface through ordinary mining like any other
+# check, not be silently skipped.
+PR_SKIP_JOB_NAMES = frozenset({"PR gate (required check)"})
 
 
 def _fetch_prior_attempts(repo: str, run: dict, source: str) -> list[RunRecord]:
