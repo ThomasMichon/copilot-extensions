@@ -2026,7 +2026,19 @@ function Invoke-Stamp {
     Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
     Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    # A just-copied tree can be briefly held open by an antivirus/indexer scan,
+    # failing the directory rename with "access denied"; retry a bounded few times.
+    $moveAttempt = 0
+    while ($true) {
+        try {
+            Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force -ErrorAction Stop
+            break
+        } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+            $moveAttempt++
+            if ($moveAttempt -ge 5) { throw }
+            Start-Sleep -Milliseconds (200 * $moveAttempt)
+        }
+    }
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
