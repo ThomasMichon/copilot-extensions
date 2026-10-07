@@ -946,14 +946,19 @@ def _stage_launch_command(tmp_path: Path) -> Path:
     return staged
 
 
-@pytest.mark.skipif(os.name != "nt", reason="the dot-source fast path only activates on Windows (POSIX already uses a real os.execvp with no extra process)")
 def test_launch_command_dot_sources_default_setup_without_extra_process(tmp_path):
     """copilot-extensions#5579: launch-command.ps1's common `pwsh -File
     default-setup.ps1 ...` case must dot-source default-setup.ps1 into its
     own host process rather than spawning a second pwsh.exe for it -- one
     fewer resident process per worktree launch, with identical argument
     binding (including switch parameters, values with spaces, and
-    GNU-style double-dash passthrough args)."""
+    GNU-style double-dash passthrough args) -- on Windows, where the fast
+    path activates. On non-Windows, the fast path is intentionally never
+    taken (POSIX already execs directly, with no extra process to collapse
+    in the first place), so this same invocation must instead fall back to
+    a genuinely separate process, which this test asserts explicitly rather
+    than skipping -- exercising the `$onWindows` gate itself on every
+    platform the suite runs on, not only on Windows."""
     shell = shutil.which("pwsh")
     if not shell:
         pytest.skip("pwsh is unavailable")
@@ -1003,10 +1008,16 @@ def test_launch_command_dot_sources_default_setup_without_extra_process(tmp_path
     assert machine == "a machine with spaces"
     assert recovery == "True"
     assert copilot_args == "--allow-all,--model,foo"
-    assert int(inner_pid_str) == outer_pid, (
-        "default-setup.ps1 ran in a separate process instead of being "
-        "dot-sourced into launch-command.ps1's own host process"
-    )
+    if os.name == "nt":
+        assert int(inner_pid_str) == outer_pid, (
+            "default-setup.ps1 ran in a separate process instead of being "
+            "dot-sourced into launch-command.ps1's own host process"
+        )
+    else:
+        assert int(inner_pid_str) != outer_pid, (
+            "the dot-source fast path must never activate on non-Windows -- "
+            "POSIX already execs directly with no extra process to collapse"
+        )
 
 
 def _run_launch_command_for_pid_check(
