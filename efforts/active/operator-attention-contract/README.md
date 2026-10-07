@@ -54,7 +54,7 @@ needs you" and "a source couldn't be read" are never confused.
 | agent-dispatch | completed, unconfirmed self-tracked task | lifecycle (`completed` vs confirmed) | `inbox --board` |
 | agent-bridge | `attention.value`: `input_required` (with `pending_input[0].message`), `permission_required`, `failed` | result snapshot (`result_snapshot.py`) | `agent-bridge result <s>`, `wait --attention input_required` |
 | agent-bridge | `presence`: `awaiting_input` / `unknown` (+ confidence) | transcript (`peek_snapshot.py`) | `agent-bridge presence <s> --json` |
-| agent-worktrees | merge bar `failed` / `unknown` | provider read (`pr_bar.py`, in review in #5566 — not yet on `dev`) | `agent-worktrees pr bar <repo> <n> --json` (exit 0 met/merged, 10 pending, 11 failed, 12 unknown) |
+| agent-worktrees | merge bar `failed` / `unknown` | provider read through `PRProvider.get_bar_snapshot` (`pr_bar.py`; landed on `dev` in #5566) | `agent-worktrees pr bar <repo> <n> --json` (exit 0 met/merged, 10 pending, 11 failed, 12 unknown) |
 
 ### Prior art
 
@@ -139,10 +139,9 @@ an empty queue.
 
   Local reads only by default; remote venues opt in (`--include-remote`), since
   each is an SSH read.
-- [ ] **pr** (needs `pr bar`, #5566): tracked open PRs whose `pr bar` exit is 11
+- [ ] **pr** (`pr bar`, on `dev` since #5566): tracked open PRs whose `pr bar` exit is 11
   (`failed`) → `failed` (the author has something to do). Exit 12 (`unknown`)
-  counts toward the source's status, not as an item. Until `pr bar` lands, the
-  adapter is `disabled`.
+  counts toward the source's status, not as an item.
 - [ ] Each adapter is bounded by a per-source timeout. A timeout is that source's
   `status: failed` (with the timeout as its `error`), not a hang.
 
@@ -150,13 +149,20 @@ an empty queue.
 
 - [ ] `agent-dispatch attention [--json] [--source <name>...] [--include-remote]`:
   the ordered queue, with the degraded banner in text mode.
-- [ ] `agent-dispatch attention next [--after <id>]`: the oldest worst item (a
-  keyboard walk in a UI is this, repeated).
+- [ ] `agent-dispatch attention next [--after <cursor>]`: the oldest worst item (a
+  keyboard walk in a UI is this, repeated). The cursor is opaque but carries the
+  queue position -- `(severity, created_at, id)` of the item last shown -- not just
+  its id, so `next` returns the first item strictly after that position in the
+  current read even when the item it names was resolved (gone) or deduped into
+  another; it wraps to the top once nothing is after it.
 - [ ] **External adapters:** a host project registers a source as a command (an
   `argv` that prints `{items[]}` JSON) in config; its own kinds are namespaced
   `x.<source>.<kind>` by the aggregator (it may also use the shared kinds). Its own signals (sign-in
   expiry, coordination asks) then join the same queue with no code in this repo,
-  under the same timeout and degraded rules.
+  under the same timeout and degraded rules. Failure contract: a non-zero exit, a
+  timeout, output that isn't JSON, a response without `items[]`, or any item that
+  doesn't validate against the schema makes that source `failed` (with the reason
+  as its `error`) -- never a crash of the aggregate, never an empty source.
 - [ ] Docs: `plugins/agent-dispatch/docs/cli-reference.md`, the skill reference,
   and the attention item schema in the plugin docs.
 
@@ -176,8 +182,11 @@ an empty queue.
   mixed failed-plus-uncertain read resolving to `degraded`) from fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
-  expected order. Kill one source and the result is `degraded: true` with the
-  others intact.
+  expected order. Kill one source and the result is `degraded` with the others
+  intact. A command source that exits non-zero, prints non-JSON, or returns a
+  malformed item is `failed`. Resolve the current item between two `next` calls
+  (and have its entity deduped into another source's item) and the walk still
+  advances deterministically.
 - [ ] Live: an operator machine with real sessions and tasks; compare with what
   each owner's own CLI reports.
 
