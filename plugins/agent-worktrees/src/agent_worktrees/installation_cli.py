@@ -11,6 +11,7 @@ from pathlib import Path
 from . import git_ops, installer as inst, launch_wrapper_assets as lwa, output, picker_profiles_cli
 from . import config as cfg
 from . import repos_cli, status_bar_cli
+from . import worktree_identity
 
 
 def _core():
@@ -27,7 +28,6 @@ def _core_helper(name: str, local):
 
 def _clarify_registration_account(*args, **kwargs):
     return _core_helper("_clarify_registration_account", repos_cli._clarify_registration_account)(*args, **kwargs)
-def _find_repo_dir(*args, **kwargs): return _core()._find_repo_dir(*args, **kwargs)
 def _resolve_remote_default_branch(*args, **kwargs):
     return _core_helper("_resolve_remote_default_branch", status_bar_cli._resolve_remote_default_branch)(*args, **kwargs)
 def _write_config(*args, **kwargs): return _core()._write_config(*args, **kwargs)
@@ -368,7 +368,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         return 1
 
     # Determine repo dir (we must be running from the repo)
-    repo_dir = _find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         output.err("Cannot determine repo root. Run from within the source repo.")
         return 1
@@ -558,7 +558,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             return 1
     else:
         # For `register`, the current directory is authoritative -- resolve the
-        # git root of cwd first. _find_repo_dir() walks up from the installed
+        # git root of cwd first. worktree_identity._find_repo_dir() walks up from the installed
         # module location (~/.agent-worktrees/...) before checking cwd, which
         # can resolve to an unrelated repo (e.g. when $HOME itself is a git
         # repo, as with dotfiles-in-$HOME setups).
@@ -573,13 +573,13 @@ def cmd_register(args: argparse.Namespace) -> int:
             if r.returncode == 0 and r.stdout.strip():
                 # Normalize through resolve_to_anchor so that running from
                 # inside a linked worktree resolves back to the main checkout,
-                # matching _find_repo_dir()'s behavior. Without this, registering
+                # matching worktree_identity._find_repo_dir()'s behavior. Without this, registering
                 # from an active worktree would anchor to the ephemeral path.
                 repo_dir = git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
         except Exception:
             pass
         if not repo_dir:
-            repo_dir = _find_repo_dir()
+            repo_dir = worktree_identity._find_repo_dir()
         if not repo_dir:
             repo_dir = Path.cwd()
             output.warn(f"Using current directory as repo root: {repo_dir}")

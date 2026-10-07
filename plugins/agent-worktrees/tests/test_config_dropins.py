@@ -639,7 +639,7 @@ def test_doctor_json_runs_without_project_context(tmp_path, monkeypatch, capfd):
         "project_name",
         lambda: (_ for _ in ()).throw(RuntimeError("no project")),
     )
-    monkeypatch.setattr(main, "_find_repo_dir", lambda: None)
+    monkeypatch.setattr(main.worktree_identity, "_find_repo_dir", lambda: None)
     monkeypatch.setattr(main.reclaim, "find_bare_orphans", lambda: [])
     monkeypatch.setattr(
         pivots, "scan_pivot_registry", lambda **_: pivot_report
@@ -675,7 +675,7 @@ def test_doctor_apply_daemon_health_flag_reaches_report(monkeypatch, tmp_path, c
         "project_name",
         lambda: (_ for _ in ()).throw(RuntimeError("no project")),
     )
-    monkeypatch.setattr(main, "_find_repo_dir", lambda: None)
+    monkeypatch.setattr(main.worktree_identity, "_find_repo_dir", lambda: None)
     monkeypatch.setattr(main.reclaim, "find_bare_orphans", lambda: [])
     monkeypatch.setattr(pivots, "scan_pivot_registry", lambda **_: pivot_report)
     seen = {}
