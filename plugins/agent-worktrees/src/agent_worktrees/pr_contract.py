@@ -139,7 +139,6 @@ class Review:
 @dataclass(frozen=True)
 class PRSnapshot:
     """A point-in-time view of a PR, sufficient to diff and classify.
-
     Carries both the fields ``pr-watch`` needs (reviews, mergeable, lifecycle)
     and the fields ``pr-consent`` / ``pr-status`` need (labels, title, draft),
     so one snapshot feeds every member of the family.
@@ -170,7 +169,6 @@ class PRSnapshot:
     @property
     def max_review_id(self) -> int:
         """High-water mark over **submitted** (verdict/comment) reviews only.
-
         Excluding non-submitted reviews from the cursor means a draft visible at
         arm time can't silently absorb its own later submission.
         """
@@ -195,7 +193,6 @@ class Comment:
 @dataclass(frozen=True)
 class CommentThread:
     """A review discussion thread on a PR, normalized across providers.
-
     ``status`` follows a small provider-neutral vocabulary -- ``active`` /
     ``pending`` (or empty) is *unresolved*; anything else (``fixed`` / ``closed``
     / ``wontfix`` / ``bydesign`` / ``resolved`` / ``outdated``) is resolved.
@@ -217,7 +214,6 @@ class CommentThread:
 @dataclass(frozen=True)
 class ThreadsResult:
     """Comment threads on a PR, plus whether the provider could report them.
-
     ``supported`` is False (with ``error`` explaining) when a provider cannot
     read threads -- callers treat that as "no thread signal", never as "no open
     feedback".
@@ -236,7 +232,6 @@ class ThreadsResult:
 @dataclass(frozen=True)
 class PRDiff:
     """A PR's current unified diff, plus whether the provider could report it.
-
     The reviewer-side "read the current diff and surrounding context"
     primitive (Vision ``plugins/agent-worktrees/pull-requests``
     §Features/``reviewer-capable-provider``). ``supported`` is False (with
@@ -311,7 +306,6 @@ class Baseline:
 
     def to_cursor(self) -> str:
         """Compact, opaque, ASCII cursor (machine-facing -- stays ASCII).
-
         Up to four ``.``-separated segments: ``r{id}``, then ``{flags}``
         (``m``/``c``, possibly empty), then ``h{head_sha}``, then
         ``k{checks_state}`` -- each only present when needed, so a cursor
@@ -331,7 +325,6 @@ class Baseline:
     @classmethod
     def from_cursor(cls, cursor: str) -> Baseline:
         """Parse a cursor produced by :meth:`to_cursor` (or a bare review id).
-
         A bare int (e.g. ``"13"``) means "review high-water 13, not yet
         merged/closed", so a PR already merged when such a cursor is passed
         counts the merge as a fresh transition.
@@ -367,7 +360,6 @@ def compute_events(
     *, dismiss_stale_reviews: bool | None = None,
 ) -> list[dict]:
     """Return the target transitions present in ``snap`` relative to ``baseline``.
-
     Pure and deterministic: the wait loop calls this each poll and exits on the
     first non-empty result.  A review by the PR author never fires (they armed
     the watch) but still advances the cursor; a ``None`` (not-yet-computed)
@@ -496,7 +488,6 @@ def effective_verdict(
     dismiss_stale_reviews: bool | None = None,
 ) -> str:
     """Reduce a PR's reviews to one effective verdict at ``head_sha``.
-
     Considers only *submitted*, non-dismissed reviews that are not the PR
     author's own (a review the provider itself marked ``dismissed`` is
     already filtered out by :func:`_latest_verdict`). The latest wins.
@@ -550,7 +541,6 @@ def _latest_verdict(
     reviews: Iterable[Review], author: str, *, review_blocking: bool = True,
 ) -> Review | None:
     """Return the latest actionable review.
-
     ``review_blocking`` selects :data:`VERDICT_STATES` (default) or
     :data:`NONBLOCKING_VERDICT_STATES` -- see :func:`effective_verdict`.
     """
@@ -620,7 +610,6 @@ def _stale_approval_is_authoritative(
 
 def title_is_wip(title: str, wip_title_prefixes: Iterable[str]) -> bool:
     """True when ``title`` starts with any configured WIP prefix (case-insensitive).
-
     With no prefixes configured this is always False (binding-absent = no-op).
     """
     t = (title or "").strip().lower()
@@ -1155,6 +1144,8 @@ def classify_pr_flow(
 #: unknown). The reminder tailors "next" / "waiting on" to these.
 PR_STATE_UNKNOWN = ""
 PR_STATE_CREATED = "created"
+PR_STATE_PUSHED = "pushed"  # create-pr pushed the branch, no PR opened: nothing to merge yet
+PR_STATE_DRY_RUN = "dry-run"  # create-pr --dry-run: nothing pushed, nothing opened
 PR_STATE_AWAITING_REVIEW = "awaiting-review"
 PR_STATE_APPROVED = "approved"
 PR_STATE_CHANGES_REQUESTED = "changes-requested"
@@ -1349,6 +1340,15 @@ def pr_reminder(
         )
 
     # ---- success path -----------------------------------------------------
+    if verb in ("create-pr", "pr-create") and state == PR_STATE_DRY_RUN:
+        return PRReminder(flow.profile, verb, state, ok, headline="dry run: nothing was pushed or opened",
+                          next_step="re-run `create-pr` without `--dry-run` to push it",
+                          waiting_on=(), use_instead=(), cautions=cautions)
+    if verb in ("create-pr", "pr-create") and state == PR_STATE_PUSHED:
+        return PRReminder(flow.profile, verb, state, ok, headline="no PR opened" + (f": {reason}" if reason else ""),
+                          next_step="open it through the provider and record it with `set-pr`, or re-run "
+                                    "`create-pr` without `--no-open` where auto-open is on",
+                          waiting_on=(), use_instead=(), cautions=cautions)
     if verb in ("create-pr", "pr-create"):
         nxt = merge if not review else f"wait for {review}, then {merge}"
         c = cautions
