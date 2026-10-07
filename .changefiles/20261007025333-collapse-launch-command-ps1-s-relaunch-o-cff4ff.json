@@ -1,0 +1,9 @@
+{
+  "comment": "Collapse launch-command.ps1's relaunch of default-setup.ps1 into a dot-source (one fewer resident pwsh.exe per worktree session launch); fix a cygpath-dependent test to skip cleanly when no conformant Bash/cygpath is available (copilot-extensions#5579)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
