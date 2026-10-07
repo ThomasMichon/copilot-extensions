@@ -73,6 +73,7 @@ class Snapshot:
     state: str = ""            # OPEN | CLOSED | MERGED
     head: str = ""
     head_after: str = ""       # the head re-read after everything else
+    changed: str = ""          # what else about the PR changed between the first and last read
     author: str = ""
     mergeable: str = ""        # MERGEABLE | CONFLICTING | UNKNOWN
     draft: bool = False
@@ -266,6 +267,9 @@ def evaluate(snap: Snapshot, *, reviewer: str = COPILOT_REVIEWER, now: str = "",
         moved = f"the head moved from {_short(snap.head)} to {_short(snap.head_after)} during the read"
         clauses = [Clause(c, "unknown", moved) for c in CLAUSES]
         return Bar(snap.repo, snap.number, snap.head_after, snap.state, "unknown", clauses, observed)
+    if snap.changed:
+        clauses = [Clause(c, "unknown", f"the PR changed during the read: {snap.changed}") for c in CLAUSES]
+        return Bar(snap.repo, snap.number, snap.head, snap.state, "unknown", clauses, observed)
     clauses = [_ci(snap), _review_on_head(snap, reviewer), _findings(snap, reviewer),
                _threads(snap), _humans(snap, reviewer), _mergeable(snap), _policy(snap, policy)]
     if snap.state == "MERGED":
@@ -335,7 +339,9 @@ def _pages(run, query: str, path, *, what: str, **kw) -> list[dict]:
         if not isinstance(page, list) or not isinstance(info, dict) \
                 or not isinstance(info.get("hasNextPage"), bool):
             raise ReadError(f"{what}: a page without readable nodes or pagination info")
-        nodes += [n for n in page if isinstance(n, dict)]
+        if not all(isinstance(n, dict) for n in page):
+            raise ReadError(f"{what}: a page held an unreadable (null) entry")
+        nodes += page
         if not info["hasNextPage"]:
             return nodes
         cursor = info.get("endCursor") or ""
@@ -394,8 +400,11 @@ def read_github(repo: str, number: int, *, host: str, token: str | None = None, 
             setattr(snap, part, [shape(n) for n in _pages(run, query, path, what=part, **kw)])
         except ReadError as exc:
             snap.errors[part] = str(exc)
-    try:
-        snap.head_after = _graphql(run, _PR_QUERY, **kw).get("headRefOid") or ""
+    try:  # the same core again: any change since the first read means a mixed view
+        after = _graphql(run, _PR_QUERY, **kw)
+        snap.head_after = after.get("headRefOid") or ""
+        snap.changed = ", ".join(f for f in ("state", "mergeable", "isDraft", "title", "labels")
+                                 if after.get(f) != pr.get(f))
     except ReadError as exc:
-        snap.errors["pr"] = f"re-reading the head: {exc}"
+        snap.errors["pr"] = f"re-reading the PR: {exc}"
     return snap

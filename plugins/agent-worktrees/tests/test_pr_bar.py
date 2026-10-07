@@ -40,13 +40,14 @@ class FakeGh:
 
     def __init__(self, *, checks=None, reviews=None, threads=None, page=100, fail="",
                  heads=(HEAD, HEAD), state="OPEN", mergeable="MERGEABLE", stuck="", raw=None,
-                 draft=False, title="Add a thing", labels=()):
+                 draft=False, title="Add a thing", labels=(), final=None):
         self.data = {"checks": checks if checks is not None else [_check()],
                      "reviews": reviews if reviews is not None else [_review()],
                      "threads": threads if threads is not None else []}
         self.page, self.fail, self.stuck = page, fail, stuck
         self.heads, self.state, self.mergeable = list(heads), state, mergeable
         self.draft, self.title, self.labels = draft, title, labels
+        self.final, self.core_reads = final or {}, 0  # fields the last core read reports instead
         self.calls = []
         self.raw = raw or {}  # kind -> the literal response body for that list
 
@@ -62,10 +63,14 @@ class FakeGh:
             kind = "reviews"
         else:
             head = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
-            return self._ok({"state": self.state, "mergeable": self.mergeable,
-                             "headRefOid": head, "author": {"login": "author"},
-                             "isDraft": self.draft, "title": self.title,
-                             "labels": {"nodes": [{"name": n} for n in self.labels]}})
+            self.core_reads += 1
+            core = {"state": self.state, "mergeable": self.mergeable,
+                    "headRefOid": head, "author": {"login": "author"},
+                    "isDraft": self.draft, "title": self.title,
+                    "labels": {"nodes": [{"name": n} for n in self.labels]}}
+            if self.core_reads > 1:
+                core.update(self.final)
+            return self._ok(core)
         if kind in self.raw:
             return subprocess.CompletedProcess(args, 0, self.raw[kind], "")
         start = int(after or 0)
@@ -344,3 +349,23 @@ def test_a_worktree_target_reads_the_supplied_configs_tracking_dir(monkeypatch, 
         active_pr=lambda: active, repo="owner/other"))
     slug, number, error = pr_bar_cli._target(["wt-1"], SimpleNamespace(repo_name="other-project"))
     assert (slug, number, error) == ("owner/other", 7, "") and seen == ["other-project"]
+
+
+def test_a_null_entry_in_a_page_is_unknown_not_dropped():
+    raw = json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
+        "nodes": [None, _thread()], "pageInfo": {"hasNextPage": False, "endCursor": ""}}}}}})
+    assert _status(_bar(FakeGh(raw={"threads": raw})))["threads_unresolved_zero"] == "unknown"
+
+
+@pytest.mark.parametrize("final, field", [
+    ({"mergeable": "CONFLICTING"}, "mergeable"),
+    ({"state": "CLOSED"}, "state"),
+    ({"isDraft": True}, "isDraft"),
+    ({"labels": {"nodes": [{"name": "do-not-merge"}]}}, "labels"),
+])
+def test_a_pr_that_changes_during_the_read_is_unknown(final, field):
+    """Same head, but the base moved (now conflicting), or it was closed, drafted or held
+    meanwhile: a verdict from the first read would be stale."""
+    bar = _bar(FakeGh(final=final))
+    assert bar.verdict == "unknown" and set(_status(bar).values()) == {"unknown"}
+    assert field in bar.clauses[0].evidence
