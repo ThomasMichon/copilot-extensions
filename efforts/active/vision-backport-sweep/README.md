@@ -28,13 +28,7 @@
   agent-mcp/agent-index's unsafe races, agent-bridge's lock-safe-but-still-
   non-conforming rewrite (the only plugin that's actually lock-safe), and
   agent-ssh/agent-containers/agent-machines' unconditional in-place
-  reinstall; filed and expanded this slice) ·
-  `ThomasMichon/copilot-extensions#5614` (attended/human-interactive
-  CLI-mode venue sessions need the same bridge-registration treatment
-  `#3346` proposes for the detached case — carved from the
-  `remote-interactive-sessions` reconciliation, operator-flagged as a
-  real requirement: an attended remote session must still be driven via
-  agent-bridge, not a fabric-invisible raw SSH mux session)
+  reinstall; filed and expanded this slice)
 
 ## Guiding Intent
 
@@ -463,6 +457,50 @@ then rather than assuming either answer.
   cross-link comment on `#3346` pointing back.
 - No vision text changed this entry — the visions already correctly state
   this as the should-be contract; only the tracked-issue gap needed
-  closing. Next: continue Phase 2 by picking the next stale/high-traffic
-  vision (candidates from the prior ranking: `agent-ssh` 139 commits since
-  2026-07-22, `agent-containers` 123 commits since 2026-08-27).
+  closing.
+
+### 2026-10-07 — Self-correction: #5614 was a phantom gap, both visions were stale
+- While scoping the next Phase 2 vision (`agent-ssh`), its plugin README's
+  `copilot <ssh-target>` description ("if another process already holds the
+  bridge reverse-forward route, the attached command reuses that route")
+  read as inconsistent with the "daemon port isn't reverse-forwarded yet"
+  claim just relied on to file `#5614`. Checked directly against
+  `copilot_venue.py` (`cmd_copilot`/`_cmd_copilot_connect`) and the owning
+  effort, `efforts/active/agent-bridge-cli-mode-sessions/README.md`: the
+  attended `copilot <name>` path already places a worktree-keyed
+  reservation, a Connection Owner tenant hold carrying **both** the
+  credential-relay **and** a daemon-port reverse-forward, and
+  self-registers into `live_sessions` marked `driven_by: cli-mode` —
+  landed and **live-clean-room-validated end to end on 2026-09-20/22**,
+  weeks before this slice's PR #5575 was opened.
+- This means the prior entry's premise was wrong on two counts: (1) `#5614`
+  described a gap that doesn't exist — **closed it** with the evidence
+  above, and corrected the misleading cross-link comment left on `#3346`.
+  (2) The `remote-interactive-sessions` and `agent-codespaces` vision text
+  PR #5575 shipped was *also* wrong — it preserved/extended a stale
+  "coordination-layer integration still missing" claim instead of
+  recognizing it as already realized. Root cause: round 3's correction
+  trusted `remote-interactive-sessions`' own existing prose as ground
+  truth instead of checking it against the owning effort/code, the same
+  verification gap that produced `#5614`.
+- Corrected both vision files in place (not a revert — a second, verified
+  correction): `remote-interactive-sessions`' Purpose & Intent and "CLI
+  mode needs no Session Host" concept section now state the integration as
+  realized, citing the owning effort's Phase 4/Validation Plan; its
+  Provenance records this as superseding the 10-06 entry rather than
+  silently overwriting it. `agent-codespaces`' `dual-mode-session-reach`
+  no longer claims the integration is "deferred" to a sibling vision.
+  Checked off that owning effort's own Phase 5 "confirm realized behavior
+  against the vision" item, since this sweep is exactly that confirmation
+  (its sibling Phase 5 item, plugin docs/architecture sync, is unaffected
+  and still open).
+- **Lesson for the rest of this sweep:** a vision's own prose is not
+  sufficient evidence for "is this still true" — verify against the owning
+  effort's journal/validation-plan and, when in doubt, the actual code,
+  before either folding something back *or* preserving an existing gap
+  claim. Apply this going forward, not only when a reviewer or a sibling
+  plugin's README happens to surface the inconsistency.
+- Next: continue Phase 2 by picking the next stale/high-traffic vision
+  (candidates from the prior ranking: `agent-ssh` 139 commits since
+  2026-07-22, `agent-containers` 123 commits since 2026-08-27) — with the
+  verification lesson above applied from the start this time.
