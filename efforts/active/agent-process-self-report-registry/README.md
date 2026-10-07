@@ -153,6 +153,20 @@ effort (this document is (c); (a) and (b) are already done — see Journal).
       on the producer side) that maintains a live "currently running" table
       from the start/end `process_spawn` pairs it observes, rather than a
       spool a human tails by hand.
+- [ ] **Design installation-cell ownership isolation for the writable live
+      table.** Per the installation-cell invariant
+      (`visions/plugin-services/installation-cells/README.md`,
+      `docs/patterns/README.md`): a writable installation-owned registry must
+      stay cell-local, and two same-named installations must never share
+      writable state — qualifying each record with marketplace provenance (as
+      Phase 1's record-identity item already does) is not by itself an
+      isolation guarantee for a *shared* table. Choose one explicitly: (a) a
+      cell-local table per installation, with a separate host-level
+      enumeration step that reads across cells read-only to produce the
+      fleet-wide query, or (b) a deliberate, documented cross-cell
+      federation contract if a single shared writable table is chosen
+      instead. Do not default to a shared table without picking one of these
+      and stating why.
 - [ ] Name Windows, Linux, and macOS explicitly for the liveness check (pid
       still alive + start-time token match) this sink needs to reconcile a
       crashed/uncleanly-killed process's record — state what's implemented
@@ -233,7 +247,7 @@ _Pending — Phase 1 design decisions above need to land here once settled._
   instance was also manually killed) and the operator's own request for a
   unified self-report mechanism, captured above verbatim.
 
-### 2026-10-06 — Two review rounds on the planning PR (#5562) reshaped the Plan
+### 2026-10-06 — Review rounds on the planning PR (#5562) reshaped the Plan
 - **Round 1 (8 findings):** the first draft proposed a new instrumentation
   hook in `agent-procutil` without checking for prior art. Review caught
   that `visions/process-telemetry` (Active) already ships the exact
@@ -263,3 +277,11 @@ _Pending — Phase 1 design decisions above need to land here once settled._
   Phase 3 wires any launch site to it. Also updated the umbrella issue
   (#5559), which still described the superseded "new agent-procutil hook" +
   "healthy/current" proposal, to match this reconciled plan.
+- **Round 4 (1 new finding, medium severity):** the writable live-process
+  table lacked installation-cell ownership isolation — qualifying each
+  record with marketplace provenance (Phase 1's record-identity item) is not
+  itself an isolation guarantee for a *shared* writable table, per the
+  installation-cell invariant. Added an explicit Phase 1 design item: pick
+  either a cell-local table per installation with read-only host-level
+  enumeration, or a deliberate documented cross-cell federation contract —
+  never default to an unexamined shared table.
