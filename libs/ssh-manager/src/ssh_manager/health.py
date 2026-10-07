@@ -152,7 +152,7 @@ async def ensure_healthy(
                     return status
                 dial.outcome, dial.stderr = "unhealthy", status.stderr or ""
             except (ConnectionError, OSError) as e:
-                dial.outcome = "error"
+                dial.outcome, dial.reason, dial.stderr = "error", f"{type(e).__name__}: {e}", str(e)
                 log.warning("Reconnect attempt %d failed for %s: %s", attempt + 1, host, e)
                 status = HealthStatus(ok=False, reason="check_failed", stderr=str(e))
 

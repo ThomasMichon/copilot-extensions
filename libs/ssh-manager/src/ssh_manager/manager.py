@@ -573,47 +573,58 @@ class ConnectionManager:
         log.debug("exec_command on %s: %s", host, command)
 
         started = time.monotonic()
-        proc = await create_ssh_subprocess(
-            *args,
-            config=info.config,
-            stdin=(
-                asyncio.subprocess.PIPE
-                if input_bytes is not None
-                else asyncio.subprocess.DEVNULL
-            ),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=info.env,
-        )
-
-        timed_out = False
         try:
-            info.child_processes.append(proc)
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(input=input_bytes), timeout=timeout
-                )
-            finally:
-                if proc in info.child_processes and proc.returncode is not None:
-                    info.child_processes.remove(proc)
-        except (TimeoutError, asyncio.TimeoutError):
-            await _terminate_process_tree(proc)
-            stdout_bytes, stderr_bytes = await proc.communicate()
-            timed_out = True
-            if proc in info.child_processes:
-                info.child_processes.remove(proc)
-        except asyncio.CancelledError:
-            await _terminate_process_tree(proc)
-            if proc in info.child_processes:
-                info.child_processes.remove(proc)
-            raise
+            proc = await create_ssh_subprocess(
+                *args,
+                config=info.config,
+                stdin=(
+                    asyncio.subprocess.PIPE
+                    if input_bytes is not None
+                    else asyncio.subprocess.DEVNULL
+                ),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=info.env,
+            )
 
-        result = CommandResult(
-            stdout=stdout_bytes.decode(errors="replace").rstrip(),
-            stderr=stderr_bytes.decode(errors="replace").rstrip(),
-            exit_code=proc.returncode if proc.returncode is not None else -1,
-            timed_out=timed_out,
-        )
+            timed_out = False
+            try:
+                info.child_processes.append(proc)
+                try:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        proc.communicate(input=input_bytes), timeout=timeout
+                    )
+                finally:
+                    if proc in info.child_processes and proc.returncode is not None:
+                        info.child_processes.remove(proc)
+            except (TimeoutError, asyncio.TimeoutError):
+                await _terminate_process_tree(proc)
+                stdout_bytes, stderr_bytes = await proc.communicate()
+                timed_out = True
+                if proc in info.child_processes:
+                    info.child_processes.remove(proc)
+            except asyncio.CancelledError:
+                await _terminate_process_tree(proc)
+                if proc in info.child_processes:
+                    info.child_processes.remove(proc)
+                raise
+
+            result = CommandResult(
+                stdout=stdout_bytes.decode(errors="replace").rstrip(),
+                stderr=stderr_bytes.decode(errors="replace").rstrip(),
+                exit_code=proc.returncode if proc.returncode is not None else -1,
+                timed_out=timed_out,
+            )
+        except BaseException as exc:
+            # Direct mode: a spawn that raises, or a cancelled exec, is still a logged dial.
+            if not info.multiplexed:
+                from .dial_log import account_of, record
+
+                record(host, kind="direct_exec", elapsed_s=time.monotonic() - started,
+                       outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "error",
+                       reason=f"{type(exc).__name__}: {exc}", stderr=str(exc),
+                       account=account_of(info.env))
+            raise
         if not info.multiplexed:  # direct mode: every exec is a fresh connection
             from .dial_log import account_of, record
 

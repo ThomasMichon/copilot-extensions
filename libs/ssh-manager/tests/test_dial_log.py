@@ -212,3 +212,58 @@ async def test_a_reconnect_whose_config_refresh_fails_is_still_logged():
     (entry,) = dial_log.read("cs-refresh")
     assert (entry["kind"], entry["outcome"], entry["attempt"]) == ("reconnect", "error", 1)
     assert "config failed" in entry["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_direct_mode_spawn_that_raises_is_still_logged(win_platform, source):
+    from ssh_manager import ConnectionManager
+
+    manager = ConnectionManager(platform=win_platform)
+    await manager.ensure_connected("spawn-fails", source)
+    with patch("ssh_manager.proxy.spawn_in_kill_on_close_job", side_effect=OSError("no ssh.exe")):
+        with pytest.raises(OSError):
+            await manager.exec_command("spawn-fails", "true")
+    (entry,) = dial_log.read("spawn-fails")
+    assert (entry["kind"], entry["outcome"]) == ("direct_exec", "error")
+    assert "no ssh.exe" in entry["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_reconnect_error_keeps_its_message():
+    from unittest.mock import MagicMock
+
+    from ssh_manager import health
+    from ssh_manager.health import HealthStatus
+
+    manager = AsyncMock()
+    manager.ensure_connected.side_effect = ConnectionError("ControlMaster failed: kex reset")
+    src = MagicMock()
+    src.gh_env = None
+    with patch.object(health, "check_health", new=AsyncMock(
+            return_value=HealthStatus(ok=False, reason="process_dead"))), \
+            patch.object(health.asyncio, "sleep", new=AsyncMock()):
+        await health.ensure_healthy(manager, "cs-err", src, max_retries=1)
+    (entry,) = dial_log.read("cs-err")
+    assert entry["outcome"] == "error"
+    assert "kex reset" in entry["reason"] and "kex reset" in entry["stderr"]
+
+
+def test_writers_in_separate_processes_never_interleave_a_line():
+    """The production writers are separate plugin processes: the per-file lock must
+    serialize them across process boundaries."""
+    import sys
+
+    here = dial_log.Path(dial_log.__file__).resolve()
+    paths = [str(here.parents[1]), str(here.parents[3] / "agent-procutil" / "src")]
+    script = (f"import sys; sys.path[:0] = {paths!r}\n"
+              "from ssh_manager import dial_log\n"
+              "n = int(sys.argv[1])\n"
+              "for i in range(40):\n"
+              "    dial_log.record('cs-procs', kind='reconnect', outcome='ok', elapsed_s=0,"
+              " attempt=n * 100 + i, stderr='x' * 200)\n")
+    procs = [subprocess.Popen([sys.executable, "-c", script, str(n)]) for n in range(6)]
+    assert all(p.wait(timeout=120) == 0 for p in procs)
+    raw = dial_log._file_for("cs-procs").read_text(encoding="utf-8").splitlines()
+    assert len(raw) == 240
+    assert sorted(json.loads(line)["attempt"] for line in raw) == sorted(
+        n * 100 + i for n in range(6) for i in range(40))
