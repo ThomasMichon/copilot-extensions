@@ -18,6 +18,21 @@ mirroring how ``ai_plugin_staging`` ships a stdlib driver and reads a marker lin
 ``user.message``, ``assistant.turn_start``, ``assistant.message``,
 ``assistant.turn_end``, ``session.usage_checkpoint``, ``session.shutdown``}.
 Files range ~66 KB–2.2 MB, so the driver reads only the **tail**.
+
+**Presence** (``snapshot["presence"]``): what the session is doing now, read from
+the transcript since its last ``session.start``/``session.resume`` -- never from
+self-reported activity. ``busy`` when the last presence-bearing event is
+``user.message``, ``assistant.turn_start``, ``tool.execution_start``/``complete``
+or ``permission.completed``; ``awaiting_input`` while a ``permission.requested``
+is unanswered (paired by ``requestId``), or when a turn ended
+(``assistant.turn_end``) in an interactive session; ``idle`` when a turn ended in
+an autopilot (or headless) session -- the mode is the latest of
+``session.mode_changed``, and ``agentMode`` on ``user.message`` /
+``permission.requested``, defaulting to interactive; ``absent`` after
+``session.shutdown``; ``unknown`` when no such event is in the window or the last
+line is partial or malformed. Every other event carries no presence signal.
+Confidence is ``scanned``. Event names verified against Copilot CLI 1.0.92
+transcripts.
 """
 
 from __future__ import annotations
@@ -78,13 +93,16 @@ def main():
         emit({"ok": False, "reason": "events.jsonl read error", "session_dir": sdir})
         return
 
-    lines = [ln for ln in raw.splitlines() if ln.strip()][-tail_lines:]
+    all_lines = [ln for ln in raw.splitlines() if ln.strip()]
+    lines = all_lines[-tail_lines:]
     evs = []
+    last_line_bad = False
     for ln in lines:
         try:
             evs.append(json.loads(ln))
+            last_line_bad = False
         except Exception:
-            pass
+            last_line_bad = True
 
     types = collections.Counter(e.get("type", "?") for e in evs)
     started = resumed = last_shutdown = None
@@ -155,7 +173,76 @@ def main():
         "recent_messages": recent[-n_recent:],
         "recent_tool_calls": tools[-n_recent:],
         "usage": usage,
+        "presence": presence(evs, last_line_bad, window_mode(all_lines)),
     })
+
+
+# Presence from the transcript (see the module docstring's "Presence" section).
+BUSY = ("user.message", "assistant.turn_start", "tool.execution_start",
+        "tool.execution_complete", "permission.completed")
+SETTLED = ("assistant.turn_end",)
+BOUNDARY = ("session.start", "session.resume")
+
+def window_mode(all_lines):
+    """The latest mode signal in the whole read window since its last lifecycle
+    boundary: a long turn pushes it out of the parsed tail."""
+    for ln in reversed(all_lines):
+        if '"session.start"' in ln or '"session.resume"' in ln:
+            return None
+        if '"agentMode"' not in ln and '"session.mode_changed"' not in ln:
+            continue
+        try:
+            e = json.loads(ln)
+        except Exception:
+            continue
+        d = e.get("data") or {}
+        if e.get("type") == "session.mode_changed" and d.get("newMode"):
+            return d.get("newMode")
+        if e.get("type") in ("user.message", "permission.requested") and d.get("agentMode"):
+            return d.get("agentMode")
+    return None
+
+def presence(evs, last_line_bad, earlier_mode=None):
+    def out(state, reason, last=None, mode=None, pending=0, confidence="scanned"):
+        return {"state": state, "confidence": confidence, "reason": reason,
+                "last_event": (last or {}).get("type"), "last_event_at": (last or {}).get("timestamp"),
+                "mode": mode, "pending_permissions": pending}
+    if last_line_bad:
+        return out("unknown", "the transcript's last line is partial or malformed")
+    start = 0
+    for i, e in enumerate(evs):
+        if e.get("type") in BOUNDARY:
+            start = i
+    mode = earlier_mode
+    pending = {}
+    last = None
+    for e in evs[start:]:
+        t = e.get("type"); d = e.get("data") or {}
+        if t == "session.mode_changed" and d.get("newMode"):
+            mode = d.get("newMode")
+        elif t in ("user.message", "permission.requested") and d.get("agentMode"):
+            mode = d.get("agentMode")
+        if t == "permission.requested":
+            pending[d.get("requestId") or e.get("id")] = e
+        elif t == "permission.completed":
+            pending.pop(d.get("requestId"), None)
+        if t in BUSY or t in SETTLED or t == "session.shutdown" or t == "permission.requested":
+            last = e
+    if last is None:
+        return out("unknown", "no presence-bearing event since the session started", mode=mode)
+    kind = last.get("type")
+    if kind == "session.shutdown":
+        return out("absent", "the session shut down", last, mode)
+    if pending:
+        return out("awaiting_input", "a permission request is unanswered", last, mode, len(pending))
+    if kind in BUSY:
+        return out("busy", "mid-turn", last, mode)
+    if mode in ("autopilot", "headless"):
+        return out("idle", "the turn ended (autopilot: nothing is asked of a human)", last, mode)
+    if mode is None:
+        return out("awaiting_input", "the turn ended; no mode signal, so assumed interactive", last,
+                   "interactive", confidence="heuristic")
+    return out("awaiting_input", "the turn ended and the session is interactive", last, mode)
 
 try:
     main()

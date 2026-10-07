@@ -177,3 +177,107 @@ def test_cmd_peek_container_target_fails_closed_instead_of_reading_local(
     with pytest.raises(SystemExit) as exc_info:
         main_mod._cmd_peek(args)
     assert exc_info.value.code == 1
+
+
+# -- presence ------------------------------------------------------------------------
+
+
+def _ev(kind: str, at: int, **data) -> dict:
+    return {"type": kind, "data": data, "id": f"e{at}", "timestamp": f"2026-10-06T00:00:{at:02}Z"}
+
+
+def _presence(tmp_path, events: list[dict], *, raw_tail: str = "") -> dict:
+    root = str(tmp_path)
+    sdir = _write_session(root, _ACP, events)
+    if raw_tail:
+        with open(os.path.join(sdir, "events.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(raw_tail)
+    snap = ps.snapshot_local(_ACP, session_state_root=root)
+    assert snap["ok"] is True
+    return snap["presence"]
+
+
+_TURN = [_ev("session.start", 0), _ev("user.message", 1, content="go", agentMode="interactive"),
+         _ev("assistant.turn_start", 2, turnId="1")]
+
+
+@pytest.mark.parametrize("tail, state", [
+    ([], "busy"),
+    ([_ev("tool.execution_start", 3), _ev("assistant.message", 4, content="working")], "busy"),
+    ([_ev("assistant.turn_end", 3, turnId="1")], "awaiting_input"),
+    ([_ev("permission.requested", 3, requestId="r1", agentMode="interactive")], "awaiting_input"),
+    ([_ev("permission.requested", 3, requestId="r1"), _ev("permission.completed", 4, requestId="r1")], "busy"),
+    ([_ev("assistant.turn_end", 3), _ev("session.shutdown", 4, shutdownType="routine")], "absent"),
+])
+def test_presence_follows_the_transcript(tmp_path, tail, state):
+    assert _presence(tmp_path, _TURN + tail)["state"] == state
+
+
+def test_an_ended_turn_is_idle_in_autopilot_and_awaiting_input_when_interactive(tmp_path):
+    ended = _ev("assistant.turn_end", 9)
+    auto = _presence(tmp_path / "a", [*_TURN, _ev("session.mode_changed", 5, previousMode="interactive",
+                                                     newMode="autopilot"), ended])
+    assert (auto["state"], auto["mode"]) == ("idle", "autopilot")
+    steered = _presence(tmp_path / "b", [_ev("session.start", 0),
+                                         _ev("user.message", 1, agentMode="autopilot"), ended])
+    assert steered["state"] == "idle"
+    plain = _presence(tmp_path / "c", [_ev("session.start", 0), _ev("user.message", 1), ended])
+    assert (plain["state"], plain["mode"]) == ("awaiting_input", "interactive")
+
+
+def test_an_unanswered_permission_outlives_later_events(tmp_path):
+    p = _presence(tmp_path, [*_TURN, _ev("permission.requested", 3, requestId="r1"),
+                             _ev("assistant.turn_end", 4)])
+    assert (p["state"], p["pending_permissions"]) == ("awaiting_input", 1)
+
+
+def test_only_events_since_the_last_resume_count(tmp_path):
+    """A permission left pending before a shutdown and resume is no longer asked."""
+    p = _presence(tmp_path, [*_TURN, _ev("permission.requested", 3, requestId="old"),
+                             _ev("session.shutdown", 4), _ev("session.resume", 5),
+                             _ev("user.message", 6), _ev("assistant.turn_end", 7)])
+    assert (p["state"], p["pending_permissions"]) == ("awaiting_input", 0)
+    assert p["last_event"] == "assistant.turn_end"
+
+
+def test_a_partial_last_line_is_unknown(tmp_path):
+    p = _presence(tmp_path, _TURN, raw_tail='{"type": "tool.execution_sta')
+    assert p["state"] == "unknown" and "partial" in p["reason"]
+
+
+def test_no_presence_bearing_event_is_unknown(tmp_path):
+    p = _presence(tmp_path, [_ev("session.start", 0), _ev("session.model_change", 1)])
+    assert p["state"] == "unknown"
+    assert p["confidence"] == "scanned"
+
+
+def test_the_shipped_driver_classifies_the_same_on_a_remote_shell(tmp_path):
+    """The codespace path runs the same driver through bash: its presence matches."""
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    if not bash or os.name == "nt":
+        pytest.skip("needs a POSIX bash")
+    root = str(tmp_path)
+    _write_session(root, _ACP, _TURN + [_ev("assistant.turn_end", 3)])
+    out = subprocess.run([bash, "-c", ps.build_peek_command(_ACP, session_state_root=root)],
+                         capture_output=True, text=True, timeout=60).stdout
+    assert ps.parse_peek_result(out)["presence"]["state"] == "awaiting_input"
+
+
+def test_a_mode_signal_older_than_the_parsed_tail_still_counts(tmp_path):
+    """A long autopilot turn pushes its user.message (with agentMode) out of the parsed
+    tail; the mode is still found in the read window, back to the last boundary."""
+    root = str(tmp_path)
+    tools = [_ev("tool.execution_complete", 10 + i) for i in range(30)]
+    _write_session(root, _ACP, [_ev("session.start", 0), _ev("user.message", 1, agentMode="autopilot"),
+                                *tools, _ev("assistant.turn_end", 59)])
+    p = ps.snapshot_local(_ACP, session_state_root=root, tail_lines=5)["presence"]
+    assert (p["state"], p["mode"], p["confidence"]) == ("idle", "autopilot", "scanned")
+
+
+def test_an_ended_turn_with_no_mode_signal_is_a_heuristic(tmp_path):
+    p = _presence(tmp_path, [_ev("session.start", 0), _ev("assistant.turn_start", 1),
+                             _ev("assistant.turn_end", 2)])
+    assert (p["state"], p["confidence"]) == ("awaiting_input", "heuristic")

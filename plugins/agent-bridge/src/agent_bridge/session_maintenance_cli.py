@@ -88,7 +88,11 @@ def _peek_iso(ts: object) -> str:
     return s[:19].replace("T", " ") if s else "-"
 
 
-def _cmd_peek(args: argparse.Namespace) -> None:
+def _peek_target(args: argparse.Namespace):
+    """Resolve ``args.target`` to a session and read its transcript snapshot over
+    its own transport: ``(session, session_id, agent, acp_session_id, snapshot)``, with
+    ``snapshot`` None when Copilot hasn't written a transcript yet. Exits 1 when
+    no session matches or the transport fails."""
     from . import peek_snapshot as ps
     from . import target_exec as tx
 
@@ -119,13 +123,7 @@ def _cmd_peek(args: argparse.Namespace) -> None:
     agent = session.get("agent_name") or ""
     acp = session.get("acp_session_id")
     if not acp:
-        msg = f"session {sid} ({agent}) has no acp_session_id yet -- copilot has not written a transcript"
-        if args.json:
-            core._json_out({"ok": False, "reason": msg, "session_id": sid, "agent": agent})
-        else:
-            print(f"[peek] {msg}")
-        return
-
+        return session, sid, agent, acp, None
     try:
         kind = tx.target_kind(session)
         if kind == "local":
@@ -137,7 +135,21 @@ def _cmd_peek(args: argparse.Namespace) -> None:
     except tx.TargetExecError as exc:
         print(f"[FAIL] peek transport error: {exc}", file=sys.stderr)
         sys.exit(1)
+    return session, sid, agent, acp, snap
 
+
+def _cmd_peek(args: argparse.Namespace) -> None:
+    from . import peek_snapshot as ps
+
+    core = _core()
+    session, sid, agent, acp, snap = _peek_target(args)
+    if snap is None:
+        msg = f"session {sid} ({agent}) has no acp_session_id yet -- copilot has not written a transcript"
+        if args.json:
+            core._json_out({"ok": False, "reason": msg, "session_id": sid, "agent": agent})
+        else:
+            print(f"[peek] {msg}")
+        return
     verdict, reason = ps.reuse_verdict(snap, stale_after_seconds=float(args.stale_hours) * 3600)
 
     if args.json:
@@ -166,6 +178,29 @@ def _cmd_peek(args: argparse.Namespace) -> None:
     tools = snap.get("recent_tool_calls") or []
     if tools:
         print("    tools:   " + ", ".join(str(t.get("title", "?")) for t in tools[:6]))
+
+
+def _cmd_presence(args: argparse.Namespace) -> None:
+    """What a session is doing now, from its own transcript (see ``peek_snapshot``'s
+    "Presence"): busy | awaiting_input | idle | absent | unknown."""
+    core = _core()
+    _session, sid, agent, acp, snap = _peek_target(args)
+    if snap is None:
+        presence = {"state": "unknown", "confidence": "scanned",
+                    "reason": "copilot hasn't written a transcript yet"}
+    elif not snap.get("ok"):
+        presence = {"state": "unknown", "confidence": "scanned",
+                    "reason": snap.get("reason", "the transcript couldn't be read")}
+    else:
+        presence = snap.get("presence") or {"state": "unknown", "confidence": "scanned",
+                                            "reason": "the transcript reader reported no presence"}
+    if args.json:
+        core._json_out({"session_id": sid, "agent": agent, "acp_session_id": acp, "presence": presence,
+                        "observed_at": snap.get("mtime") if snap else None})
+        return
+    when = f" since {_peek_iso(presence.get('last_event_at'))}" if presence.get("last_event_at") else ""
+    mode = f", {presence['mode']}" if presence.get("mode") else ""
+    print(f"  {sid}  ({agent}): {presence.get('state')}{when} -- {presence.get('reason')}{mode}")
 
 
 def _cmd_drain(args: argparse.Namespace) -> None:
@@ -254,6 +289,17 @@ def register_session_maintenance_commands(sub: argparse._SubParsersAction) -> No
     peek_p.add_argument("--stale-hours", dest="stale_hours", type=float, default=6.0, help="Age past which a session is 'cold' in the verdict (default 6h)")
     peek_p.add_argument("--json", action="store_true", help="Emit JSON.")
     peek_p.set_defaults(func=_cmd_peek)
+
+    presence_p = sub.add_parser(
+        "presence",
+        help="What a session is doing now -- busy | awaiting_input | idle | absent | unknown -- "
+             "read from its own events.jsonl (never self-reported), without launching ACP",
+    )
+    presence_p.add_argument("target", help="Session ID or agent name (e.g. codespace:<name>)")
+    presence_p.add_argument("--tail", type=int, default=400, help="Trailing events.jsonl lines to scan (default 400)")
+    presence_p.add_argument("--timeout", type=float, default=90.0, help="Remote read timeout seconds for a codespace target (default 90)")
+    presence_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    presence_p.set_defaults(func=_cmd_presence, recent=1, message_chars=1)
 
     gc_p = sub.add_parser("gc", help="Garbage-collect aged terminal/disconnected sessions and compact the sessions.db (reclaims freelist bloat)")
     gc_p.set_defaults(func=_cmd_gc)
