@@ -39,15 +39,36 @@ def mux_attached_clients(mux_bin: str, session: str) -> int | None:
 
 def refresh_attached_clients(registry, current: dict) -> dict:
     """Opportunistically refresh ``current``'s registry-tracked
-    ``attached_clients`` via a real :func:`mux_attached_clients` probe,
-    persisting the change through ``registry`` (an equal-revision live
-    refresh) only when it actually differs. Returns the (possibly updated)
-    mapping dict; a probe failure (``None``) is a no-op, per
-    :func:`mux_attached_clients`'s own docstring."""
+    ``attached_clients`` via a real :func:`mux_attached_clients` probe.
+    Returns the (possibly updated) mapping dict; a probe failure (``None``)
+    or an unchanged count is a no-op, per :func:`mux_attached_clients`'s own
+    docstring.
+
+    The actual persist goes through
+    :meth:`~worktree_manager.mux_mapping_registry.MuxMappingRegistry.
+    update_attached_clients`, an atomic identity-guarded single-field update
+    (Copilot review finding) -- ``list-clients`` can block for up to several
+    seconds, long enough for a concurrent ``register()`` to replace this
+    mapping's ``mux_session`` at the SAME revision (a case ``register()``'s
+    own monotonic-revision guard deliberately permits, so it does not
+    reject this on its own). Writing the stale whole-entry snapshot back
+    after that race would silently resurrect the superseded session;
+    ``update_attached_clients`` re-verifies identity and persists only the
+    one field, atomically, so a superseded refresh is correctly abandoned
+    instead."""
     observed = mux_attached_clients(current["mux_bin"], current["mux_session"])
     if observed is None or observed == current.get("attached_clients"):
         return current
+    result = registry.update_attached_clients(
+        current["project"],
+        current["worktree_id"],
+        observed,
+        mapping_revision=current["mapping_revision"],
+        mux_session=current["mux_session"],
+        session_incarnation=current.get("session_incarnation"),
+    )
+    if not result.get("applied"):
+        return current
     updated = dict(current)
     updated["attached_clients"] = observed
-    registry.register(updated)
     return updated

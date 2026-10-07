@@ -87,8 +87,8 @@ def cmd_daemons(rest: list[str]) -> int:
         print("   one specific pid)")
         print("  (attached_clients converges onto the real list-clients count within")
         print("   one status-render cycle of the daemon observing a live session --")
-        print("   see mux_daemon._mux_attached_clients (#4564); a brand-new mapping")
-        print("   that hasn't yet seen its first cycle may still read 0)")
+        print("   see worktree_manager.mux_attached_clients (#4564); a brand-new")
+        print("   mapping that hasn't yet seen its first cycle may still read 0)")
         return 0
     print(f"error: unknown daemons action {action!r}")
     return 2

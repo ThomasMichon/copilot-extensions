@@ -343,20 +343,28 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     Manager has ever registered, each one's own ``live`` flag, and its
     registry-tracked ``attached_clients`` count.
 
-    **``attached_clients`` freshness (#4564):** neither shipped launch path
-    (``bin/launch-session.sh``/``.ps1``) ever passes ``--attached-clients``
-    at register() time, so normalization (``_normalize_mapping_entry``)
-    defaults a brand-new mapping to ``0``. ``mux_daemon.build_compute``'s
-    ``mux-status-v1`` handler now opportunistically refreshes the field
-    (``list-clients``) at the same periodic cadence routed status renders
-    already arrive at, so a genuinely live, attached session converges onto
-    its real count within one status-render cycle of the daemon observing
-    it -- it is no longer stuck at a stale launch-time value forever. This
-    function still reports whatever is currently stored exactly as-is (it
-    never invents or estimates); a brand-new mapping that hasn't yet seen
-    its first status-render cycle, or one whose mux session accepts no
-    routed status (@aw_* writes are the only thing that currently drives
-    this refresh), can still read ``0``/stale momentarily.
+    **``attached_clients`` freshness (#4564 -- PARTIAL fix, writer-side
+    only):** neither shipped launch path (``bin/launch-session.sh``/``.ps1``)
+    ever passes ``--attached-clients`` at register() time, so normalization
+    (``_normalize_mapping_entry``) defaults a brand-new mapping to ``0``.
+    ``mux_daemon.build_compute``'s ``mux-status-v1`` handler now
+    opportunistically refreshes the field (``list-clients``) at the same
+    periodic cadence routed status renders already arrive at, so a
+    genuinely live, attached session converges onto its real count within
+    one status-render cycle of the daemon observing it -- it is no longer
+    stuck at a stale launch-time value forever. This function still
+    reports whatever is currently stored exactly as-is (it never invents
+    or estimates); a brand-new mapping that hasn't yet seen its first
+    status-render cycle, or one whose mux session accepts no routed status
+    (@aw_* writes are the only thing that currently drives this refresh),
+    can still read ``0``/stale momentarily. **This closes only #4564's
+    "Proposed fix" step 1** (the writer-side ``attached_clients`` gap).
+    #4564 also proposes a distinct ``reachable`` field (preserving the
+    last-known ``live``/``attached_clients`` values across an unreachable
+    session rather than this registry's current tombstone-on-death
+    behavior) and a batch "restore what I had open" verb -- neither is
+    implemented here; both remain open, tracked follow-on work under the
+    same issue.
 
     This is NOT filtered to currently-live mappings either: ``snapshot()``
     also returns tombstoned entries (``live: False``), which the registry
