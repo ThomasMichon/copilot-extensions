@@ -2,12 +2,12 @@
 
 Regression coverage for a self-looping-SSH bug: a worktree record, an
 embodied-task payload, or any other producer can carry the canonical
-``machines.yaml`` key/alias for THIS machine (e.g. ``tmichon-cloud2``) while
-``data_local.LOCAL`` is spelled from the raw OS hostname (e.g. a cloud
-devtunnel-provisioned box's real ``socket.gethostname()``, which can differ
-from its configured alias). A naive ``(machine, env) == LOCAL`` tuple
-comparison then wrongly concludes "remote" and dispatches over SSH to reach a
-host that is actually this one -- see ``engine_worktree_actions.py``'s
+``machines.yaml`` key/alias for THIS machine (e.g. a cloud box's configured
+``aurora-cloud2`` alias) while ``data_local.LOCAL`` is spelled from the raw OS
+hostname (e.g. a devtunnel-provisioned box's real ``socket.gethostname()``,
+which can differ from its configured alias). A naive
+``(machine, env) == LOCAL`` tuple comparison then wrongly concludes "remote"
+and dispatches over SSH to reach a host that is actually this one -- see ``engine_worktree_actions.py``'s
 ``_resume_embodied_worktree_cli``/``_embody_task_cli``, which depend on
 ``is_local`` for exactly this reason.
 """
@@ -56,10 +56,10 @@ def test_is_local_rejects_a_different_env_even_with_same_machine(monkeypatch):
 
 def test_is_local_canonicalizes_a_registry_alias_for_this_host(monkeypatch):
     """The exact regression: ``machine`` is this host's canonical
-    ``machines.yaml`` key (``tmichon-cloud2``), not its raw OS hostname."""
-    entries = {"tmichon-cloud2": _entry("tmichon-cloud2")}
-    _install_roster(monkeypatch, entries, machine="tmichon-cloud2")
-    assert data_local.is_local("tmichon-cloud2", data_local.LOCAL[1]) is True
+    ``machines.yaml`` key (``aurora-cloud2``), not its raw OS hostname."""
+    entries = {"aurora-cloud2": _entry("aurora-cloud2")}
+    _install_roster(monkeypatch, entries, machine="aurora-cloud2")
+    assert data_local.is_local("aurora-cloud2", data_local.LOCAL[1]) is True
 
 
 def test_is_local_canonicalizes_via_hostname_field(monkeypatch):
@@ -74,23 +74,23 @@ def test_is_local_canonicalizes_via_hostname_field(monkeypatch):
 
 def test_is_local_canonicalizes_via_alias_field(monkeypatch):
     entries = {
-        "tmichon-cloud2": _entry("tmichon-cloud2", alias="tmichon-cloud2"),
+        "aurora-cloud2": _entry("aurora-cloud2", alias="aurora-cloud2"),
     }
-    _install_roster(monkeypatch, entries, machine="tmichon-cloud2")
-    assert data_local.is_local("tmichon-cloud2", data_local.LOCAL[1]) is True
+    _install_roster(monkeypatch, entries, machine="aurora-cloud2")
+    assert data_local.is_local("aurora-cloud2", data_local.LOCAL[1]) is True
 
 
 def test_is_local_rejects_a_genuinely_different_machine(monkeypatch):
     entries = {
-        "tmichon-cloud2": _entry("tmichon-cloud2"),
-        "tmichon-cloud1": _entry("tmichon-cloud1"),
+        "aurora-cloud2": _entry("aurora-cloud2"),
+        "aurora-cloud1": _entry("aurora-cloud1"),
     }
-    _install_roster(monkeypatch, entries, machine="tmichon-cloud2")
-    assert data_local.is_local("tmichon-cloud1", data_local.LOCAL[1]) is False
+    _install_roster(monkeypatch, entries, machine="aurora-cloud2")
+    assert data_local.is_local("aurora-cloud1", data_local.LOCAL[1]) is False
 
 
 def test_is_local_rejects_unknown_machine(monkeypatch):
-    _install_roster(monkeypatch, {}, machine="tmichon-cloud2")
+    _install_roster(monkeypatch, {}, machine="aurora-cloud2")
     assert data_local.is_local("nonexistent-box", data_local.LOCAL[1]) is False
 
 
@@ -103,7 +103,7 @@ def test_is_local_degrades_safely_when_registry_unavailable(monkeypatch):
         raise FileNotFoundError("no config")
 
     monkeypatch.setattr(data_local.cfg, "load_config", _boom)
-    assert data_local.is_local("tmichon-cloud2", data_local.LOCAL[1]) is False
+    assert data_local.is_local("aurora-cloud2", data_local.LOCAL[1]) is False
 
 
 def test_data_ssh_is_local_delegates_to_data_local():
