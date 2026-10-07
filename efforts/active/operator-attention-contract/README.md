@@ -92,7 +92,7 @@ an empty queue.
   | `actions[]` | `{verb, argv}`: sanctioned commands that run **as-is**, with no placeholder to fill (e.g. `agent-dispatch card show <task-id>`, `agent-bridge result <session-id>`). An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
   | `source` | the adapter that produced it |
   | `input` | optional: the card's `request_input` form spec when resolving it needs an operator's answer (submitted with `agent-dispatch steer submit`) |
-  | `also[]` | the lower-ranked items deduplicated into this one (each a full item, in queue order); empty when none |
+  | `also[]` | **aggregator-owned**: the lower-ranked items deduplicated into this one (each a full item, in queue order); empty when none. A source never fills it -- an adapter or command item with a non-empty `also[]` is malformed, and that source is `failed` -- so a nested item can't slip past the identity stamping and the one-item-per-entity check |
 
 - [ ] **Display, not lifecycle.** A `live`/`started` entity waiting on a human
   surfaces. `blocked` counts only when nothing inbound can still resolve it.
@@ -221,7 +221,8 @@ an empty queue.
   the ordered queue, with the degraded banner in text mode. `--source` names a
   known source (built-in or registered); an unknown name is a usage error (exit
   2, nothing read), never silently omitted -- a typo must not read as `clear`.
-- [ ] `agent-dispatch attention next [--after <cursor>]`: the oldest worst item (a
+- [ ] `agent-dispatch attention next [--after <cursor>] [--json] [--source <name>...] [--include-remote]`
+  (each flag on the `next` subcommand itself, so it's accepted after `next`): the oldest worst item (a
   keyboard walk in a UI is this, repeated). The cursor is opaque but carries the
   queue position -- `(severity, created_at, id)` of the item last shown -- not just
   its id, so `next` returns the first item strictly after that position in the
@@ -305,8 +306,10 @@ an empty queue.
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
   a duplicate name) is rejected; an item stating another `source` or a foreign
   `id` is invalid; an item omitting both is stamped and then validated; a
-  stamped item's `id` and first-observed key are its own. `--source bridgge` (an
-  unknown name) exits 2 without reading anything.
+  stamped item's `id` and first-observed key are its own; an item arriving with a
+  non-empty `also[]` fails its source. `--source bridgge` (an
+  unknown name) exits 2 without reading anything, and `attention next --json
+  --source dispatch` parses with the flags after `next`.
 - [ ] Unit, the pr adapter: from a CWD outside any project, two registered
   projects each tracking a PR with a failing bar give both items; a project
   whose tracked PRs can't be enumerated makes the source `failed`.
