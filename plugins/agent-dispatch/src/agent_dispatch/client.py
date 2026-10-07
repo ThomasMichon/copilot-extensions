@@ -18,7 +18,7 @@ from .client_registrations import RegistrationClientMixin
 from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
 from .client_suspend import SuspendClientMixin
-from .client_transport import default_transport
+from .client_transport import ConnectRetryClient
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 class DispatchError(RuntimeError):
@@ -62,11 +62,12 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
     ):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         verify = not base_url.lower().startswith("http://")
-        self._http = httpx.Client(
+        self._http = ConnectRetryClient(
             base_url=base_url.rstrip("/"),
             headers=headers,
             timeout=timeout,
-            transport=transport if transport is not None else default_transport(verify=verify),
+            transport=transport,
+            verify=verify,
         )
         self._control_token = control_token
         # An optional owned resource (e.g. an SSH failover port-forward) closed

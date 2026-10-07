@@ -1623,6 +1623,28 @@ def test_default_connect_retries_env_override(monkeypatch):
     assert default_connect_retries() == 2
 
 
+def test_connect_retry_client_preserves_environment_proxy_routing(monkeypatch):
+    """``ConnectRetryClient`` must build the exact same proxy mounts a plain
+    ``httpx.Client()`` would for the same environment -- unlike passing a
+    custom ``transport=`` (which disables ``HTTP_PROXY``/``HTTPS_PROXY``/
+    ``NO_PROXY`` discovery entirely, since ``httpx.Client`` only computes
+    ``allow_env_proxies`` when ``transport is None``), overriding ``send()``
+    changes nothing about how Client resolves or mounts proxies."""
+    from agent_dispatch.client_transport import ConnectRetryClient
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
+
+    plain = httpx.Client()
+    retrying = ConnectRetryClient()
+    try:
+        assert len(retrying._mounts) == len(plain._mounts) == 1
+        (pattern, transport) = next(iter(retrying._mounts.items()))
+        assert isinstance(transport, httpx.HTTPTransport)
+    finally:
+        plain.close()
+        retrying.close()
+
+
 def test_client_survives_transient_connection_refused(monkeypatch, tmp_path):
     """A coordinator supersession cutover can leave a brief window where the
     old generation has released its socket and the new one hasn't bound yet:

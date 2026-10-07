@@ -3842,14 +3842,10 @@ def test_resolving_client_rejects_unknown_attribute():
 
 
 def test_dispatch_client_skips_tls_setup_only_for_plain_http(monkeypatch):
-    """`verify` now lives on the default `httpx.HTTPTransport` this client
-    builds (so it can also carry the connect-retry count), not on the
-    `httpx.Client` kwargs directly -- capture both constructors."""
     from agent_dispatch import client as client_module
     from agent_dispatch.client import DispatchClient
 
     created: list[dict] = []
-    transports: list[dict] = []
 
     class FakeHttpClient:
         def __init__(self, **kwargs):
@@ -3858,20 +3854,13 @@ def test_dispatch_client_skips_tls_setup_only_for_plain_http(monkeypatch):
         def close(self):
             pass
 
-    class FakeTransport:
-        def __init__(self, **kwargs):
-            transports.append(kwargs)
-
-    monkeypatch.setattr(client_module.httpx, "Client", FakeHttpClient)
-    monkeypatch.setattr(client_module.httpx, "HTTPTransport", FakeTransport)
+    monkeypatch.setattr(client_module, "ConnectRetryClient", FakeHttpClient)
 
     DispatchClient("http://127.0.0.1:9847").close()
     DispatchClient("https://dispatch.example.com").close()
 
-    assert "verify" not in created[0]
-    assert "verify" not in created[1]
-    assert transports[0]["verify"] is False
-    assert transports[1]["verify"] is True
+    assert created[0]["verify"] is False
+    assert created[1]["verify"] is True
 
 
 # -- headless-ACP embody backend ---------------------------------------------
