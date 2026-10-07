@@ -396,8 +396,8 @@ _PUSHED = {"success": True, "branch": "b", "remote": "fork", "provider": "github
 
 @pytest.mark.parametrize("result, state, headline", [
     (_PUSHED, "pushed", "no PR opened: the branch was pushed (--no-open)"),
-    ({**_PUSHED, "pr_open_skipped": None, "dry_run": True}, "pushed",
-     "no PR opened: dry run, nothing was pushed"),
+    ({**_PUSHED, "pr_open_skipped": None, "dry_run": True}, "dry-run",
+     "dry run: nothing was pushed or opened"),
     ({**_PUSHED, "pr_open_skipped": None, "pr_opened": False, "pr_open_error": "HTTP 422"}, "pushed",
      "no PR opened: the provider refused: HTTP 422"),
     ({**_PUSHED, "pr_open_skipped": None, "pr_opened": True, "number": 7,
@@ -418,3 +418,16 @@ def test_create_pr_json_reminder_says_created_only_when_a_pr_was_opened(
         assert m.cmd_create_pr(_args(["create-pr", wid, "--title", "x", "--json"])) == 0
     reminder = json.loads(buf.getvalue())["reminder"]
     assert (reminder["state"], reminder["headline"]) == (state, headline)
+
+
+def test_a_dry_run_never_says_it_pushed(pr_repo, monkeypatch, capsys):
+    """Human output for a preview: 'would push', never 'pushed', and no PR claimed."""
+    config, wid, _wt_path, _ = pr_repo
+    monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(m.pr_ops, "create_pr", lambda *_a, **_k: {**_PUSHED, "pr_open_skipped": None,
+                                                                  "dry_run": True})
+    assert m.cmd_create_pr(_args(["create-pr", wid, "--title", "x", "--dry-run"])) == 0
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "would push" in text and "pushed to" not in text
+

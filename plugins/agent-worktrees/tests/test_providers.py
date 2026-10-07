@@ -3484,9 +3484,10 @@ class TestRerunAutoOpen:
         assert r1["success"] and r1["pr_open_skipped"] == "--no-open"
         r2 = pr_ops.create_pr(wid, config, title="Add feature")  # opens it
         n = r2["number"]
-        r3 = pr_ops.create_pr(wid, config, title="Add feature", open_pr=False)
+        r3 = pr_ops.create_pr(wid, config, title="Add feature", open_pr=False, draft=True)
         assert r3.get("rerun") is True, r3
         assert (r3["pr_opened"], r3["number"]) == (True, n) and "pr_open_skipped" not in r3
+        assert r3["draft"] is False  # nothing was opened, so no draft was created
         assert fake.create_calls == 1
 
     def test_auto_open_off_says_so(self, pr_repo, monkeypatch):

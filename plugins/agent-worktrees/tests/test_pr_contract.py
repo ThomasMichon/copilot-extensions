@@ -1392,3 +1392,9 @@ class TestCreatePrPushedReminder:
 
     def test_created_still_reads_pr_created(self):
         assert pc.pr_reminder(_self_merge_flow(), "create-pr", pc.PR_STATE_CREATED).headline == "PR created"
+
+    def test_a_dry_run_has_its_own_state_and_next_step(self):
+        r = pc.pr_reminder(_self_merge_flow(), "create-pr", pc.PR_STATE_DRY_RUN)
+        assert (r.state, r.headline) == ("dry-run", "dry run: nothing was pushed or opened")
+        assert "without `--dry-run`" in r.next_step and "set-pr" not in r.next_step
+

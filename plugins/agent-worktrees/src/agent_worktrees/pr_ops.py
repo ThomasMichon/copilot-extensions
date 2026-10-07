@@ -1639,6 +1639,7 @@ def _finish_auto_open(
         else:
             result["pr_opened"] = True
             result["number"] = target_pr.number
+            result["draft"] = False  # nothing was opened here, so no draft was created
             if target_pr.url:
                 result["url"] = target_pr.url
         return

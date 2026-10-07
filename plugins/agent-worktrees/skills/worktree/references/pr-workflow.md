@@ -564,6 +564,8 @@ replaces the authored PR description.
 > says why in `pr_open_skipped` (`--no-open`, or `pr.auto_open is off`), and its
 > reminder reads `no PR opened` (state `pushed`), never `PR created`: there is
 > nothing to review or merge until the PR is opened and recorded.
+> A `--dry-run` reads `dry run: nothing was pushed or opened` (state `dry-run`)
+> and says it *would* push.
 
 > **Never run `create-pr`/`push-changes` for the same worktree from two
 > actors at once -- not even a delegated sub-agent "helping" with the exact
