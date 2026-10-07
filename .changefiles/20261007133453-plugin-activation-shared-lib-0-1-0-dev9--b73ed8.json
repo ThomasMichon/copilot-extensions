@@ -1,0 +1,9 @@
+{
+  "comment": "plugin-activation (shared lib, 0.1.0-dev9): an enabledPlugins entry without an @marketplace (a Copilot CLI built-in plugin) is left untouched instead of rejected as a malformed identity",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
