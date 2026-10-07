@@ -1630,6 +1630,8 @@ def _finish_auto_open(
     """
     want_open = prcfg.auto_open if open_pr is None else open_pr
     if target_pr is None:
+        if not want_open:  # untracked worktree: still say why nothing was opened
+            result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
         return
     if not want_open:
         # Nothing on the provider is touched; say what exists so no caller is told

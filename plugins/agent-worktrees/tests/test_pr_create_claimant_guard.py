@@ -430,4 +430,5 @@ def test_a_dry_run_never_says_it_pushed(pr_repo, monkeypatch, capsys):
     out = capsys.readouterr()
     text = out.out + out.err
     assert "would push" in text and "pushed to" not in text
+    assert "set-pr" not in text  # no branch exists, so no "open it and record it" advice
 

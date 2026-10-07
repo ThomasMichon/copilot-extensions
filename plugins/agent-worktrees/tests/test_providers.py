@@ -4013,3 +4013,16 @@ class TestAzureDevOpsReviewerOps:
             "proj/repo", 5, event="bogus", api_base=self.ORG, token="pat"
         )
         assert "unknown review event" in err
+
+
+def test_no_pr_opened_is_explained_even_without_a_tracked_pr():
+    """An untracked worktree (no record, so no target PR) still says why no PR was opened."""
+    from types import SimpleNamespace
+
+    kw = dict(title="t", body="", worktree_id="w", head_sha="h", draft=False, attribution=None)
+    for open_pr, auto_open, why in ((False, True, "--no-open"), (None, False, "pr.auto_open is off")):
+        result = {}
+        pr_ops._finish_auto_open(result, None, None, None, open_pr=open_pr,
+                                 prcfg=SimpleNamespace(auto_open=auto_open), **kw)
+        assert result == {"pr_open_skipped": why}
+

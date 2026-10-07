@@ -719,7 +719,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     f"Open the PR via the '{provider}' provider, then record it:\n"
                     f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
                 )
-            else:
+            elif not result.get("dry_run"):  # a dry run pushed nothing: no branch to open from
                 print(
                     f"Next: delegate PR creation to the '{provider}' provider, "
                     f"then record it with:\n"
