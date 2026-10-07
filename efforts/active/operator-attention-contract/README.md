@@ -54,7 +54,7 @@ needs you" and "a source couldn't be read" are never confused.
 | agent-dispatch | completed, unconfirmed self-tracked task | lifecycle (`completed` vs confirmed) | `inbox --board` |
 | agent-bridge | `attention.value == "input_required"`, `pending_input[0].message` | result snapshot (`result_snapshot.py`) | `agent-bridge result <s>`, `wait --attention input_required` |
 | agent-bridge | `presence`: `awaiting_input` / `unknown` (+ confidence) | transcript (`peek_snapshot.py`) | `agent-bridge presence <s> --json` |
-| agent-worktrees | merge bar `failed` / `unknown` | provider read (`pr_bar.py`) | `agent-worktrees pr bar <repo> <n> --json` |
+| agent-worktrees | merge bar `failed` / `unknown` | provider read (`pr_bar.py`, in review in #5566 — not yet on `dev`) | `agent-worktrees pr bar <repo> <n> --json` (exit 0 met/merged, 10 pending, 11 failed, 12 unknown) |
 
 ### Prior art
 
@@ -79,25 +79,32 @@ an empty queue.
   |---|---|
   | `id` | stable per (source, entity), e.g. `dispatch:task:<id>`, `bridge:session:<id>`, `pr:<owner/name>#<n>` |
   | `entity` | `task` \| `session` \| `pr` \| `other` (a source-defined kind) |
-  | `entity_ref` | what to act on (task id, session id, PR URL) |
+  | `entity_ref` | the canonical reference within its kind: a task id, a bridge session id, a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key) |
   | `lifecycle_state` | the owner's own state (`started`, `live`, `open`, ...) |
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
   | `severity` | derived from `display_state`: `failed` > `stalled` > `awaiting_input` > `blocked` > `review` |
   | `reason` | one line, ≤ 200 chars |
   | `created_at`, `updated_at` | when the condition began / was last observed |
   | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
-  | `actions[]` | `{verb, argv}`: the sanctioned CLI that resolves it (e.g. `agent-dispatch steer <id>`) |
+  | `actions[]` | `{verb, argv}`: the sanctioned CLI that resolves it, complete and runnable (e.g. `agent-dispatch steer submit <task-id> --field <key>=<value>`, `agent-dispatch card show <task-id>`) |
   | `source` | the adapter that produced it |
 
 - [ ] **Display, not lifecycle.** A `live`/`started` entity waiting on a human
   surfaces. `blocked` counts only when nothing inbound can still resolve it.
 - [ ] **Order:** severity (worst first), then `created_at` (oldest first), then
   `id`, so the order is fully deterministic.
-- [ ] **Dedupe** per `entity_ref`: keep the highest severity; the others become
-  `also[]` on the kept item, so nothing is silently dropped.
+- [ ] **Dedupe** on `(entity, entity_ref)` — the canonical kind plus its canonical
+  reference, never the bare reference (a task id and a session id can share a
+  string): keep the highest severity; the others become `also[]` on the kept item,
+  so nothing is silently dropped.
 - [ ] **Source result:** each adapter returns `{items[], ok, error?, read_at}`. The
   aggregate carries `sources[]` with each one's status. Any `ok: false` makes the
   aggregate `degraded: true`, never an empty queue that reads as "all clear".
+- [ ] **Only discovered sources take part** (standalone-first,
+  [a-la-carte independence](../../../docs/patterns/a-la-carte-independence.md)):
+  an optional sibling that isn't installed (agent-bridge, agent-worktrees) is
+  listed `disabled` and stays dark — it never degrades the result. An
+  agent-dispatch-only install is a complete, non-degraded queue of its own items.
 - [ ] Unit tests: ordering, dedupe, degraded vs empty, schema round-trip.
 
 ### Phase 2 — Built-in adapters
@@ -110,12 +117,18 @@ an empty queue.
 - [ ] **bridge**:
   - `input_required` → `awaiting_input` (`reported`);
   - presence `awaiting_input` → `awaiting_input` (`scanned`/`heuristic`);
-  - presence `unknown` on a session the bridge calls live → `stalled` (low confidence).
+  - presence `unknown` is **not** an item: it means the transcript couldn't be
+    read or holds no presence signal, not that the session stalled. It counts
+    toward the bridge source's status (`uncertain: n`). `stalled` needs independent
+    evidence: a session the bridge calls busy whose transcript hasn't moved for
+    longer than a configured threshold.
 
   Local reads only by default; remote venues opt in (`--include-remote`), since
   each is an SSH read.
-- [ ] **pr**: tracked open PRs whose `pr bar` verdict is `failed` → `failed`
-  (the author has something to do); `unknown` → `stalled`.
+- [ ] **pr** (needs `pr bar`, #5566): tracked open PRs whose `pr bar` exit is 11
+  (`failed`) → `failed` (the author has something to do). Exit 12 (`unknown`)
+  counts toward the source's status, not as an item. Until `pr bar` lands, the
+  adapter is `disabled`.
 - [ ] Each adapter is bounded by a per-source timeout. A timeout is that source's
   `ok: false`, not a hang.
 
@@ -140,7 +153,9 @@ an empty queue.
 
 ## Validation Plan
 
-- [ ] Unit: contract, ordering, dedupe, degraded/empty, each adapter on fixtures.
+- [ ] Unit: contract, ordering, dedupe — cross-source dedupe of one entity (two
+  sources naming the same PR) and cross-kind non-collision (a task and a session
+  with the same id) — degraded vs empty vs disabled, each adapter on fixtures.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded: true` with the
@@ -155,9 +170,8 @@ _Pending._ Open questions for review:
 1. **Owner.** This draft puts the aggregator in agent-dispatch, which already owns
    the operator inbox. The alternative is agent-worktrees, which is closest to the
    PR and worktree signals. The contract module is owner-neutral either way.
-2. **`stalled` from presence `unknown`.** Useful, but noisy for sessions whose
-   transcript is simply unavailable. Phase 2 keeps it low-confidence, and off for
-   remote venues unless asked.
+2. **The `stalled` threshold.** How long a busy session's transcript may stay
+   still before it's `stalled` (presence `unknown` alone never is).
 3. **Hold as an item.** An operator's own hold is listed (low severity) so it
    isn't forgotten. It could instead be filtered out by default.
 
