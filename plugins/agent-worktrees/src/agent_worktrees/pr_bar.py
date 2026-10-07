@@ -124,8 +124,13 @@ def _ci(snap: Snapshot) -> Clause:
     return Clause("ci_green", "met", f"{len(snap.checks)} checks passed on {_short(snap.head)}")
 
 
+#: Review states that are in effect: a dismissed or still-pending review isn't.
+_EFFECTIVE = ("APPROVED", "CHANGES_REQUESTED", "COMMENTED")
+
+
 def _latest_by(snap: Snapshot, login: str) -> dict | None:
-    mine = [r for r in snap.reviews if (r.get("author") or "").lower() == login.lower()]
+    mine = [r for r in snap.reviews if (r.get("author") or "").lower() == login.lower()
+            and r.get("state") in _EFFECTIVE]
     return max(mine, key=lambda r: r.get("at") or "") if mine else None
 
 
@@ -189,10 +194,11 @@ def _threads(snap: Snapshot) -> Clause:
 
 def _is_human(review: dict, snap: Snapshot, reviewer: str) -> bool:
     """A reviewer who is a person: not an app (GraphQL's ``Bot``; a REST login's
-    ``[bot]`` suffix), not the PR's reviewer of record, not its author."""
+    ``[bot]`` suffix, Copilot's reviewer), not the PR's author. A person named as the
+    reviewer of record still counts: their change request is a human one."""
     low = (review.get("author") or "").lower()
     return bool(low) and not review.get("bot") and not low.endswith("[bot]") \
-        and low not in (reviewer.lower(), COPILOT_REVIEWER, (snap.author or "").lower())
+        and low not in (COPILOT_REVIEWER, (snap.author or "").lower())
 
 
 def _humans(snap: Snapshot, reviewer: str) -> Clause:

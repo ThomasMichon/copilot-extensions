@@ -563,7 +563,8 @@ def test_an_outdated_thread_is_not_open():
 
 
 @pytest.mark.parametrize("bad", [{"state": "LOOKS_FINE"}, {"state": None}, {"submittedAt": None},
-                                 {"submittedAt": 5}, {"body": ["x"]}])
+                                 {"submittedAt": 5}, {"body": ["x"]}, {"commit": None},
+                                 {"commit": {"oid": ""}}])
 def test_a_malformed_review_field_is_unknown(bad):
     review = {**_review(), **bad}
     status = _status(_bar(FakeGh(reviews=[review])))
@@ -622,3 +623,20 @@ def test_a_demoted_actor_needs_a_persons_approval(monkeypatch, capsys):
     kept = SimpleNamespace(pr_config=base, resolution="actor-role")
     assert _cli_bar(monkeypatch, capsys, kept, [_review()])["merge_policy"] == "met"
 
+
+@pytest.mark.parametrize("state", ["DISMISSED", "PENDING"])
+def test_a_dismissed_or_pending_review_is_not_the_reviewers_latest(state):
+    """Only a review in effect counts: a dismissed clean review on the head can't meet
+    the review clauses (nor can a pending one)."""
+    old = _review(commit=OLD, at="2026-10-06T09:00:00Z")
+    gone = _review(state=state, at="2026-10-06T10:00:00Z")
+    if state == "PENDING":
+        gone["submittedAt"] = None
+    status = _status(_bar(FakeGh(reviews=[old, gone])))
+    assert status["review_on_head"] == "pending"
+
+
+def test_a_person_named_as_the_reviewer_still_counts_as_human():
+    asks = _review(author="alice", state="CHANGES_REQUESTED", body=CHANGES_BODY)
+    bar = _bar(FakeGh(reviews=[_review(), asks]), reviewer="alice")
+    assert _status(bar)["human_reviews_answered"] == "failed"

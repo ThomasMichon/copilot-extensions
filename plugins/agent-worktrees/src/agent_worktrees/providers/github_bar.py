@@ -68,6 +68,10 @@ def _review(node: dict) -> None:
         raise ReadError(f"reviews: a {state} review without a readable time")
     if node.get("body") is not None and not isinstance(node.get("body"), str):
         raise ReadError("reviews: an unreadable body")
+    commit = node.get("commit")
+    if state in ("APPROVED", "CHANGES_REQUESTED", "COMMENTED") and not (
+            isinstance(commit, dict) and isinstance(commit.get("oid"), str) and commit["oid"]):
+        raise ReadError(f"reviews: a {state} review without a readable commit (it decides 'on the head')")
 
 
 def _field(pr: dict, key: str, valid) -> object:
