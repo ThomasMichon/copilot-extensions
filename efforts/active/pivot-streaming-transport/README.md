@@ -24,6 +24,16 @@
   broader engine-boundary retirement — this effort's Phase 4 builds directly on
   that effort's completed Phase 3c non-blocking-I/O work, but is scoped
   narrowly to transport/diffing, not a restatement of that larger campaign).
+  [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)
+  (a **partial** overlap, not a restatement: Phase 3 here only fast-paths
+  agent-dispatch's and agent-bridge's CLI feeds, whereas #5555's acceptance
+  criteria require a sole-authority daemon for all four layers — Worktrees,
+  Tasks, Codespaces, Containers — plus no pivot's row state ever oscillating
+  between two values for one fact, a case this effort doesn't itself cover.
+  See the corrected 2026-10-07 addendum on that issue's cross-link comment —
+  not its original paragraph — for the precise Worktrees-pivot mechanism:
+  two independently-computed compute paths, not two confirmed tracking-record
+  writers.)
 
 ## Guiding Intent
 
