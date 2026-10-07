@@ -204,7 +204,7 @@ is this effort's actual Phase 1 deliverable.)
       (confirming it does NOT embed the seed), and `headless_new_session`'s
       updated flag.
 
-### Phase 2 — Picker UI: "Resume prompt…" Actions-menu entry (Done)
+### Phase 2 — Picker UI: "Resume prompt…" Actions-menu entry (In progress -- live validation pending)
 - [x] Add a "Resume prompt…" entry to the worktree row's Actions submenu
       (`engine_worktree_actions.py`, sibling to "Launch in new window"/"Bare
       resume"/"Messages"), offered for the same Open/Resume-eligible rows
@@ -271,18 +271,17 @@ is this effort's actual Phase 1 deliverable.)
       `--interactive <text>` for a genuine resume target, confirming the
       resume-mode seed contract Phase 2 wires the Picker onto is real, not
       assumed.
-  - **NOT yet performed (explicitly, not silently skipped):** an actual
-      live Picker session -- building and running `worktree-manager`
-      itself, picking "Resume prompt…" from a real Actions menu, typing a
-      prompt, and confirming it lands as the resumed conversation's next
-      turn via `recent-messages`/direct observation. The Textual-pilot
-      tests above exercise the real, unmocked `PromptDlgScreen` and
-      dispatch code (not a parity-slice stand-in), which is materially
-      stronger than a typical unit test, but it is still an in-process
-      harness, not the compiled Picker binary driving a real Copilot
-      resume end-to-end. Left for a follow-up session/operator spot-check
-      before this phase's own Validation Plan line is considered fully
-      closed.
+- [ ] Validate beyond unit tests (per `AGENTS.md`'s own policy, and this
+      effort's own Phase 1 cautionary tale about trusting a CLI's
+      self-reported success alone): an actual live "Resume…" launch from the
+      real Picker with a typed prompt, confirmed via `recent-messages`/a
+      genuine follow-up answer in the resumed conversation, not just a
+      green unit-test suite. **Partially satisfied, not closed:** the
+      underlying engine mechanism was live-verified directly (see Journal),
+      and the Textual-pilot tests drive the real, unmocked `PromptDlgScreen`
+      and dispatch code -- but no actual compiled-Picker session has yet
+      exercised "Resume prompt…" end-to-end. This phase stays **in
+      progress** until that direct observation happens.
 
 ### Phase 3 — Migrate "New worktree"'s own delivery onto the durable path (Not started)
 - [ ] `_create_worktree_core`'s own plan deliberately does NOT carry the

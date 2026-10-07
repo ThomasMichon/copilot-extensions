@@ -2291,10 +2291,10 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
 
 
 def test_resume_prompt_offered_only_for_local_open_or_resume_rows():
-    """"Resume prompt…" (resume-prompt-durable-seed-and-mux-fix Phase 2)
-    rides alongside Open/Resume under the exact same local-only, same
-    eligibility condition as "Launch in new window" -- a seed is rejected
-    by the engine's resolve CLI alongside a remote ``--machine`` target."""
+    """The "Resume prompt…" verb rides alongside Open/Resume under the
+    exact same local-only eligibility condition as "Launch in new window"
+    -- a seed is rejected by the engine's resolve CLI alongside a remote
+    ``--machine`` target."""
     from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
         PickerScreenWorktreeActionsMixin as M,
     )
@@ -2333,9 +2333,8 @@ def test_resume_prompt_seed_carries_through_to_resume_decision():
     """Selecting "Resume prompt…" opens the lean composer dialog; a typed
     prompt, confirmed, reaches the SAME ordinary resume decision
     ``_resume_decision`` builds for "Resume"/"Open", carried as
-    ``options["seed_prompt"]`` -- never a separate code path, and never
-    folded into the read-only "Messages" viewer (explicit operator
-    scope-down)."""
+    ``options["seed_prompt"]`` -- never a separate code path, and the
+    read-only "Messages" viewer remains a distinct, separate affordance."""
     from worktree_manager.production_picker.picker_tui.field_widgets import (
         _AutoExpandTextArea,
     )

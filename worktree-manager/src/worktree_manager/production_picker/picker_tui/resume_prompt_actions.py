@@ -14,17 +14,16 @@ from __future__ import annotations
 from .engine_prompt_dialog import PromptDlgScreen
 
 def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
-    """"Resume prompt…" (resume-prompt-durable-seed-and-mux-fix Phase 2): a
-    lean prompt-composer dialog (no options checklist -- Resume has no use
-    for Anchor/Bare/No Mux the way "New worktree…" does, those are separate
-    submenu toggles here already), modeled on that dialog's own folded-in
-    ``show_prompt`` field. On Confirm, decides the SAME ordinary resume
-    ``_resume_decision`` builds for "Resume"/"Open", carrying the collected
-    text as ``options["seed_prompt"]`` -- the engine (``resolve
-    --worktree-id --seed``) delivers it durably on either a fresh launch or
-    a live-mux reattach. Per the operator's own explicit scope-down, this
-    stays a SEPARATE affordance from the read-only "Messages"
-    (recent-messages) viewer, never folded into one screen."""
+    """The "Resume prompt…" verb opens a lean prompt-composer dialog (no options
+    checklist -- Resume has no use for Anchor/Bare/No Mux the way "New
+    worktree…" does, those are separate submenu toggles here already),
+    modeled on that dialog's own folded-in ``show_prompt`` field. On
+    Confirm, decides the SAME ordinary resume ``_resume_decision`` builds
+    for "Resume"/"Open", carrying the collected text as
+    ``options["seed_prompt"]`` -- the engine (``resolve --worktree-id
+    --seed``) delivers it durably on either a fresh launch or a live-mux
+    reattach. Stays a SEPARATE affordance from the read-only "Messages"
+    (recent-messages) viewer; the two are never folded into one screen."""
     title = rec.get("title") or rec.get("id4") or "this worktree"
     scr = PromptDlgScreen(
         f"Resume prompt · {title}",
