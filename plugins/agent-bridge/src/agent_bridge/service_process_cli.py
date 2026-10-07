@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import sys
 
+from ._kill_pid_identity import _kill_pid  # noqa: F401 -- re-exported for __main__/callers
+
 
 def _core():
     from . import __main__ as core
@@ -171,17 +173,11 @@ def _pid_on_port(port: int) -> int | None:
     return None
 
 
-def _kill_pid(pid: int) -> None:
-    import signal as _signal
-    import subprocess as sp
-
-    if sys.platform == "win32":
-        sp.run(["taskkill", "/PID", str(pid), "/F", "/T"], capture_output=True, text=True)
-    else:
-        try:
-            os.kill(pid, _signal.SIGTERM)
-        except OSError:
-            pass
+# NOTE: identity-bound ``_kill_pid`` and its helpers
+# (``_identity_termination_available``, ``_enumerate_descendant_pids_windows``,
+# ``_verify_descendant_identity_windows``, ``_kill_pid_tree_windows_if_identity``)
+# live in ``_kill_pid_identity.py`` (split out to stay under the module-size
+# cap) and are imported below.
 
 
 def _force_kill_agent_bridge_tree(pid: int) -> None:
@@ -194,6 +190,15 @@ def _force_kill_agent_bridge_tree(pid: int) -> None:
     from .procgroup import safe_killpg
 
     if not safe_killpg(pid, _signal.SIGKILL):
+        # Known residual PID-reuse window, NOT closed by this function's
+        # Windows branch above: unlike `_kill_pid`, this POSIX fallback is
+        # a bare, unverified `os.kill` by pid, with no identity-bound
+        # recheck immediately beforehand. `zdd.diagnostics
+        # .terminate_pid_if_identity` only supports SIGTERM today, not the
+        # SIGKILL semantics this force-path needs, so routing through it
+        # as-is would change this function's actual behavior, not just its
+        # safety -- left open on copilot-extensions#5006 rather than
+        # silently claimed closed.
         try:
             os.kill(pid, _signal.SIGKILL)
         except OSError:
@@ -723,18 +728,14 @@ def _service_stop() -> None:
         # stale pid-file/port/lock entry whose pid has since been reused by
         # an unrelated process must never be killed.
         #
-        # This narrows, but does not fully close, the identity hazard:
-        # `_pid_is_agent_bridge` is a cmdline-substring check, and a tiny
-        # window remains between it and `_kill_pid`'s own signal. Fully
-        # closing that would mean routing every victim through an
-        # OS-object-bound termination (e.g. `zdd.diagnostics.
-        # terminate_pid_if_identity`'s pidfd-based path) -- a real,
-        # available pattern, deliberately NOT adopted here: it changes
-        # this shared production function's behavior on every platform and
-        # caller (not just this clean-room drill), including its own
-        # existing test coverage's mocking seam, and is a separate,
-        # more invasive hardening this PR's scope does not extend to.
-        # Tracked as a known residual, not silently claimed closed.
+        # `_pid_is_agent_bridge` is a cmdline-substring check, and `_kill_pid`
+        # itself now closes the remaining window to its own signal: it
+        # re-verifies identity through an OS-object-bound termination
+        # (`zdd.diagnostics.terminate_pid_if_identity`) using a start-time
+        # token captured immediately before the kill, falling back to a
+        # bare signal only where that primitive is unavailable on this
+        # platform (never on an actual identity mismatch). Closes
+        # copilot-extensions#5006 for this call site.
         if not core._pid_is_agent_bridge(victim):
             continue
         core._kill_pid(victim)
