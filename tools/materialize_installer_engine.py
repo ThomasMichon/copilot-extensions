@@ -77,14 +77,14 @@ def materialize_ref_into(
         if not canonical.is_file():
             log.append(
                 f"SKIP {dest_consumer_dir}: canonical source missing: "
-                f"{canonical.relative_to(canonical_root)}"
+                f"{canonical.relative_to(canonical_root).as_posix()}"
             )
             continue
         if ref.resolved() != canonical.resolve():
             log.append(
                 f"SKIP {dest_script}: installer-engine reference {ref.raw_path} "
                 f"(resolved {ref.resolved()}) is not "
-                f"{canonical.relative_to(canonical_root)}"
+                f"{canonical.relative_to(canonical_root).as_posix()}"
             )
             continue
         if canonical.is_symlink():
@@ -113,7 +113,7 @@ def materialize_ref_into(
                 pass
             log.append(f"SKIP {dest_script}: could not find installer-engine entry to rewrite")
             continue
-        log.append(f"OK   {dest_engine} <- {canonical.relative_to(canonical_root)}")
+        log.append(f"OK   {dest_engine} <- {canonical.relative_to(canonical_root).as_posix()}")
     return log
 
 
