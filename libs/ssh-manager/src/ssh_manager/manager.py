@@ -684,7 +684,9 @@ class ConnectionManager:
                 limit=_STDIO_CHANNEL_LIMIT_BYTES,
             )
             if dial is not None:
-                dial.outcome = "ok"
+                # Only the spawn is known here: ssh hasn't connected yet, so not "ok"
+                # (an auth/tunnel failure can still end the child moments later).
+                dial.outcome = "spawned"
 
         info.child_processes.append(proc)
         return proc

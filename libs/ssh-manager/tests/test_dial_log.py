@@ -302,4 +302,51 @@ async def test_a_direct_mode_stdio_channel_is_a_logged_dial(win_platform, source
         with pytest.raises(OSError):
             await manager.open_stdio_channel("stdio-host", "copilot --acp")
     assert [(e["kind"], e["outcome"]) for e in dial_log.read("stdio-host")] == [
-        ("stdio_channel", "ok"), ("stdio_channel", "error")]
+        ("stdio_channel", "spawned"), ("stdio_channel", "error")]
+
+
+def test_a_spawned_stdio_channel_is_neither_ok_nor_a_failure():
+    """Only the spawn is known for a direct-mode stdio channel: counted as ``spawned``,
+    never as a connection success, and never reported as the last failure."""
+    dial_log.record("cs-sp", kind="stdio_channel", outcome="error", elapsed_s=0)
+    dial_log.record("cs-sp", kind="stdio_channel", outcome="spawned", elapsed_s=0)
+    s = dial_log.summary("cs-sp")
+    assert s["last_10m"]["by_outcome"] == {"error": 1, "spawned": 1}
+    assert s["last_failure"]["outcome"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_each_control_master_start_attempt_is_logged(win_platform, monkeypatch):
+    """A tunnel reset then a start: one line per attempt, with its attempt number and
+    account; a start that never comes logs every attempt before raising."""
+    from types import SimpleNamespace
+
+    from ssh_manager import ConnectionManager
+
+    manager = ConnectionManager(platform=win_platform)
+    monkeypatch.setattr("ssh_manager.manager.asyncio.sleep", AsyncMock())
+    starts = iter([ConnectionError("kex_exchange_identification: reset"), "master-proc"])
+
+    async def start(*_a, **_k):
+        item = next(starts)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(manager, "_start_control_master", start)
+    config = SimpleNamespace(ssh_target="cs-cm.example")
+    assert await manager._connect_with_retry(config, None, [], env={"GH_TOKEN": "t"},
+                                             target="cs-cm") == "master-proc"
+    entries = dial_log.read("cs-cm")
+    assert [(e["kind"], e["outcome"], e["attempt"], e["account"]) for e in entries] == [
+        ("control_master", "error", 1, "pinned"), ("control_master", "ok", 2, "pinned")]
+    assert "reset" in entries[0]["reason"]
+
+    async def never(*_a, **_k):
+        raise ConnectionError("tunnel down")
+
+    monkeypatch.setattr(manager, "_start_control_master", never)
+    with pytest.raises(ConnectionError):
+        await manager._connect_with_retry(config, None, [], target="cs-cm-down", attempts=3)
+    assert [(e["outcome"], e["attempt"], e["account"]) for e in dial_log.read("cs-cm-down")] == [
+        ("error", 1, "ambient"), ("error", 2, "ambient"), ("error", 3, "ambient")]

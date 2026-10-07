@@ -34,3 +34,20 @@ def test_dial_log_for_a_target_never_dialed_is_empty(tmp_path, monkeypatch, caps
     assert main(["dial-log", "cs-none", "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["entries"] == 0 and out["recent"] == [] and out["last_failure"] is None
+
+
+def test_dial_log_stays_usable_when_the_installation_context_is_refused(tmp_path, monkeypatch, capsys):
+    """A read-only diagnostic: it must answer exactly when the context is refused (a
+    broken install is when the dial history is wanted)."""
+    from ssh_manager import dial_log
+
+    from agent_codespaces import __main__ as cli
+
+    def refused():
+        raise cli.ContextRefused("generation changed")
+
+    monkeypatch.setattr(cli, "validate_context", refused)
+    monkeypatch.setenv(dial_log.DIAL_LOG_ENV, str(tmp_path))
+    dial_log.record("cs-r", kind="reconnect", outcome="error", elapsed_s=1.0)
+    assert main(["dial-log", "cs-r", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["last_failure"]["kind"] == "reconnect"

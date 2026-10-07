@@ -42,6 +42,9 @@ FIELD_CAP = 200
 LOCK_WAIT_S = 2.0
 #: Outcomes that are a connection attempt reaching (or failing to reach) the target.
 DIAL_KINDS = ("config_fetch", "control_master", "direct_exec", "stdio_channel", "reconnect")
+#: Outcomes that aren't failures: ``ok`` (connected), and ``spawned`` (a direct-mode
+#: stdio channel's ssh started; whether it connected is its caller's to see).
+NOT_FAILED = ("ok", "spawned")
 
 _SECRET = re.compile(
     r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}"
@@ -217,7 +220,7 @@ def summary(target: str, *, now: datetime | None = None) -> dict:
             age = (now - datetime.fromisoformat(e.get("at", ""))).total_seconds()
         except ValueError:
             continue
-        if e.get("outcome") != "ok":
+        if e.get("outcome") not in NOT_FAILED:
             last_failure = e
         for w, span in windows.items():
             if 0 <= age <= span and e.get("kind") in DIAL_KINDS:
