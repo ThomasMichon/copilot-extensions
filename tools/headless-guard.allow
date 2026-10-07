@@ -46,13 +46,13 @@ plugins/agent-worktrees/src/agent_worktrees/effort_focus.py:165  pre-existing at
 plugins/agent-worktrees/src/agent_worktrees/finalize.py:492  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/front_door_cli.py:279  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/git_ops.py:100  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1189  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1208  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1212  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1224  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1228  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1232  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1236  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1211  pre-existing at rule introduction, see #5518 (line shifted by an unrelated git_ops.py edit)
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1230  pre-existing at rule introduction, see #5518 (line shifted by an unrelated git_ops.py edit)
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1234  pre-existing at rule introduction, see #5518 (line shifted by an unrelated git_ops.py edit)
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1246  pre-existing at rule introduction, see #5518 (line shifted by an unrelated git_ops.py edit)
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1250  pre-existing at rule introduction, see #5518 (line shifted by an unrelated git_ops.py edit)
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1254  pre-existing at rule introduction, see #5518 (line shifted by an unrelated git_ops.py edit)
+plugins/agent-worktrees/src/agent_worktrees/git_ops.py:1258  pre-existing at rule introduction, see #5518 (line shifted by an unrelated git_ops.py edit)
 plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:307  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:442  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/installation_cli.py:567  pre-existing at rule introduction, see #5518
