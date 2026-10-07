@@ -8,8 +8,6 @@ import types
 import pytest
 from pathlib import Path
 
-import pytest
-
 from agent_worktrees import __main__ as m
 from agent_worktrees import claim_history
 from agent_worktrees import config as cfg
