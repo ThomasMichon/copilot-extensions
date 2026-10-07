@@ -100,19 +100,47 @@ successor already running in my own tree?*
    reparenting follows, so every one of those processes still reparents to the
    manager, not the ambient init, the moment its own direct parent exits. This
    closes the exact escape the origin incident showed (a cutover survivor
-   reparenting to a WSL-session `/init`). On Windows, assign the manager (and
-   therefore every spawned descendant, transitively, since Job membership is
-   inherited by default) to a **Job Object** it owns — Job membership doesn't
-   depend on parent/child linkage at all, so it needs no subreaper-equivalent
-   trick and survives an intermediate process's exit even more simply.
+   reparenting to a WSL-session `/init`). On Windows, assign the manager to a
+   **Job Object** it owns. Job membership is inherited transitively by
+   default — **except** where it already isn't: the coordinator's own
+   self-update spawn (`_spawn_self_deploy`) passes `detached_kwargs
+   (breakaway=True)`, which sets `CREATE_BREAKAWAY_FROM_JOB` specifically so
+   that spawn escapes whatever ambient job it inherits (originally meant to
+   outlive a *different*, restrictive kill-on-close job elsewhere in the
+   stack — not written with this manager's job in mind, and this pattern
+   does not get to assume every future spawn site stays breakaway-free).
+   The manager's own Job therefore permits breakaway
+   (`JOB_OBJECT_LIMIT_BREAKAWAY_OK`, so that existing flag keeps working
+   exactly as before — a spawn that needs to escape still can), and the
+   manager **actively re-captures** a legitimate successor rather than
+   relying on inherited membership alone: once step 2 below identifies a
+   live successor pid, the manager explicitly
+   `AssignProcessToJobObject`s it (via a freshly opened `PROCESS_SET_QUOTA |
+   PROCESS_TERMINATE` handle) back into its own Job before treating it as
+   adopted. A process that already escaped is caught up again the moment it
+   is recognized as the live successor, rather than needing to never escape
+   in the first place.
 2. **On child-exit, read the daemon's own liveness record** (`zdd.routing`'s
    `active.json` — already how every `zdd` consumer tracks "who is live"
    today): a `pid`/`generation` entry that resolves to a process still in the
    manager's own tree (Linux: still alive and still its descendant per
-   `/proc`; Windows: still a member of the owned Job) means a **planned
-   cutover** — adopt that pid as the new watched child and keep running, no
-   exit. Anything else (no entry, a dead pid, a pid outside the tree) means a
-   **real crash**.
+   `/proc`; Windows: a member of the owned Job, or re-captured into it per
+   above) means a **planned cutover** — adopt that pid as the new watched
+   child and keep running, no exit. Anything else (no entry, a dead pid, a
+   pid outside the tree even after a re-capture attempt) means a **real
+   crash**. `active.json` itself carries no process-identity token (only a
+   pid and a routing generation, which order publications but do not by
+   themselves rule out **PID reuse** — the recorded pid exiting and an
+   unrelated process reusing that exact number before this check runs). The
+   manager closes that gap itself: it captures a process-start-time token
+   (`zdd.diagnostics.process_start_time`) for the candidate pid at the
+   moment of adoption and re-verifies that token on every later liveness
+   poll of the adopted process, the same freshest-practical-moment
+   convention `reap_tree_posix` (below) already uses — a reused pid is
+   therefore caught the moment its start time no longer matches, not
+   trusted indefinitely off one lucky first read. Tree membership (ancestry
+   / Job presence) is itself already a much narrower target than a bare pid
+   match, but is deliberately not treated as sufficient on its own here.
 3. **Reap every other live descendant before exiting on a real crash.**
    Exiting the manager does **not** by itself clear its tree: a subreaper
    claim or Job Object membership only governs *reparenting*, not lifetime —
@@ -132,8 +160,32 @@ successor already running in my own tree?*
    already exists). On Windows this is simpler and needs no separate
    identity check at all: `TerminateJobObject` kills every current job
    member in one call, scoped by Job membership rather than a reused numeric
-   pid.
-4. **The manager updates itself in place, without the service manager ever
+   pid. This step only runs if the manager itself gets the chance to run it
+   at all — see the crash invariant below for the case where it doesn't.
+4. **The manager's own crash must not recreate this pattern's own failure
+   class, one level up.** Subreaper status and non-kill-on-close Job
+   membership are attributes of the *manager process* — they vanish the
+   instant it does, whether that's the graceful real-crash exit in step 3
+   or the manager itself being killed outright (no in-process code runs on
+   `SIGKILL`; this case cannot be closed from inside the manager at all). A
+   service manager that just restarts a fresh manager process after that
+   leaves the **old** manager's tree (the daemon, any stray survivors) alive
+   and now untracked by *anyone* — the new manager's subreaper/Job identity
+   is a completely separate one. Closing this needs an **out-of-process**
+   backstop the host's own service manager provides, not code inside this
+   module: on Linux, a systemd unit's default `KillMode=control-group`
+   already kills every process in the unit's cgroup (not just the tracked
+   main pid) as part of the stop-then-start transition a `Restart=`
+   directive drives — do not override it to `KillMode=process` for this
+   unit. On Windows, the manager's Job additionally sets
+   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the OS itself terminates every
+   remaining member the instant the job's last open handle closes (the
+   manager's own, on any exit path including a hard kill) — reconciled with
+   the manager's **own** clean self-update handoff (item 5 below) by having
+   the successor manager duplicate its own handle to the *same* Job object
+   before the predecessor exits, so that handoff is never itself the "last
+   handle" closing.
+5. **The manager updates itself in place, without the service manager ever
    noticing.** "Version-agnostic" does not make a stale manager binary safe
    on its own — it still needs an update path, just like the daemon it
    watches. On Linux, the manager periodically re-checks the `current-version`
@@ -144,14 +196,26 @@ successor already running in my own tree?*
    changes and no handoff is needed at all. Windows has no pid-preserving
    exec equivalent, so there the manager instead adopts
    [`service-lifecycle-supervision`](service-lifecycle-supervision.md)'s own
-   existing restart-in-place shape directly: wind down, spawn a successor on
+   existing restart-in-place shape directly: wind down, duplicate its Job
+   handle into a spawned successor (per item 4), spawn that successor on
    the newer interpreter with the same argv, exit with the sentinel code its
    attached launcher's own restart-loop recognizes (never bare Scheduled-Task
    `RestartCount`, which retries the same stale interpreter, not a newer
    slot) — the same mechanism the embody supervisor already uses, applied to
    the manager rather than invented fresh.
 
-## What does **not** change
+> **Validation status.** The Linux mechanisms above (subreaper reparenting,
+> `/proc`-based ancestry, identity-bound reaping, `execve` self-update) are
+> implemented and exercised against real subprocesses and real kernel
+> primitives (unit + stress tests — see Validation below). The **Windows**
+> mechanisms (Job re-capture past a breakaway escape, kill-on-close plus
+> cross-process handle duplication for a safe self-update handoff) are
+> designed and implemented in code but have **not** been exercised against a
+> real Windows host from this authoring session — treat them as a defined,
+> implemented, but not-yet-independently-validated design until a real
+> Windows-host process-boundary test confirms the crash invariant in item 4
+> holds there.
+
 
 - `zdd.cutover.CutoverOrchestrator`, `zdd.routing`, `zdd.breadcrumb`,
   `zdd.diagnostics` — none of it. The manager is a pure **additive** layer
@@ -159,10 +223,12 @@ successor already running in my own tree?*
   the same `active.json` every other consumer already reads, and it never
   drives, blocks, or participates in a drain.
 - The self-update loop's `_spawn_self_deploy` (or any installer-driven
-  activation trigger) — unchanged. It already detaches its `deploy`
-  orchestrator (`start_new_session=True`) for reasons unrelated to this
-  pattern (surviving the triggering coordinator's own possible death); the
-  manager's subreaper claim composes with that transparently.
+  activation trigger) — unchanged on Linux: it already detaches its `deploy`
+  orchestrator (`start_new_session=True`), and the manager's subreaper claim
+  composes with that transparently regardless. On Windows its existing
+  `CREATE_BREAKAWAY_FROM_JOB` flag also stays unchanged — the manager
+  compensates on its own side (item 1's re-capture step) rather than
+  requiring every spawn site across the suite to become manager-aware.
 - The stable, register-once launcher beneath the service manager (the
   `serve-service.sh` / Scheduled-Task-launcher layer from
   [`service-lifecycle-supervision`](service-lifecycle-supervision.md)) on
@@ -215,22 +281,32 @@ view — "is the unit's main process still running" — needs no other change).
 ## Validation
 
 - **Unit (mocked):** every branch of the child-exit decision — planned-cutover
-  adoption, real-crash propagation, the manager's own unexpected death, a
-  `CHILD_SUBREAPER`/Job-membership check against a faked process tree — with
-  no real subprocess spawned.
+  adoption, real-crash propagation, the manager's own unexpected death,
+  PID-reuse detection (an adopted pid whose identity token changes mid-watch
+  is treated as gone, not trusted), a subreaper/Job-membership check against
+  a faked process tree — with no real subprocess spawned.
 - **Stress (real subprocesses, no container needed):** rapid-fire restarts,
   concurrent/overlapping cutover attempts, `SIGKILL` injected mid-cutover,
-  repeated crash-loop induction — exercising the real OS subreaper/Job-Object
-  primitives directly on the test host. This class of coverage is explicitly
-  new: it did not previously exist for any of this suite's process-spawning
-  mechanics, which is part of why this exact failure mode went unnoticed
-  until it hit a live host.
+  repeated crash-loop induction, an orphan storm a real subreaper claim must
+  reparent every member of — exercising the real OS primitives directly on
+  the test host, on Linux. This class of coverage is explicitly new: it did
+  not previously exist for any of this suite's process-spawning mechanics,
+  which is part of why this exact failure mode went unnoticed until it hit
+  a live host.
 - **End-to-end (real service manager):** a real systemd unit's
   `Restart=on-failure` reconciling correctly across a real cutover needs a
   real systemd — Docker's clean-room base images do not run systemd as PID 1,
   so this is validated separately (`systemd-nspawn` or an equivalent
   systemd-capable container), as a narrower, standalone check rather than a
   clean-room scenario.
+- **Not yet validated: the Windows-specific mechanisms** (Job breakaway
+  re-capture, kill-on-close plus cross-process handle duplication for the
+  manager's own self-update handoff) — see the validation-status note above.
+  A real Windows-host process-boundary test (kill the manager outright,
+  confirm the daemon and every descendant die with it; force a self-update
+  handoff, confirm the Job survives it) is a required follow-up before this
+  pattern's Windows adoption is considered production-ready, not merely
+  code-complete.
 
 ## See Also
 
