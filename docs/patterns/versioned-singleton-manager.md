@@ -57,7 +57,10 @@ shared singleton lease serializes them) or itself a crash-loop (the loser
 re-exits non-zero every `RestartSec`, forever, on exactly the same shape this
 whole pattern exists to close) is an open question about *existing, already-
 shipped code* — out of scope to resolve here, but this pattern must not cite
-it as a proven safe exemplar to delegate to.
+it as a proven safe exemplar to delegate to. Tracked as
+[#5574](https://github.com/ThomasMichon/copilot-extensions/issues/5574) (the
+deployed unit has no `SuccessExitStatus=` for this exit code); that issue, not
+this pattern's own Validation section, owns resolving it.
 
 A daemon that owns a shared endpoint and in-flight, non-resumable work (the
 coordinator) cannot collapse to that single-process shape — the whole point of
@@ -110,46 +113,69 @@ successor already running in my own tree?*
    manager, not the ambient init, the moment its own direct parent exits. This
    closes the exact escape the origin incident showed (a cutover survivor
    reparenting to a WSL-session `/init`). On Windows, assign the manager to a
-   **Job Object** it owns, and additionally mirror the Linux ancestry walk
-   via `CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)` +
-   `th32ParentProcessID`, the same bounded upward-walk shape as
-   `is_descendant_posix` — because Job membership alone cannot be trusted as
-   proof of legitimacy here: the coordinator's own self-update spawn
-   (`_spawn_self_deploy`) passes `detached_kwargs(breakaway=True)`, which
-   sets `CREATE_BREAKAWAY_FROM_JOB` specifically so that spawn escapes
-   whatever ambient job it inherits (originally meant to outlive a
-   *different*, restrictive kill-on-close job elsewhere in the stack — not
-   written with this manager's job in mind). A process outside the Job is
-   therefore not automatically illegitimate, but Job membership also cannot
-   be the thing that *grants* trust, or a stale `active.json` pid reused by
-   a completely unrelated process would be blessed the moment the manager
-   tried to re-capture it. **Ancestry is the trust decision; Job
+   **Job Object** it owns. Successor *legitimacy*, however, is **not**
+   established by a post-hoc Toolhelp/PPID walk at child-exit time — the
+   chain the manager must validate (old daemon → breakaway `deploy` → passive
+   daemon) is one where `/shutdown` only *requests* the old daemon's exit and
+   `deploy` can return and exit independently, so by the time the manager
+   gets around to snapshotting ancestry, one or more intermediaries may
+   already be gone — their ancestry entries absent from the snapshot, and
+   their numeric pids already free to be reused by something unrelated. A
+   walk run *after the fact* cannot be made durable against that: it has
+   nothing to re-check if the thing it needs to check has already vanished.
+   Instead, provenance is captured **at spawn time**, while every process in
+   the chain is still guaranteed alive, via one narrowly scoped
+   instrumentation point rather than a suite-wide requirement: `deploy`'s own
+   spawn of the passive daemon (already inside `zdd.cutover`'s Windows
+   breakaway path, the one known call site that produces this chain)
+   duplicates a handle to its freshly created child — via `DuplicateHandle`,
+   called the instant `CreateProcess` returns, before the child has any
+   chance to exit — into the manager's own process. The manager's own
+   `hProcess`, needed as `DuplicateHandle`'s target, is threaded down to
+   `deploy` as an **inheritable** handle value (passed via an environment
+   variable and `bInheritHandles=TRUE` at `_spawn_self_deploy`'s own
+   `CreateProcess` call, then forwarded unchanged into `deploy`'s own spawn),
+   so this one call site can reach the manager directly without a lookup.
+   Because a `HANDLE` is a reference to the exact kernel process object, not
+   a reusable numeric pid, the manager's registry of duplicated handles is
+   immune to the PID-reuse failure a post-hoc walk cannot escape, and it
+   does not depend on any intermediary still being alive later to prove its
+   own ancestry — the proof was already captured the moment it mattered.
+   **Handle custody, established at spawn time, is the trust decision; Job
    (re-)membership is purely bookkeeping for the crash-cleanup backstop
-   (item 3) afterward.** Only once the Windows ancestry walk independently
-   confirms a candidate pid is a genuine descendant does the manager call
-   `AssignProcessToJobObject` (via a freshly opened `PROCESS_SET_QUOTA |
-   PROCESS_TERMINATE` handle) to bring it back under the Job.
+   (item 3) afterward.** Once the manager holds a duplicated handle for a
+   candidate process, it calls `AssignProcessToJobObject` (via a freshly
+   opened
+   `PROCESS_SET_QUOTA | PROCESS_TERMINATE` handle on the same object) to
+   bring it back under the Job.
 2. **On child-exit, read the daemon's own liveness record** (`zdd.routing`'s
    `active.json` — already how every `zdd` consumer tracks "who is live"
-   today): a `pid`/`generation` entry that resolves to a process the
-   platform ancestry walk confirms is genuinely the manager's own (Linux:
-   `/proc`-based `ppid` walk; Windows: Toolhelp32-based `ParentProcessID`
-   walk, per item 1 — **never** Job membership alone) means a **planned
-   cutover** — adopt that pid as the new watched child and keep running, no
-   exit. Anything else (no entry, a dead pid, a pid that fails the ancestry
-   check) means a **real crash**. `active.json` itself carries no
-   process-identity token (only a pid and a routing generation, which order
-   publications but do not by themselves rule out **PID reuse** — the
-   recorded pid exiting and an unrelated process reusing that exact number
-   before this check runs). The manager closes that gap itself: it captures
-   a process-start-time token (`zdd.diagnostics.process_start_time` — has a
-   Linux and a Windows backend, used identically on both platforms here)
-   for the candidate pid at the moment of adoption and re-verifies that
-   token on every later liveness poll of the adopted process, the same
-   freshest-practical-moment convention `reap_tree_posix` (below) already
-   uses — a reused pid is therefore caught the moment its start time no
-   longer matches, not trusted indefinitely off one lucky first read.
-   Ancestry confirmation happens *before* this token is ever captured, so
+   today): a `pid`/`generation` entry is checked against the manager's own
+   handle registry from item 1 — Linux: a live `/proc`-based `ppid` walk
+   confirming the pid is genuinely the manager's own descendant; Windows:
+   does the manager already hold a duplicated handle whose `GetProcessId`
+   resolves to this exact pid? **Never** Job membership alone, and on
+   Windows **never** a fresh Toolhelp snapshot taken at this point — only a
+   handle captured back at spawn time. A match means a **planned
+   cutover** — adopt that pid (that handle, on Windows) as the new watched
+   child and keep running, no exit. Anything else (no entry, a dead pid, no
+   registered handle for it) means a **real crash**. On Linux, `active.json`
+   itself carries no process-identity token (only a pid and a routing
+   generation, which order publications but do not by themselves rule out
+   **PID reuse** — the recorded pid exiting and an unrelated process reusing
+   that exact number before this check runs). The manager closes that gap
+   itself: it captures a process-start-time token
+   (`zdd.diagnostics.process_start_time` — has a Linux and a Windows
+   backend, used identically on both platforms here) for the candidate pid
+   at the moment of adoption and re-verifies that token on every later
+   liveness poll of the adopted process, the same freshest-practical-moment
+   convention `reap_tree_posix` (below) already uses — a reused pid is
+   therefore caught the moment its start time no longer matches, not trusted
+   indefinitely off one lucky first read. (On Windows this token is a
+   secondary belt-and-suspenders check — the duplicated handle itself
+   already rules out pid reuse by construction, since it names the kernel
+   object directly rather than a numeric pid.) Ancestry/handle confirmation
+   happens *before* this token is ever captured, so
    the token itself is always anchored to a process already independently
    known to be legitimate, never to whatever process merely happens to
    currently hold the recorded pid.
@@ -217,12 +243,22 @@ successor already running in my own tree?*
    crash coverage carries across the handoff, has the successor publish its
    own liveness the same way the daemon does (`zdd.routing.publish_active`
    against a manager-scoped `config_dir`, distinct from the daemon's own),
-   then exits. Windows' "service manager" for this purpose is the attached
-   launcher's own persistent restart-loop process (not the raw Scheduled
-   Task's native `RestartCount`, which this pattern already requires
-   avoiding for the daemon itself) — a loop that can simply check for a
-   live, Job-member successor before ever re-invoking, closing the exact
-   race the supervisor's own exit-42 path leaves open against systemd.
+   then exits. The Scheduled Task's own tracked process **is** the manager
+   (per "What does change" below), so when the predecessor exits here, the
+   Task's native restart policy *will* fire and re-invoke its Action — the
+   exact same "What does change" / Consumer contract shape used for the
+   manager's *very first* launch, not a separate always-running loop
+   process. The **stable launcher** the Task Action invokes (fresh, on
+   every attempt — real crash or self-update restart alike) is what closes
+   the race: before calling `zdd.singleton_manager.run()`, it performs the
+   identical liveness check the manager itself performs for the daemon in
+   item 2 (the manager-scoped `active.json` plus a Job-membership/handle
+   check) and, if a live successor manager is already found, exits
+   immediately without re-invoking `run()` — rather than spawning a second,
+   redundant manager. This closes the exact race the supervisor's own
+   exit-42 path leaves open against systemd, using the launcher that is
+   already wired in at the launch boundary rather than a second, independent
+   outer-identity mechanism.
 
 > **Validation status.** This pattern is a **design, not yet an
 > implementation** — the code (the `zdd.singleton_manager` module, both
@@ -247,10 +283,15 @@ successor already running in my own tree?*
 - The self-update loop's `_spawn_self_deploy` (or any installer-driven
   activation trigger) — unchanged on Linux: it already detaches its `deploy`
   orchestrator (`start_new_session=True`), and the manager's subreaper claim
-  composes with that transparently regardless. On Windows its existing
-  `CREATE_BREAKAWAY_FROM_JOB` flag also stays unchanged — the manager
-  compensates on its own side (item 1's ancestry walk + re-capture) rather
-  than requiring every spawn site across the suite to become manager-aware.
+  composes with that transparently regardless, with no re-check needed at
+  this call site at all. On Windows its existing `CREATE_BREAKAWAY_FROM_JOB`
+  flag also stays unchanged, but (per item 1's redesign) this one known call
+  site — and `deploy`'s own subsequent spawn of the passive daemon — gains a
+  small, scoped instrumentation point: threading the manager's inheritable
+  handle down and duplicating a handle to the passive daemon into the
+  manager at creation time. This is a bounded addition to one specific,
+  already-`zdd`-aware chain, not a requirement that spawn sites across the
+  suite generally become manager-aware.
 - The stable, register-once launcher beneath the service manager (the
   `serve-service.sh` / Scheduled-Task-launcher layer from
   [`service-lifecycle-supervision`](service-lifecycle-supervision.md)) on
@@ -273,11 +314,27 @@ place. This pattern's Windows adoption **requires** launching the manager
 through a windowless-but-attached mechanism instead (mirroring
 `agent_procutil.windowless_python`/`no_window_kwargs` — a `pythonw.exe`-style
 direct launch with no console allocated and no `conhost` detachment hop), so
-the Scheduled Task's own tracked process **is** the manager. Do not adopt this
-pattern on Windows without first closing that gap for the manager's own
-launch path specifically — it does not need to be closed for every launcher
-in the suite, only for whichever one now carries the permanently-tracked
-manager.
+the Scheduled Task's own tracked process **is** the manager — the same
+single process, start to finish, whether this is the manager's first launch
+or a restart the Task's own native policy fired. Do not adopt this pattern on
+Windows without first closing that gap for the manager's own launch path
+specifically — it does not need to be closed for every launcher in the
+suite, only for whichever one now carries the permanently-tracked manager.
+
+There is exactly **one** outer-identity model across this whole pattern on
+Windows, used consistently everywhere above: the Scheduled Task always
+re-invokes the same stable launcher fresh on every (re)start, real crash or
+self-update handoff alike — never a second, separate always-running loop
+process sitting between the Task and the manager. On Windows only (unneeded
+on Linux, where `execve` means the manager's own tracked identity never
+changes and the launcher is never re-invoked at all), that launcher performs
+one additional liveness check — identical in shape to the manager's own
+item-2 check for the daemon — before calling
+`zdd.singleton_manager.run()`: if the manager-scoped `active.json` already
+names a live, Job-verified successor manager (the self-update handoff from
+item 5), the launcher exits immediately instead of calling `run()` a second
+time; otherwise (a real crash, or the very first launch) it proceeds exactly
+as today.
 
 ## Consumer contract
 
@@ -289,7 +346,9 @@ boundary:
 
 ```
 systemd ExecStart / Scheduled Task Action
-    -> <stable launcher, resolves current-version marker, unchanged>
+    -> <stable launcher, resolves current-version marker, unchanged on
+        Linux; on Windows, additionally checks for a live successor
+        manager (per "What does change" above) before proceeding>
     -> zdd.singleton_manager.run(
            config_dir=...,                 # where active.json lives
            spawn=lambda: subprocess.Popen([resolved_python, "-m", "my_daemon", "serve"]),
