@@ -982,7 +982,7 @@ def test_launch_command_dot_sources_default_setup_without_extra_process(tmp_path
     proc = subprocess.Popen(
         [
             shell, "-NoProfile", "-NoLogo", "-File", str(staged_launch_command),
-            "--", "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(fake_default_setup),
+            "--", shell, "-NoProfile", "-NoLogo", "-File", str(fake_default_setup),
             "-Machine", "a machine with spaces", "-Recovery",
             "--allow-all", "--model", "foo",
         ],
@@ -1060,7 +1060,7 @@ def test_launch_command_falls_back_on_unrecognized_host_option(tmp_path):
     _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
         shell, staged_launch_command, tmp_path,
         [
-            "pwsh.exe", "-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass",
+            shell, "-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass",
             "-File", str(fake_default_setup), "-Machine", "testbox",
         ],
     )
@@ -1085,7 +1085,7 @@ def test_launch_command_falls_back_when_noprofile_is_omitted(tmp_path):
 
     _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
         shell, staged_launch_command, tmp_path,
-        ["pwsh.exe", "-NoLogo", "-File", str(fake_default_setup), "-Machine", "testbox"],
+        [shell, "-NoLogo", "-File", str(fake_default_setup), "-Machine", "testbox"],
     )
     assert inner_pid != outer_pid, (
         "omitting -NoProfile must not take the dot-source fast path"
@@ -1183,7 +1183,7 @@ def test_launch_command_falls_back_for_a_custom_same_named_script(tmp_path):
     _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
         shell, staged_launch_command, tmp_path,
         [
-            "pwsh.exe", "-NoProfile", "-NoLogo",
+            shell, "-NoProfile", "-NoLogo",
             "-File", str(custom_default_setup), "-Machine", "testbox",
         ],
     )
