@@ -105,8 +105,16 @@ an empty queue.
   severity, then `created_at`, then `id` -- so identical reads give identical
   results however the adapters' timeouts interleave: keep the highest severity; the others become `also[]` on the kept item,
   so nothing is silently dropped.
-- [ ] **Source result:** each adapter returns `{items[], status, error?, uncertain, read_at}`
-  with `status` one of `ok` (fully read), `failed` (couldn't be read), `uncertain`
+- [ ] **Source result:** each adapter returns `{items[], status, error?, uncertain, read_at}`,
+  with **at most one item per `(entity, entity_ref)`**. An adapter with several
+  pieces of evidence for one entity (the bridge's represented `permission_required`
+  and its transcript presence `awaiting_input` for the same session) coalesces them
+  before returning: it keeps the highest severity, then the strongest confidence
+  (`reported` > `scanned` > `heuristic`), and the kept item's `reason` names the
+  rest. So `(source, entity, entity_ref)` -- and with it `id` and the
+  first-observed key -- is unique within a read, and cross-source dedupe never
+  meets two equal ids. A source result (a command's too) that carries two items
+  for one entity is malformed, and that source is `failed`. The `status` is one of `ok` (fully read), `failed` (couldn't be read), `uncertain`
   (read, but `uncertain` of its entities couldn't be classified -- e.g. presence
   `unknown`, a `pr bar` exit 12) or `disabled` (not installed). The aggregate's
   `status` is the first that applies, in this precedence: `degraded` when any
@@ -290,7 +298,10 @@ an empty queue.
   contradiction in the failure contract is `failed`.
 - [ ] Unit, the bridge adapter: every `AttentionReason` value maps as listed
   (`policy_required` is an item; `unreachable`, `contract_changed` and an unknown
-  reason count as `uncertain`).
+  reason count as `uncertain`); a session with both a represented
+  `permission_required` and transcript `awaiting_input` yields one `reported`
+  item whose reason names both, in any read order; a command source returning two
+  items for one entity is `failed`.
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
   a duplicate name) is rejected; an item stating another `source` or a foreign
   `id` is invalid; an item omitting both is stamped and then validated; a
