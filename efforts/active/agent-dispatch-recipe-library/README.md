@@ -8,10 +8,10 @@
   and reviewer adapter -- is now fully closed, merged via PR #5414
   2026-10-06; Phase 3's own tracked single-emitter-primitive follow-on
   slice remains, explicitly out of this effort's own scope. Of this
-  effort's own Validation Plan: full-suite-green, the real consuming-repo
-  migration, and the recipe README cross-check are all now done
-  (2026-10-06); only the live fixture exercising each of the 4 named
-  recipes end-to-end remains open)
+  effort's own Validation Plan: the real consuming-repo migration and the
+  recipe README cross-check are both done (2026-10-06); a clean full-suite
+  run and the live fixture exercising each of the 4 named recipes
+  end-to-end both remain open)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -479,30 +479,34 @@ below — read it before starting any Phase 3 work).
 
 ## Validation Plan
 
-- [x] Full `agent-dispatch` plugin suite green
+- [ ] Full `agent-dispatch` plugin suite green
       (`test-supervisor -- python3 tools/run-plugin-tests.py agent-dispatch`).
-      **Confirmed 2026-10-06** (see Journal): every recipe-library-specific
+      **Still open 2026-10-06** (see Journal): every recipe-library-specific
       test module (`test_registrar_recipes.py`, `test_registrar_discovery.py`,
       `test_repository_issue_loops.py`, `test_effort_driver_loops.py`,
       `test_cli.py`, `test_registrar_registry.py`) passed cleanly across 3
-      consecutive full-suite runs. The only failures seen were 2 distinct,
-      unrelated, pre-existing timing races on an independently-confirmed
-      heavily-loaded shared machine (coordinator health-loop reporting and a
-      real-subprocess companion-readiness timeout) -- neither touches this
-      effort's own code, both pass in isolation or are a documented tight
-      real-world timeout, and both are now tracked as their own issues
-      (#5582, #5584) rather than silently dismissed.
-- [x] Each Phase's own tests above pass independently. Same evidence as above.
+      consecutive full-suite runs, but each of those 3 runs had a failure
+      elsewhere in the suite (none in a module this effort touches), so this
+      criterion itself stays open until one complete run passes clean. 2
+      distinct, unrelated timing races on an independently-confirmed
+      heavily-loaded shared machine were observed and filed as their own
+      issues rather than silently dismissed (#5582, #5584) -- neither
+      touches this effort's own code, and both are explained (one
+      confirmed transient in isolation, one a documented tight real-world
+      subprocess-startup timeout) -- but filing them is not the same as a
+      green run.
+- [x] Each Phase's own tests above pass independently. Same evidence as
+      above (the recipe-library-specific modules passed every time).
 - [x] A real consuming repo's hand-written declaration (the motivating
       operational finding's own lanes, or an equivalent fixture) is migrated
       to an `extends:`-based thin declaration with zero custom script, and
       confirmed behavior-equivalent to the original. **Done 2026-10-06**
-      (see Journal): all 4 `odsp-web-harness-effort-lane-{1..4}` declarations
-      in the bound knowledge repo migrated from `kind: repository-issue-loop`
-      to `extends: global:repository-issue-loop`, confirmed byte-for-byte
+      (see Journal): a consuming repo's 4 live, hand-written
+      `kind: repository-issue-loop` declarations migrated to
+      `extends: global:repository-issue-loop`, confirmed byte-for-byte
       identical `agent-dispatch registrar discover-repo` resolved output
-      before/after via a scratch-copy diff, landed via the bound knowledge
-      repo's own PR flow (self-merged).
+      before/after via a scratch-copy diff before touching the live files,
+      landed through that consumer's own PR flow.
 - [x] `plugins/agent-dispatch/README.md` lists all eight shipped global
       recipes (the four base archetypes plus backlog-triager,
       issue-reproducer, effort-builder, and effort-driver) with their params
@@ -1612,60 +1616,6 @@ suite green (3743 passed, 23 skipped, the one known flake above).
 - Validation for this docs phase: `python tools/check-docs-consistency.py`
   stays green, and the full plugin test/doc gate run for the PR is the
   remaining merge-time confirmation.
-
-### 2026-10-06 (later) — Validation Plan: 3 of 4 remaining items closed
-
-Resumed driving this effort's own Validation Plan (its remaining scope
-after Phase 2's Gitea close-out and Phase 3's single-emitter-primitive
-slice being explicitly spun off separately):
-
-- **Full-suite green + each Phase's own tests independently:** ran the full
-  `agent-dispatch` suite 3 times on a confirmed heavily-loaded shared
-  machine (another concurrent heavy test-runner instance held the host
-  admission lock for a long stretch). Every recipe-library-specific test
-  module passed cleanly all 3 times. 3 different unrelated failures
-  surfaced across the 3 runs, all in subsystems this effort never touched
-  (`test_coordinator.py`'s health-loop reporting, `test_managed_companion.py`'s
-  real-subprocess readiness) -- 2 confirmed transient (pass cleanly in
-  isolation), 1 reproducible but explained by a hardcoded 3-second timeout
-  on a real subprocess launch under load (the surrounding test file's own
-  comments already acknowledge this exact class of test as CI-runner-speed
-  sensitive). Filed both as their own tracked issues rather than silently
-  dismissing them: #5582 (coordinator health-loop `in_progress` race) and
-  #5584 (companion-readiness timeout too tight for a loaded machine).
-- **Real consuming-repo migration:** found 4 live, hand-written
-  `kind: repository-issue-loop` declarations in the bound knowledge repo
-  (`odsp-web-harness-effort-lane-{1..4}`, the very pipeline the effort's own
-  motivating operational finding describes). Before touching the live
-  files (these drive a real running production pipeline,
-  gim-home/odsp-web-harness#312), validated the migration safely: copied
-  one lane to a scratch directory, converted it to
-  `extends: "global:repository-issue-loop"` (dropping the now-redundant
-  `pool.body.type: headless`), and diffed `agent-dispatch registrar
-  discover-repo`'s resolved JSON output before/after -- byte-for-byte
-  identical, confirming zero behavior change. Applied the same validated
-  transformation to all 4 real lane files, re-ran `discover-repo` against
-  the real repo root to confirm clean resolution, then landed through the
-  bound knowledge repo's own PR flow (that repo requires PRs even for
-  direct-commit-eligible personal state; self-merged per its own ruleset).
-- **Recipe README cross-check:** read `plugins/agent-dispatch/README.md`'s
-  global-recipe table and narrative against `registrar_recipes.py`'s actual
-  `GLOBAL_RECIPES` dict entry-by-entry (kind, exclude_labels,
-  worker_identity, require_verification, evaluator_ref for all 8 recipes).
-  Already fully accurate -- no changes needed.
-- **Still open:** the live-fixture-repo/issue/PR validation. Each Phase's
-  own "Tests" item (Phases 5-8) used a local/mocked `tmp_path` pytest
-  fixture, not a genuinely live GitHub repo/issue/PR set -- confirmed by
-  reading the actual test bodies rather than assuming "fixture" meant
-  "live." This is a materially larger undertaking (standing up a disposable
-  scratch repo, creating real fixture issues, and driving each of the 4
-  named recipes' loops to real completion against it) and is the one
-  genuinely remaining piece of this effort's own scope.
-- **Next:** stand up the live fixture validation, or make an explicit call
-  (with the operator) on whether this effort can be considered
-  substantially complete and archived with that one item tracked as a
-  follow-on, given Phase 3's single-emitter-primitive slice is already
-  being spun off the same way.
 - With Phase 9 checked off, every planned phase in this effort is now closed
   except the explicitly deferred, separately tracked follow-ons: Phase 2's
   remaining **Gitea** reviewer adapter work and Phase 3's single-emitter-
@@ -1735,3 +1685,60 @@ slice being explicitly spun off separately):
   realized and checked off above; the Phase 2 item remains visibly open only
   for the **Gitea** reviewer adapter follow-on. The effort stays **Active**;
   do not archive it yet.
+
+### 2026-10-06 (later) — Validation Plan: 2 of 4 remaining items closed, 2 clarified
+
+Resumed driving this effort's own Validation Plan (its remaining scope
+after Phase 2's Gitea close-out and Phase 3's single-emitter-primitive
+slice being explicitly spun off separately):
+
+- **Full-suite green + each Phase's own tests independently:** ran the full
+  `agent-dispatch` suite 3 times on a confirmed heavily-loaded shared
+  machine (another concurrent heavy test-runner instance held the host
+  admission lock for a long stretch). Every recipe-library-specific test
+  module passed cleanly all 3 times, closing the **per-Phase tests**
+  criterion. The **full-suite-green** criterion itself stays **open**: all
+  3 runs had a failure elsewhere in the suite (none in a module this effort
+  touches). 2 were confirmed transient (pass cleanly in isolation); 1
+  reproduces even in isolation but traces to a hardcoded 3-second startup
+  timeout on a real subprocess launch under load (the surrounding test
+  file's own comments already acknowledge this class of test as
+  CI-runner-speed sensitive). Filed both as their own tracked issues rather
+  than silently dismissing them: #5582 (an unrelated coordinator
+  health-loop `in_progress` race) and #5584 (the companion-readiness
+  timeout). Neither closes the full-suite-green item on its own -- that
+  stays open until one complete run passes clean.
+- **Real consuming-repo migration:** a consuming repo maintained by this
+  session's operator had 4 live, hand-written `kind: repository-issue-loop`
+  declarations driving a real standing pipeline -- the same shape the
+  effort's own motivating operational finding describes. Before touching
+  the live files, validated the migration safely in a side channel: copied
+  one declaration to a scratch directory, converted it to
+  `extends: "global:repository-issue-loop"` (dropping the now-redundant
+  `pool.body.type: headless`), and diffed `agent-dispatch registrar
+  discover-repo`'s resolved JSON output before/after -- byte-for-byte
+  identical, confirming zero behavior change. Applied the same validated
+  transformation to all 4 real declarations, re-ran `discover-repo` against
+  the real repo root to confirm clean resolution, then landed and merged
+  the change through that consumer's own PR flow.
+- **Recipe README cross-check:** read `plugins/agent-dispatch/README.md`'s
+  global-recipe table and narrative against `registrar_recipes.py`'s actual
+  `GLOBAL_RECIPES` dict entry-by-entry (kind, exclude_labels,
+  worker_identity, require_verification, evaluator_ref for all 8 recipes).
+  Already fully accurate -- no changes needed.
+- **Still open:** the live-fixture-repo/issue/PR validation. Each Phase's
+  own "Tests" item (Phases 5-8) used a local/mocked `tmp_path` pytest
+  fixture, not a genuinely live GitHub repo/issue/PR set -- confirmed by
+  reading the actual test bodies rather than assuming "fixture" meant
+  "live." This is a materially larger undertaking (standing up a disposable
+  scratch repo, creating real fixture issues, and driving each of the 4
+  named recipes' loops to real completion against it) and, together with
+  one genuinely clean full-suite run, is what remains of this effort's own
+  scope.
+- **Next:** get one complete, clean full-suite run (retry once #5582/#5584
+  settle or the host machine is less loaded), then stand up the live
+  fixture validation -- or make an explicit call with the operator on
+  whether this effort can be considered substantially complete and
+  archived with those two items tracked as named follow-ons, given Phase
+  2's Gitea remainder and Phase 3's single-emitter-primitive slice are
+  already being carried the same way.
