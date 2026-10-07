@@ -587,7 +587,11 @@ def _directory_marketplace_plugin(
     if loaded is None:
         return None
     manifest, manifest_root = loaded
-    if manifest.get("name") != marketplace:
+    # Copilot CLI registers a `directory` marketplace under its settings key and
+    # never compares that key with the catalog's own `name`, so a repo may
+    # register a published catalog under a distinct local id. Only the
+    # repository-registry source keeps the stricter identity check.
+    if source_kind != "directory" and manifest.get("name") != marketplace:
         return None
     plugin_root = manifest_root
     metadata = manifest.get("metadata")
