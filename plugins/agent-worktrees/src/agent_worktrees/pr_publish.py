@@ -214,11 +214,10 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
         return PushTarget(repo.remote)
     if len(forks) < len(configured):
         # A configured fork remote is gone from this checkout (removed or renamed):
-        # the PR's head may live there. Only the repo's own remote, proven to hold
-        # the provider's PR head, is safe to push to.
-        own = _tip(repo.remote, branch, worktree_path)
-        head = _provider_head(repo, pr) if own else ""
-        return PushTarget(repo.remote) if own and head and own == head else None
+        # the PR's head may live there. A matching SHA on the repo's own remote
+        # doesn't prove the head is there (a stray copy can hold the same commit),
+        # so nothing is decided until the remote is back.
+        return None
     tips = {f: _tip(f, branch, worktree_path) for f in forks}
     if None in tips.values():
         return None
@@ -255,8 +254,9 @@ def head_branch_gone(repo, pr, worktree_path: str) -> bool:
     try:
         with publish_lock(worktree_path):
             where = push_remote(repo, pr, worktree_path)
-            return where is not None and git_ops.remote_branch_state(
-                where, pr.branch, cwd=worktree_path) == "absent"
+            # The exact ref: `ls-remote <branch>` is a tail glob, so an unrelated
+            # `archive/<branch>` would keep a deleted head looking present.
+            return where is not None and _tip(where, pr.branch, worktree_path) == ""
     except PublishLockTimeout:
         return False
 

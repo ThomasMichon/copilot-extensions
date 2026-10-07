@@ -4392,16 +4392,31 @@ class TestPRFinalizeAndPush:
         (wt_path / "c.txt").write_text("feedback\n")
         _git("add", "-A", cwd=wt_path)
         _git("commit", "-m", "address feedback", cwd=wt_path)
-        real_state = git_ops.remote_branch_state
+        from agent_worktrees import pr_publish
+        real_tip = pr_publish._tip
         seen = []
 
-        def state(remote, branch, *, cwd):
+        def tip(remote, branch, cwd):
             seen.append(self._blocked_while(wt_path))
-            return real_state(remote, branch, cwd=cwd)
+            return real_tip(remote, branch, cwd)
 
-        monkeypatch.setattr(git_ops, "remote_branch_state", state)
+        monkeypatch.setattr(pr_publish, "_tip", tip)
         assert pr_ops.create_pr(wid, config, title="Add feature").get("success")
         assert seen and all(seen)
+
+    def test_a_deleted_head_is_gone_even_beside_an_archived_branch_of_the_same_name(self, pr_repo):
+        """`ls-remote <branch>` is a tail glob: `archive/<branch>` must not keep
+        a deleted PR head looking present to the retirement check."""
+        from agent_worktrees import pr_publish
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        branch = rec.pr.branch
+        repo = config.repos["ext"]
+        assert not pr_publish.head_branch_gone(repo, rec.pr, str(wt_path))
+        _git("push", "origin", f"refs/remotes/origin/{branch}:refs/heads/archive/{branch}", cwd=wt_path)
+        _git("push", "origin", "--delete", branch, cwd=wt_path)
+        assert pr_publish.head_branch_gone(repo, rec.pr, str(wt_path))
 
     def test_the_publication_lock_is_reentrant_within_a_thread(self, pr_repo, monkeypatch):
         from agent_worktrees import pr_publish
@@ -4415,7 +4430,10 @@ class TestPRFinalizeAndPush:
                 pass
         assert not self._blocked_while(wt_path)  # released once the outer one ends
 
-    def test_a_missing_fork_remote_allows_origin_only_when_it_holds_the_prs_head(self, pr_repo, monkeypatch):
+    def test_a_missing_fork_remote_decides_nothing_even_when_origin_matches(self, pr_repo, monkeypatch):
+        """A legacy PR whose configured fork remote is gone: origin holding the
+        provider's head SHA isn't proof the head lives there (a stray copy can
+        hold the same commit), so nothing is pushed until the remote is back."""
         from agent_worktrees import pr_publish
         config, wid, wt_path, remote_dir = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
@@ -4424,7 +4442,7 @@ class TestPRFinalizeAndPush:
         repo = self._fork_config(config).repos["ext"]  # fork configured, no `fork` remote here
         origin_tip = _git("rev-parse", f"refs/remotes/origin/{rec.pr.branch}", cwd=wt_path)
         monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr: origin_tip)
-        assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) == "origin"
+        assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) is None
         monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr: "")  # unreadable
         assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) is None
         monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr: "0" * 40)  # elsewhere
