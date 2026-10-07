@@ -31,7 +31,8 @@ an autopilot (or headless) session -- the mode is the latest of
 ``permission.requested``, defaulting to interactive; ``absent`` after
 ``session.shutdown``; ``unknown`` when no such event is in the window or the last
 line is partial or malformed. Every other event carries no presence signal.
-Confidence is ``scanned``. Event names verified against Copilot CLI 1.0.92
+Confidence is ``scanned``, except an ended turn with no mode signal in the window,
+which is assumed interactive and marked ``heuristic``. Event names verified against Copilot CLI 1.0.92
 transcripts.
 """
 

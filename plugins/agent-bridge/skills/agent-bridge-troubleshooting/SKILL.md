@@ -154,7 +154,7 @@ verdict informs the resume-vs-fresh decision.
 **What is it doing right now?** `<agent-bridge catalog argv[0]> presence <session|agent> [--json]`
 reads the same transcript and answers `busy` (mid-turn), `awaiting_input` (an
 unanswered permission request, or an ended turn in an interactive session),
-`idle` (an ended turn in autopilot), `absent` (shut down) or `unknown` (nothing
+`idle` (an ended turn in an autopilot or headless session), `absent` (shut down) or `unknown` (nothing
 to go on, or a partial last line) -- never from self-reported activity. `peek
 --json` carries the same `presence` block.
 
