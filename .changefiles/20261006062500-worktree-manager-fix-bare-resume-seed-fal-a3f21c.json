@@ -1,9 +1,0 @@
-{
-  "comment": "resolve_launch_plan's bare-resume version-skew fallback no longer mistakes the engine's deliberate --seed-with---bare-resume rejection for an unsupported-flag error (it now requires the actual \"unrecognized arguments\" argparse message before retrying without --bare-resume); also updates its own seed-delivery docstring to describe worktree_id-resume seeding (resume-prompt-durable-seed-and-mux-fix)",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

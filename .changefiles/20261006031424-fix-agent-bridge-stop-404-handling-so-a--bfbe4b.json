@@ -1,9 +1,0 @@
-{
-  "comment": "Fix agent-bridge stop 404 handling so a session confirmed already-gone is treated as stopped, matching 'end'. Previously, an already-dead session's stop call raised uncaught, making agent-dispatch's cool_dormant_bodies() retry forever (confirmed live: a 3+ hour stall starving an entire exclusive-key pool).",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix classify_worktree misreporting COMPLETED (Worktree Manager MERGED/WIP flap) when a transient rev-list failure was silently coerced to zero-ahead",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

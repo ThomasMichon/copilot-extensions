@@ -1,9 +1,0 @@
-{
-  "comment": "reconcile_reserving(): release a worktree-backed reservation stuck at an UNKNOWN liveness verdict only once the local agent-worktrees registry positively confirms the worktree directory never materialized (never on elapsed time alone)",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

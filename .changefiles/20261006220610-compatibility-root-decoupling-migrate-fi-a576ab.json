@@ -1,9 +1,0 @@
-{
-  "comment": "compatibility-root-decoupling: migrate _find_repo_dir's 10 external call sites (4 shims + 6 direct) off the __main__ compat root onto worktree_identity._find_repo_dir",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

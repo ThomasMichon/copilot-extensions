@@ -1,9 +1,0 @@
-{
-  "comment": "resume-prompt-durable-seed-and-mux-fix Phase 3: launch-session.{ps1,sh} now deliver a queued pending_seed on a live-mux REATTACH too (previously only on a fresh mux-session create), closing the gap where resolve's own live-mux uncertainty gating correctly queued a seed but nothing ever delivered it on that reattach",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

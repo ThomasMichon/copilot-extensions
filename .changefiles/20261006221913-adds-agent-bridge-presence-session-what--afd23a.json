@@ -1,9 +1,0 @@
-{
-  "comment": "Adds 'agent-bridge presence <session>': what a session is doing now (busy, awaiting_input, idle, absent or unknown), read from its own events.jsonl over the same transport as peek, with unanswered permission requests paired by id and an ended turn read by the session's mode; peek --json carries the same presence block.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

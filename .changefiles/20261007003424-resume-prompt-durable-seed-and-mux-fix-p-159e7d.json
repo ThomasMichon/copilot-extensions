@@ -1,9 +1,0 @@
-{
-  "comment": "resume-prompt-durable-seed-and-mux-fix Phase 2: Picker Actions-menu \"Resume prompt...\" entry (lean composer dialog, PromptDlgScreen) threads a typed seed through the resume decision to LaunchRequest.seed_prompt, closing the one Worktree-Manager-layer gap (production picker's resume branch never read options.seed_prompt into its LaunchRequest, unlike the new-worktree branch beside it)",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

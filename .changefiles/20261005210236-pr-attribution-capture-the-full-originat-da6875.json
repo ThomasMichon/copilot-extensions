@@ -1,9 +1,0 @@
-{
-  "comment": "PR attribution: capture the full originating-worktree root chain in the codename marker (root=<codename>), via a new agent_worktrees.root_chain module",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
