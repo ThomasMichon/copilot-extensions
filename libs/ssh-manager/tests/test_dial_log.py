@@ -270,9 +270,9 @@ def test_writers_in_separate_processes_never_interleave_a_line():
         n * 100 + i for n in range(6) for i in range(40))
 
 
-def test_on_an_event_loop_a_busy_lock_drops_the_line_without_waiting():
-    """Recording from a coroutine never stalls the loop: a held lock means one try, then
-    the line is dropped (a synchronous caller would wait up to LOCK_WAIT_S)."""
+def test_on_an_event_loop_recording_returns_at_once_and_the_line_still_lands():
+    """From a coroutine, record() hands the line off and returns at once even while the
+    file is locked; the background writer appends it once the lock frees."""
     import asyncio
     import time as _time
 
@@ -284,10 +284,51 @@ def test_on_an_event_loop_a_busy_lock_drops_the_line_without_waiting():
             assert held
             started = _time.monotonic()
             dial_log.record("cs-busy", kind="direct_exec", outcome="ok", elapsed_s=0)
-            return _time.monotonic() - started
+            took = _time.monotonic() - started
+            await asyncio.sleep(0.3)  # the writer waits for the lock meanwhile
+            return took
 
-    assert asyncio.run(record_while_locked()) < 0.5
-    assert dial_log.read("cs-busy") == []
+    assert asyncio.run(record_while_locked()) < 0.1
+    assert [e["kind"] for e in dial_log.read("cs-busy")] == ["direct_exec"]
+
+
+def test_the_event_loop_thread_never_writes_the_file(monkeypatch):
+    import asyncio
+    import threading
+
+    writers = []
+    real = dial_log._write
+    monkeypatch.setattr(dial_log, "_write", lambda p, line: (writers.append(threading.current_thread().name),
+                                                             real(p, line)))
+
+    async def dial():
+        dial_log.record("cs-thread", kind="reconnect", outcome="ok", elapsed_s=0)
+
+    asyncio.run(dial())
+    assert dial_log.flush()
+    assert writers == ["dial-log-writer"] and len(dial_log.read("cs-thread")) == 1
+
+
+def test_a_saturated_writer_drops_lines_instead_of_growing(monkeypatch):
+    import asyncio
+    import threading
+
+    monkeypatch.setattr(dial_log, "QUEUE_MAX", 2)
+    dial_log._reset_writer()
+    gate, written = threading.Event(), []
+    monkeypatch.setattr(dial_log, "_write", lambda p, line: (gate.wait(5), written.append(line)))
+
+    async def burst():
+        for i in range(6):
+            dial_log.record("cs-burst", kind="reconnect", outcome="ok", elapsed_s=0, attempt=i)
+
+    try:
+        asyncio.run(burst())
+    finally:
+        gate.set()
+    assert dial_log.flush()
+    assert 1 <= len(written) <= 3  # one in the writer's hands, at most QUEUE_MAX queued
+    dial_log._reset_writer()
 
 
 @pytest.mark.asyncio

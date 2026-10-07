@@ -1,10 +1,12 @@
-"""Bounded, structured dial log: every connection attempt to a target, one line each.
+"""Bounded, structured dial log: the connection attempts to a target, one line each.
 
 Observe-only telemetry for diagnosing dial storms and relay drops without
 cross-layer SSH forensics. Each layer that opens a connection -- the
 ``gh codespace ssh --config`` fetch (which cold-starts a stopped CodeSpace), a
 ControlMaster start, a direct-mode exec (each one is a fresh connection), and a
-health-check reconnect -- records one JSON line per attempt:
+health-check reconnect -- records one JSON line per attempt (dedicated port-forward
+and relay-channel ssh processes, ``forward.py`` / ``relay_channel.py``, are not
+logged yet):
 ``{at, target, kind, outcome, elapsed_s, attempt, reason, account, stderr}``.
 
 - **Bounded.** One file per target under :func:`log_dir`, trimmed to its newest
@@ -21,18 +23,24 @@ health-check reconnect -- records one JSON line per attempt:
   command's own exit 255 the same way, so for a direct exec this can include one;
   ``timeout``; ``error`` / ``cancelled`` (the dial raised); ``spawned`` (a direct-mode
   stdio channel's ssh started; not a connection result).
-- **Never in the way.** Recording is best-effort: a lock that can't be had
-  quickly, or any I/O error, drops that one line and never raises into the dial.
+- **Never in the way.** Recording is best-effort: a lock that can't be had within
+  :data:`LOCK_WAIT_S`, or any I/O error, drops that one line and never raises into
+  the dial. On an event loop's thread, ``record`` does no file I/O at all: it hands
+  the line to a background writer thread (bounded by :data:`QUEUE_MAX`; a saturated
+  writer drops the line), which then waits for the lock like any writer.
 """
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import hashlib
 import json
 import logging
 import os
+import queue
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +55,8 @@ KEEP_LINES = 4000
 STDERR_TAIL = 300
 FIELD_CAP = 200
 LOCK_WAIT_S = 2.0
+#: Lines from event-loop threads waiting for the background writer; past this, dropped.
+QUEUE_MAX = 256
 #: The only account values recorded (see :func:`account_of`).
 ACCOUNTS = ("pinned", "ambient")
 #: Outcomes that are a connection attempt reaching (or failing to reach) the target.
@@ -211,11 +221,21 @@ def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: i
             "stderr": redact((stderr or "").strip())[-STDERR_TAIL:],
         }
         path = _file_for(target)
-        _private_dir(path.parent)
         line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
-        # On an event loop's thread never wait: a busy lock drops this one line rather
-        # than stall every other coroutine (synchronous callers wait briefly).
-        with _locked(path, wait=0.0 if _in_event_loop() else LOCK_WAIT_S) as held:
+        if _in_event_loop():
+            _enqueue(path, line)  # the loop's thread never touches the file
+        else:
+            _write(path, line)
+    except Exception as exc:  # noqa: BLE001 -- telemetry must never break a dial
+        log.debug("dial log write for %s failed: %s", target, exc)
+
+
+def _write(path: Path, line: bytes) -> None:
+    """Append *line* under the per-file lock (waiting up to :data:`LOCK_WAIT_S`), then
+    trim if the log passed its bounds. Never raises."""
+    try:
+        _private_dir(path.parent)
+        with _locked(path, wait=LOCK_WAIT_S) as held:
             if not held:
                 return
             before = path.stat().st_size if path.exists() else 0
@@ -224,11 +244,60 @@ def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: i
             if path.stat().st_size > MAX_BYTES or _lines_after_append(path, before, len(line)) > MAX_LINES:
                 _trim(path)
     except Exception as exc:  # noqa: BLE001 -- telemetry must never break a dial
-        log.debug("dial log write for %s failed: %s", target, exc)
+        log.debug("dial log write to %s failed: %s", path.name, exc)
+
+
+_writer_guard = threading.Lock()
+_queue: "queue.Queue | None" = None
+
+
+def _enqueue(path: Path, line: bytes) -> None:
+    """Hand a line to the background writer (started on first use); a saturated
+    writer drops it rather than grow without bound or block the loop."""
+    global _queue
+    with _writer_guard:
+        if _queue is None:
+            _queue = queue.Queue(maxsize=QUEUE_MAX)
+            threading.Thread(target=_drain, args=(_queue,), name="dial-log-writer", daemon=True).start()
+    try:
+        _queue.put_nowait((path, line))
+    except queue.Full:
+        log.debug("dial log writer saturated; dropped a line for %s", path.name)
+
+
+def _drain(q: "queue.Queue") -> None:
+    while True:
+        path, line = q.get()
+        try:
+            _write(path, line)
+        finally:
+            q.task_done()
+
+
+def flush(timeout: float = 2 * LOCK_WAIT_S) -> bool:
+    """Wait, at most *timeout* seconds, until lines recorded from event loops are on
+    disk; whether they all are."""
+    q = _queue
+    if q is None:
+        return True
+    with q.all_tasks_done:
+        return q.all_tasks_done.wait_for(lambda: q.unfinished_tasks == 0, timeout)
+
+
+def _reset_writer() -> None:  # a forked child has no writer thread: start afresh
+    global _queue, _writer_guard
+    _queue, _writer_guard = None, threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_writer)
+atexit.register(flush, 1.0)
 
 
 def read(target: str, *, last: int = 50) -> list[dict]:
-    """The newest *last* entries for *target* (oldest first); unreadable lines skipped."""
+    """The newest *last* entries for *target* (oldest first); unreadable lines skipped.
+    Lines this process recorded from an event loop are flushed first (bounded)."""
+    flush()
     path = _file_for(target)
     if last <= 0 or not path.exists():
         return []

@@ -18,14 +18,15 @@ agent-codespaces) import this library instead of spawning SSH directly.
 - **Async-first** -- built on asyncio, matches agent-bridge patterns
 - **Owned Windows proxies** -- native proxy children run behind a per-SSH
   loopback broker with explicit no-window flags and byte-transparent pipes
-- **Dial log** -- every connection attempt (`gh codespace ssh --config` fetch,
-  ControlMaster start, direct-mode exec or stdio channel, health reconnect) is one structured,
+- **Dial log** -- each connection attempt (`gh codespace ssh --config` fetch,
+  ControlMaster start, direct-mode exec or stdio channel, health reconnect; dedicated
+  port-forward and relay-channel ssh processes aren't logged yet) is one structured,
   redacted JSON line in a bounded per-target log under
   `~/.ssh-manager/dial-log/` (`SSH_MANAGER_DIAL_LOG_DIR` overrides it): kind,
   outcome (a direct-mode stdio channel records `spawned`: only its ssh start is
   known there, so it is neither `ok` nor a failure), elapsed time, attempt, account `pinned`/`ambient`, and a short
   stderr tail; user-only (0700 directory, 0600 files) on POSIX, one file per exact
-  target (a readable prefix plus a digest). Recording is best-effort and never raises into a dial (on an event loop's thread it never waits on the lock: a busy lock drops that one line);
+  target (a readable prefix plus a digest). Recording is best-effort and never raises into a dial (on an event loop's thread it does no file I/O: a bounded background writer appends the line, dropping it when saturated);
   `ssh_manager.dial_log.summary()` counts dials per outcome over the last 10
   minutes and hour.
 
