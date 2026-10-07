@@ -175,9 +175,15 @@ Operator, end of a long multi-repo session:
             squarely in scope) — consistent with
             `remote-interactive-sessions`'s own subject line, which already
             named "any agent-ssh-reachable machine" as a venue type
-            alongside CodeSpaces/containers. No conformance gap found
-            requiring a new issue — agent-ssh's `install.ps1`
-            nonconformance is already tracked by `#5472` (Phase 3).
+            alongside CodeSpaces/containers. `install.ps1`'s
+            nonconformance is already tracked by `#5472` (Phase 3). PR
+            review (#5627) caught one overstatement (WSL's "no daemon"
+            claim — its own `sshd` + keepalive are still real
+            prerequisites, only the network hop is removed; corrected) and
+            one genuine pre-existing implementation gap the self-healing
+            fold-back assumed worked end to end (`refresh_mesh`'s
+            temp-directory provenance bug) — already tracked independently
+            as `#5478`; cross-linked rather than refiled.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -557,8 +563,24 @@ then rather than assuming either answer.
   the shipped `copilot <ssh-target>` verb) — reworded the Non-Goal rather
   than filing a bug, since the contradiction was in the vision's own prose
   against already-working reality, not a functional gap or inconsistency
-  in the system itself. No GitHub issue was warranted by anything found
-  this slice — every fold-back traces to real, working capability, and the
-  one plugin-services conformance gap (`install.ps1`) is already tracked
-  by `#5472`.
-- PR pending; worktree not yet finalized as of this entry.
+  in the system itself.
+- **PR #5627 review** caught two real issues the slice missed: (1) the
+  *local-process reach* wording overstated the `wsl` transport as
+  needing "no daemon" — it avoids the Windows→WSL network hop only; WSL's
+  own `sshd` + a keepalive are still real prerequisites. Corrected in
+  both the Features and Provenance text. (2) A **genuine pre-existing
+  implementation gap**, exactly the kind this methodology exists to
+  surface rather than paper over: `refresh_mesh` writes a fragment whose
+  provenance points at a registry file inside a `TemporaryDirectory` it
+  then deletes, so the audit the vision's `derived-ssh-config` fold-back
+  describes reports a false `missing-target` and blocks the refreshed
+  aliases. Searched before filing (dedup discipline) — already tracked
+  independently as `#5478` (filed before this slice, same root cause,
+  confirmed by direct code read of
+  `plugins/agent-ssh/src/agent_ssh/mesh_refresh.py:113-153`). Cross-linked
+  rather than refiled; left a comment on `#5478` pointing back at the
+  vision sections now citing it. This is the methodology working as
+  intended: the should-be text stands (self-healing is the correct
+  intent), the tracked issue owns the gap in realizing it, no prose in
+  the vision describes the gap itself.
+- PR merged; worktree finalized.

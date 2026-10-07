@@ -112,10 +112,13 @@ adding connectivity is installing a module rather than rewiring the core:
   guarantee: prefer zero, and never exceed one.
 - **Local-process reach** — reach a local sub-environment on the same
   machine (e.g. a WSL distribution) through its own native interop
-  transport rather than a network hop at all — no tunnel, no daemon, no
-  `ProxyJump`. This is the zero-inbound-exposure ideal *taken to its
-  limit*: the floor's most-preferred shape, not a special case, since
-  there is no network boundary to secure in the first place.
+  transport rather than a network hop at all — no tunnel, no `ProxyJump`,
+  no network-exposed listener. This is the zero-inbound-exposure ideal
+  *taken to its limit*: the floor's most-preferred shape, not a special
+  case, since there is no network boundary to cross or secure in the first
+  place. The sub-environment's own SSH service (and a keepalive pinning it
+  up) are still real prerequisites — this transport removes the *network
+  hop*, not the target's own SSH daemon.
 A registry entry **names** which transport carries a machine; the layers above
 address the machine the same way regardless.
 
@@ -447,8 +450,10 @@ layer's.)
   reconciled against reality that had drifted untouched since this vision's
   single-day 2026-07-22 authoring (139 commits since, per the plugin's own
   `README.md`). Added: *local-process reach* (the `wsl` in-box transport —
-  no network hop, no daemon, the zero-inbound-exposure ideal taken to its
-  limit) to the Transport modules concept and `pluggable-transport-modules`;
+  no network hop, no `ProxyJump`, though the sub-environment's own SSH
+  service + keepalive are still real prerequisites — the
+  zero-inbound-exposure ideal taken to its limit) to the Transport modules
+  concept and `pluggable-transport-modules`;
   the one-axis in-box-vs-provider-plugin split criterion (non-public,
   multi-machine config) to `pluggable-transport-modules`; fragment
   **provenance and staleness detection** (`doctor`'s managed-fragment
@@ -471,7 +476,19 @@ layer's.)
   README/skills. All additions are fold-back (reality already does these
   things); no Non-Goal reality violates and no scaling-back occurred — the
   one Non-Goal reworded was a wording correction of this vision's own
-  boundary, not a weakening of it. No conformance gap was found requiring a
-  new issue; `agent-ssh`'s separate `install.ps1`
+  boundary, not a weakening of it. `agent-ssh`'s separate `install.ps1`
   immutable-versioned-runtime nonconformance is already tracked by `#5472`
   (Phase 3) and is unaffected by this slice.
+  **Review correction (PR #5627):** the "no daemon" claim in
+  *local-process reach* overstated the WSL transport — it avoids the
+  Windows→WSL *network* hop, not WSL's own `sshd` (still a real
+  prerequisite, alongside a keepalive); reworded here and in the Transport
+  modules concept. Review also found a genuine **pre-existing
+  implementation gap** the self-healing fold-back assumed worked end to
+  end: `refresh_mesh` writes a fragment's provenance pointing at a
+  registry file inside a `TemporaryDirectory` it then deletes, so the
+  audit this vision's *derived-ssh-config* describes reports a false
+  `missing-target` and blocks the refreshed aliases. Already tracked as
+  `#5478` (filed independently, pre-existing) — cross-linked rather than
+  refiled; the should-be guarantee stated here stands unchanged, `#5478`
+  is the tracked gap in realizing it.
