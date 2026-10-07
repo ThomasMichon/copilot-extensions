@@ -68,11 +68,23 @@ class TestPRNudge:
 
         config, wid, _wt, _ = pr_repo
         config = _config_with_reviewer(config, "copilot")
-        pr_ops.set_pr(wid, number=7, state="open", provider="github")
+        # trusted_target() (copilot-extensions#5609) requires a resolvable
+        # slug before reconciling: either pr.repo containing "/", or a PR
+        # URL naming the same number at the configured provider/authority.
+        # The fixture's own record.repo ("ext") is a legacy project name,
+        # not a slug, so a URL is required here -- it must resolve to the
+        # same authority _Prov.authority_endpoint() reports below.
+        pr_ops.set_pr(
+            wid, number=7, url="https://github.com/acme/ext/pull/7",
+            state="open", provider="github",
+        )
         nudge_calls = []
 
         class _Prov:
             name = "github"
+
+            def authority_endpoint(self, api_base=""):
+                return "https://github.com"
 
             def get_pull(self, repo, number, *, api_base="", token=None):
                 return PullResult(number=number, state="closed", merged=True)
