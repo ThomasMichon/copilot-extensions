@@ -8,10 +8,10 @@
   and reviewer adapter -- is now fully closed, merged via PR #5414
   2026-10-06; Phase 3's own tracked single-emitter-primitive follow-on
   slice remains, explicitly out of this effort's own scope. Of this
-  effort's own Validation Plan: the real consuming-repo migration and the
-  recipe README cross-check are both done (2026-10-06); a clean full-suite
-  run and the live fixture exercising each of the 4 named recipes
-  end-to-end both remain open)
+  effort's own Validation Plan: each Phase's own tests independently, the
+  real consuming-repo migration, and the recipe README cross-check are all
+  done (2026-10-06); a clean full-suite run and the live fixture
+  exercising each of the 4 named recipes end-to-end both remain open)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -488,25 +488,33 @@ below — read it before starting any Phase 3 work).
       consecutive full-suite runs, but each of those 3 runs had a failure
       elsewhere in the suite (none in a module this effort touches), so this
       criterion itself stays open until one complete run passes clean. 2
-      distinct, unrelated timing races on an independently-confirmed
-      heavily-loaded shared machine were observed and filed as their own
-      issues rather than silently dismissed (#5582, #5584) -- neither
-      touches this effort's own code, and both are explained (one
-      confirmed transient in isolation, one a documented tight real-world
-      subprocess-startup timeout) -- but filing them is not the same as a
+      distinct, unrelated timing-sensitive failures on an
+      independently-confirmed heavily-loaded shared machine were observed
+      and filed as their own issues rather than silently dismissed (#5582,
+      #5584) -- neither touches this effort's own code; #5582 is a
+      hypothesized race (confirmed transient: passes cleanly in isolation)
+      and #5584 is a documented tight real-world subprocess-startup
+      timeout -- but filing them is not the same as a
       green run.
-- [x] Each Phase's own tests above pass independently. Same evidence as
-      above (the recipe-library-specific modules passed every time).
+- [x] Each Phase's own tests above pass independently. **Confirmed
+      2026-10-06**: ran each recipe-library-specific test module directly
+      and in isolation (not only as part of a combined full-suite run) --
+      `test_registrar_recipes.py`, `test_registrar_discovery.py`,
+      `test_repository_issue_loops.py`, `test_effort_driver_loops.py`,
+      `test_cli.py`, `test_registrar_registry.py` together: 567 passed, 1
+      skipped.
 - [x] A real consuming repo's hand-written declaration (the motivating
       operational finding's own lanes, or an equivalent fixture) is migrated
       to an `extends:`-based thin declaration with zero custom script, and
       confirmed behavior-equivalent to the original. **Done 2026-10-06**
       (see Journal): a consuming repo's 4 live, hand-written
       `kind: repository-issue-loop` declarations migrated to
-      `extends: global:repository-issue-loop`, confirmed byte-for-byte
+      `extends: global:repository-issue-loop`. Confirmed byte-for-byte
       identical `agent-dispatch registrar discover-repo` resolved output
-      before/after via a scratch-copy diff before touching the live files,
-      landed through that consumer's own PR flow.
+      before/after for **all 4** declarations (reconstructed each file's
+      pre-change content from git history and diffed the complete resolved
+      output against the post-change tree, not just a single representative
+      sample), before landing through that consumer's own PR flow.
 - [x] `plugins/agent-dispatch/README.md` lists all eight shipped global
       recipes (the four base archetypes plus backlog-triager,
       issue-reproducer, effort-builder, and effort-driver) with their params
@@ -1692,22 +1700,27 @@ Resumed driving this effort's own Validation Plan (its remaining scope
 after Phase 2's Gitea close-out and Phase 3's single-emitter-primitive
 slice being explicitly spun off separately):
 
-- **Full-suite green + each Phase's own tests independently:** ran the full
-  `agent-dispatch` suite 3 times on a confirmed heavily-loaded shared
-  machine (another concurrent heavy test-runner instance held the host
-  admission lock for a long stretch). Every recipe-library-specific test
-  module passed cleanly all 3 times, closing the **per-Phase tests**
-  criterion. The **full-suite-green** criterion itself stays **open**: all
-  3 runs had a failure elsewhere in the suite (none in a module this effort
-  touches). 2 were confirmed transient (pass cleanly in isolation); 1
-  reproduces even in isolation but traces to a hardcoded 3-second startup
-  timeout on a real subprocess launch under load (the surrounding test
-  file's own comments already acknowledge this class of test as
-  CI-runner-speed sensitive). Filed both as their own tracked issues rather
-  than silently dismissing them: #5582 (an unrelated coordinator
-  health-loop `in_progress` race) and #5584 (the companion-readiness
-  timeout). Neither closes the full-suite-green item on its own -- that
-  stays open until one complete run passes clean.
+- **Each Phase's own tests, independently:** ran each recipe-library-specific
+  test module directly and in isolation (not only as part of a combined
+  full-suite run) -- `test_registrar_recipes.py`,
+  `test_registrar_discovery.py`, `test_repository_issue_loops.py`,
+  `test_effort_driver_loops.py`, `test_cli.py`, `test_registrar_registry.py`
+  together: **567 passed, 1 skipped.** Closes this criterion.
+- **Full-suite-green:** ran the full `agent-dispatch` suite 3 times on a
+  confirmed heavily-loaded shared machine (another concurrent heavy
+  test-runner instance held the host admission lock for a long stretch).
+  Every recipe-library-specific test module passed cleanly all 3 times, but
+  each run had a failure elsewhere in the suite (none in a module this
+  effort touches) -- this criterion stays **open** until one complete run
+  passes clean. 2 distinct, unrelated timing-sensitive failures were
+  observed and filed as their own issues rather than silently dismissed:
+  #5582 (a hypothesized coordinator health-loop `in_progress` race --
+  confirmed transient, passes cleanly in isolation) and #5584 (a
+  companion-readiness test with a hardcoded 3-second real-subprocess
+  startup timeout, reproduces even in isolation, traced to a tight
+  real-world timeout the surrounding test file's own comments already
+  acknowledge as CI-runner-speed sensitive). Filing both is not the same as
+  a green run.
 - **Real consuming-repo migration:** a consuming repo maintained by this
   session's operator had 4 live, hand-written `kind: repository-issue-loop`
   declarations driving a real standing pipeline -- the same shape the
@@ -1718,9 +1731,12 @@ slice being explicitly spun off separately):
   `pool.body.type: headless`), and diffed `agent-dispatch registrar
   discover-repo`'s resolved JSON output before/after -- byte-for-byte
   identical, confirming zero behavior change. Applied the same validated
-  transformation to all 4 real declarations, re-ran `discover-repo` against
-  the real repo root to confirm clean resolution, then landed and merged
-  the change through that consumer's own PR flow.
+  transformation to all 4 real declarations, landed and merged the change
+  through that consumer's own PR flow, then went back and reconstructed
+  each of the 4 real declarations' **pre-change** content from git history
+  to diff the **complete, all-4** resolved `discover-repo` output against
+  the post-change tree -- byte-for-byte identical for all 4, not just the
+  one representative sample.
 - **Recipe README cross-check:** read `plugins/agent-dispatch/README.md`'s
   global-recipe table and narrative against `registrar_recipes.py`'s actual
   `GLOBAL_RECIPES` dict entry-by-entry (kind, exclude_labels,
