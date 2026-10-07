@@ -30,8 +30,9 @@ an autopilot (or headless) session -- the mode is the latest of
 ``session.mode_changed``, and ``agentMode`` on ``user.message`` /
 ``permission.requested``, defaulting to interactive; ``absent`` after
 ``session.shutdown``; ``unknown`` when no such event follows the boundary, when
-no boundary lies within the newest 64 MiB (an older permission request or mode
-signal could be unread), or when the last line is partial or malformed. The
+no boundary is found at all (a truncated transcript) or within the newest 64 MiB
+(an older permission request or mode signal could be unread), or when the last
+line is partial or malformed. The
 transcript is read backward in blocks to that boundary, never cut at a fixed
 tail. Every other event carries no presence signal.
 Confidence is ``scanned``, except an ended turn with no mode signal since the
@@ -200,8 +201,9 @@ def scan_back(ef, size):
     unanswered permission request or mode signal is never cut off by a fixed tail.
     A cheap substring prefilter, then the parsed ``type`` decides -- an event name
     appearing as a payload value is not that event. Returns ``(events, complete)``;
-    *complete* is False when :data:`SCAN_CAP` bytes held no boundary: the events
-    since the boundary are then not all known, and presence is ``unknown``."""
+    *complete* is True only when a boundary was found: with none (a truncated file,
+    or none within :data:`SCAN_CAP` bytes) the events since the session started are
+    not all known, and presence is ``unknown`` whatever the file's size."""
     out = []
     pos, carry, scanned = size, b"", 0
     with open(ef, "rb") as fh:
@@ -227,7 +229,7 @@ def scan_back(ef, size):
                         out.reverse()
                         return out, True
     out.reverse()
-    return out, pos == 0
+    return out, False
 
 def presence_of(ef, size, last_line_bad):
     evs, complete = scan_back(ef, size)
@@ -241,7 +243,8 @@ def presence(evs, last_line_bad, complete=True):
     if last_line_bad:
         return out("unknown", "the transcript's last line is partial or malformed")
     if not complete:  # an older permission request or mode signal may be unread
-        return out("unknown", "no session boundary within the newest %%d bytes read" %% SCAN_CAP)
+        return out("unknown", "no session start or resume found in the transcript (read back up "
+                   "to %%d bytes)" %% SCAN_CAP)
     start = 0
     for i, e in enumerate(evs):
         if e.get("type") in BOUNDARY:

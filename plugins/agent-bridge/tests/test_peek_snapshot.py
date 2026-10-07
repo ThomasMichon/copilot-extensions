@@ -324,4 +324,12 @@ def test_no_boundary_within_the_scan_cap_is_unknown(tmp_path, monkeypatch):
     filler = [_ev("tool.execution_complete", 10 + i % 40, output="x" * 2000) for i in range(100)]
     _write_session(root, _ACP, [*_TURN, _ev("permission.requested", 3, requestId="r1"), *filler])
     p = ps.snapshot_local(_ACP, session_state_root=root)["presence"]
-    assert p["state"] == "unknown" and "boundary" in p["reason"]
+    assert p["state"] == "unknown" and "no session start or resume" in p["reason"]
+
+
+def test_a_transcript_without_any_session_boundary_is_unknown(tmp_path):
+    """A small, truncated transcript with no session start or resume: what came before
+    is unknown, so presence is too -- whatever the file's size."""
+    p = _presence(tmp_path, [_ev("permission.completed", 1, requestId="r0"),
+                             _ev("tool.execution_complete", 2)])
+    assert p["state"] == "unknown" and "no session start or resume" in p["reason"]
