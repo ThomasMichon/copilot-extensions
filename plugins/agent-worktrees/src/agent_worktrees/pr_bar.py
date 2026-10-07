@@ -284,7 +284,10 @@ def evaluate(snap: Snapshot, *, reviewer: str = COPILOT_REVIEWER, now: str = "",
 
 _PR_QUERY = """query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
 pullRequest(number:$number){state mergeable headRefOid isDraft title author{login}
-labels(first:100){nodes{name}}}}}"""
+labels(first:100){pageInfo{hasNextPage endCursor} nodes{name}}}}}"""
+_LABELS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
+repository(owner:$owner,name:$name){pullRequest(number:$number){labels(first:100,after:$after){
+pageInfo{hasNextPage endCursor} nodes{name}}}}}"""
 _CHECKS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){commits(last:1){nodes{commit{oid
 statusCheckRollup{contexts(first:100,after:$after){pageInfo{hasNextPage endCursor}
@@ -351,6 +354,22 @@ def _pages(run, query: str, path, *, what: str, **kw) -> list[dict]:
     raise ReadError(f"{what}: more than {MAX_PAGES} pages")
 
 
+def _core(run, **kw) -> dict:
+    """The PR's core fields with **every** label (a hold label can sit past the first
+    page): ``labels`` becomes the full, sorted list of names. :class:`ReadError` on any
+    unreadable or truncated label page."""
+    pr = _graphql(run, _PR_QUERY, **kw)
+    first = pr.get("labels")
+    page = first.get("nodes") if isinstance(first, dict) else None
+    info = first.get("pageInfo") if isinstance(first, dict) else None
+    if not isinstance(page, list) or not isinstance(info, dict) \
+            or not isinstance(info.get("hasNextPage"), bool) or not all(isinstance(n, dict) for n in page):
+        raise ReadError("labels: a page without readable nodes or pagination info")
+    if info["hasNextPage"]:
+        page = _pages(run, _LABELS_QUERY, lambda pr: pr.get("labels"), what="labels", **kw)
+    return {**pr, "labels": sorted(n.get("name") or "" for n in page)}
+
+
 def _checks_conn(pr: dict):
     """The head commit's check contexts; an empty list when the commit has no
     rollup (nothing reported), ``None`` (unreadable) when the commit is missing."""
@@ -372,11 +391,11 @@ def read_github(repo: str, number: int, *, host: str, token: str | None = None, 
     kw = {"host": host, "env": env, "owner": owner, "name": name, "number": int(number)}
     snap = Snapshot(repo=repo, number=int(number))
     try:
-        pr = _graphql(run, _PR_QUERY, **kw)
+        pr = _core(run, **kw)
         snap.state, snap.mergeable = pr.get("state") or "", pr.get("mergeable") or ""
         snap.head, snap.author = pr.get("headRefOid") or "", (pr.get("author") or {}).get("login", "")
         snap.draft, snap.title = bool(pr.get("isDraft")), pr.get("title") or ""
-        snap.labels = [n.get("name", "") for n in ((pr.get("labels") or {}).get("nodes") or []) if n]
+        snap.labels = list(pr["labels"])
     except ReadError as exc:
         snap.errors["pr"] = str(exc)
         return snap
@@ -401,7 +420,7 @@ def read_github(repo: str, number: int, *, host: str, token: str | None = None, 
         except ReadError as exc:
             snap.errors[part] = str(exc)
     try:  # the same core again: any change since the first read means a mixed view
-        after = _graphql(run, _PR_QUERY, **kw)
+        after = _core(run, **kw)
         snap.head_after = after.get("headRefOid") or ""
         snap.changed = ", ".join(f for f in ("state", "mergeable", "isDraft", "title", "labels")
                                  if after.get(f) != pr.get(f))

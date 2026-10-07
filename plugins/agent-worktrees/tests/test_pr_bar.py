@@ -48,6 +48,7 @@ class FakeGh:
         self.heads, self.state, self.mergeable = list(heads), state, mergeable
         self.draft, self.title, self.labels = draft, title, labels
         self.final, self.core_reads = final or {}, 0  # fields the last core read reports instead
+        self.data["labels"] = [{"name": n} for n in labels]
         self.calls = []
         self.raw = raw or {}  # kind -> the literal response body for that list
 
@@ -55,7 +56,9 @@ class FakeGh:
         query = next(a[len("query="):] for a in args if a.startswith("query="))
         after = next((a[len("after="):] for a in args if a.startswith("after=")), "")
         self.calls.append((query.split("{")[2][:20], after))
-        if "statusCheckRollup" in query:
+        if "labels(first:100,after" in query:
+            kind = "labels"
+        elif "statusCheckRollup" in query:
             kind = "checks"
         elif "reviewThreads" in query:
             kind = "threads"
@@ -67,7 +70,8 @@ class FakeGh:
             core = {"state": self.state, "mergeable": self.mergeable,
                     "headRefOid": head, "author": {"login": "author"},
                     "isDraft": self.draft, "title": self.title,
-                    "labels": {"nodes": [{"name": n} for n in self.labels]}}
+                    "labels": {"nodes": [{"name": n} for n in self.labels[:100]],
+                               "pageInfo": {"hasNextPage": len(self.labels) > 100, "endCursor": "100"}}}
             if self.core_reads > 1:
                 core.update(self.final)
             return self._ok(core)
@@ -83,7 +87,7 @@ class FakeGh:
         if kind == "checks":
             return self._ok({"commits": {"nodes": [{"commit": {"oid": HEAD, "statusCheckRollup": {
                 "contexts": conn}}}]}})
-        return self._ok({"reviewThreads" if kind == "threads" else "reviews": conn})
+        return self._ok({{"threads": "reviewThreads", "reviews": "reviews", "labels": "labels"}[kind]: conn})
 
     @staticmethod
     def _ok(pr):
@@ -361,7 +365,7 @@ def test_a_null_entry_in_a_page_is_unknown_not_dropped():
     ({"mergeable": "CONFLICTING"}, "mergeable"),
     ({"state": "CLOSED"}, "state"),
     ({"isDraft": True}, "isDraft"),
-    ({"labels": {"nodes": [{"name": "do-not-merge"}]}}, "labels"),
+    ({"labels": {"nodes": [{"name": "do-not-merge"}], "pageInfo": {"hasNextPage": False}}}, "labels"),
 ])
 def test_a_pr_that_changes_during_the_read_is_unknown(final, field):
     """Same head, but the base moved (now conflicting), or it was closed, drafted or held
@@ -369,3 +373,16 @@ def test_a_pr_that_changes_during_the_read_is_unknown(final, field):
     bar = _bar(FakeGh(final=final))
     assert bar.verdict == "unknown" and set(_status(bar).values()) == {"unknown"}
     assert field in bar.clauses[0].evidence
+
+
+def test_a_hold_label_past_the_first_hundred_still_fails_the_policy():
+    labels = tuple(f"area-{i}" for i in range(150)) + ("do-not-merge",)
+    bar = _bar(FakeGh(labels=labels))
+    assert _status(bar)["merge_policy"] == "failed"
+    assert "do-not-merge" in next(c.evidence for c in bar.clauses if c.id == "merge_policy")
+
+
+def test_an_unreadable_label_page_is_unknown():
+    labels = tuple(f"area-{i}" for i in range(150))
+    bar = _bar(FakeGh(labels=labels, fail="labels"))
+    assert bar.verdict == "unknown" and set(_status(bar).values()) == {"unknown"}
