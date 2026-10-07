@@ -51,3 +51,16 @@ def test_dial_log_stays_usable_when_the_installation_context_is_refused(tmp_path
     dial_log.record("cs-r", kind="reconnect", outcome="error", elapsed_s=1.0)
     assert main(["dial-log", "cs-r", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["last_failure"]["kind"] == "reconnect"
+
+
+def test_text_output_never_replays_control_sequences(tmp_path, monkeypatch, capsys):
+    """A remote's stderr can carry ESC/OSC sequences: text mode shows them escaped."""
+    from ssh_manager import dial_log
+
+    monkeypatch.setenv(dial_log.DIAL_LOG_ENV, str(tmp_path))
+    dial_log.record("cs-esc", kind="direct_exec", outcome="transient", elapsed_s=1.0,
+                    reason="exit 255 \x1b]0;owned\x07", stderr="\x1b[2J\x1b]8;;http://x\x07click")
+    assert main(["dial-log", "cs-esc"]) == 0
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\x07" not in out
+    assert "\\x1b[2J" in out and "\\x1b]0;owned\\x07" in out

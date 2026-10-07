@@ -10,7 +10,8 @@ health-check reconnect -- records one JSON line per attempt:
 - **Bounded.** One file per target under :func:`log_dir`, trimmed to its newest
   :data:`KEEP_LINES` lines whenever it passes :data:`MAX_LINES` lines or
   :data:`MAX_BYTES`, by an atomic replace under the same per-file lock writers
-  take, so concurrent writers never interleave a line or lose the trim.
+  take, so concurrent writers never interleave a line or lose the trim. The line
+  count is kept beside the log (``.count``), so an append never rescans it.
 - **Redacted.** Only a short stderr tail is kept, with token-like strings and
   authorization values replaced; the account is recorded as ``pinned`` or
   ``ambient``, never anything derived from a credential. No command lines.
@@ -148,6 +149,7 @@ def _trim(path: Path) -> None:
     with path.open("rb") as fh:
         lines = fh.read().splitlines(keepends=True)
     if len(lines) <= MAX_LINES and sum(map(len, lines)) <= MAX_BYTES:
+        _save_count(path, sum(map(len, lines)), len(lines))
         return
     keep = lines[-KEEP_LINES:]
     while keep and sum(map(len, keep)) > MAX_BYTES * 3 // 4:
@@ -156,6 +158,35 @@ def _trim(path: Path) -> None:
     with _open_private(tmp, "wb") as fh:
         fh.write(b"".join(keep))
     os.replace(tmp, path)
+    _save_count(path, sum(map(len, keep)), len(keep))
+
+
+def _count_file(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".count")
+
+
+def _save_count(path: Path, size: int, lines: int) -> None:
+    with _open_private(_count_file(path), "w") as fh:
+        fh.write(f"{size} {lines}")
+
+
+def _lines_after_append(path: Path, before: int, added: int) -> int:
+    """The log's line count after one line was appended at size *before*: kept as
+    ``<size> <lines>`` in a sidecar, written under the writer lock, so a steady-state
+    append never rescans the log. A sidecar that doesn't describe the file it was
+    written for (a crash between the two writes, an edit) is recovered by one count,
+    bounded because the log is trimmed at :data:`MAX_BYTES`."""
+    try:
+        size, lines = (int(x) for x in _count_file(path).read_text(encoding="ascii").split())
+    except (OSError, ValueError):
+        size, lines = -1, 0
+    if size == before:
+        lines += 1
+    else:
+        with path.open("rb") as fh:
+            lines = sum(1 for _ in fh)
+    _save_count(path, before + added, lines)
+    return lines
 
 
 def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: int | None = None,
@@ -178,20 +209,13 @@ def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: i
         with _locked(path, wait=0.0 if _in_event_loop() else LOCK_WAIT_S) as held:
             if not held:
                 return
+            before = path.stat().st_size if path.exists() else 0
             with _open_private(path, "ab") as fh:
                 fh.write(line)
-            if path.stat().st_size > MAX_BYTES or _approx_lines(path) > MAX_LINES:
+            if path.stat().st_size > MAX_BYTES or _lines_after_append(path, before, len(line)) > MAX_LINES:
                 _trim(path)
     except Exception as exc:  # noqa: BLE001 -- telemetry must never break a dial
         log.debug("dial log write for %s failed: %s", target, exc)
-
-
-def _approx_lines(path: Path) -> int:
-    # Cheap: only count when the file could plausibly hold MAX_LINES short lines.
-    if path.stat().st_size < MAX_LINES * 64:
-        return 0
-    with path.open("rb") as fh:
-        return sum(1 for _ in fh)
 
 
 def read(target: str, *, last: int = 50) -> list[dict]:

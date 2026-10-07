@@ -24,6 +24,16 @@ def add_dial_log_parser(sub) -> None:
     p.set_defaults(func=cmd_dial_log)
 
 
+def _safe(value) -> str:
+    """A log field for the terminal: control characters (an ESC/OSC sequence in a
+    remote's stderr, say) shown escaped, never interpreted."""
+    return "".join(c if c.isprintable() else repr(c)[1:-1] for c in str(value if value is not None else ""))
+
+
+def _secs(value) -> float:
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
 def cmd_dial_log(args) -> int:
     from ssh_manager import dial_log
 
@@ -35,14 +45,15 @@ def cmd_dial_log(args) -> int:
     print(f"{args.name}: {summary['entries']} logged attempt(s)  [{summary['log']}]")
     for window in ("last_10m", "last_1h"):
         counts = summary[window]
-        by = ", ".join(f"{k} {v}" for k, v in sorted(counts["by_outcome"].items())) or "none"
+        by = ", ".join(f"{_safe(k)} {v}" for k, v in sorted(counts["by_outcome"].items())) or "none"
         print(f"  {window}: {counts['dials']} dial(s) ({by})")
     failure = summary.get("last_failure")
     if failure:
-        print(f"  last failure: {failure.get('at')} {failure.get('kind')} {failure.get('outcome')}"
-              f" {failure.get('reason') or ''}".rstrip())
+        print(f"  last failure: {_safe(failure.get('at'))} {_safe(failure.get('kind'))} "
+              f"{_safe(failure.get('outcome'))} {_safe(failure.get('reason'))}".rstrip())
     for e in entries:
-        tail = f"  {e.get('stderr')[:120]}" if e.get("stderr") else ""
-        print(f"    {e.get('at', '?')[:23]}  {e.get('kind', '?'):<14} {e.get('outcome', '?'):<10}"
-              f" {e.get('elapsed_s', 0):>7.2f}s  #{e.get('attempt') or '-'} {e.get('account') or ''}{tail}")
+        tail = f"  {_safe(e.get('stderr'))[:120]}" if e.get("stderr") else ""
+        print(f"    {_safe(e.get('at', '?'))[:23]}  {_safe(e.get('kind', '?')):<14} "
+              f"{_safe(e.get('outcome', '?')):<10} {_secs(e.get('elapsed_s')):>7.2f}s  "
+              f"#{_safe(e.get('attempt') or '-')} {_safe(e.get('account'))}{tail}")
     return 0

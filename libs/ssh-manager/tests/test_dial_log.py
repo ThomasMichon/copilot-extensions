@@ -47,7 +47,6 @@ def test_a_dial_is_one_structured_redacted_line():
 def test_the_log_stays_bounded_and_keeps_the_newest(monkeypatch):
     monkeypatch.setattr(dial_log, "MAX_LINES", 50)
     monkeypatch.setattr(dial_log, "KEEP_LINES", 30)
-    monkeypatch.setattr(dial_log, "_approx_lines", lambda p: sum(1 for _ in p.open("rb")))
     for i in range(120):
         dial_log.record("cs-2", kind="direct_exec", outcome="ok", elapsed_s=0, attempt=i)
     entries = dial_log.read("cs-2", last=1000)
@@ -350,3 +349,39 @@ async def test_each_control_master_start_attempt_is_logged(win_platform, monkeyp
         await manager._connect_with_retry(config, None, [], target="cs-cm-down", attempts=3)
     assert [(e["outcome"], e["attempt"], e["account"]) for e in dial_log.read("cs-cm-down")] == [
         ("error", 1, "ambient"), ("error", 2, "ambient"), ("error", 3, "ambient")]
+
+
+def test_a_steady_state_append_never_rescans_the_log(monkeypatch):
+    """The line count is kept beside the log under the writer lock: an append reads
+    no part of the log back, however large it is."""
+    from pathlib import Path
+
+    monkeypatch.setattr(dial_log, "MAX_LINES", 10)  # a log past any "big enough to count" cutoff
+    for _ in range(3):
+        dial_log.record("cs-o1", kind="direct_exec", outcome="ok", elapsed_s=0)
+    log = dial_log._file_for("cs-o1")
+    reads, real = [], Path.open
+
+    def spy(self, mode="r", *a, **k):
+        if self == log and "r" in mode:
+            reads.append(mode)
+        return real(self, mode, *a, **k)
+
+    monkeypatch.setattr(Path, "open", spy)
+    dial_log.record("cs-o1", kind="direct_exec", outcome="ok", elapsed_s=0)
+    assert reads == []
+    assert dial_log._count_file(log).read_text() == f"{log.stat().st_size} 4"
+
+
+def test_a_stale_line_count_is_recounted(monkeypatch):
+    """A count that doesn't describe the log (a crash between the two writes, an
+    edit) is recounted once, so the line bound still holds."""
+    monkeypatch.setattr(dial_log, "MAX_LINES", 5)
+    monkeypatch.setattr(dial_log, "KEEP_LINES", 3)
+    for _ in range(4):
+        dial_log.record("cs-o2", kind="reconnect", outcome="ok", elapsed_s=0)
+    log = dial_log._file_for("cs-o2")
+    dial_log._count_file(log).write_text("0 0")  # stale: claims an empty log
+    dial_log.record("cs-o2", kind="reconnect", outcome="ok", elapsed_s=0)
+    dial_log.record("cs-o2", kind="reconnect", outcome="ok", elapsed_s=0)  # the 6th line trims
+    assert len(dial_log.read("cs-o2", last=100)) <= 5
