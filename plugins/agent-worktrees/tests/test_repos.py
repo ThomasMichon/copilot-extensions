@@ -46,6 +46,14 @@ def _bare_anchor_from_clone(upstream: Path, dest: Path, branch: str = "main") ->
     subprocess.run(["git", "clone", str(upstream), str(dest)],
                    check=True, capture_output=True, text=True)
     _git(dest, "checkout", branch)
+    # A clone does not inherit the source repo's LOCAL user.email/user.name
+    # (only global/system config) -- a clean CI runner with no global git
+    # identity otherwise makes a later `commit-tree` against this clone fail
+    # silently (empty stdout), which callers that build a commit here and
+    # feed it straight into `update-ref` never notice until that ref update
+    # itself fails on an empty SHA.
+    _git(dest, "config", "user.email", "t@example.com")
+    _git(dest, "config", "user.name", "Test")
     _git(dest, "config", "core.bare", "true")
     # A plain clone never inherits user.name/user.email -- unlike
     # _init_repo's own repos, which set it explicitly. Under this
