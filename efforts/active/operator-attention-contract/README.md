@@ -161,11 +161,21 @@ an empty queue.
     `unknown` or `gone` never count: only a live owner that stopped progressing
     is buildup. `reason` carries both ages and the `queued`/`held_live` counts;
     the item clears on an `ok` read where neither age exceeds its threshold.
-- [ ] **bridge**:
+- [ ] **bridge** -- every reason in agent-bridge's `AttentionReason` vocabulary
+  (`models.py`) is mapped, so no parked session can drop out of the queue
+  unnoticed:
   - `input_required` → `awaiting_input` (`reported`);
-  - `permission_required` (a represented snapshot / `wait --attention`) →
+  - `permission_required` and `policy_required` (a represented snapshot /
+    `wait --attention`; each waits on an operator decision) →
     `awaiting_input` (`reported`);
   - `failed` (a local result snapshot) → `failed` (`reported`);
+  - `unreachable` and `contract_changed` aren't items: the session's state
+    can't be read or trusted, so each counts toward the bridge source's
+    `uncertain` (never `clear`);
+  - `turn_complete`, `turn_cancelled`, `stopped` and `ended` are settled
+    states, not operator asks: no item;
+  - a reason this adapter doesn't know (a newer bridge) counts toward
+    `uncertain` too, never silently dropped;
   - presence `awaiting_input` → `awaiting_input` (`scanned`/`heuristic`);
   - presence `unknown` is **not** an item: it means the transcript couldn't be
     read or holds no presence signal, not that the session stalled. It counts
@@ -200,7 +210,15 @@ an empty queue.
   current read even when the item it names was resolved (gone) or deduped into
   another; it wraps to the top once nothing is after it.
 - [ ] **External adapters:** a host project registers a source as a command (an
-  `argv`) in config. The command prints the same source-result envelope a
+  `argv`) in config under a **name** that is the source's identity: it must be
+  unique, match `[a-z0-9-]+`, and not be a built-in source's name (`dispatch`,
+  `bridge`, `pr`), or the registration is rejected (and listed as a `failed`
+  source naming the conflict). The aggregator **stamps** identity at the
+  boundary rather than trusting the command: each item's `source` is set to the
+  registered name and its `id` derived from `(source, entity, entity_ref)`; an
+  item that states a different `source` or `id` is invalid. So an external
+  source can never alias a built-in producer, mint a duplicate `id`, or clear
+  another source's first-observed time. The command prints the same source-result envelope a
   built-in adapter returns, `{"schema": 1, "items": [...], "status"?,
   "uncertain"?, "error"?, "read_at"?}`, so a partial read can say so: it reports
   `status: uncertain` with the count of entities it couldn't classify. Omitted
@@ -253,6 +271,12 @@ an empty queue.
   2`) makes the aggregate `partial`; `{"schema": 1, "items": [...]}` alone reads
   as `ok`; a missing `schema` and `schema: 2` are each `failed`; each
   contradiction in the failure contract is `failed`.
+- [ ] Unit, the bridge adapter: every `AttentionReason` value maps as listed
+  (`policy_required` is an item; `unreachable`, `contract_changed` and an unknown
+  reason count as `uncertain`).
+- [ ] Unit, external identity: a command source registered as `dispatch` (or as
+  a duplicate name) is rejected; an item stating another `source` or a foreign
+  `id` is invalid; a stamped item's `id` and first-observed key are its own.
 - [ ] Unit, the pr adapter: from a CWD outside any project, two registered
   projects each tracking a PR with a failing bar give both items; a project
   whose tracked PRs can't be enumerated makes the source `failed`.
