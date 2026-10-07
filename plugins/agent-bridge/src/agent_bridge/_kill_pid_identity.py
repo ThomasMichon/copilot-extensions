@@ -128,7 +128,6 @@ def _enumerate_descendant_pids_windows(
 
     # pid -> (parent_pid, creation_date)
     by_pid: dict[int, tuple[int, str]] = {}
-    children_of: dict[int, list[int]] = {}
     for line in (out.stdout or "").splitlines():
         parts = line.split("\t", 2)
         if len(parts) != 3:
@@ -140,7 +139,6 @@ def _enumerate_descendant_pids_windows(
         except ValueError:
             continue
         by_pid[child_pid] = (parent_pid, creation.strip())
-        children_of.setdefault(parent_pid, []).append(child_pid)
 
     if pid not in by_pid:
         # The root itself wasn't present in the census -- there is no
@@ -148,6 +146,26 @@ def _enumerate_descendant_pids_windows(
         # parent-generation check against. Treat the whole census as
         # failed rather than silently validating against nothing.
         return [], False
+
+    # Build child->parent edges, but reject any that are ALREADY stale at
+    # census time: a genuine parent always exists (and so has an older
+    # CreationDate) before any of its real children. If the recorded
+    # child's own CreationDate does not postdate its recorded parent's,
+    # that "parent" pid has already been recycled by an unrelated process
+    # since the child's real parent exited -- the edge itself is bogus,
+    # independent of anything that happens later. These full-precision
+    # ISO-8601 UTC timestamps (fixed-width, 'o' format) sort correctly via
+    # plain string comparison. Rejected edges are never added to
+    # children_of, so neither the edge nor anything reachable only
+    # through it is traversed.
+    children_of: dict[int, list[int]] = {}
+    for child_pid, (parent_pid, child_creation) in by_pid.items():
+        parent_entry = by_pid.get(parent_pid)
+        if parent_entry is None:
+            continue
+        if child_creation <= parent_entry[1]:
+            continue
+        children_of.setdefault(parent_pid, []).append(child_pid)
 
     descendants: list[tuple[int, int, str, str]] = []
     seen = {pid}
@@ -274,22 +292,35 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
     census cannot be fooled by that pid getting freed and reused by an
     unrelated process in between -- running the census only after killing
     the root (a prior version of this function did that) would reopen
-    exactly that window. Each descendant's ancestry edge AND both ends'
-    generation fingerprints are re-verified together, immediately before
-    its own kill (see ``_verify_descendant_identity_windows``) -- never
-    trusting the bulk census alone for the actual termination decision.
+    exactly that window.
 
-    If the ROOT's own identity verification fails, descendant cleanup is
-    skipped entirely: the census was taken assuming this *was* the
-    verified daemon, and that assumption is void once the root check
-    itself comes back negative.
+    The root is verified (a non-destructive check: does its CURRENT
+    process-start-time still match *start_time*?) but **NOT terminated**
+    until every descendant has already been processed. Descendants are
+    then verified and killed **deepest-first** (``_enumerate_descendant
+    _pids_windows`` returns them in breadth-first/shallowest-first order,
+    so this function walks that list in reverse): every descendant's
+    recorded parent -- root or an intermediate ancestor -- therefore
+    remains alive and queryable via ``_verify_descendant_identity_windows``
+    at the moment it is checked. A prior version of this function killed
+    the root (or an intermediate parent) before processing its own
+    children, which broke parent-generation verification entirely: once a
+    parent pid is dead, re-querying its current ``CreationDate`` returns
+    nothing, and every one of its children would be (incorrectly) rejected
+    as unverifiable and left running. The root is terminated last, using
+    the SAME *start_time* token captured at the very start of ``_kill_pid``.
+
+    If the ROOT's own (non-destructive) identity check fails, NOTHING is
+    terminated -- neither the root nor any descendant: the census was
+    taken assuming this *was* the verified daemon, and that assumption is
+    void once the root check itself comes back negative.
 
     A failed census (vs. a genuinely empty one) is surfaced via a stderr
     warning rather than silently treated as "no descendants" -- the root
-    is still killed (best effort, once its own identity is verified), but
-    some live children may survive when the census itself could not run,
-    and that is made visible rather than silently assumed away. This
-    never falls back to a bare, unverified ``taskkill``.
+    is still (eventually) killed, best effort, once its own identity is
+    verified, but some live children may survive when the census itself
+    could not run, and that is made visible rather than silently assumed
+    away. This never falls back to a bare, unverified ``taskkill``.
     """
     from zdd import diagnostics
 
@@ -302,8 +333,11 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
             file=sys.stderr,
         )
 
-    root_result = diagnostics.terminate_pid_if_identity(pid, start_time)
-    if not root_result.get("identity_verified"):
+    # Non-destructive root identity gate: confirm this is still the
+    # verified process WITHOUT killing it yet -- descendants are handled
+    # first, while root (and every intermediate ancestor) stays alive and
+    # queryable for their own parent-generation checks.
+    if diagnostics.process_start_time(pid) != start_time:
         return
 
     for (
@@ -311,12 +345,14 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
         recorded_parent_pid,
         recorded_child_creation,
         recorded_parent_creation,
-    ) in descendants:
+    ) in reversed(descendants):
         child_start = _verify_descendant_identity_windows(
             child_pid, recorded_parent_pid, recorded_child_creation, recorded_parent_creation
         )
         if child_start is not None:
             diagnostics.terminate_pid_if_identity(child_pid, child_start)
+
+    diagnostics.terminate_pid_if_identity(pid, start_time)
 
 
 def _kill_pid(pid: int) -> None:

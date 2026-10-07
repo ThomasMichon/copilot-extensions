@@ -220,9 +220,9 @@ def test_enumerate_descendant_pids_windows_attaches_each_levels_parent_creation(
         returncode = 0
         stdout = "\n".join(
             [
-                "4242\t1\tRootC",  # root, parent is pid 1 (irrelevant)
-                "5001\t4242\tC1",  # level-1 child of root
-                "6001\t5001\tC2",  # level-2 grandchild, parent is 5001
+                "4242\t1\t2026-01-01T00:00:00.0000000Z",  # root
+                "5001\t4242\t2026-01-01T00:00:01.0000000Z",  # level-1 child of root
+                "6001\t5001\t2026-01-01T00:00:02.0000000Z",  # level-2 grandchild of 5001
             ]
         )
 
@@ -232,8 +232,45 @@ def test_enumerate_descendant_pids_windows_attaches_each_levels_parent_creation(
 
     assert census_ok is True
     by_child = {d[0]: d for d in descendants}
-    assert by_child[5001] == (5001, 4242, "C1", "RootC")
-    assert by_child[6001] == (6001, 5001, "C2", "C1")  # parent creation is 5001's OWN, not root's
+    assert by_child[5001] == (
+        5001,
+        4242,
+        "2026-01-01T00:00:01.0000000Z",
+        "2026-01-01T00:00:00.0000000Z",
+    )
+    # parent creation is 5001's OWN (level-1), not root's
+    assert by_child[6001] == (
+        6001,
+        5001,
+        "2026-01-01T00:00:02.0000000Z",
+        "2026-01-01T00:00:01.0000000Z",
+    )
+
+
+def test_enumerate_descendant_pids_windows_rejects_chronologically_stale_edge(monkeypatch):
+    """An edge whose recorded child does NOT postdate its recorded parent
+    is rejected at census time, before any traversal -- a genuine parent
+    always exists (and is thus older) before any of its real children, so
+    this is proof the "parent" pid has already been recycled by an
+    unrelated process since the child's real parent exited."""
+    import subprocess as sp
+
+    class _Result:
+        returncode = 0
+        stdout = "\n".join(
+            [
+                "4242\t1\t2026-01-01T00:00:05.0000000Z",  # root
+                # "child" 5001 predates its recorded parent 4242 -- bogus edge
+                "5001\t4242\t2026-01-01T00:00:00.0000000Z",
+            ]
+        )
+
+    monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
+
+    descendants, census_ok = m._enumerate_descendant_pids_windows(4242)
+
+    assert census_ok is True
+    assert descendants == []  # the stale edge is excluded, not merely flagged
 
 
 def test_enumerate_descendant_pids_windows_fails_when_root_absent_from_census(monkeypatch):
@@ -246,7 +283,7 @@ def test_enumerate_descendant_pids_windows_fails_when_root_absent_from_census(mo
 
     class _Result:
         returncode = 0
-        stdout = "5001\t9999\tC1"  # root pid 4242 is nowhere in this output
+        stdout = "5001\t9999\t2026-01-01T00:00:00.0000000Z"  # root 4242 nowhere in output
 
     monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
 
@@ -418,23 +455,15 @@ def test_verify_descendant_identity_windows_rejects_stale_parent_generation(monk
     assert queried == [5001, 4242]  # child checked first, then its recorded parent
 
 
-def test_kill_pid_tree_windows_skips_descendant_termination_when_root_identity_fails(
+def test_kill_pid_tree_windows_skips_all_termination_when_root_identity_fails(
     monkeypatch,
 ):
-    """If the root's own identity verification fails (a reused pid), no
-    descendant must be terminated -- even though the census (which now
-    runs BEFORE the root kill, precisely to avoid being fooled by the
-    root's own pid being freed and reused) did complete and return
-    entries."""
-    monkeypatch.setattr(
-        diagnostics,
-        "terminate_pid_if_identity",
-        lambda pid, st: {
-            "killed": False,
-            "identity_verified": False,
-            "method": "windows-handle-identity-mismatch",
-        },
-    )
+    """If the root's own (non-destructive) identity gate fails -- its
+    CURRENT process-start-time no longer matches the token captured at the
+    start of ``_kill_pid`` -- NOTHING is terminated: not the root, and not
+    any descendant, even though the census (which now runs BEFORE the
+    root is touched at all) did complete and return entries."""
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "replacement-token")
     monkeypatch.setattr(
         m,
         "_enumerate_descendant_pids_windows",
@@ -447,10 +476,59 @@ def test_kill_pid_tree_windows_skips_descendant_termination_when_root_identity_f
         lambda child, parent, child_creation, parent_creation: verify_called.append(child)
         or "zzz",
     )
+    terminate_called = []
+    monkeypatch.setattr(
+        diagnostics,
+        "terminate_pid_if_identity",
+        lambda pid, st: terminate_called.append((pid, st))
+        or {"killed": True, "identity_verified": True, "method": "windows-verified-handle"},
+    )
 
-    m._kill_pid_tree_windows_if_identity(4242, "stale-token")
+    m._kill_pid_tree_windows_if_identity(4242, "original-token")
 
     assert verify_called == []  # no descendant identity check, let alone a kill
+    assert terminate_called == []  # root itself never reached the kill call either
+
+
+def test_kill_pid_tree_windows_kills_descendants_deepest_first_then_root(monkeypatch):
+    """Descendants must be verified and killed in REVERSE of the census's
+    breadth-first order (deepest-first), and the root must be terminated
+    LAST -- not first. A prior version killed the root (or an intermediate
+    parent) before processing its own children, which broke parent-
+    generation verification entirely: once a parent pid is dead,
+    re-querying its current identity returns nothing, and every one of
+    its children would be (incorrectly) rejected as unverifiable."""
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
+    monkeypatch.setattr(
+        m,
+        "_enumerate_descendant_pids_windows",
+        lambda pid: (
+            [
+                (5001, 4242, "c1", "root-c"),  # level 1
+                (6001, 5001, "c2", "c1"),  # level 2 (appended after level 1 by BFS)
+            ],
+            True,
+        ),
+    )
+    order: list[int] = []
+    monkeypatch.setattr(
+        m,
+        "_verify_descendant_identity_windows",
+        lambda child, parent, child_creation, parent_creation: order.append(child) or "zzz",
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "terminate_pid_if_identity",
+        lambda pid, st: order.append(pid)
+        or {"killed": True, "identity_verified": True, "method": "windows-verified-handle"},
+    )
+
+    m._kill_pid_tree_windows_if_identity(4242, "root-token")
+
+    # Each descendant produces two entries (verify, then kill) back-to-back;
+    # the deepest descendant (6001) must be fully handled before the
+    # shallower one (5001), and the root (4242) must be last of all.
+    assert order == [6001, 6001, 5001, 5001, 4242]
 
 
 def _spawn_sleeper() -> subprocess.Popen:

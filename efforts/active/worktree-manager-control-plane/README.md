@@ -1317,7 +1317,33 @@ claiming discipline alone.
   BFS census correctly carrying each level's own parent `CreationDate`,
   root-absent-from-census treated as census failure, and a stale-parent-
   generation rejection with the exact query order asserted. Full targeted
-  suite re-run: 62 passed, 20 skipped.
+  suite re-run: 62 passed, 20 skipped. A SIXTH review round found 2 more
+  real findings, both fixed: (n) the census itself could already contain
+  a chronologically bogus edge BEFORE any of this module's code ran at
+  all: if an orphan's dead original parent's pid had already been
+  recycled by something else by census time, both ends' `CreationDate`
+  snapshots simply describe that *same* replacement process, so the
+  later re-check trivially passes — reject any census edge outright
+  where the recorded child does not postdate its recorded parent (a
+  genuine parent always exists, and is thus older, before any of its
+  real children; these fixed-width ISO-8601 UTC timestamps sort
+  correctly via plain string comparison), never adding such an edge to
+  the traversal at all; (o) the kill order itself was backwards: killing
+  the root first (or an intermediate parent before its own children, as
+  the prior breadth-first order did) left every one of its children
+  unverifiable afterward, since `_query_pid_ancestry_windows` on a dead
+  parent returns nothing — the exact bug the parent-generation check
+  was supposed to defend against, just triggered by this function's own
+  actions instead of external pid reuse. Restructured into a
+  **non-destructive root-identity gate** (compare current
+  `process_start_time` to the captured token, without killing), then
+  descendants verified and killed **deepest-first** (the census's own
+  breadth-first list, walked in reverse) so every descendant's recorded
+  parent is still alive and queryable when checked, with the root
+  terminated **last** of all. Added 2 more tests (22 total): a
+  chronologically-stale edge rejected at census time, and the exact
+  deepest-first-then-root kill order asserted end-to-end. Full targeted
+  suite re-run: 64 passed, 20 skipped.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR
