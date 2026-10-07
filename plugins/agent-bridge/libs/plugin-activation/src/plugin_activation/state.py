@@ -195,6 +195,29 @@ def inventory_records(
     return records
 
 
+def _checked_enabled_plugins(data: dict[str, Any], path: Path) -> dict[str, Any] | None:
+    """``enabledPlugins`` validated for the entries this library manages, or
+    ``None`` when absent.
+
+    Only marketplace plugins (any key with an ``@``) are this library's: each
+    must be a well-formed ``name@marketplace`` with a boolean value. A key
+    without one is a built-in plugin's own entry (Copilot CLI's first-party
+    plugins have no marketplace): it is never read, written or validated here,
+    so one such entry can't make every activation read refuse."""
+    enabled = data.get("enabledPlugins")
+    if enabled is None and "enabledPlugins" not in data:
+        return None
+    if not isinstance(enabled, dict):
+        raise PluginStateError(f"{path}: enabledPlugins must be an object")
+    for key, value in enabled.items():
+        if isinstance(key, str) and "@" not in key:
+            continue
+        validate_identity(key)
+        if not isinstance(value, bool):
+            raise PluginStateError(f"{path}: enabledPlugins.{key} must be boolean")
+    return enabled
+
+
 def activation_value(
     data: dict[str, Any],
     path: Path,
@@ -202,16 +225,8 @@ def activation_value(
 ) -> bool | None:
     """Return one activation value, distinguishing absence from ``false``."""
     validate_identity(identity)
-    enabled = data.get("enabledPlugins")
-    if enabled is None and "enabledPlugins" not in data:
-        return None
-    if not isinstance(enabled, dict):
-        raise PluginStateError(f"{path}: enabledPlugins must be an object")
-    for key, value in enabled.items():
-        validate_identity(key)
-        if not isinstance(value, bool):
-            raise PluginStateError(f"{path}: enabledPlugins.{key} must be boolean")
-    return enabled.get(identity)
+    enabled = _checked_enabled_plugins(data, path)
+    return None if enabled is None else enabled.get(identity)
 
 
 def remove_activation_entries(
@@ -224,15 +239,9 @@ def remove_activation_entries(
     requested = sorted(set(identities))
     for identity in requested:
         validate_identity(identity)
-    enabled = settings.get("enabledPlugins")
-    if enabled is None and "enabledPlugins" not in settings:
+    enabled = _checked_enabled_plugins(settings, path)
+    if enabled is None:
         return dict(settings), []
-    if not isinstance(enabled, dict):
-        raise PluginStateError(f"{path}: enabledPlugins must be an object")
-    for key, value in enabled.items():
-        validate_identity(key)
-        if not isinstance(value, bool):
-            raise PluginStateError(f"{path}: enabledPlugins.{key} must be boolean")
 
     new = dict(settings)
     new_enabled = dict(enabled)
