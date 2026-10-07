@@ -12,7 +12,24 @@ requires-python = ">=3.10"
 authors = [
     { name = "Thomas Michon" }
 ]
-dependencies = []
+dependencies = [
+    "agent-work-coalescing-singleton",
+    "agent-procutil",
+    "agent-single-instance-lease",
+]
+
+[tool.uv.sources]
+# Shared coalescing/rendezvous daemon primitive (module
+# ``work_coalescing_singleton``) -- resolved live from its canonical path so
+# this plugin never vendors its own copy.
+agent-work-coalescing-singleton = { path = "../../libs/work-coalescing-singleton", editable = true }
+# Windowless subprocess-spawn helpers (module ``agent_procutil``) -- the
+# notify dispatch path must never pop a console window on Windows.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
+# OS-lock-backed single-instance guard (module ``single_instance_lease``) --
+# ``serve`` must never let two daemons race to bind and both write
+# rendezvous, orphaning one silently.
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 
 [project.optional-dependencies]
 dev = [
