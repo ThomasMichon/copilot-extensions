@@ -175,7 +175,17 @@ function Invoke-Runtime {
     } else {
         Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
     }
-    & $Python -m agent_codespaces @forwardArgs
+    # Relax EAP for just this forwarding call: the wrapped module's own
+    # exit code is the only contract this dispatcher relays, so a
+    # legitimate stderr diagnostic from a non-zero exit must never become
+    # a terminating exception here (copilot-extensions#5494).
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Python -m agent_codespaces @forwardArgs
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
     exit $LASTEXITCODE
 }
 

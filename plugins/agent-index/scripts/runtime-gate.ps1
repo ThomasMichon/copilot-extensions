@@ -823,18 +823,32 @@ function Restore-PlannedSetupRole {
     $script:SetupRoleTemporary = $false
 }
 
+function Invoke-AgentIndexRuntime {
+    # Relax EAP for just this forwarding call: the wrapped module's own
+    # exit code is the only contract every call site below relays, so a
+    # legitimate stderr diagnostic from a non-zero exit must never become
+    # a terminating exception here (copilot-extensions#5494).
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Python -I -X utf8 -m agent_index @InvocationArgs
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 $Python = Resolve-ReadyRuntime
 $Role = Get-ConfiguredRole
 $RuntimeState = Get-RuntimeState $Python
 
 switch ($Command) {
     '--version' {
-        if ($Python) { & $Python -I -X utf8 -m agent_index @InvocationArgs; exit $LASTEXITCODE }
+        if ($Python) { Invoke-AgentIndexRuntime; exit $LASTEXITCODE }
         Write-Output $PackageVersion
         exit 0
     }
     'version' {
-        if ($Python) { & $Python -I -X utf8 -m agent_index @InvocationArgs; exit $LASTEXITCODE }
+        if ($Python) { Invoke-AgentIndexRuntime; exit $LASTEXITCODE }
         Write-Output $PackageVersion
         exit 0
     }
@@ -844,7 +858,7 @@ switch ($Command) {
             else { Write-SetupRequired $RuntimeState }
             exit 0
         }
-        & $Python -I -X utf8 -m agent_index @InvocationArgs
+        Invoke-AgentIndexRuntime
         exit $LASTEXITCODE
     }
     'installer-readiness' {
@@ -860,7 +874,7 @@ switch ($Command) {
             }
             exit 0
         }
-        if ($Python) { & $Python -I -X utf8 -m agent_index @InvocationArgs; exit $LASTEXITCODE }
+        if ($Python) { Invoke-AgentIndexRuntime; exit $LASTEXITCODE }
         if ($InvocationArgs -contains '--json') {
             [ordered]@{ role = $Role; state = 'ready'; setup_required = $false } | ConvertTo-Json -Compress
         } else {
@@ -909,7 +923,13 @@ if (-not $Python) {
 }
 
 if ($Command -eq 'setup') {
-    $setupOutput = & $Python -I -X utf8 -m agent_index @InvocationArgs | Out-String
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $setupOutput = & $Python -I -X utf8 -m agent_index @InvocationArgs | Out-String
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
     $setupRc = $LASTEXITCODE
     Restore-PlannedSetupRole
     if ($setupOutput) { Write-Output $setupOutput.TrimEnd() }
@@ -917,5 +937,5 @@ if ($Command -eq 'setup') {
     exit 0
 }
 
-& $Python -I -X utf8 -m agent_index @InvocationArgs
+Invoke-AgentIndexRuntime
 exit $LASTEXITCODE
