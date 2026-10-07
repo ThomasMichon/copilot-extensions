@@ -787,6 +787,12 @@ def _push_changes_pr(
     if not feature:
         output.err("PR mode: no tracked PR feature branch to update.")
         return False
+    from . import pr_publish
+    push_target = pr_publish.push_target(repo, pushed_pr, worktree_path)  # a fork-headed PR's fork
+    if push_target is None:
+        output.err(pr_publish.UNREADABLE_REMOTE)
+        return False
+    push_to = push_target.remote
 
     # Branch-name leak class (pr-attribution-codenames Phase 5): create-pr
     # validates a NEW feature branch name, but push-changes republishes a
@@ -820,12 +826,12 @@ def _push_changes_pr(
         if on_wt:
             print(
                 f"[dry-run] Would snapshot {feature} to {wt_branch}'s current "
-                f"tip, then push {feature} to {remote}."
+                f"tip, then push {feature} to {push_to}."
             )
         else:
             print(
                 f"[dry-run] Would push the current tracked PR branch "
-                f"{feature} to {remote}."
+                f"{feature} to {push_to}."
             )
         return True
 
@@ -839,6 +845,12 @@ def _push_changes_pr(
     try:
         print(f"Fetching from {remote}...")
         git_ops.fetch(remote, cwd=worktree_path)
+        if push_to != remote:  # the lease needs the fork's current head
+            try:
+                git_ops.fetch(push_to, cwd=worktree_path)
+            except git_ops.GitError as exc:  # an unreachable fork: fail cleanly, nothing rebased or pushed
+                output.err(f"Couldn't fetch the PR's fork remote '{push_to}': {exc}. Nothing was pushed.")
+                return False
         if record.repo:
             tracking.record_repo_fetch_confirmed(record.repo)
 
@@ -854,12 +866,13 @@ def _push_changes_pr(
                 feature_branch=feature, retry_command="agent-worktrees push-changes"))
             return False
         with hooks.allow_pr_push():
-            pushed = git_ops.push(
-                remote, feature, cwd=worktree_path,
+            pushed = pr_publish.push_checked(
+                record, push_to, feature, cwd=worktree_path,
+                expected_head_repo=push_target.head_repo, expected_head_identity=push_target.head_identity,
                 force_with_lease_expect=(lease_expect or None), force_with_lease=True,
             )
         if not pushed:
-            output.err(f"Failed to push {feature} to {remote}.")
+            output.err(f"Failed to push {feature} to {push_to}.")
             if pushed.retryable:
                 output.err(
                     push_diagnostics.pr_branch_non_fast_forward_hint(
@@ -876,34 +889,9 @@ def _push_changes_pr(
         head_sha = git_ops.git(
             "rev-parse", feature, cwd=worktree_path, check=False
         ).stdout.strip()
-        if pushed_pr is not None:
-            pushed_pr.head_sha = head_sha
-            pushed_pr.head_observed_at = ""
-            pushed_pr.head_observed_api_base = ""
-            if pushed_pr.state in ("", "creating"):
-                pushed_pr.state = "open"
-        tracking.save_record(record)
-        from . import pr_ops
-        observation_error = pr_ops.refresh_head_observation(
-            config, record, pushed_pr, head_sha
-        )
-        if observation_error:
-            output.warn(
-                "PR head was pushed, but authoritative provider observation "
-                f"failed: {observation_error}"
-            )
-        attribution_error = pr_ops.refresh_source_attribution(
-            worktree_id,
-            config,
-            record,
-            pushed_pr,
-            head_sha,
-        )
-        if attribution_error:
-            output.warn(
-                f"PR head was pushed, but source attribution publication "
-                f"failed: {attribution_error}"
-            )
+        pr_publish.record_pushed_head(config, record, worktree_id, pushed_pr, head_sha,
+                                      remote=push_to, head_repo=pushed.head_repo,
+                                      head_identity=getattr(pushed, "head_identity", ""))
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
@@ -913,7 +901,7 @@ def _push_changes_pr(
             f"incremental updates from '{wt_branch}'."
         )
         output.ok(
-            f"Pushed {feature} to {remote}. "
+            f"Pushed {feature} to {push_to}. "
             f"The open PR is updated."
         )
         return True
@@ -957,6 +945,12 @@ def _push_changes_pr_refspec(
     if not feature:
         output.err("PR mode (refspec): no tracked PR head ref to update.")
         return False
+    from . import pr_publish
+    push_target = pr_publish.push_target(repo, pushed_pr, worktree_path)  # a fork-headed PR's fork
+    if push_target is None:
+        output.err(pr_publish.UNREADABLE_REMOTE)
+        return False
+    push_to = push_target.remote
 
     from .providers.attribution import BranchLeakError, validate_effective_head
     try:
@@ -983,7 +977,7 @@ def _push_changes_pr_refspec(
     if dry_run:
         print(
             f"[dry-run] Would push "
-            f"{wt_branch}:refs/heads/{feature} to {remote}."
+            f"{wt_branch}:refs/heads/{feature} to {push_to}."
         )
         return True
 
@@ -997,6 +991,12 @@ def _push_changes_pr_refspec(
     try:
         print(f"Fetching from {remote}...")
         git_ops.fetch(remote, cwd=worktree_path)
+        if push_to != remote:  # the lease needs the fork's current head
+            try:
+                git_ops.fetch(push_to, cwd=worktree_path)
+            except git_ops.GitError as exc:  # an unreachable fork: fail cleanly, nothing rebased or pushed
+                output.err(f"Couldn't fetch the PR's fork remote '{push_to}': {exc}. Nothing was pushed.")
+                return False
         if record.repo:
             tracking.record_repo_fetch_confirmed(record.repo)
 
@@ -1007,14 +1007,13 @@ def _push_changes_pr_refspec(
                 feature_branch=feature, retry_command="agent-worktrees push-changes"))
             return False
         with hooks.allow_pr_push():
-            pushed = git_ops.push(
-                remote, f"{wt_branch}:refs/heads/{feature}",
-                cwd=worktree_path,
-                force_with_lease_expect=(lease_expect or None),
-                force_with_lease=True,
+            pushed = pr_publish.push_checked(
+                record, push_to, f"{wt_branch}:refs/heads/{feature}",
+                cwd=worktree_path, expected_head_repo=push_target.head_repo, expected_head_identity=push_target.head_identity,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=True,
             )
         if not pushed:
-            output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
+            output.err(f"Failed to push {wt_branch} to {push_to}/{feature}.")
             if pushed.retryable:
                 output.err(
                     push_diagnostics.pr_branch_non_fast_forward_hint(
@@ -1031,34 +1030,9 @@ def _push_changes_pr_refspec(
         head_sha = git_ops.git(
             "rev-parse", "HEAD", cwd=worktree_path, check=False
         ).stdout.strip()
-        if pushed_pr is not None:
-            pushed_pr.head_sha = head_sha
-            pushed_pr.head_observed_at = ""
-            pushed_pr.head_observed_api_base = ""
-            if pushed_pr.state in ("", "creating"):
-                pushed_pr.state = "open"
-        tracking.save_record(record)
-        from . import pr_ops
-        observation_error = pr_ops.refresh_head_observation(
-            config, record, pushed_pr, head_sha
-        )
-        if observation_error:
-            output.warn(
-                "PR head was pushed, but authoritative provider observation "
-                f"failed: {observation_error}"
-            )
-        attribution_error = pr_ops.refresh_source_attribution(
-            worktree_id,
-            config,
-            record,
-            pushed_pr,
-            head_sha,
-        )
-        if attribution_error:
-            output.warn(
-                f"PR head was pushed, but source attribution publication "
-                f"failed: {attribution_error}"
-            )
+        pr_publish.record_pushed_head(config, record, worktree_id, pushed_pr, head_sha,
+                                      remote=push_to, head_repo=pushed.head_repo,
+                                      head_identity=getattr(pushed, "head_identity", ""))
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
@@ -1068,7 +1042,7 @@ def _push_changes_pr_refspec(
             f"directly to PR head '{feature}'."
         )
         output.ok(
-            f"Pushed {wt_branch} to {remote}/{feature}. "
+            f"Pushed {wt_branch} to {push_to}/{feature}. "
             f"The open PR is updated."
         )
         return True
