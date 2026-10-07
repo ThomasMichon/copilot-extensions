@@ -78,7 +78,7 @@ an empty queue.
   | Field | Meaning |
   |---|---|
   | `id` | stable per (source, entity), e.g. `dispatch:task:<id>`, `bridge:session:<id>`, `pr:<owner/name>#<n>` |
-  | `entity` | `task` \| `session` \| `pr` \| `other` (a source-defined kind) |
+  | `entity` | a shared kind -- `task` \| `session` \| `pr`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
   | `entity_ref` | the canonical reference within its kind: a task id, a bridge session id, a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key) |
   | `lifecycle_state` | the owner's own state (`started`, `live`, `open`, ...) |
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
@@ -95,7 +95,7 @@ an empty queue.
   `id`, so the order is fully deterministic.
 - [ ] **Dedupe** on `(entity, entity_ref)` — the canonical kind plus its canonical
   reference, never the bare reference (a task id and a session id can share a
-  string): keep the highest severity; the others become `also[]` on the kept item,
+  string; a source's own `x.<source>.<kind>` keeps its references to itself): keep the highest severity; the others become `also[]` on the kept item,
   so nothing is silently dropped.
 - [ ] **Source result:** each adapter returns `{items[], ok, error?, read_at}`. The
   aggregate carries `sources[]` with each one's status. Any `ok: false` makes the
@@ -139,7 +139,8 @@ an empty queue.
 - [ ] `agent-dispatch attention next [--after <id>]`: the oldest worst item (a
   keyboard walk in a UI is this, repeated).
 - [ ] **External adapters:** a host project registers a source as a command (an
-  `argv` that prints `{items[]}` JSON) in config. Its own signals (sign-in
+  `argv` that prints `{items[]}` JSON) in config; its own kinds are namespaced
+  `x.<source>.<kind>` by the aggregator (it may also use the shared kinds). Its own signals (sign-in
   expiry, coordination asks) then join the same queue with no code in this repo,
   under the same timeout and degraded rules.
 - [ ] Docs: `plugins/agent-dispatch/docs/cli-reference.md`, the skill reference,
