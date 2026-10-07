@@ -1,9 +1,0 @@
-{
-  "comment": "finalize recognizes work that landed by squash merge (the whole branch as one patch) and on the PR's own base branch when it isn't the configured default one, never counts a branch's creation point as unlanded work, names the checks it ran when it refuses, and adds 'finalize --explain-landing [--json]'; pr-status advises pulling a merged PR forward onto the branch it merged into.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

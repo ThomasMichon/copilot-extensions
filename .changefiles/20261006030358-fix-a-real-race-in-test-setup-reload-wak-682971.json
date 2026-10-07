@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a real race in test_setup_reload_wake_failure_fallback_does_not_downgrade_a_newer_failure (issue #5475): poll for the failure to actually publish before asserting, instead of asserting the instant the worker starts",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

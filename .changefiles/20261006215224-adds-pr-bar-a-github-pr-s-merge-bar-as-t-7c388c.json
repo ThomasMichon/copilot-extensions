@@ -1,9 +1,0 @@
-{
-  "comment": "Adds 'pr bar': a GitHub PR's merge bar as typed clauses (CI green, the reviewer's latest review on the head with no open or previously missed findings, no unresolved threads, no outstanding human change request, no merge conflict), each with evidence, all on one head; every list is paginated to its end and anything unreadable is 'unknown', never met. Provider CLI output and piped bodies are UTF-8 on every platform.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix flashing-window regression: 4 self-respawn sites (coordinator spawn/bootstrap, supervisor self-update respawn, hibernate-the-wait detached waiter) now use windowless_daemon_kwargs() instead of windowless_python()+detached_kwargs(), since each spawns a daemon with recurring console-subsystem descendants.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

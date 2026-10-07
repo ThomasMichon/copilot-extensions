@@ -1,9 +1,0 @@
-{
-  "comment": "push-changes and a create-pr re-run update a fork-headed PR's head on the fork remote it lives on, instead of pushing a stray copy to the repo's own remote (or, for create-pr, marking the live PR merged because its branch isn't on that remote).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

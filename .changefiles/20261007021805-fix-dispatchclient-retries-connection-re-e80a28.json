@@ -1,9 +1,0 @@
-{
-  "comment": "Fix: DispatchClient retries connection-refused on its default transport, closing a liveness-check-then-connect race where a coordinator self-retire-on-supersession cutover could land between the CLI's live-coordinator probe and a request's actual connect, silently dropping a Picker steering-card submission as an unrecoverable delivery failure.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

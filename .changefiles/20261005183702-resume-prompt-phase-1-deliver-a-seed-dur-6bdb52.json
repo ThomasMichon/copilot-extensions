@@ -1,9 +1,0 @@
-{
-  "comment": "Resume prompt Phase 1: deliver a seed durably as a full --interactive argument on the Resume launch command (resolve --worktree-id --seed), working identically muxed or --no-mux; headless_new_session's seed flag switched from -i to --interactive (PowerShell can intercept the short form on Windows)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

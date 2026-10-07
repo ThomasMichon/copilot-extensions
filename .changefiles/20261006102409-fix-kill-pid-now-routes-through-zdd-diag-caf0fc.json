@@ -1,9 +1,0 @@
-{
-  "comment": "Fix: _kill_pid now routes through zdd.diagnostics.terminate_pid_if_identity with a freshly-captured process_start_time token before terminating a victim pid, closing a check-then-bare-kill PID-reuse race (copilot-extensions#5006).",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a test_pr_ops.py regression from #5498's compat-root migration: one monkeypatch.setattr(m, '_infer_worktree_id', ...) site was missed (grep/tool blind spot already known from that PR), left pointing at the now-empty __main__ module instead of worktree_identity.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

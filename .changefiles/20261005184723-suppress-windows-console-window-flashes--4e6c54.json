@@ -1,9 +1,0 @@
-{
-  "comment": "Suppress Windows console-window flashes on captured child spawns (auth command, run_code, transform/storage command decorators); extend the ${python} cross-platform token to decorator command options.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

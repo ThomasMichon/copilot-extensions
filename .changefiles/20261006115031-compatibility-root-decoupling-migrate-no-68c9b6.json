@@ -1,9 +1,0 @@
-{
-  "comment": "compatibility-root-decoupling: migrate _normalize_path's 10 external call sites (6 shims + 3 direct) off the __main__ compat root onto the already-canonical sessions._normalize_path",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}
