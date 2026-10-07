@@ -29,10 +29,13 @@ is unanswered (paired by ``requestId``), or when a turn ended
 an autopilot (or headless) session -- the mode is the latest of
 ``session.mode_changed``, and ``agentMode`` on ``user.message`` /
 ``permission.requested``, defaulting to interactive; ``absent`` after
-``session.shutdown``; ``unknown`` when no such event is in the window or the last
-line is partial or malformed. Every other event carries no presence signal.
-Confidence is ``scanned``, except an ended turn with no mode signal in the window,
-which is assumed interactive and marked ``heuristic``. Event names verified against Copilot CLI 1.0.92
+``session.shutdown``; ``unknown`` when no such event follows the boundary, when
+no boundary lies within the newest 64 MiB (an older permission request or mode
+signal could be unread), or when the last line is partial or malformed. The
+transcript is read backward in blocks to that boundary, never cut at a fixed
+tail. Every other event carries no presence signal.
+Confidence is ``scanned``, except an ended turn with no mode signal since the
+boundary, which is assumed interactive and marked ``heuristic``. Event names verified against Copilot CLI 1.0.92
 transcripts.
 """
 
@@ -188,7 +191,8 @@ RELEVANT = BUSY + SETTLED + BOUNDARY + ("session.shutdown", "permission.requeste
                                        "session.mode_changed")
 
 SCAN_BLOCK = 1 << 20
-SCAN_CAP = 64 << 20
+# How far back to look for the session boundary (overridable for tests).
+SCAN_CAP = int(os.environ.get("AGENT_BRIDGE_PRESENCE_SCAN_CAP", 64 << 20))
 
 def scan_back(ef, size):
     """Presence-relevant events from the end of the transcript back to its latest
@@ -196,12 +200,13 @@ def scan_back(ef, size):
     unanswered permission request or mode signal is never cut off by a fixed tail.
     A cheap substring prefilter, then the parsed ``type`` decides -- an event name
     appearing as a payload value is not that event. Returns ``(events, complete)``;
-    *complete* is False only when :data:`SCAN_CAP` bytes held no boundary."""
+    *complete* is False when :data:`SCAN_CAP` bytes held no boundary: the events
+    since the boundary are then not all known, and presence is ``unknown``."""
     out = []
     pos, carry, scanned = size, b"", 0
     with open(ef, "rb") as fh:
         while pos > 0 and scanned < SCAN_CAP:
-            n = min(SCAN_BLOCK, pos)
+            n = min(SCAN_BLOCK, pos, SCAN_CAP - scanned)
             pos -= n
             fh.seek(pos)
             chunk = fh.read(n) + carry
@@ -230,14 +235,13 @@ def presence_of(ef, size, last_line_bad):
 
 def presence(evs, last_line_bad, complete=True):
     def out(state, reason, last=None, mode=None, pending=0, confidence="scanned"):
-        if not complete:
-            confidence = "heuristic"
-            reason += " (no session boundary in the newest %%d MiB read)" %% (SCAN_CAP >> 20)
         return {"state": state, "confidence": confidence, "reason": reason,
                 "last_event": (last or {}).get("type"), "last_event_at": (last or {}).get("timestamp"),
                 "mode": mode, "pending_permissions": pending}
     if last_line_bad:
         return out("unknown", "the transcript's last line is partial or malformed")
+    if not complete:  # an older permission request or mode signal may be unread
+        return out("unknown", "no session boundary within the newest %%d bytes read" %% SCAN_CAP)
     start = 0
     for i, e in enumerate(evs):
         if e.get("type") in BOUNDARY:

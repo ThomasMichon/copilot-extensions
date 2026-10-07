@@ -314,3 +314,14 @@ def test_a_permission_request_beyond_the_byte_window_still_awaits_input(tmp_path
     p = ps.snapshot_local(_ACP, session_state_root=root)["presence"]
     assert (p["state"], p["pending_permissions"], p["mode"]) == ("awaiting_input", 1, "interactive")
     assert p["confidence"] == "scanned"
+
+
+def test_no_boundary_within_the_scan_cap_is_unknown(tmp_path, monkeypatch):
+    """The boundary and an unanswered request lie beyond the scan cap: the events since
+    the boundary aren't all known, so presence is unknown rather than a guess."""
+    monkeypatch.setenv("AGENT_BRIDGE_PRESENCE_SCAN_CAP", str(64 * 1024))
+    root = str(tmp_path)
+    filler = [_ev("tool.execution_complete", 10 + i % 40, output="x" * 2000) for i in range(100)]
+    _write_session(root, _ACP, [*_TURN, _ev("permission.requested", 3, requestId="r1"), *filler])
+    p = ps.snapshot_local(_ACP, session_state_root=root)["presence"]
+    assert p["state"] == "unknown" and "boundary" in p["reason"]
