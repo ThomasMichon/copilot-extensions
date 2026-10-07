@@ -1,0 +1,9 @@
+{
+  "comment": "add watch daemon (serve/watch subscribe/unsubscribe/status): shared PR-watch poller replacing one-waiter-per-subscriber with one poller per (repo, PR)",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "minor"
+    }
+  ]
+}
