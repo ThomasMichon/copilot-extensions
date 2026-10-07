@@ -504,7 +504,9 @@ in-repo overlay (below); the in-repo version wins when both are present.
 > closed, exactly like a genuine mismatch. The approved local **remote
 > name** (`pr.fork.remote`) is likewise part of what was approved: if it
 > later changes (including to an existing remote such as `origin`), the old
-> approval is not reused either.
+> approval is not reused either. It must also differ from the repo's own
+> remote (`remote`): a fork's publication target is recognized by its remote
+> name, so `create-pr` refuses a fork remote that shares the repo's.
 >
 > A repo can also be pre-approved once, ahead of any `create-pr` call — e.g.
 > during machine/harness setup — with `agent-worktrees forks set

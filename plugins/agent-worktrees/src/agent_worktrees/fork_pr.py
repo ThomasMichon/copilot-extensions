@@ -538,7 +538,7 @@ def _ensure_fork_and_remote(
 
 
 def resolve_fork_publish(
-    worktree_path: str, default_pr_repo: str, prcfg, *, confirm_fork: bool,
+    worktree_path: str, default_pr_repo: str, prcfg, *, confirm_fork: bool, repo_remote: str = "",
 ) -> dict:
     """Resolve ``pr.fork``'s confirmation gate and, once cleared, the actual
     fork/remote bootstrap for one ``create_pr`` call.
@@ -549,11 +549,20 @@ def resolve_fork_publish(
       -- nothing was mutated; relay ``message`` to the human and re-run with
       ``confirm_fork=True`` once they agree.
     - ``{"error": "..."}`` -- a hard failure; nothing further was mutated
-      beyond what the error message itself describes.
+      beyond what the error message itself describes. ``pr.fork.remote`` naming
+      the repo's own remote (*repo_remote*) is one: a fork's publication target
+      is recognized by its remote name, so sharing the repo's would leave the
+      fork's identity unrecorded and its later updates unchecked.
     - ``{"publish_remote", "fork_owner", "warning": <optional str>}`` on
       success -- the fork/remote are ready; ``warning`` is set only when the
       fork succeeded but persisting the confirmation itself failed.
     """
+    if repo_remote and prcfg.fork.remote == repo_remote:
+        return {"error": (
+            f"pr.fork.remote is '{prcfg.fork.remote}', the repository's own remote. "
+            f"A fork needs a remote of its own (e.g. 'fork'); set pr.fork.remote to "
+            f"another name. Nothing was changed."
+        )}
     # This registry is not scoped by GitHub authority (host) -- the same
     # owner/repo slug can identify unrelated repositories on github.com vs.
     # a GitHub Enterprise host (via an explicit pr.api_base OR ambient

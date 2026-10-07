@@ -955,6 +955,31 @@ class TestCreatePRForkFlow:
             "feature/work-2-aaaa", cwd=str(wt_path)
         )
 
+    def test_fork_mode_rejects_a_fork_remote_named_like_the_repo_remote(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        """A fork's publication target is recognized by its remote name: one sharing
+        the repo's own remote would record no fork identity, so a later repoint of that
+        remote would go unchecked. Refused before anything changes, even confirmed."""
+        import dataclasses
+
+        from agent_worktrees import providers
+
+        config, wid, wt_path, remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, fork=dataclasses.replace(repo.pr.fork, remote=repo.remote))
+        config = dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
+        monkeypatch.delenv("GH_HOST", raising=False)
+        monkeypatch.setattr(providers, "get_provider", lambda _name: pytest.fail("no provider call"))
+        url_before = git_ops.git("remote", "get-url", repo.remote, cwd=str(wt_path)).stdout
+
+        res = pr_ops.create_pr(wid, config, confirm_fork=True)
+
+        assert res.get("success") is not True, res
+        assert "the repository's own remote" in res["error"]
+        assert git_ops.git("remote", "get-url", repo.remote, cwd=str(wt_path)).stdout == url_before
+
     def test_fork_mode_rejects_non_default_gh_host(
         self, pr_repo, tmp_path, monkeypatch,
     ):

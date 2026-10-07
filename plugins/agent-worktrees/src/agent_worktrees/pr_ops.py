@@ -763,7 +763,7 @@ def create_pr(
         from . import fork_pr
 
         fork_result = fork_pr.resolve_fork_publish(
-            worktree_path, default_pr_repo, prcfg, confirm_fork=confirm_fork,
+            worktree_path, default_pr_repo, prcfg, confirm_fork=confirm_fork, repo_remote=remote,
         )
         if fork_result.get("needs_confirmation"):
             return {**base, "success": False, **fork_result}
