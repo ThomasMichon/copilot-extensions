@@ -21,9 +21,9 @@ plugins/agent-codespaces/scripts/service.yaml:27  pre-existing at rule introduct
 plugins/agent-codespaces/src/agent_codespaces/config.py:1400  pre-existing at rule introduction, see #5518
 plugins/agent-codespaces/src/agent_codespaces/config.py:1970  pre-existing at rule introduction, see #5518
 plugins/agent-dispatch/scripts/stamp_build_info.py:58  pre-existing at rule introduction, see #5518
-plugins/agent-index/scripts/cell-runtime.py:1363  pre-existing at rule introduction, see #5518
-plugins/agent-index/scripts/cell-runtime.py:1371  pre-existing at rule introduction, see #5518
-plugins/agent-index/scripts/cell-runtime.py:1380  pre-existing at rule introduction, see #5518
+plugins/agent-index/scripts/cell-runtime.py:1357  pre-existing at rule introduction, see #5518
+plugins/agent-index/scripts/cell-runtime.py:1365  pre-existing at rule introduction, see #5518
+plugins/agent-index/scripts/cell-runtime.py:1374  pre-existing at rule introduction, see #5518
 plugins/agent-index/src/agent_index/config.py:400  pre-existing at rule introduction, see #5518
 plugins/agent-logger/src/agent_logger/aggregate.py:827  pre-existing at rule introduction, see #5518
 plugins/agent-logger/src/agent_logger/chronicle/sink.py:162  pre-existing at rule introduction, see #5518

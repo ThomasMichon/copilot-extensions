@@ -281,9 +281,7 @@ def _run_context(
             f"installation-context {action} returned malformed JSON"
         ) from exc
     if not isinstance(value, dict):
-        raise CellError(
-            f"installation-context {action} returned a non-object result"
-        )
+        raise CellError(f"installation-context {action} returned a non-object result")
     return value
 
 
@@ -626,9 +624,7 @@ def _installation_lock(
                 continue
             if not owner_valid:
                 if time.monotonic() >= deadline:
-                    raise CellError(
-                        "installation lock owner cannot be proven stale"
-                    )
+                    raise CellError("installation lock owner cannot be proven stale")
                 time.sleep(0.2)
                 continue
             tombstone = plugin_root / (
@@ -953,9 +949,7 @@ def _write_runtime_profile(
     if _lexists(path):
         actual = _read_json(path)
         if actual != expected:
-            raise CellError(
-                "runtime dependency profile conflicts with the immutable slot"
-            )
+            raise CellError("runtime dependency profile conflicts with the immutable slot")
         return actual
     _atomic_json(path, expected)
     return expected
@@ -3197,16 +3191,19 @@ def _run_cell_deploy(
     *,
     recover: bool,
 ) -> None:
-    result = subprocess.run(
-        _cell_deploy_command(command_launcher, recover=recover),
-        cwd=command_launcher.parent.parent,
-        env=_isolated_environment(child_env),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            _cell_deploy_command(command_launcher, recover=recover),
+            cwd=command_launcher.parent.parent,
+            env=_isolated_environment(child_env),
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", check=False, timeout=LOCK_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        label = "recovery" if recover else "cutover"
+        raise CellError(
+            f"cell-local service {label} timed out after {LOCK_TIMEOUT_SECONDS:g}s"
+        ) from exc
     if result.returncode != 0:
         if result.stdout.strip():
             try:
