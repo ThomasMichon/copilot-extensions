@@ -836,6 +836,54 @@ def test_apply_from_worker_posts_distinct_slots_without_uuid_overhead():
     assert sorted(ran) == ["first", "second"]
 
 
+def test_apply_from_worker_drops_quietly_when_the_picker_already_cancelled_it(
+    caplog,
+):
+    """Regression: a mount-time setup thread (``_setup_live_async``,
+    ``_setup_live_pivots``, the prewarm/reload workers, ...) still finishing
+    its work when ``on_unmount`` sets ``_bg_cancel`` (the picker is tearing
+    down -- e.g. a launch decision such as resuming a worktree) must NOT post
+    into the (already torn-down) Inbox at all, and must NOT log a WARNING.
+    Before this fix, ``_apply_from_worker`` unconditionally posted, which
+    ``Inbox.post`` could only report as a "failed to wake the owning render
+    flow" warning -- noisy, and indistinguishable from a genuine, unexpected
+    wake failure -- for what is actually this expected, intentional exit.
+    Mirrors ``test_run_bg_drops_quietly_when_the_picker_already_cancelled_it``
+    for the sibling ``_run_bg`` path."""
+
+    class _Screen(PickerScreenLoadingMixin):
+        pass
+
+    screen = _Screen()
+    inbox, _owner = _inbox_with_foreign_home(screen)
+    screen.inbox = inbox
+    screen._bg_cancel = threading.Event()
+    screen._bg_cancel.set()  # picker already tore down
+
+    ran = []
+    with caplog.at_level(logging.WARNING, logger="agent-worktrees.picker"):
+        screen._apply_from_worker(lambda: ran.append("applied"))
+
+    assert ran == []
+    assert screen.inbox.pending_slots() == frozenset()
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_apply_from_worker_still_posts_without_bg_cancel_attribute():
+    """Lightweight test doubles across the suite construct a bare object with
+    no ``_bg_cancel`` of its own (no real ``__init__`` ran) -- the cancel
+    check must degrade safely (never crash, never silently drop) for them."""
+
+    class _Screen(PickerScreenLoadingMixin):
+        pass
+
+    screen = _Screen()
+    inbox, _owner = _inbox_with_foreign_home(screen)
+    screen.inbox = inbox
+    screen._apply_from_worker(lambda: None)
+    assert len(screen.inbox.pending_slots()) == 1
+
+
 def test_inbox_updated_message_carries_no_payload_and_names_its_handler():
     message = InboxUpdated()
     assert message.handler_name == "on_inbox_updated"

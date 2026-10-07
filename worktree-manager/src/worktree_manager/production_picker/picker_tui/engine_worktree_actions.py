@@ -828,7 +828,7 @@ class PickerScreenWorktreeActionsMixin:
             "machine": machine,
             "env": env,
             "title": title,
-            "is_local": (machine, env) == self.src.LOCAL,
+            "is_local": self.src.is_local(machine, env),
         })
         if project:
             self.app.result["project"] = project
@@ -871,7 +871,7 @@ class PickerScreenWorktreeActionsMixin:
                 source_id = source_id or match.get("source_id")
                 source_kind = source_kind or match.get("source_kind")
         env = env or str(local_env or "").strip()
-        remote = (machine, env) != self.src.LOCAL
+        remote = not self.src.is_local(machine, env)
         base_argv = ["agent-dispatch", "embody", task_id, "--interactive", "--machine", machine]
         local_argv = _tasks._resolve_argv(
             base_argv, {"task_id": task_id, "machine": machine}

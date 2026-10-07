@@ -207,6 +207,7 @@ def _fixture_source():
     src = types.SimpleNamespace()
     src.LOCAL = local
     src.LOCAL_LABEL = "anomalous-potato · win"
+    src.is_local = lambda m, e: (m, e) == local
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
@@ -1782,6 +1783,7 @@ def _bridge_source():
     src = types.SimpleNamespace()
     src.LOCAL = ("anomalous-potato", "Win")
     src.LOCAL_LABEL = "anomalous-potato · win"
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.machines = lambda: [
         ("anomalous-potato Win", "anomalous-potato", "Win", True),
         ("emancipation-cube Win", "emancipation-cube", "Win", True),

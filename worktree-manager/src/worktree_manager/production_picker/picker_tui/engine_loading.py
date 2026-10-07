@@ -288,7 +288,26 @@ class PickerScreenLoadingMixin:
         the caller's own identity, unlike ``app.call_from_thread`` -- and
         posting from the inbox's own home thread applies immediately rather
         than waiting on a wake that, with no event loop running yet, might
-        never come."""
+        never come.
+
+        Checks ``_bg_cancel`` first, exactly like ``run_background``'s own
+        worker (see background.py): ``on_unmount`` sets it when the picker
+        itself is tearing down (a launch decision -- e.g. resuming a
+        worktree -- cancel, or quit), and a mount-time setup thread
+        (``_setup_live_async``, ``_setup_live_pivots``, the prewarm/reload
+        workers, ...) still finishing its work at that moment has an
+        app/screen that is already gone. Without this check, that worker
+        unconditionally tried to wake the torn-down render flow, which
+        ``Inbox.post`` could only log as a "failed to wake" warning --
+        noisy, and indistinguishable from a genuine, unexpected wake
+        failure -- for what is actually this expected, intentional exit.
+        ``getattr`` degrades safely for the many lightweight test doubles
+        across the suite that construct a bare object with no ``_bg_cancel``
+        of its own (see ``ensure_inbox``'s own docstring for the same
+        pattern)."""
+        cancel = getattr(self, "_bg_cancel", None)
+        if cancel is not None and cancel.is_set():
+            return
         ensure_inbox(self).post(
             f"worker-apply:{next(_WORKER_APPLY_SEQ)}", callback
         )
