@@ -41,7 +41,7 @@ STDERR_TAIL = 300
 FIELD_CAP = 200
 LOCK_WAIT_S = 2.0
 #: Outcomes that are a connection attempt reaching (or failing to reach) the target.
-DIAL_KINDS = ("config_fetch", "control_master", "direct_exec", "reconnect")
+DIAL_KINDS = ("config_fetch", "control_master", "direct_exec", "stdio_channel", "reconnect")
 
 _SECRET = re.compile(
     r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}"
@@ -88,16 +88,26 @@ def account_of(env: dict | None) -> str:
     return "pinned" if (env or {}).get("GH_TOKEN") else "ambient"
 
 
+def _in_event_loop() -> bool:
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
 @contextlib.contextmanager
-def _locked(path: Path):
-    """An exclusive per-file lock, waited for at most :data:`LOCK_WAIT_S`; yields
-    whether it was had."""
+def _locked(path: Path, *, wait: float = LOCK_WAIT_S):
+    """An exclusive per-file lock, waited for at most *wait* seconds (0: one try);
+    yields whether it was had."""
     lock_path = path.with_suffix(path.suffix + ".lock")
     if not lock_path.exists():
         _open_private(lock_path, "ab").close()
     fh = open(lock_path, "a+b")
     try:
-        deadline = time.monotonic() + LOCK_WAIT_S
+        deadline = time.monotonic() + wait
         while True:
             try:
                 if os.name == "nt":
@@ -160,7 +170,9 @@ def record(target: str, *, kind: str, outcome: str, elapsed_s: float, attempt: i
         path = _file_for(target)
         _private_dir(path.parent)
         line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
-        with _locked(path) as held:
+        # On an event loop's thread never wait: a busy lock drops this one line rather
+        # than stall every other coroutine (synchronous callers wait briefly).
+        with _locked(path, wait=0.0 if _in_event_loop() else LOCK_WAIT_S) as held:
             if not held:
                 return
             with _open_private(path, "ab") as fh:

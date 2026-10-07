@@ -7,6 +7,7 @@ that need SSH go through this manager to share multiplexed connections.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -660,22 +661,30 @@ class ConnectionManager:
 
         log.debug("open_stdio_channel on %s: %s", host, remote_cmd)
 
-        proc = await create_ssh_subprocess(
-            *args,
-            config=info.config,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=(
-                asyncio.subprocess.DEVNULL
-                if discard_stderr
-                else asyncio.subprocess.PIPE
-            ),
-            env=info.env,
-            # POSIX: give the ssh child its own session/process group so
-            # teardown signals only the ssh process tree -- never the parent's
-            # group. Windows uses taskkill /T against the root pid.
-            limit=_STDIO_CHANNEL_LIMIT_BYTES,
-        )
+        from .dial_log import Dial, account_of
+
+        # Direct mode: opening the channel is itself a fresh connection -- one dial line
+        # (its spawn; the long-lived channel's later life is the caller's).
+        dial = Dial(host, "stdio_channel", account=account_of(info.env)) if not info.multiplexed else None
+        with dial or contextlib.nullcontext():
+            proc = await create_ssh_subprocess(
+                *args,
+                config=info.config,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=(
+                    asyncio.subprocess.DEVNULL
+                    if discard_stderr
+                    else asyncio.subprocess.PIPE
+                ),
+                env=info.env,
+                # POSIX: give the ssh child its own session/process group so
+                # teardown signals only the ssh process tree -- never the parent's
+                # group. Windows uses taskkill /T against the root pid.
+                limit=_STDIO_CHANNEL_LIMIT_BYTES,
+            )
+            if dial is not None:
+                dial.outcome = "ok"
 
         info.child_processes.append(proc)
         return proc

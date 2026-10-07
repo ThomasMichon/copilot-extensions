@@ -267,3 +267,39 @@ def test_writers_in_separate_processes_never_interleave_a_line():
     assert len(raw) == 240
     assert sorted(json.loads(line)["attempt"] for line in raw) == sorted(
         n * 100 + i for n in range(6) for i in range(40))
+
+
+def test_on_an_event_loop_a_busy_lock_drops_the_line_without_waiting():
+    """Recording from a coroutine never stalls the loop: a held lock means one try, then
+    the line is dropped (a synchronous caller would wait up to LOCK_WAIT_S)."""
+    import asyncio
+    import time as _time
+
+    path = dial_log._file_for("cs-busy")
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    async def record_while_locked():
+        with dial_log._locked(path) as held:
+            assert held
+            started = _time.monotonic()
+            dial_log.record("cs-busy", kind="direct_exec", outcome="ok", elapsed_s=0)
+            return _time.monotonic() - started
+
+    assert asyncio.run(record_while_locked()) < 0.5
+    assert dial_log.read("cs-busy") == []
+
+
+@pytest.mark.asyncio
+async def test_a_direct_mode_stdio_channel_is_a_logged_dial(win_platform, source):
+    from ssh_manager import ConnectionManager
+
+    manager = ConnectionManager(platform=win_platform)
+    await manager.ensure_connected("stdio-host", source)
+    proc = AsyncMock()
+    with patch("ssh_manager.proxy.spawn_in_kill_on_close_job", return_value=(proc, None)):
+        await manager.open_stdio_channel("stdio-host", "copilot --acp")
+    with patch("ssh_manager.proxy.spawn_in_kill_on_close_job", side_effect=OSError("spawn failed")):
+        with pytest.raises(OSError):
+            await manager.open_stdio_channel("stdio-host", "copilot --acp")
+    assert [(e["kind"], e["outcome"]) for e in dial_log.read("stdio-host")] == [
+        ("stdio_channel", "ok"), ("stdio_channel", "error")]
