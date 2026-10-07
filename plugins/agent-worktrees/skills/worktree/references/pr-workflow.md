@@ -20,6 +20,7 @@ rules.
 - `create-pr` (auto-open, attribution marker, labels) -- for tracing a PR you
   didn't open, see [pr-attribution.md](pr-attribution.md) instead
 - Dispositions: keep-alive vs detach
+- Bounding review/fix rounds (`pr rounds`: stop on plateau or round cap)
 - Draft PRs (`--draft` / `pr-ready`)
 - Multiple PRs from one worktree
 - Recovery
@@ -372,7 +373,9 @@ The normal, expected flow for a worktree with work to land:
 5. **Address feedback** in the **same** worktree (keep-alive disposition):
    edit -> commit on the feature branch -> `push-changes` updates the PR
    branch (never the default branch). Note: new commits **dismiss stale approvals**, so
-   re-request / await review again.
+   re-request / await review again. After each automated review, run
+   `pr rounds` first and stop on a plateau or round cap -- see
+   [Bounding review/fix rounds](#bounding-reviewfix-rounds-pr-rounds).
 6. **Repeat 4–5** until the PR is **approved and merged upstream**. With
    auto-merge set, merge happens automatically on approval; otherwise a human
    merges.
@@ -764,6 +767,45 @@ Either way HEAD stays on
 `worktree/{id}` — just commit there and run `push-changes`. (A worktree still
 checked out on a legacy feature branch is accepted too and pushed as-is.) It
 does not create a PR; it updates the existing one.
+
+### Bounding review/fix rounds (`pr rounds`)
+
+An automated reviewer can keep finding one new edge case per round, so an
+unbounded fix -> push -> re-review loop can run for many rounds without
+converging. After **each** new review from the bound reviewer lands on your
+head, and before you start fixing it, run:
+
+```
+<agent-worktrees catalog argv[0]> pr rounds [<owner/name> <n> | <n> | <worktree-id>] --json
+```
+
+Act on its exit code:
+
+- **0** (`continue` or `done`) -- fix the findings and push the next round;
+  on `done` there is nothing left to fix, so check `pr bar` and merge when it
+  is met.
+- **20** (`plateau`) or **21** (`round_cap`) -- **stop starting rounds.** The
+  loop isn't converging; another round won't fix that. Look for the
+  lower-level cause the findings share, or bring in a person. If this work
+  runs as an agent-dispatch task, post a steer card on it rather than asking
+  in chat, so the decision shows up wherever the operator looks:
+
+  ```
+  <agent-dispatch catalog argv[0]> card set <task-id> \
+    --title "PR <n>: review loop stopped (<verdict>)" \
+    --status "Needs a decision on the remaining findings" --link "<PR url>" \
+    --body @rounds.md \
+    --request-input "decision:choice[Rethink,Continue,Merge as is],notes:textarea"
+  ```
+
+  where `rounds.md` carries the guard's `reason`, its `trend` (findings per
+  round) and the remaining findings. Resume only on the operator's answer.
+- **12** (`unknown`) -- the reviews couldn't be read, or the PR moved while
+  they were read. Re-run it; never treat `unknown` as permission to continue
+  or as a stop.
+
+`--max-rounds` and `--plateau-passes` override the defaults (6 and 3) when the
+operator sets a different budget for this PR.
 
 ### Finalizing a PR-mode worktree
 

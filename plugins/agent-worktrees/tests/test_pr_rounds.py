@@ -81,6 +81,21 @@ def test_unreadable_reviews_are_unknown():
     assert pr_rounds.EXIT[result.verdict] == 12
 
 
+@pytest.mark.parametrize("mixed, reason", [
+    ({"head": ""}, "no head read"),
+    ({"head_after": "h9"}, "the head moved from h3 to h9 during the read"),
+    ({"changed": "reviews"}, "the PR changed during the read: reviews"),
+])
+def test_a_mixed_read_is_unknown_never_a_stale_stop(mixed, reason):
+    # Without the guard these reviews read as done, plateau and round_cap respectively.
+    for metrics in ((2, 0), (3, 4, 3, 5), (5, 4, 3, 2, 1, 1)):
+        reviews = [_review(f"h{i}", f"2026-10-07T0{i}:00:00Z", _body(m)) for i, m in enumerate(metrics)]
+        snap = pr_bar.Snapshot(repo="o/r", number=1, reviews=reviews, **{"head": "h3", **mixed})
+        result = pr_rounds.evaluate(snap)
+        assert (result.verdict, result.reason) == ("unknown", reason)
+        assert pr_rounds.EXIT[result.verdict] == 12
+
+
 def test_the_cli_reports_the_guard_as_its_exit_code(monkeypatch, capsys):
     from agent_worktrees import pr_bar_cli, pr_cli
 

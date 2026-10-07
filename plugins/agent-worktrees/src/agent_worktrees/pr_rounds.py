@@ -15,7 +15,8 @@ The **guard** is pure (:func:`guard`):
   another round.
 - ``round_cap`` -- ``max_rounds`` rounds have run without finishing.
 - ``continue`` -- otherwise: "Round N of M".
-- ``unknown`` -- the reviews couldn't be read.
+- ``unknown`` -- the reviews couldn't be read, or the read was mixed: no head, the head
+  moved, or the PR changed while it was read (the same fail-closed rule as ``pr bar``).
 """
 
 from __future__ import annotations
@@ -98,6 +99,14 @@ def evaluate(snap: pr_bar.Snapshot, *, reviewer: str = pr_bar.COPILOT_REVIEWER,
     if "pr" in snap.errors or "reviews" in snap.errors:
         why = snap.errors.get("reviews") or snap.errors.get("pr")
         return Guard(snap.repo, snap.number, 0, max_rounds, plateau_passes, "unknown", str(why))
+    # A mixed read fails closed, as pr_bar.evaluate does: reviews fetched before the head
+    # moved (or the PR changed) can't say the loop is done, stuck or out of rounds.
+    stale = ("no head read" if not snap.head else
+             f"the head moved from {pr_bar._short(snap.head)} to {pr_bar._short(snap.head_after)} during the read"
+             if snap.head_after and snap.head_after != snap.head else
+             f"the PR changed during the read: {snap.changed}" if snap.changed else "")
+    if stale:
+        return Guard(snap.repo, snap.number, 0, max_rounds, plateau_passes, "unknown", stale)
     rounds = rounds_of(snap, reviewer)
     verdict, reason = guard(rounds, max_rounds=max_rounds, plateau_passes=plateau_passes)
     return Guard(snap.repo, snap.number, len(rounds), max_rounds, plateau_passes, verdict, reason,
