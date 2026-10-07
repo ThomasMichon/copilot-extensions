@@ -10,6 +10,7 @@ from pathlib import Path
 from . import config as cfg
 from . import git_ops, output
 from . import services as svc
+from . import worktree_identity
 
 
 def _core():
@@ -186,7 +187,7 @@ def cmd_services_dispatch(argv: list[str]) -> int:
 
 
 def _cmd_services_list(json_output: bool = False) -> int:
-    repo_dir = _core()._find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         output.err("Cannot find repo root")
         return 1
@@ -237,7 +238,7 @@ def _cmd_services_list(json_output: bool = False) -> int:
 
 
 def _cmd_services_status(json_output: bool = False) -> int:
-    repo_dir = _core()._find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         output.err("Cannot find repo root")
         return 1
@@ -363,7 +364,7 @@ def _plugin_managed_notice(name: str) -> int:
 
 
 def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
-    repo_dir = _core()._find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         output.err("Cannot find repo root")
         return 1
@@ -422,7 +423,7 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
 
 
 def _cmd_services_batch(action: str, flags: list[str]) -> int:
-    repo_dir = _core()._find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         output.err("Cannot find repo root")
         return 1

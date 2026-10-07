@@ -209,7 +209,7 @@ def test_prelaunch_selected_context_uses_validated_installer_environment(
         monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     else:
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", inherited_context)
-    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: repo)
     monkeypatch.setattr(
         cfg,
         "load_config",
@@ -281,7 +281,7 @@ def test_prelaunch_uses_marketplace_fingerprint_staleness_for_marketplace_kind(
         encoding="utf-8",
     )
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
-    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: repo)
     monkeypatch.setattr(
         cfg,
         "load_config",
@@ -344,7 +344,7 @@ def test_prelaunch_legacy_default_uses_conventional_runtime(
     legacy_root.mkdir()
     (legacy_root / "deploy-manifest.json").write_text("{}", encoding="utf-8")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
-    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: repo)
     monkeypatch.setattr(
         cfg,
         "load_config",
@@ -418,7 +418,7 @@ def test_prelaunch_repo_service_only_bootstrapped_when_opted_in(
     legacy_root.mkdir()
     (legacy_root / "deploy-manifest.json").write_text("{}", encoding="utf-8")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
-    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: repo)
     monkeypatch.setattr(
         cfg,
         "load_config",
@@ -477,7 +477,7 @@ def test_prelaunch_invalid_other_context_fails_closed(
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: repo)
     monkeypatch.setattr(
         cfg,
         "load_config",

@@ -15,6 +15,7 @@ from pathlib import Path
 from . import config as cfg
 from . import installer as inst, output, services as svc
 from . import picker_profiles_cli, services_cli
+from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 
 
@@ -49,10 +50,6 @@ def _refresh_terminal_profiles(*args, **kwargs):
 
 def _resolve_environment(*args, **kwargs):
     return _core_helper("_resolve_environment", services_cli._resolve_environment)(*args, **kwargs)
-
-
-def _find_repo_dir(*args, **kwargs):
-    return _core()._find_repo_dir(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:
@@ -652,7 +649,7 @@ def plan_pre_launch() -> dict:
     """Check bootstrap service staleness and return an action plan dict."""
     from . import reconcile as _reconcile
 
-    repo_dir = _find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         return {"action": "continue", "reason": "no-repo"}
 
@@ -870,7 +867,7 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
         os.replace(temp, status_path)
 
     repo_override = getattr(args, "repo", None)
-    repo_dir = repo_override or _find_repo_dir()
+    repo_dir = repo_override or worktree_identity._find_repo_dir()
     if not repo_dir:
         if getattr(args, "apply", False):
             _write_status({"ok": False, "reason": "no-repo", "failed": []})

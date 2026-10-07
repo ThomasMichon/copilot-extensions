@@ -314,11 +314,71 @@ Any change that makes these files slightly smaller is a win."
       the bounded test-supervisor's per-call wall-clock ceiling cut the
       run off mid `test_pr_ops.py` -- the same already-documented
       ~22-minute-alone file, not a regression.
-- [ ] `_find_repo_dir`, `_apply_tracking_override`, `_build_active_paths`
-      (next-highest traffic; re-measure with `--progress` before picking
-      exact order -- several of these have outsized monkeypatch counts
-      relative to call-site counts, which may make them higher-value than
-      raw call-site ranking suggests).
+- [x] `_find_repo_dir` (10 call sites / 9 monkeypatch sites). Had 5
+      "definition sites": a real implementation in `__main__.py` and 4
+      thin re-export shims (`installation_cli.py`, `maintenance_cli.py`,
+      `status_bar_cli.py`, `update_cli.py`) forwarding to
+      `core()._find_repo_dir()`; 6 further non-shim call sites
+      (`context_cli.py` x2, `services_cli.py` x4) called through `core()`
+      directly. First attempt moved the real implementation into
+      `git_ops.py` (the natural conceptual home -- the function already
+      calls `git_ops.resolve_to_anchor`), with a deferred `from . import
+      config as cfg` inside the function body to dodge a genuine circular
+      import (`config` -> `inrepo_config_source` -> `git_ops`). That
+      attempt failed `check-module-size.py`: nearly every substantial
+      module in this plugin -- including `git_ops.py` itself, already
+      grandfathered at exactly its current 1731-line ceiling -- sits
+      flush against its own shrink-only cap, so a ~65-line real function
+      had nowhere to land without widening a baseline (a deliberate,
+      scheduled-job-only path per this repo's own convention, not a
+      routine PR's call). Reverted, and re-homed the function in
+      `worktree_identity.py` instead -- a smaller, newer module from this
+      same effort's earlier slices (326 lines against an un-baselined
+      1000-line cap, ~674 lines of headroom) that already imports
+      `config`/`git_ops` at module level with no circular-import risk, and
+      is thematically adjacent (identity/location resolution, same as
+      `_resolve_worktree_id`/`_infer_worktree_id`). Migrated: deleted
+      `__main__.py`'s definition (it had no internal bare callers of its
+      own); deleted all 4 shims, redirecting each shim module's own
+      internal bare calls to `worktree_identity._find_repo_dir()`
+      (`maintenance_cli.py` and `update_cli.py` needed a new top-level
+      `worktree_identity` import; the other modules already imported
+      enough siblings that only the one new import was needed); redirected
+      the 6 non-shim call sites the same way. Updated all 9 test
+      monkeypatch sites (`test_config_dropins.py` x2,
+      `test_doctor_pair_integrity.py`, `test_status_context.py`,
+      `test_update_quick_skip.py` x5) from `<alias>._find_repo_dir` to
+      `<alias>.worktree_identity._find_repo_dir` -- confirmed `<alias>`
+      (`main`/`m`, both aliasing `__main__`) already exposes
+      `worktree_identity` as an attribute (imported there since the
+      `_infer_worktree_id` slice), so no test-side import changes needed
+      beyond the retarget.
+      Validated: `tools/compat-root-migration.py --name _find_repo_dir`
+      reports zero call/monkeypatch sites (was 10/9); `ruff check --select
+      F,E9` clean across all 8 touched source files and 4 touched test
+      files; `check-module-size.py` clean (confirmed `git_ops.py` was left
+      byte-for-byte untouched via `git diff --stat` after the revert).
+      Targeted sweep (71 tests) green. Full-suite validation this slice
+      was blocked by **shared-host resource contention**, not a code
+      defect: repeated attempts hit git-subprocess hangs in three
+      different, entirely untouched test files
+      (`test_anchor_hygiene.py::test_behind_count_requires_fetch`,
+      two tests in `test_claim_handoffs_accept.py`) -- confirmed
+      pre-existing by reproducing the first hang identically on a
+      `git stash`-clean tree -- and a subsequent attempt couldn't even
+      acquire a `test-supervisor` host validation slot after 120s
+      ("host validation slot unavailable"). `Get-Process` showed ~97
+      Python processes on the box, several days old, consistent with
+      this being a genuinely shared machine under load from other
+      concurrent work, not this slice's own doing. Relying on this
+      repo's own CI full-matrix run (on isolated GitHub Actions runners,
+      unaffected by local host contention) as the Validation Plan's own
+      designated authoritative confirmation for this slice.
+- [ ] `_apply_tracking_override`, `_build_active_paths` (next-highest
+      traffic; re-measure with `--progress` before picking exact order --
+      several of these have outsized monkeypatch counts relative to
+      call-site counts, which may make them higher-value than raw
+      call-site ranking suggests).
 - [ ] Re-measure scope after each name lands; update this Plan with the next
       batch rather than pre-committing to a fixed list up front.
 
@@ -990,4 +1050,107 @@ _Pending._
   `_apply_tracking_override` (9/7), `_build_active_paths` (8/17) --
   re-measure with `--progress` before picking exact order for the next
   slice, per the effort's own standing instruction.
+
+### 2026-10-06 (evening) -- `_find_repo_dir` slice (Phase 2, slice 6)
+- Fresh worktree, re-ran `--progress` per standing instruction: confirmed
+  `_find_repo_dir` still top-ranked (10 call sites / 9 monkeypatch sites),
+  matching the prior slice's own projection exactly.
+- Shape: 5 "definition sites" (the migration tool's static scan counts a
+  function body AND a same-named shim as definitions) -- a real ~65-line
+  implementation in `__main__.py`, and 4 thin re-export shims
+  (`installation_cli.py`, `maintenance_cli.py`, `status_bar_cli.py`,
+  `update_cli.py`). 6 further call sites in `context_cli.py` (x2) and
+  `services_cli.py` (x4) called `core()._find_repo_dir()` directly with no
+  local shim at all.
+- **First attempt, reverted**: moved the real implementation into
+  `git_ops.py` -- the strongest conceptual fit, since the function's own
+  logic already calls `git_ops.resolve_to_anchor` for every return path.
+  Added a *deferred* `from . import config as cfg` inside the function
+  body rather than a top-level import, after tracing a genuine circular
+  import this would otherwise create: `config.py` imports
+  `inrepo_config_source`, which already imports `git_ops` -- a top-level
+  `git_ops -> config` import would complete the cycle. This part worked
+  fine. But `check-module-size.py` then failed: `git_ops.py` is already
+  grandfathered at its own ceiling (1731 lines, exactly matching its
+  current size before this change), and nearly every other substantial
+  module in this plugin -- `config.py`, `finalize.py`, `pr_ops.py`,
+  `installer.py`, a dozen more -- is sitting flush against its own
+  baselined cap too (`headroom = 0` for all of them). Widening a
+  baseline is this repo's own `--allow-widen` path, explicitly restricted
+  by convention to a scheduled, main-only widen job -- never a routine
+  PR's own call per `check-module-size.py`'s module docstring -- so that
+  was not an option here. Reverted the `git_ops.py` edit in full
+  (confirmed byte-for-byte via `git diff --stat` showing zero changes
+  after `git checkout --`).
+- **Second attempt, landed**: re-homed the function in
+  `worktree_identity.py` instead -- a smaller module from this same
+  effort's own earlier slices (`_resolve_worktree_id`/
+  `_infer_worktree_id`), un-baselined at only 326 lines against the
+  1000-line default cap (~674 lines of headroom), already importing both
+  `config` and `git_ops` at module level with no circular-import risk
+  (it's a leaf module nothing upstream depends on), and thematically
+  apt -- identity/location resolution, the same genre as its two
+  existing residents. Added a top-level `import subprocess` (the one
+  stdlib import it still needed). Migrated: deleted `__main__.py`'s
+  definition (confirmed zero internal bare callers of its own, unlike
+  `_normalize_path`'s 11 -- this function was ONLY ever reached through
+  the compat root); deleted the 4 shims, redirecting each shim module's
+  own internal bare calls to `worktree_identity._find_repo_dir()`
+  (`maintenance_cli.py` and `update_cli.py` needed a fresh top-level
+  `worktree_identity` import added -- and, having briefly added `git_ops`
+  to both for the first attempt, confirmed `git_ops` was otherwise unused
+  in either file afterward and removed that now-dead import rather than
+  leaving drift); redirected the 6 non-shim call sites
+  (`context_cli.py`, `services_cli.py`) the same way, adding
+  `worktree_identity` as a new import to both plus `installation_cli.py`
+  and `status_bar_cli.py` (whose existing `git_ops` imports stayed,
+  since both still use `git_ops` elsewhere for unrelated calls).
+- Updated all 9 test monkeypatch sites across 4 files
+  (`test_config_dropins.py` x2, `test_doctor_pair_integrity.py`,
+  `test_status_context.py`, `test_update_quick_skip.py` x5) from
+  `monkeypatch.setattr(<alias>, "_find_repo_dir", ...)` to
+  `monkeypatch.setattr(<alias>.worktree_identity, "_find_repo_dir", ...)`
+  -- confirmed first that `<alias>` (`main`/`m`, both local aliases for
+  `__main__`) already exposes `worktree_identity` as an attribute (it's
+  been imported there since the `_infer_worktree_id` slice), so the
+  retarget needed no new test-side imports, just the attribute-path
+  change.
+- Validation: `tools/compat-root-migration.py --name _find_repo_dir`
+  reports zero call/monkeypatch sites (was 10/9). `ruff check --select
+  F,E9` clean across all 8 touched source files and 4 touched test
+  files. `check-module-size.py` clean, with `git_ops.py` confirmed
+  completely untouched by the final diff. Targeted sweep (71 tests) all
+  green on the first pass. **Full-suite validation was blocked by
+  shared-host resource contention, not a code defect**: three separate
+  attempts each hit a different git-subprocess hang in a file this slice
+  never touched (`test_anchor_hygiene.py::test_behind_count_requires_
+  fetch`, then two different tests inside `test_claim_handoffs_accept.py`)
+  -- confirmed the first of these is genuinely pre-existing and
+  unrelated by reproducing it identically after a `git stash` of every
+  change this slice made. A subsequent attempt then failed even earlier,
+  unable to acquire a `test-supervisor` host validation slot after 120
+  seconds ("host validation slot unavailable"); `Get-Process` showed
+  roughly 97 Python processes resident on the box, several dating back
+  **days** (9/19, 9/30, 10/1, 10/4, 10/5) -- conclusive evidence this is
+  a shared machine under contention from other concurrent work, not
+  something this session caused or should remediate by killing unfamiliar
+  processes. Per the Validation Plan's own "CI green on each slice's PR
+  before merging (this repo's authoritative full-matrix confirmation)"
+  clause, deferred full-suite confirmation to the repo's actual CI run on
+  isolated GitHub Actions infrastructure rather than continuing to retry
+  against local contention.
+- Final `--progress` aggregate: **39 accessors, 209 call sites, 156
+  distinct monkeypatched names, 992 patch-site occurrences.** (Accessor
+  count unchanged -- no shim's `_core()` accessor reached zero this
+  slice either, same as `_normalize_path`; 209 = 219 - 10 call sites
+  migrated; -2 distinct monkeypatched names and -10 patch-site
+  occurrences reflect the 9 monkeypatch retargets -- more than one test
+  file's fixture apparently shared a patch target the raw per-name count
+  didn't fully capture, worth double-checking at the START of the next
+  slice rather than assumed.) Next-highest-traffic names per the current
+  ranking: `_apply_tracking_override` (9/7), `_build_active_paths`
+  (8/17), `_infer_worktree_id_from_cwd` (6/34, outsized monkeypatch count
+  relative to call sites -- may be higher-value despite lower rank, per
+  the effort's own Plan note) -- re-measure with `--progress` before
+  picking exact order for the next slice.
 
