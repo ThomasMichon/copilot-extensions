@@ -236,7 +236,7 @@ def pull_for(pr, repo):
     # An older record's project-name (or missing) repo resolves from its PR URL
     # (tracked_pr_slug); the URL's authority is checked below.
     from .pr_reconcile import tracked_pr_slug
-    slug = tracked_pr_slug(pr, api_base=getattr(repo.pr, "api_base", "") or "")
+    slug = tracked_pr_slug(pr, api_base=getattr(getattr(repo, "pr", None), "api_base", "") or "")
     if slug is None:
         return None
     if not number and not slug:
