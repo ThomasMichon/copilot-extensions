@@ -1343,7 +1343,27 @@ claiming discipline alone.
   terminated **last** of all. Added 2 more tests (22 total): a
   chronologically-stale edge rejected at census time, and the exact
   deepest-first-then-root kill order asserted end-to-end. Full targeted
-  suite re-run: 64 passed, 20 skipped.
+  suite re-run: 64 passed, 20 skipped. A SEVENTH review round found 1
+  more real finding (fixed) plus a metadata gap: (p) the round-6 fix's
+  `child_creation <= parent_creation` rejection treated EQUAL timestamps
+  as proof of staleness, but equality proves nothing either way -- a
+  genuinely legitimate, fast-spawning parent/child pair can tie at the
+  WMI provider's own timestamp resolution (`.ToString('o')` adds no
+  precision beyond what the provider actually reports). Narrowed the
+  bogus-edge rejection to strict `<` only; an equal-timestamp edge is
+  now tracked separately as *ambiguous* -- still excluded from traversal
+  (fail-closed, same as a bogus edge), but the census now reports itself
+  **incomplete** (not silently successful) whenever such an edge is
+  actually reachable from the requested root, so the existing
+  incomplete-census warning fires instead of silently omitting a real
+  subtree. Added 1 more test (23 total). The review's one remaining
+  (non-code) finding was this PR's own missing CONTRIBUTING.md-required
+  **Documentation impact** / **Graceful cutover impact** statements, and
+  an overclaiming title -- addressed directly on the PR description
+  rather than in this Journal (this effort's Plan item already correctly
+  scopes the claim to the `_kill_pid` call site, leaving the POSIX
+  `_force_kill_agent_bridge_tree` SIGKILL path open on #5006). Full
+  targeted suite re-run: 65 passed, 20 skipped.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR

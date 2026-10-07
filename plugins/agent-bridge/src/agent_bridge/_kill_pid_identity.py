@@ -96,12 +96,15 @@ def _enumerate_descendant_pids_windows(
     numerically-recycled value forever, so a numeric-only parent check can
     never detect that the parent itself changed generation.
 
-    The returned ``bool`` distinguishes a genuinely empty descendant list
-    (query succeeded, *pid* simply has no children) from an enumeration
-    failure (the query itself didn't run, or *pid* itself wasn't found in
-    the census and so there is no trustworthy anchor for validating any
-    descendant's parent generation) -- callers must not treat the latter
-    as "no descendants to kill".
+    The returned ``bool`` distinguishes a trustworthy descendant list
+    (query succeeded, *pid* itself was found in the census, and every
+    reachable edge was definitively resolvable) from an untrustworthy one
+    -- the query itself didn't run, *pid* wasn't found in the census (no
+    anchor to validate any descendant's parent generation against), OR an
+    AMBIGUOUS edge (equal child/parent ``CreationDate``, proving neither
+    staleness nor legitimacy) was reachable from *pid* and had to be
+    excluded rather than guessed at. Callers must not treat a ``False``
+    result as "no descendants to kill" in any of these cases.
     """
     import subprocess as sp
 
@@ -147,32 +150,49 @@ def _enumerate_descendant_pids_windows(
         # failed rather than silently validating against nothing.
         return [], False
 
-    # Build child->parent edges, but reject any that are ALREADY stale at
-    # census time: a genuine parent always exists (and so has an older
-    # CreationDate) before any of its real children. If the recorded
-    # child's own CreationDate does not postdate its recorded parent's,
-    # that "parent" pid has already been recycled by an unrelated process
-    # since the child's real parent exited -- the edge itself is bogus,
-    # independent of anything that happens later. These full-precision
-    # ISO-8601 UTC timestamps (fixed-width, 'o' format) sort correctly via
-    # plain string comparison. Rejected edges are never added to
-    # children_of, so neither the edge nor anything reachable only
-    # through it is traversed.
+    # Build child->parent edges, but reject any that are DEFINITIVELY
+    # stale at census time: a genuine parent always exists (and so has a
+    # strictly older CreationDate) before any of its real children. If
+    # the recorded child's own CreationDate is strictly EARLIER than its
+    # recorded parent's, that "parent" pid has already been recycled by
+    # an unrelated process since the child's real parent exited -- the
+    # edge itself is bogus, independent of anything that happens later.
+    # These full-precision ISO-8601 UTC timestamps (fixed-width, 'o'
+    # format) sort correctly via plain string comparison.
+    #
+    # Equal timestamps are NOT proof of staleness -- the WMI provider's
+    # own timestamp resolution can genuinely tie for a fast-spawning
+    # legitimate parent/child pair, and ``.ToString('o')`` does not add
+    # precision beyond what the provider actually reports. An equal-
+    # timestamp edge is therefore AMBIGUOUS, not bogus: it is excluded
+    # from traversal the same way a bogus edge is (fail-closed, never
+    # guessed at), but tracked separately so the census can report itself
+    # incomplete -- rather than silently claiming success with an empty
+    # descendant list -- whenever such an edge is actually reachable from
+    # the requested root.
     children_of: dict[int, list[int]] = {}
+    ambiguous_children_of: dict[int, list[int]] = {}
     for child_pid, (parent_pid, child_creation) in by_pid.items():
         parent_entry = by_pid.get(parent_pid)
         if parent_entry is None:
             continue
-        if child_creation <= parent_entry[1]:
+        parent_creation = parent_entry[1]
+        if child_creation < parent_creation:
+            continue
+        if child_creation == parent_creation:
+            ambiguous_children_of.setdefault(parent_pid, []).append(child_pid)
             continue
         children_of.setdefault(parent_pid, []).append(child_pid)
 
     descendants: list[tuple[int, int, str, str]] = []
     seen = {pid}
     frontier = [pid]
+    census_incomplete = False
     while frontier:
         next_frontier = []
         for parent_pid in frontier:
+            if ambiguous_children_of.get(parent_pid):
+                census_incomplete = True
             parent_creation = by_pid[parent_pid][1]
             for child_pid in children_of.get(parent_pid, []):
                 if child_pid in seen:
@@ -182,7 +202,7 @@ def _enumerate_descendant_pids_windows(
                 descendants.append((child_pid, parent_pid, child_creation, parent_creation))
                 next_frontier.append(child_pid)
         frontier = next_frontier
-    return descendants, True
+    return descendants, not census_incomplete
 
 
 def _query_pid_ancestry_windows(pid: int) -> tuple[int, str] | None:

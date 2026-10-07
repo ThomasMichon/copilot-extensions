@@ -248,11 +248,14 @@ def test_enumerate_descendant_pids_windows_attaches_each_levels_parent_creation(
 
 
 def test_enumerate_descendant_pids_windows_rejects_chronologically_stale_edge(monkeypatch):
-    """An edge whose recorded child does NOT postdate its recorded parent
-    is rejected at census time, before any traversal -- a genuine parent
-    always exists (and is thus older) before any of its real children, so
-    this is proof the "parent" pid has already been recycled by an
-    unrelated process since the child's real parent exited."""
+    """An edge whose recorded child STRICTLY predates its recorded parent
+    is definitively bogus and rejected at census time, before any
+    traversal -- a genuine parent always exists (and is thus older)
+    before any of its real children, so this is proof the "parent" pid
+    has already been recycled by an unrelated process since the child's
+    real parent exited. This definitive case is still reported as a
+    successful (not merely incomplete) census: there is no ambiguity
+    here, unlike an equal-timestamp edge."""
     import subprocess as sp
 
     class _Result:
@@ -271,6 +274,34 @@ def test_enumerate_descendant_pids_windows_rejects_chronologically_stale_edge(mo
 
     assert census_ok is True
     assert descendants == []  # the stale edge is excluded, not merely flagged
+
+
+def test_enumerate_descendant_pids_windows_treats_equal_timestamps_as_incomplete(monkeypatch):
+    """Equal child/parent ``CreationDate`` values are NOT proof of
+    staleness -- a legitimate parent/child pair can genuinely tie at the
+    WMI provider's own timestamp resolution. Such an edge must still be
+    excluded from traversal (fail-closed, never guessed at), but the
+    census as a whole must report itself INCOMPLETE rather than silently
+    claiming success with an empty descendant list, since real children
+    may exist beyond that ambiguous edge."""
+    import subprocess as sp
+
+    class _Result:
+        returncode = 0
+        stdout = "\n".join(
+            [
+                "4242\t1\t2026-01-01T00:00:05.0000000Z",  # root
+                # child ties its recorded parent exactly -- ambiguous, not bogus
+                "5001\t4242\t2026-01-01T00:00:05.0000000Z",
+            ]
+        )
+
+    monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
+
+    descendants, census_ok = m._enumerate_descendant_pids_windows(4242)
+
+    assert descendants == []  # still excluded from traversal
+    assert census_ok is False  # but the census is marked incomplete, not successful
 
 
 def test_enumerate_descendant_pids_windows_fails_when_root_absent_from_census(monkeypatch):
