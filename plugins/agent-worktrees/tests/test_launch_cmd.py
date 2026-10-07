@@ -994,9 +994,98 @@ def test_launch_command_dot_sources_default_setup_without_extra_process(tmp_path
     )
 
 
+def _run_launch_command_for_pid_check(
+    shell: str, scripts: Path, tmp_path: Path, fake_default_setup: Path, inner_argv: list[str]
+) -> tuple[int, int, int]:
+    """Run launch-command.ps1 with *inner_argv* as the forwarded command and
+    return (returncode, outer_pid, inner_pid) so a caller can assert whether
+    the dot-source fast path fired (inner_pid == outer_pid) or the original
+    child-process fallback ran (inner_pid != outer_pid)."""
+    marker = tmp_path / f"result-{os.getpid()}-{len(inner_argv)}.txt"
+    env = os.environ.copy()
+    env["RESULT_MARKER"] = str(marker)
+    env["AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED"] = "1"
+    proc = subprocess.Popen(
+        [shell, "-NoProfile", "-NoLogo", "-File", str(scripts / "launch-command.ps1"), "--"]
+        + inner_argv,
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    outer_pid = proc.pid
+    _stdout, stderr = proc.communicate(timeout=30)
+    assert proc.returncode == 17, stderr
+    inner_pid = int(marker.read_text(encoding="utf-8").strip())
+    return proc.returncode, outer_pid, inner_pid
+
+
+def _fake_default_setup_pid_only(tmp_path: Path) -> Path:
+    fake_default_setup = tmp_path / "default-setup.ps1"
+    fake_default_setup.write_text(
+        "param([string]$Machine,[Parameter(ValueFromRemainingArguments)]"
+        "[string[]]$CopilotArgs)\n"
+        'Set-Content -LiteralPath $env:RESULT_MARKER -Value "$PID"\n'
+        "exit 17\n",
+        encoding="utf-8",
+    )
+    return fake_default_setup
+
+
+def test_launch_command_falls_back_on_unrecognized_host_option(tmp_path):
+    """An unreviewed host option before `-File` (e.g. -ExecutionPolicy
+    Bypass) must not silently be dropped by the fast path -- fall back to
+    the original child-process relaunch, which actually honors it."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+
+    _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
+        shell, scripts, tmp_path, fake_default_setup,
+        [
+            "pwsh.exe", "-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass",
+            "-File", str(fake_default_setup), "-Machine", "testbox",
+        ],
+    )
+    assert inner_pid != outer_pid, (
+        "an unrecognized host option before -File must not take the "
+        "dot-source fast path"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="powershell.exe (Desktop edition) is Windows-only")
+def test_launch_command_falls_back_when_requested_engine_differs_from_host(tmp_path):
+    """Requesting `powershell.exe` (Windows PowerShell) while the current
+    host is `pwsh` (PowerShell Core) -- or vice versa -- must not silently
+    run default-setup.ps1 under the wrong engine; fall back so the
+    requested engine is actually used."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    if not shutil.which("powershell"):
+        pytest.skip("powershell.exe (Windows PowerShell) is unavailable")
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+
+    # Host is pwsh (Core); requested engine is powershell.exe (Desktop).
+    _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
+        shell, scripts, tmp_path, fake_default_setup,
+        [
+            "powershell.exe", "-NoProfile", "-NoLogo",
+            "-File", str(fake_default_setup), "-Machine", "testbox",
+        ],
+    )
+    assert inner_pid != outer_pid, (
+        "a requested engine that differs from the current host must not "
+        "take the dot-source fast path"
+    )
+
+
 def test_default_setup_launches_absolute_copilot_with_empty_path(
-    tmp_path,
-):
+    tmp_path,):
     marker = tmp_path / "launched"
     env = os.environ.copy()
     env["PATH"] = ""

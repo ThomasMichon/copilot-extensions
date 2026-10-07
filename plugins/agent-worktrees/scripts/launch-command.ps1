@@ -27,7 +27,18 @@ if ($args.Count -gt ($offset + 1)) {
 
 $usesDefaultSetup = $false
 $executableName = [IO.Path]::GetFileNameWithoutExtension($executable)
-if ($executableName -in @('pwsh', 'powershell')) {
+# The fast path below runs default-setup.ps1 IN THIS HOST PROCESS, so it is
+# only behavior-preserving when the requested invocation is actually
+# equivalent to this host: same engine (an explicit `powershell.exe`
+# request must still get real Windows PowerShell, never silently run under
+# whatever engine happens to host launch-command.ps1), and no host option
+# before `-File` beyond the fixed, inert `-NoProfile -NoLogo` pair this
+# wrapper already assumes -- any other option (e.g. -ExecutionPolicy,
+# -WindowStyle, -Mta/-Sta) would otherwise be silently dropped instead of
+# applied. Anything else falls through to the original spawn-and-wait,
+# which honors the requested engine/options exactly as before.
+$currentHostEngine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
+if ([string]::Equals($executableName, $currentHostEngine, [StringComparison]::OrdinalIgnoreCase)) {
     for ($index = 0; $index -lt ($remainingArgs.Count - 1); $index++) {
         if (
             [string]::Equals(
@@ -37,7 +48,14 @@ if ($executableName -in @('pwsh', 'powershell')) {
             ) -and
             [IO.Path]::GetFileName($remainingArgs[$index + 1]) -eq 'default-setup.ps1'
         ) {
-            $usesDefaultSetup = $true
+            $precedingHostOptions = if ($index -gt 0) { $remainingArgs[0..($index - 1)] } else { @() }
+            $onlyKnownInertOptions = @($precedingHostOptions | Where-Object {
+                -not [string]::Equals($_, '-NoProfile', [StringComparison]::OrdinalIgnoreCase) -and
+                -not [string]::Equals($_, '-NoLogo', [StringComparison]::OrdinalIgnoreCase)
+            }).Count -eq 0
+            if ($onlyKnownInertOptions) {
+                $usesDefaultSetup = $true
+            }
             break
         }
     }
