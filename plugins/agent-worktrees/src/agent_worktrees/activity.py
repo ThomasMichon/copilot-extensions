@@ -137,6 +137,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import handoff_trace
+from . import jsonl_cache
 from .worktree_identity import _infer_worktree_id_from_cwd
 
 # Rolling retention window. Lines older than this are dropped on prune.
@@ -579,6 +580,47 @@ def parse_since(value: str) -> datetime | None:
     return dt
 
 
+def _parse_all_events(path: Path) -> list[dict]:
+    """Every parseable line in *path* as a dict, oldest first, unfiltered.
+
+    The expensive, cacheable half of :func:`read_events` -- full file I/O
+    plus one ``json.loads`` per line. Split out so repeated calls with
+    different filters (the common status-monitor sweep shape: once for
+    ``handoff_cutover_spawn``, once for ``handoff_predecessor_retire``, per
+    worktree, per sweep) hit :mod:`jsonl_cache` instead of re-reading this
+    machine-global log -- which can reach tens of MB after a few days of
+    multi-session use (copilot-extensions#3751's own diagnosis, same shape,
+    different call path) -- from scratch every time.
+    """
+    out: list[dict] = []
+    if not path.exists():
+        return out
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for raw in handle:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    out.append(json.loads(raw))
+                except Exception:
+                    continue
+    except OSError:
+        return out
+    return out
+
+
+def _rec_ts(rec: dict) -> datetime | None:
+    """Extract the UTC timestamp already present on a parsed event dict."""
+    try:
+        ts = datetime.fromisoformat(rec["ts"])
+    except Exception:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
 def read_events(
     *,
     since: datetime | None = None,
@@ -590,31 +632,18 @@ def read_events(
     """Return matching events, oldest first."""
     path = log_path()
     out: list[dict] = []
-    if not path.exists():
-        return out
-    try:
-        with open(path, encoding="utf-8") as handle:
-            for raw in handle:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    rec = json.loads(raw)
-                except Exception:
-                    continue
-                if worktree_id and rec.get("worktree_id") != worktree_id:
-                    continue
-                if launch_id and rec.get("launch_id") != launch_id:
-                    continue
-                if event and rec.get("event") != event:
-                    continue
-                if since is not None:
-                    ts = _parse_ts(raw)
-                    if ts is not None and ts < since:
-                        continue
-                out.append(rec)
-    except OSError:
-        return out
+    for rec in jsonl_cache.cached_parse(path, _parse_all_events):
+        if worktree_id and rec.get("worktree_id") != worktree_id:
+            continue
+        if launch_id and rec.get("launch_id") != launch_id:
+            continue
+        if event and rec.get("event") != event:
+            continue
+        if since is not None:
+            ts = _rec_ts(rec)
+            if ts is not None and ts < since:
+                continue
+        out.append(rec)
     if limit is not None and limit > 0:
         out = out[-limit:]
     return out

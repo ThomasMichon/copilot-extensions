@@ -216,6 +216,35 @@ def test_read_events_filters(patch_install_dir: Path):
     assert len(activity.read_events(worktree_id="wt-2", event="worktree_created")) == 1
 
 
+def test_read_events_reuses_the_cached_parse_across_distinct_filters(
+    patch_install_dir: Path, monkeypatch,
+):
+    """copilot-extensions#3751's own diagnosis, same shape, different call
+    path: the resident status-monitor's handoff-retire sweep
+    (``_pending_handoff_retire_requests``) calls ``read_events`` twice per
+    worktree, every sweep tick, with different ``event=`` filters -- both
+    calls must hit the SAME cached parse of this machine-global log, not
+    re-read + re-``json.loads`` the whole file twice."""
+    activity.log_event("worktree_created", worktree_id="wt-1")
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
+
+    calls: list[Path] = []
+    real_parse_all = activity._parse_all_events
+
+    def _spy(path: Path):
+        calls.append(path)
+        return real_parse_all(path)
+
+    monkeypatch.setattr(activity, "_parse_all_events", _spy)
+    activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+    activity.read_events(worktree_id="wt-1", event="handoff_predecessor_retire")
+    assert len(calls) == 1, "a second call with a different filter must still be a cache hit"
+
+    activity.log_event("handoff_predecessor_retire", worktree_id="wt-1")
+    activity.read_events(worktree_id="wt-1", event="handoff_predecessor_retire")
+    assert len(calls) == 2, "an appended event must force exactly one re-parse"
+
+
 def test_read_events_limit_returns_most_recent(patch_install_dir: Path):
     for i in range(5):
         activity.log_event("session_started", worktree_id=f"wt-{i}")

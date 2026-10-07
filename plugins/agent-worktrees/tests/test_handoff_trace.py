@@ -50,6 +50,33 @@ def test_append_event_no_ops_without_project_or_worktree_id(patch_install_dir: P
     assert handoff_trace.read_trace("proj-a", "wt-1") == []
 
 
+def test_read_trace_reuses_the_cached_parse_until_a_new_event_lands(
+    patch_install_dir: Path, monkeypatch,
+):
+    """copilot-extensions#3751's own diagnosis, same shape, different call
+    path: the resident status-monitor's handoff-retire sweep calls
+    ``read_trace`` once per worktree carrying a pending/linked handoff,
+    every sweep tick -- an unchanged trace file must be a cache hit, not a
+    full re-read + re-parse."""
+    handoff_trace.append_event("proj-a", "wt-1", {"event": "handoff_cutover_spawn"})
+
+    calls: list[Path] = []
+    real_parse = handoff_trace._parse_trace_file
+
+    def _spy(path: Path):
+        calls.append(path)
+        return real_parse(path)
+
+    monkeypatch.setattr(handoff_trace, "_parse_trace_file", _spy)
+    handoff_trace.read_trace("proj-a", "wt-1")
+    handoff_trace.read_trace("proj-a", "wt-1")
+    assert len(calls) == 1, "second read_trace call must be a cache hit, not a re-parse"
+
+    handoff_trace.append_event("proj-a", "wt-1", {"event": "handoff_predecessor_retire"})
+    handoff_trace.read_trace("proj-a", "wt-1")
+    assert len(calls) == 2, "an appended event must force exactly one re-parse"
+
+
 def test_two_projects_same_worktree_id_do_not_interleave(patch_install_dir: Path):
     handoff_trace.append_event("proj-a", "wt-1", {"event": "a-event"})
     handoff_trace.append_event("proj-b", "wt-1", {"event": "b-event"})

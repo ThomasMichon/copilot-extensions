@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Iterator
 
 from . import config as cfg
+from . import jsonl_cache
 
 # Reject path separators, NUL, and any "." / ".." segment -- both ``project``
 # and ``worktree_id`` are copied here without the ``_resolve_worktree_id``
@@ -145,21 +146,15 @@ def append_event(
         return False
 
 
-def read_trace(project: str, worktree_id: str) -> list[dict]:
-    """Return every durably-recorded event for one worktree, oldest first.
+def _parse_trace_file(path: Path) -> list[dict]:
+    """Every parseable line in *path* as a dict, oldest first, unfiltered.
 
-    Best-effort: a missing file, an invalid ``project``/``worktree_id``, an
-    undecodable byte, or an unparseable line is skipped rather than raised,
-    matching ``activity.read_events``'s tolerance for a partially written or
-    corrupted log. Decoding uses ``errors="replace"`` so one damaged byte
-    downgrades to a `\ufffd`-bearing (and thus unparseable, skipped) line
-    instead of aborting the whole read via ``UnicodeDecodeError`` -- later
-    valid lines in the same file remain readable.
+    The expensive, cacheable half of :func:`read_trace` -- see
+    :mod:`jsonl_cache`. Decoding uses ``errors="replace"`` so one damaged
+    byte downgrades to a `\ufffd`-bearing (and thus unparseable, skipped)
+    line instead of aborting the whole read via ``UnicodeDecodeError`` --
+    later valid lines in the same file remain readable.
     """
-    try:
-        path = trace_path(project, worktree_id)
-    except ValueError:
-        return []
     out: list[dict] = []
     if not path.exists():
         return out
@@ -176,6 +171,30 @@ def read_trace(project: str, worktree_id: str) -> list[dict]:
     except OSError:
         return out
     return out
+
+
+def read_trace(project: str, worktree_id: str) -> list[dict]:
+    """Return every durably-recorded event for one worktree, oldest first.
+
+    Best-effort: a missing file, an invalid ``project``/``worktree_id``, an
+    undecodable byte, or an unparseable line is skipped rather than raised,
+    matching ``activity.read_events``'s tolerance for a partially written or
+    corrupted log.
+
+    The per-file parse is memoized via :mod:`jsonl_cache` on the file's own
+    ``(mtime_ns, size)`` -- the resident status-monitor's handoff-retire
+    sweep (``_pending_handoff_retire_requests``) calls this once per
+    worktree carrying a pending/linked handoff, every sweep tick, and this
+    trace file only changes when a stage-mapped event is actually appended
+    to THIS worktree, so an unchanged file is now a cache hit instead of a
+    full re-read + re-parse (copilot-extensions#3751's own diagnosis, same
+    shape, different call path).
+    """
+    try:
+        path = trace_path(project, worktree_id)
+    except ValueError:
+        return []
+    return jsonl_cache.cached_parse(path, _parse_trace_file)
 
 
 def remove_trace(project: str | None, worktree_id: str | None) -> None:
