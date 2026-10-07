@@ -113,3 +113,50 @@ def test_status_reports_active_subscribers():
     reg.register(key, "sub-1", until=(MERGED,), notify={})
     reg.register(key, "sub-2", until=(MERGED,), notify={})
     assert reg.status() == {str(key): ["sub-1", "sub-2"]}
+
+
+def test_snapshot_state_round_trips_through_restore_state():
+    reg = WatchRegistry()
+    key1, key2 = _key(1), _key(2)
+    reg.register(key1, "a", until=(MERGED, CLOSED), notify={"argv": ["echo", "hi"]})
+    # Prime a real baseline (not auto-None) so the round trip exercises it.
+    reg.apply_snapshot(key1, PRSnapshot(pr_state="open", review_decision="REVIEW_REQUIRED"))
+    reg.register(key2, "b", until=(REVIEW_CHANGED,), notify={}, timeout=120.0)
+
+    dump = reg.snapshot_state()
+    assert len(dump) == 2
+
+    restored = WatchRegistry()
+    count = restored.restore_state(dump)
+    assert count == 2
+    assert restored.subscriber_count(key1) == 1
+    assert restored.subscriber_count(key2) == 1
+    assert sorted(restored.status().keys()) == sorted(reg.status().keys())
+
+    # The restored subscriber's baseline survived -- a review-decision
+    # transition fires against it exactly as it would have pre-restart.
+    fired = restored.apply_snapshot(
+        key1, PRSnapshot(pr_state="open", review_decision="APPROVED")
+    )
+    # key1's subscriber only cares about MERGED/CLOSED, so a review change
+    # alone must not fire it -- confirms until/baseline were both preserved
+    # distinctly, not conflated.
+    assert fired == ()
+
+    # key2's subscriber (REVIEW_CHANGED, no baseline yet -- auto-baseline)
+    # still has its ~120s timeout preserved (not reset to None/expired).
+    sub = restored._subscribers[key2]["b"]
+    assert sub.deadline is not None and sub.deadline > time.monotonic()
+
+
+def test_restore_state_skips_malformed_entries_without_raising():
+    reg = WatchRegistry()
+    count = reg.restore_state(
+        [
+            {"repo": "o/n", "number": 1, "subscriber_id": "ok", "until": ["merged"], "notify": {}},
+            {"repo": "o/n"},  # missing required fields
+            "not-a-dict",  # wrong type entirely
+        ]
+    )
+    assert count == 1
+    assert reg.subscriber_count(_key(1)) == 1

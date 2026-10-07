@@ -463,7 +463,9 @@ def _watch_boot() -> None:
     )
 
 
-def _watch_request(kind: str, payload: dict, *, boot_wait_s: float = 6.0) -> dict:
+def _watch_request(
+    kind: str, payload: dict, *, boot_wait_s: float = 6.0, boot: bool = True
+) -> dict:
     from work_coalescing_singleton import call_with_fallback
 
     def _fallback() -> dict:
@@ -471,7 +473,7 @@ def _watch_request(kind: str, payload: dict, *, boot_wait_s: float = 6.0) -> dic
 
     return call_with_fallback(
         dial=_watch_dial,
-        boot=_watch_boot,
+        boot=_watch_boot if boot else None,
         boot_wait_s=boot_wait_s,
         kind=kind,
         key=f"{payload.get('repo', '')}#{payload.get('number', '')}",
@@ -519,7 +521,7 @@ def _cmd_watch_unsubscribe(args: argparse.Namespace) -> int:
 
 
 def _cmd_watch_status(args: argparse.Namespace) -> int:
-    result = _watch_request("status", {"repo": "", "number": 0}, boot_wait_s=0.0)
+    result = _watch_request("status", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
@@ -544,6 +546,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     racing ``_watch_boot`` callers safe: the loser raises
     ``AlreadyRunningError`` and exits 0 immediately rather than silently
     running a second, orphaned daemon nobody will ever discover.
+
+    On startup the daemon reattaches every subscription a prior generation
+    persisted (``WatchDaemon``'s own ``_reattach_from_disk``) -- a
+    ``serve stop`` followed by ``serve restart`` (the update path) never
+    silently drops a caller that's suspended waiting on this daemon to wake
+    it.
     """
     from single_instance_lease import AlreadyRunningError, SingleInstance
     from work_coalescing_singleton import CoalescingServer
@@ -563,14 +571,86 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     write_lock_data(rendezvous_fields(server))
     print(f"agent-pull-requests: watch daemon listening ({server.rendezvous()['endpoint']})")
     try:
-        while True:
-            time.sleep(3600)
+        daemon.wait_for_shutdown()
     except KeyboardInterrupt:
         pass
     finally:
         server.close()
         lease.release()
     return 0
+
+
+def _cmd_serve_stop(args: argparse.Namespace) -> int:
+    """Request a graceful shutdown of a running daemon over the control
+    plane (not a process kill): it finishes its current poll tick, closes
+    its listener, and releases its single-instance lease, exiting cleanly.
+    Every subscription is already durable (persisted on every mutation), so
+    nothing is lost -- 'serve' (or the next auto-boot) reattaches all of
+    them."""
+    result = _watch_request("shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
+    ok = bool(result.get("shutting_down"))
+    if args.json:
+        print(json.dumps({"stopped": ok, **result}, indent=2, sort_keys=True))
+    elif ok:
+        print("agent-pull-requests: watch daemon is shutting down")
+    else:
+        print("agent-pull-requests: no watch daemon reachable")
+    return 0 if ok else 1
+
+
+def _cmd_serve_status(args: argparse.Namespace) -> int:
+    """Daemon health (pid, subscriber/key counts) -- distinct from
+    ``watch status``'s per-subscriber listing."""
+    result = _watch_request("health", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif "pid" in result:
+        print(
+            f"running (pid {result['pid']}) · "
+            f"{result.get('subscriber_count', 0)} subscriber(s) across "
+            f"{result.get('active_keys', 0)} PR(s)"
+        )
+    else:
+        print("not running")
+    return 0 if "pid" in result else 1
+
+
+def _cmd_serve_restart(args: argparse.Namespace) -> int:
+    """Stop (if running) then start a fresh daemon on *this* invocation's
+    interpreter -- the update/reattach path: every durable subscription
+    survives (see ``_cmd_serve``'s own docstring), so 'restart to pick up
+    an update' never orphans a caller that's suspended waiting on a PR."""
+    from .watch_daemon import read_lock_data
+
+    was_running = read_lock_data() is not None
+    if was_running:
+        stop_result = _watch_request(
+            "shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False
+        )
+        if not stop_result.get("shutting_down"):
+            print("agent-pull-requests: could not reach the running daemon to stop it")
+            return 1
+        # Wait for the old process to actually release its single-instance
+        # lease (closing the socket + exiting) before spawning the
+        # successor -- otherwise the new 'serve' would just lose the lease
+        # race and exit immediately as "already running" (the OLD one).
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and _watch_dial() is not None:
+            time.sleep(0.2)
+    _watch_boot()
+    # Boot-wait for the successor's own rendezvous, mirroring
+    # call_with_fallback's own dial/boot-wait sequence.
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if _watch_dial() is not None:
+            if args.json:
+                print(json.dumps({"restarted": True, "was_running": was_running}))
+            else:
+                print("agent-pull-requests: watch daemon restarted")
+            return 0
+        time.sleep(0.2)
+    print("agent-pull-requests: restart requested, but the new daemon has not answered yet")
+    return 1
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
@@ -688,6 +768,12 @@ def build_parser() -> argparse.ArgumentParser:
     watch_status.add_argument("--json", action="store_true")
     watch_status.set_defaults(handler=_cmd_watch_status)
 
+    watch_health = watch_sub.add_parser(
+        "health", help="daemon health (pid, subscriber/key counts) -- never auto-boots"
+    )
+    watch_health.add_argument("--json", action="store_true")
+    watch_health.set_defaults(handler=_cmd_serve_status)
+
     serve = subparsers.add_parser(
         "serve", help="run the resident PR-watch daemon in the foreground"
     )
@@ -695,6 +781,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--poll-interval", type=float, default=30.0, help="seconds between polls per watched PR"
     )
     serve.set_defaults(handler=_cmd_serve)
+
+    stop = subparsers.add_parser(
+        "stop", help="gracefully stop a running watch daemon -- never auto-boots"
+    )
+    stop.add_argument("--json", action="store_true")
+    stop.set_defaults(handler=_cmd_serve_stop)
+
+    restart = subparsers.add_parser(
+        "restart",
+        help="stop (if running) then start a fresh watch daemon -- the update/reattach path",
+    )
+    restart.add_argument("--json", action="store_true")
+    restart.set_defaults(handler=_cmd_serve_restart)
 
     version = subparsers.add_parser("version", help="print the agent-pull-requests version and exit")
     version.set_defaults(handler=_cmd_version)
