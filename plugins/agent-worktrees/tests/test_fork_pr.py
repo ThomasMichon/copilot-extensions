@@ -385,6 +385,39 @@ class TestResolveLiveForkOwner:
         assert fork_pr._resolve_live_fork_owner(self._cfg(), None) is None
 
 
+class TestEnsureForkAndRemote:
+    def _cfg(self):
+        import dataclasses
+        return dataclasses.replace(cfg.PRConfig(enabled=True), provider="github")
+
+    def test_publication_lock_timeout_returns_error(self, monkeypatch, tmp_path):
+        from agent_worktrees import pr_publish
+
+        timeout_type = getattr(pr_publish, "PublishLockTimeout", TimeoutError)
+        monkeypatch.setattr(pr_publish, "PublishLockTimeout", timeout_type, raising=False)
+
+        class _FakeProvider:
+            def authority_endpoint(self, api_base=""):
+                return "github.com"
+
+            def ensure_fork(self, repo_slug, *, api_base="", token=None):
+                return ("alice", "https://github.com/alice/repo.git")
+
+        def locked(_worktree_path):
+            raise timeout_type("lock still held")
+
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: _FakeProvider(),
+        )
+        monkeypatch.setattr(pr_publish, "publish_lock", locked)
+
+        result = fork_pr._ensure_fork_and_remote(
+            str(tmp_path), "owner/repo", self._cfg(), token=None,
+        )
+
+        assert result == {"error": "lock still held"}
+
+
 class TestNonDefaultAuthority:
     """pr.fork's durable registry isn't scoped by GitHub authority, so it
     must refuse to operate at all when EITHER the resolved authority (an
