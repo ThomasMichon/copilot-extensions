@@ -1,0 +1,9 @@
+{
+  "comment": "Settle a spawned/cold reservation once its requeued task's body is confirmed gone, so a fresh attempt is actually re-spawnable (previously required manual reservations-fail intervention every time).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

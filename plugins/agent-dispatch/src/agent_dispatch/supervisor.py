@@ -2890,6 +2890,12 @@ class Supervisor:
                     )
         return settled
 
+    def reconcile_requeued_task_reservations(self) -> int:
+        """See :func:`spawn_requeue_recovery.reconcile_requeued_task_reservations`."""
+        from .spawn_requeue_recovery import reconcile_requeued_task_reservations as _r
+
+        return _r(self)
+
     def hold_live_leases(self) -> int:
         """Heartbeat the lease of every **confirmed-alive** embodied worker.
 
@@ -3640,6 +3646,7 @@ class Supervisor:
         """
         now = time.time() if now is None else now
         self.reconcile()
+        self.reconcile_requeued_task_reservations()
         self.reconcile_reserving()
         self.release_requested_bodies(now=now)
         self.bind_headless_owner_sessions()

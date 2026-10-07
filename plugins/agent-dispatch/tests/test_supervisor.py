@@ -2916,6 +2916,46 @@ def test_requeued_task_is_not_double_spawned(q, client):
     assert spawn.calls == [t.id]  # still just the one spawn
 
 
+def test_requeued_task_is_respawned_once_its_body_is_confirmed_gone(q, client):
+    """Regression (ThomasMichon/copilot-extensions#5563): the companion
+    case to :func:`test_requeued_task_is_not_double_spawned` above -- same
+    requeued-while-reservation-still-`spawned` shape, but THIS time the
+    supervisor's own fresh liveness re-probe genuinely confirms the body is
+    gone. Before this fix, nothing ever settled that dangling `spawned`
+    reservation for a merely-`queued` (never terminal) task --
+    `reconcile()`'s own settlement is gated to SUBMITTED/COMPLETED/ABANDONED
+    only -- so the task sat re-claimable but could never actually be
+    re-embodied, forever, requiring a human to `reservations fail` it by
+    hand every time. A positive GONE verdict must free the slot; the sibling
+    test above confirms a LIVE/UNKNOWN one still must not."""
+    t = q.create("work")
+    spawn = _ok_spawn({"session": "local-body:sess-1", "worktree": "wt-1"})
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        local_body_verdict_fn=lambda _sid: "live",
+    )
+    sup.poll_once()  # spawn #1
+
+    # simulate: embody claimed + started, then its worker went away -> re-queued
+    q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    q.start(t.id, "m/wt")
+    q.reconcile_liveness(headless_local_verdict=lambda sid: "gone")
+    assert q.get(t.id).status == Status.QUEUED
+
+    # NOW the body is confirmed gone on a fresh probe too (not merely the
+    # earlier verdict that requeued it) -- the supervisor's own next cycle
+    # must free the stale reservation and spawn a fresh attempt.
+    sup.local_body_verdict_fn = lambda _sid: "gone"
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]  # a genuine second spawn, not a double
+    stale = q.get_reservation("dispatch-task:" + t.id + ":1")
+    assert stale.state == SpawnState.SETTLED
+    assert stale.conclusion_state == "complete"
+
+
 def test_reconcile_settles_terminal_then_allows_respawn(q, client):
     t = q.create("work")
     spawn = _ok_spawn()
