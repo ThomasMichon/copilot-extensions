@@ -173,7 +173,7 @@ def main():
         "recent_messages": recent[-n_recent:],
         "recent_tool_calls": tools[-n_recent:],
         "usage": usage,
-        "presence": presence(evs, last_line_bad, window_mode(all_lines)),
+        "presence": presence(window_events(all_lines), last_line_bad),
     })
 
 
@@ -183,26 +183,27 @@ BUSY = ("user.message", "assistant.turn_start", "tool.execution_start",
 SETTLED = ("assistant.turn_end",)
 BOUNDARY = ("session.start", "session.resume")
 
-def window_mode(all_lines):
-    """The latest mode signal in the whole read window since its last lifecycle
-    boundary: a long turn pushes it out of the parsed tail."""
-    for ln in reversed(all_lines):
-        if '"session.start"' in ln or '"session.resume"' in ln:
-            return None
-        if '"agentMode"' not in ln and '"session.mode_changed"' not in ln:
+RELEVANT = BUSY + SETTLED + BOUNDARY + ("session.shutdown", "permission.requested",
+                                       "session.mode_changed")
+
+def window_events(all_lines):
+    """Every presence-relevant event in the whole read window, not only the parsed
+    tail: a long turn pushes a pending permission request or the mode signal out
+    of the tail. A cheap substring prefilter, then the parsed ``type`` decides --
+    an event name quoted inside a message's text is not that event."""
+    out = []
+    for ln in all_lines:
+        if not any('"' + t + '"' in ln for t in RELEVANT):
             continue
         try:
             e = json.loads(ln)
         except Exception:
             continue
-        d = e.get("data") or {}
-        if e.get("type") == "session.mode_changed" and d.get("newMode"):
-            return d.get("newMode")
-        if e.get("type") in ("user.message", "permission.requested") and d.get("agentMode"):
-            return d.get("agentMode")
-    return None
+        if isinstance(e, dict) and e.get("type") in RELEVANT:
+            out.append(e)
+    return out
 
-def presence(evs, last_line_bad, earlier_mode=None):
+def presence(evs, last_line_bad):
     def out(state, reason, last=None, mode=None, pending=0, confidence="scanned"):
         return {"state": state, "confidence": confidence, "reason": reason,
                 "last_event": (last or {}).get("type"), "last_event_at": (last or {}).get("timestamp"),
@@ -213,7 +214,7 @@ def presence(evs, last_line_bad, earlier_mode=None):
     for i, e in enumerate(evs):
         if e.get("type") in BOUNDARY:
             start = i
-    mode = earlier_mode
+    mode = None
     pending = {}
     last = None
     for e in evs[start:]:

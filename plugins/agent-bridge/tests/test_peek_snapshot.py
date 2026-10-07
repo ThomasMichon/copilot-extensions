@@ -281,3 +281,23 @@ def test_an_ended_turn_with_no_mode_signal_is_a_heuristic(tmp_path):
     p = _presence(tmp_path, [_ev("session.start", 0), _ev("assistant.turn_start", 1),
                              _ev("assistant.turn_end", 2)])
     assert (p["state"], p["confidence"]) == ("awaiting_input", "heuristic")
+
+
+def test_a_permission_request_older_than_the_parsed_tail_still_awaits_input(tmp_path):
+    """Hundreds of events after an unanswered permission request: it still awaits."""
+    root = str(tmp_path)
+    later = [_ev("tool.execution_complete", 10 + i % 40) for i in range(60)]
+    _write_session(root, _ACP, [*_TURN, _ev("permission.requested", 3, requestId="r1"), *later])
+    p = ps.snapshot_local(_ACP, session_state_root=root, tail_lines=5)["presence"]
+    assert (p["state"], p["pending_permissions"]) == ("awaiting_input", 1)
+
+
+def test_an_event_name_as_a_payload_value_is_not_that_event(tmp_path):
+    """The mode comes from beyond the parsed tail, past an event whose payload value is
+    literally ``session.start``: only an event's own ``type`` is a session boundary."""
+    root = str(tmp_path)
+    quoting = _ev("session.info", 4, message="session.start")  # a value that is exactly an event name
+    _write_session(root, _ACP, [*_TURN, _ev("session.mode_changed", 3, newMode="autopilot"), quoting,
+                                _ev("assistant.turn_end", 5)])
+    p = ps.snapshot_local(_ACP, session_state_root=root, tail_lines=2)["presence"]
+    assert (p["state"], p["mode"]) == ("idle", "autopilot")
