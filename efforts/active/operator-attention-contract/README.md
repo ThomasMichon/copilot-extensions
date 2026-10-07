@@ -79,6 +79,7 @@ an empty queue.
 
   | Field | Meaning |
   |---|---|
+  | `schema` | the item's own version, `1`; carried on every item, separately from the envelope's |
   | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:<session-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's a sound tie-breaker and `--after` cursor |
   | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
   | `entity_ref` | the canonical reference within its kind: a task id, a bridge session id, a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key), a queue as its canonical repo |
@@ -177,7 +178,14 @@ an empty queue.
   each is an SSH read.
 - [ ] **pr** (`pr bar`, on `dev` since #5566): tracked open PRs whose `pr bar` exit is 11
   (`failed`) → `failed` (the author has something to do). Exit 12 (`unknown`)
-  counts toward the source's status, not as an item.
+  counts toward the source's status, not as an item. **Candidates:** the open
+  PRs tracked by agent-worktrees across **every project registered on this
+  machine**, not just the one the caller's CWD belongs to. They're enumerated
+  through agent-worktrees' own CLI (never by reading its files), and each one is
+  read with explicit project context (`agent-worktrees -p <project> pr bar
+  <worktree-id> --json`), so the result is the same from any CWD. A project whose
+  tracked PRs can't be enumerated makes the source `failed`: a partial list
+  can't claim to be complete.
 - [ ] Each adapter is bounded by a per-source timeout. A timeout is that source's
   `status: failed` (with the timeout as its `error`), not a hang.
 
@@ -203,7 +211,8 @@ an empty queue.
   shared kinds). Its own signals (sign-in
   expiry, coordination asks) then join the same queue with no code in this repo,
   under the same timeout and degraded rules. Failure contract: a non-zero exit, a
-  timeout, output that isn't JSON, a response without `items[]`, a `status`
+  timeout, output that isn't JSON, a missing or unsupported `schema` (anything but
+  `1`), a response without `items[]`, a `status`
   outside `ok | failed | uncertain`, a status that contradicts `uncertain`
   (`ok` with a count above 0, `uncertain` with 0), or any item that
   doesn't validate against the schema makes that source `failed` (with the reason
@@ -233,15 +242,20 @@ an empty queue.
   mixed failed-plus-uncertain read resolving to `degraded`) from fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
 - [ ] Unit, the envelope: `attention --json` and `attention next --json` match
   the exact documented shape (keys, types, `sources[]` order) and round-trip,
-  including an item with `lifecycle_state: null` (a queue);
+  including an item with `lifecycle_state: null` (a queue), and every item
+  carries its own `schema: 1`;
   `clear` and `degraded` with zero items stay distinguishable.
 - [ ] Unit, the dispatch adapter: a `submitted` task is a `review` item and a
   `completed` one isn't; `stalled` at exactly the threshold isn't an item and one
   second over is; held tasks with an `unknown` or `gone` owner never count; a
   threshold of `0` turns its half off.
 - [ ] Unit, command sources: a partial read (`status: uncertain`, `uncertain:
-  2`) makes the aggregate `partial`; `{items[]}` alone reads as `ok`; each
+  2`) makes the aggregate `partial`; `{"schema": 1, "items": [...]}` alone reads
+  as `ok`; a missing `schema` and `schema: 2` are each `failed`; each
   contradiction in the failure contract is `failed`.
+- [ ] Unit, the pr adapter: from a CWD outside any project, two registered
+  projects each tracking a PR with a failing bar give both items; a project
+  whose tracked PRs can't be enumerated makes the source `failed`.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded` with the others
