@@ -1056,6 +1056,28 @@ def test_launch_command_falls_back_on_unrecognized_host_option(tmp_path):
     )
 
 
+def test_launch_command_falls_back_when_noprofile_is_omitted(tmp_path):
+    """A requested child that OMITS -NoProfile is explicitly asking for a
+    profile-loading session. launch-command.ps1's own host process is
+    already running without a profile (every real call site starts it with
+    -NoProfile) -- dot-sourcing can't retroactively load one, so the fast
+    path must not silently coerce this request into its own profile-less
+    host; fall back to a real child process that actually loads one."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+
+    _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
+        shell, scripts, tmp_path, fake_default_setup,
+        ["pwsh.exe", "-NoLogo", "-File", str(fake_default_setup), "-Machine", "testbox"],
+    )
+    assert inner_pid != outer_pid, (
+        "omitting -NoProfile must not take the dot-source fast path"
+    )
+
+
 @pytest.mark.skipif(os.name != "nt", reason="powershell.exe (Desktop edition) is Windows-only")
 def test_launch_command_falls_back_when_requested_engine_differs_from_host(tmp_path):
     """Requesting `powershell.exe` (Windows PowerShell) while the current

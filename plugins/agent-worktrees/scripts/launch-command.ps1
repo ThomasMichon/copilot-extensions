@@ -31,12 +31,16 @@ $executableName = [IO.Path]::GetFileNameWithoutExtension($executable)
 # only behavior-preserving when the requested invocation is actually
 # equivalent to this host: same engine (an explicit `powershell.exe`
 # request must still get real Windows PowerShell, never silently run under
-# whatever engine happens to host launch-command.ps1), and no host option
-# before `-File` beyond the fixed, inert `-NoProfile -NoLogo` pair this
-# wrapper already assumes -- any other option (e.g. -ExecutionPolicy,
-# -WindowStyle, -Mta/-Sta) would otherwise be silently dropped instead of
-# applied. Anything else falls through to the original spawn-and-wait,
-# which honors the requested engine/options exactly as before.
+# whatever engine happens to host launch-command.ps1), and the host options
+# before `-File` are EXACTLY the fixed `-NoProfile -NoLogo` pair this
+# wrapper's own host was itself started with -- not merely a subset. This
+# process already has no profile loaded, so a requested child that OMITS
+# -NoProfile (signaling the caller actually wants one loaded) must not be
+# silently coerced into this already-profile-less host; and any other
+# unrecognized option (e.g. -ExecutionPolicy, -WindowStyle, -Mta/-Sta)
+# would otherwise be silently dropped instead of applied. Anything else
+# falls through to the original spawn-and-wait, which honors the
+# requested engine/options exactly as before.
 $currentHostEngine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
 if ([string]::Equals($executableName, $currentHostEngine, [StringComparison]::OrdinalIgnoreCase)) {
     for ($index = 0; $index -lt ($remainingArgs.Count - 1); $index++) {
@@ -49,11 +53,14 @@ if ([string]::Equals($executableName, $currentHostEngine, [StringComparison]::Or
             [IO.Path]::GetFileName($remainingArgs[$index + 1]) -eq 'default-setup.ps1'
         ) {
             $precedingHostOptions = if ($index -gt 0) { $remainingArgs[0..($index - 1)] } else { @() }
-            $onlyKnownInertOptions = @($precedingHostOptions | Where-Object {
-                -not [string]::Equals($_, '-NoProfile', [StringComparison]::OrdinalIgnoreCase) -and
-                -not [string]::Equals($_, '-NoLogo', [StringComparison]::OrdinalIgnoreCase)
-            }).Count -eq 0
-            if ($onlyKnownInertOptions) {
+            $hasNoProfile = @($precedingHostOptions | Where-Object {
+                [string]::Equals($_, '-NoProfile', [StringComparison]::OrdinalIgnoreCase)
+            }).Count -eq 1
+            $hasNoLogo = @($precedingHostOptions | Where-Object {
+                [string]::Equals($_, '-NoLogo', [StringComparison]::OrdinalIgnoreCase)
+            }).Count -eq 1
+            $exactlyInertOptions = $hasNoProfile -and $hasNoLogo -and $precedingHostOptions.Count -eq 2
+            if ($exactlyInertOptions) {
                 $usesDefaultSetup = $true
             }
             break
