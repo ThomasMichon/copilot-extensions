@@ -9,7 +9,7 @@
   venue provider.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-22
+- **Last revised:** 2026-10-06
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -18,16 +18,23 @@
 [session-hosting](../session-hosting/README.md) already establishes that many
 execution rigs — CLI/mux, ACP, SDK, application, third-party — can host a
 Copilot session as peer providers under one durable agency model. What it does
-not yet resolve is **where** that hosting happens: today a muxed, interactive
-CLI session is a *local* affordance (agent-worktrees/Worktree Manager), while a
-*remote* venue (a CodeSpace or trusted container) is reached only through
-[venue-parity](../venue-parity/README.md)'s headless, agent-bridge-driven
-dispatch core. An operator who wants the same muxed, interactive, attended
-experience they get locally — but running in a remote venue, with the same
-reattach, observation, and coordination guarantees — has no first-class path to
-it, and the coordination layer's own CLI-side extension currently resolves
-which daemon to register with **ambiently** rather than through an explicit,
-discoverable assignment.
+not yet fully resolve is **where** that hosting happens: a muxed, interactive
+CLI session has long been a *local* affordance (agent-worktrees/Worktree
+Manager), and the venue providers now offer their own symmetric launch of
+that same shape — [agent-codespaces](../plugins/agent-codespaces/README.md)'
+and agent-containers' `copilot <name>` (interactive) /
+`copilot <name> --detach` (programmatic) commands. What that venue-level
+launch does **not** yet do is make the resulting session a **first-class
+coordinated peer** the way a locally-hosted one is: the coordination layer's
+own CLI-side extension still resolves which daemon to register with
+**ambiently** rather than through an explicit, discoverable, worktree-keyed
+reservation, and (per the narrower, concrete gap below) the daemon's own API
+port is not yet among what gets reverse-forwarded into a venue, so a muxed
+session launched there has no network path back to register at all. This
+vision's job is that remaining coordination-layer integration — reservation,
+discoverability, and honest marking — not the venue-launch primitive itself,
+which [agent-codespaces](../plugins/agent-codespaces/README.md)'s own vision
+now states as shipped.
 
 The north star: a remote venue is simply another place a **standard, muxed
 Copilot CLI session** can run, coordinated by the existing hosting boundary
@@ -298,6 +305,12 @@ headless session's mechanics do not actually extend to an attended one.
 - Sibling vision: [venue-parity](../venue-parity/README.md) — the thin,
   symmetric SSH transport and auth-relay back-channel this vision's venue
   launch rides rather than duplicates.
+- Related vision: [plugins/agent-codespaces](../plugins/agent-codespaces/README.md) —
+  owns the venue-launch primitive itself (`copilot <name>` /
+  `copilot <name> --detach`, and the host/venue port bridging it rides);
+  this vision owns the remaining coordination-layer integration (worktree-
+  keyed reservation, `live_sessions` discoverability, honest marking) that
+  makes a launched session a first-class peer.
 - Related vision: [host-resource-providers](../host-resource-providers/README.md) —
   the independent, related concern of a CLI-mode (or any) session reaching
   locally-provided capabilities; this vision neither depends on nor blocks it.
@@ -308,6 +321,22 @@ headless session's mechanics do not actually extend to an attended one.
 - Child visions: none (leaf).
 
 ## Provenance
+
+- **2026-10-06** — Corrected a stale Purpose & Intent claim: it still said
+  a remote venue "is reached only through venue-parity's headless,
+  agent-bridge-driven dispatch core" and an operator "has no first-class
+  path" to an attended remote session, when the venue-launch primitive
+  itself (`copilot <name>` / `copilot <name> --detach`) was already added
+  by the 2026-09-20/09-22 entries below and is now stated as shipped in
+  [agent-codespaces](../plugins/agent-codespaces/README.md)'s own vision.
+  Reworded the opening framing to name that primitive as already landed and
+  scope this vision's remaining job precisely to the coordination-layer
+  integration (reservation, `live_sessions` discoverability, honest
+  marking) — the same narrower gap the "CLI mode needs no Session Host"
+  concept section already stated correctly; no new intent was added, only
+  a stale current-state claim corrected to match this vision's own later
+  history. Added a See Also cross-link to agent-codespaces' vision for the
+  ownership split this correction states.
 
 - **2026-09-22** — Added the detached, programmatic form of the venue
   `copilot` launch (operator direction: an orchestrating session dispatches

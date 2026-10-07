@@ -10,7 +10,11 @@
   not one item); scoped so far:
   `visions/plugins/agent-dispatch/tasks-pane-ux` §Concepts/the-suspended-task-waiter,
   `visions/plugins/agent-dispatch/reviewer` §Behaviors/stagnation-escalates,
-  `visions/plugins/agent-dispatch` §Behaviors/inherits-runtime-service-invariants
+  `visions/plugins/agent-dispatch` §Behaviors/inherits-runtime-service-invariants,
+  `visions/plugins/agent-codespaces` (repo-sourced-provenance,
+  in-venue-plugin-injection, dual-mode-session-reach),
+  `visions/remote-interactive-sessions` §Purpose & Intent (stale-framing
+  correction, carried by the same slice's PR review)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -139,6 +143,18 @@ Operator, end of a long multi-repo session:
       starts in earnest (deliberately not pre-enumerated now — scope it from
       the actual state of each vision at reconciliation time, not guessed
       upfront).
+      - [x] `visions/plugins/agent-codespaces/README.md` — reconciled against
+            313 commits of drift since its 2026-07-31 authoring. Folded back
+            *repo-sourced-provenance* (active-plugin-declared venue policy,
+            lower precedence than adoption) and *in-venue-plugin-injection*
+            (the governing harness plugin injecting plugins into the venue
+            itself), plus *dual-mode-session-reach* (interactive `copilot
+            <name>` vs. headless `--detach`, orchestrator-blind `--ref-file`
+            hand-off, `--reverse-forward`/`--forward` port bridging) under
+            `coordination-layer-provider`. Corrected a stale "agent-containers
+            when authored" sibling reference and widened the reality-docs
+            skill list (`recovering-codespaces`, `cleaning-codespaces`). No
+            conformance gap found — all fold-back, no issue carved.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -347,3 +363,78 @@ then rather than assuming either answer.
   `mutable-dev-slot`'s Phase 3 rollout list with the specific plugins this
   audit found. This is a fix-direction correction only — the Phase 3
   conformance table and classifications above are unchanged.
+
+### 2026-10-06 — Phase 2 slice: `agent-codespaces` vision reconciliation
+- Picked Phase 2 (widen the vision sweep) off the four-option Next Slice
+  menu from the prior handoff. Ranked candidate visions by staleness ×
+  commit traffic since each one's own last-revised date (`git log
+  --since=<last-revised-date> --oneline -- plugins/<name>` counts, a
+  single consistent metric); `agent-codespaces` (last revised 2026-07-31,
+  313 commits since) ranked above the other stale candidates (`agent-ssh`,
+  last revised 2026-07-22, 139 commits since; `agent-containers`, last
+  revised 2026-08-27, 123 commits since — both legitimate follow-ups for a
+  future slice).
+- Read the vision in full against the plugin's current `README.md` and
+  `docs/patterns/codespace-repo-provenance.md`. Found two substantial,
+  already-shipped capabilities the vision never stated at all: the
+  active-plugin-sourced venue-policy seam (`codespaceConfig` declaration,
+  lower precedence than adoption, identity-verified root resolution) and
+  in-venue plugin injection (the governing harness plugin's
+  `codespacePlugins`, staged from a local marketplace when needed). Folded
+  both back as new Concepts + Features (*repo-sourced-provenance*,
+  *in-venue-plugin-injection*). Also found the already-shipped interactive/
+  headless dual-mode CLI sessions (`copilot <name>` / `--detach`), the
+  orchestrator-blind `--ref-file` hand-off, and the `--reverse-forward`/
+  `--forward` port bridging entirely unstated under
+  *coordination-layer-provider* — folded back as *dual-mode-session-reach*.
+  Ran the superset check on each addition: all are reality already doing
+  this; nothing contradicts an existing Non-Goal or scales the vision back.
+- Opportunistically corrected a now-stale "agent-containers (when
+  authored)" sibling-leaf reference (that vision has existed since before
+  this slice) and widened the Reality-docs skill list to include
+  `recovering-codespaces` and `cleaning-codespaces`, both of which already
+  exist and already operationalize behaviors the vision states
+  (*recover-not-lose*, *credential-readiness-verified-end-to-end*).
+- No conformance gap was found requiring a new issue — this slice is
+  fold-back only, distinct from Phase 3's separate `install.ps1`
+  conformance audit (`#5472` already covers agent-codespaces there and is
+  unaffected).
+- **PR #5575 review, round 1:** caught two real contradictions in the first
+  draft: *dual-mode-session-reach* over-claimed "never two divergent code
+  paths" when reality actually routes a detached session through
+  `copilot_detach.cmd_detach` and an attached one through a separate
+  `interactive_ssh` path; and *repo-sourced-provenance*'s "no adoption
+  step" directly contradicted *config-by-adoption*'s pre-existing "adoption
+  is the one act" wording. Fixed by scoping the adoption claim to the
+  repo-owned policy lane specifically (the two provenance lanes compose,
+  they don't compete) and by narrowing the dual-mode-reach claim to the
+  shared contract rather than a shared implementation.
+- **PR #5575 review, round 2:** the round-1 fix for the code-path finding
+  overcorrected — it added a "not yet fully realized... north-star-ahead
+  refinement" sentence that (a) pinned implementation wiring the vision's
+  own "Not a specification" boundary explicitly excludes, and (b) quietly
+  turned a no-gap fold-back slice into one with an untracked vision→reality
+  delta, contradicting the PR's own no-gap claim. Also flagged the PR
+  description was missing this repo's required **Documentation impact**
+  statement (`CONTRIBUTING.md`'s pre-PR checklist). Fixed by dropping the
+  offending sentence entirely (the behavior now states only the should-be
+  contract guarantee, leaving the implementation-path question genuinely
+  unpinned) and by adding the statement to the PR description.
+- **PR #5575 review, round 3:** caught a genuine cross-vision contradiction
+  the first two rounds missed: `visions/remote-interactive-sessions/
+  README.md`'s own Purpose & Intent framing still claimed (stale against
+  its *own* later provenance) that a remote venue "is reached only through
+  venue-parity's headless... dispatch core" and an operator "has no
+  first-class path" to an attended remote session — directly contradicting
+  *dual-mode-session-reach*'s now-documented `copilot <name>` /
+  `--detach` venue-launch primitive. Scoped *dual-mode-session-reach*
+  explicitly to the venue-launch layer, deferring the deeper
+  coordination-layer integration (reservation, `live_sessions`
+  discoverability, honest marking) to `remote-interactive-sessions`. Also
+  reconciled that vision's own stale framing in place (its Purpose & Intent
+  had not caught up with its own 2026-09-20/09-22 provenance entries that
+  already added the venue-launch primitive) and added a two-way See Also
+  cross-link naming the ownership split. This is itself a small, in-scope
+  Phase 2 fold-back on a second vision, carried by the same review round
+  rather than deferred to a separate slice.
+- Worktree not yet finalized as of this entry; PR pending merge.
