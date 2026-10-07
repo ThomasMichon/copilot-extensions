@@ -9,11 +9,12 @@
   contract** as a local one.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-07-31
+- **Last revised:** 2026-10-06
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) (install
   topology, the credential-relay path, the `codespace:` resolver) · the plugin's
   [`README`](../../../plugins/agent-codespaces/README.md) and its skills
-  (`codespaces-lifecycle`, `codespaces-setup`, `borrowing-codespaces`)
+  (`codespaces-lifecycle`, `codespaces-setup`, `borrowing-codespaces`,
+  `recovering-codespaces`, `cleaning-codespaces`)
 - **Inherits:** [plugin-services](../../plugin-services/README.md) — the service
   model's invariants are design contracts this venue provider must honor.
 
@@ -125,10 +126,37 @@ the cloud. (This is the parent's *uniform-venue-reach*, realized for CodeSpaces.
 ### Config by adoption — the repo owns its venue policy
 A repo's CodeSpace policy — machine size, region, credential sources, and
 setup hooks — lives **in the adopting repo** and is **read live**, with no
-generated intermediate copy to drift. **Adoption** is the one act that wires a
-repo to the provider; ordinary operation reads that policy without mutating the
-repo. (The parent service model's *install/adopt boundary*, seen from the venue
-side.)
+generated intermediate copy to drift. For this **repo-owned policy lane**,
+**adoption** is the one act that wires a repo in; ordinary operation reads
+that policy without mutating the repo. (The parent service model's
+*install/adopt boundary*, seen from the venue side.) A second, separate
+provenance lane needing no adoption step at all exists alongside it — see
+*Repo-sourced provenance* below.
+
+### Repo-sourced provenance — a venue policy without a control-plane repo
+A repo's venue policy need not live in an *adopted* control-plane repo at all:
+the **active plugin presiding over a session** may ship the policy with
+itself and declare where to find it, so a repo that only ever reaches its
+venue through a harness plugin gets a working policy with **no adoption
+step, no sessionStart hook, and no user-level pointer**. This is a second,
+**lower-precedence** provenance source *composing with* (not replacing) the
+repo-owned lane above — adopted/cwd config always wins when both exist —
+and it is resolved only from an **identity-verified** active plugin root,
+never a guessed or unverified path. Legacy and operator-owned pointers
+remain independently diagnosable alongside it rather than silently
+superseded.
+
+### In-venue plugin injection — the harness follows the agent into the venue
+The plugins a session needs are not only the ones installed on the host: the
+**active harness plugin** governing a venue may declare which plugins should
+be **injected into the venue itself** on connect, scoped to the specific
+product/workspace repo the venue serves. Whether the declared plugin's
+payload comes from a remote marketplace (install + register normally) or
+from the harness's own local marketplace (stage the payload into the venue
+and fold it into the launch directly, since the venue cannot resolve a
+repo-relative local path), the agent that lands in the venue ends up with
+the **same effective plugin surface** the orchestrating session intended,
+without a manual per-venue install step.
 
 ### Per-repo identity — the right account for the target org
 Provisioning and reaching a CodeSpace act under the identity that can **see the
@@ -249,10 +277,48 @@ contract**: name-resolvable (raw or friendly), and resolving one **wakes the
 machine, opens the credentialed door, and spawns the agent** transparently. A
 CodeSpace agent is created, inspected, and reached exactly like a local one.
 
+### dual-mode-session-reach
+A CodeSpace agent is reachable **both** headlessly (an orchestrator drives it
+as a fabric participant, JSON handles, no terminal) and **interactively** (a
+human's own terminal session, muxed inside the venue) through the **same
+provider** under its one coordination contract — the same venue, the same
+credentialed door, and the same resolver address both reach modes. A
+reference artifact a human supplies for the worker (a trace, transcript,
+log, or screenshot) reaches the venue **without the orchestrator ever
+reading it** — a pure hand-off, not a pass-through. A host port the venue's
+work needs (a browser's live DevTools endpoint) and a venue port the host
+needs to reach (a worker's dev server) are each bridgeable on request, so
+verifying work that spans the host/venue boundary does not require a
+second, ad hoc transport. This feature is the **venue-launch layer** only —
+preparing the venue, the transport, and the muxed process itself; whether
+that interactive session becomes a first-class, discoverable,
+reservation-bound peer in the coordination layer's own `live_sessions`
+registry is a separate, fabric-wide concern this vision defers entirely to
+[remote-interactive-sessions](../../remote-interactive-sessions/README.md).
+
 ### config-by-adoption
 A repo's venue policy lives **in that repo** and is **read live** (no generated
 intermediate), with per-repo overrides. Provisioning and reach honor it without
-copying or mutating it; only **adoption** wires a repo in.
+copying or mutating it; for the **repo-owned policy lane**, only **adoption**
+wires a repo in — see *repo-sourced-provenance* for the separate,
+lower-precedence lane that needs no adoption step at all.
+
+### repo-sourced-provenance
+A venue policy can originate from the **active plugin** presiding over a
+session instead of an adopted repo — a **second provenance lane**, composing
+with (not replacing) the repo-owned one above: declared, identity-verified,
+and resolved at **lower precedence** than adoption, so a repo reached only
+through a harness plugin gets working venue policy with no adoption step.
+Legacy and operator-owned pointers stay independently diagnosable rather
+than silently superseded by this source.
+
+### in-venue-plugin-injection
+The plugin surface a venue's agent ends up with can be **declared by the
+governing harness plugin**, scoped to the product/workspace repo the venue
+actually serves, and realized on connect regardless of whether the declared
+plugin's payload comes from a remote marketplace (installed normally) or the
+harness's own local marketplace (staged into the venue and folded into the
+launch, since the venue cannot resolve a repo-relative local path itself).
 
 ### per-repo-identity
 Host-side operations run under the account that can access the **target repo's
@@ -539,18 +605,23 @@ tooling.)
   *discoverable-local-endpoint*, *collision-free-endpoints*,
   *minimal-network-exposure*, *a-la-carte-installability*, *graceful-composition*,
   *degrade-gracefully*, *install-adopt-boundary*, *version-skew-tolerant-contracts*.
-- Sibling leaves: **agent-containers** *(local-container venue, when authored)* ·
-  [agent-ssh](../agent-ssh/README.md) *(the connectivity substrate this venue's
-  reach rides on)*.
+- Sibling leaves: [agent-containers](../agent-containers/README.md) *(local-container
+  venue, now authored)* · [agent-ssh](../agent-ssh/README.md) *(the connectivity
+  substrate this venue's reach rides on)*.
 - Presenter: [picker](../../picker/README.md) — the Worktree Picker's **CodeSpaces**
   pivot *renders* this venue's pool membership, per-venue state, allocation, and
   budget headroom (owned here; the Picker never redefines or re-stores them).
 - Consumer: [agent-logger](../agent-logger/README.md) — the fabric's **memory layer**
   that compiles and mines the rescued CodeSpace session data into logs and usage
   telemetry (this vision guarantees the *capture*; agent-logger owns the analysis).
+- Related vision: [remote-interactive-sessions](../../remote-interactive-sessions/README.md) —
+  owns the coordination-layer integration (worktree-keyed reservation,
+  `live_sessions` discoverability, honest marking) that turns this vision's
+  *dual-mode-session-reach* venue launch into a first-class coordinated peer;
+  this vision owns the launch primitive itself, not that integration.
 - Reality docs: [`docs/architecture.md`](../../../docs/architecture.md) · the
   `plugins/agent-codespaces/` skills (`codespaces-lifecycle`, `codespaces-setup`,
-  `borrowing-codespaces`).
+  `borrowing-codespaces`, `recovering-codespaces`, `cleaning-codespaces`).
 
 ## Provenance
 
@@ -633,3 +704,34 @@ tooling.)
   multi-account identity); the connectivity substrate itself is
   [agent-ssh](../agent-ssh/README.md) /
   [#63](https://github.com/ThomasMichon/copilot-extensions/issues/63).
+
+- **2026-10-06** — Fold-back slice (`vision-backport-sweep` Phase 2): reconciled
+  against reality that had drifted 313 commits past this vision's last
+  revision. Added two previously-unstated concepts/features reverse-engineered
+  from the plugin's current `README.md` and `docs/patterns/
+  codespace-repo-provenance.md`: *repo-sourced-provenance* (a venue policy can
+  be declared by the **active plugin** itself, at lower precedence than
+  adoption, with no adoption step required — a second provenance lane that
+  composes with, rather than replaces, the pre-existing *config-by-adoption*
+  repo-owned lane) and *in-venue-plugin-injection* (the governing harness
+  plugin can declare which plugins land **inside** the venue, scoped per
+  product/workspace repo, staged from a local marketplace when the venue
+  can't resolve a repo-relative path). Added *dual-mode-session-reach*
+  stating the should-be shared-contract guarantee behind the already-shipped
+  interactive (`copilot <name>`) vs. headless (`--detach`) CLI-mode
+  sessions, the orchestrator-blind reference-file hand-off (`--ref-file`),
+  and the host↔venue port bridging (`--reverse-forward` / `--forward`) —
+  none of which the *coordination-layer-provider* feature had stated, and
+  deliberately scoped to the contract (venue/credentialed door/resolver),
+  not to whether the underlying code happens to share one implementation
+  path, which stays unpinned per this vision's own "Not a specification"
+  boundary. Also corrected the stale *agent-containers* sibling-leaf
+  reference (authored since this vision was first written) and widened the
+  reality-docs skill list to include `recovering-codespaces` and
+  `cleaning-codespaces`. All additions are **fold-back** (reality already
+  does these things; the vision simply hadn't stated them) — no Non-Goal
+  reality violates and no scaling-back occurred. No conformance gap was
+  found requiring an issue; the mechanisms above are additive capability,
+  not invariant violations. Phase 3's cutover/immutable-runtime conformance
+  audit already covers this plugin's `install.ps1` separately (see `#5472`)
+  and is unaffected by this slice.
