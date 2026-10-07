@@ -2958,6 +2958,7 @@ class TestCreatePRAutoOpen:
         res = pr_ops.create_pr(wid, config, title="Add feature", open_pr=False)
         assert res["success"] is True
         assert "pr_opened" not in res
+        assert res["pr_open_skipped"] == "--no-open"
 
     def test_provider_failure_is_non_fatal(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo
@@ -3483,6 +3484,38 @@ class TestRerunAutoOpen:
         assert r2["pr_opened"] is True
         assert fake.create_calls == 1                       # no duplicate PR opened
 
+    def test_no_open_says_why_and_still_reports_an_existing_pr(self, pr_repo, monkeypatch):
+        """``--no-open`` opens and changes nothing on the provider (it still reads the
+        tracked PR's state, so a merged PR's branch is never reused): a first run records why no PR was
+        opened, and a re-run on an already-open PR still reports it (never "none")."""
+        config, wid, _wt_path, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+
+        r1 = pr_ops.create_pr(wid, config, title="Add feature", open_pr=False)
+        assert r1["success"] and r1["pr_open_skipped"] == "--no-open"
+        r2 = pr_ops.create_pr(wid, config, title="Add feature")  # opens it
+        n = r2["number"]
+        r3 = pr_ops.create_pr(wid, config, title="Add feature", open_pr=False, draft=True)
+        assert r3.get("rerun") is True, r3
+        assert (r3["pr_opened"], r3["number"]) == (True, n) and "pr_open_skipped" not in r3
+        assert r3["draft"] is False  # nothing was opened, so no draft was created
+        assert r3["pr_existing"] is True
+        assert fake.create_calls == 1
+
+    def test_auto_open_off_says_so(self, pr_repo, monkeypatch):
+        config, wid, _wt_path, _ = pr_repo  # pr.auto_open is off here
+
+        def _boom(name):
+            raise AssertionError("no provider call when auto-open is off")
+
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", _boom)
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is True and "pr_opened" not in res
+        assert res["pr_open_skipped"] == "pr.auto_open is off"
+
     def test_rerun_after_external_merge_opens_fresh_pr(self, pr_repo, monkeypatch):
         # #1336: a feature branch whose PR merged externally (auto-merge), with
         # a new commit added on that branch, must open a FRESH PR on re-run --
@@ -3995,3 +4028,16 @@ class TestAzureDevOpsReviewerOps:
             "proj/repo", 5, event="bogus", api_base=self.ORG, token="pat"
         )
         assert "unknown review event" in err
+
+
+def test_no_pr_opened_is_explained_even_without_a_tracked_pr():
+    """An untracked worktree (no record, so no target PR) still says why no PR was opened."""
+    from types import SimpleNamespace
+
+    kw = dict(title="t", body="", worktree_id="w", head_sha="h", draft=False, attribution=None)
+    for open_pr, auto_open, why in ((False, True, "--no-open"), (None, False, "pr.auto_open is off")):
+        result = {}
+        pr_ops._finish_auto_open(result, None, None, None, open_pr=open_pr,
+                                 prcfg=SimpleNamespace(auto_open=auto_open), **kw)
+        assert result == {"pr_open_skipped": why}
+

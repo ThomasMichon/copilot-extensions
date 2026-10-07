@@ -1375,3 +1375,26 @@ class TestThreadTypes:
         assert active.is_active is True and resolved.is_active is False
         assert [t.id for t in res.active] == [1]
         assert res.supported is True
+
+
+class TestCreatePrPushedReminder:
+    """A pushed branch with no PR (``--no-open``, a dry run, a provider refusal)
+    is never reported as "PR created" with a merge as the next step."""
+
+    def test_pushed_says_no_pr_and_how_to_open_one(self):
+        r = pc.pr_reminder(_self_merge_flow(), "create-pr", pc.PR_STATE_PUSHED,
+                           reason="the branch was pushed (--no-open)")
+        assert r.headline == "no PR opened: the branch was pushed (--no-open)"
+        assert "set-pr" in r.next_step and "merge" not in r.next_step
+        assert r.waiting_on == () and r.state == "pushed"
+        blob = (r.text() + " " + repr(r.as_dict())).lower()
+        assert not [bad for bad in _FORBIDDEN if bad.lower() in blob]
+
+    def test_created_still_reads_pr_created(self):
+        assert pc.pr_reminder(_self_merge_flow(), "create-pr", pc.PR_STATE_CREATED).headline == "PR created"
+
+    def test_a_dry_run_has_its_own_state_and_next_step(self):
+        r = pc.pr_reminder(_self_merge_flow(), "create-pr", pc.PR_STATE_DRY_RUN)
+        assert (r.state, r.headline) == ("dry-run", "dry run: nothing was pushed or opened")
+        assert "without `--dry-run`" in r.next_step and "set-pr" not in r.next_step
+
