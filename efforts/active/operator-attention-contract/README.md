@@ -235,7 +235,10 @@ an empty queue.
   (`ok` with a count above 0, `uncertain` with 0), or any item that
   doesn't validate against the schema makes that source `failed` (with the reason
   as its `error`) -- never a crash of the aggregate, never an empty source. A
-  command that reports `status: failed` itself is `failed` with its own `error`.
+  command that reports `status: failed` itself is `failed` with its own `error`,
+  which must be a non-empty single line (≤ 200 chars); a self-reported failure
+  without one gets the aggregator's own `error`, `"source reported failed without
+  an error"`, so every response maps to the aggregate shape.
 - [ ] Docs: `plugins/agent-dispatch/docs/cli-reference.md`, the skill reference,
   and the attention item schema in the plugin docs.
 
@@ -269,7 +272,8 @@ an empty queue.
   threshold of `0` turns its half off.
 - [ ] Unit, command sources: a partial read (`status: uncertain`, `uncertain:
   2`) makes the aggregate `partial`; `{"schema": 1, "items": [...]}` alone reads
-  as `ok`; a missing `schema` and `schema: 2` are each `failed`; each
+  as `ok`; a missing `schema` and `schema: 2` are each `failed`; a self-reported
+  `status: failed` without an `error` gets the aggregator's fallback error; each
   contradiction in the failure contract is `failed`.
 - [ ] Unit, the bridge adapter: every `AttentionReason` value maps as listed
   (`policy_required` is an item; `unreachable`, `contract_changed` and an unknown
