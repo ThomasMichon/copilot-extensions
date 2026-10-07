@@ -148,8 +148,10 @@ an empty queue.
   `clear` therefore says "nothing needs you *from these sources*", and a client
   can tell it from a full read. `attention next`
   returns the same envelope with `item` (one item, or `null` when the queue is
-  empty) and `cursor` in place of `items`. Adding a field is compatible; renaming,
-  removing or retyping one bumps `schema`.
+    empty) and `cursor` in place of `items`. **Schema evolution** (envelope and
+    item alike): adding an **optional** field -- one a consumer may find absent --
+    is compatible and keeps `schema`; renaming, removing or retyping a field, or
+    adding one consumers must rely on, bumps it.
 - [ ] **Only discovered sources take part** (standalone-first,
   [a-la-carte independence](../../../docs/patterns/a-la-carte-independence.md)):
   an optional sibling that isn't installed (agent-bridge, agent-worktrees) is
@@ -203,9 +205,9 @@ an empty queue.
 
   **Candidates:** the union of agent-bridge's two session registries, read
   through its own API (never its database): **bridge-managed sessions**
-  (`agent-bridge sessions --json`, the sessions it spawned and drives) and
-  **registered interactive CLI sessions** (`agent-bridge live-sessions list
-  --json`, live rows only). A session that appears in both is one entity
+  (`agent-bridge --json sessions`, the sessions it spawned and drives) and
+  **registered interactive CLI sessions** (`agent-bridge --json live-sessions
+  list`, live rows only; `--json` is the bridge's global option, so it comes first). A session that appears in both is one entity
   (`entity_ref` is its session id). Every candidate is classified from its
   result snapshot and its presence, as listed above. If either listing fails or
   times out, the bridge source is `failed`, never `ok` on the other alone: a
