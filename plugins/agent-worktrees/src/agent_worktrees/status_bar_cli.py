@@ -10,6 +10,7 @@ from pathlib import Path
 from . import config as cfg
 from . import git_ops, prune, sessions, tracking
 from . import output
+from . import worktree_identity
 
 
 def _core():
@@ -80,10 +81,6 @@ def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
 
 def _local_claimant_alive(owner_ref: str) -> bool | None:
     return _core()._local_claimant_alive(owner_ref)
-
-
-def _find_repo_dir():
-    return _core()._find_repo_dir()
 
 
 # status-segment -- one styled line for a tmux/psmux status bar
@@ -676,7 +673,7 @@ def _resolve_machine_alias(machine: str, repo: str | None) -> str:
 
         repo_dir = repos_mod.resolve_path(repo) if repo else None
         if not repo_dir:
-            repo_dir = _find_repo_dir()
+            repo_dir = worktree_identity._find_repo_dir()
         if not repo_dir:
             return machine
         entries = cfg.load_machines_yaml(repo_dir)

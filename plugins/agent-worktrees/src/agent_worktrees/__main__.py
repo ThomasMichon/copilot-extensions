@@ -5245,67 +5245,6 @@ def _resolve_copilot() -> str | None:
     return _rc.resolve_copilot()
 
 
-def _find_repo_dir() -> Path | None:
-    """Find the repo root for the current project.
-
-    Priority order (most specific → least specific):
-      1. Running script location (navigate up to git root)
-      2. The (assumed) CWD git root (via git rev-parse)
-      3. Config anchor (last resort -- may be stale)
-
-    Resolution is from the directory, not ambient env: the former
-    ``WORKTREE_REPO`` env fallback has been removed (it was
-    a cross-session contamination source). All paths are resolved through
-    :func:`git_ops.resolve_to_anchor` so that running from inside a git worktree
-    returns the main checkout, not the ephemeral worktree path.
-    """
-
-    # 1. Running script location -- walk up from __file__ to find .git
-    #    Only useful when running from a dev checkout inside the repo.
-    #    When installed (under ~/.agent-worktrees/), the walk would escape
-    #    the install tree and hit unrelated git repos (e.g. a stray .git
-    #    in $HOME).  Stop at the install dir boundary to prevent this.
-    here = Path(__file__).resolve().parent
-    _install_root = cfg.install_dir().resolve()
-    candidate = here
-    for _ in range(8):  # limit traversal depth
-        if (candidate / ".git").exists() or (candidate / ".git").is_file():
-            return git_ops.resolve_to_anchor(candidate)
-        parent = candidate.parent
-        if parent == candidate:
-            break
-        # Stop before escaping the install tree -- if our code lives
-        # under ~/.agent-worktrees/, there's no project repo above it.
-        if candidate == _install_root:
-            break
-        candidate = parent
-
-    # 2. git rev-parse to find repo root of the current directory
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(Path.cwd()), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if r.returncode == 0:
-            return git_ops.resolve_to_anchor(Path(r.stdout.strip()))
-    except Exception:
-        pass
-
-    # 3. Config anchor (last resort -- may deploy stale code if anchor
-    #    hasn't been updated, but better than failing entirely)
-    try:
-        config = cfg.load_config()
-        anchor = Path(config.default_repo.anchor)
-        if anchor.exists():
-            return anchor
-    except Exception:
-        pass
-
-    return None
-
-
 def _write_global_config(
     machine: str,
     plat: str,
