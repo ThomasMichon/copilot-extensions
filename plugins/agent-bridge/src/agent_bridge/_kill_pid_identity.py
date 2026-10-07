@@ -72,25 +72,36 @@ def _identity_termination_available() -> bool:
 
 def _enumerate_descendant_pids_windows(
     pid: int,
-) -> tuple[list[tuple[int, int, str]], bool]:
-    """``(child_pid, parent_pid, creation_date)`` triples for every live
-    descendant of *pid* on Windows, plus whether the census itself
-    succeeded.
+) -> tuple[list[tuple[int, int, str, str]], bool]:
+    """``(child_pid, parent_pid, child_creation, parent_creation)``
+    quadruples for every live descendant of *pid* on Windows, plus whether
+    the census itself succeeded.
 
-    ``creation_date`` is WMI's own ``CreationDate`` for *that pid*,
-    captured in the SAME bulk snapshot as the ancestry data -- a cheap,
-    already-available generation fingerprint. It is NOT the same token
-    format ``zdd.diagnostics`` uses for the actual identity-bound kill
-    (that is captured separately, per-child, immediately before use --
-    see ``_verify_descendant_identity_windows``); it exists solely so a
-    later re-check can detect "this pid was reused since the census" by
-    comparing CreationDate again, via the same cheap WMI mechanism,
-    without a second per-process round trip for every level of the tree.
+    ``child_creation``/``parent_creation`` are WMI's own ``CreationDate``
+    for those pids, captured in the SAME bulk snapshot as the ancestry
+    data (full-precision, invariant-culture ISO-8601 via
+    ``.ToString('o')`` -- the default ``CreationDate`` string
+    interpolation this module used to rely on silently truncates to
+    whole seconds, which is not enough resolution to tell two distinct
+    process generations on the same reused pid apart). This is NOT the
+    same token format ``zdd.diagnostics`` uses for the actual
+    identity-bound kill (that is captured separately, per-child,
+    immediately before use -- see ``_verify_descendant_identity_windows``);
+    it exists solely so a later re-check can detect "this pid (or its
+    recorded parent) was reused since the census" via the same cheap WMI
+    mechanism, without trusting a bare numeric ancestry match alone --
+    Windows never live-reparents an orphan the way POSIX does; a dead
+    parent's pid simply gets reused by something else entirely while the
+    child's own ``ParentProcessId`` field keeps pointing at that now
+    numerically-recycled value forever, so a numeric-only parent check can
+    never detect that the parent itself changed generation.
 
     The returned ``bool`` distinguishes a genuinely empty descendant list
     (query succeeded, *pid* simply has no children) from an enumeration
-    failure (the query itself didn't run) -- callers must not treat the
-    latter as "no descendants to kill".
+    failure (the query itself didn't run, or *pid* itself wasn't found in
+    the census and so there is no trustworthy anchor for validating any
+    descendant's parent generation) -- callers must not treat the latter
+    as "no descendants to kill".
     """
     import subprocess as sp
 
@@ -102,7 +113,8 @@ def _enumerate_descendant_pids_windows(
                 "-NonInteractive",
                 "-Command",
                 "Get-CimInstance Win32_Process | ForEach-Object "
-                '{ "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CreationDate)" }',
+                '{ "$($_.ProcessId)`t$($_.ParentProcessId)`t'
+                '$($_.CreationDate.ToUniversalTime().ToString(\'o\'))" }',
             ],
             capture_output=True,
             text=True,
@@ -130,56 +142,36 @@ def _enumerate_descendant_pids_windows(
         by_pid[child_pid] = (parent_pid, creation.strip())
         children_of.setdefault(parent_pid, []).append(child_pid)
 
-    descendants: list[tuple[int, int, str]] = []
+    if pid not in by_pid:
+        # The root itself wasn't present in the census -- there is no
+        # trustworthy census-time generation to anchor ANY descendant's
+        # parent-generation check against. Treat the whole census as
+        # failed rather than silently validating against nothing.
+        return [], False
+
+    descendants: list[tuple[int, int, str, str]] = []
     seen = {pid}
     frontier = [pid]
     while frontier:
         next_frontier = []
         for parent_pid in frontier:
+            parent_creation = by_pid[parent_pid][1]
             for child_pid in children_of.get(parent_pid, []):
                 if child_pid in seen:
                     continue
                 seen.add(child_pid)
-                _, creation_date = by_pid[child_pid]
-                descendants.append((child_pid, parent_pid, creation_date))
+                child_creation = by_pid[child_pid][1]
+                descendants.append((child_pid, parent_pid, child_creation, parent_creation))
                 next_frontier.append(child_pid)
         frontier = next_frontier
     return descendants, True
 
 
-def _verify_descendant_identity_windows(
-    child_pid: int, recorded_parent_pid: int, recorded_creation_date: str
-) -> str | None:
-    """Capture *child_pid*'s current process-start-time identity token
-    FIRST, then verify it is STILL the SAME process the census named --
-    both its ancestry (current parent pid matches *recorded_parent_pid*)
-    AND its generation (current WMI ``CreationDate`` matches
-    *recorded_creation_date*) -- returning that already-captured token, or
-    ``None`` if any step fails.
-
-    The ``CreationDate`` re-check is what closes the generation-reuse gap
-    a bare ancestry (parent-pid-number) check cannot: if *child_pid* itself
-    was reused by an unrelated process between the census and now, its
-    current ``CreationDate`` will differ even when, by numeric
-    coincidence, the replacement's parent pid happens to match too. A
-    naturally orphaned descendant (an intermediate ancestor died first,
-    e.g. during this same tree-kill) also fails this check once Windows
-    reparents it (its ``ParentProcessId`` changes) -- conservatively
-    skipping it rather than risk misidentifying a reparented process as
-    still belonging to the verified tree.
-
-    Capturing the identity token before this re-check mirrors ``_kill_pid``'s
-    own root-level ordering: a pid reused during the (slower) WMI lookup
-    is still caught by ``terminate_pid_if_identity``'s own final
-    re-verification at the actual kill.
-    """
+def _query_pid_ancestry_windows(pid: int) -> tuple[int, str] | None:
+    """The CURRENT ``(ParentProcessId, CreationDate)`` for *pid*, via the
+    same full-precision WMI mechanism as the bulk census, or ``None`` if
+    *pid* is not currently a live process."""
     import subprocess as sp
-
-    from zdd import diagnostics
-
-    start_time = diagnostics.process_start_time(child_pid)
-    if start_time is None:
-        return None
 
     try:
         out = sp.run(
@@ -189,8 +181,9 @@ def _verify_descendant_identity_windows(
                 "-NonInteractive",
                 "-Command",
                 "(Get-CimInstance Win32_Process -Filter "
-                f"'ProcessId={child_pid}' -ErrorAction SilentlyContinue) | "
-                'ForEach-Object { "$($_.ParentProcessId)`t$($_.CreationDate)" }',
+                f"'ProcessId={pid}' -ErrorAction SilentlyContinue) | "
+                "ForEach-Object { \"$($_.ParentProcessId)`t"
+                '$($_.CreationDate.ToUniversalTime().ToString(\'o\'))" }',
             ],
             capture_output=True,
             text=True,
@@ -200,13 +193,71 @@ def _verify_descendant_identity_windows(
     except (OSError, sp.TimeoutExpired):
         return None
     parts = (out.stdout or "").strip().split("\t", 1)
-    if len(parts) != 2:
+    if len(parts) != 2 or not parts[0].isdigit():
         return None
-    current_ppid_s, current_creation = parts
-    if not current_ppid_s.isdigit() or int(current_ppid_s) != recorded_parent_pid:
+    return int(parts[0]), parts[1]
+
+
+def _verify_descendant_identity_windows(
+    child_pid: int,
+    recorded_parent_pid: int,
+    recorded_child_creation: str,
+    recorded_parent_creation: str,
+) -> str | None:
+    """Capture *child_pid*'s current process-start-time identity token
+    FIRST, then verify it is STILL the SAME process the census named, AND
+    that its recorded parent is STILL the same parent generation the
+    census observed -- returning that already-captured token, or ``None``
+    if any step fails.
+
+    Three independent checks, all against the full-precision WMI
+    ``CreationDate`` fingerprint:
+
+    1. *child_pid*'s current ``ParentProcessId`` still matches
+       *recorded_parent_pid* (the ancestry edge itself hasn't changed).
+    2. *child_pid*'s own current ``CreationDate`` still matches
+       *recorded_child_creation* -- closing the gap where *child_pid*
+       itself was reused by an unrelated process between the census and
+       now, even when the replacement happens to share the same
+       numerically-recorded parent pid.
+    3. The recorded PARENT's current ``CreationDate`` still matches
+       *recorded_parent_creation* -- closing the gap a bare ancestry
+       check can never see: Windows does not live-reparent an orphan
+       (unlike POSIX); a child's ``ParentProcessId`` field keeps pointing
+       at a now-dead parent's pid number forever, even after that number
+       gets reused by something else entirely. Without this check, an
+       orphan whose original parent died (its pid later recycled by the
+       daemon tree itself, or by anything else) would pass a bare
+       ancestry check against the *wrong, unrelated* "parent".
+
+    Capturing the identity token before any of these re-checks mirrors
+    ``_kill_pid``'s own root-level ordering: a pid reused during the
+    (slower) WMI lookups is still caught by
+    ``terminate_pid_if_identity``'s own final re-verification at the
+    actual kill.
+    """
+    from zdd import diagnostics
+
+    start_time = diagnostics.process_start_time(child_pid)
+    if start_time is None:
         return None
-    if current_creation != recorded_creation_date:
+
+    child_now = _query_pid_ancestry_windows(child_pid)
+    if child_now is None:
         return None
+    current_parent_pid, current_child_creation = child_now
+    if current_parent_pid != recorded_parent_pid:
+        return None
+    if current_child_creation != recorded_child_creation:
+        return None
+
+    parent_now = _query_pid_ancestry_windows(recorded_parent_pid)
+    if parent_now is None:
+        return None
+    _, current_parent_creation = parent_now
+    if current_parent_creation != recorded_parent_creation:
+        return None
+
     return start_time
 
 
@@ -223,10 +274,10 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
     census cannot be fooled by that pid getting freed and reused by an
     unrelated process in between -- running the census only after killing
     the root (a prior version of this function did that) would reopen
-    exactly that window. Each descendant's ancestry AND generation
-    fingerprint are re-verified together, immediately before its own kill
-    (see ``_verify_descendant_identity_windows``) -- never trusting the
-    bulk census alone for the actual termination decision.
+    exactly that window. Each descendant's ancestry edge AND both ends'
+    generation fingerprints are re-verified together, immediately before
+    its own kill (see ``_verify_descendant_identity_windows``) -- never
+    trusting the bulk census alone for the actual termination decision.
 
     If the ROOT's own identity verification fails, descendant cleanup is
     skipped entirely: the census was taken assuming this *was* the
@@ -255,9 +306,14 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
     if not root_result.get("identity_verified"):
         return
 
-    for child_pid, recorded_parent_pid, recorded_creation_date in descendants:
+    for (
+        child_pid,
+        recorded_parent_pid,
+        recorded_child_creation,
+        recorded_parent_creation,
+    ) in descendants:
         child_start = _verify_descendant_identity_windows(
-            child_pid, recorded_parent_pid, recorded_creation_date
+            child_pid, recorded_parent_pid, recorded_child_creation, recorded_parent_creation
         )
         if child_start is not None:
             diagnostics.terminate_pid_if_identity(child_pid, child_start)

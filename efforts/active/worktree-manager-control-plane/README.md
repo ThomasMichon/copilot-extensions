@@ -1287,7 +1287,37 @@ claiming discipline alone.
   `None`/unavailable by design -- gated both tests on
   `_identity_termination_available()` so they skip (not fail) on those
   platforms. Expanded `test_kill_pid_identity.py` to 17 tests. Full
-  targeted suite re-run: 59 passed, 20 skipped.
+  targeted suite re-run: 59 passed, 20 skipped. A FIFTH review round
+  found 2 more real findings, both fixed: (l) the round-4 fix's WMI
+  `CreationDate` fingerprint was read via default `ToString()`
+  interpolation, which silently truncates to whole-second precision --
+  two distinct process generations on the same reused pid within the
+  same displayed second would incorrectly compare equal. Switched both
+  the bulk census and the per-pid re-check to
+  `.ToUniversalTime().ToString('o')` (full-precision, invariant-culture
+  ISO-8601) in every WMI query; (m) round 4's own docstring claim that
+  "Windows reparents orphans" was **wrong** -- Windows does NOT
+  live-reparent an orphan the way POSIX does; a child's
+  `ParentProcessId` field keeps pointing at its original parent's pid
+  number forever, even after that parent has died and the OS has
+  recycled that exact pid number for an entirely unrelated process. A
+  bare numeric ancestry check can therefore never detect that the
+  *recorded parent itself* changed generation -- confirmed by the
+  reviewer's own focused check showing even a child created *before* the
+  current root could incorrectly pass. Fixed by tracking each
+  descendant's recorded PARENT's own census-time `CreationDate` too (the
+  census now fails outright if the root itself isn't present in its own
+  output, since that leaves no trustworthy anchor for ANY descendant),
+  and re-verifying it against the parent's CURRENT `CreationDate`
+  (`_query_pid_ancestry_windows`, a new shared helper) alongside the
+  child's own ancestry+generation check, immediately before the kill --
+  three independent checks must all agree: child's current parent pid,
+  child's own generation fingerprint, and the recorded parent's own
+  generation fingerprint. Added 4 more tests (now 20 total) covering a
+  BFS census correctly carrying each level's own parent `CreationDate`,
+  root-absent-from-census treated as census failure, and a stale-parent-
+  generation rejection with the exact query order asserted. Full targeted
+  suite re-run: 62 passed, 20 skipped.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR

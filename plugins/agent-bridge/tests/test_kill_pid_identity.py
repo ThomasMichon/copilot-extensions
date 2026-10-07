@@ -209,6 +209,53 @@ def test_kill_pid_stays_on_identity_path_when_self_probe_is_inconclusive(monkeyp
     assert fallback_called == []
 
 
+def test_enumerate_descendant_pids_windows_attaches_each_levels_parent_creation(monkeypatch):
+    """The census must attach each descendant's RECORDED-PARENT's own
+    census-time creation date (not just the child's own), including at
+    depth 2+ -- this is the data ``_verify_descendant_identity_windows``
+    needs to validate parent generations, not just numeric ancestry."""
+    import subprocess as sp
+
+    class _Result:
+        returncode = 0
+        stdout = "\n".join(
+            [
+                "4242\t1\tRootC",  # root, parent is pid 1 (irrelevant)
+                "5001\t4242\tC1",  # level-1 child of root
+                "6001\t5001\tC2",  # level-2 grandchild, parent is 5001
+            ]
+        )
+
+    monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
+
+    descendants, census_ok = m._enumerate_descendant_pids_windows(4242)
+
+    assert census_ok is True
+    by_child = {d[0]: d for d in descendants}
+    assert by_child[5001] == (5001, 4242, "C1", "RootC")
+    assert by_child[6001] == (6001, 5001, "C2", "C1")  # parent creation is 5001's OWN, not root's
+
+
+def test_enumerate_descendant_pids_windows_fails_when_root_absent_from_census(monkeypatch):
+    """If the root pid itself doesn't appear in the bulk census output
+    (e.g. it already exited between the caller's check and this query),
+    there is no trustworthy census-time generation to anchor ANY
+    descendant's parent-generation check against -- the whole census must
+    be treated as failed, not as "root has no descendants"."""
+    import subprocess as sp
+
+    class _Result:
+        returncode = 0
+        stdout = "5001\t9999\tC1"  # root pid 4242 is nowhere in this output
+
+    monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
+
+    descendants, census_ok = m._enumerate_descendant_pids_windows(4242)
+
+    assert descendants == []
+    assert census_ok is False
+
+
 def test_kill_pid_windows_terminates_root_and_live_descendants(monkeypatch):
     """Windows tree semantics (previously ``taskkill /T``) are preserved:
     descendants are enumerated and each re-verified/terminated through its
@@ -218,13 +265,13 @@ def test_kill_pid_windows_terminates_root_and_live_descendants(monkeypatch):
     monkeypatch.setattr(
         m,
         "_enumerate_descendant_pids_windows",
-        lambda pid: ([(5001, 4242, "c1"), (5002, 4242, "c2")], True),
+        lambda pid: ([(5001, 4242, "c1", "root-c"), (5002, 4242, "c2", "root-c")], True),
     )
     verified = {5001: "aaa", 5002: "bbb"}
     monkeypatch.setattr(
         m,
         "_verify_descendant_identity_windows",
-        lambda child, parent, creation: verified.get(child),
+        lambda child, parent, child_creation, parent_creation: verified.get(child),
     )
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
     terminated = []
@@ -302,40 +349,32 @@ def test_verify_descendant_identity_windows_captures_token_before_ancestry(monke
     caught by ``terminate_pid_if_identity``'s own final re-verification at
     the kill, rather than this function instead capturing a replacement's
     token."""
-    import subprocess as sp
-
-    class _Result:
-        returncode = 0
-        stdout = "4242\tC1"  # matches recorded parent + creation date
-
     order: list[str] = []
+    responses = {5001: (4242, "C1"), 4242: (0, "RootC")}
     monkeypatch.setattr(
         diagnostics, "process_start_time", lambda pid: order.append("token") or "zzz"
     )
-    monkeypatch.setattr(sp, "run", lambda *a, **k: order.append("ancestry") or _Result())
+    monkeypatch.setattr(
+        m,
+        "_query_pid_ancestry_windows",
+        lambda pid: order.append("ancestry") or responses[pid],
+    )
 
-    result = m._verify_descendant_identity_windows(5001, 4242, "C1")
+    result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
 
     assert result == "zzz"
-    assert order == ["token", "ancestry"]
+    assert order == ["token", "ancestry", "ancestry"]
 
 
 def test_verify_descendant_identity_windows_rejects_parent_mismatch(monkeypatch):
     """A census-recorded ancestry relationship that no longer holds at
     re-check time (the child's current parent differs, e.g. the pid was
-    reused, or an ancestor died and Windows reparented it) must be
-    rejected -- the already-captured token is discarded, never returned to
-    the caller for use in a kill."""
-    import subprocess as sp
-
-    class _Result:
-        returncode = 0
-        stdout = "9999\tC1"  # a different parent than recorded
-
-    monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
+    reused) must be rejected -- the already-captured token is discarded,
+    never returned to the caller for use in a kill."""
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
+    monkeypatch.setattr(m, "_query_pid_ancestry_windows", lambda pid: (9999, "C1"))
 
-    result = m._verify_descendant_identity_windows(5001, 4242, "C1")
+    result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
 
     assert result is None
 
@@ -347,18 +386,36 @@ def test_verify_descendant_identity_windows_rejects_generation_mismatch(monkeypa
     census-captured one even when the replacement happens to share the
     same parent pid by coincidence -- this generation fingerprint re-check
     is what actually closes that gap."""
-    import subprocess as sp
-
-    class _Result:
-        returncode = 0
-        stdout = "4242\tC2"  # parent matches, but creation date does not
-
-    monkeypatch.setattr(sp, "run", lambda *a, **k: _Result())
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
+    monkeypatch.setattr(m, "_query_pid_ancestry_windows", lambda pid: (4242, "C2"))
 
-    result = m._verify_descendant_identity_windows(5001, 4242, "C1")
+    result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
 
     assert result is None
+
+
+def test_verify_descendant_identity_windows_rejects_stale_parent_generation(monkeypatch):
+    """Even when the child's own ancestry (numeric parent pid) and its own
+    generation fingerprint both still match, the recorded PARENT's own
+    current generation must ALSO still match the census -- this is what
+    catches an orphan whose original parent already died and had its pid
+    number reused by something else entirely (Windows never live-reparents
+    an orphan the way POSIX does, so a bare ancestry-number check alone
+    can never detect this)."""
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
+    calls = {"child": (4242, "C1"), "parent": (999, "DifferentParentGeneration")}
+    queried: list[int] = []
+
+    def _fake_query(pid):
+        queried.append(pid)
+        return calls["child"] if pid == 5001 else calls["parent"]
+
+    monkeypatch.setattr(m, "_query_pid_ancestry_windows", _fake_query)
+
+    result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
+
+    assert result is None
+    assert queried == [5001, 4242]  # child checked first, then its recorded parent
 
 
 def test_kill_pid_tree_windows_skips_descendant_termination_when_root_identity_fails(
@@ -379,13 +436,16 @@ def test_kill_pid_tree_windows_skips_descendant_termination_when_root_identity_f
         },
     )
     monkeypatch.setattr(
-        m, "_enumerate_descendant_pids_windows", lambda pid: ([(5001, 4242, "c1")], True)
+        m,
+        "_enumerate_descendant_pids_windows",
+        lambda pid: ([(5001, 4242, "c1", "root-c")], True),
     )
     verify_called = []
     monkeypatch.setattr(
         m,
         "_verify_descendant_identity_windows",
-        lambda child, parent, creation: verify_called.append(child) or "zzz",
+        lambda child, parent, child_creation, parent_creation: verify_called.append(child)
+        or "zzz",
     )
 
     m._kill_pid_tree_windows_if_identity(4242, "stale-token")
