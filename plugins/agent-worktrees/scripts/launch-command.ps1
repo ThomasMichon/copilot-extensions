@@ -31,17 +31,25 @@ $executableName = [IO.Path]::GetFileNameWithoutExtension($executable)
 # only behavior-preserving when the requested invocation is actually
 # equivalent to this host: same engine (an explicit `powershell.exe`
 # request must still get real Windows PowerShell, never silently run under
-# whatever engine happens to host launch-command.ps1), and the host options
+# whatever engine happens to host launch-command.ps1), the host options
 # before `-File` are EXACTLY the fixed `-NoProfile -NoLogo` pair this
-# wrapper's own host was itself started with -- not merely a subset. This
+# wrapper's own host was itself started with (not merely a subset -- this
 # process already has no profile loaded, so a requested child that OMITS
-# -NoProfile (signaling the caller actually wants one loaded) must not be
-# silently coerced into this already-profile-less host; and any other
-# unrecognized option (e.g. -ExecutionPolicy, -WindowStyle, -Mta/-Sta)
-# would otherwise be silently dropped instead of applied. Anything else
-# falls through to the original spawn-and-wait, which honors the
-# requested engine/options exactly as before.
+# -NoProfile, signaling the caller actually wants one loaded, must not be
+# silently coerced into this already-profile-less host; any other
+# unrecognized option, e.g. -ExecutionPolicy/-WindowStyle/-Mta/-Sta, would
+# otherwise be silently dropped instead of applied), AND the resolved
+# script is genuinely THIS plugin's own canonical default-setup.ps1 -- not
+# merely a same-named file. A repo's authoritative launch template can
+# point at its OWN custom script that merely happens to share the
+# 'default-setup.ps1' basename; dot-sourcing isn't generally equivalent to
+# `pwsh -File` for arbitrary script content (e.g. $MyInvocation.InvocationName
+# and top-level `return` semantics differ), so only this plugin's own,
+# known-compatible script qualifies. Anything else falls through to the
+# original spawn-and-wait, which honors the requested engine/options/script
+# exactly as before.
 $currentHostEngine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
+$ownDefaultSetupScript = Join-Path $PSScriptRoot 'default-setup.ps1'
 if ([string]::Equals($executableName, $currentHostEngine, [StringComparison]::OrdinalIgnoreCase)) {
     for ($index = 0; $index -lt ($remainingArgs.Count - 1); $index++) {
         if (
@@ -49,19 +57,29 @@ if ([string]::Equals($executableName, $currentHostEngine, [StringComparison]::Or
                 $remainingArgs[$index],
                 '-File',
                 [StringComparison]::OrdinalIgnoreCase
-            ) -and
-            [IO.Path]::GetFileName($remainingArgs[$index + 1]) -eq 'default-setup.ps1'
+            )
         ) {
-            $precedingHostOptions = if ($index -gt 0) { $remainingArgs[0..($index - 1)] } else { @() }
-            $hasNoProfile = @($precedingHostOptions | Where-Object {
-                [string]::Equals($_, '-NoProfile', [StringComparison]::OrdinalIgnoreCase)
-            }).Count -eq 1
-            $hasNoLogo = @($precedingHostOptions | Where-Object {
-                [string]::Equals($_, '-NoLogo', [StringComparison]::OrdinalIgnoreCase)
-            }).Count -eq 1
-            $exactlyInertOptions = $hasNoProfile -and $hasNoLogo -and $precedingHostOptions.Count -eq 2
-            if ($exactlyInertOptions) {
-                $usesDefaultSetup = $true
+            $requestedScript = $remainingArgs[$index + 1]
+            $isOwnScript = $false
+            try {
+                $isOwnScript = [string]::Equals(
+                    [IO.Path]::GetFullPath($requestedScript),
+                    [IO.Path]::GetFullPath($ownDefaultSetupScript),
+                    [StringComparison]::OrdinalIgnoreCase
+                )
+            } catch { }
+            if ($isOwnScript) {
+                $precedingHostOptions = if ($index -gt 0) { $remainingArgs[0..($index - 1)] } else { @() }
+                $hasNoProfile = @($precedingHostOptions | Where-Object {
+                    [string]::Equals($_, '-NoProfile', [StringComparison]::OrdinalIgnoreCase)
+                }).Count -eq 1
+                $hasNoLogo = @($precedingHostOptions | Where-Object {
+                    [string]::Equals($_, '-NoLogo', [StringComparison]::OrdinalIgnoreCase)
+                }).Count -eq 1
+                $exactlyInertOptions = $hasNoProfile -and $hasNoLogo -and $precedingHostOptions.Count -eq 2
+                if ($exactlyInertOptions) {
+                    $usesDefaultSetup = $true
+                }
             }
             break
         }
