@@ -82,11 +82,11 @@ an empty queue.
   | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:<session-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's a sound tie-breaker and `--after` cursor |
   | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
   | `entity_ref` | the canonical reference within its kind: a task id, a bridge session id, a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key), a queue as its canonical repo |
-  | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...) |
+  | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...); `null` for an entity with no owner lifecycle (a `queue`) |
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
   | `severity` | derived from `display_state`: `failed` > `stalled` > `awaiting_input` > `blocked` > `review` |
   | `reason` | one line, ≤ 200 chars |
-  | `created_at`, `updated_at` | when the condition began / was last observed. A source that only knows when it observed something (e.g. a `pr bar` read) gets `created_at` from the aggregator's persisted first-observed time for that `(entity, entity_ref, display_state)`, so repeated reads keep the same order. That time is cleared only by proof that the condition ended: a read of the producing source with `status: ok` that no longer contains the item. An item missing from a `failed` or `uncertain` read, or from a source that is now `disabled`, keeps its time -- an outage proves nothing, so recovery doesn't reorder an unchanged queue |
+  | `created_at`, `updated_at` | when the condition began / was last observed. A source that only knows when it observed something (e.g. a `pr bar` read) gets `created_at` from the aggregator's persisted first-observed time, kept **per source** for `(source, entity, entity_ref, display_state)`, so repeated reads keep the same order. Each source's time is cleared only by proof from that same source that the condition ended: a read of it with `status: ok` that no longer contains the item. An item missing from a `failed` or `uncertain` read, or from a source that is now `disabled`, keeps its time -- an outage proves nothing, so recovery doesn't reorder an unchanged queue -- and one source's `ok` omission never clears another source's evidence for the same entity. A deduplicated item's `created_at` is the earliest of its contributing sources' times |
   | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
   | `actions[]` | `{verb, argv}`: sanctioned commands that run **as-is**, with no placeholder to fill (e.g. `agent-dispatch card show <task-id>`, `agent-bridge result <session-id>`). An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
   | `source` | the adapter that produced it |
@@ -226,11 +226,14 @@ an empty queue.
   adapter order — repeated reads keep a source's first-observed `created_at`,
   and so does an outage and recovery (the source reads `failed`, then `uncertain`
   without the item, then `ok` with it: the same `created_at` throughout), while
-  an `ok` read without the item followed by its return gives a new one — and
+  an `ok` read without the item followed by its return gives a new one; two
+  sources naming one PR, where one source's `ok` read drops it while the other
+  still reports it, keep the item's `created_at` — and
   each aggregate status (`clear`, `attention`, `degraded`, `partial`, and a
   mixed failed-plus-uncertain read resolving to `degraded`) from fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
 - [ ] Unit, the envelope: `attention --json` and `attention next --json` match
-  the exact documented shape (keys, types, `sources[]` order) and round-trip;
+  the exact documented shape (keys, types, `sources[]` order) and round-trip,
+  including an item with `lifecycle_state: null` (a queue);
   `clear` and `degraded` with zero items stay distinguishable.
 - [ ] Unit, the dispatch adapter: a `submitted` task is a `review` item and a
   `completed` one isn't; `stalled` at exactly the threshold isn't an item and one
@@ -272,7 +275,7 @@ Open questions for review:
 - Lifecycle names follow agent-dispatch's current states (`submitted` awaiting
   confirmation, `completed` terminal); the aggregate response envelope, the
   dispatch `stalled` predicate and the command-source envelope are specified;
-  `created_at` survives a source outage. Owner decided (agent-dispatch); Phases
+  `created_at` survives a source outage, and is kept per source. Owner decided (agent-dispatch); Phases
   1-3 land as one PR.
 
 ### 2026-10-07 — Kickoff
