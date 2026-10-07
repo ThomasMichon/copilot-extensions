@@ -166,7 +166,7 @@ def _findings(snap: Snapshot, reviewer: str) -> Clause:
                       f"{reviewer}'s review of {_short(snap.head)} states no open-finding count")
     open_count, missed = counts
     reviewer_open = sum(1 for t in snap.threads
-                        if not t.get("resolved") and (t.get("author") or "").lower() == reviewer.lower())
+                        if _open(t) and (t.get("author") or "").lower() == reviewer.lower())
     if open_count != reviewer_open:
         return Clause("review_findings_zero", "unknown",
                       f"the summary reports {open_count} open findings but {reviewer_open} "
@@ -180,7 +180,7 @@ def _findings(snap: Snapshot, reviewer: str) -> Clause:
 def _threads(snap: Snapshot) -> Clause:
     if "threads" in snap.errors:
         return Clause("threads_unresolved_zero", "unknown", error=snap.errors["threads"])
-    unresolved = [t for t in snap.threads if not t.get("resolved")]
+    unresolved = [t for t in snap.threads if _open(t)]
     if unresolved:
         where = ", ".join(sorted({t.get("path") or "(PR)" for t in unresolved}))
         return Clause("threads_unresolved_zero", "failed", f"{len(unresolved)} unresolved: {where}")
@@ -220,6 +220,12 @@ def _mergeable(snap: Snapshot) -> Clause:
     if value == "CONFLICTING":
         return Clause("mergeable", "failed", "merge conflict with the base")
     return Clause("mergeable", "pending", f"the provider hasn't computed mergeability ({value or 'unset'})")
+
+
+def _open(thread: dict) -> bool:
+    """Still open: neither resolved nor outdated (outdated is terminal in the shared
+    thread contract, ``pr_contract.CommentThread``)."""
+    return not thread.get("resolved") and not thread.get("outdated")
 
 
 def _outstanding_change_requests(snap: Snapshot) -> list[str]:
@@ -267,6 +273,14 @@ def _policy(snap: Snapshot, policy: dict | None) -> Clause:
         return Clause("merge_policy", "failed", "the provider reports an outstanding change request")
     if state.verdict == "CHANGES_REQUESTED":
         return Clause("merge_policy", "failed", "the provider's review verdict is changes requested")
+    if policy.get("human_approval_required"):
+        humans = {}
+        for r in sorted(snap.reviews, key=lambda r: r.get("at") or ""):
+            if _is_human(r, snap, "") and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+                humans[r["author"]] = r
+        if not any(r.get("state") == "APPROVED" and r.get("commit") == snap.head for r in humans.values()):
+            return Clause("merge_policy", "pending", "this actor needs a person's approval on "
+                          f"{_short(snap.head)} (a reviewer app's doesn't count)")
     if policy.get("approval_required", True) and state.verdict != "APPROVED":
         return Clause("merge_policy", "pending", f"the repo's policy requires an approval on "
                       f"{_short(snap.head)} (verdict: {state.verdict or 'none'})")

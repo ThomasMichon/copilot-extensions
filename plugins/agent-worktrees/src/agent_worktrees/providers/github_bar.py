@@ -55,6 +55,21 @@ _STATES, _MERGEABLE = ("OPEN", "CLOSED", "MERGED"), ("MERGEABLE", "CONFLICTING",
 _DECISIONS = (None, "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED")
 
 
+_REVIEW_STATES = ("APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING")
+
+
+def _review(node: dict) -> None:
+    """Fail closed on the review fields the verdicts turn on: an unreadable state, or
+    a submitted review without a readable time (it orders the verdicts)."""
+    state, at = node.get("state"), node.get("submittedAt")
+    if state not in _REVIEW_STATES:
+        raise ReadError(f"reviews: an unreadable state {state!r}"[:200])
+    if state != "PENDING" and not (isinstance(at, str) and at):
+        raise ReadError(f"reviews: a {state} review without a readable time")
+    if node.get("body") is not None and not isinstance(node.get("body"), str):
+        raise ReadError("reviews: an unreadable body")
+
+
 def _field(pr: dict, key: str, valid) -> object:
     """A core field the bar decides on, or :class:`ReadError`: a malformed lifecycle
     state, head, draft flag or title must never read as a clean PR."""
@@ -184,7 +199,7 @@ def read_bar(repo: str, number: int, *, host: str, token: str | None = None, run
         ("checks", _CHECKS_QUERY, lambda pr: _checks_conn(pr, snap.head), lambda n: {
             "name": _s(n.get("name")) or _s(n.get("context")) or "?",
             "status": _s(n.get("status")) or _s(n.get("state")), "conclusion": _s(n.get("conclusion"))}),
-        ("reviews", _REVIEWS_QUERY, lambda pr: pr.get("reviews"), lambda n: {
+        ("reviews", _REVIEWS_QUERY, lambda pr: pr.get("reviews"), lambda n: _review(n) or {
             "id": n.get("databaseId") if type(n.get("databaseId")) is int else None,
             "author": _login(n), "bot": (n.get("author") or {}).get("__typename") == "Bot",
             "state": _s(n.get("state")), "commit": _s((n.get("commit") or {}).get("oid")),

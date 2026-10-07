@@ -334,7 +334,7 @@ class MockPRProvider:
         reviews = [{"id": r.id, "author": r.user, "state": "DISMISSED" if r.dismissed else r.state,
                     "commit": r.commit_id, "body": pr.review_bodies.get(r.id, ""), "at": r.submitted_at}
                    for r in pr.reviews]
-        threads = [{"resolved": t.status == "resolved", "outdated": t.status == "outdated",
+        threads = [{"resolved": not t.is_active and t.status != "outdated", "outdated": t.status == "outdated",
                     "path": t.file_path, "author": t.comments[0].author if t.comments else ""}
                    for t in pr.threads]
         return Snapshot(repo=repo, number=number, state=state, head=pr.head_sha,

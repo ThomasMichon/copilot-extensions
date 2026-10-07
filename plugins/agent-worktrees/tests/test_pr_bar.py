@@ -25,8 +25,8 @@ def _review(author=COPILOT, state="COMMENTED", commit=HEAD, body=APPROVED_BODY, 
             "body": body, "submittedAt": at}
 
 
-def _thread(resolved=True, author=COPILOT, path="src/x.py"):
-    return {"isResolved": resolved, "isOutdated": False, "path": path,
+def _thread(resolved=True, author=COPILOT, path="src/x.py", outdated=False):
+    return {"isResolved": resolved, "isOutdated": outdated, "path": path,
             "comments": {"nodes": [{"author": {"login": author}}]}}
 
 
@@ -553,4 +553,72 @@ def test_checks_for_another_commit_are_unknown_not_the_heads():
     """A head that moves and comes back between pages (A -> B -> A) can't pass B's
     checks off as A's: every checks page must be for the head."""
     assert _status(_bar(FakeGh(checks_oid=OLD)))["ci_green"] == "unknown"
+
+
+def test_an_outdated_thread_is_not_open():
+    """Outdated is terminal in the shared thread contract: it neither fails the thread
+    clause nor contradicts a clean '0 open findings' summary."""
+    status = _status(_bar(FakeGh(threads=[_thread(resolved=False, outdated=True)])))
+    assert status["threads_unresolved_zero"] == "met" and status["review_findings_zero"] == "met"
+
+
+@pytest.mark.parametrize("bad", [{"state": "LOOKS_FINE"}, {"state": None}, {"submittedAt": None},
+                                 {"submittedAt": 5}, {"body": ["x"]}])
+def test_a_malformed_review_field_is_unknown(bad):
+    review = {**_review(), **bad}
+    status = _status(_bar(FakeGh(reviews=[review])))
+    assert status["review_on_head"] == "unknown" and status["merge_policy"] == "unknown"
+
+
+def test_a_pending_review_needs_no_time():
+    pending = {**_review(author="someone", state="PENDING"), "submittedAt": None}
+    assert _status(_bar(FakeGh(reviews=[_review(), pending])))["review_on_head"] == "met"
+
+
+@pytest.mark.parametrize("status", ["fixed", "closed", "wontfix", "resolved"])
+def test_the_mock_treats_every_terminal_thread_status_as_resolved(status):
+    from agent_worktrees.providers import PRScope
+    from agent_worktrees.providers.mock import MockPRProvider
+
+    mock = MockPRProvider()
+    pr = mock.create_pull(PRScope(repo="owner/repo", head="feat", base="main", title="t", body=""))
+    mock.add_thread("owner/repo", pr.number, status=status, file_path="src/x.py")
+    snap = mock.get_bar_snapshot("owner/repo", pr.number)
+    assert _status(pr_bar.evaluate(snap, policy=NO_APPROVAL))["threads_unresolved_zero"] == "met"
+
+
+_REAL_READ = github_bar.read_bar
+
+
+def _cli_bar(monkeypatch, capsys, flow, reviews):
+    from types import SimpleNamespace
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import pr_cli, pr_config, providers
+
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: SimpleNamespace())
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda _c, slug: SimpleNamespace(
+        resolved=True, repo_config=SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))))
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, p: "t")
+    monkeypatch.setattr(pr_config, "resolve_actor_pr_flow", lambda *_a, **_k: flow)
+    monkeypatch.setattr(github_bar, "read_bar", lambda repo, number, *, host, token: _REAL_READ(
+        repo, number, host=host, token=token, run=FakeGh(reviews=reviews)))
+    pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7", "--json"])
+    return {c["id"]: c["status"] for c in json.loads(capsys.readouterr().out)["clauses"]}
+
+
+def test_a_demoted_actor_needs_a_persons_approval(monkeypatch, capsys):
+    """A contributor demoted by live authority in a self-merge repo (no approval
+    configured, review non-blocking) still needs a person's approval on the head, as
+    pr-watch waits for one: a reviewer app's clean comment isn't enough."""
+    from types import SimpleNamespace
+
+    base = SimpleNamespace(approval_required=False, review_blocking=False, hold_labels=(),
+                           wip_title_prefixes=())
+    demoted = SimpleNamespace(pr_config=base, resolution="actor-authority")
+    assert _cli_bar(monkeypatch, capsys, demoted, [_review()])["merge_policy"] == "pending"
+    person = _review(author="maintainer", state="APPROVED", at="2026-10-06T11:00:00Z")
+    assert _cli_bar(monkeypatch, capsys, demoted, [_review(), person])["merge_policy"] == "met"
+    kept = SimpleNamespace(pr_config=base, resolution="actor-role")
+    assert _cli_bar(monkeypatch, capsys, kept, [_review()])["merge_policy"] == "met"
 

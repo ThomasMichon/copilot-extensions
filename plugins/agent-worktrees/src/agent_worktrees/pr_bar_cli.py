@@ -97,13 +97,19 @@ def cmd_pr_bar(argv: list[str]) -> int:
         snap = pr_bar.unsupported(slug, number, name)
         snap.errors["pr"] = f"the {name} provider's merge-bar read failed: {exc}"
     try:  # the acting identity's role-specific policy, as pr-watch resolves it
-        policy_cfg = pr_config.resolve_actor_pr_flow(resolution.repo_config, slug, token=token).pr_config
+        actor_flow = pr_config.resolve_actor_pr_flow(resolution.repo_config, slug, token=token)
+        policy_cfg, review_blocking = actor_flow.pr_config, pr_config.actor_review_blocking(actor_flow)
+        # Demoted by live authority (e.g. a read-only contributor in a self-merge repo):
+        # a real human's approval is required, as pr-watch waits for one.
+        demoted = actor_flow.resolution == "actor-authority"
     except Exception:
-        policy_cfg = prcfg  # the configured base policy
-    policy = {"approval_required": getattr(policy_cfg, "approval_required", True),
+        policy_cfg, demoted = prcfg, False  # the configured base policy
+        review_blocking = bool(getattr(prcfg, "review_blocking", True))
+    policy = {"approval_required": bool(getattr(policy_cfg, "approval_required", True)) or demoted,
+              "human_approval_required": demoted,
               "hold_labels": tuple(getattr(policy_cfg, "hold_labels", ()) or ()),
               "wip_title_prefixes": tuple(getattr(policy_cfg, "wip_title_prefixes", ()) or ()),
-              "review_blocking": bool(getattr(policy_cfg, "review_blocking", True))}
+              "review_blocking": review_blocking}
     bar = pr_bar.evaluate(snap, reviewer=args.reviewer or pr_bar.COPILOT_REVIEWER, policy=policy)
     if args.json:
         print(json.dumps(bar.to_dict(), indent=2))
