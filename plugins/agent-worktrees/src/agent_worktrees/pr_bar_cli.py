@@ -58,31 +58,29 @@ def _target(operands: list[str], config) -> tuple[str, int, str]:
     return active.repo or record.repo or "", int(active.number), ""
 
 
-def cmd_pr_bar(argv: list[str]) -> int:
-    try:
-        args = _parser().parse_args(argv)
-    except SystemExit as exc:
-        return int(exc.code or 0)
+def read_target(operands: list[str], config_path: str | None, verb: str) -> tuple[int, dict]:
+    """Resolve the PR the operands name and read it once through its repo's own
+    ``PRProvider`` (``get_bar_snapshot``): ``(0, context)``, or ``(exit code, {})``
+    after reporting why. Shared by ``pr bar`` and ``pr rounds``."""
     from pathlib import Path
 
     from . import config as cfg
-    from . import pr_bar, providers
+    from . import pr_bar, pr_config, providers
     try:
-        config = cfg.load_config(Path(args.config) if args.config else None)
+        config = cfg.load_config(Path(config_path) if config_path else None)
     except Exception as exc:
         output.err(str(exc))
-        return 2
-    slug, number, error = _target(args.operands, config)
+        return 2, {}
+    slug, number, error = _target(operands, config)
     if error or "/" not in slug:
         output.err(error or f"'{slug}' isn't an owner/name repo slug.")
-        return 2
-    from . import pr_config
+        return 2, {}
     resolution = pr_config.resolve_repo_config_for_slug(config, slug)
     if not resolution.resolved:
-        output.err(f"pr bar: {slug!r} isn't a registered repo this machine can resolve a PR "
+        output.err(f"pr {verb}: {slug!r} isn't a registered repo this machine can resolve a PR "
                    "binding for; register it (agent-worktrees repos add) so its own provider, "
                    "host and token are used. Refusing to use another repo's binding.")
-        return 2
+        return 2, {}
     prcfg = resolution.repo_config.pr
     name = prcfg.provider or "github"
     api_base = getattr(prcfg, "api_base", "") or ""
@@ -90,12 +88,27 @@ def cmd_pr_bar(argv: list[str]) -> int:
         token = providers.account_token_for_slug(slug, prcfg)
     except Exception as exc:
         output.err(f"Couldn't resolve the account for {slug}: {exc}")
-        return 12
+        return 12, {}
     try:  # the read goes through the repo's PRProvider; a provider without one reads unknown
         snap = providers.get_provider(name).get_bar_snapshot(slug, number, api_base=api_base, token=token)
     except Exception as exc:
         snap = pr_bar.unsupported(slug, number, name)
         snap.errors["pr"] = f"the {name} provider's merge-bar read failed: {exc}"
+    return 0, {"slug": slug, "number": number, "snap": snap, "name": name, "api_base": api_base,
+               "token": token, "resolution": resolution, "prcfg": prcfg}
+
+
+def cmd_pr_bar(argv: list[str]) -> int:
+    try:
+        args = _parser().parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    from . import pr_bar, pr_config, providers
+    code, ctx = read_target(args.operands, args.config, "bar")
+    if code:
+        return code
+    slug, number, snap, name = ctx["slug"], ctx["number"], ctx["snap"], ctx["name"]
+    api_base, token, resolution, prcfg = ctx["api_base"], ctx["token"], ctx["resolution"], ctx["prcfg"]
     try:  # the acting identity's role-specific policy, as pr-watch resolves it
         actor_flow = pr_config.resolve_actor_pr_flow(resolution.repo_config, slug, token=token)
         policy_cfg, review_blocking = actor_flow.pr_config, pr_config.actor_review_blocking(actor_flow)

@@ -20,6 +20,7 @@ rules.
 - `create-pr` (auto-open, attribution marker, labels) -- for tracing a PR you
   didn't open, see [pr-attribution.md](pr-attribution.md) instead
 - Dispositions: keep-alive vs detach
+- Bounding review/fix rounds (`pr rounds`: stop on plateau or round cap)
 - Draft PRs (`--draft` / `pr-ready`)
 - Multiple PRs from one worktree
 - Recovery
@@ -372,7 +373,9 @@ The normal, expected flow for a worktree with work to land:
 5. **Address feedback** in the **same** worktree (keep-alive disposition):
    edit -> commit on the feature branch -> `push-changes` updates the PR
    branch (never the default branch). Note: new commits **dismiss stale approvals**, so
-   re-request / await review again.
+   re-request / await review again. After each automated review, run
+   `pr rounds` first and stop on a plateau or round cap -- see
+   [Bounding review/fix rounds](#bounding-reviewfix-rounds-pr-rounds).
 6. **Repeat 4–5** until the PR is **approved and merged upstream**. With
    auto-merge set, merge happens automatically on approval; otherwise a human
    merges.
@@ -770,6 +773,58 @@ Either way HEAD stays on
 `worktree/{id}` — just commit there and run `push-changes`. (A worktree still
 checked out on a legacy feature branch is accepted too and pushed as-is.) It
 does not create a PR; it updates the existing one.
+
+### Bounding review/fix rounds (`pr rounds`)
+
+An automated reviewer can keep finding one new edge case per round, so an
+unbounded fix -> push -> re-review loop can run for many rounds without
+converging. After **each** new review from the bound reviewer lands on your
+head, and before you start fixing it, run:
+
+```
+<agent-worktrees catalog argv[0]> pr rounds [<owner/name> <n> | <n> | <worktree-id>] [--reviewer <login>] --json
+```
+
+`--reviewer` defaults to GitHub Copilot's review account. When the repo's
+bound reviewer is anything else (`pr.reviewer: agent:<name>` or `external`),
+pass that reviewer's account login: otherwise its reviews aren't counted and
+every read shows zero rounds.
+
+Act on its exit code:
+
+- **0** (`continue` or `done`) -- the guard doesn't stop the loop. Whether to
+  run another round is still the target repo's own stopping policy (for
+  example, a repo may say not to spin a round only for low-severity findings
+  once its verdict condition is met): the finding count is advisory and
+  carries neither severity nor whether a finding was already dismissed. On
+  `done` there is nothing left to fix, so check `pr bar` and merge when it is
+  met.
+- **20** (`plateau`) or **21** (`round_cap`) -- **stop starting rounds.** The
+  loop isn't converging; another round won't fix that. Look for the
+  lower-level cause the findings share, or bring in a person. If this work
+  runs as an agent-dispatch task, post a steer card on it rather than asking
+  in chat, so the decision shows up wherever the operator looks:
+
+  ```
+  <agent-dispatch catalog argv[0]> card set <task-id> \
+    --title "PR <n>: review loop stopped (<verdict>)" \
+    --status "Needs a decision on the remaining findings" --link "<PR url>" \
+    --body @rounds.md \
+    --request-input "decision:choice[Rethink,Run more rounds,Stop here],notes:textarea"
+  ```
+
+  where `rounds.md` carries the guard's `reason`, its `trend` (findings per
+  round) and the remaining findings. Resume only on the operator's answer.
+  The answer steers the review loop only: it never waives the repo's merge
+  gates (its verdict rules, required approvals, `pr bar`).
+- **12** (`unknown`) -- never permission to continue, and never a stop. Read
+  its `reason`: a read that moved under it (the head moved, the PR changed)
+  is transient, so re-run once. Anything else (the reviews couldn't be read,
+  a provider without this read, the same `unknown` again) is not going to
+  clear by retrying: stop and escalate as for a plateau, with the reason.
+
+`--max-rounds` and `--plateau-passes` override the defaults (6 and 3) when the
+operator sets a different budget for this PR.
 
 ### Finalizing a PR-mode worktree
 
