@@ -5,9 +5,12 @@
   rather than merely borrowing whatever SSH profiles happen to already exist.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-07-22
+- **Last revised:** 2026-10-07
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
-  the plugin's future `plugins/agent-ssh/docs/`
+  the plugin's [`README`](../../../plugins/agent-ssh/README.md),
+  `docs/transport-provider-contract.md`, and its skills (`agent-ssh`,
+  `setting-up-ssh-host`, `setting-up-ssh-client`, `sharing-ssh-keys`,
+  `troubleshooting-devtunnel-ssh`)
 
 ## Purpose & Intent
 
@@ -107,6 +110,12 @@ adding connectivity is installing a module rather than rewiring the core:
   probe. This is the transport layer's instance of the suite-wide
   [*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
   guarantee: prefer zero, and never exceed one.
+- **Local-process reach** — reach a local sub-environment on the same
+  machine (e.g. a WSL distribution) through its own native interop
+  transport rather than a network hop at all — no tunnel, no daemon, no
+  `ProxyJump`. This is the zero-inbound-exposure ideal *taken to its
+  limit*: the floor's most-preferred shape, not a special case, since
+  there is no network boundary to secure in the first place.
 A registry entry **names** which transport carries a machine; the layers above
 address the machine the same way regardless.
 
@@ -128,7 +137,23 @@ opening a listening port, and treat direct/inbound as the deliberate exception.
 Verify — on demand and/or continuously — that a machine advertised as reachable
 **actually is**, and keep the "is this machine reachable?" bit honest. A machine
 whose transport has decayed is demoted from the reachable set so higher layers
-stop routing to a dead path; a repaired machine is restored.
+stop routing to a dead path; a repaired machine is restored. Continuous
+assertion means re-running a transport's **own discovery** (not trusting a
+previously cached identity, since a tunnel identity can rotate on host
+restart), re-deriving this machine's managed profile fragment from that live
+state, and probing every declared alias — wired into the fabric's own
+machine-maintenance automation so a drifted mesh **self-heals** on a bounded
+cadence rather than silently breaking until an operator notices.
+
+### Machine maintenance escalation
+A machine that stays unreachable past bounded self-healing is not a dead
+end: the layer **routes** the problem rather than either looping forever or
+giving up silently. Repeatable remediation (a known fix a maintenance
+automation can apply) is the fabric's declared auto-update owner's concern;
+what self-healing cannot resolve becomes a scoped, explicitly-targeted
+maintenance item an operator's own maintenance workflow drains. Absent that
+trusted workflow, the layer degrades to **inspection-only** — it reports the
+unreachable state precisely, but never mutates a machine on a guess.
 
 ### Mesh introspection & derived roster
 Reaching a machine is only the *floor*; the fabric also needs to know **what a
@@ -183,11 +208,17 @@ mesh by declaration rather than by a manual, per-box ritual.
 
 ### pluggable-transport-modules
 Reachability is delivered by **interchangeable transport modules** (direct,
-tunnel-based providers, real-user interactive reach) behind one contract. Adding
-or swapping a transport is installing a module; the core and the layers above are
-unchanged. A module may even be an **out-of-repo provider plugin** — a different
-owner, a different marketplace — that registers against the contract; the core need
-not ship every transport.
+tunnel-based providers, real-user interactive reach, local-process reach)
+behind one contract. Adding or swapping a transport is installing a module; the
+core and the layers above are unchanged. A module may even be an **out-of-repo
+provider plugin** — a different owner, a different marketplace — that
+registers against the contract; the core need not ship every transport. The
+one axis that decides where a transport ships is whether it carries
+**non-public, multi-machine provider configuration or credentials**: a
+transport free of that stays an in-box module in the public core; one that
+needs it ships as its own, independently-owned provider plugin — keeping
+audience-private hostnames/identifiers/secrets out of the public core either
+way.
 
 ### transport-provider-contract
 The core's durable **product** is the **transport-provider contract** plus
@@ -214,7 +245,12 @@ pinning) is **derived from the registry**, not hand-edited — so the mesh's wir
 has a single declarative source and stays consistent across machines. These
 **per-machine profiles, keyed by machine name, are the contract** the fabric's
 consumers rely on: producing and maintaining them so a machine is reachable
-**by its name** is agent-ssh's core deliverable.
+**by its name** is agent-ssh's core deliverable. Every derived fragment carries
+its own **provenance** (which registry and transport-module source produced
+it), so the layer can audit a fragment against its current sources, flag one
+that has drifted stale, and report the exact remediation — without ever
+guessing at, or silently deleting, a fragment it cannot prove is safe to
+remove.
 
 ### managed-key-lifecycle
 SSH key material is **minted and host-key-pinned** by the layer, not
@@ -229,6 +265,18 @@ Private halves never leave their owner's control.
 Where a working SSH profile already exists, agent-ssh **detects and augments**
 it rather than clobbering it — a machine that is already reachable is adopted
 as-is, and the layer adds only what is missing.
+
+### venue-contract-reach
+A mesh machine is not only *reachable* — once adopted, it can be **driven as
+a CLI-mode venue** under the exact same contract a CodeSpace or trusted
+container is: deliver an attended, muxed, interactive Copilot CLI session
+(or its detached, orchestrator-facing counterpart) to the operator, reusing
+the same reserve → connect → release lifecycle and `live_sessions`
+registration those venues use. This is **reach of an already-adopted
+machine, not provisioning** — the distinction the layer's Non-Goals draw: no
+new compute is created, no agent identity is minted; an existing mesh member
+is simply handed the fabric's one coordination contract, the same way a
+venue provider hands it to a machine it provisioned.
 
 ## Behaviors
 
@@ -297,10 +345,13 @@ layer's.)
   coordination layer **derives its addressable roster** from those inputs and
   owns the agents themselves. agent-ssh does not create, message, or manage an
   agent.
-- **Not a venue provider.** Provisioning a CodeSpace or a container and
-  presenting its agent to the fabric is the venue providers' territory; agent-ssh
-  wires **machine-to-machine SSH reachability**, the substrate a machine venue
-  may in turn ride on.
+- **Not a compute provisioner.** Creating new compute — booting a CodeSpace, a
+  container — is the venue providers' territory; agent-ssh never creates a
+  machine, only adopts and reaches an existing one. *Reaching* an already-mesh-
+  adopted machine as a CLI-mode venue (`venue-contract-reach`) is this layer's
+  own feature, not an exception to this boundary — it hands the fabric's
+  coordination contract to a machine that already exists, never mints new
+  compute to do it.
 - **Not an account-per-agent or identity provider.** It authenticates the
   operator's real identity through an existing IdP; it does not mint SSH
   *accounts* per agent. It **mints and pins** the SSH key material a machine
@@ -391,3 +442,36 @@ layer's.)
   **minting + host-key pinning** but takes **no dependency on the fabric's trust
   layer** for the SSH mesh. Supersedes the earlier `mint · store · distribute`
   framing. Mined from operator decision.
+
+- **2026-10-07** — Fold-back slice (`vision-backport-sweep` Phase 2):
+  reconciled against reality that had drifted untouched since this vision's
+  single-day 2026-07-22 authoring (139 commits since, per the plugin's own
+  `README.md`). Added: *local-process reach* (the `wsl` in-box transport —
+  no network hop, no daemon, the zero-inbound-exposure ideal taken to its
+  limit) to the Transport modules concept and `pluggable-transport-modules`;
+  the one-axis in-box-vs-provider-plugin split criterion (non-public,
+  multi-machine config) to `pluggable-transport-modules`; fragment
+  **provenance and staleness detection** (`doctor`'s managed-fragment
+  audit) to `derived-ssh-config`; **continuous self-healing** (`refresh-mesh`
+  wired into `agent-machines`' hourly watchdog, re-running a transport's own
+  discovery rather than trusting a cached identity) to Mesh health &
+  reachability assertion; a new **Machine maintenance escalation** concept
+  for the bounded-diagnosis-then-route-to-maintenance behavior when
+  self-healing can't resolve a machine. Also folded back
+  *venue-contract-reach* (`agent-ssh copilot <ssh-target>`): an
+  already-mesh-adopted machine can be driven as a CLI-mode venue under the
+  exact same contract agent-codespaces/agent-containers use — and reworded
+  the "Not a venue provider" Non-Goal (to "Not a compute provisioner") to
+  state the actual boundary precisely: agent-ssh never creates compute, but
+  *reaching* an existing mesh member as a venue is squarely this layer's
+  job, consistent with `remote-interactive-sessions`'s own subject
+  description, which already named "any agent-ssh-reachable machine" as a
+  venue type alongside CodeSpaces/containers. Updated the stale
+  "docs/future" reality-docs pointer to the plugin's real, shipped
+  README/skills. All additions are fold-back (reality already does these
+  things); no Non-Goal reality violates and no scaling-back occurred — the
+  one Non-Goal reworded was a wording correction of this vision's own
+  boundary, not a weakening of it. No conformance gap was found requiring a
+  new issue; `agent-ssh`'s separate `install.ps1`
+  immutable-versioned-runtime nonconformance is already tracked by `#5472`
+  (Phase 3) and is unaffected by this slice.

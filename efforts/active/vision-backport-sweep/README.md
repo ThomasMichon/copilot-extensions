@@ -14,7 +14,9 @@
   `visions/plugins/agent-codespaces` (repo-sourced-provenance,
   in-venue-plugin-injection, dual-mode-session-reach),
   `visions/remote-interactive-sessions` §Purpose & Intent (stale-framing
-  correction, carried by the same slice's PR review)
+  correction, carried by the same slice's PR review),
+  `visions/plugins/agent-ssh` (local-process reach, fragment provenance,
+  mesh self-healing, machine maintenance escalation, venue-contract-reach)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -155,6 +157,27 @@ Operator, end of a long multi-repo session:
             when authored" sibling reference and widened the reality-docs
             skill list (`recovering-codespaces`, `cleaning-codespaces`). No
             conformance gap found — all fold-back, no issue carved.
+      - [x] `visions/plugins/agent-ssh/README.md` — reconciled against 139
+            commits of drift since its single-day 2026-07-22 authoring,
+            never revisited since. Folded back *local-process reach* (the
+            `wsl` in-box transport), fragment provenance/staleness
+            detection (`doctor`'s managed-fragment audit), continuous mesh
+            self-healing (`refresh-mesh` wired into `agent-machines`'
+            hourly watchdog), a new *Machine maintenance escalation*
+            concept, and *venue-contract-reach* (`agent-ssh copilot
+            <ssh-target>` — an adopted mesh machine driven as a CLI-mode
+            venue under the same contract agent-codespaces/agent-containers
+            use). The last of these required reconciling a real textual
+            contradiction: the vision's "Not a venue provider" Non-Goal
+            flatly ruled out exactly this shipped capability. Reworded it
+            to "Not a compute provisioner" (agent-ssh never creates
+            compute; reaching an existing mesh member as a venue is
+            squarely in scope) — consistent with
+            `remote-interactive-sessions`'s own subject line, which already
+            named "any agent-ssh-reachable machine" as a venue type
+            alongside CodeSpaces/containers. No conformance gap found
+            requiring a new issue — agent-ssh's `install.ps1`
+            nonconformance is already tracked by `#5472` (Phase 3).
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -504,3 +527,38 @@ then rather than assuming either answer.
   (candidates from the prior ranking: `agent-ssh` 139 commits since
   2026-07-22, `agent-containers` 123 commits since 2026-08-27) — with the
   verification lesson above applied from the start this time.
+
+### 2026-10-07 — Phase 2 slice: `agent-ssh` vision reconciliation
+- Operator clarified the sweep's standing methodology (recorded here for
+  future slices): visions are the **shared, published superset** — folded
+  back from reality, with gaps/contradictions never described as prose in
+  the vision itself. Any genuine gap/contradiction found gets a **GitHub
+  issue**, not a note left in the vision. Efforts (private in dotfiles, or
+  this repo's own in-repo `efforts/active/` convention) exist to *drive*
+  closing those issues or land a specific build-out — downstream of the
+  issue, never a substitute for filing one.
+- Picked `agent-ssh` (139 commits since its single-day 2026-07-22
+  authoring, never revisited) per the prior ranking. Read the vision in
+  full against `plugins/agent-ssh/README.md`. Applied the verification
+  lesson from the self-correction above throughout — checked each
+  candidate fold-back against the plugin's actual shipped CLI/behavior
+  (not just vision prose), and before reconciling the venue-reach
+  capability specifically, cross-checked `remote-interactive-sessions`'s
+  own subject line (confirmed it already names "any agent-ssh-reachable
+  machine" as a venue type, so this fold-back is consistent with — not in
+  tension with — that vision too).
+- Found and folded back five previously-unstated, already-shipped
+  capabilities (see the Phase 2 checklist entry above for detail):
+  *local-process reach* (`wsl` transport), fragment
+  provenance/staleness detection, continuous mesh self-healing via
+  `agent-machines`' watchdog, a new *Machine maintenance escalation*
+  concept, and *venue-contract-reach*. The last required resolving a real
+  **vision-text contradiction** (the "Not a venue provider" Non-Goal vs.
+  the shipped `copilot <ssh-target>` verb) — reworded the Non-Goal rather
+  than filing a bug, since the contradiction was in the vision's own prose
+  against already-working reality, not a functional gap or inconsistency
+  in the system itself. No GitHub issue was warranted by anything found
+  this slice — every fold-back traces to real, working capability, and the
+  one plugin-services conformance gap (`install.ps1`) is already tracked
+  by `#5472`.
+- PR pending; worktree not yet finalized as of this entry.
