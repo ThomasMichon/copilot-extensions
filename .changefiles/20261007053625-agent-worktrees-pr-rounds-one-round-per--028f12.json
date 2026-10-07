@@ -1,0 +1,9 @@
+{
+  "comment": "agent-worktrees pr rounds: one round per head the reviewer reviewed, measured by the findings it reported; a pure guard stops a review/fix loop on a plateau (no improvement in the last N rounds) or a round cap, and says 'round N of M' otherwise",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
