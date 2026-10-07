@@ -1177,10 +1177,21 @@ def test_detach_stdio_from_frontend_closes_frontend_pipe(tmp_path):
         "time.sleep(5.0)\n"  # stay alive well past the bounded read below
         "print('after-detach-should-not-reach-the-frontend')\n"
     )
+    # A Windows venv's python.exe is a redirector that spawns the real
+    # interpreter and itself holds the inherited pipe write handle until the
+    # child exits, so EOF could never come from the child's dup2. Probe the
+    # real interpreter directly, with this venv's import path.
+    interpreter = sys.executable
+    env = None
+    base = getattr(sys, "_base_executable", None)
+    if sys.platform == "win32" and base and base != sys.executable:
+        interpreter = base
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
     proc = subprocess.Popen(
-        [sys.executable, str(script)],
+        [interpreter, str(script)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        env=env,
     )
     try:
         result: dict[str, bytes] = {}
