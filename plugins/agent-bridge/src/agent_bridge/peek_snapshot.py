@@ -174,7 +174,7 @@ def main():
         "recent_messages": recent[-n_recent:],
         "recent_tool_calls": tools[-n_recent:],
         "usage": usage,
-        "presence": presence(window_events(all_lines), last_line_bad),
+        "presence": presence_of(ef, size, last_line_bad),
     })
 
 
@@ -187,25 +187,52 @@ BOUNDARY = ("session.start", "session.resume")
 RELEVANT = BUSY + SETTLED + BOUNDARY + ("session.shutdown", "permission.requested",
                                        "session.mode_changed")
 
-def window_events(all_lines):
-    """Every presence-relevant event in the whole read window, not only the parsed
-    tail: a long turn pushes a pending permission request or the mode signal out
-    of the tail. A cheap substring prefilter, then the parsed ``type`` decides --
-    an event name quoted inside a message's text is not that event."""
-    out = []
-    for ln in all_lines:
-        if not any('"' + t + '"' in ln for t in RELEVANT):
-            continue
-        try:
-            e = json.loads(ln)
-        except Exception:
-            continue
-        if isinstance(e, dict) and e.get("type") in RELEVANT:
-            out.append(e)
-    return out
+SCAN_BLOCK = 1 << 20
+SCAN_CAP = 64 << 20
 
-def presence(evs, last_line_bad):
+def scan_back(ef, size):
+    """Presence-relevant events from the end of the transcript back to its latest
+    session boundary (newest last), read backward in blocks so a long session's
+    unanswered permission request or mode signal is never cut off by a fixed tail.
+    A cheap substring prefilter, then the parsed ``type`` decides -- an event name
+    appearing as a payload value is not that event. Returns ``(events, complete)``;
+    *complete* is False only when :data:`SCAN_CAP` bytes held no boundary."""
+    out = []
+    pos, carry, scanned = size, b"", 0
+    with open(ef, "rb") as fh:
+        while pos > 0 and scanned < SCAN_CAP:
+            n = min(SCAN_BLOCK, pos)
+            pos -= n
+            fh.seek(pos)
+            chunk = fh.read(n) + carry
+            scanned += n
+            parts = chunk.split(b"\n")
+            carry = parts[0] if pos > 0 else b""
+            for raw in reversed(parts[1:] if pos > 0 else parts):
+                ln = raw.decode("utf-8", "replace")
+                if not any('"' + t + '"' in ln for t in RELEVANT):
+                    continue
+                try:
+                    e = json.loads(ln)
+                except Exception:
+                    continue
+                if isinstance(e, dict) and e.get("type") in RELEVANT:
+                    out.append(e)
+                    if e.get("type") in BOUNDARY:
+                        out.reverse()
+                        return out, True
+    out.reverse()
+    return out, pos == 0
+
+def presence_of(ef, size, last_line_bad):
+    evs, complete = scan_back(ef, size)
+    return presence(evs, last_line_bad, complete)
+
+def presence(evs, last_line_bad, complete=True):
     def out(state, reason, last=None, mode=None, pending=0, confidence="scanned"):
+        if not complete:
+            confidence = "heuristic"
+            reason += " (no session boundary in the newest %%d MiB read)" %% (SCAN_CAP >> 20)
         return {"state": state, "confidence": confidence, "reason": reason,
                 "last_event": (last or {}).get("type"), "last_event_at": (last or {}).get("timestamp"),
                 "mode": mode, "pending_permissions": pending}

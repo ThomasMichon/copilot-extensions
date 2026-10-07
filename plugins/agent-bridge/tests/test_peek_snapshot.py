@@ -301,3 +301,16 @@ def test_an_event_name_as_a_payload_value_is_not_that_event(tmp_path):
                                 _ev("assistant.turn_end", 5)])
     p = ps.snapshot_local(_ACP, session_state_root=root, tail_lines=2)["presence"]
     assert (p["state"], p["mode"]) == ("idle", "autopilot")
+
+
+def test_a_permission_request_beyond_the_byte_window_still_awaits_input(tmp_path):
+    """A 2.4 MB transcript: an unanswered request near the start, then megabytes of tool
+    events. The scan reads back to the session boundary, not a fixed byte tail."""
+    root = str(tmp_path)
+    filler = [_ev("tool.execution_complete", 10 + i % 40, output="x" * 2000) for i in range(1200)]
+    _write_session(root, _ACP, [*_TURN, _ev("permission.requested", 3, requestId="r1",
+                                             agentMode="interactive"), *filler])
+    assert os.path.getsize(os.path.join(root, _ACP, "events.jsonl")) > 2_000_000
+    p = ps.snapshot_local(_ACP, session_state_root=root)["presence"]
+    assert (p["state"], p["pending_permissions"], p["mode"]) == ("awaiting_input", 1, "interactive")
+    assert p["confidence"] == "scanned"
