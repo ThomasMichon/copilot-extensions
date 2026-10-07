@@ -16,7 +16,9 @@
   `visions/remote-interactive-sessions` §Purpose & Intent (stale-framing
   correction, carried by the same slice's PR review),
   `visions/plugins/agent-ssh` (local-process reach, fragment provenance,
-  mesh self-healing, machine maintenance escalation, venue-contract-reach)
+  mesh self-healing, machine maintenance escalation, venue-contract-reach),
+  `visions/plugins/agent-containers` (interactive-venue-reach-trusted,
+  restricted-venue-picker-discovery, host-backed persistence)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -184,6 +186,24 @@ Operator, end of a long multi-repo session:
             fold-back assumed worked end to end (`refresh_mesh`'s
             temp-directory provenance bug) — already tracked independently
             as `#5478`; cross-linked rather than refiled.
+      - [x] `visions/plugins/agent-containers/README.md` — reconciled
+            against 123 commits of drift since its 2026-08-27 last
+            revision. Folded back *interactive-venue-reach-trusted*
+            (`agent-containers copilot <name>` / `--detach` — the exact
+            same CLI-mode venue contract agent-codespaces/agent-ssh use,
+            deliberately excluded for restricted venues),
+            *restricted-venue-picker-discovery* (`ssh-profile <name>
+            --project` — a named, read-only Worktree Picker source), and
+            extended `full-harness-projection-trusted` with host-backed
+            persistence + `systemd_capable` self-maintenance for
+            image-backed trusted fleets — a capability that had moved from
+            the vision's own "as the capability matures" aspiration to
+            shipped reality without the vision being told. Added a
+            cross-link to `remote-interactive-sessions`, matching the
+            ownership split already established there for
+            agent-codespaces/agent-ssh. No conformance gap found requiring
+            a new issue — `install.ps1`'s nonconformance is already
+            tracked by `#5472` (Phase 3).
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -584,3 +604,33 @@ then rather than assuming either answer.
   intent), the tracked issue owns the gap in realizing it, no prose in
   the vision describes the gap itself.
 - PR merged; worktree finalized.
+
+### 2026-10-07 — Phase 2 slice: `agent-containers` vision reconciliation
+- Continued Phase 2, picking `agent-containers` (123 commits since its
+  2026-08-27 last revision) per the standing ranking. Read the vision in
+  full against `plugins/agent-containers/README.md`, applying the
+  verification discipline from the two prior corrections: checked each
+  candidate fold-back against the plugin's actual shipped CLI/config
+  surface, not just vision prose.
+- Found and folded back three previously-unstated, already-shipped
+  capabilities (see the Phase 2 checklist entry above for detail):
+  *interactive-venue-reach-trusted* (the same CLI-mode venue contract
+  agent-codespaces/agent-ssh already got folded back, now shipped here
+  too — trusted-only, restricted venues correctly excluded),
+  *restricted-venue-picker-discovery* (Worktree Picker source
+  registration for a restricted venue), and host-backed
+  persistence/`systemd_capable` self-maintenance extending
+  `full-harness-projection-trusted` — the last notable because the
+  vision's own text had already hedged it as "as the capability matures,"
+  so this is the should-be aspiration catching up to reality rather than
+  reality drifting from should-be.
+- No vision-text contradiction this time (unlike `agent-ssh`'s Non-Goal
+  rework) and no genuine code gap found requiring a new issue — every
+  fold-back traces to real, working, already-documented capability.
+  `install.ps1`'s nonconformance is already tracked by `#5472`.
+- Next: continue Phase 2 with the next vision in the index not yet swept
+  (the three stale-high-traffic candidates from the original ranking are
+  now all reconciled — `agent-codespaces`, `agent-ssh`,
+  `agent-containers` — so the next pick should re-rank the remainder of
+  `visions/README.md`'s ~29-vision index, prioritizing branch visions
+  (`agent-fabric`, `native-convergence`) per the effort's own Plan).
