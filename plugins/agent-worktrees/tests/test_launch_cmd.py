@@ -946,6 +946,7 @@ def _stage_launch_command(tmp_path: Path) -> Path:
     return staged
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the dot-source fast path only activates on Windows (POSIX already uses a real os.execvp with no extra process)")
 def test_launch_command_dot_sources_default_setup_without_extra_process(tmp_path):
     """copilot-extensions#5579: launch-command.ps1's common `pwsh -File
     default-setup.ps1 ...` case must dot-source default-setup.ps1 into its
