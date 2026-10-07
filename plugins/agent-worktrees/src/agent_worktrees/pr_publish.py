@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import os
 import subprocess
+import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -166,6 +167,18 @@ def _provider_head(repo, pr) -> str:
 
 
 def push_target(repo, pr, worktree_path: str) -> PushTarget | None:
+    """The git remote holding *pr*'s head, to push its updates to, read under
+    :func:`publish_lock`: the branch tips it compares and the identity it returns
+    come from one snapshot, never across a fork setup that repoints the remote
+    in between. ``None`` too when the lock can't be had."""
+    try:
+        with publish_lock(worktree_path):
+            return _select_push_target(repo, pr, worktree_path)
+    except PublishLockTimeout:
+        return None
+
+
+def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     """The git remote holding *pr*'s head, to push its updates to.
 
     The remote ``create-pr`` recorded on the PR, when it isn't the repo's own
@@ -233,6 +246,21 @@ def push_remote(repo, pr, worktree_path: str) -> str | None:
     return target.remote if target else None
 
 
+def head_branch_gone(repo, pr, worktree_path: str) -> bool:
+    """Whether *pr*'s head branch is confirmed absent from the remote holding it
+    (a fork-headed PR's fork): the remote and the absence check are one snapshot
+    under :func:`publish_lock`, since a fork setup repointing the remote between
+    them would find the branch "absent" on another fork and retire a live PR.
+    Unreadable or undecided is never "gone"."""
+    try:
+        with publish_lock(worktree_path):
+            where = push_remote(repo, pr, worktree_path)
+            return where is not None and git_ops.remote_branch_state(
+                where, pr.branch, cwd=worktree_path) == "absent"
+    except PublishLockTimeout:
+        return False
+
+
 def _pr_for(record, branch: str):
     """The live tracked PR whose head is *branch*, if any."""
     return next((p for p in (record.prs if record is not None else [])
@@ -295,20 +323,34 @@ def _unlock_publish_file(fh) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
+#: The publication locks this thread holds: a nested acquisition (a decision made
+#: under the lock that reads a push target, which takes it too) joins the outer one.
+_held = threading.local()
+
+
 @contextlib.contextmanager
 def publish_lock(cwd: str, *, acquire_timeout: float | None = None):
     """Serialize changing a remote's URL with pushing through it, across every
     worktree of the clone (they share one ``.git/config``): the lock lives in the
-    common git dir."""
+    common git dir. Re-entrant within a thread; other threads and processes wait."""
     common = git_ops.git("rev-parse", "--git-common-dir", cwd=cwd, check=False).stdout.strip()
     path = Path(cwd, common) / "agent-worktrees-publish.lock"
+    key = os.path.normcase(str(path.resolve()))
+    held = getattr(_held, "paths", None)
+    if held is None:
+        held = _held.paths = set()
+    if key in held:
+        yield
+        return
     with path.open("a+b") as fh:
         _lock_publish_file(fh, timeout=(
             PUBLISH_LOCK_ACQUIRE_TIMEOUT_S if acquire_timeout is None else acquire_timeout
         ))
+        held.add(key)
         try:
             yield
         finally:
+            held.discard(key)
             _unlock_publish_file(fh)
 
 

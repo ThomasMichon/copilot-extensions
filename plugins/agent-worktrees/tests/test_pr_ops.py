@@ -4341,6 +4341,80 @@ class TestPRFinalizeAndPush:
         assert fin.push_changes(wid, config) is False
         assert not _git("ls-remote", "--heads", "origin", branch, cwd=wt_path)
 
+    @staticmethod
+    def _blocked_while(wt_path):
+        """Start a stand-in for another worktree's fork setup (it takes the
+        publication lock to repoint): True when it's still waiting."""
+        import threading
+
+        from agent_worktrees import pr_publish
+
+        def repoint():
+            with pr_publish.publish_lock(str(wt_path)):
+                pass
+
+        waiter = threading.Thread(target=repoint, daemon=True)
+        waiter.start()
+        waiter.join(0.3)
+        return waiter.is_alive()
+
+    def test_a_legacy_targets_tips_and_identity_are_one_locked_snapshot(self, pr_repo, monkeypatch):
+        """A PR with no recorded remote is resolved by comparing branch tips, then
+        reading the chosen fork's identity: a repoint can't land between them."""
+        from agent_worktrees import pr_publish
+        config, wid, wt_path, remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        self._move_head_to_fork(wt_path, remote_dir, rec.pr.branch)
+        rec.pr.remote = ""
+        rec.pr.head_repo = ""
+        config = self._fork_config(config)
+        real_tip = pr_publish._tip
+        seen = []
+
+        def tip(remote, branch, cwd):
+            seen.append(self._blocked_while(wt_path))
+            return real_tip(remote, branch, cwd)
+
+        monkeypatch.setattr(pr_publish, "_tip", tip)
+        target = pr_publish.push_target(config.repos["ext"], rec.pr, str(wt_path))
+        assert target is not None and target.remote == "fork"
+        assert target.head_identity == pr_publish.push_identity("fork", cwd=str(wt_path))
+        assert seen and all(seen)
+
+    def test_retiring_a_pruned_pr_reads_its_remote_and_branch_in_one_locked_snapshot(
+            self, pr_repo, monkeypatch):
+        """create-pr marks a live PR merged once its branch is gone from the remote
+        holding it: a repoint between choosing that remote and checking the branch
+        would find it "absent" on another fork and retire a live PR."""
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+        real_state = git_ops.remote_branch_state
+        seen = []
+
+        def state(remote, branch, *, cwd):
+            seen.append(self._blocked_while(wt_path))
+            return real_state(remote, branch, cwd=cwd)
+
+        monkeypatch.setattr(git_ops, "remote_branch_state", state)
+        assert pr_ops.create_pr(wid, config, title="Add feature").get("success")
+        assert seen and all(seen)
+
+    def test_the_publication_lock_is_reentrant_within_a_thread(self, pr_repo, monkeypatch):
+        from agent_worktrees import pr_publish
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        monkeypatch.setattr(pr_publish, "PUBLISH_LOCK_ACQUIRE_TIMEOUT_S", 0.05)
+        with pr_publish.publish_lock(str(wt_path)):
+            assert pr_publish.push_target(config.repos["ext"], rec.pr, str(wt_path)) is not None
+            with pr_publish.publish_lock(str(wt_path)):
+                pass
+        assert not self._blocked_while(wt_path)  # released once the outer one ends
+
     def test_a_missing_fork_remote_allows_origin_only_when_it_holds_the_prs_head(self, pr_repo, monkeypatch):
         from agent_worktrees import pr_publish
         config, wid, wt_path, remote_dir = pr_repo

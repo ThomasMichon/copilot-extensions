@@ -648,9 +648,7 @@ def create_pr(
     # reconcile down to the genuinely-live (or no) active PR.
     if not new and not branch and git_ops.has_remote(remote, cwd=worktree_path):
         while active_is_live and active is not None and active.branch:
-            where = pr_publish.push_remote(repo, active, worktree_path)  # a fork-headed PR's fork
-            if where is None or git_ops.remote_branch_state(
-                    where, active.branch, cwd=worktree_path) != "absent":
+            if not pr_publish.head_branch_gone(repo, active, worktree_path):
                 break
             active.state = "merged"
             if not active.closed_at:
