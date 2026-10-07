@@ -485,12 +485,16 @@ tracks in favor of a new one, the service manager's restart/failure accounting
 reflects that handoff as **intentional**, never as a crash to retry — so a
 cutover can never leave the service manager fighting a restart loop against an
 already-live, untracked survivor it cannot see. This holds equally for a
-restart-in-place supervisor (the new process *is* the tracked one) and a
-spawn-new-retire-old cutover (the tracked identity must be handed off, not
-simply orphaned) — *how* identity is handed off (an exit code a `Restart=`
-policy whitelists, a native "I am now this handle" notification, a thin
-version-agnostic process the service manager tracks permanently and which
-itself mediates the handoff) is spec-level, not fixed here.
+restart-in-place supervisor (the new process *is* the tracked one, so an exit
+code the service manager's restart policy whitelists is sufficient on its
+own) and a spawn-new-retire-old cutover (two processes genuinely overlap, so
+the tracked identity itself must be **transferred or retained** — a bare
+whitelisted exit code only suppresses the restart-as-failure signal while
+leaving the unit inactive and the real successor outside its tracking,
+reproducing the same incoherence under a different name; a native identity
+handoff, or a thin version-agnostic intermediary the service manager tracks
+permanently and which itself mediates the handoff, are the mechanisms that
+actually close this case) — *which* mechanism is spec-level, not fixed here.
 
 ### payload-remains-replaceable
 The marketplace payload remains replaceable while services and launchers are
