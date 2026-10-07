@@ -1694,7 +1694,7 @@ suite green (3743 passed, 23 skipped, the one known flake above).
   for the **Gitea** reviewer adapter follow-on. The effort stays **Active**;
   do not archive it yet.
 
-### 2026-10-06 (later) — Validation Plan: 2 of 4 remaining items closed, 2 clarified
+### 2026-10-06 (later) — Validation Plan: 3 of 5 items closed (2 with genuinely new evidence, 1 already accurate)
 
 Resumed driving this effort's own Validation Plan (its remaining scope
 after Phase 2's Gitea close-out and Phase 3's single-emitter-primitive
@@ -1756,5 +1756,9 @@ slice being explicitly spun off separately):
   fixture validation -- or make an explicit call with the operator on
   whether this effort can be considered substantially complete and
   archived with those two items tracked as named follow-ons, given Phase
-  2's Gitea remainder and Phase 3's single-emitter-primitive slice are
-  already being carried the same way.
+  3's single-emitter-primitive slice is already being carried the same
+  way.
+- **Documentation impact:** this update touches only this effort's own
+  README (its authoritative status/validation record) -- no plugin
+  source, `plugins/*/README.md`, skills, or other contributor/user-facing
+  documentation is affected.
