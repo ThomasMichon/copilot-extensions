@@ -166,6 +166,13 @@ def _provider_head(repo, pr) -> str:
         return ""
 
 
+def _own_remote(repo, worktree_path: str) -> PushTarget | None:
+    """The repo's own remote as the push target, only while ``git push`` writes where
+    it fetches from: the push's lease and credential come from the fetch URL, so a
+    ``pushurl`` naming another destination is refused (``None``) like a fork's."""
+    return PushTarget(repo.remote) if push_slug(repo.remote, cwd=worktree_path) else None
+
+
 def push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     """The git remote holding *pr*'s head, to push its updates to, read under
     :func:`publish_lock`: the branch tips it compares and the identity it returns
@@ -211,7 +218,7 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     configured = _fork_remotes(repo)
     forks = [f for f in configured if git_ops.has_remote(f, cwd=worktree_path)]
     if not branch or not configured:
-        return PushTarget(repo.remote)
+        return _own_remote(repo, worktree_path)
     if len(forks) < len(configured):
         # A configured fork remote is gone from this checkout (removed or renamed):
         # the PR's head may live there. A matching SHA on the repo's own remote
@@ -223,7 +230,7 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
         return None
     holding = [f for f, tip in tips.items() if tip]
     if not holding:
-        return PushTarget(repo.remote)
+        return _own_remote(repo, worktree_path)
     tips[repo.remote] = _tip(repo.remote, branch, worktree_path)
     if tips[repo.remote] is None:
         return None

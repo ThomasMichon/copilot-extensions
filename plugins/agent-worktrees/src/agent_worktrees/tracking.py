@@ -2361,9 +2361,9 @@ def _merge_pr_attribution_state(
             match.pr_id = fresh_id
             current_pr.pr_id = fresh_id
         # Field by field, only while both describe the same PR (set_pr may reassign one, clearing its
-        # fork): the same repository always, and the same number unless one side has none yet.
-        same_pr = ((match.repo or "").lower() == (current_pr.repo or "").lower()
-                   and (None in (match.number, current_pr.number) or match.number == current_pr.number))
+        # fork): the same repository always, and the same number and provider unless one side has none yet.
+        same_pr = (match.repo or "").lower() == (current_pr.repo or "").lower() and all(
+            not (a and b) or a == b for a, b in ((match.number, current_pr.number), (match.provider, current_pr.provider)))
         for f in (("remote", "head_repo", "head_identity", "head_owner") if same_pr else ()):
             setattr(match, f, getattr(match, f) or getattr(current_pr, f))
         # An EQUAL on-disk revision is also authoritative, not only a strictly greater one

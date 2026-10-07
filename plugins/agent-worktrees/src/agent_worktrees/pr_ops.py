@@ -2107,7 +2107,8 @@ def _set_pr_locked(
             api_base = ""
         parsed_repo = _repo_slug_from_pr_url(url, api_base)
 
-    reassigned = (number is not None and pr.number is not None and number != pr.number) or bool(parsed_repo and pr.repo and parsed_repo != pr.repo)
+    reassigned = ((number is not None and pr.number is not None and number != pr.number) or bool(parsed_repo and pr.repo and parsed_repo != pr.repo)
+                  or bool(provider and pr.provider and provider != pr.provider))  # attaching a first one keeps the PR
     identity_changed = (
         (number is not None and number != pr.number)
         or (provider is not None and provider != pr.provider)

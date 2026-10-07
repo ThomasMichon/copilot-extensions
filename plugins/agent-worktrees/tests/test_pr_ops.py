@@ -4790,6 +4790,64 @@ class TestPRFinalizeAndPush:
         assert (rec.pr.repo, rec.pr.number) == ("other-org/other-repo", 7)
         assert (rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner) == ("", "", "")
 
+    def test_set_pr_correcting_an_established_provider_clears_its_fork(self, pr_repo):
+        """Another provider is another PR: its old fork target is dropped (and the
+        save's field merge doesn't restore it), while attaching a first provider
+        keeps the PR's fork."""
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.pr.provider, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner = "", "fork", "alice/ext", "alice"
+        tracking.save_record(rec)
+        pr_ops.set_pr(wid, provider="github", config=config)  # first provider: still that PR
+        rec = tracking.load_record(path)
+        assert (rec.pr.provider, rec.pr.remote, rec.pr.head_owner) == ("github", "fork", "alice")
+        pr_ops.set_pr(wid, provider="ado", config=config)
+        rec = tracking.load_record(path)
+        assert (rec.pr.provider, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner) == ("ado", "", "", "")
+
+    def test_a_stale_writer_of_another_provider_never_restores_its_fork(self, pr_repo):
+        """The save's field merge only fills fork fields from the on-disk copy while both
+        describe the same PR: one under another established provider doesn't."""
+        _config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.pr.provider, rec.pr.head_repo = "github", "alice/ext"
+        tracking.save_record(rec)
+        moved = tracking.load_record(path)
+        moved.pr.provider = "ado"
+        moved.pr.remote = moved.pr.head_repo = moved.pr.head_identity = moved.pr.head_owner = ""
+        tracking.save_record(moved)
+        rec = tracking.load_record(path)
+        assert (rec.pr.provider, rec.pr.remote, rec.pr.head_repo) == ("ado", "", "")
+
+    def test_the_repo_remote_fallbacks_refuse_a_push_url_naming_another_repo(self, pr_repo):
+        """The repo's own remote is the target of a PR with no fork configured, and of
+        one no configured fork holds: like a fork, it must push where it fetches from,
+        since the push's lease and credential come from the fetch URL."""
+        from agent_worktrees import finalize as fin
+        from agent_worktrees import pr_publish
+        config, wid, wt_path, remote_dir = pr_repo
+        assert pr_ops.create_pr(wid, config, title="Add feature").get("success")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        repo, fork_repo = config.repos["ext"], self._fork_config(config).repos["ext"]
+        fork_dir = remote_dir.parent / "fork.git"
+        _git("init", "--bare", "-b", "master", str(fork_dir), cwd=wt_path)
+        _git("remote", "add", "fork", str(fork_dir), cwd=wt_path)  # configured, without the branch
+        assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) == repo.remote
+        assert pr_publish.push_remote(fork_repo, rec.pr, str(wt_path)) == repo.remote
+        other = remote_dir.parent / "elsewhere.git"
+        _git("init", "--bare", "-b", "master", str(other), cwd=wt_path)
+        _git("remote", "set-url", "--push", repo.remote, str(other), cwd=wt_path)
+        assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) is None
+        assert pr_publish.push_remote(fork_repo, rec.pr, str(wt_path)) is None
+        (wt_path / "e.txt").write_text("more\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "more", cwd=wt_path)
+        assert fin.push_changes(wid, config) is False
+        assert not git_ops.git("--git-dir", str(other), "rev-parse", "--verify", "-q",
+                               f"refs/heads/{rec.pr.branch}", check=False).stdout.strip()
+
     def test_an_explicit_fork_owner_survives_a_rerun(self, pr_repo, monkeypatch):
         """The PR head's owner recorded at publish (an explicit pr.fork.owner) wins over
         the fork repository's owner on a rerun, e.g. after opening was deferred."""
