@@ -18,6 +18,7 @@ from . import output
 from . import git_ops, sessions, state_root as state_root_mod, tracking
 from . import installer as inst
 from . import installation_cli, pr_config, session_binding_cli, status_updater_cli
+from . import worktree_identity
 
 
 def _core():
@@ -241,7 +242,7 @@ def _emit_pr_reminder(reminder, *, use_json: bool, result: dict | None = None) -
 def cmd_deploy_instructions(args: argparse.Namespace) -> int:
     """Retire migrated managed instruction files for the current machine."""
     project = cfg.project_name()
-    repo_dir = _core()._find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         output.err("Cannot find repo root")
         return 1
@@ -311,7 +312,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     try:
         repo_dir = config.default_repo.anchor
     except Exception:
-        repo_dir = _core()._find_repo_dir()
+        repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         return _empty()
 

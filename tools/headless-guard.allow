@@ -34,13 +34,12 @@ plugins/agent-vault/src/agent_vault/prompt.py:71  pre-existing at rule introduct
 plugins/agent-worktrees/scripts/service.yaml:16  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/__main__.py:3670  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/__main__.py:5193  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/__main__.py:5285  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/anchor_hygiene.py:55  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/claim_handoff_accept_support.py:126  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/claim_history_mirror.py:521  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/claimant.py:351  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/codename_reverse_lookup.py:178  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/context_cli.py:392  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/context_cli.py:393  pre-existing at rule introduction, see #5518 (line shifted by an unrelated context_cli.py edit)
 plugins/agent-worktrees/src/agent_worktrees/delegate_cli.py:344  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/effort_focus.py:165  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/finalize.py:492  pre-existing at rule introduction, see #5518
@@ -67,8 +66,8 @@ plugins/agent-worktrees/src/agent_worktrees/installer.py:580  pre-existing at ru
 plugins/agent-worktrees/src/agent_worktrees/installer.py:74  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/lease_store.py:763  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/list_views_cli.py:160  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:240  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:887  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:235  pre-existing at rule introduction, see #5518 (line shifted by an unrelated maintenance_cli.py edit)
+plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:882  pre-existing at rule introduction, see #5518 (line shifted by an unrelated maintenance_cli.py edit)
 plugins/agent-worktrees/src/agent_worktrees/manager_launch_cli.py:327  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:58  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:69  pre-existing at rule introduction, see #5518
@@ -84,6 +83,7 @@ plugins/agent-worktrees/src/agent_worktrees/repos.py:999  pre-existing at rule i
 plugins/agent-worktrees/src/agent_worktrees/state_root.py:201  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/state_root.py:443  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/validate.py:109  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/worktree_identity.py:366  pre-existing at rule introduction, see #5518 (relocated from __main__.py:5285 by the compatibility-root-decoupling effort's _find_repo_dir migration slice)
 plugins/ai-attribution/scripts/write_session_guidance.py:110  pre-existing at rule introduction, see #5518
 plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py:141  pre-existing at rule introduction, see #5518
 plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py:155  pre-existing at rule introduction, see #5518

@@ -108,7 +108,7 @@ def test_status_context_alias_resolution_fails_open(monkeypatch, capsys):
         m, "_find_record_for_path", lambda _p: _record(machine="raw-host-01")
     )
     monkeypatch.setattr(repos_module, "resolve_path", lambda name: None)
-    monkeypatch.setattr(m, "_find_repo_dir", lambda: None)
+    monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: None)
     rc = m.cmd_status_context(_ns())
     assert rc == 0
     assert capsys.readouterr().out.strip() == "raw-host-01  win  test-chamber:8e45"

@@ -11,18 +11,13 @@ from pathlib import Path
 from . import config as cfg
 from . import installer as inst
 from . import output, reclaim, sessions, tracking
+from . import worktree_identity
 
 
 def _core():
     from . import __main__ as core
 
     return core
-
-
-def _find_repo_dir(*args, **kwargs):
-    return _core()._find_repo_dir(*args, **kwargs)
-
-
 
 
 def _current_session_ids(*args, **kwargs):
@@ -225,7 +220,7 @@ def cmd_hygiene(args) -> int:
 
 def cmd_dev(args) -> int:
     """Dispatch to tools/dev/setup.{sh,ps1} for dev venv management."""
-    repo_dir = _find_repo_dir()
+    repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
         output.err("Cannot determine repo root.")
         return 1
@@ -536,7 +531,7 @@ def cmd_doctor(args) -> int:
     try:
         from . import reconcile as _reconcile
 
-        repo_dir = _find_repo_dir()
+        repo_dir = worktree_identity._find_repo_dir()
         runtime_lag = _reconcile.running_version_lag(Path(repo_dir)) if repo_dir else []
     except Exception:
         runtime_lag = []
