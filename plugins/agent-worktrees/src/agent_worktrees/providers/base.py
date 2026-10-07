@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from ..pr_bar import Snapshot
     from ..pr_contract import PRDiff, PRSnapshot, ReviewNudgeResult, ThreadsResult
 
 
@@ -427,6 +428,14 @@ class PRProvider(Protocol):
         """
         ...
 
+    def get_bar_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> "Snapshot":
+        """One fail-closed read of everything ``pr bar`` evaluates (``pr_bar.Snapshot``):
+        every list paged to its end, unreadable parts named in ``errors``; never raises.
+        A provider that can't read it returns ``pr_bar.unsupported(...)`` (all unknown)."""
+        ...
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
@@ -736,6 +745,11 @@ def run_cli(
             resolved,
             capture_output=True,
             text=True,
+            # Provider CLIs speak UTF-8 (review bodies carry emoji); the locale
+            # code page (cp1252 on Windows) would fail to decode them and mangle
+            # a piped body. An undecodable byte is replaced, never fatal.
+            encoding="utf-8",
+            errors="replace",
             input=input_text,
             env=full_env,
             timeout=timeout,

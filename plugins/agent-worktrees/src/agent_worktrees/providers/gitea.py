@@ -49,7 +49,6 @@ _GITEA_PERMISSION_TOKEN = {"admin": "admin", "push": "write", "pull": "read"}
 
 def _gitea_viewer_permission(permissions: object) -> str:
     """Normalize Gitea's ``permissions`` object to a merge-authority token.
-
     Returns ``""`` when missing/malformed or every bit is false (an
     authenticated read of a visible repo always has at least ``pull`` true, so
     all-false means the field wasn't populated -- unknown, not a confident
@@ -170,7 +169,6 @@ class GiteaProvider:
         payload: dict | None = None,
     ) -> tuple[int, str]:
         """``_curl`` with bounded retry on transient failures.
-
         Returns ``(status, body)``; ``status == 0`` means a curl-level failure
         persisted across all attempts.  A *transient* status (5xx / 408 / 429 /
         curl error) is retried with exponential backoff; a permanent status
@@ -194,7 +192,6 @@ class GiteaProvider:
 
     def _all_labels(self, scope: PRScope, token: str) -> dict[str, int]:
         """Resolve ``label-name (lowercased) -> id`` for the repo, **paginated**.
-
         Gitea's ``GET /repos/{repo}/labels`` returns a single page (default 30),
         so a repo with more labels than fit on page 1 leaves later labels
         invisible.  We page with an explicit ``limit`` until an **empty** page,
@@ -966,14 +963,17 @@ class GiteaProvider:
             viewer_permission=_gitea_viewer_permission(data.get("permissions")),
         )
 
+    def get_bar_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None):
+        from ..pr_bar import unsupported  # no merge-bar read here yet: every clause is unknown
+        return unsupported(repo, number, self.name)
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
-        """List PR review threads (one per Gitea review that carries comments).
-
-        Gitea's irritating detail: there is no first-class "thread" -- code
-        comments hang off reviews, so a review with code comments is treated as a
-        thread, resolved when its comments carry a ``resolver``.
+        """List PR review threads (one per Gitea review that carries comments). Gitea's
+        irritating detail: there is no first-class "thread" -- code comments hang off
+        reviews, so a review with code comments is treated as a thread, resolved when
+        its comments carry a ``resolver``.
         """
         if not token:
             return ThreadsResult(
