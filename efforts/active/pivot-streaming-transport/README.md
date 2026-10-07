@@ -340,6 +340,24 @@ insufficient.)_
       duplicates Phase 2's client-side diffing logic on the daemon side and
       introduces the daemon-connection failure mode this phase's Validation
       Plan gate is actually about.
+      — **2026-10-06 re-evaluation**: live-measured on the operator's own
+      machine to settle 3c's gate (see the same-day journal entry for the
+      full investigation). Finding: 3b's cache-hit path genuinely is cheap
+      (~150ms), but on this machine the `codespace`/`container` namespaces
+      never reached a healthy cached state — both have real, individually
+      slow (10-16s) `namespace-list` providers (GitHub Codespaces/Docker
+      enumeration, each a CLI subprocess with no result cache of its own
+      yet) that exceed this cache's own refresh cadence, so every
+      `GET /api/v1/agents` paid their full scan cost on every call. **Fixed
+      as a 3b follow-up, not a 3c precondition**: `get_snapshot()`'s
+      opportunistic join is now bounded by a short, independent
+      `_opportunistic_join_budget` (default 1.5s) instead of the far more
+      generous `_watchdog_timeout` — a slow namespace's scan still runs
+      (and is still picked up once it finishes), it just never blocks a
+      caller past that short budget. 3c's own gate ("3b shipped and
+      measured insufficient") is **still not met**: this fix makes cheap
+      polling actually cheap again regardless of push vs. poll, so the
+      push-specific case for 3c remains unproven. Stays deferred.
 
 ### Phase 4 — Segment-level React-esque diffing in the Picker's own render path
 - [x] Profile `_refresh_nf_segments()` (`engine_rendering.py`) against a
@@ -2297,3 +2315,97 @@ Plan has no further un-started, clearly-scoped items without a design
 decision from the operator (Phase 3c's own gate: "do not start until 3b is
 shipped and measured insufficient" -- not yet revisited).
 
+### 2026-10-06 — Phase 3c gate re-evaluated with live evidence; found and fixed a real Phase 3b gap instead
+
+Operator asked where Phase 3c's gate actually stood now that 3b had
+shipped ("3b shipped and measured insufficient" — has it?). Rather than
+reason from the design doc alone, gathered live evidence on the operator's
+own machine.
+
+**What the evidence showed, in order:**
+- `agent-bridge`'s regression suite is green (51/51 passed, 1 skipped) and
+  a raw, unauthenticated `GET /health`/`GET /api/v1/agents` round trip is
+  genuinely cheap (~90-450ms) — 3b's cache mechanism itself works exactly
+  as designed.
+- But the REAL client path (traced inline inside `BridgeClient._request`,
+  bypassing every CLI/process-spawn variable) told a different story:
+  `GET /api/v1/agents` cost a flat **~8s on every single call**, 4-for-4 on
+  an already-connected client — not cold-start, not variance, a per-request
+  tax `require_complete=true` confirmed as `503 agent roster incomplete`.
+- Root cause, read directly from `routes/agents.py` +
+  `agent_registry_cache.py`: two registered namespaces — `codespace`
+  (`agent-codespaces`) and `container` (`agent-containers`) — never reached
+  a fresh, healthy cache entry. Measured their actual `namespace-list`
+  CLI invocations directly: **`agent-codespaces namespace-list` ~15.9s**
+  (a real GitHub Codespaces API enumeration), **`agent-containers
+  namespace-list` ~10.0s** (a real Docker enumeration) — both individually
+  slower than this cache's own `DEFAULT_REFRESH_INTERVAL` (12s), so neither
+  namespace could ever complete within one refresh cycle. `get_snapshot()`'s
+  own documented policy ("any GET that observes a namespace as incomplete
+  must itself opportunistically join that namespace's single-flight
+  refresh") then made every caller block on these two namespaces' scans —
+  bounded, at the time, by `_watchdog_timeout` (minutes-scale by default,
+  floored at `resolver_timeout + 2.0`), not a budget sized for a live
+  request.
+- This is **not a Phase 3b defect** — single-flight, generation-guarding,
+  last-known-good retention all behave exactly as the design and its tests
+  require. The actual gap: the opportunistic-join bound was sized for
+  *background supervision* (how long before a hung cycle is force-
+  abandoned), not for *how long one live request should ever wait inline*
+  — those are different concerns that happened to share one timeout.
+
+**Fix landed** (`agent_registry_cache.py`): a new, independent
+`_opportunistic_join_budget` (default `DEFAULT_OPPORTUNISTIC_JOIN_BUDGET =
+1.5`, clamped to `min(watchdog_timeout, 1.5)` so an explicitly-short test
+`watchdog_timeout` still bounds it at least that tightly) replaces
+`_watchdog_timeout` as the per-namespace join's timeout inside
+`get_snapshot()`. The namespace scan itself is unaffected — `asyncio.
+shield` already protected it from the join's own timeout, so it keeps
+running in the background exactly as before; only how long any *one*
+caller waits for it inline changed. A later caller (or the periodic loop)
+still observes the scan's eventual result with no second scan needed.
+
+**Validation**: added
+`test_get_snapshot_opportunistic_join_is_bounded_well_under_watchdog_timeout`
+— a namespace whose scan only succeeds after being released (simulating a
+slow-but-healthy provider), with a real, unmocked default `watchdog_timeout`
+(confirmed >10s, exactly the old bound) — asserts `get_snapshot()` still
+returns in well under 2s, the namespace reports incomplete, and a
+subsequent call (after the scan actually finishes) observes the fresh row
+with no second scan triggered. Full `agent-bridge` suite:
+**installed editable against this worktree's own source (the shared
+`.test-venvs` cache otherwise points at the anchor checkout) — all tests
+green**, no regressions in any of the existing opportunistic-join/
+freshness/single-flight tests, which all use near-instant mock resolvers
+and so were never actually exercising the multi-second bound this change
+narrows.
+
+**Scope note**: `agent-codespaces`'/`agent-containers`' own `namespace-list`
+implementations still have no result cache of their own — each full
+invocation is still a genuine 10-16s GitHub/Docker enumeration, now just
+no longer blocking every `agent-bridge` caller. Operator confirmed this is
+a known, accepted gap ("`agent-codespaces` and `agent-containers` don't
+have DB-backed daemons yet; we'll get there") — out of scope for this
+effort, not re-raised as a blocking follow-up here.
+
+**Phase 3c's gate re-assessed**: still not met. This fix makes cheap
+polling actually cheap again (the whole point of 3b) regardless of the
+push-vs-poll question — it does not, by itself, make the case for push.
+Stays deferred.
+
+**PR #5585 review round (Copilot, COMMENTED)**: three findings, all fixed
+before merge — (1) medium: the explicit `opportunistic_join_budget`
+constructor override bypassed the `min(watchdog_timeout, ...)` clamp,
+letting a caller-requested budget outlive the watchdog bound the cache's
+own orphaned-task recovery depends on; fixed by applying the clamp
+unconditionally, plus a new regression test
+(`test_explicit_opportunistic_join_budget_is_still_clamped_to_watchdog_timeout`);
+(2) low: the PR description was missing the repository's required
+Documentation-impact statement (`CONTRIBUTING.md:453-470`) — added,
+pointing back at this same journal entry as the investigation's actual
+authoritative home; (3) low: the new `DEFAULT_OPPORTUNISTIC_JOIN_BUDGET`
+code comment read like journal narrative (dates, measured numbers,
+specific plugin names) rather than a timeless invariant description —
+rewritten to describe the general shape (a provider slower than the
+cache's own refresh cadence) without restating this investigation's
+specific evidence, which stays here in the journal instead.
