@@ -52,7 +52,7 @@ needs you" and "a source couldn't be read" are never confused.
 | agent-dispatch | task `awaiting_steer` (a posted card's `request_input`) | task record; board group "Blocked" (`board_cli.py`) | `agent-dispatch inbox --awaiting-steer`, `inbox --board` |
 | agent-dispatch | task `hold_reason` (operator pause) | task record; board group "Paused" | `inbox --board` |
 | agent-dispatch | completed, unconfirmed self-tracked task | lifecycle (`completed` vs confirmed) | `inbox --board` |
-| agent-bridge | `attention.value == "input_required"`, `pending_input[0].message` | result snapshot (`result_snapshot.py`) | `agent-bridge result <s>`, `wait --attention input_required` |
+| agent-bridge | `attention.value`: `input_required` (with `pending_input[0].message`), `permission_required`, `failed` | result snapshot (`result_snapshot.py`) | `agent-bridge result <s>`, `wait --attention input_required` |
 | agent-bridge | `presence`: `awaiting_input` / `unknown` (+ confidence) | transcript (`peek_snapshot.py`) | `agent-bridge presence <s> --json` |
 | agent-worktrees | merge bar `failed` / `unknown` | provider read (`pr_bar.py`, in review in #5566 — not yet on `dev`) | `agent-worktrees pr bar <repo> <n> --json` (exit 0 met/merged, 10 pending, 11 failed, 12 unknown) |
 
@@ -95,7 +95,10 @@ an empty queue.
   `id`, so the order is fully deterministic.
 - [ ] **Dedupe** on `(entity, entity_ref)` — the canonical kind plus its canonical
   reference, never the bare reference (a task id and a session id can share a
-  string; a source's own `x.<source>.<kind>` keeps its references to itself): keep the highest severity; the others become `also[]` on the kept item,
+  string; a source's own `x.<source>.<kind>` keeps its references to itself).
+  The winner, and the order of `also[]`, use the queue's own precedence --
+  severity, then `created_at`, then `id` -- so identical reads give identical
+  results however the adapters' timeouts interleave: keep the highest severity; the others become `also[]` on the kept item,
   so nothing is silently dropped.
 - [ ] **Source result:** each adapter returns `{items[], ok, error?, read_at}`. The
   aggregate carries `sources[]` with each one's status. Any `ok: false` makes the
@@ -116,6 +119,9 @@ an empty queue.
   - undraining buildup (vision *buildup-is-a-health-signal*) → `stalled`.
 - [ ] **bridge**:
   - `input_required` → `awaiting_input` (`reported`);
+  - `permission_required` (a represented snapshot / `wait --attention`) →
+    `awaiting_input` (`reported`);
+  - `failed` (a local result snapshot) → `failed` (`reported`);
   - presence `awaiting_input` → `awaiting_input` (`scanned`/`heuristic`);
   - presence `unknown` is **not** an item: it means the transcript couldn't be
     read or holds no presence signal, not that the session stalled. It counts
@@ -155,8 +161,9 @@ an empty queue.
 ## Validation Plan
 
 - [ ] Unit: contract, ordering, dedupe — cross-source dedupe of one entity (two
-  sources naming the same PR) and cross-kind non-collision (a task and a session
-  with the same id) — degraded vs empty vs disabled, each adapter on fixtures.
+  sources naming the same PR), cross-kind non-collision (a task and a session
+  with the same id), and an equal-severity tie resolved the same way in any
+  adapter order — degraded vs empty vs disabled, each adapter on fixtures.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded: true` with the
