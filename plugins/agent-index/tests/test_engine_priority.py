@@ -4,12 +4,28 @@
 normally on this package's own import path, so the module is loaded directly
 by file path -- mirroring the pattern used for other standalone entry-point
 scripts in this test suite (e.g. ``test_maintenance_tick.py``).
+
+Platform split (see ``app.py``'s own docstrings for the full reasoning):
+POSIX's ``os.nice()`` only affects the calling thread (inherited by threads
+created *afterward*), so the throttle is applied eagerly at process startup,
+in ``main()``, before uvicorn creates its worker/event-loop threads. Windows'
+``SetPriorityClass`` is process-wide regardless of timing, but applying it
+before the one-time model load was observed to stall that load indefinitely
+under host contention at ``IDLE_PRIORITY_CLASS`` -- so Windows instead defers
+it to ``_get_pipeline()``, strictly after a successful ``warm_up()``. Both
+platforms share a once-per-process-lifetime guard so a later
+``/spindown`` + reload cycle never re-triggers (or, on POSIX, compounds --
+``os.nice()`` is a relative increment) the throttle.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import sys
+import types
 from pathlib import Path
+
+import pytest
 
 APP_PATH = (
     Path(__file__).resolve().parents[1]
@@ -19,6 +35,8 @@ APP_PATH = (
     / "app.py"
 )
 
+_IS_WINDOWS = sys.platform.startswith("win")
+
 
 def _load_module():
     spec = importlib.util.spec_from_file_location("agent_index_engine_app", APP_PATH)
@@ -26,31 +44,6 @@ def _load_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def test_main_does_not_lower_priority_directly(monkeypatch) -> None:
-    """``main()`` must NOT throttle the process itself anymore -- doing so
-    before the model has loaded was observed to stall the one-time load
-    (20s+ even unthrottled) indefinitely under host contention at Windows
-    IDLE_PRIORITY_CLASS. The throttle is applied later, by
-    ``_get_pipeline()``, only after a successful first load."""
-    module = _load_module()
-
-    calls: list[str] = []
-
-    def fake_lower(nice: int) -> None:
-        calls.append(f"lower:{nice}")
-
-    monkeypatch.setattr(
-        __import__("agent_index.indexing.priority", fromlist=["x"]),
-        "lower_current_process_priority",
-        fake_lower,
-    )
-    monkeypatch.setattr(module, "run_engine", lambda **_kw: calls.append("run_engine"))
-
-    module.main([])
-
-    assert calls == ["run_engine"]
 
 
 class _FakePipeline:
@@ -64,15 +57,59 @@ class _FakePipeline:
     def warm_up(self) -> None:
         self.warmed_up = True
 
+    def unload(self) -> None:
+        self.warmed_up = False
 
-def test_get_pipeline_lowers_priority_only_after_warm_up(monkeypatch) -> None:
+
+def _stub_pipeline_import(monkeypatch: pytest.MonkeyPatch, fake_pipeline: _FakePipeline) -> None:
+    """`_get_pipeline()` does `from agent_index_engine.pipeline import
+    EmbeddingPipeline` as a local import -- `agent_index_engine` is a
+    separate installable package not normally on this suite's path, so
+    register a stub in sys.modules rather than relying on it being genuinely
+    importable."""
+    fake_module = types.ModuleType("agent_index_engine.pipeline")
+    fake_module.EmbeddingPipeline = lambda *_a, **_kw: fake_pipeline  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "agent_index_engine.pipeline", fake_module)
+
+
+# -- main(): POSIX eager / Windows deferred -----------------------------------
+
+
+@pytest.mark.skipif(_IS_WINDOWS, reason="POSIX-only: eager throttle at startup")
+def test_main_lowers_priority_eagerly_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    calls: list[str] = []
+    monkeypatch.setattr(module, "_ensure_priority_lowered_once", lambda: calls.append("lower"))
+    monkeypatch.setattr(module, "run_engine", lambda **_kw: calls.append("run_engine"))
+
+    module.main([])
+
+    assert calls == ["lower", "run_engine"]
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only: main() must NOT throttle directly")
+def test_main_does_not_lower_priority_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    calls: list[str] = []
+    monkeypatch.setattr(module, "_ensure_priority_lowered_once", lambda: calls.append("lower"))
+    monkeypatch.setattr(module, "run_engine", lambda **_kw: calls.append("run_engine"))
+
+    module.main([])
+
+    assert calls == ["run_engine"]
+
+
+# -- _get_pipeline(): Windows deferred / POSIX no-op --------------------------
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only deferred throttle path")
+def test_get_pipeline_lowers_priority_only_after_warm_up_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The throttle must be applied strictly AFTER ``warm_up()`` returns, not
     before -- otherwise the (slow, one-time) model load itself would run at
     the already-lowered priority, the exact bug this corrected ordering
     fixes."""
-    import sys
-    import types
-
     module = _load_module()
     calls: list[str] = []
 
@@ -84,18 +121,10 @@ def test_get_pipeline_lowers_priority_only_after_warm_up(monkeypatch) -> None:
         real_warm_up()
 
     fake_pipeline.warm_up = tracking_warm_up  # type: ignore[method-assign]
-
-    # `_get_pipeline()` does `from agent_index_engine.pipeline import
-    # EmbeddingPipeline` as a local import -- `agent_index_engine` is a
-    # separate installable package not normally on this suite's path (see
-    # module docstring), so register a stub in sys.modules rather than
-    # relying on it being genuinely importable.
-    fake_pipeline_module = types.ModuleType("agent_index_engine.pipeline")
-    fake_pipeline_module.EmbeddingPipeline = lambda *_a, **_kw: fake_pipeline  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "agent_index_engine.pipeline", fake_pipeline_module)
+    _stub_pipeline_import(monkeypatch, fake_pipeline)
 
     monkeypatch.setattr(module, "_check_gpu_deps", lambda: True)
-    monkeypatch.setattr(module, "_lower_own_priority", lambda: calls.append("lower"))
+    monkeypatch.setattr(module, "_ensure_priority_lowered_once", lambda: calls.append("lower"))
     monkeypatch.setattr(module, "_config", None)
     monkeypatch.setattr(module, "_pipeline", None)
 
@@ -105,7 +134,26 @@ def test_get_pipeline_lowers_priority_only_after_warm_up(monkeypatch) -> None:
     assert calls == ["warm_up", "lower"]
 
 
-def test_get_pipeline_does_not_relower_priority_once_loaded(monkeypatch) -> None:
+@pytest.mark.skipif(_IS_WINDOWS, reason="POSIX-only: _get_pipeline() must NOT throttle directly")
+def test_get_pipeline_does_not_lower_priority_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    calls: list[str] = []
+
+    fake_pipeline = _FakePipeline()
+    _stub_pipeline_import(monkeypatch, fake_pipeline)
+
+    monkeypatch.setattr(module, "_check_gpu_deps", lambda: True)
+    monkeypatch.setattr(module, "_ensure_priority_lowered_once", lambda: calls.append("lower"))
+    monkeypatch.setattr(module, "_config", None)
+    monkeypatch.setattr(module, "_pipeline", None)
+
+    result = module._get_pipeline()
+
+    assert result is fake_pipeline
+    assert calls == []
+
+
+def test_get_pipeline_does_not_relower_priority_once_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
     """A second call after the model is already loaded must be a cheap
     no-op -- never re-triggering the throttle (or a second model load)."""
     module = _load_module()
@@ -114,14 +162,124 @@ def test_get_pipeline_does_not_relower_priority_once_loaded(monkeypatch) -> None
     fake_pipeline = _FakePipeline()
     fake_pipeline.warmed_up = True  # already loaded
     monkeypatch.setattr(module, "_pipeline", fake_pipeline)
-    monkeypatch.setattr(
-        module, "_lower_own_priority", lambda: calls.append("lower")
-    )
+    monkeypatch.setattr(module, "_ensure_priority_lowered_once", lambda: calls.append("lower"))
 
     result = module._get_pipeline()
 
     assert result is fake_pipeline
     assert calls == []
+
+
+# -- the once-per-process-lifetime guard, platform-agnostic ------------------
+
+
+def test_ensure_priority_lowered_once_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    calls: list[str] = []
+    monkeypatch.setattr(module, "_priority_lowered", False)
+    monkeypatch.setattr(module, "_lower_own_priority", lambda: calls.append("lower"))
+
+    module._ensure_priority_lowered_once()
+    module._ensure_priority_lowered_once()
+    module._ensure_priority_lowered_once()
+
+    assert calls == ["lower"]
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only restore capability")
+def test_reset_priority_for_reload_restores_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    calls: list[str] = []
+    monkeypatch.setattr(module, "_priority_lowered", True)
+
+    from agent_index.indexing import priority as priority_module
+
+    monkeypatch.setattr(priority_module, "restore_normal_priority", lambda: calls.append("restore"))
+
+    module._reset_priority_for_reload()
+
+    assert calls == ["restore"]
+    assert module._priority_lowered is False
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only restore capability")
+def test_reset_priority_for_reload_is_noop_when_never_lowered(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    calls: list[str] = []
+    monkeypatch.setattr(module, "_priority_lowered", False)
+
+    from agent_index.indexing import priority as priority_module
+
+    monkeypatch.setattr(priority_module, "restore_normal_priority", lambda: calls.append("restore"))
+
+    module._reset_priority_for_reload()
+
+    assert calls == []
+
+
+@pytest.mark.skipif(_IS_WINDOWS, reason="POSIX has nothing to restore (no root)")
+def test_reset_priority_for_reload_is_noop_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    calls: list[str] = []
+    monkeypatch.setattr(module, "_priority_lowered", True)
+
+    from agent_index.indexing import priority as priority_module
+
+    monkeypatch.setattr(priority_module, "restore_normal_priority", lambda: calls.append("restore"))
+
+    module._reset_priority_for_reload()
+
+    assert calls == []
+    # POSIX never resets the guard -- there is nothing to protect against on
+    # a later reload (see module docstring): it was already lowered once,
+    # eagerly, at process startup, and stays that way for the process's
+    # whole lifetime.
+    assert module._priority_lowered is True
+
+
+# -- regression: spinup -> spindown -> spinup must not compound/re-stall -----
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="exercises the Windows defer+restore lifecycle")
+def test_spinup_spindown_spinup_does_not_compound_or_restall(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The exact scenario review flagged: on Windows, a /spindown must
+    restore normal priority so the NEXT /spinup's warm_up() doesn't inherit
+    an already-lowered priority and reproduce the load-stall bug a second
+    time; the throttle itself must not compound across the cycle."""
+    from fastapi.testclient import TestClient
+
+    module = _load_module()
+
+    fake_pipeline = _FakePipeline()
+    _stub_pipeline_import(monkeypatch, fake_pipeline)
+    monkeypatch.setattr(module, "_check_gpu_deps", lambda: True)
+    monkeypatch.setattr(module, "_config", None)
+    monkeypatch.setattr(module, "_pipeline", None)
+    monkeypatch.setattr(module, "_priority_lowered", False)
+
+    lower_calls: list[int] = []
+    restore_calls: list[str] = []
+    monkeypatch.setattr(module, "_lower_own_priority", lambda: lower_calls.append(1))
+
+    from agent_index.indexing import priority as priority_module
+
+    monkeypatch.setattr(
+        priority_module, "restore_normal_priority", lambda: restore_calls.append("restore")
+    )
+
+    with TestClient(module.app) as client:
+        r1 = client.post("/spinup")
+        assert r1.status_code == 200
+        assert lower_calls == [1]  # lowered once after the first load
+
+        r2 = client.post("/spindown")
+        assert r2.status_code == 200
+        assert restore_calls == ["restore"]  # restored so the next load isn't pre-throttled
+        assert module._priority_lowered is False
+
+        r3 = client.post("/spinup")
+        assert r3.status_code == 200
+        assert lower_calls == [1, 1]  # lowered again for the second load -- never compounded
 
 
 def test_lower_own_priority_reads_configured_engine_nice(monkeypatch) -> None:

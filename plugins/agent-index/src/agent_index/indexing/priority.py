@@ -39,6 +39,35 @@ def lower_current_process_priority(nice: int) -> None:
     _lower_io_priority()
 
 
+def restore_normal_priority() -> None:
+    """Best-effort: undo a prior Windows priority-class lowering.
+
+    Windows-only. POSIX's ``os.nice()`` is a one-way floor for an
+    unprivileged process -- raising it back requires ``CAP_SYS_NICE``/root,
+    which a caller cannot assume, so there is nothing this can do there; a
+    POSIX caller should rely on applying the throttle at most once per
+    process lifetime instead (see ``agent_index_engine.app``'s
+    spinup/spindown handling). Never raises.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+
+        normal = 0x00000020  # NORMAL_PRIORITY_CLASS
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.SetPriorityClass.restype = ctypes.c_int
+        handle = kernel32.GetCurrentProcess()
+        if kernel32.SetPriorityClass(handle, normal):
+            log.debug("priority restored to normal")
+        else:
+            log.debug("SetPriorityClass(NORMAL) returned 0; priority unchanged")
+    except Exception:  # pragma: no cover - Windows-only, best-effort
+        log.debug("could not restore Windows priority", exc_info=True)
+
+
 def _lower_cpu_priority(nice: int) -> None:
     # POSIX: os.nice() is RELATIVE and returns the new value, so it only ever
     # lowers priority relative to the (possibly already-niced) parent -- it can

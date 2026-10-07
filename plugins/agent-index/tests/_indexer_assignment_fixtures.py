@@ -1,20 +1,29 @@
 """Reusable fixtures for the two documented container-testing workarounds when
 a repository carries no ``indexer:``/``indexers:`` designation in its own
 checked-in ``.agent-index/config.yaml`` -- the normal, intentional shape for a
-stateless, shareable harness repo (e.g. ``odsp-web-harness``), which never
+stateless, shareable harness repo (e.g. ``example-harness``), which never
 bakes a machine-specific designation into shared, forkable config. A real
 operator's bound knowledge repo supplies that designation at runtime; a
 container has neither a real knowledge repo nor a second real machine to
-designate, so a test needs one of these two standâ€‘ins instead:
+designate, so a test needs one of these two stand-ins instead:
 
 1. :func:`paired_knowledge_repo_indexer` -- a temporary, local-only
-   "knowledge repo" carrying the ``indexers:`` designation, mirroring how a
-   real bound knowledge repo supplies it (see
-   ``config._knowledge_root_for_repo`` / ``_knowledge_overlay.py``).
+   "knowledge repo" carrying the ``indexers:`` designation. This fixture
+   works ONLY because it monkeypatches ``config._external_state_root``
+   directly -- it mirrors the *shape* of what a real bound knowledge repo
+   supplies, not the real resolution mechanism (a genuine run needs an
+   actual ``agent-worktrees state-root --json`` response reporting
+   ``bound: true`` / ``source: "knowledge_repo"``; see
+   ``config._knowledge_root_for_repo`` / ``_knowledge_overlay.py``). A
+   bare, unregistered directory is not independently discoverable outside
+   this mocked test setup.
 2. :func:`machine_local_indexer_overlay` -- a machine-local overlay
-   (``<repo>/.copilot-extensions/agent-index/config.yaml``, gitignored, never
-   committed) declaring the current machine as the indexer directly, with
-   no knowledge-repo/external-state resolution involved at all.
+   (``<repo>/.copilot-extensions/agent-index/config.yaml``) declaring the
+   current machine as the indexer directly, with no knowledge-repo/
+   external-state resolution involved at all. This path is NOT
+   automatically gitignored by anything in agent-index itself -- a real
+   repo using this workaround must add it to its own ignore rules, or the
+   machine-specific designation is left available to commit.
 
 See ``plugins/agent-index/README.md`` ("Testing without an assigned indexer
 machine") for the developer-facing explanation these fixtures back.
