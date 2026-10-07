@@ -619,45 +619,104 @@ class TestPairedBothGate:
         rec.pair_role = "knowledge"
         return rec
 
-    def test_empty_knowledge_companion_collected_when_sibling_final(self):
-        d = prune.cleanup_disposition(
-            self._knowledge_rec(), _info(S.UNUSED),
-            paired_sibling_final=lambda r: True,
+    def _disp(self, rec, info=None, *, final=True, idle=True, **kw):
+        return prune.cleanup_disposition(
+            rec, info or _info(S.UNUSED),
+            paired_sibling_final=lambda r: final,
+            paired_sibling_idle=lambda r: idle,
+            **kw,
         )
+
+    def test_empty_knowledge_companion_collected_when_sibling_final_and_idle(self):
+        d = self._disp(self._knowledge_rec())
         assert d.cleanable is True and d.bucket == "clean"
         assert "empty paired companion" in d.reason
 
-    def test_empty_knowledge_companion_held_when_sibling_not_final(self):
+    def test_companion_preserved_when_finalized_sibling_still_live(self):
+        # finalize leaves the harness session running; its knowledge
+        # companion must not be removed out from under it (#5543 review).
+        d = self._disp(self._knowledge_rec(), idle=False)
+        assert d.cleanable is False and d.bucket == "unused"
+
+    def test_companion_preserved_when_sibling_liveness_unknown(self):
+        d = self._disp(self._knowledge_rec(), idle=None)
+        assert d.cleanable is False and d.bucket == "unused"
+
+    def test_companion_preserved_without_idle_probe(self):
         d = prune.cleanup_disposition(
             self._knowledge_rec(), _info(S.UNUSED),
-            paired_sibling_final=lambda r: False,
+            paired_sibling_final=lambda r: True,
         )
+        assert d.cleanable is False and d.bucket == "unused"
+
+    def test_empty_knowledge_companion_held_when_sibling_not_final(self):
+        d = self._disp(self._knowledge_rec(), final=False)
         assert d.cleanable is False and d.bucket == "paired-pending"
 
     def test_knowledge_companion_with_conversation_preserved(self):
-        d = prune.cleanup_disposition(
-            self._knowledge_rec(), _info(S.UNUSED), turn_count=3,
-            paired_sibling_final=lambda r: True,
-        )
+        d = self._disp(self._knowledge_rec(), turn_count=3)
         assert d.cleanable is False and d.bucket == "conversation"
 
     def test_knowledge_companion_with_live_claim_preserved(self):
         rec = self._knowledge_rec()
         rec.resources = [tracking.ResourceClaim(
             kind="worktree", ref="m/other/wt-x", state="active")]
-        d = prune.cleanup_disposition(
-            rec, _info(S.UNUSED),
-            paired_sibling_final=lambda r: True,
-        )
+        d = self._disp(rec)
         assert d.cleanable is False and d.bucket == "held-claims"
 
     def test_empty_harness_half_still_needs_include_unused(self):
-        rec = _rec_paired(status="active")
-        d = prune.cleanup_disposition(
-            rec, _info(S.UNUSED),
-            paired_sibling_final=lambda r: True,
-        )
+        d = self._disp(_rec_paired(status="active"))
         assert d.cleanable is False and d.bucket == "unused"
+
+
+class TestCleanupPairedSiblingIdle:
+    """cleanup's idle probe confirms the sibling has no live session."""
+
+    def _sib(self, tmp_path, **kw):
+        sib = _rec()
+        sib.worktree_id = "wt-h"
+        sib.worktree_path = str(tmp_path / "wt-h")
+        for k, v in kw.items():
+            setattr(sib, k, v)
+        return sib
+
+    def _probe(self, monkeypatch, sib, active=frozenset()):
+        from agent_worktrees import cleanup_gc_cli
+        monkeypatch.setattr(tracking, "find_paired_record", lambda r: sib)
+        monkeypatch.setattr(cleanup_gc_cli, "_build_active_paths",
+                            lambda recs: set(active))
+        return cleanup_gc_cli._paired_sibling_idle(_rec_paired())
+
+    def test_missing_sibling_unknown(self, monkeypatch):
+        assert self._probe(monkeypatch, None) is None
+
+    def test_live_session_claim_not_idle(self, tmp_path, monkeypatch):
+        (tmp_path / "wt-h").mkdir()
+        sib = self._sib(tmp_path, resources=[tracking.ResourceClaim(
+            kind="session", ref="m/p/wt-h#s1", state="at-rest")])
+        assert self._probe(monkeypatch, sib) is False
+
+    def test_active_path_not_idle(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        (tmp_path / "wt-h").mkdir()
+        sib = self._sib(tmp_path)
+        active = {sessions._normalize_path(sib.worktree_path)}
+        assert self._probe(monkeypatch, sib, active) is False
+
+    def test_no_session_idle(self, tmp_path, monkeypatch):
+        (tmp_path / "wt-h").mkdir()
+        assert self._probe(monkeypatch, self._sib(tmp_path)) is True
+
+    def test_reaped_sibling_idle(self, tmp_path, monkeypatch):
+        assert self._probe(monkeypatch, self._sib(tmp_path)) is True
+
+    def test_error_fails_safe(self, monkeypatch):
+        from agent_worktrees import cleanup_gc_cli
+
+        def boom(r):
+            raise RuntimeError("x")
+        monkeypatch.setattr(tracking, "find_paired_record", boom)
+        assert cleanup_gc_cli._paired_sibling_idle(_rec_paired()) is None
 
 
 class TestDefaultPairedSiblingFinal:

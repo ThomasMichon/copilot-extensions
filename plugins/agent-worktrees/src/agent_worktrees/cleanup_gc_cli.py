@@ -38,6 +38,28 @@ def sweep_managed_worktrees(*args, **kwargs): return reap_cli.sweep_managed_work
 def sweep_finished_session_worktrees(*args, **kwargs): return reap_cli.sweep_finished_session_worktrees(*args, **kwargs)
 
 
+def _paired_sibling_idle(rec: tracking.WorktreeRecord) -> bool | None:
+    """:data:`prune.PairedSiblingIdleProbe` for cleanup (#5543).
+
+    ``True`` only when the paired sibling is confirmed to have no live
+    session: no live ``kind="session"`` claim and no lock-file, hosted, or
+    mux session on its checkout. A missing sibling record is unknown
+    (``None``); any error fails safe to ``None``.
+    """
+    try:
+        sib = tracking.find_paired_record(rec)
+        if sib is None:
+            return None
+        if any(c.kind == "session" and c.is_live for c in sib.resources):
+            return False
+        if not sib.worktree_path or not Path(sib.worktree_path).exists():
+            return True
+        active = _build_active_paths([sib])
+        return sessions._normalize_path(sib.worktree_path) not in active
+    except Exception:
+        return None
+
+
 def add_parsers(sub) -> None:
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
@@ -340,6 +362,7 @@ def _revalidate_cleanup_safety(
                 include_conversations=include_conversations,
                 claimant_alive=claimant_mod.resolve_claimant_alive,
                 paired_sibling_final=prune.default_paired_sibling_final,
+                paired_sibling_idle=_paired_sibling_idle,
             )
             if not disp.cleanable:
                 blockers = _closure_blockers(latest, fresh_info, disp, turn_count=turns)
@@ -485,6 +508,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 include_conversations=include_conversations,
                 claimant_alive=claimant_mod.resolve_claimant_alive,
                 paired_sibling_final=prune.default_paired_sibling_final,
+                paired_sibling_idle=_paired_sibling_idle,
             )
             cleanable = disp.cleanable
             skip_reason = _cleanup_per_item_skip_reason(disp)

@@ -55,6 +55,15 @@ ClaimantAliveProbe = Callable[[str], Optional[bool]]
 # Injected (not called inline) so the pure assessment stays unit-testable.
 PairedSiblingFinalProbe = Callable[[tracking.WorktreeRecord], bool | None]
 
+# A paired-sibling-idle probe (#5543): given a PAIRED worktree record, report
+# whether its sibling is confirmed to have no live session (lock file, mux,
+# hosted session, or live ``kind="session"`` claim). ``finalize`` deliberately
+# leaves a live session running, so "finalized" alone never proves the
+# sibling has stopped using this half. Only ``True`` grants the empty
+# knowledge-companion exception in :func:`cleanup_disposition`; ``False`` and
+# ``None`` (unknown) keep the ordinary unused-preservation behavior.
+PairedSiblingIdleProbe = Callable[[tracking.WorktreeRecord], bool | None]
+
 # --- Verdict categories -----------------------------------------------------
 #
 # safe == True  (pruning loses nothing):
@@ -304,6 +313,7 @@ def cleanup_disposition(
     include_conversations: bool = False,
     claimant_alive: ClaimantAliveProbe | None = None,
     paired_sibling_final: PairedSiblingFinalProbe | None = None,
+    paired_sibling_idle: PairedSiblingIdleProbe | None = None,
 ) -> CleanupDisposition:
     """Map a prune verdict onto a cleanup action + bucket.
 
@@ -475,13 +485,16 @@ def cleanup_disposition(
         return CleanupDisposition(True, "clean", v.reason)
     if v.category == "empty":
         # An empty knowledge companion of a pair is a launch-time scaffold, not
-        # operator work. Reaching here with the probe injected means the
-        # BOTH-gate above already confirmed the harness sibling is finalized,
-        # so collect it without --include-unused; otherwise neither half ever
-        # converges (the harness waits on this half, which default cleanup
-        # preserves as "unused" forever).
-        if (paired_sibling_final is not None and rec.is_paired
-                and rec.pair_role == "knowledge"):
+        # operator work (#5543). Reaching here with the final-probe injected
+        # means the BOTH-gate above already confirmed the harness sibling is
+        # finalized; the idle-probe must additionally confirm no live session
+        # still uses it (finalize leaves the session running). Then collect it
+        # without --include-unused; otherwise neither half ever converges (the
+        # harness waits on this half, which default cleanup preserves as
+        # "unused" forever).
+        if (paired_sibling_final is not None and paired_sibling_idle is not None
+                and rec.is_paired and rec.pair_role == "knowledge"
+                and paired_sibling_idle(rec) is True):
             return CleanupDisposition(
                 True, "clean",
                 f"{v.reason} · empty paired companion of a finalized sibling")
