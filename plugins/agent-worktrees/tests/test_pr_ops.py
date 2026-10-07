@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import types
+
+import pytest
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
@@ -4965,6 +4967,31 @@ class TestPRStatusLive:
         assert rec.active_pr().head_sha == head
         # The whole provider-observation tuple goes with the old head.
         assert (rec.active_pr().head_observed_at, rec.active_pr().head_observed_api_base) == ("", "")
+
+    @pytest.mark.parametrize("vanishes", ["record", "worktree"])
+    def test_adopt_pushed_head_keeps_the_expectation_when_local_state_vanishes(
+            self, pr_repo, monkeypatch, vanishes):
+        """The record or the worktree disappears mid-call: nothing raises, so
+        pr-merge still goes ahead against the recorded head."""
+        from agent_worktrees import pr_cli
+
+        config, wid, wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.active_pr().head_sha = "recorded-before-a-manual-push"
+        tracking.save_record(rec)
+        head = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+        real_git = git_ops.git
+
+        def git(*args, **kw):
+            if vanishes == "record":
+                path.unlink()
+                return real_git(*args, **kw)
+            raise OSError(2, "No such file or directory")
+
+        monkeypatch.setattr(git_ops, "git", git)
+        assert pr_cli._adopt_pushed_head(config, rec.repo, 7, "gitea", head) == ""
 
     def test_adopt_pushed_head_rereads_the_record_under_its_lock(self, pr_repo, monkeypatch):
         """Another process updates the record between the scan and the write:

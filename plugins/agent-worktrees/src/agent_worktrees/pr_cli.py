@@ -295,18 +295,22 @@ def _adopt_pushed_head(
     if not worktree or not Path(worktree).is_dir():
         return ""
     # Git outside the record lock (never held across I/O), then a fresh RMW under it.
-    local = git_ops.git("rev-parse", "HEAD", cwd=worktree, check=False)
-    if local.returncode != 0 or local.stdout.strip() != live_head:
+    # A best-effort check: any local read failure keeps the recorded expectation.
+    try:
+        local = git_ops.git("rev-parse", "HEAD", cwd=worktree, check=False)
+        if local.returncode != 0 or local.stdout.strip() != live_head:
+            return ""
+        with tracking._RecordLock(path):
+            current = tracking.load_record(path)
+            prs = matching(current)
+            if len(prs) != 1 or prs[0].head_sha != seen.head_sha or current.worktree_path != worktree:
+                return ""  # changed since it was read: decide again on the next attempt
+            prs[0].head_sha = live_head
+            prs[0].head_observed_at = ""  # no provider observation of this head yet
+            prs[0].head_observed_api_base = ""
+            tracking.save_record(current)
+    except Exception:
         return ""
-    with tracking._RecordLock(path):
-        current = tracking.load_record(path)
-        prs = matching(current)
-        if len(prs) != 1 or prs[0].head_sha != seen.head_sha or current.worktree_path != worktree:
-            return ""  # changed since it was read: decide again on the next attempt
-        prs[0].head_sha = live_head
-        prs[0].head_observed_at = ""  # no provider observation of this head yet
-        prs[0].head_observed_api_base = ""
-        tracking.save_record(current)
     return live_head
 
 
