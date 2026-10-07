@@ -18,6 +18,30 @@ from dataclasses import dataclass, field
 from .watch_contract import Baseline, PRSnapshot, advance_baseline, compute_transitions
 
 
+def _baseline_to_dict(baseline: Baseline | None) -> dict | None:
+    if baseline is None:
+        return None
+    return {
+        "merged": baseline.merged,
+        "closed": baseline.closed,
+        "review_decision": baseline.review_decision,
+        "mergeable": baseline.mergeable,
+        "checks_state": baseline.checks_state,
+    }
+
+
+def _baseline_from_dict(data: dict | None) -> Baseline | None:
+    if data is None:
+        return None
+    return Baseline(
+        merged=bool(data.get("merged", False)),
+        closed=bool(data.get("closed", False)),
+        review_decision=data.get("review_decision"),
+        mergeable=data.get("mergeable"),
+        checks_state=data.get("checks_state"),
+    )
+
+
 @dataclass(frozen=True)
 class WatchKey:
     repo: str
@@ -103,6 +127,59 @@ class WatchRegistry:
             return {
                 str(key): sorted(bucket.keys()) for key, bucket in self._subscribers.items()
             }
+
+    def snapshot_state(self) -> list[dict]:
+        """Durable, process-independent dump of every live subscriber.
+
+        Deadlines are stored as **remaining seconds** (not an absolute
+        ``time.monotonic()`` epoch, which is meaningless across a process
+        restart) so :meth:`restore_state` can recompute a correct deadline
+        against the new process's own clock.
+        """
+        with self._lock:
+            now = time.monotonic()
+            out: list[dict] = []
+            for key, bucket in self._subscribers.items():
+                for sub in bucket.values():
+                    out.append(
+                        {
+                            "repo": key.repo,
+                            "number": key.number,
+                            "subscriber_id": sub.subscriber_id,
+                            "until": list(sub.until),
+                            "notify": sub.notify,
+                            "baseline": _baseline_to_dict(sub.baseline),
+                            "remaining_timeout": (
+                                max(0.0, sub.deadline - now) if sub.deadline is not None else None
+                            ),
+                        }
+                    )
+            return out
+
+    def restore_state(self, entries: list[dict]) -> int:
+        """Reload a :meth:`snapshot_state` dump (e.g. after a daemon
+        restart). Returns the number of subscribers restored. Never raises
+        on a malformed individual entry -- a corrupt/partial state file
+        should lose at most the bad entries, never block startup."""
+        restored = 0
+        with self._lock:
+            for entry in entries:
+                try:
+                    key = WatchKey(repo=str(entry["repo"]), number=int(entry["number"]))
+                    sub = Subscriber(
+                        subscriber_id=str(entry["subscriber_id"]),
+                        until=tuple(entry["until"]),
+                        notify=dict(entry.get("notify") or {}),
+                        baseline=_baseline_from_dict(entry.get("baseline")),
+                    )
+                    remaining = entry.get("remaining_timeout")
+                    if remaining is not None:
+                        sub.deadline = time.monotonic() + float(remaining)
+                    self._subscribers.setdefault(key, {})[sub.subscriber_id] = sub
+                    restored += 1
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return restored
 
     def apply_snapshot(self, key: WatchKey, snap: PRSnapshot) -> tuple[FiredEvent, ...]:
         """Diff ``snap`` against every subscriber of ``key``; fire and

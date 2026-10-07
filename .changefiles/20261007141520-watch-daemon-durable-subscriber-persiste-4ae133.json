@@ -1,0 +1,9 @@
+{
+  "comment": "watch daemon: durable subscriber persistence + serve/stop/restart/watch-health lifecycle verbs for safe update reattachment",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "minor"
+    }
+  ]
+}
