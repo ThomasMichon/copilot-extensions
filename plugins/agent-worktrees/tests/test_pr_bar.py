@@ -316,3 +316,31 @@ def test_pr_bar_cli_reports_the_verdict_as_its_exit_code(monkeypatch, capsys):
     assert pr_cli.cmd_pr_dispatch(["bar", "someone/else", "7"]) == 2  # unregistered: no borrowed binding
     prcfg.provider = "azure-devops"
     assert pr_cli.cmd_pr_dispatch(["bar", "owner/repo", "7"]) == 2
+
+
+@pytest.mark.parametrize("conn", [
+    {"nodes": [_thread()]},                                        # no pageInfo: maybe truncated
+    {"nodes": [_thread()], "pageInfo": {"endCursor": "x"}},        # no hasNextPage
+    {"pageInfo": {"hasNextPage": False, "endCursor": ""}},          # no nodes
+    {"nodes": "oops", "pageInfo": {"hasNextPage": False}},          # nodes not a list
+])
+def test_malformed_pagination_is_unknown_never_complete(conn):
+    raw = json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": conn}}}})
+    assert _status(_bar(FakeGh(raw={"threads": raw})))["threads_unresolved_zero"] == "unknown"
+
+
+def test_a_worktree_target_reads_the_supplied_configs_tracking_dir(monkeypatch, tmp_path):
+    """--config naming another project: its tracking dir, never the ambient one."""
+    from types import SimpleNamespace
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import pr_bar_cli, tracking, worktree_identity
+
+    seen = []
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, _c: wid)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: seen.append(name) or tmp_path)
+    active = SimpleNamespace(number=7, repo="owner/other")
+    monkeypatch.setattr(tracking, "load_record", lambda path: SimpleNamespace(
+        active_pr=lambda: active, repo="owner/other"))
+    slug, number, error = pr_bar_cli._target(["wt-1"], SimpleNamespace(repo_name="other-project"))
+    assert (slug, number, error) == ("owner/other", 7, "") and seen == ["other-project"]

@@ -331,9 +331,12 @@ def _pages(run, query: str, path, *, what: str, **kw) -> list[dict]:
         conn = path(_graphql(run, query, after=after, **kw))
         if not isinstance(conn, dict):
             raise ReadError(f"{what}: the response had no readable list")
-        nodes += [n for n in conn.get("nodes") or [] if isinstance(n, dict)]
-        info = conn.get("pageInfo") or {}
-        if not info.get("hasNextPage"):
+        page, info = conn.get("nodes"), conn.get("pageInfo")
+        if not isinstance(page, list) or not isinstance(info, dict) \
+                or not isinstance(info.get("hasNextPage"), bool):
+            raise ReadError(f"{what}: a page without readable nodes or pagination info")
+        nodes += [n for n in page if isinstance(n, dict)]
+        if not info["hasNextPage"]:
             return nodes
         cursor = info.get("endCursor") or ""
         if not cursor or cursor == after:
@@ -350,7 +353,7 @@ def _checks_conn(pr: dict):
     if not isinstance(commit, dict):
         return None
     rollup = commit.get("statusCheckRollup")
-    return rollup.get("contexts") if isinstance(rollup, dict) else {"nodes": [], "pageInfo": {}}
+    return rollup.get("contexts") if isinstance(rollup, dict) else {"nodes": [], "pageInfo": {"hasNextPage": False}}
 
 
 def read_github(repo: str, number: int, *, host: str, token: str | None = None, run=None) -> Snapshot:

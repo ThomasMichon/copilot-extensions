@@ -48,7 +48,8 @@ def _target(operands: list[str], config) -> tuple[str, int, str]:
     if not wid:
         return "", 0, "Not in a worktree; pass <owner/name> <number> or a worktree id."
     try:
-        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        # The supplied config's project (--config), never the ambient one.
+        record = tracking.load_record(cfg.tracking_dir(getattr(config, "repo_name", None)) / f"{wid}.yaml")
     except Exception as exc:
         return "", 0, f"No readable tracking record for '{wid}': {exc}"
     active = record.active_pr()
