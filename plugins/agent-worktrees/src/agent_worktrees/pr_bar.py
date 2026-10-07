@@ -81,7 +81,7 @@ class Snapshot:
     title: str = ""
     labels: list[str] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)    # {name, status, conclusion}
-    reviews: list[dict] = field(default_factory=list)   # {author, state, commit, body, at}
+    reviews: list[dict] = field(default_factory=list)   # {author, bot, state, commit, body, at}
     threads: list[dict] = field(default_factory=list)   # {resolved, outdated, path, author}
     errors: dict[str, str] = field(default_factory=dict)
 
@@ -186,10 +186,12 @@ def _threads(snap: Snapshot) -> Clause:
     return Clause("threads_unresolved_zero", "met", f"0 unresolved of {len(snap.threads)}")
 
 
-def _is_human(login: str, snap: Snapshot, reviewer: str) -> bool:
-    low = (login or "").lower()
-    return bool(low) and low not in (reviewer.lower(), COPILOT_REVIEWER, (snap.author or "").lower()) \
-        and not low.endswith("[bot]")
+def _is_human(review: dict, snap: Snapshot, reviewer: str) -> bool:
+    """A reviewer who is a person: not an app (GraphQL's ``Bot``; a REST login's
+    ``[bot]`` suffix), not the PR's reviewer of record, not its author."""
+    low = (review.get("author") or "").lower()
+    return bool(low) and not review.get("bot") and not low.endswith("[bot]") \
+        and low not in (reviewer.lower(), COPILOT_REVIEWER, (snap.author or "").lower())
 
 
 def _humans(snap: Snapshot, reviewer: str) -> Clause:
@@ -197,13 +199,13 @@ def _humans(snap: Snapshot, reviewer: str) -> Clause:
         return Clause("human_reviews_answered", "unknown", error=snap.errors["reviews"])
     verdicts: dict[str, dict] = {}
     for r in sorted(snap.reviews, key=lambda r: r.get("at") or ""):
-        if _is_human(r.get("author", ""), snap, reviewer) and r.get("state") in (
+        if _is_human(r, snap, reviewer) and r.get("state") in (
                 "APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
             verdicts[r["author"]] = r
     asking = sorted(a for a, r in verdicts.items() if r.get("state") == "CHANGES_REQUESTED")
     if asking:
         return Clause("human_reviews_answered", "failed", f"changes requested by {', '.join(asking)}")
-    humans = {r.get("author") for r in snap.reviews if _is_human(r.get("author", ""), snap, reviewer)}
+    humans = {r.get("author") for r in snap.reviews if _is_human(r, snap, reviewer)}
     return Clause("human_reviews_answered", "met",
                   f"no outstanding change request ({len(humans)} human reviewer(s))")
 

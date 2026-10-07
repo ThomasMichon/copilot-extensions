@@ -19,8 +19,9 @@ CHANGES_BODY = ("### \U0001f7e1 Changes recommended\n\n<details open>\n<summary>
                 "</strong></summary>\n</details>")
 
 
-def _review(author=COPILOT, state="COMMENTED", commit=HEAD, body=APPROVED_BODY, at="2026-10-06T10:00:00Z"):
-    return {"author": {"login": author}, "state": state, "commit": {"oid": commit},
+def _review(author=COPILOT, state="COMMENTED", commit=HEAD, body=APPROVED_BODY, at="2026-10-06T10:00:00Z",
+            kind="User"):
+    return {"author": {"__typename": kind, "login": author}, "state": state, "commit": {"oid": commit},
             "body": body, "submittedAt": at}
 
 
@@ -65,6 +66,8 @@ class FakeGh:
         elif "reviews(" in query:
             kind = "reviews"
         else:
+            if "core" in self.raw:
+                return subprocess.CompletedProcess(args, 0, self.raw["core"], "")
             head = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
             self.core_reads += 1
             core = {"state": self.state, "mergeable": self.mergeable,
@@ -449,3 +452,43 @@ def test_an_unreadable_label_page_is_unknown():
     labels = tuple(f"area-{i}" for i in range(150))
     bar = _bar(FakeGh(labels=labels, fail="labels"))
     assert bar.verdict == "unknown" and set(_status(bar).values()) == {"unknown"}
+
+
+def test_an_app_reviewer_is_not_a_human():
+    """GraphQL logins carry no ``[bot]`` suffix: an app's change request (``Bot``) is no
+    human's, while a person's (``User``) still blocks."""
+    app = _review(author="some-app", state="CHANGES_REQUESTED", kind="Bot")
+    assert _status(_bar(FakeGh(reviews=[_review(), app])))["human_reviews_answered"] == "met"
+    person = _review(author="someone", state="CHANGES_REQUESTED")
+    assert _status(_bar(FakeGh(reviews=[_review(), person])))["human_reviews_answered"] == "failed"
+
+
+@pytest.mark.parametrize("first, last, status", [
+    ("UNKNOWN", "MERGEABLE", "met"),      # GitHub computed it during the read: the answer stands
+    ("MERGEABLE", "UNKNOWN", None),      # recomputing (the base moved): not an answer, not a change
+])
+def test_mergeability_settling_during_the_read_is_not_a_change(first, last, status):
+    bar = _bar(FakeGh(mergeable=first, final={"mergeable": last}))
+    assert "changed during the read" not in " ".join(c.evidence for c in bar.clauses)
+    mergeable = _status(bar)["mergeable"]
+    assert mergeable == status if status else mergeable != "met"
+
+
+@pytest.mark.parametrize("kind, body, part", [
+    ("threads", {"data": {"repository": [1]}}, "threads_unresolved_zero"),
+    ("reviews", {"data": {"repository": {"pullRequest": {"reviews": {
+        "nodes": [{"author": [1], "state": "COMMENTED"}],
+        "pageInfo": {"hasNextPage": False}}}}}}, "review_on_head"),
+    ("threads", {"data": {"repository": {"pullRequest": {"reviewThreads": {
+        "nodes": [{"isResolved": False, "comments": "x"}],
+        "pageInfo": {"hasNextPage": False}}}}}}, "threads_unresolved_zero"),
+    ("core", {"data": {"repository": {"pullRequest": {"author": [1], "labels": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}}, "ci_green"),
+])
+def test_a_malformed_nested_response_is_unknown_never_raised(kind, body, part):
+    """``get_bar_snapshot`` never raises: a list where an object belongs, anywhere in a
+    page, reads as that part unreadable."""
+    snap = github_bar.read_bar("owner/repo", 7, host="github.com", token="t",
+                               run=FakeGh(raw={kind: json.dumps(body)}))
+    assert snap.errors
+    bar = pr_bar.evaluate(snap, now="2026-10-06T12:00:00+00:00", policy=NO_APPROVAL)
+    assert _status(bar)[part] == "unknown"

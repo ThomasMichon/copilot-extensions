@@ -26,7 +26,7 @@ statusCheckRollup{contexts(first:100,after:$after){pageInfo{hasNextPage endCurso
 nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}}}"""
 _REVIEWS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(first:100,after:$after){
-pageInfo{hasNextPage endCursor} nodes{databaseId author{login} state submittedAt body commit{oid}}}}}}"""
+pageInfo{hasNextPage endCursor} nodes{databaseId author{__typename login} state submittedAt body commit{oid}}}}}}"""
 _THREADS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$after){
 pageInfo{hasNextPage endCursor} nodes{isResolved isOutdated path comments(first:1){nodes{author{login}}}}}}}}"""
@@ -36,6 +36,30 @@ MAX_PAGES = 100
 
 class ReadError(RuntimeError):
     pass
+
+
+#: A response shaped other than expected (a list where an object belongs, ...):
+#: read as that part being unreadable, never raised out of :func:`read_bar`.
+_SHAPE_ERRORS = (ReadError, AttributeError, TypeError, KeyError, IndexError, ValueError)
+
+
+def _unreadable(exc: Exception) -> str:
+    return str(exc) if isinstance(exc, ReadError) else f"malformed response ({type(exc).__name__}: {exc})"
+
+
+def _s(value) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _login(node) -> str:
+    """The author's login; ``""`` for a deleted user (``null``). Any other shape is
+    unreadable: the author decides who counts as a human reviewer."""
+    author = node.get("author")
+    if author is None:
+        return ""
+    if not isinstance(author, dict) or not isinstance(author.get("login", ""), str):
+        raise ReadError("an author that isn't readable")
+    return author.get("login") or ""
 
 
 def _graphql(run, query: str, *, host: str, env: dict, owner: str, name: str,
@@ -55,7 +79,9 @@ def _graphql(run, query: str, *, host: str, env: dict, owner: str, name: str,
         raise ReadError(f"unexpected GraphQL response shape: {type(data).__name__}")
     if data.get("errors"):
         raise ReadError(f"GraphQL errors: {json.dumps(data.get('errors'))[:300]}")
-    pr = ((data.get("data") or {}).get("repository") or {}).get("pullRequest")
+    repo = data.get("data")
+    repo = repo.get("repository") if isinstance(repo, dict) else None
+    pr = repo.get("pullRequest") if isinstance(repo, dict) else None
     if not isinstance(pr, dict):
         raise ReadError("the pull request wasn't in the response")
     return pr
@@ -124,38 +150,42 @@ def read_bar(repo: str, number: int, *, host: str, token: str | None = None, run
     snap = Snapshot(repo=repo, number=int(number))
     try:
         pr = _core(run, **kw)
-        snap.state, snap.mergeable = pr.get("state") or "", pr.get("mergeable") or ""
-        snap.head, snap.author = pr.get("headRefOid") or "", (pr.get("author") or {}).get("login", "")
-        snap.draft, snap.title = bool(pr.get("isDraft")), pr.get("title") or ""
-        snap.labels = list(pr["labels"])
-    except ReadError as exc:
-        snap.errors["pr"] = str(exc)
+        snap.state, snap.mergeable = _s(pr.get("state")), _s(pr.get("mergeable"))
+        snap.head, snap.author = _s(pr.get("headRefOid")), _login(pr)
+        snap.draft, snap.title = pr.get("isDraft") is True, _s(pr.get("title"))
+        snap.labels = [_s(n) for n in pr["labels"]]
+    except _SHAPE_ERRORS as exc:
+        snap.errors["pr"] = _unreadable(exc)
         return snap
     parts = (
         ("checks", _CHECKS_QUERY, _checks_conn, lambda n: {
-            "name": n.get("name") or n.get("context") or "?",
-            "status": n.get("status") or n.get("state") or "",
-            "conclusion": n.get("conclusion") or ""}),
+            "name": _s(n.get("name")) or _s(n.get("context")) or "?",
+            "status": _s(n.get("status")) or _s(n.get("state")), "conclusion": _s(n.get("conclusion"))}),
         ("reviews", _REVIEWS_QUERY, lambda pr: pr.get("reviews"), lambda n: {
-            "id": n.get("databaseId"),
-            "author": (n.get("author") or {}).get("login", ""), "state": n.get("state") or "",
-            "commit": (n.get("commit") or {}).get("oid", ""), "body": n.get("body") or "",
-            "at": n.get("submittedAt") or ""}),
+            "id": n.get("databaseId") if type(n.get("databaseId")) is int else None,
+            "author": _login(n), "bot": (n.get("author") or {}).get("__typename") == "Bot",
+            "state": _s(n.get("state")), "commit": _s((n.get("commit") or {}).get("oid")),
+            "body": _s(n.get("body")), "at": _s(n.get("submittedAt"))}),
         ("threads", _THREADS_QUERY, lambda pr: pr.get("reviewThreads"), lambda n: {
-            "resolved": bool(n.get("isResolved")), "outdated": bool(n.get("isOutdated")),
-            "path": n.get("path") or "",
-            "author": (((n.get("comments") or {}).get("nodes") or [{}])[0].get("author") or {}).get("login", "")}),
+            "resolved": n.get("isResolved") is True, "outdated": n.get("isOutdated") is True,
+            "path": _s(n.get("path")), "author": _login(((n.get("comments") or {}).get("nodes") or [{}])[0])}),
     )
     for part, query, path, shape in parts:
         try:
             setattr(snap, part, [shape(n) for n in _pages(run, query, path, what=part, **kw)])
-        except ReadError as exc:
-            snap.errors[part] = str(exc)
+        except _SHAPE_ERRORS as exc:
+            snap.errors[part] = _unreadable(exc)
     try:  # the same core again: any change since the first read means a mixed view
         after = _core(run, **kw)
-        snap.head_after = after.get("headRefOid") or ""
-        snap.changed = ", ".join(f for f in ("state", "mergeable", "isDraft", "title", "labels")
-                                 if after.get(f) != pr.get(f))
-    except ReadError as exc:
-        snap.errors["pr"] = f"re-reading the PR: {exc}"
+        snap.head_after = _s(after.get("headRefOid"))
+        changed = [f for f in ("state", "isDraft", "title", "labels") if after.get(f) != pr.get(f)]
+        # GitHub computes mergeability lazily: UNKNOWN first, then the answer. Only a
+        # flip between two answers is a change; otherwise the latest read stands.
+        known = {pr.get("mergeable"), after.get("mergeable")} <= {"MERGEABLE", "CONFLICTING"}
+        if known and after.get("mergeable") != pr.get("mergeable"):
+            changed.append("mergeable")
+        snap.mergeable = _s(after.get("mergeable"))
+        snap.changed = ", ".join(changed)
+    except _SHAPE_ERRORS as exc:
+        snap.errors["pr"] = f"re-reading the PR: {_unreadable(exc)}"
     return snap
