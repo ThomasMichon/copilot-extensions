@@ -73,21 +73,14 @@ DEFAULT_DB = _HERE / "ci_telemetry.sqlite3"
 # second live-fetch path this phase does not need. Remove an entry here once
 # its owning effort resolves it (confirmed via a fresh `refresh` + `report`
 # showing it no longer applies).
-KNOWN_NOISY_NONBLOCKING_CHECKS: tuple[dict, ...] = (
-    {
-        "key": "identifier-leak-guard-unconfigured",
-        "title": "identifier leak guard: FORBIDDEN_IDS_FACILITY/FORBIDDEN_IDS_WORK secrets unset",
-        "note": (
-            "Red on every PR because the repo secrets it needs are not "
-            "configured -- not a code defect. Owned end-to-end by "
-            "efforts/active/ci-identifier-leak-guard/ (#3923); this entry "
-            "should be removed once that effort lands and a fresh refresh "
-            "confirms the check no longer fires red."
-        ),
-        "occurrences": None,  # not counted from run history -- see module docstring
-        "blocking": False,
-    },
-)
+#
+# The sole prior entry (`identifier-leak-guard-unconfigured`, the
+# `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK`-unset noise) was removed
+# 2026-10-06: `efforts/active/ci-identifier-leak-guard/` (#3923) provisioned
+# the secrets, and `identifier leak guard` now reports `pass` consistently
+# across live PRs (spot-checked #5553, #5440, #5383, #5325) -- it is no
+# longer unconditionally red and does not belong in this tuple.
+KNOWN_NOISY_NONBLOCKING_CHECKS: tuple[dict, ...] = ()
 
 
 # --------------------------------------------------------------------------
@@ -505,6 +498,8 @@ def render_report(stats: list[SignatureStat]) -> str:
         )
 
     lines.append("\n## Known noisy, non-blocking checks (tracked separately, not run-history-derived)\n")
+    if not KNOWN_NOISY_NONBLOCKING_CHECKS:
+        lines.append("- none currently tracked\n")
     for entry in KNOWN_NOISY_NONBLOCKING_CHECKS:
         lines.append(f"- `{entry['key']}` **{entry['title']}** -- {entry['note']}")
 
