@@ -36,15 +36,25 @@ def _identity_termination_available() -> bool:
     """Whether this platform has a genuine identity-bound termination
     primitive at all (a build-time/kernel capability, independent of any
     specific pid). Windows always does (ctypes/kernel32); POSIX only when
-    ``os.pidfd_open``/``signal.pidfd_send_signal`` are callable AND an
-    actual self-probe (``pidfd_open`` against our own, guaranteed-alive
-    pid) succeeds -- the Python bindings existing does not prove the
-    running kernel supports the syscall (an older kernel raises
-    ``ENOSYS``, which would otherwise be indistinguishable from a benign
-    per-victim lookup failure and incorrectly left unkilled instead of
-    falling back)."""
+    ``os.pidfd_open``/``signal.pidfd_send_signal`` are callable AND a
+    self-probe (``pidfd_open`` against our own, guaranteed-alive pid)
+    does not report definite kernel-level absence of the syscall
+    (``ENOSYS``) -- the Python bindings existing does not prove the
+    running kernel supports the syscall; an older kernel raises
+    ``ENOSYS`` there.
+
+    Any OTHER self-probe failure (``EMFILE``/``ENFILE``/``EPERM``/etc.) is
+    deliberately treated as inconclusive, NOT as capability absence: this
+    function still returns ``True`` in that case, keeping ``_kill_pid`` on
+    the fail-closed identity-bound path (where a subsequent per-victim
+    lookup failure simply skips the kill) rather than opening up the
+    legacy unverified-kill fallback on a transient/unrelated resource
+    error that says nothing about whether the real victim pid could be
+    safely identity-verified.
+    """
     if sys.platform == "win32":
         return True
+    import errno
     import signal as _signal
 
     if not callable(getattr(os, "pidfd_open", None)) or not callable(
@@ -53,8 +63,8 @@ def _identity_termination_available() -> bool:
         return False
     try:
         fd = os.pidfd_open(os.getpid(), 0)
-    except OSError:
-        return False
+    except OSError as exc:
+        return exc.errno != errno.ENOSYS
     else:
         os.close(fd)
         return True
@@ -126,19 +136,28 @@ def _enumerate_descendant_pids_windows(pid: int) -> tuple[list[tuple[int, int]],
 
 
 def _verify_descendant_identity_windows(child_pid: int, recorded_parent_pid: int) -> str | None:
-    """Re-verify *child_pid* is STILL a live child of *recorded_parent_pid*
-    and return its current process-start-time identity token, or ``None``
-    if either check fails.
+    """Capture *child_pid*'s current process-start-time identity token
+    FIRST, then verify it is STILL a live child of *recorded_parent_pid* --
+    returning that same, already-captured token, or ``None`` if either
+    step fails.
 
-    Performed as one narrow, per-pid re-check immediately before use --
-    never trusting the bulk census alone -- so a pid the OS reused for an
-    unrelated process between the census and this point (a different
-    parent, or no live parent at all) is rejected here rather than
-    accepted on stale ancestry evidence.
+    Mirrors ``_kill_pid``'s own token-before-ownership-check ordering:
+    capturing the token before the (slower) ancestry re-check means a pid
+    reused during that check is still caught by
+    ``terminate_pid_if_identity``'s own final re-verification at the
+    actual kill -- using a token captured any later (e.g. after the
+    ancestry check, as a prior version of this function did) would
+    instead risk capturing a *replacement* process's token if reuse
+    happened during that check, since nothing would subsequently catch
+    the mismatch for a replacement that happens to share the same parent.
     """
     import subprocess as sp
 
     from zdd import diagnostics
+
+    start_time = diagnostics.process_start_time(child_pid)
+    if start_time is None:
+        return None
 
     try:
         out = sp.run(
@@ -160,7 +179,7 @@ def _verify_descendant_identity_windows(child_pid: int, recorded_parent_pid: int
     current_ppid = (out.stdout or "").strip()
     if not current_ppid.isdigit() or int(current_ppid) != recorded_parent_pid:
         return None
-    return diagnostics.process_start_time(child_pid)
+    return start_time
 
 
 def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
@@ -176,14 +195,25 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
     ``_verify_descendant_identity_windows``) -- never a token sampled
     separately from a stale bulk snapshot.
 
+    If the ROOT's own identity verification fails (the census ran before
+    the root died and its pid got reused), descendant cleanup is skipped
+    entirely: a descendant census taken from that point can describe the
+    *replacement* process's children, not the verified daemon's, so
+    killing them would terminate unrelated processes even though the root
+    kill itself was correctly refused.
+
     A failed census (vs. a genuinely empty one) is surfaced via a stderr
     warning rather than silently treated as "no descendants" -- the root
-    is still killed (best effort), but some live children may survive
-    when the census itself could not run, and that is made visible rather
-    than silently assumed away. This never falls back to a bare,
-    unverified ``taskkill``.
+    is still killed (best effort, once its own identity is verified), but
+    some live children may survive when the census itself could not run,
+    and that is made visible rather than silently assumed away. This
+    never falls back to a bare, unverified ``taskkill``.
     """
     from zdd import diagnostics
+
+    root_result = diagnostics.terminate_pid_if_identity(pid, start_time)
+    if not root_result.get("identity_verified"):
+        return
 
     descendants, census_ok = _enumerate_descendant_pids_windows(pid)
     if not census_ok:
@@ -193,7 +223,6 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
             "children may survive",
             file=sys.stderr,
         )
-    diagnostics.terminate_pid_if_identity(pid, start_time)
     for child_pid, recorded_parent_pid in descendants:
         child_start = _verify_descendant_identity_windows(child_pid, recorded_parent_pid)
         if child_start is not None:

@@ -1234,7 +1234,38 @@ claiming discipline alone.
   `test_kill_pid_identity.py` to 10 tests covering token-before-ownership
   ordering, descendant ancestry re-verification rejecting a stale/wrong
   parent, the pidfd self-probe distinguishing missing-attribute from
-  kernel-ENOSYS, and census-failure visibility.
+  kernel-ENOSYS, and census-failure visibility. A THIRD review round
+  found the new `_kill_pid_identity.py` module (split out after round 2
+  to stay under the 1000-line module-size cap) exceeded that very cap at
+  1042 lines -- split `_identity_termination_available`,
+  `_enumerate_descendant_pids_windows`, `_verify_descendant_identity_windows`,
+  `_kill_pid_tree_windows_if_identity`, and `_kill_pid` into their own
+  `_kill_pid_identity.py` (263 lines; `service_process_cli.py` now 820),
+  re-exported for existing callers, with thin lazy-import wrappers
+  avoiding a circular import. That same review round then found 4 MORE
+  real findings in the refactored code, all fixed: (f) the kernel-ENOSYS
+  self-probe treated ANY `OSError` as platform incapability, including
+  transient/unrelated resource errors (`EMFILE`/`EPERM`) that say nothing
+  about real kernel support -- narrowed to only treat a definite
+  `errno.ENOSYS` as capability absence, staying on the fail-closed
+  identity-bound path (skip-the-kill, not fall-back-to-bare-kill) for any
+  other self-probe failure; (g) `_verify_descendant_identity_windows`
+  still captured a child's identity token AFTER its ancestry re-check (a
+  separate, later lookup) -- reordered to capture the token FIRST, same
+  as the root-level fix, so a pid reused during the ancestry check is
+  still caught by `terminate_pid_if_identity`'s own final verification;
+  (h) if the ROOT's own identity verification failed (a reused pid), the
+  Windows tree-kill path still proceeded to enumerate and kill
+  "descendants" -- from a census that, taken from that same wrong pid,
+  could describe an unrelated replacement's children -- now returns
+  immediately on root-verification failure, before any census runs; (i)
+  the test suite only ever exercised mocked `terminate_pid_if_identity`
+  results, never the real OS-bound primitive -- added two tests using an
+  actual spawned child process: one confirming a matching token
+  genuinely terminates it, one confirming a stale/wrong token leaves it
+  alive, both with explicit cleanup in either outcome. Expanded
+  `test_kill_pid_identity.py` to 15 tests. Full targeted suite re-run
+  after the split: 57 passed, 20 skipped.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR
