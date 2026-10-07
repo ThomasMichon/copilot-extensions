@@ -28,7 +28,13 @@
   agent-mcp/agent-index's unsafe races, agent-bridge's lock-safe-but-still-
   non-conforming rewrite (the only plugin that's actually lock-safe), and
   agent-ssh/agent-containers/agent-machines' unconditional in-place
-  reinstall; filed and expanded this slice)
+  reinstall; filed and expanded this slice) ·
+  `ThomasMichon/copilot-extensions#5614` (attended/human-interactive
+  CLI-mode venue sessions need the same bridge-registration treatment
+  `#3346` proposes for the detached case — carved from the
+  `remote-interactive-sessions` reconciliation, operator-flagged as a
+  real requirement: an attended remote session must still be driven via
+  agent-bridge, not a fabric-invisible raw SSH mux session)
 
 ## Guiding Intent
 
@@ -437,4 +443,26 @@ then rather than assuming either answer.
   cross-link naming the ownership split. This is itself a small, in-scope
   Phase 2 fold-back on a second vision, carried by the same review round
   rather than deferred to a separate slice.
-- Worktree not yet finalized as of this entry; PR pending merge.
+- PR #5575 merged; worktree finalized.
+
+### 2026-10-07 — Operator follow-up: attended sessions must stay bridge-driven
+- Operator confirmed, after reviewing this slice's summary, that attended
+  (human-interactive) remote CodeSpace sessions should still be driven via
+  agent-bridge, not treated as a bridge-invisible raw SSH mux escape hatch
+  — exactly the coordination-layer gap `remote-interactive-sessions`
+  already defers to from `agent-codespaces`' `dual-mode-session-reach`.
+- Searched for an existing tracked issue before filing (dedup discipline):
+  found `#3346` ("Detached (agent-facing) CLI-mode venue sessions..."),
+  which proposes the matching daemon-port-reverse-forward +
+  `live_sessions` registration machinery but is explicitly scoped to the
+  **detached**/agent-facing launch only — no issue covered the
+  **attended**/human-interactive counterpart.
+- Filed `#5614` for the attended case, cross-referencing `#3346` and the
+  two visions (`remote-interactive-sessions`'s stated gap,
+  `agent-codespaces`'s `dual-mode-session-reach` deferral). Left a
+  cross-link comment on `#3346` pointing back.
+- No vision text changed this entry — the visions already correctly state
+  this as the should-be contract; only the tracked-issue gap needed
+  closing. Next: continue Phase 2 by picking the next stale/high-traffic
+  vision (candidates from the prior ranking: `agent-ssh` 139 commits since
+  2026-07-22, `agent-containers` 123 commits since 2026-08-27).
