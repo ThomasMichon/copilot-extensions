@@ -48,7 +48,8 @@ def _self_merge_flow():
 class _FakeProvider:
     name = "github"
 
-    def __init__(self, err="", auto_err="unsupported", review_gate=None):
+    def __init__(self, err="", auto_err="unsupported", review_gate=None, live_head=""):
+        self._live_head = live_head
         self._err = err
         self._auto_err = auto_err
         self._review_gate = review_gate
@@ -91,6 +92,9 @@ class _FakeProvider:
             bypass_reason=bypass_reason,
         ))
         return self._auto_err
+
+    def get_pull(self, repo, number, *, api_base="", token=None):
+        return prov.PullResult(number=number, head_sha=self._live_head)
 
     def pull_review_gate(self, repo, number, *, api_base="", token=None):
         self.review_gate_calls.append(dict(repo=repo, number=number))
@@ -289,6 +293,43 @@ def test_now_passes_tracked_pushed_head_to_auto_merge_default_path(monkeypatch):
              delete_source_branch=True, expected_head_sha="just-pushed-sha")
     ]
     assert fake.calls == []  # no immediate direct merge
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize(("adopted", "expected"), [("manually-pushed-sha", "manually-pushed-sha"),
+                                                   ("", "just-pushed-sha")])
+def test_now_adopts_a_moved_head_only_when_it_is_the_worktrees_own(monkeypatch, adopted, expected):
+    """The provider's head moved past the recorded one (a plain `git push`):
+    `pr-merge` merges it only when the tracking worktree's own HEAD is that
+    head, else the stale expectation stands and the provider refuses."""
+    from agent_worktrees import pr_cli
+
+    fake = _FakeProvider(live_head="manually-pushed-sha")
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head",
+                        lambda config, repo, number, provider: "just-pushed-sha")
+    asked = []
+    monkeypatch.setattr(pr_cli, "_adopt_pushed_head",
+                        lambda config, repo, number, provider, live: asked.append(live) or adopted)
+    rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True, config=object())
+    assert rc == 0 and asked == ["manually-pushed-sha"]
+    assert fake.calls[0]["expected_head_sha"] == expected
+
+
+def test_now_merges_against_the_recorded_head_when_the_live_head_is_unreadable(monkeypatch):
+    """A malformed provider read (here, bad JSON) is no usage error: the merge
+    goes ahead against the recorded expectation."""
+    from agent_worktrees import pr_cli
+
+    fake = _FakeProvider()
+    fake.get_pull = lambda *a, **kw: (_ for _ in ()).throw(ValueError("Expecting value"))
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head",
+                        lambda config, repo, number, provider: "just-pushed-sha")
+    rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True, config=object())
+    assert rc == 0 and fake.calls[0]["expected_head_sha"] == "just-pushed-sha"
 
 
 def test_now_omits_match_head_commit_without_config(monkeypatch):

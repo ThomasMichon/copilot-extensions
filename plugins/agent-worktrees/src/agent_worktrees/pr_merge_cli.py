@@ -205,6 +205,17 @@ def _pr_merge_now(
         expected_head_sha = _pr_cli._tracked_pr_pushed_head(
             config, args.repo, args.pr, provider.name,
         )
+        if expected_head_sha:
+            # A plain `git push` of the worktree's own HEAD leaves the record a
+            # head behind: adopt the provider's head when it is that HEAD.
+            try:
+                live = provider.get_pull(args.repo, args.pr, api_base=base, token=tok).head_sha
+            except (ProviderError, OSError, ValueError, AttributeError):
+                live = ""  # unreadable: merge against the recorded head, as before
+            if live and live != expected_head_sha:
+                expected_head_sha = _pr_cli._adopt_pushed_head(
+                    config, args.repo, args.pr, provider.name, live,
+                ) or expected_head_sha
 
     # General repo comprehension: this repo's *config* selects pr-self-merge
     # (a maintainer's choice), but that never implies the identity running
