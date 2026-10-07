@@ -1363,7 +1363,33 @@ claiming discipline alone.
   rather than in this Journal (this effort's Plan item already correctly
   scopes the claim to the `_kill_pid` call site, leaving the POSIX
   `_force_kill_agent_bridge_tree` SIGKILL path open on #5006). Full
-  targeted suite re-run: 65 passed, 20 skipped.
+  targeted suite re-run: 65 passed, 20 skipped. An EIGHTH review round
+  found 1 more real finding (fixed) plus a lower-severity efficiency
+  observation (also fixed): (q) the deepest-first kill loop could
+  terminate its OWN executing process before reaching the root kill --
+  Session Hosts are launched as children of the bridge daemon
+  (`session_host/launcher.py`), so a `service stop` invoked from inside
+  one of those descendants would see itself in the census as a verified
+  descendant of the root being stopped, and could kill itself mid-cleanup,
+  leaving the daemon running with no one left to finish stopping it.
+  `os.getpid()` is now explicitly excluded from the actual termination
+  call (its identity is still verified like any other descendant, so
+  traversal through any of its own further children stays correct --
+  only the kill itself is skipped). The lower-severity finding noted each
+  verified descendant cost two separate PowerShell round trips (child +
+  parent), uncapped by the caller's own `forced_timeout` (which only
+  starts counting after this function returns) -- combined both lookups
+  into one PowerShell invocation
+  (`_query_two_pid_ancestry_windows`, replacing the now-removed
+  `_query_pid_ancestry_windows`) and added an overall
+  `_DESCENDANT_CLEANUP_DEADLINE_S` (30s) wall-clock budget for the whole
+  descendant loop, independent of any one descendant's per-query timeout;
+  remaining descendants are left unprocessed (best effort, surfaced via a
+  stderr warning) once it elapses, with the root kill still proceeding
+  immediately. Added 2 more tests (25 total): self-protection against
+  killing the executing process, and the deadline actually stopping
+  further descendant processing. Full targeted suite re-run: 67 passed,
+  20 skipped.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR

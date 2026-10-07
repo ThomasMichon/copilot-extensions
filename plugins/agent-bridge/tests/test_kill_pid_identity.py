@@ -14,6 +14,7 @@ performs its own final re-verification right at the kill.
 from __future__ import annotations
 
 import errno
+import os
 import signal
 import subprocess
 import sys
@@ -411,27 +412,26 @@ def test_kill_pid_windows_census_failure_still_kills_root_and_warns(monkeypatch,
 
 
 def test_verify_descendant_identity_windows_captures_token_before_ancestry(monkeypatch):
-    """The identity token must be captured FIRST, before the ancestry/
-    generation re-check -- mirroring ``_kill_pid``'s own root-level
-    ordering -- so a pid reused during the (slower) WMI lookup is still
-    caught by ``terminate_pid_if_identity``'s own final re-verification at
-    the kill, rather than this function instead capturing a replacement's
-    token."""
+    """The identity token must be captured FIRST, before the combined
+    ancestry/generation re-check -- mirroring ``_kill_pid``'s own
+    root-level ordering -- so a pid reused during the (slower) WMI lookup
+    is still caught by ``terminate_pid_if_identity``'s own final
+    re-verification at the kill, rather than this function instead
+    capturing a replacement's token."""
     order: list[str] = []
-    responses = {5001: (4242, "C1"), 4242: (0, "RootC")}
     monkeypatch.setattr(
         diagnostics, "process_start_time", lambda pid: order.append("token") or "zzz"
     )
     monkeypatch.setattr(
         m,
-        "_query_pid_ancestry_windows",
-        lambda pid: order.append("ancestry") or responses[pid],
+        "_query_two_pid_ancestry_windows",
+        lambda child, parent: order.append("ancestry") or ((4242, "C1"), (0, "RootC")),
     )
 
     result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
 
     assert result == "zzz"
-    assert order == ["token", "ancestry", "ancestry"]
+    assert order == ["token", "ancestry"]
 
 
 def test_verify_descendant_identity_windows_rejects_parent_mismatch(monkeypatch):
@@ -440,7 +440,9 @@ def test_verify_descendant_identity_windows_rejects_parent_mismatch(monkeypatch)
     reused) must be rejected -- the already-captured token is discarded,
     never returned to the caller for use in a kill."""
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
-    monkeypatch.setattr(m, "_query_pid_ancestry_windows", lambda pid: (9999, "C1"))
+    monkeypatch.setattr(
+        m, "_query_two_pid_ancestry_windows", lambda child, parent: ((9999, "C1"), (0, "RootC"))
+    )
 
     result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
 
@@ -455,7 +457,9 @@ def test_verify_descendant_identity_windows_rejects_generation_mismatch(monkeypa
     same parent pid by coincidence -- this generation fingerprint re-check
     is what actually closes that gap."""
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
-    monkeypatch.setattr(m, "_query_pid_ancestry_windows", lambda pid: (4242, "C2"))
+    monkeypatch.setattr(
+        m, "_query_two_pid_ancestry_windows", lambda child, parent: ((4242, "C2"), (0, "RootC"))
+    )
 
     result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
 
@@ -471,19 +475,18 @@ def test_verify_descendant_identity_windows_rejects_stale_parent_generation(monk
     an orphan the way POSIX does, so a bare ancestry-number check alone
     can never detect this)."""
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "zzz")
-    calls = {"child": (4242, "C1"), "parent": (999, "DifferentParentGeneration")}
-    queried: list[int] = []
+    queried_args: list[tuple[int, int]] = []
 
-    def _fake_query(pid):
-        queried.append(pid)
-        return calls["child"] if pid == 5001 else calls["parent"]
+    def _fake_query(child, parent):
+        queried_args.append((child, parent))
+        return (4242, "C1"), (999, "DifferentParentGeneration")
 
-    monkeypatch.setattr(m, "_query_pid_ancestry_windows", _fake_query)
+    monkeypatch.setattr(m, "_query_two_pid_ancestry_windows", _fake_query)
 
     result = m._verify_descendant_identity_windows(5001, 4242, "C1", "RootC")
 
     assert result is None
-    assert queried == [5001, 4242]  # child checked first, then its recorded parent
+    assert queried_args == [(5001, 4242)]  # one combined query, not two separate ones
 
 
 def test_kill_pid_tree_windows_skips_all_termination_when_root_identity_fails(
@@ -560,6 +563,75 @@ def test_kill_pid_tree_windows_kills_descendants_deepest_first_then_root(monkeyp
     # the deepest descendant (6001) must be fully handled before the
     # shallower one (5001), and the root (4242) must be last of all.
     assert order == [6001, 6001, 5001, 5001, 4242]
+
+
+def test_kill_pid_tree_windows_never_terminates_its_own_executing_process(monkeypatch):
+    """A `service stop` invoked from inside an agent that is itself a
+    Session Host descendant of the bridge daemon being stopped must never
+    terminate its own executing process (``os.getpid()``) -- doing so
+    before the root kill below would leave the daemon running with no one
+    left to finish stopping it. Its identity is still verified like any
+    other descendant (traversal stays correct); only the actual
+    termination call is skipped."""
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
+    monkeypatch.setattr(
+        m,
+        "_enumerate_descendant_pids_windows",
+        lambda pid: ([(os.getpid(), 4242, "self-c", "root-c")], True),
+    )
+    verify_called = []
+    monkeypatch.setattr(
+        m,
+        "_verify_descendant_identity_windows",
+        lambda child, parent, child_creation, parent_creation: verify_called.append(child)
+        or "zzz",
+    )
+    terminated = []
+    monkeypatch.setattr(
+        diagnostics,
+        "terminate_pid_if_identity",
+        lambda pid, st: terminated.append((pid, st))
+        or {"killed": True, "identity_verified": True, "method": "windows-verified-handle"},
+    )
+
+    m._kill_pid_tree_windows_if_identity(4242, "root-token")
+
+    assert verify_called == [os.getpid()]  # still identity-verified, just not killed
+    assert terminated == [(4242, "root-token")]  # only the root was actually terminated
+
+
+def test_kill_pid_tree_windows_stops_processing_descendants_past_deadline(monkeypatch):
+    """Descendant cleanup is bounded by an overall wall-clock deadline,
+    independent of any one descendant's own per-query timeout -- a large
+    tree or a slow CIM provider must not delay the root kill for minutes;
+    remaining descendants are left unprocessed (best effort) instead, and
+    the root kill still proceeds immediately once the deadline elapses."""
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
+    monkeypatch.setattr(
+        m,
+        "_enumerate_descendant_pids_windows",
+        lambda pid: ([(5001, 4242, "c1", "root-c"), (5002, 4242, "c2", "root-c")], True),
+    )
+    verify_called = []
+    monkeypatch.setattr(
+        m,
+        "_verify_descendant_identity_windows",
+        lambda child, parent, child_creation, parent_creation: verify_called.append(child)
+        or "zzz",
+    )
+    terminated = []
+    monkeypatch.setattr(
+        diagnostics,
+        "terminate_pid_if_identity",
+        lambda pid, st: terminated.append((pid, st))
+        or {"killed": True, "identity_verified": True, "method": "windows-verified-handle"},
+    )
+    monkeypatch.setattr(m, "_DESCENDANT_CLEANUP_DEADLINE_S", 0.0)  # already elapsed
+
+    m._kill_pid_tree_windows_if_identity(4242, "root-token")
+
+    assert verify_called == []  # no descendant even attempted once the deadline had passed
+    assert terminated == [(4242, "root-token")]  # the root kill still happens regardless
 
 
 def _spawn_sleeper() -> subprocess.Popen:

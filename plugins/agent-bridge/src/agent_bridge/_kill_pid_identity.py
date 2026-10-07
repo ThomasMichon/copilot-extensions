@@ -13,6 +13,14 @@ from __future__ import annotations
 import os
 import sys
 
+#: Overall wall-clock budget for the Windows descendant-cleanup loop in
+#: ``_kill_pid_tree_windows_if_identity``, independent of any one
+#: descendant's per-query timeout. Bounds total shutdown latency for a
+#: large process tree or a slow CIM provider; the root kill always
+#: proceeds once this elapses, with any remaining descendants left
+#: unprocessed (best effort, surfaced via a stderr warning).
+_DESCENDANT_CLEANUP_DEADLINE_S = 30.0
+
 
 def _core():
     from . import __main__ as core
@@ -205,10 +213,15 @@ def _enumerate_descendant_pids_windows(
     return descendants, not census_incomplete
 
 
-def _query_pid_ancestry_windows(pid: int) -> tuple[int, str] | None:
-    """The CURRENT ``(ParentProcessId, CreationDate)`` for *pid*, via the
-    same full-precision WMI mechanism as the bulk census, or ``None`` if
-    *pid* is not currently a live process."""
+def _query_two_pid_ancestry_windows(
+    child_pid: int, parent_pid: int
+) -> tuple[tuple[int, str] | None, tuple[int, str] | None]:
+    """The CURRENT ``(ParentProcessId, CreationDate)`` for BOTH *child_pid*
+    and *parent_pid* in a single PowerShell invocation (each ``None`` if
+    that pid isn't currently live) -- halving the per-descendant process-
+    spawn overhead of ``_verify_descendant_identity_windows``'s two
+    separate lookups, which matters for a large tree (every verified
+    descendant previously launched PowerShell twice)."""
     import subprocess as sp
 
     try:
@@ -218,10 +231,13 @@ def _query_pid_ancestry_windows(pid: int) -> tuple[int, str] | None:
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "(Get-CimInstance Win32_Process -Filter "
-                f"'ProcessId={pid}' -ErrorAction SilentlyContinue) | "
-                "ForEach-Object { \"$($_.ParentProcessId)`t"
-                '$($_.CreationDate.ToUniversalTime().ToString(\'o\'))" }',
+                "foreach ($queryPid in @("
+                f"{child_pid}, {parent_pid}"
+                ")) { $proc = Get-CimInstance Win32_Process -Filter "
+                '"ProcessId=$queryPid" -ErrorAction SilentlyContinue; '
+                "if ($proc) { \"$queryPid`t$($proc.ParentProcessId)`t"
+                "$($proc.CreationDate.ToUniversalTime().ToString('o'))\" } "
+                'else { "$queryPid`t`t" } }',
             ],
             capture_output=True,
             text=True,
@@ -229,11 +245,22 @@ def _query_pid_ancestry_windows(pid: int) -> tuple[int, str] | None:
             **_core().no_window_kwargs(),
         )
     except (OSError, sp.TimeoutExpired):
-        return None
-    parts = (out.stdout or "").strip().split("\t", 1)
-    if len(parts) != 2 or not parts[0].isdigit():
-        return None
-    return int(parts[0]), parts[1]
+        return None, None
+
+    results: dict[int, tuple[int, str] | None] = {}
+    for line in (out.stdout or "").splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        queried_pid_s, ppid_s, creation = parts
+        if not queried_pid_s.isdigit():
+            continue
+        queried_pid = int(queried_pid_s)
+        if ppid_s.isdigit():
+            results[queried_pid] = (int(ppid_s), creation)
+        else:
+            results[queried_pid] = None
+    return results.get(child_pid), results.get(parent_pid)
 
 
 def _verify_descendant_identity_windows(
@@ -273,6 +300,13 @@ def _verify_descendant_identity_windows(
     (slower) WMI lookups is still caught by
     ``terminate_pid_if_identity``'s own final re-verification at the
     actual kill.
+
+    Both the child's own ancestry and its recorded parent's current
+    generation are fetched via ONE combined PowerShell invocation
+    (``_query_two_pid_ancestry_windows``) rather than two separate
+    queries -- halving this function's per-descendant process-spawn
+    overhead, which matters for a large tree where every verified
+    descendant previously launched PowerShell twice.
     """
     from zdd import diagnostics
 
@@ -280,7 +314,7 @@ def _verify_descendant_identity_windows(
     if start_time is None:
         return None
 
-    child_now = _query_pid_ancestry_windows(child_pid)
+    child_now, parent_now = _query_two_pid_ancestry_windows(child_pid, recorded_parent_pid)
     if child_now is None:
         return None
     current_parent_pid, current_child_creation = child_now
@@ -289,7 +323,6 @@ def _verify_descendant_identity_windows(
     if current_child_creation != recorded_child_creation:
         return None
 
-    parent_now = _query_pid_ancestry_windows(recorded_parent_pid)
     if parent_now is None:
         return None
     _, current_parent_creation = parent_now
@@ -341,7 +374,33 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
     verified, but some live children may survive when the census itself
     could not run, and that is made visible rather than silently assumed
     away. This never falls back to a bare, unverified ``taskkill``.
+
+    The CURRENT process (``os.getpid()``) is never among the descendants
+    actually terminated, even if it legitimately appears in the census as
+    a verified descendant of *pid*: a `service stop` invoked from inside
+    an agent that is itself a Session Host descendant of the bridge
+    daemon being stopped (launched by the bridge; breaking away from its
+    job does not change its recorded parent pid) would otherwise risk
+    this very cleanup routine terminating its own executing process
+    before it ever reaches the root kill below -- leaving the daemon
+    running with no one left to finish stopping it. Its identity is still
+    verified like any other descendant (so traversal through any of its
+    own further children, however unlikely, stays correct); only the
+    actual termination call is skipped for this one pid.
+
+    Descendant cleanup is bounded by ``_DESCENDANT_CLEANUP_DEADLINE_S``
+    overall: each verified descendant costs at least one (now combined,
+    see ``_query_two_pid_ancestry_windows``) PowerShell round trip, so a
+    large tree or a slow CIM provider could otherwise delay the root kill
+    for minutes -- the caller's own ``forced_timeout``
+    (``_ensure_retired_daemon_exited``) only starts counting AFTER this
+    function returns, so it cannot bound work done here. Once the
+    deadline elapses, remaining descendants are left unprocessed (best
+    effort, same as an incomplete census) and the root kill still
+    proceeds immediately.
     """
+    import time
+
     from zdd import diagnostics
 
     descendants, census_ok = _enumerate_descendant_pids_windows(pid)
@@ -360,16 +419,26 @@ def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
     if diagnostics.process_start_time(pid) != start_time:
         return
 
+    self_pid = os.getpid()
+    deadline = time.monotonic() + _DESCENDANT_CLEANUP_DEADLINE_S
     for (
         child_pid,
         recorded_parent_pid,
         recorded_child_creation,
         recorded_parent_creation,
     ) in reversed(descendants):
+        if time.monotonic() >= deadline:
+            print(
+                f"[WARN] agent-bridge: descendant-process cleanup for pid {pid} exceeded "
+                f"{_DESCENDANT_CLEANUP_DEADLINE_S:.0f}s; remaining descendants left "
+                "unprocessed so the root kill is not delayed further",
+                file=sys.stderr,
+            )
+            break
         child_start = _verify_descendant_identity_windows(
             child_pid, recorded_parent_pid, recorded_child_creation, recorded_parent_creation
         )
-        if child_start is not None:
+        if child_start is not None and child_pid != self_pid:
             diagnostics.terminate_pid_if_identity(child_pid, child_start)
 
     diagnostics.terminate_pid_if_identity(pid, start_time)
