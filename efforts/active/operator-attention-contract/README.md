@@ -194,6 +194,19 @@ an empty queue.
 
   Local reads only by default; remote venues opt in (`--include-remote`), since
   each is an SSH read.
+
+  **Candidates:** the union of agent-bridge's two session registries, read
+  through its own API (never its database): **bridge-managed sessions**
+  (`agent-bridge sessions --json`, the sessions it spawned and drives) and
+  **registered interactive CLI sessions** (`agent-bridge live-sessions list
+  --json`, live rows only). A session that appears in both is one entity
+  (`entity_ref` is its session id). Every candidate is classified from its
+  result snapshot and its presence, as listed above. If either listing fails or
+  times out, the bridge source is `failed`, never `ok` on the other alone: a
+  parked session in the registry that wasn't read must not read as `clear`.
+  With `--include-remote`, each remote venue's registry is a further candidate
+  set under the same rule, and a venue that can't be read makes the source
+  `failed` too.
 - [ ] **pr** (`pr bar`, on `dev` since #5566): tracked open PRs whose `pr bar` exit is 11
   (`failed`) → `failed` (the author has something to do). Exit 12 (`unknown`)
   counts toward the source's status, not as an item. **Candidates:** the open
@@ -302,7 +315,10 @@ an empty queue.
   reason count as `uncertain`); a session with both a represented
   `permission_required` and transcript `awaiting_input` yields one `reported`
   item whose reason names both, in any read order; a command source returning two
-  items for one entity is `failed`.
+  items for one entity is `failed`; a parked session found only in the
+  bridge-managed registry and one found only in the live-session registry each
+  yield an item, one present in both yields a single item, and a failed listing
+  of either registry makes the bridge source `failed`.
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
   a duplicate name) is rejected; an item stating another `source` or a foreign
   `id` is invalid; an item omitting both is stamped and then validated; a
