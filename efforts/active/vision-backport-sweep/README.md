@@ -139,6 +139,18 @@ Operator, end of a long multi-repo session:
       starts in earnest (deliberately not pre-enumerated now — scope it from
       the actual state of each vision at reconciliation time, not guessed
       upfront).
+      - [x] `visions/plugins/agent-codespaces/README.md` — reconciled against
+            ~312 commits of drift since its 2026-07-31 authoring. Folded back
+            *repo-sourced-provenance* (active-plugin-declared venue policy,
+            lower precedence than adoption) and *in-venue-plugin-injection*
+            (the governing harness plugin injecting plugins into the venue
+            itself), plus *dual-mode-session-reach* (interactive `copilot
+            <name>` vs. headless `--detach`, orchestrator-blind `--ref-file`
+            hand-off, `--reverse-forward`/`--forward` port bridging) under
+            `coordination-layer-provider`. Corrected a stale "agent-containers
+            when authored" sibling reference and widened the reality-docs
+            skill list (`recovering-codespaces`, `cleaning-codespaces`). No
+            conformance gap found — all fold-back, no issue carved.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -347,3 +359,39 @@ then rather than assuming either answer.
   `mutable-dev-slot`'s Phase 3 rollout list with the specific plugins this
   audit found. This is a fix-direction correction only — the Phase 3
   conformance table and classifications above are unchanged.
+
+### 2026-10-06 — Phase 2 slice: `agent-codespaces` vision reconciliation
+- Picked Phase 2 (widen the vision sweep) off the four-option Next Slice
+  menu from the prior handoff. Ranked candidate visions by staleness ×
+  recent commit traffic (`git log --since=<last-revised-date> -- plugins/
+  <name>` counts) rather than guessing; `agent-codespaces` (last revised
+  2026-07-31, ~312 commits of drift since, 923 commits in the last 30 days
+  — the heaviest-traffic plugin with a stale vision) ranked above the
+  other stale candidates (`agent-ssh` 2026-07-22/370 commits,
+  `agent-containers` 2026-08-27/573 commits — both legitimate follow-ups
+  for a future slice).
+- Read the vision in full against the plugin's current `README.md` and
+  `docs/patterns/codespace-repo-provenance.md`. Found two substantial,
+  already-shipped capabilities the vision never stated at all: the
+  active-plugin-sourced venue-policy seam (`codespaceConfig` declaration,
+  lower precedence than adoption, identity-verified root resolution) and
+  in-venue plugin injection (the governing harness plugin's
+  `codespacePlugins`, staged from a local marketplace when needed). Folded
+  both back as new Concepts + Features (*repo-sourced-provenance*,
+  *in-venue-plugin-injection*). Also found the already-shipped interactive/
+  headless dual-mode CLI sessions (`copilot <name>` / `--detach`), the
+  orchestrator-blind `--ref-file` hand-off, and the `--reverse-forward`/
+  `--forward` port bridging entirely unstated under
+  *coordination-layer-provider* — folded back as *dual-mode-session-reach*.
+  Ran the superset check on each addition: all are reality already doing
+  this; nothing contradicts an existing Non-Goal or scales the vision back.
+- Opportunistically corrected a now-stale "agent-containers (when
+  authored)" sibling-leaf reference (that vision has existed since before
+  this slice) and widened the Reality-docs skill list to include
+  `recovering-codespaces` and `cleaning-codespaces`, both of which already
+  exist and already operationalize behaviors the vision states
+  (*recover-not-lose*, *credential-readiness-verified-end-to-end*).
+- No conformance gap was found requiring a new issue — this slice is
+  fold-back only, distinct from Phase 3's separate `install.ps1`
+  conformance audit (`#5472` already covers agent-codespaces there and is
+  unaffected). PR pending; worktree not yet finalized as of this entry.
