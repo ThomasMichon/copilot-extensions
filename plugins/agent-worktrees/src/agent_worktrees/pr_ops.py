@@ -2311,7 +2311,7 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
     result = {**base, "has_pr": active is not None, "pr_count": len(record.prs)}
     if active is not None:
         result.update(_pr_to_dict(active))
-        rec = _pull_forward_recommendation(record, active, config)
+        rec = _pull_forward_recommendation(record, active, config, live=live)
         if rec:
             result.update(rec)
         if live:
@@ -2395,74 +2395,8 @@ def pr_threads(
     return out
 
 
-def _pull_forward_recommendation(
-    record: tracking.WorktreeRecord,
-    active: PRRecord,
-    config: Config,
-) -> dict | None:
-    """Recommend the post-merge pull-forward when the active PR has merged.
-
-    Returns recommendation fields, or ``None`` when no nudge is warranted.
-    Fires only when the active PR is **merged** and the worktree branch is not
-    already rebased on top of the updated default branch -- i.e. there is real
-    pull-forward work to do.  Best-effort and side-effect-free (a single
-    upstream fetch aside): any git hiccup falls back to recommending, since the
-    agent's ``git sync`` is a safe no-op when already current.
-    """
-    if active.state != "merged":
-        return None
-    path = record.worktree_path
-    if not (path and Path(path).exists()):
-        return None
-    repo = config.default_repo
-    remote = repo.remote
-    upstream = f"{remote}/{repo.default_branch}"
-    # Refresh the upstream ref so "behind" reflects the just-landed merge.
-    if git_ops.has_remote(remote, cwd=path):
-        try:
-            git_ops.fetch(remote, cwd=path)
-        except Exception:
-            pass
-        else:
-            # worktree-finality-and-obligations Phase 9: a merged PR's
-            # pull-forward check is exactly the "pr-merge" freshness trigger
-            # -- share this fetch with every other worktree of the repo.
-            if record.repo:
-                tracking.record_repo_fetch_confirmed(record.repo)
-    behind: int | None = None
-    branch = git_ops._get_current_branch_safe(path)
-    if branch and git_ops.ref_exists(upstream, cwd=path):
-        out = git_ops.git(
-            "rev-list", "--count", f"{branch}..{upstream}",
-            cwd=path, check=False,
-        ).stdout.strip()
-        try:
-            behind = int(out)
-        except ValueError:
-            behind = None
-    # Already on top of the updated default branch -- nothing to pull forward.
-    if behind == 0:
-        return None
-    rec: dict = {
-        "pull_forward_recommended": True,
-        "pull_forward_command": "agent-worktrees git sync",
-    }
-    if behind:
-        rec["behind"] = behind
-    if not git_ops.is_clean(cwd=path):
-        rec["pull_forward_blocked"] = "dirty"
-        rec["next_action"] = (
-            f"Active PR #{active.number} is merged, but this worktree has "
-            "uncommitted changes. Commit or stash them, then run "
-            f"`agent-worktrees git sync` to pull forward (rebase onto {upstream})."
-        )
-    else:
-        rec["next_action"] = (
-            f"Active PR #{active.number} is merged. Pull this worktree forward: "
-            f"`agent-worktrees git sync` (rebase onto {upstream}; the merged "
-            "commits drop as already-applied)."
-        )
-    return rec
+#: Mechanical extraction (see pr_pull_forward.py) -- kept out of this module to stay under its size cap.
+from .pr_pull_forward import pull_forward_recommendation as _pull_forward_recommendation  # noqa: E402,F401
 
 
 def _pr_to_dict(pr: PRRecord) -> dict:
