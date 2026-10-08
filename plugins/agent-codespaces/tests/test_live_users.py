@@ -229,7 +229,7 @@ def test_pool_unknown_census_is_in_use_and_never_orphaned(monkeypatch, tmp_path)
     assert m.orphaned is False and m.disposition == pool.IN_USE
 
 
-def test_quota_running_reclaim_never_stops_a_box_in_use(monkeypatch):
+def test_quota_running_reclaim_never_stops_a_box_in_use(monkeypatch, tmp_path):
     from agent_codespaces import __main__ as cli
     from agent_codespaces import status
     from agent_codespaces.lifecycle import CodespaceInfo
@@ -238,6 +238,9 @@ def test_quota_running_reclaim_never_stops_a_box_in_use(monkeypatch):
         name=NAME, display_name="", repository="o/r", branch="main",
         state="Available", machine="basicLinux32gb", last_used_at="", account="",
     )
+    import ssh_manager.locks as locks
+
+    monkeypatch.setattr(locks, "locks_dir", lambda: tmp_path)
     monkeypatch.setattr(cli, "list_codespaces", lambda: [cs])
     monkeypatch.setattr(status, "get_status", lambda name: SimpleNamespace(
         state=status.STATE_RECOVERED))

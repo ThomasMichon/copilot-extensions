@@ -3874,11 +3874,11 @@ def _reclaim_for_quota(err: str) -> str | None:
             if st and st.state in (STATE_RECOVERED, STATE_PRUNABLE):
                 from ssh_manager import TargetBusyError
 
-                from .live_users import refuse_if_in_use
+                from .lifecycle_lock import lifecycle_lock
 
-                try:
-                    refuse_if_in_use(cs.name, "stop")  # never stop a box still in use
-                    stop_codespace(cs.name)
+                try:  # never stop a box still in use; check + stop under the lock
+                    with lifecycle_lock(cs.name, refuse_live_users="stop"):
+                        stop_codespace(cs.name)
                 except (RuntimeError, TargetBusyError):
                     continue
                 return f"stopped eligible running box '{cs.name}' to free running quota"
