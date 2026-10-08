@@ -129,6 +129,23 @@ approval counts, not all of them):
   exists rather than naming dynamic matrix jobs directly) apply to
   everyone with no bypass, including every Maintainer.
 
+#### Onboarding a Maintainer
+
+The repository owner applies both halves of the existing Maintainer tier:
+keep the invited collaborator's **Write** permission, add their GitHub user
+ID to the review-required ruleset as a `User` bypass actor with
+`bypass_mode: pull_request`, and add their login to `.github/CODEOWNERS`'
+root `*` pattern through an owner-authored PR against `dev`. The automatic
+Copilot review workflow reads that root roster directly; there is no second
+workflow roster to update.
+
+Verify the live ruleset entry, collaborator permission, and merged root
+roster before declaring onboarding complete. Do not add bypasses to the
+PR-required, required-check, workflow/CODEOWNERS-lockdown, or release-branch
+rulesets. Maintainers still follow [the contribution and review
+flow](../CONTRIBUTING.md#contribution-flow-pr-required), including required
+CI and resolving blocking review findings before merging.
+
 ### 4. Workflow/CODEOWNERS lockdown
 
 `.github/workflows/`, `.github/actions/`, and `.github/CODEOWNERS` itself
