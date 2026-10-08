@@ -243,9 +243,13 @@ Operator, end of a long multi-repo session:
             library"). No conformance gap found requiring a new issue —
             the remaining drift (CPU-priority throttling, FTS
             rebuild/recovery refinements, server-venv packaging split,
-            peer-launch/CWD-compliance/mutable-dev-slot cross-cutting
-            infra) is either already-described behavior being bug-fixed,
-            or cross-cutting infra already tracked by `#5472` (Phase 3).
+            peer-launch/CWD-compliance infra shared with other plugins) is
+            already-described behavior being bug-fixed into working order;
+            `mutable-dev-slot`-pattern drift specifically is already
+            tracked by `#5472` (Phase 3) — peer-launch and CWD-compliance
+            are not that issue's scope and are not separately tracked
+            here, being cross-cutting infra outside this vision's own
+            subject.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -741,9 +745,11 @@ then rather than assuming either answer.
   summaries alone — most of the 70 commits turned out to be bug fixes
   (CPU-priority throttling that silently never worked, FTS rebuild
   recovery, server-venv packaging, dependency ceiling typos) or
-  cross-cutting infra shared with many other plugins (peer-launch,
-  CWD-compliance, mutable-dev-slot — already tracked by `#5472`/Phase 3,
-  out of this vision's own scope), not new vision-worthy capability.
+  cross-cutting infra shared with many other plugins (peer-launch and
+  CWD-compliance, generic infra out of this vision's own scope; the
+  mutable-dev-slot-pattern same-version-rebuild conformance gap, which
+  does apply to agent-index specifically, is already tracked by `#5472`/
+  Phase 3), not new vision-worthy capability.
 - Found three genuine fold-back candidates: (1) a `git:` source now
   accepts a per-source `ref:` override + `auth.account` authenticated
   fetch (#4829) — this directly sharpens `continuous-delta-freshness`'s

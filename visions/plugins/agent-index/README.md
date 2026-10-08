@@ -85,11 +85,13 @@ The pluggable adapters that pull a repo's corpus into the index:
   `git:` source's default — the remote's canonical default branch, freshly
   fetched — is **per-source overridable**: an explicit `ref:` (any branch,
   tag, or SHA) for a repo whose integration branch isn't its default branch,
-  and an `auth.account` that authenticates that source's own fetch step
-  (resolved the same way a `github:` source's token is) rather than
-  depending on the ambient git credential helper's active account. Absent
-  either override the connector keeps tracking the canonical default branch,
-  as before.
+  and an `auth.account` that **attempts to** authenticate that source's own
+  fetch step (resolved the same way a `github:` source's token is) instead
+  of relying on the ambient git credential helper's active account — but
+  token resolution failing is **non-fatal**: the fetch still proceeds, now
+  falling back to that ambient credential helper, rather than failing the
+  source outright. Absent either override the connector keeps tracking the
+  canonical default branch, as before.
 - **Corpus composition is a grafted, multi-project config**, not a single
   manually-authored list: the effective `corpus.sources` is dynamically
   unioned from every project the operator has locally adopted (resolved via
@@ -237,11 +239,17 @@ tracks is, **by default**, the repo's **canonical default branch as fetched from
 its remote** (the pushed/merged state the team shares) — not a local working tree
 that may sit on a feature branch, carry uncommitted edits, or lag `origin` — with
 an explicit **per-source `ref:` override** available for the deliberate
-exception (a repo whose integration branch isn't its default branch). Freshness
-means the index reflects what has actually landed on the tracked ref, fetched
-fresh before it reindexes. (A configured local-only repo that has opted into
-hosting still indexes cleanly from its local history — the remote is the
-*default* source of truth, not a requirement.)
+exception (a repo whose integration branch isn't its default branch) — though
+that freshness guarantee is strongest for a **remote-tracking ref** (e.g.
+`origin/dev`), which the fetch step does advance; an override naming a local
+branch/tag or a fixed SHA is not itself fetched, so it can go stale, and a
+fetch failure deliberately falls back to that stale state or local `HEAD`
+rather than failing the source. Freshness means the index reflects what has
+actually landed on the tracked ref **as of the last successful fetch**, not an
+unconditional live guarantee for every accepted override. (A configured
+local-only repo that has opted into hosting still indexes cleanly from its
+local history — the remote is the *default* source of truth, not a
+requirement.)
 
 ### lightweight-client-and-declared-host-service
 Formerly `self-contained-service`.
@@ -554,7 +562,9 @@ generic is what lets many different products reuse it.
   same shape" to "the same library." No conformance gap found requiring a
   new issue; the rest of the drift (CPU-priority throttling, FTS
   rebuild/recovery refinements, server-venv packaging split, dependency and
-  CI fixes, peer-launch/CWD-compliance/mutable-dev-slot cross-cutting infra
-  shared with other plugins) is either already-described behavior being
-  bug-fixed into working order, or cross-cutting infra out of this vision's
-  own scope (the latter tracked by `#5472`/Phase 3, not re-tracked here).
+  CI fixes, peer-launch/CWD-compliance cross-cutting infra shared with
+  other plugins) is already-described behavior being bug-fixed into
+  working order or generic infra out of this vision's own scope; the
+  mutable-dev-slot-pattern same-version-rebuild conformance gap, which does
+  apply to agent-index specifically, is already tracked by `#5472`/Phase 3
+  (not re-tracked here).
