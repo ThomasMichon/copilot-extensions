@@ -705,7 +705,9 @@ class TestRefreshLocalCache:
         grandchild_pid: int | None = None
         grandchild_start_time: str | None = None
         try:
-            call_timeout = 1.0
+            # Wide enough for a loaded host's interpreter startup to spawn the
+            # grandchild before the timeout tree-kill fires.
+            call_timeout = 5.0
             started = time.monotonic()
             result = await lcr._run_bounded(
                 [sys.executable, str(script)], timeout=call_timeout,
@@ -786,15 +788,22 @@ class TestRefreshLocalCache:
         # it inherits the direct child's own (piped) handles, which is
         # exactly what keeps those pipes open after the direct child exits.
         script = tmp_path / "exits_fast.py"
+        # The direct child waits (bounded) for the grandchild's pidfile before
+        # exiting, so a loaded host's slow interpreter startup cannot let the
+        # timeout tree-kill fire before the grandchild ever existed.
         script.write_text(
-            "import subprocess, sys\n"
+            "import os, subprocess, sys, time\n"
             f"subprocess.Popen([sys.executable, {str(grandchild_script)!r}])\n"
+            "deadline = time.monotonic() + 4.0\n"
+            f"while not os.path.exists({str(pidfile)!r}) "
+            "and time.monotonic() < deadline:\n"
+            "    time.sleep(0.05)\n"
         )
 
         grandchild_pid: int | None = None
         grandchild_start_time: str | None = None
         try:
-            call_timeout = 1.0
+            call_timeout = 5.0
             started = time.monotonic()
             result = await lcr._run_bounded(
                 [sys.executable, str(script)], timeout=call_timeout,

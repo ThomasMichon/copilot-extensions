@@ -25,11 +25,12 @@
   compute paths — this daemon's own `worktree_status_compute.py` only
   assembles a read-only bundle (it does not stamp `WorktreeRecord.git_state`;
   `picker_support/data_local.py` is the path that does) — which #5555
-  proposes consolidating into one. `agent-worktrees-authoritative-daemon` is
-  a **proposed**, not yet committed, destination for that consolidation (its
-  Plan/Validation Plan don't cover it today); this effort's own output is the
-  second compute path that would need folding in, not a place the fix
-  currently lands.
+  proposes consolidating into one. `agent-worktrees-authoritative-daemon`'s
+  Phase 6 (added 2026-10-06, operator-directed formal follow-on from
+  `pivot-streaming-transport`) is now the committed destination for that
+  consolidation — see that effort's own Phase 6 for the current design
+  status; this effort's own output remains the second compute path Phase 6
+  traces and folds in, not a place the fix lands directly.
 
 ## Guiding Intent
 

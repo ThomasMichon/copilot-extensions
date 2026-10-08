@@ -330,6 +330,26 @@ class EventLog:
                 rows = list(self._events[start:end])
             return (continuity, head, rows)
 
+    def snapshot_before(
+        self, before: int, limit: int
+    ) -> tuple[str | None, list[SseEvent], bool]:
+        """Atomically snapshot the newest ``limit`` events with ``id < before``.
+
+        Returns ``(continuity, events, has_more)`` from one history: the read
+        holds the same lock as :meth:`rebuild`, so a page never mixes a
+        replaced generation with its replacement, and ``continuity`` names the
+        generation the ids belong to.
+        """
+        with self._lock:
+            continuity = (
+                (self._telemetry.log_epoch or None) if self._events else None
+            )
+            end = min(len(self._events), max(0, before - 1))
+            while end > 0 and self._events[end - 1].id >= before:
+                end -= 1
+            start = max(0, end - max(0, limit))
+            return (continuity, list(self._events[start:end]), start > 0)
+
     def snapshot_event(
         self, event_id: int, *, durable: bool = False
     ) -> tuple[str | None, SseEvent | None]:

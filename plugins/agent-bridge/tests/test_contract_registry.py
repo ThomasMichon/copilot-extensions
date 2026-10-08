@@ -108,6 +108,9 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         ),
         "live_session_alias": bridge_protocol.LIVE_SESSION_ALIAS_PROTOCOL_VERSION,
         "agent_roster_cache": bridge_protocol.AGENT_ROSTER_CACHE_PROTOCOL_VERSION,
+        "events_before_paging": (
+            bridge_protocol.EVENTS_BEFORE_PAGING_PROTOCOL_VERSION
+        ),
     }
 
 

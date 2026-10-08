@@ -132,9 +132,15 @@ LIVE_SESSION_ALIAS_PROTOCOL_VERSION = 21
 # uninitialized/stale namespace still fires for a plain, unparameterized GET.
 AGENT_ROSTER_CACHE_PROTOCOL_VERSION = 22
 
+# First version whose ``GET /api/v1/sessions/{id}/events`` honors
+# ``before=<seq>&limit=<n>`` backward paging as a JSON response. A caller gates
+# on it rather than sending ``before`` to an older daemon that would ignore it
+# and open an SSE stream instead.
+EVENTS_BEFORE_PAGING_PROTOCOL_VERSION = 23
+
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 22
+HTTP_PROTOCOL_VERSION = 23
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.
