@@ -52,7 +52,8 @@ def _zip_logs(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
         if info.is_dir():
             continue
         if not _is_log_name(info.filename):
-            if info.filename.endswith(".log"):
+            leaf = info.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            if _is_log_name(leaf):
                 raise ValueError(f"process-log ZIP members must be flat: {info.filename!r}")
             continue
         if stat.S_ISLNK(info.external_attr >> 16):

@@ -78,6 +78,17 @@ def test_zip_rejects_nonflat_log_members(tmp_path: Path, name: str) -> None:
         list(iter_process_log_refs(tmp_path))
 
 
+@pytest.mark.parametrize("name", ["notes.log", "logs/notes.log", "../notes.log"])
+def test_zip_ignores_unrelated_log_members(tmp_path: Path, name: str) -> None:
+    """A `.log` member whose leaf name doesn't match the process-log naming
+    pattern is unrelated metadata, not a malformed/misplaced process log --
+    ignore it regardless of nesting, rather than rejecting it as non-flat."""
+    path = tmp_path / "logs.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(name, b"unrelated")
+    assert list(iter_process_log_refs(tmp_path)) == []
+
+
 @pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
 def test_root_swapped_to_symlink_after_configuration_is_rejected(tmp_path: Path) -> None:
     """A deterministic stand-in for the race: once `log_root` names a symlink
