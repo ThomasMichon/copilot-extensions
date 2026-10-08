@@ -517,6 +517,9 @@ async def test_codespace_spawner_splits_relay_from_local_forward(monkeypatch):
     assert _FakeRelay.instances[0].started == 1
     assert spawned.relay == [_FakeRelay.instances[0]]
     assert spawned.endpoint["reverse_forwards"] == ["9857:127.0.0.1:9857"]
+    # A CodeSpace relay may only reconnect after a no-wake "is it running" check.
+    gate = _FakeRelay.instances[0].kw["reconnect_gate"]
+    assert gate.__func__ is sp.CodeSpaceSpawner.can_inspect_without_wake
 
 
 @pytest.mark.asyncio

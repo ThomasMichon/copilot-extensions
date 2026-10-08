@@ -504,9 +504,8 @@ class CodeSpaceSpawner:
         protocol_version = int(state.get("protocol_version", proto.PROTOCOL_VERSION))
 
         config = self._transport.ssh_config()
-        # Also allow the transport to contribute reverse-forwards (e.g. the
-        # credential relay) so a detached far-side Host that outlives its launch
-        # channel keeps a live relay for the whole session (rush build / ADO).
+        # Transport reverse-forwards (the credential relay) get dedicated supervisors so a
+        # detached Host keeps a relay; a CodeSpace one never reconnects to a stopped box.
         forward = LocalForward(config, remote_port)
         try:
             local_port = await forward.establish()
@@ -525,6 +524,7 @@ class CodeSpaceSpawner:
             reverse,
             serving_probe_for_port=self._serving_probe_for_port,
             host_port_resolver=get_live_relay_port,
+            reconnect_gate=self.can_inspect_without_wake if self.boundary == "codespace" else None,
         )
         relay_ports = relay_ports_from_reverse_forwards(reverse)
         started_relays = []

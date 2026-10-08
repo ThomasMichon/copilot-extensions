@@ -685,6 +685,13 @@ class _SessionCoreMixin:
     def _mark_session_failed(self, session: Session, *, trigger: str) -> None:
         """Persist and publish one authoritative failed transition."""
         session.status = SessionStatus.FAILED
+        # A failed session no longer owns a live credential relay: stop its
+        # reconnect supervisor so it cannot keep re-waking a stopped CodeSpace.
+        # A later resume re-supervises the relay from the durable endpoint.
+        kill_relays = getattr(self, "_kill_relays_sync", None)
+        if callable(kill_relays):
+            with contextlib.suppress(Exception):
+                kill_relays(session.session_id)
         self._db.update_session_status(
             session.session_id, SessionStatus.FAILED.value, time.time()
         )
