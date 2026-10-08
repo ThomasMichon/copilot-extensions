@@ -80,9 +80,9 @@ an empty queue.
   | Field | Meaning |
   |---|---|
   | `schema` | the item's own version, `1`; carried on every item, separately from the envelope's |
-  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:<session-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
+  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:wt:<machine>/<worktree-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
   | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
-  | `entity_ref` | the canonical reference within its kind: a task id, a bridge session id, a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key), a queue as its canonical repo |
+  | `entity_ref` | the canonical, **durable** reference within its kind: a task id; a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key); a queue as its canonical repo; a session as its logical delegate reference (agent-bridge's identity model), never a bridge escrow `session_id` or a live registration, which a restart, takeover or handoff replaces: `wt:<machine>/<worktree-id>` when a managed worktree hosts it, else `lineage:<durable id of its lineage root>` for a bridge-owned line of work (the root's `durable_session_id`, reached through its predecessor links), else `copilot:<Copilot session id>` for an interactive session with no worktree |
   | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...); `null` for an entity with no owner lifecycle (a `queue`) |
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
   | `severity` | derived from `display_state`: `failed` > `stalled` > `awaiting_input` > `blocked` > `review` |
@@ -215,8 +215,12 @@ an empty queue.
   through its own API (never its database): **bridge-managed sessions**
   (`agent-bridge --json sessions`, the sessions it spawned and drives) and
   **registered interactive CLI sessions** (`agent-bridge --json live-sessions
-  list`, live rows only; `--json` is the bridge's global option, so it comes first). A session that appears in both is one entity
-  (`entity_ref` is its session id). Every candidate is classified from its
+  list`, live rows only; `--json` is the bridge's global option, so it comes first). Candidates
+  are keyed by their logical delegate reference (see `entity_ref`), so a session
+  that appears in both registries, or a successor that replaced one after a
+  restart, takeover or handoff, is one entity whose first-observed time and
+  cursor position carry over; its actions name the *current* session handle,
+  resolved at read time. Every candidate is classified from its
   **attention state** and its presence, as listed above. The attention state is
   the reason agent-bridge's own attention evaluator would settle a `wait
   --attention` on -- the only place `policy_required` (and, for bridge-managed
@@ -369,7 +373,12 @@ an empty queue.
   items for one entity is `failed`; a parked session found only in the
   bridge-managed registry and one found only in the live-session registry each
   yield an item, one present in both yields a single item, and a failed listing
-  of either registry makes the bridge source `failed`.
+  of either registry makes the bridge source `failed`. Identity: a parked
+  worktree session replaced by a successor (a CLI restart, a takeover, a bridge
+  handoff) keeps its `entity_ref`, `id` and `created_at`, while its actions
+  name the successor; a bridge-owned lineage with no worktree keeps its root
+  reference across two handoffs; two worktrees never share one; and no item's
+  `id` contains a bridge escrow `session_id`.
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
   a duplicate name) is rejected into `config_errors[]` -- never a second
   `sources[]` entry under that name -- and the aggregate is `degraded`; an item stating another `source` or a foreign
