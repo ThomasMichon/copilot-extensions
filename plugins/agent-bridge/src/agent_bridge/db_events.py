@@ -209,6 +209,27 @@ class _EventsMixin:
             result.append(d)
         return result
 
+    def get_events_before(
+        self, session_id: str, before_id: int, limit: int
+    ) -> list[dict[str, Any]]:
+        """Return up to ``limit`` events with event_id < before_id, ascending.
+
+        Backward paging for timeline consumers: the newest ``limit`` events
+        strictly older than ``before_id``. Does not touch any delivery cursor.
+        """
+        self.flush()
+        rows = self.execute_read(
+            "SELECT * FROM events WHERE session_id=? AND event_id<? "
+            "ORDER BY event_id DESC LIMIT ?",
+            (session_id, before_id, limit),
+        )
+        result = []
+        for r in reversed(rows):
+            d = dict(r)
+            d["data"] = json.loads(d.pop("data_json"))
+            result.append(d)
+        return result
+
     def get_cursor(self, caller_id: str, session_id: str) -> int:
         """Return the last-acked event id for a caller on a session (0 if none)."""
         rows = self.execute_read(

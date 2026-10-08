@@ -82,6 +82,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "cli_mode_unclaimed_release": "CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION",
     "live_session_alias": "LIVE_SESSION_ALIAS_PROTOCOL_VERSION",
     "agent_roster_cache": "AGENT_ROSTER_CACHE_PROTOCOL_VERSION",
+    "events_before_paging": "EVENTS_BEFORE_PAGING_PROTOCOL_VERSION",
 }
 
 # Git-evidence resolution (commit/blob lookups, opportunistic across a

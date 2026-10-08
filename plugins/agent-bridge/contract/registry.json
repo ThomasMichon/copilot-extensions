@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 22,
+        "current": 23,
         "minimum": 1,
-        "previous_generation": 21,
+        "previous_generation": 22,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -28,7 +28,8 @@
           19,
           20,
           21,
-          22
+          22,
+          23
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -67,13 +68,14 @@
         "live_session_mode": 19,
         "cli_mode_unclaimed_release": 20,
         "live_session_alias": 21,
-        "agent_roster_cache": 22
+        "agent_roster_cache": 22,
+        "events_before_paging": 23
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "9a43c5e5be8e168317f882636330d0c81f94094ab7792e329e15bf261a567888",
+          "sha256": "63e7e414822178d6f547bf9caa0c7ec8f1ebde3b3cd8e9e3ca55baafff225991",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -91,9 +93,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "fc97c03d617099c86a18685b2b41880d565684ce30149d699530070214d94938",
+          "sha256": "e7d6434f1dccfda93cc86a06091947f3355a6e82a2a12d6e03605b83d9bbb3b5",
           "semantic": false,
-          "non_semantic_reason": "Adds a RuntimeError -> HTTP 409 mapping for a namespace-provider readiness refusal in start_session; the representative session-create wire shape (request/response contract) is unchanged."
+          "non_semantic_reason": "Adds the before=/limit= backward JSON page (continuity-qualified, atomic with event-log rebuild) to the events route (HTTP generation 23, gated by events_before_paging); the representative session-create wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -117,15 +119,15 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "30ca6a508f112d332cab47dee57cf8f6ad92d8653e5d524f683b9fd2d5f8818e",
+          "sha256": "c9859339eb49407869c4cb2fce1cf2c033c0fdc08b5b4996932141fb99a94c9a",
           "role": "current health response",
-          "generation": 22
+          "generation": 23
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-response.json",
-          "sha256": "c92b62fc72f4061878426ab50ab995d959d99c05f7d7e0624b4952939266c6b7",
+          "sha256": "706cbc802d57ca7c1d4634c8caaa7ef313da3c168ad92df8575ab24c9eba49c2",
           "role": "current agent-roster list response (force_refresh/require_complete, Phase 3b)",
-          "generation": 22
+          "generation": 23
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-21/health.json",
@@ -159,9 +161,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "e1de4f327ec2f14332dc9792b5c43f3fb80d1b2d53d3318c6f233e262b897b63",
+          "sha256": "c0ac46c1f279d993389150093d22f689c748c458802ba73017a972b0aaece46d",
           "role": "current session-create response",
-          "generation": 22
+          "generation": 23
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
@@ -189,9 +191,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "52a2d57b6a456afae44052bd258f04002ed0b1b49667abc0351db44019c466d2",
+          "sha256": "d6f83eb04a4887e3d961cce7f648d0fe1bda7a0b9f1649223591308c96c3ddea",
           "role": "current HTTP range and capability constants",
-          "generation": 22
+          "generation": 23
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
@@ -228,9 +230,47 @@
           "sha256": "e9c37e02dc48013a52ed0338371578910c9982cc9bf53cc033669852cbeab321",
           "role": "previous HTTP generation health evidence",
           "generation": 20
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-22/health.json",
+          "sha256": "30ca6a508f112d332cab47dee57cf8f6ad92d8653e5d524f683b9fd2d5f8818e",
+          "role": "previous HTTP generation health evidence",
+          "generation": 22
         }
       ],
       "provenance": [
+        {
+          "commit": "b6f2d27784c9988f0f3253e0407c12b416771ad8",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 23,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "857cc2d80e5096c299ab30b0c1a84e9bda8df7d6",
+          "capture_method": "Read production constants from the pushed head revision; HTTP_PROTOCOL_VERSION is 23 and events_before_paging is introduced at generation 23."
+        },
+        {
+          "commit": "b6f2d27784c9988f0f3253e0407c12b416771ad8",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 23,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "b7824012ab12d5a13c978cf567e474cd1512d5d3",
+          "capture_method": "Serialize StartSessionResponse from the pushed head revision; its protocol_version default follows HTTP generation 23."
+        },
+        {
+          "commit": "b6f2d27784c9988f0f3253e0407c12b416771ad8",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 23,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+          "capture_method": "Invoke the health route shape from the pushed head revision with controlled empty runtime state; the response advertises HTTP generation 23."
+        },
+        {
+          "commit": "b6f2d27784c9988f0f3253e0407c12b416771ad8",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 23,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-captured at generation 23 (events_before_paging) from the pushed head revision; the agents route and its default/parameterized response shapes are unchanged since generation 22 (agent_roster_cache)."
+        },
         {
           "commit": "8e3b5282bb1131c87c8cbb2a2c43ec8913ada253",
           "plugin_version": "0.4.1-dev3",
@@ -754,7 +794,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_session_host.py",
-          "sha256": "9a9cde913c7625475f34dc17d5c149c5f26f0d85daae17b44c2da7d9f9380ab1",
+          "sha256": "2e883e25a6538f9dfdaa41b94c9c9c7bd16e660664302bd31089c47749f9b59b",
           "semantic": false,
           "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape."
         }
@@ -832,7 +872,7 @@
       "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1448",
       "reason": "The delegation effort owns lifecycle vocabulary and product semantics; the compatibility registry must not redefine them.",
       "reference_path": "plugins/agent-bridge/docs/delegation-contract.md",
-      "reference_sha256": "89eaa2db43d0389682ae079a9b63bd065659544c7b63240789f64bd5cd136604"
+      "reference_sha256": "12c36b8efdc2d0ce36191a832e40aab33e8dbca6e2ed1c1ff9d45811bf910b62"
     },
     {
       "id": "agent-bridge.event-history-identity",

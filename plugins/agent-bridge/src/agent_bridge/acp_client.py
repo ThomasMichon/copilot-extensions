@@ -13,7 +13,6 @@ import contextlib
 import json
 import logging
 import os
-import re
 import time
 import signal
 import sys
@@ -63,6 +62,13 @@ from acp.schema import (
 )
 
 from . import __version__
+from .acp_subagents import (
+    BG_TASK_AGENT_ID_RE as _BG_TASK_AGENT_ID_RE,
+    BG_TASK_INACTIVE_STATUSES as _BG_TASK_INACTIVE_STATUSES,
+    BG_TASK_LAUNCH_RE as _BG_TASK_LAUNCH_RE,
+    BG_TASK_STATUS_RE as _BG_TASK_STATUS_RE,
+    SubagentAttribution,
+)
 from .procgroup import safe_killpg, terminate_windows_tree
 
 log = logging.getLogger("agent-bridge")
@@ -74,43 +80,6 @@ _TERMINAL_TOOL_STATUSES = frozenset(
     {
         "completed", "complete", "success", "succeeded",
         "failed", "error", "cancelled", "canceled",
-    }
-)
-
-# -- Background-task (sub-agent) detection --------------------------------------
-#
-# Copilot's `task` tool can launch a sub-agent in *background* mode. The
-# orchestrator turn then returns ``end_turn`` while the sub-agent keeps running
-# in the same Copilot process (its bash/tool calls stream in after the turn
-# settles, and the orchestrator auto-wakes when it completes). Tearing the
-# process down in that window kills in-flight background work -- exactly what a
-# conversation "waiting on the PR daemon or another agent session" must not
-# suffer. There is no structured ACP field for this, so we parse the `task`
-# tool's human-readable output (the only authoritative signal Copilot emits):
-#
-#   launch     -> "Agent started in background with agent_id: <id>. ..."
-#   completion -> a later read_agent / task-wait result naming the same
-#                 ``agent_id: <id>`` with ``status: completed|failed|...``
-#                 (or "Agent is idle (waiting for messages). ... status: idle").
-#
-# An agent is "active background work" from launch until the first time we
-# observe it in a terminal-or-idle status. Idle counts as not-active: an idle
-# sub-agent is parked waiting for messages, not making progress, so it does not
-# need the connection held open. The match is deliberately tolerant (the phrase
-# is product copy that can drift); a missed completion only over-counts, which
-# `force` teardown overrides -- it never silently kills live work.
-_BG_TASK_LAUNCH_RE = re.compile(
-    r"started in background with agent_id:\s*([A-Za-z0-9][\w-]*)",
-    re.IGNORECASE,
-)
-_BG_TASK_AGENT_ID_RE = re.compile(r"agent_id:\s*([A-Za-z0-9][\w-]*)")
-_BG_TASK_STATUS_RE = re.compile(r"status:\s*([A-Za-z_]+)")
-# Sub-agent statuses that mean "no longer actively running background work".
-_BG_TASK_INACTIVE_STATUSES = frozenset(
-    {
-        "completed", "complete", "succeeded", "success",
-        "failed", "error", "cancelled", "canceled",
-        "idle", "stopped",
     }
 )
 
@@ -475,10 +444,15 @@ class AcpClient:
         # tool_call_id of the launching `task` call (or "" if unknown). An entry
         # is present from the moment we see "started in background with
         # agent_id: <id>" until we observe that id reach an inactive status
-        # (completed/failed/idle/...). See _BG_TASK_* above. Used to keep the
+        # (completed/failed/idle/...). See acp_subagents. Used to keep the
         # Copilot process alive while sub-agents are doing real work so a
         # teardown does not kill the PR daemon or another waited-on session.
         self._background_tasks: dict[str, str] = {}
+        # Sub-agent attribution from Copilot's raw session-event feed.
+        self._subagent_attr = SubagentAttribution(
+            self._emit, lambda: not (self._loading_session and self._suppress_replay),
+            lambda: self._acp_session_id,
+        )
         self._prompt_error: str | None = None
         self._stop_reason: str | None = None
         self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
@@ -688,7 +662,9 @@ class AcpClient:
             input_stream,
             output_stream,
         )
-        await self._connection.initialize(
+        self._subagent_attr.install_route(self._connection)
+        await self._subagent_attr.call_with_meta(
+            self._connection.initialize,
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(
                 # Advertise form elicitation so the agent's ``ask_user`` calls
@@ -733,7 +709,9 @@ class AcpClient:
         if timing_callback is not None:
             timing_callback("session_new_mcp_build", time.monotonic() - started)
         started = time.monotonic()
-        result = await self._connection.new_session(
+        self._subagent_attr.reset()
+        result = await self._subagent_attr.call_with_meta(
+            self._connection.new_session,
             cwd=cwd, mcp_servers=servers,
         )
         if timing_callback is not None:
@@ -792,6 +770,7 @@ class AcpClient:
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
         self._cancel_out_of_turn()
+        self._subagent_attr.reset()
         self._loading_session = True
         self._suppress_replay = suppress_replay
         result = None
@@ -801,7 +780,8 @@ class AcpClient:
             if timing_callback is not None:
                 timing_callback("session_load_mcp_build", time.monotonic() - started)
             started = time.monotonic()
-            result = await self._connection.load_session(
+            result = await self._subagent_attr.call_with_meta(
+                self._connection.load_session,
                 cwd=cwd, session_id=session_id,
                 mcp_servers=servers,
             )
@@ -810,6 +790,7 @@ class AcpClient:
         finally:
             self._loading_session = False
             self._suppress_replay = True
+            self._subagent_attr.reset_text_runs()
         self._acp_session_id = session_id
         # Re-assert the model/effort on resume: a reloaded session may report
         # the agent's default in its config options (dotfiles#790).
@@ -1048,6 +1029,7 @@ class AcpClient:
         # any background-task tracking so a discarded client never reports
         # stale active tasks.
         self._background_tasks.clear()
+        self._subagent_attr.reset()
 
     # -- Event emission ------------------------------------------------------
 
@@ -1134,6 +1116,7 @@ class AcpClient:
             if isinstance(content, TextContentBlock):
                 self._maybe_open_out_of_turn()
                 self._response_chunks.append(content.text)
+                self._subagent_attr.track_text("message", content.text)
                 self._emit("agent_message", {"text": content.text})
 
         elif isinstance(update, UserMessageChunk):
@@ -1154,6 +1137,7 @@ class AcpClient:
             if isinstance(content, TextContentBlock):
                 self._maybe_open_out_of_turn()
                 self._thought_chunks.append(content.text)
+                self._subagent_attr.track_text("thought", content.text)
                 self._emit("agent_thought", {"text": content.text})
 
         elif isinstance(update, AgentPlanUpdate):
@@ -1180,6 +1164,7 @@ class AcpClient:
                 "title": tc.title,
                 "kind": tc.kind,
                 "raw_input": getattr(update, "raw_input", None),
+                **self._subagent_attr.tool_call_fields(update),
             })
 
         elif isinstance(update, ToolCallProgress):
@@ -1208,6 +1193,7 @@ class AcpClient:
                 "status": status,
                 "content": list(existing.content) if (terminal and existing) else [],
                 "raw_output": raw_output,
+                **self._subagent_attr.tool_call_fields(update, settled=terminal),
             })
             # A `task` tool's launch/completion is only legible in its terminal
             # text output, so scan it once the call has settled.
@@ -1242,7 +1228,7 @@ class AcpClient:
 
         Copilot exposes no structured background-task signal, so the launch and
         completion of a background sub-agent are recovered from the `task`
-        tool's human-readable result text (see _BG_TASK_* above):
+        tool's human-readable result text (see acp_subagents):
 
           * launch     -> "...started in background with agent_id: <id>..."
           * completion -> a later read_agent/task-wait result naming the same
