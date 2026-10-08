@@ -23,6 +23,18 @@ automatic sweep depends on.
 |-------------|---------------------|--------------|
 | this operator's primary machine | Drives all phases | the originating worktree and its successors, one per phase |
 
+## Coordination
+
+- **Topology:** single sequential driver, one PR per phase (no parallel
+  slices; each phase's PR targets `dev` and is reviewed/merged before the
+  next phase's worktree is created).
+- **Host (owns PRs):** this operator's primary machine (the only
+  participant).
+- **Delegates:** none.
+- **Handoff:** not applicable today (single driver); if a future session
+  picks up a later phase, resume via this README's Plan checklist and
+  Journal -- the next unchecked Phase is always the next slice.
+
 ## Context
 
 Live-diagnosed via `py-spy` stack sampling against a real resident
@@ -130,6 +142,16 @@ follow-ons.
       for decision-making.
 - [ ] `status_monitor_runtime._monitor_pending_handoff_request` -- same.
 - [ ] `sessions_pane_retire.already_attempted_handoff_tokens` -- same.
+- [ ] `handoff_cutover._maybe_emit_stage_13` -- its `retired` check (an
+      unbounded, no-`limit` scan for `handoff_predecessor_retire`/`outcome
+      == "gone"`) becomes a direct `handoff.predecessor_retire_state ==
+      "retired"` read. Runs from both the automatic retire path and
+      hook-invoked session registration -- not an on-demand diagnostic,
+      must not keep scanning the log.
+- [ ] `session_binding_cli.py`'s `already_retired` check inside
+      `cmd_register_session` (the same `handoff_predecessor_retire`/`outcome
+      == "gone"` scan, called on every session registration) -- same slot
+      read as the previous item.
 - [ ] `tracking_disposition_write.py`'s `status_reported` dedup -- replace
       the unbounded, no-`limit` full-file scan with a direct per-session
       dedup field (e.g. on the matching `SessionEntry`), since this one
@@ -137,7 +159,9 @@ follow-ons.
       just the daemon sweep.
 - [ ] Confirm `handoff_diagnostics.py`, `session_binding_cli.py`'s on-demand
       verbs, and `handoffs-check` remain the only journal readers, explicitly
-      (diagnostic/on-demand only, per the Request's item 5).
+      (diagnostic/on-demand only, per the Request's item 5) -- audit for any
+      further automatic (non-on-demand) caller beyond the five above before
+      declaring this phase done.
 
 ### Phase 3 — Generalize the per-worktree journal
 - [ ] Extend `handoff_trace.py`'s proven per-project/per-worktree
@@ -182,9 +206,10 @@ follow-ons.
 
 - [ ] Unit tests for the new `SessionHandoff` fields and the rewritten
       abandon-after-N-failures logic (Phase 1).
-- [ ] Unit tests proving the 4 rewired hot-path functions never call
+- [ ] Unit tests proving the 6 rewired hot-path functions never call
       `activity.read_events`/`handoff_trace.read_trace` (Phase 2) --
-      e.g. a monkeypatch that raises if either is called during a sweep.
+      e.g. a monkeypatch that raises if either is called during a sweep or
+      during session registration.
 - [ ] Unit tests for the generalized per-worktree journal writer/reader,
       concurrent-writer-safety (mirroring `handoff_trace.py`'s own existing
       coverage) (Phase 3).
