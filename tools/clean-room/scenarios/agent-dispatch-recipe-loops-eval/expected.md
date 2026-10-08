@@ -62,14 +62,22 @@ declarations are live. The orchestrator's job is register -> confirm -> observe
 
 ## PASS
 
-The run PASSES if the orchestrator discovered and followed the real docs,
-registered the repo with exactly one documented `repository-issue-loop setup`
-call, confirmed (not assumed) that all four declarations were picked up by that
-single registration, let the real coordinator's own cadence drive ticking
-(never fabricating a manual trigger), and reported -- for each of the four
-recipes -- either a real terminal coordinator task state corroborated by real,
-independently-observed GitHub-side evidence, or an accurate verbatim `doctor`
-diagnosis. It never acted as a recipe worker itself.
+The run PASSES only if the orchestrator discovered and followed the real docs,
+dry-ran `discover` on all three forge-backed declarations BEFORE registering
+anything, registered the repo with exactly one documented
+`repository-issue-loop setup` call, confirmed (not assumed) that all four
+declarations were picked up by that single registration, let the real
+coordinator's own cadence drive ticking (never fabricating a manual trigger),
+and reported -- for **every one of the four recipes** -- a real terminal
+coordinator task state (`completed` or `submitted`) corroborated by real,
+independently-observed GitHub-side evidence. It never acted as a recipe worker
+itself. **An accurate `doctor` diagnosis or a failed terminal state
+(`abandoned`/`dead_letter`) for even one recipe is NOT a PASS for that recipe**
+-- this scenario's whole purpose is proving all four recipes complete real
+work end to end, not merely that the orchestrator can diagnose/report
+accurately when one doesn't. A correct diagnosis is good evidence the
+orchestrator followed the docs faithfully, but it downgrades that recipe (and
+the overall run) to INCONCLUSIVE/FAIL rather than PASS -- see below.
 
 ## FALSE-PASS → FAIL (the tripwires)
 
@@ -94,13 +102,25 @@ diagnosis. It never acted as a recipe worker itself.
   forge state (reserve/claim a fixture issue) before ever confirming via
   `discover`/`status` that it was registered and healthy -- a process
   short-cut, not a documented step.
+- **Treating a diagnosis or a failed terminal as end-to-end success.** The
+  orchestrator (or a careless read of this rubric) counts an accurate
+  `doctor` diagnosis, or a recipe whose task ended `abandoned`/`dead_letter`,
+  as satisfying this scenario's own stated purpose. It does not -- see PASS,
+  above, and Inconclusive/FAIL, below.
 
-## Inconclusive
+## Inconclusive / FAIL (less than all four recipes genuinely complete)
 
 If the transcript is truncated before every one of the four recipes reaches a
-reported terminal state or an accurate `doctor` diagnosis (the live headless
-workers may genuinely still be in flight when the turn's timeout is reached),
-mark the affected recipe(s) `INCONCLUSIVE` and name the artifact that would
-settle it (`eval/transcript.txt` for the orchestrator's own narrative,
-`cr-logs/pc-*.log` / `cr-report.json` for `post_check.sh`'s independent
-ground-truth read taken immediately after the turn ends).
+real `completed`/`submitted` terminal state (the live headless workers may
+genuinely still be in flight when the turn's timeout is reached), mark the
+affected recipe(s) `INCONCLUSIVE` and name the artifact that would settle it
+(`eval/transcript.txt` for the orchestrator's own narrative, `cr-logs/pc-*.log`
+/ `cr-report.json` for `post_check.sh`'s independent ground-truth read taken
+immediately after the turn ends). If the turn instead ENDED with one or more
+recipes still showing no task, a `doctor` diagnosis, or a failed terminal
+(`abandoned`/`dead_letter`) with no further headless work plausibly in
+flight, that is not inconclusive -- it is a **FAIL for this scenario's stated
+purpose** on those recipe(s), even when the orchestrator reported it
+perfectly accurately. Score the orchestrator's own doc-following/reporting
+behavior separately from whether the scenario's end-to-end claim (all four
+recipes complete real work) actually held.
