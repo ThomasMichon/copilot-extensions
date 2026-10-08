@@ -98,6 +98,17 @@ before ACP readiness or prompt delivery. A relay-enabled resume fails explicitly
 when that readiness cannot be proven; fleets with relay disabled skip the gate.
 This resume contract is separate from broader relay port-stability policy.
 
+Session-Host sessions carry the relay's reverse-forward on a dedicated,
+self-healing supervisor (`ssh_manager.SupervisedRelayForward`) owned per
+session. That ownership ends with the session: the bridge stops a session's
+relay supervisors -- and their whole SSH process tree, including a
+`gh codespace ssh` ProxyCommand -- when the session is marked failed, ends, or
+is explicitly stopped (a redeploy detach keeps it for the surviving turn, and a
+later resume re-supervises it from the durable endpoint). A CodeSpace relay's
+supervisor also checks the CodeSpace's state through the GitHub API before any
+reconnect and retires instead of reconnecting when it is stopped, so a relay
+never re-wakes a CodeSpace that was stopped on purpose.
+
 The relay speaks the git credential protocol over TCP and supports the standard
 `get`/`fill`, `store`/`approve`, and `erase`/`reject` shapes plus token actions
 such as `get-github-token`, `get-azure-token`, and `get-access-token`; provider

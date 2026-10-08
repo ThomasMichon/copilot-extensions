@@ -143,31 +143,66 @@ async def test_monitor_without_gate_still_reconnects(monkeypatch):
     await relay.stop()
 
 
+def _capture_killpg(monkeypatch):
+    killed = []
+    monkeypatch.setattr(
+        relay_mod.os, "killpg",
+        lambda pgid, sig: killed.append((pgid, sig)),
+        raising=False,
+    )
+    monkeypatch.setattr(relay_mod.signal, "SIGKILL", 9, raising=False)
+    return killed
+
+
 async def test_stop_nowait_cancels_monitor_and_kills_process_group(monkeypatch):
     relay, spawned = _supervised(monkeypatch)
     await relay.start()
     proc = spawned[0]
-    killed_groups = []
-    monkeypatch.setattr(relay_mod.sys, "platform", "linux")
-    monkeypatch.setattr(relay_mod.os, "getpgid", lambda pid: pid, raising=False)
-    monkeypatch.setattr(relay_mod.os, "getpgrp", lambda: 1, raising=False)
-    monkeypatch.setattr(
-        relay_mod.os, "killpg",
-        lambda pgid, sig: killed_groups.append((pgid, sig)),
-        raising=False,
-    )
-    monkeypatch.setattr(relay_mod.signal, "SIGKILL", 9, raising=False)
+    relay._groups[id(proc)] = proc.pid  # as recorded at spawn on POSIX
+    killed = _capture_killpg(monkeypatch)
     monitor = relay._monitor_task
 
     relay.stop_nowait()
     relay.stop_nowait()  # idempotent
 
-    assert killed_groups == [(proc.pid, 9)]
+    await _settle(lambda: not relay._cleanup_tasks)
+    assert (proc.pid, 9) in killed
+    assert relay._proc is None
     assert relay._monitor_task is None
-    await asyncio.sleep(0)
     assert monitor.cancelled() or monitor.done()
-    proc.returncode = -9
-    await _settle(lambda: relay._proc is None)
     # A stopped relay never reconnects, even if the monitor were to run again.
     assert await relay._reconnect_allowed() is False
     assert len(spawned) == 1
+
+
+async def test_teardown_reaches_descendants_after_root_exited(monkeypatch):
+    relay, spawned = _supervised(monkeypatch)
+    await relay.establish()
+    proc = spawned[0]
+    relay._groups[id(proc)] = proc.pid
+    proc.returncode = 255  # root gone; a ProxyCommand child may survive
+    killed = _capture_killpg(monkeypatch)
+
+    await relay.stop()
+
+    assert killed == [(proc.pid, 9)]
+    assert relay._groups == {}
+
+
+async def test_gated_reconnect_rechecks_gate_before_each_retry(monkeypatch):
+    answers = [True, False, False]
+
+    async def gate() -> bool:
+        return answers.pop(0)
+
+    relay, spawned = _supervised(monkeypatch, gate=gate)
+
+    async def bind_fails(self, proc):
+        return _SettleResult(False, "remote port forwarding failed", True)
+
+    monkeypatch.setattr(SupervisedRelayForward, "_wait_settled", bind_fails)
+
+    assert await relay._restart_with_backoff("process exited") is False
+
+    assert len(spawned) == 1, "a stopped venue must not get a second attempt"
+    assert relay.retired is True

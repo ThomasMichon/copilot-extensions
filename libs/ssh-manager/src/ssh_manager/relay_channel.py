@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
 from .locks import process_identity
-from .process import terminate_ssh_process_tree
+from .process import run_process_cleanup, terminate_ssh_process_tree
 from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager.relay")
@@ -112,6 +112,8 @@ class SupervisedRelayForward:
         self._monitor_task: asyncio.Task[None] | None = None
         self._stopped = False
         self._retired = False
+        self._gated_establish = False
+        self._groups: dict[int, int] = {}
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
 
     @property
@@ -185,6 +187,14 @@ class SupervisedRelayForward:
         spec = f"{self._relay_port}:127.0.0.1:{host_port}"
         last_err = ""
         for attempt in range(1, _ESTABLISH_ATTEMPTS + 1):
+            # A monitor-driven reconnect re-checks the gate before every spawn:
+            # the venue may have been stopped during the backoff below.
+            if self._gated_establish and attempt > 1 \
+                    and await self._reconnect_allowed() is not True:
+                raise ConnectionError(
+                    "credential relay reconnect to "
+                    f"{self._config.ssh_target} declined by its reconnect gate"
+                )
             args = build_forward_ssh_args(
                 self._config,
                 None,
@@ -207,11 +217,12 @@ class SupervisedRelayForward:
                 stderr=asyncio.subprocess.PIPE,
             )
             self._proc = proc
+            self._track_group(proc)
             self._notify_pid_change()
             try:
                 settled = await self._wait_settled(proc)
             except asyncio.CancelledError:
-                await self._kill(proc)
+                await self._terminate(proc)
                 if self._proc is proc:
                     self._proc = None
                 raise
@@ -230,7 +241,7 @@ class SupervisedRelayForward:
             stderr = settled.stderr or await self._drain_stderr(proc)
             last_err = stderr or last_err or "ssh exited"
             exited_early = proc.returncode is not None
-            await self._kill(proc)
+            await self._terminate(proc)
             if self._proc is proc:
                 self._proc = None
 
@@ -302,35 +313,63 @@ class SupervisedRelayForward:
         self._proc = None
         if proc is None:
             return
-        if proc.returncode is None:
-            self._kill_tree_nowait(proc)
+        self._kill_tree_nowait(proc, self._groups.get(id(proc)))
         self._notify_pid_change()
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        cleanup = loop.create_task(self._kill(proc))
+        cleanup = loop.create_task(self._terminate(proc))
         self._cleanup_tasks.add(cleanup)
         cleanup.add_done_callback(self._cleanup_tasks.discard)
 
+    def _track_group(self, proc: asyncio.subprocess.Process) -> None:
+        """Record the fresh ssh root's own process group (POSIX).
+
+        Captured at spawn, while the root is known to be ours, so teardown can
+        still reach a surviving ProxyCommand child (e.g. ``gh codespace ssh``)
+        after the root has exited -- without a later, PID-reuse-prone lookup.
+        """
+        if sys.platform == "win32" or not isinstance(proc, asyncio.subprocess.Process):
+            return
+        try:
+            pgid = os.getpgid(proc.pid)
+        except OSError:
+            return
+        # start_new_session makes the root its own group leader; never adopt
+        # a group that is not the root's own, or is this process's.
+        if pgid == proc.pid and pgid != os.getpgrp():
+            self._groups[id(proc)] = pgid
+
     @staticmethod
-    def _kill_tree_nowait(proc: asyncio.subprocess.Process) -> None:
-        pid = getattr(proc, "pid", None)
-        if sys.platform != "win32" and isinstance(pid, int) and pid > 0:
-            # The ssh root leads its own session/group (start_new_session), so
-            # the group kill also reaches its ProxyCommand children. Never
-            # signal a group that is not the root's own (or is ours).
-            try:
-                pgid = os.getpgid(pid)
-                if pgid == pid and pgid != os.getpgrp():
-                    os.killpg(pgid, signal.SIGKILL)
-                    return
-            except OSError:
-                pass
+    def _signal_group(pgid: int | None) -> bool:
+        if pgid is None:
+            return False
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            return False
+        return True
+
+    @classmethod
+    def _kill_tree_nowait(
+        cls, proc: asyncio.subprocess.Process, pgid: int | None,
+    ) -> None:
+        if cls._signal_group(pgid) or proc.returncode is not None:
+            return
         try:
             proc.kill()
         except (ProcessLookupError, OSError):
             pass
+
+    async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
+        """Kill ``proc`` and any descendants that outlived an exited root."""
+        pgid = self._groups.pop(id(proc), None)
+        await self._kill(proc)
+        self._signal_group(pgid)
+        # Releases a Windows ProxyCommand owner even when the root had already
+        # exited (``terminate_ssh_process_tree`` only runs for a live root).
+        await run_process_cleanup(proc)
 
     async def _monitor(self) -> None:
         try:
@@ -418,7 +457,11 @@ class SupervisedRelayForward:
                     "Credential relay reverse-forward unhealthy (%s); re-establishing",
                     reason,
                 )
-                await self.establish()
+                self._gated_establish = self._reconnect_gate is not None
+                try:
+                    await self.establish()
+                finally:
+                    self._gated_establish = False
                 return True
             except asyncio.CancelledError:
                 raise
@@ -485,7 +528,7 @@ class SupervisedRelayForward:
     async def _cancel_process(self) -> None:
         proc = self._proc
         if proc is not None:
-            await self._kill(proc)
+            await self._terminate(proc)
             self._proc = None
             self._notify_pid_change()
 
