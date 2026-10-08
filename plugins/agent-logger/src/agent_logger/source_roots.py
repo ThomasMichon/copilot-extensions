@@ -162,6 +162,23 @@ def _regular_member(path: Path, *, optional: bool = False) -> None:
         raise SourceLayoutError(f"session observation is not regular: {path}")
 
 
+def validate_session_ref(ref: sessions.SessionRef) -> None:
+    """Reject linked or non-regular session files, including optional sidecars."""
+    if ref.kind == "live":
+        _directory(ref.path)
+        member = ref.path / sessions.EVENTS_MEMBER
+        sidecars = (ref.path / name for name in sessions.SIDECAR_MEMBERS)
+    else:
+        _directory(ref.path.parent)
+        member = ref.path
+        sidecars = (
+            ref.path.parent / f"{ref.id}.{name}" for name in sessions.SIDECAR_MEMBERS
+        )
+    _regular_member(member)
+    for sidecar in sidecars:
+        _regular_member(sidecar, optional=True)
+
+
 @dataclass(frozen=True)
 class ArchiveSource:
     """One physical source observation; aliases are never silently coalesced."""
@@ -196,19 +213,7 @@ class ArchiveSource:
             *((archived,) if archived is not None else ()),
         ):
             self.validate()
-            if ref.kind == "live":
-                _directory(ref.path)
-                member = ref.path / sessions.EVENTS_MEMBER
-                sidecars = (ref.path / name for name in sessions.SIDECAR_MEMBERS)
-            else:
-                _directory(ref.path.parent)
-                member = ref.path
-                sidecars = (
-                    ref.path.parent / f"{ref.id}.{name}" for name in sessions.SIDECAR_MEMBERS
-                )
-            _regular_member(member)
-            for sidecar in sidecars:
-                _regular_member(sidecar, optional=True)
+            validate_session_ref(ref)
             yield ref
 
     def iter_process_logs(self) -> Iterator[ProcessLogRef]:

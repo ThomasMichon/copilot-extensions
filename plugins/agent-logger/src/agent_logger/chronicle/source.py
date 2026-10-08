@@ -46,7 +46,7 @@ from pathlib import Path
 
 from agent_logger import sessions
 from agent_logger.segmenter.collate import read_workspace
-from agent_logger.source_roots import iter_archive_sources
+from agent_logger.source_roots import iter_archive_sources, validate_session_ref
 from agent_logger.sync.origin import read_origin_sidecar
 from agent_logger.sync.provenance import (
     RESCUE_SNAPSHOT_PROVENANCE,
@@ -468,6 +468,7 @@ class SyncedSessionSource(SessionSource):
     def _discover_archived(
         self, machine_dir: Path, ref: sessions.SessionRef, *, now: datetime | None
     ) -> DiscoveredSession | None:
+        validate_session_ref(ref)
         if not sessions.verify_archive(ref):
             return None
         provenance = read_provenance(machine_dir, ref.id)

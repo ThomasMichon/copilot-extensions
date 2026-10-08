@@ -380,6 +380,49 @@ def test_leaf_reader_preserves_regular_and_absent_sidecars(tmp_path: Path, kind:
         assert sessions.read_member(ref, member) == member.encode()
 
 
+@pytest.mark.parametrize("member", sessions.SIDECAR_MEMBERS)
+@pytest.mark.parametrize("representation", ["symlink", "broken-symlink", "directory", "reparse"])
+def test_chronicle_rejects_unsafe_archived_sidecars_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, member: str, representation: str
+) -> None:
+    from agent_logger.chronicle.source import ReservationStore, SyncedSessionSource
+
+    corpus = tmp_path / "corpus"
+    store = corpus / "repo.codespaces/box/archived"
+    store.mkdir(parents=True)
+    with tarfile.open(store / "session-1.tar.gz", "w:gz"):
+        pass
+    sidecar = store / f"session-1.{member}"
+    outside = tmp_path / "outside"
+    if representation == "directory":
+        sidecar.mkdir()
+    elif representation == "reparse":
+        sidecar.write_bytes(b"outside-corpus")
+        real_is_link = source_roots.is_link_or_reparse
+        monkeypatch.setattr(
+            source_roots,
+            "is_link_or_reparse",
+            lambda path, mode: path == sidecar or real_is_link(path, mode),
+        )
+    else:
+        if representation == "symlink":
+            outside.write_bytes(b"outside-corpus")
+        try:
+            sidecar.symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"native symlink creation unavailable: {exc}")
+
+    def unexpected_read(*args: object, **kwargs: object) -> None:
+        pytest.fail("archive bytes or sidecars read before no-link validation")
+
+    monkeypatch.setattr(sessions, "verify_archive", unexpected_read)
+    monkeypatch.setattr(sessions, "read_workspace", unexpected_read)
+    monkeypatch.setattr(sessions, "read_origin", unexpected_read)
+    source = SyncedSessionSource(corpus, ReservationStore(tmp_path / "state.db"))
+    with pytest.raises(SourceLayoutError, match="not regular"):
+        source.scan()
+
+
 def test_missing_and_permission_denied_roots_remain_explicit(tmp_path, monkeypatch):
     with pytest.raises(SourceLayoutError, match="missing"):
         list(iter_archive_sources(tmp_path / "absent"))
