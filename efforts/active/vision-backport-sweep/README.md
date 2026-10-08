@@ -270,6 +270,14 @@ Operator, end of a long multi-repo session:
             Closed stale feature-delivery issues `#2595` and `#2596` with
             direct source/owning-effort evidence; their umbrella `#2594`
             remains open, not inferred complete from these two closures.
+      - [ ] `visions/plugins/agent-bridge/README.md` — observation and
+            attribution slice reconciled: evidence-backed presence, reported
+            consumption with per-figure provenance and rollup coverage,
+            conservative sub-agent attribution, creator identity distinct
+            from caller affinity, and continuity-aware backward history
+            browsing. The rest of the leaf's deployment, hosting, routing,
+            and protocol contracts remain to be reconciled; this is not a
+            completed full-leaf sweep.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -848,3 +856,47 @@ then rather than assuming either answer.
   section per slice, or reconcile `agent-bridge`; branch visions
   (`agent-fabric`, `native-convergence`, `plugin-services`) and the remaining
   Phase 3 invariants still await their own audits.
+
+### 2026-10-08 — Phase 2 agent-bridge observation/attribution slice
+- Read the full agent-bridge vision, then scoped this slice to one coherent
+  observation contract rather than claiming the entire leaf reconciled.
+  Fold-back evidence: presence and consumption (`#5568`, `#5591`,
+  `peek_snapshot.py`, `session_maintenance_cli.py`); conservative sub-agent
+  attribution and backward history paging (`#5279`, `acp_subagents.py`,
+  `acp_client.py`, `routes/event_pages.py`, `db_events.py`); creator
+  provenance (`#5361`, `caller_session.py`, session creation and successor
+  propagation). Owning reality docs are agent-bridge's
+  `docs/architecture.md` and `docs/delegation-contract.md`.
+- Superset check: preserved all existing Features, Behaviors, and Non-Goals.
+  Added positive observation capabilities and safety guarantees, not a new
+  teardown order. Presence is transcript evidence, not a liveness oracle;
+  consumption is reported coverage, not an authoritative bill; creator
+  identity is informational, not reuse/cursor/control identity. Attribution
+  remains optional and conservative; no complete attribution guarantee was
+  inferred from a best-effort feed. No API names, thresholds, schemas, or
+  protocol numbers were added to the vision.
+- Direction 1: added `inherits-runtime-service-invariants` and a service-model
+  See Also link, retaining the existing process-count and deployment promises.
+  Direction 2 is **scoped to these observation additions**, not a fresh
+  whole-daemon conformance audit:
+
+  | Invariant | Status in this scope | Evidence / delta |
+  |---|---|---|
+  | `interoperate-across-version-skew` | Conforms for optional attribution and creator capture; full bridge contract remains partial | `SubagentAttribution.call_with_meta` retries only rejected optional metadata; absent feed preserves the ordinary stream. `gate_caller_session_id` omits unsupported capture with a warning. Backward paging is explicitly protocol-gated in architecture docs. Broader contract evolution stays tracked by `#1460`, not closed here. |
+  | `degrade-gracefully` | Conforms for these observations | `_cmd_presence` exposes unknown with a reason; `_cmd_usage` preserves missing figures and per-metric coverage; attribution rejects mismatched/interleaved text rather than assigning it speculatively. These paths do not require a logger or dispatch service. |
+  | `process-count-scales-with-services-not-sessions` | Conforms for these additions only | Attribution state belongs to the existing `AcpClient`; local transcript inspection is a bounded helper invocation, not a new resident daemon. This is not a census of the bridge's overall process topology. |
+  | `immutable-versioned-runtime` / `zero-downtime-cutover` | Not re-audited | Existing Phase 3 findings and `#5472` remain the applicable tracked delta; this documentation slice changes no installer/runtime. |
+
+- No new invariant blind spot identified at branch altitude and no new
+  implementation gap carved from this bounded observation comparison. Other
+  recent bridge commits and the remaining Phase 3 invariants are explicitly
+  outside this slice. Existing source documentation already describes these
+  additions; only the standing vision and this effort need updates.
+- Validation: document-structure guard passes for both touched READMEs.
+  The contained agent-bridge runner selected the existing peek/presence/usage,
+  sub-agent attribution, creator-provenance, and backward-page contract tests:
+  **119 passed, 2 skipped, 3299 deselected** on Windows. This includes real
+  local transcript-helper execution and in-process HTTP/manager boundaries,
+  not a new live agent run. Clean-room and external-venue tiers were not run:
+  no provisioning, runtime, hook, or payload behavior changes in this slice.
+  The Windows-inapplicable remote-shell scenario remains skipped.
