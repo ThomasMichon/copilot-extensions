@@ -111,6 +111,16 @@ Notes:
 - **Never write run artifacts into the repo tree.** Results land in a machine-local
   dir outside the repo (the run prints its exact path). The rig may run from an
   anchor checkout; per-run state in a repo is a hazard.
+- **`gh` auth needs an explicit persisted login for any scenario spanning
+  multiple separate `docker exec` calls** (a Tier-E orchestrator session's own
+  tool calls, a multi-phase `setup.sh`/`post_check.sh` pair, etc.). The
+  injected `COPILOT_GITHUB_TOKEN` env var is only visible to the single
+  process it's set for -- it does NOT survive into a later, separate `docker
+  exec` invocation. Run `gh auth login --with-token <<<"$COPILOT_GITHUB_TOKEN"`
+  (or equivalent) once early in `setup.sh`, check its real exit status, and
+  rely on the persisted `~/.config/gh/hosts.yml` credential for every later
+  phase -- never assume a bare env-var export alone is enough once more than
+  one `docker exec` is involved.
 
 Parameterize the reference scenario for a quick single-plugin check via
 PowerShell params (`-MarketplaceRepo`, `-MarketplaceName`, `-PrimaryPlugin`,
