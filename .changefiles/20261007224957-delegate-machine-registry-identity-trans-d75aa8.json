@@ -1,9 +1,0 @@
-{
-  "comment": "Delegate machine registry/identity/transport logic to the new shared agent-machine-transport library",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

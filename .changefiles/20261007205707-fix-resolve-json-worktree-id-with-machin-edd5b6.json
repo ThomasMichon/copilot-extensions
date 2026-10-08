@@ -1,9 +1,0 @@
-{
-  "comment": "Fix: resolve --json --worktree-id with --machine/--environment targeting the local machine but a different-platform environment (e.g. WSL from Windows) now dispatches the SSH handoff instead of failing closed with 'Worktree not found' against the local machine's own tracking directory",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix embedding engine startup: model loading now runs at normal priority (previously throttled before load, stalling the one-time load indefinitely under host contention at Windows IDLE_PRIORITY_CLASS); the host-politeness throttle is now applied only after a successful load, so it still protects ongoing embedding work.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

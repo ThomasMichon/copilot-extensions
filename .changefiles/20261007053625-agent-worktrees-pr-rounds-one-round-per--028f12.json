@@ -1,9 +1,0 @@
-{
-  "comment": "agent-worktrees pr rounds: one round per head the reviewer reviewed, measured by the findings it reported; a pure guard stops a review/fix loop on a plateau (no improvement in the last N rounds) or a round cap, says 'round N of M' otherwise, and reads unknown when the head or PR moved mid-read. The worktree skill's PR loop runs it after each review and posts a steer card on plateau or round cap",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

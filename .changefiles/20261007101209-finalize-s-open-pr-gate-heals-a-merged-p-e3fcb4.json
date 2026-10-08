@@ -1,9 +1,0 @@
-{
-  "comment": "finalize no longer refuses two kinds of landed legacy worktree: a merged PR on an older record that keeps the project name (not owner/name) heals, because every provider read of a tracked PR resolves the hosting repo from its PR URL through one shared tracked_pr_slug, and healing the active PR no longer skips the next open entry; and a tracked branch that was only ever synced (reset) to newer tips of the remote it was created from carries no work of its own, so its creation point advances through those proven resets",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

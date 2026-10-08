@@ -1,9 +1,0 @@
-{
-  "comment": "Bring two modules back within their module-size ceilings after concurrent merges pushed them over (no behavior change).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

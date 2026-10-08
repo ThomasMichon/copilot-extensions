@@ -1,9 +1,0 @@
-{
-  "comment": "plugin-activation: an enabledPlugins entry without an @marketplace (a Copilot CLI built-in plugin, e.g. computer-use) is no longer rejected as a malformed identity -- it is left untouched, so Copilot settings restores and activation reads stop refusing the whole file",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

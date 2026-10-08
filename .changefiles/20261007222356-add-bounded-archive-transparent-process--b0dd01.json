@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded archive-transparent process-log evidence readers.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

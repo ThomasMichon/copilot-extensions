@@ -1,9 +1,0 @@
-{
-  "comment": "Fix picker teardown-wake noise and self-looping SSH dispatch for an aliased local machine",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

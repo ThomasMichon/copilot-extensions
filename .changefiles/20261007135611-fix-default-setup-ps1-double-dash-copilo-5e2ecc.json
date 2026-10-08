@@ -1,9 +1,0 @@
-{
-  "comment": "Fix default-setup.ps1 double-dash CopilotArgs mis-binding via launch-command.ps1 dot-source fast path; fix preview_release.py copying/scanning a local .venv; fix single-plugin retired-directory-pointer check and Windows path-separator log messages",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

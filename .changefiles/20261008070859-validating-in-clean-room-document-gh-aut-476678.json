@@ -1,9 +1,0 @@
-{
-  "comment": "validating-in-clean-room: document gh auth persistence requirement (gh auth login --with-token) for any scenario spanning multiple docker exec calls",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

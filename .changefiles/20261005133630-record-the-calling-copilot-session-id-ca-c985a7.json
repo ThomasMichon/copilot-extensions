@@ -1,9 +1,0 @@
-{
-  "comment": "Record the calling Copilot session id (caller_session_id, from COPILOT_AGENT_SESSION_ID) on bridge sessions and expose it next to caller_id in session listings",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}
