@@ -299,6 +299,7 @@ def run_background_capture(
     *,
     timeout: float,
     env: Mapping[str, str] | None = None,
+    cwd: str | os.PathLike[str] | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a short-lived captured process tree without a headed Windows console.
 
@@ -331,6 +332,7 @@ def run_background_capture(
             stdin=subprocess.DEVNULL,
             text=True,
             env=dict(env) if env is not None else None,
+            cwd=cwd,
             **_process_tree_kwargs(),
         )
     except OSError:

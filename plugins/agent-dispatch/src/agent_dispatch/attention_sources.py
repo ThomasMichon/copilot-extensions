@@ -195,6 +195,10 @@ def registration_error(name: Any, spec: Any) -> str | None:
     argv = spec.get("argv")
     if not (isinstance(argv, list) and argv and all(isinstance(a, str) and a for a in argv)):
         return "argv must be a non-empty list of strings"
+    if not os.path.isabs(argv[0]):
+        # Resolved at registration, never at read time: a bare or relative command
+        # would otherwise resolve against whatever checkout the read runs in.
+        return "the command must be an absolute path (`attention source add` resolves it)"
     timeout = spec.get("timeout", DEFAULT_TIMEOUT)
     if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= MAX_TIMEOUT:
         return f"timeout must be in (0, {MAX_TIMEOUT:g}] seconds"
@@ -211,10 +215,12 @@ def save_registrations(sources: dict[str, dict[str, Any]], path: Path | None = N
 
 def read_command(name: str, spec: dict[str, Any], read_at: str,
                  run: Callable[..., Any] | None = None) -> dict[str, Any]:
-    """Run one command source and translate its envelope (never guessing)."""
+    """Run one command source and translate its envelope (never guessing). It
+    runs from the registry's own directory, so neither its command nor a relative
+    argument can resolve against the checkout the read happens to run in."""
     if run is None:
         from .procutil import run_background_capture as run
-    done = run(spec["argv"], timeout=spec["timeout"])
+    done = run(spec["argv"], timeout=spec["timeout"], cwd=str(registry_path().parent))
     if done is None:
         return ac.command_failure(f"did not finish within {spec['timeout']:g}s (or could not start)")
     if done.returncode != 0:
@@ -259,10 +265,13 @@ def _finish(name: str, result: dict[str, Any]) -> dict[str, Any]:
 
 def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: dict[str, float],
             selected: list[str] | None, config_errors: list[dict[str, str]],
-            store: Any, read_at: str | None = None) -> dict[str, Any]:
+            store: Any, read_at: str | None = None, read_token: int | None = None) -> dict[str, Any]:
     """Read every (selected) source concurrently and build the aggregate envelope.
     A selected name that is only a rejected registration is reported through its
-    config error, not as a source."""
+    config error, not as a source. ``read_token`` (default: the start time in
+    nanoseconds) orders this read against concurrent ones for the store, which
+    the second-precision ``read_at`` can't."""
+    read_token = time.time_ns() if read_token is None else read_token
     read_at = read_at or now_iso()
     names = sorted(n for n in (selected if selected is not None else readers) if n in readers)
     results: dict[str, dict[str, Any]] = {}
@@ -294,7 +303,7 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
             raw = ac.command_failure(f"timed out after {timeouts.get(name, DEFAULT_TIMEOUT):g}s")
         raw.setdefault("read_at", read_at)
         results[name] = _finish(name, raw)
-    store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at)
+    store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at, read_token)
     if selected is not None:
         config_errors = [e for e in config_errors if e["name"] in selected]
     sources = [{"name": n, "status": r["status"], "uncertain": r.get("uncertain", 0),

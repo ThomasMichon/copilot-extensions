@@ -4,7 +4,9 @@ aggregate status, the dispatch source, command sources and the CLI."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 
 import pytest
 
@@ -34,9 +36,13 @@ def _ok(*items, status="ok", uncertain=0):
     return lambda read_at: {"items": [dict(i) for i in items], "status": status, "uncertain": uncertain}
 
 
-def _collect(readers, store, selected=None, config_errors=(), read_at=T1):
+def _collect(readers, store, selected=None, config_errors=(), read_at=T1, read_token=None):
+    from datetime import datetime
+
+    # Tests order reads by read_at unless a token says otherwise.
+    token = read_token if read_token is not None else int(datetime.fromisoformat(read_at).timestamp() * 1e9)
     return srcs.collect(readers, timeouts={}, selected=selected, config_errors=list(config_errors),
-                        store=store, read_at=read_at)
+                        store=store, read_at=read_at, read_token=token)
 
 
 # -- contract ---------------------------------------------------------------------
@@ -214,7 +220,7 @@ def test_the_coordinators_epoch_timestamps_become_iso(tmp_path):
 
 
 def _run_returning(stdout="", returncode=0, stderr=""):
-    return lambda argv, timeout: subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+    return lambda argv, timeout, cwd=None: subprocess.CompletedProcess(argv, returncode, stdout, stderr)
 
 
 def _command(stdout, **kw):
@@ -247,7 +253,7 @@ def test_a_command_that_exits_non_zero_or_prints_non_json_fails(kw):
 
 
 def test_a_command_that_times_out_fails():
-    assert srcs.read_command("ext", {"argv": ["x"], "timeout": 5}, T1, run=lambda a, timeout: None)["status"] == "failed"
+    assert srcs.read_command("ext", {"argv": ["x"], "timeout": 5}, T1, run=lambda a, timeout, cwd=None: None)["status"] == "failed"
 
 
 def _cmd_item(**kw):
@@ -278,9 +284,11 @@ def test_an_item_omitting_source_id_and_times_is_stamped_then_validated(tmp_path
 
 
 def test_a_registration_under_a_builtin_name_is_rejected_not_listed(tmp_path):
-    srcs.save_registrations({"dispatch": {"argv": ["x"]}, "ok-one": {"argv": ["y"]}, "Bad Name": {"argv": ["z"]}})
+    srcs.save_registrations({"dispatch": {"argv": [sys.executable]}, "ok-one": {"argv": [sys.executable]},
+                             "Bad Name": {"argv": [sys.executable]}, "relative": {"argv": ["./source"]}})
     valid, errors = srcs.load_registrations()
-    assert list(valid) == ["ok-one"] and sorted(e["name"] for e in errors) == ["Bad Name", "dispatch"]
+    assert list(valid) == ["ok-one"]
+    assert sorted(e["name"] for e in errors) == ["Bad Name", "dispatch", "relative"]
 
 
 class _Client:
@@ -388,8 +396,24 @@ def test_cli_bad_cursor_is_a_usage_error(monkeypatch, capsys):
 def test_cli_source_add_parses_options_before_the_command(monkeypatch, capsys):
     rc, out = _cli(monkeypatch, capsys, ["attention", "source", "add", "ext", "--timeout", "5", "--",
                                          "python", "-c", "print(1)"])
-    assert rc == 0 and json.loads(out.out) == {"registered": "ext", "argv": ["python", "-c", "print(1)"],
-                                               "timeout": 5.0}
+    doc = json.loads(out.out)
+    assert rc == 0 and doc["registered"] == "ext" and doc["timeout"] == 5.0
+    # The bare command is pinned to an absolute path at registration.
+    assert os.path.isabs(doc["argv"][0]) and doc["argv"][1:] == ["-c", "print(1)"]
+
+
+def test_a_command_source_runs_from_the_registry_directory_not_the_callers(monkeypatch, tmp_path):
+    seen = {}
+
+    def run(argv, timeout, cwd=None):
+        seen["cwd"] = cwd
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"schema": 1, "items": []}), "")
+
+    checkout = tmp_path / "untrusted-checkout"
+    checkout.mkdir()
+    monkeypatch.chdir(checkout)
+    srcs.read_command("ext", {"argv": [sys.executable], "timeout": 5}, T1, run=run)
+    assert seen["cwd"] == str(srcs.registry_path().parent) != str(checkout)
 
 
 def test_a_short_deadline_is_honored_even_when_checked_after_a_long_one(tmp_path):
@@ -452,7 +476,7 @@ def test_concurrent_registrations_are_never_lost(monkeypatch):
     names = [f"src-{i}" for i in range(8)]
 
     def add(name):
-        args = parser.parse_args(["attention", "source", "add", name, "--", "x"])
+        args = parser.parse_args(["attention", "source", "add", name, "--", sys.executable])
         args.func(args)
 
     threads = [threading.Thread(target=add, args=(n,)) for n in names]
@@ -508,7 +532,7 @@ def test_cli_next_on_a_degraded_empty_read_is_not_all_clear(monkeypatch, capsys)
 
 def test_cli_source_add_refuses_a_registry_whose_sources_is_not_an_object(monkeypatch, capsys):
     srcs.registry_path().write_text('{"sources": []}', encoding="utf-8")
-    rc, out = _cli(monkeypatch, capsys, ["attention", "source", "add", "ext", "--", "x"])
+    rc, out = _cli(monkeypatch, capsys, ["attention", "source", "add", "ext", "--", sys.executable])
     assert rc == 1 and "not an object" in out.err
 
 
@@ -589,3 +613,28 @@ def test_a_failed_lane_read_is_uncertain_and_keeps_the_task_items():
     result = srcs.read_dispatch(lambda: Flaky(tasks), T1)
     assert result["status"] == "uncertain" and result["uncertain"] == 1
     assert [i["entity_ref"] for i in result["items"]] == ["q0"]
+
+
+def test_reads_in_the_same_second_are_ordered_by_their_token(tmp_path):
+    store = FirstObserved(tmp_path / "o.json")
+    _collect({"s": _ok({**_item(), "created_at": None})}, store, read_at=T0, read_token=1)
+    _collect({"s": _ok()}, store, read_at=T1, read_token=3)  # the newer ok read clears it
+    _collect({"s": _ok({**_item(), "created_at": None})}, store, read_at=T1, read_token=2)  # same second, older
+    env = _collect({"s": _ok({**_item(), "created_at": None})}, store, read_at=T2, read_token=4)
+    assert env["items"][0]["created_at"] == T2
+
+
+def test_a_silent_failover_to_the_shared_coordinator_is_pinned_in_actions(monkeypatch, capsys):
+    from agent_dispatch import config
+
+    class Shared(_Client):
+        base_url = "https://shared.example/"
+
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    monkeypatch.setattr(config, "shared_url", lambda: "https://shared.example")
+    monkeypatch.setattr(m, "_client", lambda args: Shared(tasks))
+    args = m.build_parser().parse_args(["attention", "next"])
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    assert "agent-dispatch --shared card show t1" in out
+    assert "next: agent-dispatch --shared attention next --after" in out

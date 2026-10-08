@@ -36,7 +36,10 @@ didn't issue, or a registration that isn't valid.
   `attention-sources.json`) under a name that is its identity: unique,
   `[a-z0-9-]+`, and not a built-in name (`dispatch`, `bridge`, `pr`). A rejected
   registration is not a source: it is listed in `config_errors[]`, and it makes
-  a read that includes it `degraded`.
+  a read that includes it `degraded`. `source add` pins a bare command to its
+  absolute path, a registration whose command isn't absolute is rejected, and
+  the command runs from the registry's directory: nothing in the checkout a read
+  runs in can supply or redirect it (pass file arguments as absolute paths).
 
 Each source runs under its own timeout (a reader that hangs past it is abandoned, never keeping the command alive) (a command's own `--timeout`, default
 20 s, at most 120 s), as a contained process tree. A timeout, a crash or any
@@ -83,7 +86,7 @@ after it even when that item was resolved meanwhile; it wraps to the top.
 | `reason` | one line, at most 200 characters |
 | `created_at`, `updated_at` | when the condition began / was last observed, as canonical UTC (`YYYY-MM-DDTHH:MM:SS+00:00`); a command source may send any ISO-8601 spelling with an offset, which is normalized |
 | `confidence` | `reported`, `scanned` or `heuristic` |
-| `actions[]` | `{verb, argv}` that run as-is (a dispatch action carries the read's own `--url`/`--shared`, never a token); the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>`. A client may run `show` without confirmation only for a built-in source's item; every action of a command source is operator-initiated |
+| `actions[]` | `{verb, argv}` that run as-is (a dispatch action carries the read's own `--url`/`--shared`, or `--shared` when the default path failed over to the shared coordinator; never a token); the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>`. A client may run `show` without confirmation only for a built-in source's item; every action of a command source is operator-initiated |
 | `source` | the source that produced it |
 | `input` | optional: the form an answer needs (the steering card's `request_input` field list, or an object) |
 | `also[]` | lower-ranked items for the same entity from other sources (aggregator-owned) |
@@ -97,6 +100,8 @@ operator omits `created_at`; it is kept per source in a machine-local store
 (`attention-observed.json`), so repeated reads keep the same order. A time is
 cleared only when that same source reads `ok` without the item; a `failed` or
 `uncertain` read keeps it, so an outage never reorders an unchanged queue.
+Concurrent reads are ordered by a nanosecond token taken when each starts, so a
+slower, older read that finishes last can't re-add a time a newer one cleared.
 
 ## Writing a command source
 

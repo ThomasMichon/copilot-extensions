@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 from typing import Any
 
@@ -42,11 +44,38 @@ def _target_cli(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(cli)
 
 
+def _effective_cli(args: argparse.Namespace, client: Any) -> tuple[str, ...]:
+    """:func:`_target_cli`, plus ``--shared`` when the default path silently failed
+    over to the shared coordinator -- so an action keeps reaching the queue the
+    read came from even once the local coordinator is back. (An SSH failover has
+    no flag to pin it; its actions keep the default route, which fails over the
+    same way while the local coordinator stays down.)"""
+    cli = _target_cli(args)
+    if len(cli) == 1:
+        from .config import shared_url
+
+        surl, base = shared_url(), getattr(client, "base_url", None)
+        if surl and base and base.rstrip("/") == surl.rstrip("/"):
+            cli += ("--shared",)
+    return cli
+
+
+def _dispatch_reader(args: argparse.Namespace):
+    """The ``dispatch`` reader; records the effective invocation on ``args`` for
+    the ``next`` hint."""
+    args.attention_cli = _target_cli(args)
+
+    def read(read_at: str) -> dict[str, Any]:
+        client = _core()._client(args)
+        args.attention_cli = _effective_cli(args, client)
+        return srcs.read_dispatch(lambda: client, read_at, cli=args.attention_cli)
+
+    return read
+
+
 def _readers(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, float], list[dict[str, str]], set[str]]:
     registrations, config_errors = srcs.load_registrations()
-    cli = _target_cli(args)
-    readers: dict[str, Any] = {
-        "dispatch": lambda read_at: srcs.read_dispatch(lambda: _core()._client(args), read_at, cli=cli)}
+    readers: dict[str, Any] = {"dispatch": _dispatch_reader(args)}
     timeouts = {"dispatch": srcs.DEFAULT_TIMEOUT}
     for name, spec in registrations.items():
         readers[name] = lambda read_at, n=name, s=spec: srcs.read_command(n, s, read_at)
@@ -129,7 +158,7 @@ def _cmd_next(args: argparse.Namespace) -> int:
 
 def _next_argv(args: argparse.Namespace, envelope: dict[str, Any], cursor: str) -> list[str]:
     """The follow-up that walks the same queue: same coordinator, same sources."""
-    argv = [*_target_cli(args), "attention", "next", "--after", cursor]
+    argv = [*(getattr(args, "attention_cli", None) or _target_cli(args)), "attention", "next", "--after", cursor]
     for name in envelope["selected"] or ():
         argv += ["--source", name]
     return argv
@@ -154,6 +183,10 @@ def _cmd_source(args: argparse.Namespace) -> int:
         except SystemExit:
             return 2
         spec = {"argv": argv, "timeout": parsed.timeout}
+        if argv and not os.path.isabs(argv[0]):  # pin the command now, not at each read
+            resolved = shutil.which(argv[0])
+            if resolved:
+                spec["argv"] = [os.path.abspath(resolved), *argv[1:]]
         error = srcs.registration_error(args.name, spec)
         if error:
             print(f"agent-dispatch: cannot register {args.name!r}: {error}", file=sys.stderr)
