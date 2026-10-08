@@ -3,7 +3,8 @@
 Covers env capture in the CLI, validation, the additive v25 schema migration,
 the DB round trip, exposure next to ``caller_id`` in the HTTP session rows
 (list, detail, status) that ``agent-bridge --json sessions`` prints and in the
-create response, and the client's HTTP-protocol gate against older daemons.
+create response, the client's HTTP-protocol gate against older daemons, and
+the real ``SessionManager`` start / rehydrate / handoff paths.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from agent_bridge.models import (
     StartSessionResponse,
 )
 from agent_bridge.protocol import CALLER_SESSION_ID_PROTOCOL_VERSION
-from agent_bridge.session_manager import Session
+from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
 
 SID = "3f2a9c1e-7b4d-4e8a-9c0f-1a2b3c4d5e6f"
@@ -425,3 +426,67 @@ def test_remote_venue_cli_records_caller_session(
     assert {s["session_id"]: s["caller_session_id"] for s in listed} == {
         "remote-1": SID,
     }
+
+
+# -- Real SessionManager paths (only spawn / ACP are stubbed) ------------------
+
+
+@pytest.fixture
+def _real_spawn(mock_acp_client):
+    """Stub only the process spawn + ACP transport; the real
+    ``SessionManager.start_session`` / ``handoff_session`` run unchanged."""
+    proc = MagicMock()
+    proc.proc = MagicMock(pid=12345, returncode=None)
+    proc.proc.stderr.readline = AsyncMock(return_value=b"")
+
+    async def _fake_host_connect(self, target, **kwargs):
+        return mock_acp_client, mock_acp_client.acp_session_id
+
+    with patch("agent_bridge.session_manager.spawn", return_value=proc), \
+            patch("agent_bridge.session_manager.AcpClient",
+                  return_value=mock_acp_client), \
+            patch.object(
+                SessionManager, "_connect_via_session_host", _fake_host_connect,
+            ):
+        yield
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("raw", "expected"), [(SID, SID), ("bad id!", None)])
+async def test_real_start_session_normalizes_and_persists(
+    session_manager, tmp_db, spawn_target, _real_spawn, raw, expected,
+) -> None:
+    session = await session_manager.start_session(
+        spawn_target, caller_id="/wt", caller_session_id=raw,
+    )
+    assert session.caller_session_id == expected
+    assert tmp_db.get_session(session.session_id)["caller_session_id"] == expected
+
+
+def test_rehydrate_restores_caller_session_id(tmp_db) -> None:
+    tmp_db.create_session(
+        session_id="cold-1", name="n", agent_name=None, target_dir="/r",
+        target_type="local", status="idle", now=1.0,
+        caller_id="/wt", caller_session_id=SID,
+    )
+    mgr = SessionManager(tmp_db)
+    session = mgr._sessions["cold-1"]
+    assert session.caller_id == "/wt"
+    assert session.caller_session_id == SID
+
+
+@pytest.mark.asyncio
+async def test_handoff_successor_inherits_caller_session_id(
+    session_manager, tmp_db, spawn_target, _real_spawn,
+) -> None:
+    pred = await session_manager.start_session(
+        spawn_target, caller_id="/wt", caller_session_id=SID,
+    )
+    succ = await session_manager.handoff_session(
+        pred.session_id, seed_text="continue",
+    )
+    if succ._prompt_task is not None:
+        await succ._prompt_task
+    assert succ.session_id != pred.session_id
+    assert succ.caller_session_id == SID
+    assert tmp_db.get_session(succ.session_id)["caller_session_id"] == SID
