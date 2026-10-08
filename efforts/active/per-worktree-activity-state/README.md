@@ -171,6 +171,23 @@ follow-ons.
       `not retire_disqualified_by_nonterminal and now -
       retire_first_attempt_at >= _RETIRE_ABANDON_GRACE_S` directly off the
       slot -- no journal replay, and no behavioral change from today.
+- [ ] **One-time backfill for already-existing handoffs, before Phase 2
+      cuts the readers over.** A handoff that was spawned/retired *before*
+      this upgrade has that state recorded only in the journal -- its
+      `SessionHandoff` entry's new slot fields all start unset. If Phase 2
+      starts trusting those fields immediately, a pre-upgrade spawned
+      handoff would look unattempted (risking a duplicate successor spawn)
+      and a pre-upgrade retired one would look still-pending (risking a
+      retry against an already-retired predecessor) -- a real double-action
+      hazard right at the cutover moment, not a cosmetic gap. As part of
+      this same phase (not deferred to Phase 2), backfill every existing
+      `SessionHandoff`'s new fields from its current journal-derived state
+      -- a one-time read per handoff at upgrade time (reusing the same
+      merge-the-journal-sources logic the current readers already use),
+      never a recurring per-sweep scan. Add tests covering a pre-upgrade
+      spawned-but-not-retired handoff and a pre-upgrade spawned-and-retired
+      one, confirming each backfills to the correct slot state rather than
+      appearing unattempted after the cutover.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
 - [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
@@ -289,6 +306,12 @@ archived-journal discovery, standalone-install retention floor):
       activity occurs. A separate token with every attempt terminal-class
       from the start must still abandon at exactly `_RETIRE_ABANDON_GRACE_S`
       past `retire_first_attempt_at` (Phase 1).
+- [ ] A pre-upgrade backfill test: a `SessionHandoff` whose spawn/retire
+      history exists only in the journal (simulating a pre-upgrade
+      handoff) must backfill to the correct slot state -- one case spawned
+      but not yet retired, one case spawned and retired -- confirm neither
+      appears unattempted after the cutover (no duplicate spawn, no
+      retry-after-already-retired) (Phase 1).
 - [ ] Unit tests proving the 6 rewired hot-path functions never call
       `activity.read_events`/`handoff_trace.read_trace` (Phase 2) --
       e.g. a monkeypatch that raises if either is called during a sweep or

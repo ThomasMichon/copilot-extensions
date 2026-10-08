@@ -110,10 +110,25 @@ regression, not merely a missed optimization.
       pruning rather than deleting outright so the "recent history
       survives a while" promise holds) -- never "keep forever" as the
       silent default.
+- [ ] **A one-time prune at cleanup time is not rolling retention.** An
+      entry still younger than the cutoff at the moment of cleanup
+      correctly survives that pass -- but once the worktree is gone,
+      nothing revisits that file again later when those entries finally
+      age past the window, so it would sit there forever past its own
+      retention deadline. Add a **recurring** GC pass independent of any
+      single worktree's cleanup event -- e.g. piggybacking on the resident
+      status-monitor's own already-continuous periodic sweep (it already
+      exists and already does light housekeeping), or an equivalent
+      scheduled task -- that revisits every cleaned-up-but-still-retained
+      journal and reaps/deletes it once it has fully aged out, not merely
+      pruning it down.
 - [ ] Archival (when present) is strictly additive longevity on top of this
       floor, never the sole reclaim mechanism.
 - [ ] Add a cleanup test with `agent-logger` absent that confirms the
-      journal is still eventually bounded.
+      journal is still eventually bounded, AND a separate recurring-GC test
+      that advances time past the retention window after cleanup and
+      confirms the journal is then actually reaped by the recurring pass,
+      not left in place forever.
 
 ## Validation (phase-specific)
 
@@ -132,6 +147,11 @@ regression, not merely a missed optimization.
       `agent-logger` absent (or its callback failing), confirm
       `agent-worktrees`' own bounded-retention fallback still eventually
       prunes/bounds that worktree's journal rather than growing it forever.
+- [ ] A recurring-GC test: clean up a worktree whose journal entries are
+      still within the retention window at cleanup time (so the one-time
+      prune leaves it intact); advance time past the window; confirm the
+      recurring GC pass (not the one-time cleanup prune) reaps/deletes it
+      rather than leaving it indefinitely.
 - [ ] An archived-journal discovery test: clean up (archive + reclaim) a
       worktree with `agent-logger` installed, then confirm the unscoped
       `agent-worktrees activity` view still includes its recent history by
