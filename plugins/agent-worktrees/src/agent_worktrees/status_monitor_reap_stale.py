@@ -74,50 +74,57 @@ def _slot_marker_valid(slot: Path, version: str) -> bool:
 
 def current_runtime_python() -> str:
     """The CURRENT runtime slot's interpreter path, falling back to this
-    process's own ``sys.executable`` only if no validated slot resolves. A
-    long-delayed caller (e.g. this module's own ``status-monitor-reap-stale``,
-    which can run up to its configured delay after being spawned) may
-    itself be running from a slot that is no longer current by the time it
-    spawns a monitor -- spawning with a stale interpreter would start an
-    already-superseded (or, worse, incomplete/broken) monitor that
-    ``_ensure_status_monitor()`` would otherwise report as successfully
-    ensured despite an immediate exit.
+    process's own ``sys.executable`` whenever that slot doesn't resolve to
+    a validated, complete runtime. A long-delayed caller (e.g. this
+    module's own ``status-monitor-reap-stale``, which can run up to its
+    configured delay after being spawned) may itself be running from a
+    slot that is no longer current by the time it spawns a monitor --
+    spawning with a stale interpreter would start an already-superseded
+    (or, worse, incomplete/broken) monitor that ``_ensure_status_monitor()``
+    would otherwise report as successfully ensured despite an immediate
+    exit.
 
     Uses ``config.venv_python()`` (the same current-version ->
-    last-known-good -> newest-slot resolution ORDER the canonical
-    hooks/binstubs use) but additionally validates each candidate's
-    ``.install-complete.json`` completion marker before trusting it
-    (``_slot_marker_valid``) -- ``venv_python()`` itself accepts any
-    existing interpreter file unconditionally, which the canonical
-    resolvers do not. This does NOT replicate the canonical resolvers'
-    full semantic-version-ordering comparison for the final
+    last-known-good -> newest-slot resolution order the canonical
+    hooks/binstubs use) but additionally validates the resolved
+    candidate's ``.install-complete.json`` completion marker
+    (``_slot_marker_valid``) before trusting it -- ``venv_python()`` itself
+    accepts any existing interpreter file unconditionally, which the
+    canonical resolvers do not.
+
+    Deliberately does NOT fall back to scanning sibling slots when the
+    resolved candidate's own marker fails to validate: a slot picked that
+    way can still be immediately self-retired by
+    ``status_updater_cli._runtime_superseded()``, which compares a running
+    monitor's own prefix against the RAW ``current-version`` pointer
+    value, not against whichever slot this resolver happened to validate
+    -- under a stale/corrupt pointer naming a newer, incomplete slot, a
+    spawned OLDER validated sibling would see itself as superseded and
+    exit immediately, right back to zero monitors. Falling back directly
+    to this process's own already-running ``sys.executable`` instead
+    sidesteps that mismatch entirely (this process is itself proof that
+    interpreter can run), at the cost of not auto-recovering from a
+    genuinely corrupt ``current-version`` pointer -- a rarer, deeper
+    failure mode than the ordinary post-cutover ambiguity this module
+    exists to heal, and better pursued (if ever) as its own fix to
+    ``status_updater_cli._runtime_superseded()`` making the two decisions
+    marker-aware and mutually consistent, not scoped to this interim
+    mitigation.
+
+    Also does NOT replicate the canonical resolvers' full
+    semantic-version-ordering comparison for ``venv_python()``'s own
     newest-complete-slot fallback (a direct, lexicographic ``versions/``
-    directory-name sort is used instead, which is not a semver-exact
-    ordering for all possible version-string shapes): doing so exactly
-    would mean forking/duplicating that comparison logic a second time in
-    Python, a larger, separate hardening effort for ``config.venv_python()``
-    itself (already used elsewhere in this codebase), not scoped to this
-    interim mitigation."""
+    directory-name sort): unifying Python-side resolution with those
+    resolvers is a separate, broader hardening effort for
+    ``config.venv_python()`` itself (already used elsewhere in this
+    codebase)."""
     try:
         from . import config as _cfg
         current = _cfg.venv_python()
         if current.exists():
             root = current.parents[1] if current.parent.name in ("Scripts", "bin") else current.parent
-            version = root.name
-            if _slot_marker_valid(root, version):
+            if _slot_marker_valid(root, root.name):
                 return str(current)
-            # The resolved slot's own marker didn't validate (stale pointer
-            # or an in-progress install) -- scan for any OTHER validated
-            # slot rather than trusting an unvalidated interpreter.
-            versions_dir = root.parent
-            if versions_dir.is_dir():
-                for slot in sorted(versions_dir.iterdir(), reverse=True):
-                    if slot == root or not _slot_marker_valid(slot, slot.name):
-                        continue
-                    for sub in (("Scripts", "python.exe"), ("bin", "python")):
-                        candidate = slot.joinpath(*sub)
-                        if candidate.exists():
-                            return str(candidate)
     except Exception:
         pass
     return sys.executable

@@ -3281,25 +3281,30 @@ def test_current_runtime_python_rejects_a_marker_naming_a_different_version(
     assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
 
 
-def test_current_runtime_python_falls_back_to_another_validated_slot(
+def test_current_runtime_python_does_not_fall_back_to_a_sibling_slot(
     monkeypatch, tmp_path,
 ):
     """When the resolved current-version slot's own marker doesn't
-    validate, scan for and use any OTHER validated slot under the same
-    ``versions/`` directory, rather than giving up straight to
-    sys.executable while a perfectly good, complete slot sits right next
-    to the broken one."""
+    validate, fall back DIRECTLY to sys.executable -- never scan for a
+    different, validated sibling slot, even when one exists right next to
+    the broken one. A sibling picked that way can still be immediately
+    self-retired by status_updater_cli._runtime_superseded(), which
+    compares against the RAW current-version pointer value, not whichever
+    slot this resolver happened to validate; under a stale pointer naming
+    a newer, incomplete slot, a spawned older validated sibling would see
+    itself as superseded and exit immediately, right back to zero
+    monitors. sys.executable sidesteps that mismatch entirely."""
     bad_slot = tmp_path / "versions" / "2.0.0-dev1"
     bad_python = bad_slot / "Scripts" / "python.exe"
     bad_python.parent.mkdir(parents=True)
     bad_python.write_text("", encoding="utf-8")  # no marker -- invalid
 
-    good_python = _write_valid_slot(tmp_path, version="1.0.0-dev1")
+    _write_valid_slot(tmp_path, version="1.0.0-dev1")  # a validated sibling exists
 
     from agent_worktrees import config as _cfg
     monkeypatch.setattr(_cfg, "venv_python", lambda: bad_python)
 
-    assert status_monitor_reap_stale.current_runtime_python() == str(good_python)
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
 
 
 def test_schedule_delayed_daemon_health_reap_spawns_reap_stale_with_delay(monkeypatch):
