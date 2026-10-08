@@ -1,0 +1,9 @@
+{
+  "comment": "validating-in-clean-room: document the new agent-dispatch-recipe-loops-eval scenario",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
