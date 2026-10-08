@@ -1,0 +1,9 @@
+{
+  "comment": "Picker monitor-enabled predicate: make it pytest-only (mandatory in production, mirroring agent-worktrees)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

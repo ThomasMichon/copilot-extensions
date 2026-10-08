@@ -56,6 +56,15 @@ def _current_engine_prefix() -> str | None:
 
 
 def status_monitor_enabled() -> bool:
+    """Whether the resident coalescing monitor is active.
+
+    Always True in normal operation -- mandatory infrastructure, not an
+    operator-facing opt-out. Mirrors ``agent_worktrees.status_monitor_
+    runtime._status_monitor_enabled``'s own gating exactly: the env var is
+    TEST/DEBUG-ONLY, honored only when ``PYTEST_CURRENT_TEST`` is set.
+    """
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
     return os.environ.get("AGENT_WORKTREES_STATUS_MONITOR", "").strip().lower() not in (
         "0",
         "false",
