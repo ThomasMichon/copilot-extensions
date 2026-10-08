@@ -9,8 +9,11 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-09-20
-- **Reality docs:** the agent-worktrees plugin `docs/`; `providers/base.py`
+- **Last revised:** 2026-10-07
+- **Reality docs:** the agent-worktrees plugin `docs/`;
+  `skills/worktree/references/pr-workflow.md` (the "Addressing a foreign
+  repo" section is the authoritative, maintained description of
+  `foreign-repo-pr-operations`); `providers/base.py`
   (the `PRProvider` protocol and provider registry); `tests/test_pr_*.py`,
   `tests/test_providers.py` (the existing pr-command test suite)
 - **Supersedes / superseded by:** none
@@ -20,19 +23,21 @@
 A registered repo's pull-request behavior — opening, reading, reviewing,
 commenting on, and landing a change — should be reachable through **one
 coherent, provider-neutral surface**, the same way agent-worktrees already
-owns repo identity and contribution posture. Today that surface covers the
-**author's** side of a PR's life (open, watch, signal merge consent, check
-status, complete). A reviewer, a scenario-eval, or any other consumer that
-needs to read a PR's diff/comments/threads or publish comments and verdicts
-has no equivalent first-class primitive, and either goes without or embeds
-its own forge-specific client — exactly the duplication agent-worktrees
-exists to prevent elsewhere.
+owns repo identity and contribution posture. That surface now covers both
+the **author's** side of a PR's life (open, watch, signal merge consent,
+check status, complete) and the **reviewer's** side (read the diff and
+surrounding context, read and post comments, read and resolve threads,
+publish a verdict) as first-class, provider-neutral operations — a
+reviewer, a scenario-eval, or any other consumer no longer needs to embed
+its own forge-specific client to do what the author side has long been
+able to do.
 
-This capability's north star is **symmetry and reach**: whatever an author
-can do to a PR through agent-worktrees, a reviewer should be able to observe
-and respond to the same way; whatever agent-worktrees can do for a repo it
-has locally checked out, an authorized caller should be able to do for a
-repo it hasn't — addressing it by name and letting agent-worktrees resolve
+This capability's north star remains **symmetry and reach**: whatever an
+author can do to a PR through agent-worktrees, a reviewer should be able to
+observe and respond to the same way — realized; whatever agent-worktrees
+can do for a repo it has locally checked out, an authorized caller should
+be able to do for a repo it hasn't — addressing it by name and letting
+agent-worktrees resolve
 that repo's own registered provider and policy, exactly as it already
 resolves identity and contribution posture for a repo that isn't the
 caller's own worktree. And because a live forge is not always available or
@@ -190,11 +195,39 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
   [agent-dispatch/reviewer](../../agent-dispatch/reviewer/README.md) — the
   cooperative reviewer loop this capability is meant to compose rather than
   have re-implemented beside it.
-- Reality docs: the agent-worktrees plugin `docs/`; `providers/base.py`;
+- Reality docs: the agent-worktrees plugin `docs/`;
+  `skills/worktree/references/pr-workflow.md`; `providers/base.py`;
   `tests/test_pr_*.py`, `tests/test_providers.py`
 
 ## Provenance
 
+- **2026-10-07** — Fold-back confirmation slice (`vision-backport-sweep`
+  Phase 2): reconciled against 372 commits of drift in the plugin's PR
+  surface since this vision's last revision. Found this vision in
+  unusually good shape — two of the three gaps the original 2026-09-14
+  authoring named are now fully realized, and the third is **partially**
+  realized: `reviewer-capable-provider` (confirmed real in
+  `providers/base.py`'s protocol *and* `providers/github.py`'s
+  implementation, exposed as `pr-diff`/`pr-comment`/`pr-review`/`pr-status
+  --threads`) and `conformance-verified-mock-provider` (`MockPRProvider`
+  registered as a fourth provider in `_PROVIDERS`, exercised by the same
+  test suite real providers are) are both fully realized.
+  `foreign-repo-pr-operations` is **partially** realized:
+  `pr-watch`/`pr-merge`/`create-pr`/`pr-ready`/`pr-abandon` all address a
+  registered repo with no local checkout per `pr-workflow.md`'s
+  "Addressing a foreign repo" section (which already uses this vision's
+  own feature name verbatim), but `pr-status`/`pr-diff`/`pr-comment`/
+  `pr-review` still have no foreign-repo argument — the symmetry this
+  vision's north star promises is not yet complete for those four. Closed
+  two now-stale tracking issues with evidence (`#2699` reviewer-side ops,
+  `#2691` mock provider) rather than leaving them open against
+  already-shipped capability. Narrowed `#2700` (foreign-repo addressing)
+  to those four remaining commands rather than closing it. Updated this
+  vision's own stale Purpose & Intent opening, which still described
+  reviewer-side operations as entirely missing. No Feature/Behavior text
+  needed changing beyond that — the should-be prose was already accurate;
+  only the opening narrative and the tracked-issue state had drifted from
+  it.
 - **2026-09-20** — Round-23 review of the `codename-attribution-by-default`
   effort (#2977) found this vision silent on the `source_attribution`/
   codename PR-marker mechanism `pr-attribution-codenames` (Done) already

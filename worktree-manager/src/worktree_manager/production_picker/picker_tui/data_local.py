@@ -50,6 +50,70 @@ LOCAL = _local_identity()
 LOCAL_LABEL = f"{LOCAL[0]} · {LOCAL[1].lower()}"
 
 
+def is_local(machine: str, env: str) -> bool:
+    """Canonicalized "is ``(machine, env)`` this picker's own host?" check.
+
+    A plain ``(machine, env) == LOCAL`` tuple comparison only matches when
+    *machine* is spelled exactly like this host's raw OS hostname (``LOCAL[0]``,
+    from ``socket.gethostname()``). A worktree record, an embodied-task
+    payload, or any other producer may instead carry the canonical
+    ``machines.yaml`` key/alias for this very machine (set via the
+    hostname-field decoupling -- the same motivating case as
+    ``agent_worktrees.machine_identity.is_local_machine``) -- a spelling
+    mismatch then wrongly concludes "remote" and dispatches an unnecessary
+    (and self-looping, over SSH/devtunnel) network hop to reach a host that is
+    actually this one. ``data_ssh._build_sources`` already canonicalizes
+    through the same registry for exactly this reason; this is the equivalent
+    check for a single ``(machine, env)`` pair rather than the whole roster.
+
+    Checks the direct ``machine == config.machine`` case BEFORE loading the
+    registry (mirroring ``machine_identity.is_local_machine``'s own order),
+    so a configured local alias still resolves local during a registry
+    outage/malformed-file degradation, not just a registry hit. Every
+    comparison against ``config.machine``/an entry's ``alias`` is gated on a
+    non-empty value (as ``_build_sources`` already does for aliases): an
+    unset ``config.machine`` (legitimately empty) must never blanket-match
+    every roster entry's own unset/empty alias.
+    """
+    if (machine, env) == LOCAL:
+        return True
+    if not machine or env != LOCAL[1]:
+        return False
+    try:
+        config = cfg.load_config()
+    except Exception:
+        return False
+    config_machine = (config.machine or "").lower()
+    nl = machine.lower()
+    if config_machine and nl == config_machine:
+        return True
+    try:
+        entries = cfg.load_machines_yaml(config.default_repo.anchor)
+    except Exception:
+        return False
+    entry = entries.get(machine) or next(
+        (
+            e for e in entries.values()
+            if e.key.lower() == nl
+            or (getattr(e, "hostname", "") or "").lower() == nl
+            or (getattr(e, "alias", "") or "").lower() == nl
+        ),
+        None,
+    )
+    if entry is None:
+        return False
+    local_key = LOCAL[0].lower()
+    return bool(
+        entry.key.lower() == local_key
+        or (getattr(entry, "hostname", "") or "").lower() == local_key
+        or (config_machine and entry.key.lower() == config_machine)
+        or (
+            config_machine
+            and (getattr(entry, "alias", "") or "").lower() == config_machine
+        )
+    )
+
+
 def _project_repo() -> tuple[str, str]:
     """``(repo name, default branch)`` for the active project's default repo."""
     try:

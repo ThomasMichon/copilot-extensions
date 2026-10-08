@@ -331,7 +331,7 @@ class PickerScreenMaintenanceActionsMixin:
             "machine": m,
             "env": e,
             "title": rec.get("title"),
-            "is_local": (m, e) == self.src.LOCAL,
+            "is_local": self.src.is_local(m, e),
         }
         opts = {}
         if no_mux:
