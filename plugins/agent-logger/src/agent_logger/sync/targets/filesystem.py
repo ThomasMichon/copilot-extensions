@@ -465,12 +465,14 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     :class:`_SourceChangedDuringCopy`: that check only compares the SAME
     open descriptor's own identity before and after the byte copy, which a
     rename can never change (the descriptor still refers to the original
-    inode throughout). After landing, the directory ENTRY's current
-    identity is re-stat'd by name (via the pinned ``root_fd``, never by
-    path) and compared against the identity observed before the copy
-    started; a mismatch means the name was reassigned mid-copy, so the
-    just-landed (now-stale) destination is removed and the entry is
-    treated as unlanded this pass, same as a locked file.
+    inode throughout). The directory ENTRY's current identity is instead
+    re-stat'd by name (via the pinned ``root_fd``, never by path) and
+    compared against the identity observed before the copy started, via a
+    ``revalidate`` callback :func:`_copy_stream_replace` calls strictly
+    *before* committing the replace (see that function's own docstring) --
+    a mismatch discards only the just-written temporary file; no landed
+    destination copy is ever removed, and the entry is treated as unlanded
+    this pass, same as a locked file.
     """
     copied = 0
     nbytes = 0
@@ -1876,12 +1878,16 @@ class FilesystemTarget(Target):
         a successfully-persisted session-state leg -- otherwise
         ``session-sync status``/fleet health would report this machine as
         fresh and healthy despite requested evidence not fully landing.
-        A clean process-log retry does not clear a ``partial`` status this
-        sets -- composing a combined, independently-clearable status for
-        both transfer legs is a known, out-of-scope follow-up; staying
-        degraded until explicitly investigated fails safe, not silently.
-        Never raises: a failure here must not mask the original failure
-        this method exists to record."""
+        Preserves the session-state push's own recorded fields (detritus
+        exclusion counts/roots/completeness) rather than resetting them to
+        defaults -- only ``status`` and ``deferred_files`` describe this
+        downgrade; a process-log failure must not erase diagnostics the
+        same pass's session-state leg already recorded. A clean process-log
+        retry does not clear a ``partial`` status this sets -- composing a
+        combined, independently-clearable status for both transfer legs is
+        a known, out-of-scope follow-up; staying degraded until explicitly
+        investigated fails safe, not silently. Never raises: a failure here
+        must not mask the original failure this method exists to record."""
         try:
             machine_root = _existing_relative_directory(self._root(), Path(machine))
         except OSError:
@@ -1894,12 +1900,27 @@ class FilesystemTarget(Target):
             existing = None
         if existing is None or existing.get("status") != "ok":
             return
-        session_count = existing.get("session_count", 0)
-        if not isinstance(session_count, int) or isinstance(session_count, bool):
-            session_count = 0
+
+        def _as_int(value: object, default: int) -> int:
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+            return default
+
+        def _as_str_list(value: object) -> list[str]:
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, str)]
+            return []
+
+        session_count = _as_int(existing.get("session_count"), 0)
         write_sync_meta(
             machine_root, machine, self.name, "partial", session_count,
             deferred_files=[reason],
+            excluded_roots=_as_str_list(existing.get("excluded_detritus_roots")),
+            excluded_file_count=_as_int(existing.get("excluded_detritus_file_count"), 0),
+            excluded_byte_count=_as_int(existing.get("excluded_detritus_byte_count"), 0),
+            excluded_measurement_complete=bool(
+                existing.get("excluded_detritus_measurement_complete", True)
+            ),
         )
 
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:

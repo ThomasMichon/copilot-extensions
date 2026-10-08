@@ -3438,10 +3438,14 @@ def test_push_process_logs_failure_downgrades_sync_meta_to_partial(tmp_path: Pat
     """A process-log leg failing after the session-state leg already wrote
     `sync-meta.json` with status `ok` must not leave that status standing --
     otherwise `session-sync status`/fleet health reports this machine as
-    fresh and healthy despite the requested evidence not landing."""
+    fresh and healthy despite the requested evidence not landing. The
+    downgrade must also preserve the session-state leg's own recorded
+    detritus-exclusion fields rather than resetting them to defaults --
+    only `status`/`deferred_files` describe the process-log leg's outcome."""
     from agent_logger.sync import meta
 
     src = _make_source(tmp_path)
+    _add_chromium_profile(src / "session-state" / "abc-123")
     dest_root = tmp_path / "dest"
     target = LocalTarget({"path": str(dest_root)})
 
@@ -3450,6 +3454,7 @@ def test_push_process_logs_failure_downgrades_sync_meta_to_partial(tmp_path: Pat
     machine_root = dest_root / "m1"
     original = meta.read_sync_meta(machine_root)
     assert original["status"] == "ok"
+    assert original["excluded_detritus_file_count"] > 0
 
     # A root that exists but is unsafe (a symlink) fails push_process_logs
     # via its own "unsafe process-log source" branch.
@@ -3467,6 +3472,17 @@ def test_push_process_logs_failure_downgrades_sync_meta_to_partial(tmp_path: Pat
     downgraded = meta.read_sync_meta(machine_root)
     assert downgraded["status"] == "partial"
     assert downgraded["session_count"] == original["session_count"]
+    assert (
+        downgraded["excluded_detritus_file_count"]
+        == original["excluded_detritus_file_count"]
+    )
+    assert (
+        downgraded["excluded_detritus_roots"] == original["excluded_detritus_roots"]
+    )
+    assert (
+        downgraded["excluded_detritus_measurement_complete"]
+        == original["excluded_detritus_measurement_complete"]
+    )
 
 
 def test_process_logs_enabled_and_source_config() -> None:
