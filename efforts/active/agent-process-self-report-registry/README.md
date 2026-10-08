@@ -5,12 +5,13 @@
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-10-06
 - **Status:** Draft
+- **Vision:** [Process Registry](../../../visions/process-registry/README.md)
 - **Umbrella issue:** #5559
 - **Sub-issues:** #5557 (mux-daemon stale-retirement bug, found while auditing
   for this effort) · #5558 (agent-dispatch worker-pool version-skew bug, same)
 
-**Documentation impact:** This plan defines operational process registration,
-not a telemetry consumer. The boundary in
+**Documentation impact:** This campaign derives from the new Process Registry
+vision and its [architecture proposal](architecture.md), not a telemetry consumer. The boundary in
 [`visions/process-telemetry`](../../../visions/process-telemetry/README.md)
 distinguishes these subjects explicitly. Implementation will document the
 registry's lifecycle, query interface, coverage, and bounded snapshot journal.
@@ -27,14 +28,19 @@ This is an operational state service, **not telemetry**. It does not install
 a telemetry sink, consume `process_spawn` telemetry events, or export to a
 formal telemetry-reporting system. The precedent is a local state/log tool
 such as agent-logger: retain inspectable records and answer questions on demand.
-A small daemon is the operator's preferred direction, not yet a mandated
-implementation; a folder or database remains a valid storage choice.
+If the daemon model is adopted, there is **one host-owned broker**, shared
+across plugins, marketplaces, versions, and worktrees, in the designated
+operator account's security scope. Producers drop small files through
+in-process facilities or existing invokers; no process exists just to report
+another process. File-watch notifications accelerate ingestion but do not
+replace periodic reconciliation. [Architecture](architecture.md) specifies
+the proposed ownership, failure boundaries, identity, quotas, and recovery.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Driving agent | Design the registration contract, state service, snapshot journal, and adopter rollout | `copilot-extensions` worktree |
+| Driving agent | Draft and review the contract, implement it in later slices, and validate adopter coverage | `copilot-extensions` worktree |
 
 ## Coordination
 
@@ -42,8 +48,8 @@ implementation; a folder or database remains a valid storage choice.
 - **Host (owns PRs):** the driving agent for each slice; no shared feature
   branch — each phase below is small enough to land as its own independent
   PR against `dev`, so no cross-slice branch coordination is needed.
-- **Slice ownership:** one slice per Plan phase (contract, implementation,
-  adopter rollout). A slice's own PR is the handoff point — the next slice starts
+- **Slice ownership:** one slice per Plan phase (contract, broker, clients,
+  validation). A slice's own PR is the handoff point — the next slice starts
   once the prior one merges and this README's Plan/Journal are updated.
 - **Handoff:** whoever starts the next unclaimed Plan phase reads this
   README's current Plan/Journal state first; no other coordination channel
@@ -82,12 +88,15 @@ continue independently; registry adoption must not require or configure it.
 _(Agent-recommended design safeguards below implement the operator's intent;
 they are not additional operator requirements.)_
 
-**`libs/agent-procutil` is not the right implementation site.** It's the
-canonical source (not `plugins/agent-worktrees/libs/agent-procutil/`, which
-is a per-consumer *materialized copy* produced by
-`tools/materialize_main.py`) for Windows-headless/detached **spawn kwargs**
-(console-window suppression, kill-on-close Job Objects) — a different,
-narrower concern from process self-report.
+**Reusable building blocks, not a second process spawner.** Canonical
+`libs/agent-procutil` supplies both pure flag helpers and actual spawn wrappers.
+Only the latter know child PIDs and are candidates for check-in integration;
+pure kwargs helpers remain side-effect-free. Consumer materialized copies
+are not edit sites. `single-instance-lease` supplies an OS-exclusive role lease;
+`endpoint-rendezvous` supplies atomic discovery records; `zdd` has native
+Windows/Linux process-identity prior art; and `ssh-manager` has a bounded
+background file writer suitable as a performance precedent. None is claimed
+to implement this registry today. See [architecture](architecture.md).
 
 **Record identity carries installation-cell/marketplace provenance, not
 just plugin name + version.** Per the installation-cell invariant
@@ -112,124 +121,101 @@ health judgment.
 
 ## Request
 
-Operator (verbatim, from the diagnosis conversation): "Determine how many of
-each agent-* singleton we havew, determine how many agent-mcp shims we have,
-etc. We really need a way to have our processes self-report: role, phost
-plugin, Pid, owner sessionid, cwd, worktree, etc. I wonder if there is a way
-or place do track this reliably and with consistency" — followed by "All three" when offered
-the choice to (a) investigate/fix the stale processes found, (b) file both
-findings as tracked issues, and (c) scope this registry idea as a real
-effort (this document is (c); (a) and (b) are already done — see Journal).
+**Summary of settled operator intent:** inventory all participating process
+roles, including Python/shell/console-host children and MCP shims; attach
+role/source/PID/session/cwd/worktree identity; use one optional global local
+handler, file check-ins, on-demand views, and a couple of folder snapshots per
+hour. No formal telemetry sink, no reporter subprocess, and no dependency of
+useful work on the monitor. Worktree Manager is a proposed lifecycle owner,
+not a mandatory dependency of every plugin.
 
-Operator clarification (verbatim, 2026-10-07):
+The operator selected the **operator-account** scope: one host broker for the
+designated operator, shared across installations/worktrees; other accounts
+cannot bootstrap separate brokers for this capability.
 
-> Ah, let's try to differentiate this from proper "telemetry" and treat this
-> more like a "stateful log", more akin to the port-reservation system. We want
-> a folder, DB, or little daemon (most likely) where as processes start and
-> exit, they announce and remove themselves from registration. This daemon
-> can be *asked* at any time for a state snapshot, and it can journal a couple
-> snapshots an hour into a folder. But what it *won't* do is hook up to any
-> formal telemetry sink. Kind of like how agent-logger accumulates and provides
-> on-demand reporting of copilot logs/ and session-state, but absolutely does
-> not hook up to a formal telemetry-reporting sink system.
-
-The earlier request's "(a) done" means the stale instance was cleaned up,
-not that the retirement root cause was fixed. #5557 and #5558 remain separate
-defect trackers until their own repairs are verified.
+Literal request and subsequent clarifications:
+[inception transcript](inception-transcript.md). The detailed mechanisms and
+initial resource budgets in [architecture](architecture.md) are explicitly
+agent-recommended. One-time stale-process cleanup does not close the root-cause
+defects #5557/#5558.
 
 ## Plan
 
 ### Phase 1 — Design the stateful registration contract
-- [ ] Survey the existing port-reservation/lease and local-log systems; reuse
-      identity, storage, rendezvous, and lifecycle primitives where suitable.
-- [ ] Specify register, unregister, and snapshot operations with role, plugin,
-      version, PID, owner session ID, cwd, and worktree. Unknown ownership is
-      explicit; do not fabricate it for host-owned services.
-- [ ] Choose the folder/database/service arrangement. Prefer a small daemon
-      for coordination and periodic snapshots, while retaining the operator's
-      latitude on storage. Name its source owner and lifecycle before coding.
-      If resident, reconcile its update/activation design with
-      `docs/patterns/graceful-daemon-cutover.md` at design time; any exemption
-      needs an explicit justification, not merely a restart policy.
-- [ ] _(Agent-recommended)_ Define owner-scoped access to registration,
-      unregister, query, and stored state/snapshots. Follow
-      `docs/patterns/service-transport.md`: private UDS permissions or Windows
-      named-pipe DACLs; authenticated owner-scoped access if loopback TCP is
-      necessary. Protect files with equivalent permissions. Reject mutation
-      of another registration without its ownership proof; PID knowledge or
-      claimed session/cell strings alone are not authorization. State the
-      same-user trust boundary and exclude credentials/raw command payloads
-      from persisted records.
-- [ ] Define a snapshot journal of roughly two snapshots per hour in a folder,
-      plus on-demand snapshots. _(Agent-recommended)_ Bound retention/disk
-      use, write snapshots atomically, and record timestamps and coverage.
-- [ ] _(Agent-recommended)_ Resolve installation-cell isolation: cell-local
-      writable state with read-only enumeration, or an explicitly reviewed
-      host-owned federation service that validates each caller's cell identity.
-      Qualified record keys alone are not a writable-state isolation policy.
-- [ ] _(Agent-recommended)_ Define PID+start-time identity, conditional removal,
-      crash reconciliation, Windows/Linux/macOS support, restart recovery,
-      and retry/re-registration when the registry was unavailable at startup.
-- [ ] _(Agent-recommended)_ Distinguish confirmed live, stale, unknown, and
-      unregistered/uncovered processes. A failed query or partial adopter
-      coverage must never be reported as a complete empty process inventory.
-- [ ] Require no telemetry-sink integration, telemetry configuration, or
-      dependency on `process_spawn` events. This is a state protocol.
+- [x] Capture the file-check-in, one-broker, no-helper, no-telemetry requirements
+      and the designated-operator scope; derive the [vision](../../../visions/process-registry/README.md).
+- [x] Draft the [architecture proposal](architecture.md), grounded in the
+      existing lease, discovery, process-identity, and bounded-file-writer
+      primitives; separate proposals from measured or implemented claims.
+- [ ] Review and settle Worktree Manager's host ownership, canonical client
+      home, operator-account federation/permissions, and native OS support.
+- [ ] Review the strict-single-broker update exemption: no active/passive
+      overlap; bounded file spooling and stale-query answers during replacement.
+- [ ] Convert proposed latency/CPU/backlog/retention values into explicit,
+      testable implementation acceptance budgets before runtime rollout.
 
-### Phase 2 — Implement registration, queries, and the snapshot journal
-- [ ] Implement the reviewed state service/storage and a small registration
-      client; startup/exit announce membership without blocking useful work.
-      _(Agent-recommended)_ Registration failure emits a bounded local
-      diagnostic and permits later retry rather than silently disappearing.
-      Adopting plugins remain independently usable when the optional registry
-      is absent; this must not become a mandatory global broker.
-- [ ] Implement an on-demand state query and counts by role/plugin/session/
-      worktree, distinguishing logical registrations from OS launcher processes.
-- [ ] Implement periodic snapshot files, on-demand historical reporting,
-      bounded retention, and crash/restart reconciliation. No telemetry export.
+### Phase 2 — Implement the one host broker
+- [ ] Implement host discovery, the global role lease, authorized mailbox
+      catalog, watcher hints plus bounded recovery scans, and private live state.
+- [ ] Implement identity-safe start/end ingestion, deduplication, crash
+      reconciliation, uncertainty, bounded enrichment, and quota diagnostics.
+- [ ] Implement owner-scoped on-demand queries, approximately twice-hourly
+      atomic snapshot files, bounded history, and safe one-broker upgrades.
+- [ ] Document source ownership and native Windows/Linux/macOS behavior,
+      including explicitly unverified foreign PID namespaces.
 
-### Phase 3 — Adopt and verify the required process roles
-- [ ] Register `agent-dispatch` serve, supervise, and emitter processes,
-      `agent-bridge` services, and `worktree-manager` mux-daemons.
-- [ ] Register `agent-mcp` shims, explicitly included in the operator's
-      original census request; report their owning session and config identity
-      without exposing credentials or full command-line payloads.
-- [ ] Verify counts and identity against an independent OS census; mark
-      uncovered roles honestly. Registration/liveness is not a health verdict
-      or permission to terminate a process.
-- [ ] Update runtime documentation and journal results. Further adopters such
-      as `agent-containers` are deferred to a named follow-up, not an unchecked
-      optional phase that prevents this effort's own completion.
+### Phase 3 — Integrate clients and the required process roles
+- [ ] Add optional in-process check-in support to real shared process invokers
+      and safe self-announcement points. No subprocess/daemon per report,
+      no side effects in flag helpers, and no reporting I/O on critical paths.
+- [ ] Cover `agent-dispatch` serve/supervise/emitter roles, `agent-bridge`,
+      Worktree Manager mux-daemons, MCP shims, and their managed script/native
+      children. Prove or label console-host attribution; separate logical and
+      physical counts.
+- [ ] Preserve independent plugin behavior when the handler is absent. Test
+      managed `.py`/`.ps1`/`.sh` and actual invoker paths, not just a fake API.
+
+### Phase 4 — Validate, document, and transfer further adoption
+- [ ] Execute the validation matrix below and benchmark the reviewed budgets.
+- [ ] Validate controlled stale/version-skew examples and a real OS census;
+      partial coverage is explicit, never a false "nothing running" result.
+- [ ] Update runtime docs and journal landed work; transfer any further
+      adopters such as `agent-containers` to a named tracker before completion.
 
 ## Validation Plan
 
-- [ ] Register/unregister real test processes; queries show exactly the live
-      membership with required fields and distinguish launcher/interpreter pairs.
-- [ ] Exercise hard exit, PID reuse, delayed unregister, unavailable registry,
-      restart, and denied OS inspection; no stale record removes a new process.
-- [ ] Verify installation-cell isolation and concurrent registration/query
-      behavior on the explicitly supported Windows/Linux/macOS paths.
-- [ ] If a resident daemon is selected, validate version activation/cutover:
-      preserve membership across handover, keep queries/registrations usable,
-      roll back a failed activation, and retire superseded instances without
-      deleting the current owner's records. Validate any reviewed exemption.
-- [ ] Attempt unauthorized register/unregister/query and state/snapshot-file
-      access; all are denied under the reviewed owner scope. Test forged
-      registration ownership and conditional removal without disclosing
-      private session/cwd/worktree data to untrusted callers.
-- [ ] Verify periodic snapshots at the chosen approximately twice-hourly cadence,
-      folder output, retention bounds, atomic writes, and on-demand reports.
-- [ ] Disable/remove all telemetry configuration: registration, query, and
-      snapshot journaling still work. No call reaches a formal telemetry sink.
-- [ ] Force registration/storage/enumeration failures and partial adopter
-      coverage: queries show uncertainty, and consumer startup remains bounded.
-- [ ] Cross-check all Phase 3 roles, including MCP shims, against an independent
-      OS census. Use controlled stale/version-skew examples rather than depending
-      on a production fault happening during validation.
+- [ ] Verify zero reporting subprocesses and no competing brokers under
+      multi-plugin, multi-installation, concurrent-start, and upgrade scenarios.
+- [ ] Exercise absent/offline/frozen handler, saturated queues, stuck producer
+      file writes, disk-full/access failures, and enabled-spool quotas; useful
+      work and exit never wait for registration or unbounded retries.
+- [ ] Reorder/duplicate starts and ends, miss all watcher notifications,
+      overflow the watcher, replace directories, and crash between ingestion
+      commit and ticket cleanup; replay does not lose identity or resurrect exits.
+- [ ] Reuse PIDs, restart the host/broker, deny OS inspection, and provide
+      foreign-domain PIDs; unknown never becomes dead or misattributed current.
+- [ ] Test native Windows/Linux/macOS identity and filesystem paths, exact
+      ticket deletion, permission/reparse/symlink boundaries, and cross-account
+      access denial. Same-user claimed tags remain labeled rather than trusted.
+- [ ] Verify snapshots twice hourly, atomic publication, history/count/byte
+      retention caps, timestamp freshness, pagination, and on-demand queries.
+- [ ] Remove all telemetry configuration; registration, queries, and snapshots
+      still work with no telemetry-sink call or telemetry event prerequisite.
+- [ ] Cross-check required physical/logical roles against an independent census,
+      including wrappers, MCP shims, short-lived shells and console-host inference.
+- [ ] Benchmark producer latency, daemon CPU, queue/thread growth, watcher storms,
+      and disk growth at the [architecture's proposed scales](architecture.md#8-validation-and-acceptance-gates);
+      qualify actual release budgets from measurements, not reasoning alone.
+- [ ] Exercise strict-singleton replacement, failed activation, rollback, and
+      crash recovery; no two broker writers/instances coexist, and staged
+      check-ins survive the agreed brief service gap.
 
 ## Proposal
 
-_Pending — Phase 1 design decisions above need to land here once settled._
+[File-check-in architecture proposal](architecture.md) is the reviewable design.
+It does not claim an implemented service, validated performance, or repaired
+retirement/version-skew defects. The literal inception record is
+[here](inception-transcript.md).
 
 ## Journal
 
@@ -297,3 +283,17 @@ _Pending — Phase 1 design decisions above need to land here once settled._
 - Added the repo's conditional graceful-cutover design/validation obligation
   if a resident daemon is chosen, and preserved independent plugin operation
   when this optional registration service is absent.
+
+### 2026-10-07 — File-check-in architecture and separate vision drafted
+- PR #5562 landed the prior non-telemetry planning contract; no implementation
+  followed it. The operator then required one shared broker and no reporting
+  subprocess, selecting the operator-account security scope when asked.
+- Drafted a separate Process Registry vision and linked architecture: immutable
+  file tickets, a host-owned single writer, watcher hints plus recovery scans,
+  exact OS identity, a bounded snapshot journal, and explicit uncertainty.
+- The architecture documents the unavoidable filesystem-stall caveat and
+  chooses off-critical-path writers/parent registration rather than promising
+  that synchronous shell file writes can have a hard timeout.
+- Worktree Manager ownership, private SQLite, mailbox quotas, staggered native
+  inspection, and strict-singleton replacement are labeled recommendations for
+  review. The process-telemetry emission mechanism remains untouched.
