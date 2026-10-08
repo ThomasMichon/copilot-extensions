@@ -63,7 +63,9 @@ BG_TASK_INACTIVE_STATUSES = frozenset(
 # Copilot's ACP agent can mirror a requested subset of its internal session
 # events as ``github.com/copilot/sessionEvent`` JSON-RPC notifications
 # (``params: {sessionId, type, timestamp, agentId?, data}``). The subscription
-# is requested through ``_meta["github.com/copilot"].events`` on
+# is requested through ``_meta["github.com/copilot"].events`` in
+# ``initialize``'s ``clientCapabilities`` -- the placement current Copilot CLI
+# honors -- and, for older agents, also as top-level request ``_meta`` on
 # ``initialize`` / ``session/new`` / ``session/load``. Events produced by a
 # sub-agent carry ``agentId``; main-agent events do not.
 #
@@ -190,11 +192,18 @@ class SubagentAttribution:
             log.debug("Could not register raw session-event route", exc_info=True)
 
     @staticmethod
-    async def call_with_meta(method: Callable[..., Any], **kwargs: Any) -> Any:
+    async def call_with_meta(
+        method: Callable[..., Any],
+        *,
+        retry_overrides: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Invoke an ACP RPC requesting the raw event feed, failing open.
 
         If the agent rejects the request's ``_meta`` as invalid params, retry
-        once exactly as the bridge always has (no ``_meta``).
+        once exactly as the bridge always has (no ``_meta``), with
+        ``retry_overrides`` replacing any kwargs that also carried the request
+        (e.g. ``initialize``'s ``client_capabilities``).
         """
         meta = subagent_event_meta()
         if not meta:
@@ -205,7 +214,7 @@ class SubagentAttribution:
             if getattr(exc, "code", None) != _INVALID_PARAMS:
                 raise
             log.info("Agent rejected the raw session-event request; retrying without it")
-            return await method(**kwargs)
+            return await method(**{**kwargs, **(retry_overrides or {})})
 
     def reset(self) -> None:
         self.subagents.clear()
