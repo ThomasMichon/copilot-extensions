@@ -380,13 +380,24 @@ def _submit_and_stream(
     from .send_outcome import emit, prompt_outcome
 
     queue = getattr(args, "queue", False)
-    result = client.submit_prompt(
-        session_id,
-        prompt,
-        queue=queue,
-        caller_id=caller_id,
-        request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
-    )
+    from .client import BridgeClientError
+
+    try:
+        result = client.submit_prompt(
+            session_id,
+            prompt,
+            queue=queue,
+            caller_id=caller_id,
+            request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
+        )
+    except BridgeClientError as exc:
+        if exc.status != 409:
+            raise
+        # A turn started between the busy check and this submit: the same
+        # refusal as a busy target, not a generic HTTP failure.
+        print(f"[BUSY] Session {session_id} started a turn before this prompt arrived: {exc.detail}",
+              file=sys.stderr)
+        sys.exit(core._SEND_BUSY_EXIT)
 
     if result.get("queued"):
         ident = core._connection_identity(client, session_id)

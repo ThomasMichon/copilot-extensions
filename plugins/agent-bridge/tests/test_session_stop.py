@@ -261,6 +261,27 @@ def test_cli_grace_reports_phases_in_text(monkeypatch, capsys):
     assert "requested" in out.out and "stopped anyway" in out.out and "[OK] Session s1 stopped" in out.out
 
 
+@pytest.mark.parametrize("grace", ["nan", "inf", "-1", "soon"])
+def test_cli_rejects_a_grace_that_could_never_time_out(grace, capsys):
+    with pytest.raises(SystemExit) as exc:
+        m.build_parser().parse_args(["stop", "s1", "--grace", grace])
+    assert exc.value.code == 2
+
+
+def test_a_session_gone_before_the_notice_is_still_stopped():
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "idle", "turn_count": 0}, 1: None},
+                 stop_error=BridgeClientError(404, "gone"))
+
+    def gone(sid, prompt, **_kw):
+        clock.t = 1
+        raise BridgeClientError(404, f"Session {sid} not found")
+
+    fake.submit_prompt = gone
+    result = _run(fake, clock, grace=30)
+    assert result["outcome"] == "stopped" and result["acknowledged"] is False
+
+
 def test_plain_stop_is_unchanged(monkeypatch, capsys):
     calls = []
 

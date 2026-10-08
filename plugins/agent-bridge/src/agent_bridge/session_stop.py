@@ -120,7 +120,13 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
     from .client import BridgeClientError
 
     baseline = int(session.get("turn_count") or 0)
-    submitted = client.submit_prompt(session_id, STOP_NOTICE, queue=True)
+    try:
+        submitted = client.submit_prompt(session_id, STOP_NOTICE, queue=True)
+    except BridgeClientError as exc:
+        if exc.status != 404:
+            raise
+        result["acknowledged"] = False  # gone before the notice: stop/confirm handle it
+        return
     queue_id = submitted.get("queue_id") if submitted.get("queued") else None
     result["notice"] = {"queued": queue_id is not None, "queue_id": queue_id, "withdrawn": False}
     dequeued_before = queue_id is None  # an immediate notice is running on return

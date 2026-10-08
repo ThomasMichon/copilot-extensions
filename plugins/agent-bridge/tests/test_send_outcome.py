@@ -240,6 +240,18 @@ def test_prompt_path_outcomes_and_stdout_is_only_json(monkeypatch, capsys, resul
     assert "Resuming stopped session" in err
 
 
+def test_a_turn_that_starts_between_the_check_and_the_submit_is_refused_busy(monkeypatch, capsys):
+    class Racing(_PromptClient):
+        def submit_prompt(self, session_id, prompt, **_kw):
+            raise BridgeClientError(409, "Session s-1 is running, not idle")
+
+    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
+    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
+    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
+    code, out, _ = _run(monkeypatch, capsys, Racing({}))
+    assert code == 75 and out["outcome"] == "refused_busy"
+
+
 def test_a_busy_target_is_refused_busy_with_exit_75(monkeypatch, capsys):
     def busy(_client, _target, force=False):
         print("[BUSY] running a turn", file=__import__("sys").stderr)

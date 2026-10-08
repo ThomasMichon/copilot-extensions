@@ -54,6 +54,19 @@ def _cmd_stop(args: argparse.Namespace) -> None:
     print(f"[OK] Session {args.session_id} stopped")
 
 
+def _grace_seconds(value: str) -> float:
+    """A finite, non-negative ``--grace`` (``nan``/``inf`` would never time out)."""
+    import math
+
+    try:
+        seconds = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number of seconds: {value!r}") from None
+    if not math.isfinite(seconds) or seconds < 0:
+        raise argparse.ArgumentTypeError("must be a finite number of seconds, 0 or more")
+    return seconds
+
+
 def _cmd_stop_phased(client, args: argparse.Namespace) -> None:
     """``stop --grace``/``--json``: the cooperative, phased stop (session_stop)."""
     from .session_stop import STOP_BUSY_EXIT, STOP_UNCONFIRMED_EXIT, run_stop
@@ -360,7 +373,7 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     stop_p = sub.add_parser("stop", help="Stop a session (with --grace, ask the agent to wind down first)")
     stop_p.add_argument("session_id", help="Session ID")
     stop_p.add_argument("--force", action="store_true", help="Tear down even with active background sub-agent tasks (kills them), skipping any --grace notice. Prefer waiting for them to finish.")
-    stop_p.add_argument("--grace", type=float, default=None, metavar="SECONDS", help="Cooperative stop: queue a wind-down notice (never interrupting a running turn), wait up to SECONDS for the agent to act on it and settle, then stop the session either way. A notice still queued at the deadline is withdrawn.")
+    stop_p.add_argument("--grace", type=_grace_seconds, default=None, metavar="SECONDS", help="Cooperative stop: queue a wind-down notice (never interrupting a running turn), wait up to SECONDS for the agent to act on it and settle, then stop the session either way. A notice still queued at the deadline is withdrawn.")
     stop_p.add_argument("--reap-host", action="store_true", help="Also retire the owned Session Host child instead of preserving it for reattachment")
     stop_p.set_defaults(func=_cmd_stop)
 
