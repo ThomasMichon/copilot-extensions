@@ -750,7 +750,7 @@ than hypothetical:
   narrow overlay fix may legitimately land first (it addresses a real bug
   regardless), but it closes neither 6a's own trace nor this phase's
   closing claim on #5555 on its own.)_
-- [ ] **6a — Design sub-pass (do this first, in its own PR per this effort's
+- [x] **6a — Design sub-pass (do this first, in its own PR per this effort's
       own Phase 1 precedent):** first, trace both consumers' actual
       dataflow — the **production** Worktrees-pivot path
       (`worktree-manager/production_picker/picker_tui/data_local.py` →
@@ -781,6 +781,27 @@ than hypothetical:
       review gate) — the two existing call sites have different
       latency/freshness contracts and a wrong default risks silently
       slowing down the Picker's default classify path.
+
+      **Done (2026-10-07/08) — see `phase-6-audit.md`.** Traced all three
+      candidate compute paths (`classify_daemon`/`_classify_records`;
+      `worktree_status_compute`/agent-dispatch's relay; `status-segment`'s
+      own inline classify). Ruled out the two additional findings above as
+      the reported oscillation's own mechanism in the sense of "two daemons
+      disagreeing" — `worktree_status_compute` and `status-segment` are
+      confirmed uninvolved in the Worktrees-pivot row render at all (a
+      different consumer and a `active_paths=None` immune path,
+      respectively). The actual oscillation is a single render protocol's
+      two intentional phases (`list --json --cache-only` then `--classify`)
+      interacting with `picker_support.data_local._overlay_cached_state`'s
+      unconditional `live -> state="active"` override on the cache-only
+      first paint, independently of this phase's own structural
+      consolidation. Decided shape (i) for 6b (generalize
+      `worktree_status_compute` with a `fetch: bool` param; `classify_daemon`
+      becomes a thin no-fetch view). **Scoped a second, separate fix**
+      (narrow, not part of 6b/6c/6d) for the override itself — see the
+      audit doc's Recommendation section — required before this phase's
+      closing claim on #5555, per 6d's own "don't let a silent gap stand"
+      requirement.
 - [ ] **6b — Implement the chosen consolidation**, keeping both existing
       external call-site contracts (`_classify_records`'s `daemon_filters`
       path; `session_tracking_cli`'s `worktree-status` bundle command)
@@ -863,6 +884,29 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-08 — Phase 6a complete: traced all three compute paths; oscillation's real mechanism is narrower than the title implies
+Full trace in `phase-6-audit.md`. Confirmed via code reading (not
+assumption) that `worktree_status_compute`/agent-dispatch's relay and
+`status-segment`'s own inline classify are **not** implicated in the
+reported `MERGED`→`WIP`/`ACTIVE`→`MERGED` oscillation — one is a different
+consumer (the Tasks board), the other deliberately passes
+`active_paths=None` to never render `active` at all. The actual mechanism:
+the Worktrees-pivot's own two-phase render (`list --json --cache-only`
+first paint, then `--classify` authoritative populate) combines a cached
+`git_state` with `picker_support.data_local._overlay_cached_state()`'s
+local liveness probe, which **unconditionally overwrites** the row's
+`state` to `"active"` whenever a session is live — independent of actual
+git state — then the subsequent classify pass corrects it back. No two
+daemons ever disagree; one state source is overridden, then restored.
+Decided shape (i) for 6b/6c (generalize `worktree_status_compute` with
+`fetch: bool`; `classify_daemon` becomes its thin no-fetch view) — that
+consolidation is still worth doing for the effort's own stated purpose,
+but does **not** by itself fix the reported symptom. Scoped a second,
+narrow, separately-landing fix for the override itself (don't overwrite
+`state`; use a distinct liveness marker instead) — required before this
+phase's closing claim on #5555, flagged explicitly so 6b/6c landing alone
+doesn't silently read as "the oscillation is fixed."
 
 ### 2026-09-28 — Confirmed operational pattern: duplicate resident `status-monitor` processes are a real, correctable bug, not benign
 Found while updating a Windows-native install after the two fixes above:
