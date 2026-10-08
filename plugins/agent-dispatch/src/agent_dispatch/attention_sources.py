@@ -307,10 +307,11 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
             store: Any, read_at: str | None = None, read_token: int | None = None) -> dict[str, Any]:
     """Read every (selected) source concurrently and build the aggregate envelope.
     A selected name that is only a rejected registration is reported through its
-    config error, not as a source. ``read_token`` (default: the start time in
-    nanoseconds) orders this read against concurrent ones for the store, which
-    the second-precision ``read_at`` can't."""
-    read_token = time.time_ns() if read_token is None else read_token
+    config error, not as a source. ``read_token`` (default: the number the store
+    allocates as the read starts) orders this read against concurrent ones,
+    which the second-precision ``read_at`` can't."""
+    if read_token is None:  # the store numbers reads as they start (a clock can tie or step back)
+        read_token = store.begin_read() if hasattr(store, "begin_read") else time.time_ns()
     read_at = read_at or now_iso()
     names = sorted(n for n in (selected if selected is not None else readers) if n in readers)
     results: dict[str, dict[str, Any]] = {}

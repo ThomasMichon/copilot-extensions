@@ -587,7 +587,7 @@ def test_a_stored_time_that_is_not_canonical_is_dropped(tmp_path):
     path = tmp_path / "observed.json"
     path.write_text(json.dumps({"version": 1, "entries": {"a": "bad", "b": T0, "c": "2026-10-07T10:00:00Z"}}),
                     encoding="utf-8")
-    assert attention_store._read(path) == ({"b": T0}, {})
+    assert attention_store._read(path) == ({"b": T0}, {}, 1)
 
 
 def test_lanes_past_the_backlog_budget_are_uncertain_not_a_failed_source():
@@ -772,3 +772,24 @@ def test_names_with_a_trailing_newline_are_rejected(value):
     assert not ac.SOURCE_NAME.match(value) and not ac.CUSTOM_KIND.match(value)
     assert steering_fields.field_list_problem([{"name": "answer\n", "type": "text"}])
     assert srcs.registration_error(value, {"argv": [sys.executable]})
+
+
+def test_read_numbers_are_strictly_increasing_and_persisted(tmp_path):
+    a, b = FirstObserved(tmp_path / "o.json"), FirstObserved(tmp_path / "o.json")  # two processes
+    numbers = [a.begin_read(), b.begin_read(), a.begin_read()]
+    assert numbers == sorted(set(numbers)) and len(numbers) == 3
+
+
+def test_a_damaged_counter_never_reissues_an_applied_number(tmp_path):
+    path = tmp_path / "o.json"
+    path.write_text(json.dumps({"version": 1, "entries": {}, "applied": {"s": 41}, "next_read": 3}), encoding="utf-8")
+    assert FirstObserved(path).begin_read() == 42
+
+
+@pytest.mark.parametrize("item_kw", [{"source": "bridge", "state": "awaiting_input"},
+                                     {"source": "dispatch", "state": "review"}])
+def test_input_belongs_to_a_dispatch_item_awaiting_input_only(item_kw):
+    with pytest.raises(ac.ContractError, match="input belongs"):
+        ac.validate_item({**_item(**item_kw), "input": [{"name": "a", "type": "text"}]})
+    with pytest.raises(ac.ContractError):
+        ac.validate_item({**_item(source="dispatch", state="awaiting_input"), "input": None})

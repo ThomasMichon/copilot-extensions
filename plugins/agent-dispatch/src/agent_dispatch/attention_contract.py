@@ -161,7 +161,9 @@ def validate_item(item: Any) -> None:
         raise ContractError("actions must be a list")
     for action in item["actions"]:
         _check_action(action, source)
-    if "input" in item and item["input"] is not None:
+    if "input" in item:  # a non-empty form, on a dispatch steering ask only
+        if source != "dispatch" or item["display_state"] != "awaiting_input":
+            raise ContractError("input belongs to a dispatch item awaiting input only")
         check_input(item["input"])
     if not isinstance(item["also"], list):
         raise ContractError("also must be a list")

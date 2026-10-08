@@ -53,21 +53,24 @@ def locked(path: Path, timeout: float = _LOCK_TIMEOUT) -> Iterator[None]:
         lock.release()
 
 
-def _read(path: Path) -> tuple[dict[str, str], dict[str, int]]:
-    """``(entries, applied)``: first-observed times, and each source's newest
-    applied read token (the watermark that keeps an older snapshot from
-    overwriting newer proof)."""
+def _read(path: Path) -> tuple[dict[str, str], dict[str, int], int]:
+    """``(entries, applied, next_read)``: first-observed times, each source's
+    newest applied read number (the watermark that keeps an older snapshot from
+    overwriting newer proof), and the next read number to hand out."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {}, {}
+        return {}, {}, 1
     entries = data.get("entries") if isinstance(data, dict) else None
     if not isinstance(entries, dict):
-        return {}, {}  # malformed state is recovered as empty, like unreadable JSON
+        return {}, {}, 1  # malformed state is recovered as empty, like unreadable JSON
     applied = data.get("applied")
-    applied = applied if isinstance(applied, dict) else {}
-    return ({k: v for k, v in entries.items() if isinstance(k, str) and _canonical(v)},
-            {k: v for k, v in applied.items() if isinstance(k, str) and type(v) is int})
+    applied = {k: v for k, v in (applied if isinstance(applied, dict) else {}).items()
+               if isinstance(k, str) and type(v) is int}
+    next_read = data.get("next_read")
+    # Never hand out a number at or below one already applied, even after damage.
+    next_read = max([next_read if type(next_read) is int else 1, *(v + 1 for v in applied.values())])
+    return ({k: v for k, v in entries.items() if isinstance(k, str) and _canonical(v)}, applied, next_read)
 
 
 def _canonical(value: object) -> bool:
@@ -79,10 +82,10 @@ def _canonical(value: object) -> bool:
         return False
 
 
-def _write(path: Path, entries: dict[str, str], applied: dict[str, int]) -> None:
+def _write(path: Path, entries: dict[str, str], applied: dict[str, int], next_read: int) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps({"version": 1, "entries": entries, "applied": applied}, indent=1, sort_keys=True),
-                   encoding="utf-8")
+    doc = {"version": 1, "entries": entries, "applied": applied, "next_read": next_read}
+    tmp.write_text(json.dumps(doc, indent=1, sort_keys=True), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -92,6 +95,15 @@ class FirstObserved:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or default_path()
 
+    def begin_read(self) -> int:
+        """Allocate this read's number when it starts: persisted and strictly
+        increasing across processes (unlike a clock), so concurrent reads have a
+        total order the stale-snapshot guard can rely on."""
+        with locked(self.path):
+            entries, applied, next_read = _read(self.path)
+            _write(self.path, entries, applied, next_read + 1)
+        return next_read
+
     def apply(self, results: dict[str, dict[str, Any]], read_at: str, read_token: int | None = None) -> None:
         """Fill each item's missing ``created_at`` from the store (or ``read_at`` when
         first seen), and clear what an ``ok`` read of that same source dropped.
@@ -99,11 +111,11 @@ class FirstObserved:
         A read older than one already applied for a source only reads the store:
         concurrent CLI reads can finish out of order, and a slow, older snapshot
         must not re-add a time a newer ``ok`` read proved had ended. Reads are
-        ordered by ``read_token`` (nanoseconds at the read's start, by default
-        now): ``read_at`` has one-second precision, so concurrent reads often tie."""
-        token = time.time_ns() if read_token is None else read_token
+        ordered by ``read_token``, the number :meth:`begin_read` gave the read
+        when it started (allocated now when omitted)."""
+        token = self.begin_read() if read_token is None else read_token
         with locked(self.path):
-            entries, applied = _read(self.path)
+            entries, applied, next_read = _read(self.path)
             before = (dict(entries), dict(applied))
             for source, result in results.items():
                 if result["status"] not in ("ok", "uncertain"):
@@ -127,4 +139,4 @@ class FirstObserved:
                     for key in [k for k in entries if k.startswith(prefix) and k not in seen]:
                         del entries[key]
             if (entries, applied) != before:
-                _write(self.path, entries, applied)
+                _write(self.path, entries, applied, max(next_read, token + 1))
