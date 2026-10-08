@@ -206,6 +206,7 @@ def _fixture_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.is_local = lambda m, e: (m, e) == local
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
@@ -824,6 +825,7 @@ def _resources_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -934,6 +936,7 @@ def _many_claims_source(n=40):
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -1549,6 +1552,7 @@ def test_machine_rotate_clears_and_resets_selection():
 
     src = types.SimpleNamespace()
     src.LOCAL = ("anomalous-potato", "Win")
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [
         ("anomalous-potato Win", "anomalous-potato", "Win", True),
@@ -1782,6 +1786,7 @@ def _bridge_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = ("anomalous-potato", "Win")
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.machines = lambda: [
@@ -2600,6 +2605,7 @@ def test_jump_to_caller_targets_caller_worktree():
                   "caller_worktree": "anomalous-potato-win-caller-9999"}
     src = types.SimpleNamespace()
     src.LOCAL = ("anomalous-potato", "Win")
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [
         ("anomalous-potato Win", "anomalous-potato", "Win", True),
@@ -2709,6 +2715,7 @@ def _maint_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -2976,6 +2983,7 @@ def _profiles_source():
     # The engine resolves the local host from the source LOCAL; align it with a
     # host column so the self-diagonal lock lands on Anomalous-Potato Win.
     src.LOCAL = ("Anomalous-Potato", "Win")
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     return src
 
 
@@ -3608,6 +3616,7 @@ def _sessionless_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -3901,6 +3910,7 @@ def _live_fixture_source():
 
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [
         ("Anomalous-Potato Win", "Anomalous-Potato", "Win", True),
@@ -4006,6 +4016,39 @@ def test_resume_decision_exits_with_worktree():
     asyncio.run(run())
 
 
+def test_resume_decision_canonicalizes_an_aliased_local_row():
+    """Regression: ``_resume_decision`` is the primary "resume an
+    already-loaded row" path (``_decide(self._resume_decision(row))``,
+    distinct from the synthetic fallback the embodied-task path uses). It
+    must use ``self.src.is_local`` the same way, not a naive
+    ``(m, e) == self.src.LOCAL`` tuple comparison: a row whose ``machine``
+    field is this host's canonical ``machines.yaml`` alias (rather than its
+    raw OS hostname) must still resolve ``is_local: True`` here, or
+    ``__main__._remote_machine_env`` sends an ordinary resume through the
+    remote/SSH launch path for a worktree that is actually local."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+
+    class _Screen(ema.PickerScreenMaintenanceActionsMixin):
+        pass
+
+    screen = _Screen()
+    screen.src = types.SimpleNamespace(
+        LOCAL=("raw-os-hostname", "Win"),
+        is_local=lambda m, e: m == "configured-alias" and e == "Win",
+    )
+    rec = {
+        "raw": {"id": "configured-alias-win-20260627-aaaa"},
+        "machine": "configured-alias",
+        "env": "Win",
+        "id4": "aaaa",
+        "title": "Aliased local row",
+    }
+
+    decision = screen._resume_decision(rec)
+
+    assert decision["is_local"] is True
+
+
 def test_open_submenu_no_mux_toggle():
     """No Mux is an arrow-reachable toggle ROW at the bottom of the verb list
     (#88 NF1 fix): ↓ onto it, Space flips it, ↑ back to Open, Enter -> the resume
@@ -4065,6 +4108,7 @@ def _verb_fixture_source():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6260,6 +6304,7 @@ def test_command_bar_idle_escape_preserves_focus_by_key(monkeypatch):
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6311,6 +6356,7 @@ def test_command_bar_never_hides_a_live_worktree(monkeypatch):
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6363,6 +6409,7 @@ def test_command_bar_filter_matches_state_and_status_markers(monkeypatch):
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6558,6 +6605,7 @@ def test_command_bar_sort_cycles_worktrees_order(monkeypatch):
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6600,6 +6648,7 @@ def test_command_bar_sort_cycle_preserves_focus_and_anchor(monkeypatch):
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6652,6 +6701,7 @@ def test_command_bar_sort_cycle_remaps_last_l_from_outside_the_list(monkeypatch)
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6697,6 +6747,7 @@ def test_command_bar_filter_preserves_focused_row_by_key(monkeypatch):
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6753,6 +6804,7 @@ def test_command_bar_filter_lands_at_equivalent_index_when_row_vanishes(monkeypa
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6804,6 +6856,7 @@ def test_command_bar_last_l_clamps_to_equivalent_index_when_row_vanishes(monkeyp
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -6858,6 +6911,7 @@ def test_command_bar_anchor_clamps_to_equivalent_index_when_row_vanishes(monkeyp
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -7693,6 +7747,7 @@ def test_hidden_worktrees_filtered_and_toggle():
     ]
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -7764,6 +7819,7 @@ def test_bridge_and_system_hidden_and_marked_distinctly():
 
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
@@ -7829,6 +7885,7 @@ def test_origin_marks_drive_visibility_and_labels():
 
     src = types.SimpleNamespace()
     src.LOCAL = local
+    src.is_local = lambda m, e: (m, e) == src.LOCAL
     src.LOCAL_LABEL = "anomalous-potato · win"
     src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
     src.bucket = derive.bucket
