@@ -2,7 +2,7 @@
 
 - **Slug:** `operator-attention-contract`
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`, sources in `agent-bridge` and `agent-worktrees`)
-- **Branch(es):** one implementation PR off `dev` for Phases 1-3; Phase 4 clients as separate PRs (the Tasks pane in this repository; a downstream dashboard in its own)
+- **Branch(es):** two implementation PRs off `dev` -- ThomasMichon/copilot-extensions#5668 (the contract, the aggregator, the CLI, command sources and the `dispatch` source), then one for the `bridge` and `pr` sources with their sibling commands; Phase 4 clients as separate PRs (the Tasks pane in this repository; a downstream dashboard in its own)
 - **Created:** 2026-10-07
 - **Status:** Draft
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md) §Behaviors *buildup-is-a-health-signal*, §Features *verify-the-completion-claim* (work "held for attention")
@@ -34,12 +34,14 @@ needs you" and "a source couldn't be read" are never confused.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Implementer | All phases | one worktree off `dev` for Phases 1-3 |
+| Implementer | All phases | a worktree off `dev` per implementation PR |
 
 ## Coordination
 
-- **Topology:** one PR for Phases 1-3 (the contract, the adapters and the CLI
-  are one coherent, testable surface); Phase 4 clients follow separately.
+- **Topology:** Phases 1 and 3 with the `dispatch` source land first (ThomasMichon/copilot-extensions#5668,
+  one coherent surface); the `bridge` and `pr` sources follow in one PR with
+  their sibling commands (they touch agent-bridge and agent-worktrees); Phase 4
+  clients follow separately.
 - **Host (owns PRs):** the implementer.
 - **Delegates:** none.
 - **Handoff:** n/a.
@@ -80,9 +82,9 @@ an empty queue.
   | Field | Meaning |
   |---|---|
   | `schema` | the item's own version, `1`; carried on every item, separately from the envelope's |
-  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:wt:<machine>/<worktree-id>`, `pr:pr:<authority>/<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
+  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:wt:<machine>/<project>/<worktree-id>`, `pr:pr:<authority>/<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
   | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>`, where `<kind>` matches `[a-z0-9_-]+` (so neither it nor the source name can contain `:`, and `id` splits back unambiguously) (two external adapters' `login` items never collide) |
-  | `entity_ref` | the canonical, **durable** reference within its kind: a task id; a PR as `<authority>/<owner/name>#<n>`, where `<authority>` is the canonical provider authority agent-worktrees resolves for its repository: the provider's authority endpoint with its scheme, credentials, default port and trailing slash dropped and its host lowercased, but its path kept (e.g. `github.com`, `ghes.example.com`, `dev.azure.com/<org>`, `gitea.example.com/api/v1`), so a provider whose organization lives in the path never collapses two organizations' `project/repo#<n>` -- never a raw URL, so two spellings of one PR are one key, while the same `owner/name#<n>` under two authorities stays two; a queue as its canonical repo; a session as its logical delegate reference (agent-bridge's identity model), never a bridge escrow `session_id` or a live registration, which a restart, takeover or handoff replaces: `wt:<machine>/<worktree-id>` when a managed worktree hosts it, else `lineage:<durable id of its lineage root>` for a bridge-owned line of work (the root's `durable_session_id`, reached through its predecessor links), else `copilot:<Copilot session id>` for an interactive session with no worktree |
+  | `entity_ref` | the canonical, **durable** reference within its kind: a task id; a PR as `<authority>/<owner/name>#<n>`, where `<authority>` is the canonical provider authority agent-worktrees resolves for its repository: the provider's authority endpoint with its scheme, credentials, default port and trailing slash dropped and its host lowercased, but its path kept (e.g. `github.com`, `ghes.example.com`, `dev.azure.com/<org>`, `gitea.example.com/api/v1`), so a provider whose organization lives in the path never collapses two organizations' `project/repo#<n>` -- never a raw URL, so two spellings of one PR are one key, while the same `owner/name#<n>` under two authorities stays two; a queue as its canonical repo; a session as its logical delegate reference (agent-bridge's identity model), never a bridge escrow `session_id` or a live registration, which a restart, takeover or handoff replaces: `wt:<machine>/<project>/<worktree-id>` when a managed worktree hosts it (the project too: one worktree id can exist in two projects), else `lineage:<durable id of its lineage root>` for a bridge-owned line of work (the root's `durable_session_id`, reached through its predecessor links), else `copilot:<Copilot session id>` for an interactive session with no worktree |
   | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...); `null` for an entity with no owner lifecycle (a `queue`) |
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
   | `severity` | derived from `display_state`: `failed` > `stalled` > `awaiting_input` > `blocked` > `review` |
@@ -403,7 +405,8 @@ an empty queue.
   worktree session replaced by a successor (a CLI restart, a takeover, a bridge
   handoff) keeps its `entity_ref`, `id` and `created_at`, while its actions
   name the successor; a bridge-owned lineage with no worktree keeps its root
-  reference across two handoffs; two worktrees never share one; no item's
+  reference across two handoffs; two worktrees never share one, including one
+  worktree id in two projects; no item's
   `id` contains a bridge escrow `session_id`; and a pre-ACP bridge session and
   a worktree-less interactive session without an exposed Copilot session id
   each count as `uncertain`, not as an item.
