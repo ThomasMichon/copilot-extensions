@@ -343,19 +343,27 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     Manager has ever registered, each one's own ``live`` flag, and its
     registry-tracked ``attached_clients`` count.
 
-    **Known, real limitation in ``attached_clients`` today:** this field is
-    only ever as accurate as whatever a ``register()`` caller actually
-    populates. Both shipped launch paths
-    (``bin/launch-session.sh``/``.ps1``) never pass ``--attached-clients``
-    at all, so normalization (``_normalize_mapping_entry``) defaults it to
-    ``0`` for every real mapping registered today, and nothing refreshes it
-    afterward (status-monitor applies only ever touch
-    ``last_status_rendered_at``). This function reports that value exactly
-    as stored -- it does not invent, estimate, or silently correct it. A
-    genuinely live, actively-attached session can therefore show
-    ``attached_clients: 0`` in production right now; fixing that is
-    separate, tracked follow-on work (populating/refreshing the field at
-    its real source), not something this read-only listing can paper over.
+    **``attached_clients`` freshness (#4564 -- PARTIAL fix, writer-side
+    only):** neither shipped launch path (``bin/launch-session.sh``/``.ps1``)
+    ever passes ``--attached-clients`` at register() time, so normalization
+    (``_normalize_mapping_entry``) defaults a brand-new mapping to ``0``.
+    The resident daemon attempts refreshes (``list-clients``) on an independent
+    20-second cadence, even when the status monitor is absent or publications
+    fail, and independently of changes to status option values.
+    At most two mappings are probed
+    per cycle, round-robin, within a shared two-second budget; large fleets
+    converge over multiple cycles. This function still
+    reports whatever is currently stored exactly as-is (it never invents
+    or estimates); a brand-new mapping awaiting its first successful
+    observation, a stopped daemon, or a failed probe can leave the stored
+    count stale. This implements only the attached-client observation portion
+    of #4564's proposed step 1.
+    #4564 also proposes a distinct ``reachable`` field (preserving the
+    last-known ``live``/``attached_clients`` values across an unreachable
+    session rather than this registry's current tombstone-on-death
+    behavior) and a batch "restore what I had open" verb -- neither is
+    implemented here; both remain open, tracked follow-on work under the
+    same issue.
 
     This is NOT filtered to currently-live mappings either: ``snapshot()``
     also returns tombstoned entries (``live: False``), which the registry

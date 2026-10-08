@@ -417,6 +417,55 @@ class MuxMappingRegistry:
             self._write_all(entries)
         return {"applied": True}
 
+    def update_attached_clients(
+        self,
+        project: str,
+        worktree_id: str,
+        attached_clients: int,
+        *,
+        mapping_revision: int,
+        mux_session: str,
+        session_incarnation: str | None = None,
+    ) -> dict:
+        """Atomically update just the ``attached_clients`` field on an
+        existing mapping entry, under this registry's own interprocess lock
+        -- guarded by identity (``mapping_revision`` + ``mux_session`` +
+        ``session_incarnation``) the same way :meth:`remove` is guarded:
+        a caller that read a
+        mapping snapshot before a slow probe (``list-clients`` can block up
+        to several seconds) must not then write that stale whole-entry
+        snapshot back and silently clobber a concurrent ``register()``'s
+        newer session identity -- ``register()``'s own monotonic-revision
+        guard only rejects a strictly *older* revision, and deliberately
+        permits a same-revision live refresh (e.g. a cutover to a new
+        ``mux_session`` at the same revision), so it cannot be relied on
+        alone here. Performing the identity check AND the write under one
+        lock acquisition (rather than a separate read-then-write pair)
+        closes the race entirely, rather than merely narrowing it.
+
+        Returns ``{"applied": bool, ...}``; ``applied: False`` means the
+        mapping was superseded (or removed) in the meantime and the refresh
+        was correctly abandoned rather than overwriting anything."""
+        key = (project, worktree_id)
+        with self._interprocess_lock():
+            entries = self._read_all()
+            current = entries.get(key)
+            if (
+                current is None
+                or not current["live"]
+                or current["mapping_revision"] != mapping_revision
+                or current["mux_session"] != mux_session
+                or current.get("session_incarnation") != (session_incarnation or "")
+            ):
+                return {"applied": False, "reason": "superseded"}
+            if current["attached_clients"] == attached_clients:
+                return {"applied": True, "changed": False}
+            updated = dict(current)
+            updated["attached_clients"] = attached_clients
+            entries[key] = updated
+            self._write_all(entries)
+            return {"applied": True, "changed": True}
+
     def get(self, project: str, worktree_id: str) -> dict | None:
         with self._interprocess_lock():
             entries = self._read_all()
