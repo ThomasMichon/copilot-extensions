@@ -630,17 +630,9 @@ def _apply_tracking_override(
     genuinely unlanded work. Masking it to COMPLETED would let plain
     ``cleanup --clean`` delete it with no ``--force`` at all.
     """
-    if rec.status in ("finalized", "complete", "completed"):
-        if (
-            info.state != git_ops.WorktreeState.DIRTY
-            and info.dirty == 0
-            and info.state not in (
-                git_ops.WorktreeState.GONE,
-                git_ops.WorktreeState.ACTIVE,
-            )
-        ):
-            return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
-    return info
+    from .worktree_git_facts import apply_tracking_override
+
+    return apply_tracking_override(rec, info)
 
 
 def _classify_records(
@@ -986,30 +978,19 @@ def _classify_one_record(
     worktree at a time, instead of computing the whole batch before any row is
     sent. ``repo`` / ``active_paths`` are hoisted out of the per-record loop by
     the caller (they are the same for every record)."""
-    if rec.worktree_path and Path(rec.worktree_path).exists():
-        info = git_ops.classify_worktree(
-            rec.worktree_path,
-            rec.branch,
-            fetch=False,
-            remote=repo.remote,
-            default_branch=repo.default_branch,
-            active_paths=active_paths,
-        )
-        info = _apply_tracking_override(rec, info)
-    elif rec.status == "finalized":
-        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
-    else:
-        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
-    # Layer the session-derived CONVO refinement so this data contract
-    # reports the same display state the tmux status bar does.
+    from . import worktree_git_facts
+
+    turns = 0
     if session_ctx is not None:
         turns = session_ctx.turn_count.get(sessions._normalize_path(rec.worktree_path), 0,)
-        if turns:
-            info = dataclasses.replace(
-                info,
-                state=git_ops.refine_state_with_session(info.state, turns),
-            )
-    return info
+    return worktree_git_facts.compute(
+        rec,
+        repo=repo,
+        fetch=False,
+        active_paths=active_paths,
+        session_turns=turns,
+        tracking_override=_apply_tracking_override,
+    )
 
 
 def _make_pr_lookup(config):

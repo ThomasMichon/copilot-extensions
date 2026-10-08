@@ -118,6 +118,24 @@ version and be coordinated with the Manager.
 > **Contract version: `1`.** Bump on any breaking change (removed verb, removed
 > or retyped field, changed flag semantics). Additive fields do **not** bump it.
 
+## Git-disposition computation
+
+Batch `list --json --classify` and per-worktree `worktree-status-bundle` share
+`worktree_git_facts.compute`: checkout existence, git classification, finalized
+tracking override, and session-turn CONVO refinement. The batch path does not
+fetch and retains its observed live-session ACTIVE precedence. The bundle
+requests a fetch with `active_paths=None`, keeping its independently reported
+liveness fact from short-circuiting actual git inspection. Bundles use the
+record's durable `session_turns`; batch lists use their targeted session scan.
+Those observations and fetch modes may legitimately yield different answers.
+Neither refinement discards the leaf's fetch-attempt/failure or sync fields.
+
+Both coalescing request servers run inside the one resident status-monitor.
+Their project-batch and single-worktree request shapes, rendezvous fields, and
+cache policies remain distinct. Sharing computation does not itself establish
+daemon-only read authority or a snapshot/incremental stream: the existing
+caller-side fallback and polling contracts remain until that separate cutover.
+
 ## Invariants for every pinned verb
 
 - **`--json` → stdout is JSON only; stderr is logs only.** No TTY prompts, no

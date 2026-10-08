@@ -1,0 +1,9 @@
+{
+  "comment": "Share the full git-disposition wrapper between batch classification and per-worktree status bundles, preserving explicit fetch intent and liveness separation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

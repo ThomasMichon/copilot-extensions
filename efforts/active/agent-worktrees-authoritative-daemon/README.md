@@ -691,7 +691,7 @@ survey above.
       `direct-read-is-a-degrade-not-a-peer` reads remain sanctioned;
       writes do not.
 
-### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(in progress — 6a done)_
+### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(in progress — 6b/6c implemented and validated; 6d open)_
 _(Added 2026-10-06, operator-directed formal follow-on from
 `pivot-streaming-transport`. Addresses the Worktrees-pivot half of
 [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555):
@@ -836,7 +836,7 @@ than hypothetical:
       preservation, newer queued stamps, timeout recovery, and actual
       interpreter-exit drainage. This closes the dropped-stamp failure mode,
       not #5555's full repeated-oscillation or daemon-authority acceptance gate.
-- [ ] **6b — Implement the chosen consolidation**, keeping both existing
+- [x] **6b — Implement the chosen consolidation**, keeping both existing
       external call-site contracts (`_classify_records`'s `daemon_filters`
       path; `session_tracking_cli`'s `worktree-status` bundle command)
       unchanged in shape — only the shared internal compute path changes.
@@ -861,7 +861,16 @@ than hypothetical:
       separate `facts["liveness"]` fact for this, so the shared helper's
       `active_paths` parameter stays an opt-in Path A only passes, not a
       value both callers share.
-- [ ] **6c — Structural delegation test proving one shared compute seam,**
+
+      Implemented in `worktree_git_facts.compute`: both callers share checkout
+      existence, git classification, closure override, and CONVO refinement.
+      Lists retain their targeted session scan; bundles use durable
+      `session_turns` without adding session/liveness probes to the git fact.
+      The root tracking-override adapter deliberately preserves existing
+      monkeypatch compatibility. Source hosting is now verified:
+      `status_monitor_cli` starts both servers in the same resident process;
+      distinct request shapes do not imply independent daemon processes.
+- [x] **6c — Structural delegation test proving one shared compute seam,**
       not a same-answer coincidence test: a same-repository-state agreement
       check cannot distinguish "two implementations that happen to agree on
       an unchanged repo" from "one shared compute path" — and would wrongly
@@ -877,6 +886,12 @@ than hypothetical:
       behavior (the no-fetch vs. fetch-confirmed `behind` divergence case
       above) as a **separate**, explicitly-expected-to-differ assertion,
       not folded into the delegation test.
+
+      `test_worktree_git_facts.py` patches the new wrapper (not the previously
+      shared leaf) and reaches both public entry points through real isolated
+      coalescing servers and a real bundle cache, forbidding caller fallback.
+      A separate local bare-remote scenario advances a ref and proves that
+      no-fetch `behind=0` and fetch-requesting `behind=1` are both correct.
 - [ ] **6d — Close the remaining snapshot/stream gap, or formally defer it:**
       6b as scoped only shares a compute implementation between the two
       existing *polling* entry points — it does not give the Picker's
@@ -890,7 +905,7 @@ than hypothetical:
       tracked follow-on issue for the snapshot/stream cutover — do not let
       6a-6c's completion read as "the Worktrees-pivot half of #5555 is
       done" if this gap is left open silently.
-- [ ] Update `classify_daemon.py`'s and `worktree_status_compute.py`'s own
+- [x] Update `classify_daemon.py`'s and `worktree_status_compute.py`'s own
       module docstrings to describe the consolidated architecture, so a
       future reader doesn't rediscover this effort's own "two daemons, one
       fact" history as a live bug.
@@ -935,6 +950,42 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-08 — Phase 6b/6c: one shared wrapper; stamp release verified
+
+The cache-stamp fix merged as #5700 and is now present in the released
+`main` source (the original dev CI run completed successfully; promotion
+#5705 merged). Deployment inspection of agent-worktrees 1.24.25-dev1 confirms
+the `lock_timeout` parameter and the background queue's `lock_timeout=0.5`
+call. Unified update reported live-monitor cutover and the new monitor
+publishes both classify and worktree-status generations. This verifies the
+narrow stamp repair, not the original recurrence cadence.
+
+The reviewed richer wrapper is implemented in `worktree_git_facts.compute`,
+not a second wrapper around the already-shared leaf alone. It retains
+explicit fetch intent, closure/dirty safeguards, and CONVO refinement.
+Bundle git facts now gain the same closure/CONVO policy, using durable turn
+counts and `active_paths=None`; batch lists retain their existing session
+observation and no-fetch behavior. Two request servers remain inside one
+resident process, with distinct request/cache contracts.
+
+All 224 tests in the complete affected contract selection passed on native
+Windows, including real coalescing transports, a local bare-remote freshness
+divergence, missing/finalized checkouts, and root-override compatibility.
+No live tracking record or mux session was modified by those tests.
+Clean-room provisioning is not applicable to this computation-only change;
+external development-venue validation is not available for this local
+engine surface. Linux parity remains CI coverage.
+
+Phase 6d remains open: caller-side fallback on a live daemon's timeout or
+malformed answer is still not authorized by the parent requirement. The
+whole-payload `list_cache` is another path to cover: normal classified lists
+can return cached JSON without computing/stamping, while cache-only paints
+read record hints directly. Its resident freshness lease can outlive the
+ordinary 4s TTL. This dataflow is confirmed, but its contribution to the
+reported live oscillation is not yet reproduced. Neither wrapper sharing nor
+stamp deployment closes daemon-only snapshot/stream authority or row-stability
+acceptance.
 
 ### 2026-10-08 — Phase 6 cache-stamp follow-on: reproduced contention; bounded the background wait
 

@@ -22,6 +22,12 @@ full design + validation writeup: the daemon's ``compute`` callback loads a
 project's records itself via ``tracking.list_records``, so a request payload
 only ever names the project + its list filters, never serializes whole
 records over the wire).
+
+The per-record git wrapper is :mod:`worktree_git_facts`, shared with
+:mod:`worktree_status_compute`. Batch classification remains fetch-free and
+opts into live-session precedence; bundles request a fetch and keep liveness
+separate. Their two coalescing servers share one resident status-monitor
+process, not two daemon processes, and retain distinct request/cache contracts.
 """
 
 
