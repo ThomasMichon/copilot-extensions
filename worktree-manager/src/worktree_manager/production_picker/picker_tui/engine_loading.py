@@ -288,10 +288,35 @@ class PickerScreenLoadingMixin:
         the caller's own identity, unlike ``app.call_from_thread`` -- and
         posting from the inbox's own home thread applies immediately rather
         than waiting on a wake that, with no event loop running yet, might
-        never come."""
-        ensure_inbox(self).post(
-            f"worker-apply:{next(_WORKER_APPLY_SEQ)}", callback
-        )
+        never come.
+
+        Checks ``_bg_cancel`` first, exactly like ``run_background``'s own
+        worker (see background.py): ``on_unmount`` sets it when the picker
+        itself is tearing down (a launch decision -- e.g. resuming a
+        worktree -- cancel, or quit), and a mount-time setup thread
+        (``_setup_live_async``, ``_setup_live_pivots``, the prewarm/reload
+        workers, ...) still finishing its work at that moment has an
+        app/screen that is already gone. Without this check, that worker
+        unconditionally tried to wake the torn-down render flow, which
+        ``Inbox.post`` could only log as a "failed to wake" warning --
+        noisy, and indistinguishable from a genuine, unexpected wake
+        failure -- for what is actually this expected, intentional exit.
+        The check and the ``post`` call both run under ``_bg_cancel_lock``
+        (see its own docstring in ``engine.py``) so ``on_unmount`` can never
+        set ``_bg_cancel`` in the gap between them -- without that, this
+        check-then-act could still race a concurrent teardown and emit the
+        very warning it exists to suppress. ``getattr`` degrades safely for
+        the many lightweight test doubles across the suite that construct a
+        bare object with no ``_bg_cancel``/``_bg_cancel_lock`` of its own
+        (see ``ensure_inbox``'s own docstring for the same pattern)."""
+        cancel = getattr(self, "_bg_cancel", None)
+        lock = getattr(self, "_bg_cancel_lock", None) or contextlib.nullcontext()
+        with lock:
+            if cancel is not None and cancel.is_set():
+                return
+            ensure_inbox(self).post(
+                f"worker-apply:{next(_WORKER_APPLY_SEQ)}", callback
+            )
     def _prepare_live_source(self, snapshot):
         """Resolve source/config-derived values on the setup worker."""
         source_tabs = getattr(self.src, "source_tabs", None)
@@ -524,7 +549,13 @@ class PickerScreenLoadingMixin:
         # blocking work() call returns) may already be gone -- so a worker still
         # running at this moment drops its outcome quietly instead of logging a
         # "could not marshal" warning for what is really just this expected exit.
-        self._bg_cancel.set()
+        # Held under ``_bg_cancel_lock`` so this can never interleave between
+        # ``_apply_from_worker``'s own check and its ``Inbox.post`` call (see
+        # that lock's own docstring in ``engine.py``). ``getattr`` degrades
+        # safely for lightweight test doubles across the suite that
+        # exercise ``on_unmount`` on a bare object with no real ``__init__``.
+        with getattr(self, "_bg_cancel_lock", None) or contextlib.nullcontext():
+            self._bg_cancel.set()
         disposer = getattr(self, "_dispose_pending_setup_payloads", None)
         if callable(disposer):
             disposer()
