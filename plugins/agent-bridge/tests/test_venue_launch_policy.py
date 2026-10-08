@@ -275,3 +275,20 @@ async def test_a_raw_codespace_spawn_asks_the_policy_too(monkeypatch):
     with pytest.raises(vlp.LaunchRefusedError) as exc:
         await transport.spawn(target)
     assert exc.value.codespace == "cs-one"
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_codespace_target_is_gated_by_its_command(monkeypatch):
+    """A target persisted before the codespace block existed names its CodeSpace
+    only in its ``agent-codespaces ... --stdio`` command; a resync of it is
+    gated like any other."""
+    from agent_bridge import transport
+
+    monkeypatch.setattr(vlp, "codespace_launch_refusal", lambda name: f"{name} is paused")
+    monkeypatch.setattr(transport, "spawn_raw", AsyncMock(side_effect=AssertionError("must not launch")))
+    target = SpawnTarget(type="command", codespace=None,
+                         spawn_command=["agent-codespaces", "ssh", "--stdio", "cs-legacy", "--repo", "org/repo",
+                                        "--remote-cmd", "copilot --acp"])
+    with pytest.raises(vlp.LaunchRefusedError) as exc:
+        await transport.spawn(target)
+    assert exc.value.codespace == "cs-legacy"

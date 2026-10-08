@@ -185,5 +185,10 @@ async def gate_raw_codespace_spawn(target: object) -> None:
     import asyncio
 
     name = (getattr(target, "codespace", None) or {}).get("name")
+    if not name and getattr(target, "spawn_command", None):
+        # A legacy persisted target names its CodeSpace only in the command.
+        from .session_host.codespace_transport import parse_codespace_target
+
+        name = (parse_codespace_target(target.spawn_command) or {}).get("name")
     if name:
         await asyncio.to_thread(ensure_codespace_launch_allowed, name)
