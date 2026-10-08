@@ -309,3 +309,22 @@ class TestNoResume:
         sm.resume_session = resume
         await sm._kick_pending_drain(session, allow_resume=False)
         assert resumed == [] and session.status == SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_a_dead_client_is_reported_as_not_running_and_never_respawned(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_prompts import SessionNotRunningError
+
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        session.client = None  # crashed: still IDLE, not STOPPED
+        resumed = []
+
+        async def resume(*a, **k):
+            resumed.append(a)
+
+        sm.resume_session = resume
+        with pytest.raises(SessionNotRunningError, match="^session_not_running"):
+            await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert resumed == [] and session.status == SessionStatus.IDLE

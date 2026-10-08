@@ -11,7 +11,7 @@ from typing import Any
 
 from .models import SessionStatus
 from .session_manager import DaemonDrainingError, Session, log
-from .session_stop import SESSION_STOPPED
+from .session_stop import SESSION_NOT_RUNNING, SESSION_STOPPED
 from .transport import SpawnTarget
 
 
@@ -20,6 +20,14 @@ class SessionStoppedError(ValueError):
     turns route answers 409 with this message, which starts with ``code``."""
 
     code = SESSION_STOPPED
+
+
+class SessionNotRunningError(ValueError):
+    """A ``no_resume`` prompt reached a session whose client isn't running (a
+    crash, not a stop): nothing can take the notice, but the session still needs
+    stopping. A 409 whose message starts with ``code``."""
+
+    code = SESSION_NOT_RUNNING
 
 
 class _SessionPromptMixin:
@@ -65,7 +73,8 @@ class _SessionPromptMixin:
         # Auto-resume if the process is dead but session is recoverable
         if not session.client or not session.client.is_running:
             if no_resume:  # re-checked here: a stop may have landed since admission
-                raise SessionStoppedError(f"{SessionStoppedError.code}: Session {session_id} is not running")
+                raise SessionNotRunningError(
+                    f"{SessionNotRunningError.code}: Session {session_id} has no running client")
             log.info(
                 "Session %s (%s) process is dead -- auto-%s",
                 session_id,

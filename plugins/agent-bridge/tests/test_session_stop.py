@@ -364,3 +364,18 @@ def test_plain_stop_is_unchanged(monkeypatch, capsys):
     monkeypatch.setattr(m, "_get_client", lambda: Bare())
     m._cmd_stop(argparse.Namespace(session_id="abc", force=False, reap_host=False))
     assert calls == [("abc", False, False)] and capsys.readouterr().out == "[OK] Session abc stopped\n"
+
+
+def test_a_session_whose_client_isnt_running_is_still_stopped():
+    """A crashed (not stopped) session can't take the notice, but it still needs
+    the provider stop -- never a false already_stopped."""
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "idle", "turn_count": 1}})
+
+    def not_running(sid, prompt):
+        raise BridgeClientError(409, f"{session_stop.SESSION_NOT_RUNNING}: Session {sid} has no running client")
+
+    fake.submit_stop_notice = not_running
+    result = _run(fake, clock, grace=30)
+    assert result["outcome"] == "stopped" and result["acknowledged"] is False
+    assert ("stop", False, False) in fake.calls

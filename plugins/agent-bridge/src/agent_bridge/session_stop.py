@@ -37,6 +37,8 @@ STOP_UNCONFIRMED_EXIT = 1
 STOP_UNSUPPORTED_EXIT = 69
 #: The 409 detail prefix a ``no_resume`` notice gets from a stopped session.
 SESSION_STOPPED = "session_stopped"
+#: ... and from a session whose client isn't running (not stopped: still stop it).
+SESSION_NOT_RUNNING = "session_not_running"
 
 
 def _now_iso() -> str:
@@ -151,6 +153,9 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
     except BridgeClientError as exc:
         if exc.status == 409 and str(exc.detail).startswith(SESSION_STOPPED):
             return None
+        if exc.status == 409 and str(exc.detail).startswith(SESSION_NOT_RUNNING):
+            result["acknowledged"] = False  # nothing can take the notice; the provider stop still runs
+            return session_id
         if exc.status != 404:
             raise
         result["acknowledged"] = False  # gone before the notice: stop/confirm handle it
