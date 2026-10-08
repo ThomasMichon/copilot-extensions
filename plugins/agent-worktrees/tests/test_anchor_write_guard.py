@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import time
 from pathlib import Path
 
@@ -205,6 +206,634 @@ def test_shell_git_fetch_from_anchor_cwd_allows(tmp_path, anchor):
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
+def test_shell_git_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git merge-base main HEAD", gp),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git merge-file ours base theirs",
+        "git checkout-index --all",
+    ],
+)
+def test_shell_mutating_dashed_git_command_from_anchor_denies(
+    tmp_path, anchor, command,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(command, gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_exe_commit_from_anchor_cwd_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git.exe commit -m example", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_exe_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git.exe merge-base main HEAD", gp),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+@pytest.mark.parametrize("executable", ["git-commit", "git-commit.exe"])
+def test_shell_direct_git_commit_from_anchor_cwd_denies(
+    tmp_path, anchor, executable,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f"{executable} -m example", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_direct_git_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git-merge-base main HEAD", gp),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+@pytest.mark.parametrize("separator", ["\n", "; ", " && "])
+def test_shell_git_readonly_batch_from_anchor_cwd_allows(
+    tmp_path, anchor, separator,
+):
+    gp = anchor[0]["path"]
+    command = separator.join([
+        "git pull --ff-only origin main",
+        "git fetch origin refs/pull/42/head",
+        "git merge-base main HEAD",
+    ])
+    assert guard.decide(_shell(command, gp), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_shell_git_fetch_and_powershell_merge_base_assignment_allows(
+    tmp_path, anchor,
+):
+    gp = anchor[0]["path"]
+    command = (
+        "git fetch origin refs/pull/42/head\n"
+        "$base = (git merge-base main HEAD).Trim()"
+    )
+    assert guard.decide(_shell(command, gp), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_bash_git_line_continuation_from_anchor_denies(
+    tmp_path, anchor, newline,
+):
+    gp = anchor[0]["path"]
+    command = f"git \\{newline}commit --allow-empty -m example"
+    d = guard.decide(_shell(command, gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_powershell_git_line_continuation_from_anchor_denies(
+    tmp_path, anchor, newline,
+):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(gp),
+        "toolArgs": {
+            "command": f"git `{newline}commit --allow-empty -m example"
+        },
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("separator", ["\n", "; ", " && "])
+def test_shell_git_readonly_batch_with_dashC_allows(
+    tmp_path, anchor, separator,
+):
+    gp = anchor[0]["path"]
+    command = separator.join([
+        f'git --no-pager -C "{gp}" pull --ff-only origin main',
+        f'git --no-pager -C "{gp}" fetch origin refs/pull/42/head',
+        f'git --no-pager -C "{gp}" merge-base main HEAD',
+    ])
+    assert guard.decide(_shell(command, tmp_path), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_shell_git_write_with_global_options_still_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    command = (
+        f'git --no-pager -c color.ui=false -C "{gp}" commit -m example'
+    )
+    d = guard.decide(_shell(command, tmp_path), env={}, home=tmp_path,
+                     anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "alias.save=commit",
+        "alias.save=status",
+        "alias.save=other",
+        "alias.save=!echo saved",
+    ],
+)
+def test_shell_git_command_local_alias_from_anchor_denies(
+    tmp_path, anchor, config,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell(f'git -C "{gp}" -c "{config}" save -m example', tmp_path),
+        env={}, home=tmp_path, anchors=anchor,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "user.name=Example; User",
+        "user.name=Example && User",
+    ],
+)
+def test_shell_git_quoted_config_separator_from_anchor_denies(
+    tmp_path, anchor, config,
+):
+    gp = anchor[0]["path"]
+    command = (
+        f'git -C "{gp}" -c "{config}" '
+        "commit --allow-empty -m example"
+    )
+    d = guard.decide(_shell(command, tmp_path), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_alias_with_quoted_separator_from_anchor_denies(
+    tmp_path, anchor,
+):
+    gp = anchor[0]["path"]
+    command = (
+        f'git -C "{gp}" -c "alias.save=!echo before; git commit" save'
+    )
+    d = guard.decide(_shell(command, tmp_path), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(echo ok; git commit --allow-empty -m example)"',
+        'echo "$(echo "$(git commit --allow-empty -m example)")"',
+        'echo "$(printf ")"; git commit --allow-empty -m example)"',
+        "echo `git commit --allow-empty -m example`",
+    ],
+)
+def test_bash_git_command_substitution_from_anchor_denies(
+    tmp_path, anchor, command,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(command, gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(git commit --allow-empty -m example; echo ok)",
+        "echo `git commit --allow-empty -m example; echo ok`",
+    ],
+)
+def test_bash_unquoted_substitution_separator_from_anchor_denies(
+    tmp_path, anchor, command,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(command, gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <(git commit --allow-empty -m example; echo ok)",
+        "cat >(git commit --allow-empty -m example)",
+    ],
+)
+def test_bash_process_substitution_from_anchor_denies(
+    tmp_path, anchor, command,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(command, gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_bash_single_quoted_git_substitution_text_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(
+        _shell("echo '$(git commit --allow-empty -m example)'", gp),
+        env={}, home=tmp_path, anchors=anchor,
+    ) is None
+
+
+def test_powershell_git_command_substitution_from_anchor_denies(
+    tmp_path, anchor,
+):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(gp),
+        "toolArgs": {
+            "command": 'Write-Output "$(git commit --allow-empty -m example)"'
+        },
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_powershell_git_array_subexpression_from_anchor_denies(
+    tmp_path, anchor,
+):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(gp),
+        "toolArgs": {
+            "command": (
+                "Write-Output @(git commit --allow-empty -m example; "
+                "Write-Output ok)"
+            )
+        },
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "Write-Output foo#bar; git commit --allow-empty -m example",
+        "<# note #>; git commit --allow-empty -m example",
+    ],
+)
+def test_powershell_comment_boundaries_preserve_git_command(
+    tmp_path, anchor, command,
+):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(gp),
+        "toolArgs": {"command": command},
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    ("tool", "command"),
+    [
+        (
+            "bash",
+            "echo ok # $(\ngit commit --allow-empty -m example",
+        ),
+        (
+            "powershell",
+            "Write-Output ok # (\ngit commit --allow-empty -m example",
+        ),
+    ],
+)
+def test_shell_comment_openers_do_not_hide_next_git_command(
+    tmp_path, anchor, tool, command,
+):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": tool,
+        "cwd": str(gp),
+        "toolArgs": {"command": command},
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("git commit --allow-empty -m example", "deny"),
+        ("git merge-base main HEAD", "allow"),
+    ],
+)
+def test_powershell_git_grouping_expression_from_anchor(
+    tmp_path, anchor, expression, expected,
+):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(gp),
+        "toolArgs": {"command": f"$result = ({expression})"},
+    }
+    decision = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    if expected == "deny":
+        assert decision and decision["permissionDecision"] == "deny"
+    else:
+        assert decision is None
+
+
+def test_powershell_doubled_apostrophe_path_denies(tmp_path, anchor):
+    literal = _main_checkout(tmp_path, "anchor'name")
+    escaped = str(literal).replace("'", "''")
+    anchors = [*anchor, {"name": "literal", "path": str(literal)}]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(tmp_path),
+        "toolArgs": {
+            "command": f"git -C '{escaped}' commit -m example"
+        },
+    }
+    decision = guard.decide(payload, env={}, home=tmp_path, anchors=anchors)
+    assert decision and decision["permissionDecision"] == "deny"
+
+
+def test_cmd_apostrophe_does_not_quote_separator(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": "cmd",
+        "cwd": str(gp),
+        "toolArgs": {
+            "command": (
+                "echo 'ignored & git commit --allow-empty -m example'"
+            )
+        },
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_config_env_alias_from_anchor_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    command = (
+        "VALUE='commit -m example' "
+        f'git -C "{gp}" --config-env=alias.save=VALUE save'
+    )
+    d = guard.decide(_shell(command, tmp_path), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("dash_c", ["-C", "-C{}"])
+def test_shell_git_commit_with_dashC_forms_still_denies(
+    tmp_path, anchor, dash_c,
+):
+    gp = anchor[0]["path"]
+    option = f'-C "{gp}"' if dash_c == "-C" else dash_c.format(gp)
+    d = guard.decide(_shell(f"git {option} commit -m example", tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_commit_with_attached_quoted_dashC_denies(tmp_path, anchor):
+    spaced = _main_checkout(tmp_path, "anchor with spaces")
+    anchors = [*anchor, {"name": "spaced", "path": str(spaced)}]
+    d = guard.decide(
+        _shell(f'git -C"{spaced}" commit -m example', tmp_path),
+        env={}, home=tmp_path, anchors=anchors,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("empty_path", ['""', "''"])
+def test_shell_git_empty_dashC_from_anchor_denies(
+    tmp_path, anchor, empty_path,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell(f"git -C {empty_path} commit -m example", gp),
+        env={}, home=tmp_path, anchors=anchor,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("suffix", ["%literal", "$literal"])
+def test_shell_git_quoted_literal_expansion_character_path_denies(
+    tmp_path, anchor, suffix,
+):
+    literal = _main_checkout(tmp_path, f"anchor{suffix}")
+    anchors = [*anchor, {"name": "literal", "path": str(literal)}]
+    d = guard.decide(
+        _shell(f"git -C '{literal}' commit -m example", tmp_path),
+        env={}, home=tmp_path, anchors=anchors,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("suffix", ["$literal", "`literal"])
+def test_bash_double_quoted_escaped_character_path_denies(
+    tmp_path, anchor, suffix,
+):
+    literal = _main_checkout(tmp_path, f"anchor{suffix}")
+    escaped = str(literal).replace(suffix[0], f"\\{suffix[0]}")
+    anchors = [*anchor, {"name": "literal", "path": str(literal)}]
+    d = guard.decide(
+        _shell(f'git -C "{escaped}" commit -m example', tmp_path),
+        env={}, home=tmp_path, anchors=anchors,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_unresolved_dashC_variable_still_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    command = f"$repo='{gp}'; git -C $repo commit -m example"
+    assert guard.decide(_shell(command, tmp_path), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell backslash separator")
+def test_powershell_git_dashC_trailing_separator_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(tmp_path),
+        "toolArgs": {"command": f'git -C "{gp}\\" commit -m example'},
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_powershell_git_dashC_backtick_spaces_denies(tmp_path, anchor):
+    spaced = _main_checkout(tmp_path, "anchor with spaces")
+    escaped = str(spaced).replace(" ", "` ")
+    anchors = [*anchor, {"name": "spaced", "path": str(spaced)}]
+    payload = {
+        "toolName": "powershell",
+        "cwd": str(tmp_path),
+        "toolArgs": {"command": f"git -C {escaped} commit -m example"},
+    }
+    d = guard.decide(payload, env={}, home=tmp_path, anchors=anchors)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_commit_with_escaped_space_dashC_denies(tmp_path, anchor):
+    spaced = _main_checkout(tmp_path, "anchor with spaces")
+    escaped = str(spaced).replace(" ", "\\ ")
+    anchors = [*anchor, {"name": "spaced", "path": str(spaced)}]
+    d = guard.decide(
+        _shell(f"git -C {escaped} commit -m example", tmp_path),
+        env={}, home=tmp_path, anchors=anchors,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_repeated_dashC_uses_only_final_directory(tmp_path, anchor):
+    other = _main_checkout(tmp_path, "other-repo")
+    gp = anchor[0]["path"]
+    assert guard.decide(
+        _shell(f'git -C "{gp}" -C "{other}" commit -m example', tmp_path),
+        env={}, home=tmp_path, anchors=anchor,
+    ) is None
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        '--git-dir "{}/.git"',
+        '--git-dir="{}/.git"',
+        '--work-tree "{}"',
+        '--work-tree="{}"',
+    ],
+)
+def test_shell_git_commit_with_repository_target_options_denies(
+    tmp_path, anchor, option,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(
+        f"git {option.format(gp)} commit -m example", tmp_path,
+    ), env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_dir_elsewhere_overrides_anchor_cwd(tmp_path, anchor):
+    other = _main_checkout(tmp_path, "other-repo")
+    gp = anchor[0]["path"]
+    assert guard.decide(
+        _shell(f'git --git-dir "{other / ".git"}" commit -m example', gp),
+        env={}, home=tmp_path, anchors=anchor,
+    ) is None
+
+
+def test_shell_git_dir_elsewhere_overrides_anchor_dashC(tmp_path, anchor):
+    other = _main_checkout(tmp_path, "other-repo")
+    gp = anchor[0]["path"]
+    assert guard.decide(
+        _shell(
+            f'git -C "{gp}" --git-dir "{other / ".git"}" commit -m example',
+            tmp_path,
+        ),
+        env={}, home=tmp_path, anchors=anchor,
+    ) is None
+
+
+@pytest.mark.parametrize("use_dash_c", [False, True])
+def test_shell_git_dir_elsewhere_checkout_keeps_implicit_anchor_work_tree(
+    tmp_path, anchor, use_dash_c,
+):
+    other = _main_checkout(tmp_path, "other-repo")
+    gp = anchor[0]["path"]
+    prefix = f'git -C "{gp}"' if use_dash_c else "git"
+    command = (
+        f'{prefix} --git-dir "{other / ".git"}" checkout -- tracked.txt'
+    )
+    cwd = tmp_path if use_dash_c else gp
+    d = guard.decide(_shell(command, cwd), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("option", ["--git-dir", "--work-tree"])
+def test_shell_repeated_repository_target_uses_final_value(
+    tmp_path, anchor, option,
+):
+    other = _main_checkout(tmp_path, "other-repo")
+    gp = anchor[0]["path"]
+    anchor_target = f"{gp}/.git" if option == "--git-dir" else gp
+    other_target = f"{other}/.git" if option == "--git-dir" else str(other)
+    assert guard.decide(
+        _shell(
+            f'git {option} "{anchor_target}" {option} "{other_target}" '
+            "commit -m example",
+            tmp_path,
+        ),
+        env={}, home=tmp_path, anchors=anchor,
+    ) is None
+
+
+@pytest.mark.parametrize("option", ["--git-dir", "--work-tree"])
+def test_shell_repeated_repository_target_final_anchor_denies(
+    tmp_path, anchor, option,
+):
+    other = _main_checkout(tmp_path, "other-repo")
+    gp = anchor[0]["path"]
+    anchor_target = f"{gp}/.git" if option == "--git-dir" else gp
+    other_target = f"{other}/.git" if option == "--git-dir" else str(other)
+    d = guard.decide(
+        _shell(
+            f'git {option} "{other_target}" {option} "{anchor_target}" '
+            "commit -m example",
+            tmp_path,
+        ),
+        env={}, home=tmp_path, anchors=anchor,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_work_tree_elsewhere_keeps_anchor_repository_target(
+    tmp_path, anchor,
+):
+    other = tmp_path / "other-work-tree"
+    other.mkdir()
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell(f'git --work-tree "{other}" commit -m example', gp),
+        env={}, home=tmp_path, anchors=anchor,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git --help commit",
+        "git --version commit",
+        "git --exec-path commit",
+        "git -C . --help commit",
+    ],
+)
+def test_shell_git_terminal_global_options_allow(tmp_path, anchor, command):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell(command, gp), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+@pytest.mark.parametrize("separator", ["\n", "; ", " && "])
+def test_shell_git_batch_with_real_mutation_still_denies(
+    tmp_path, anchor, separator,
+):
+    gp = anchor[0]["path"]
+    command = separator.join([
+        "git fetch origin refs/pull/42/head",
+        "git commit -m example",
+    ])
+    d = guard.decide(_shell(command, gp), env={}, home=tmp_path,
+                     anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_git_bare_pull_without_ff_only_from_anchor_cwd_denies(
     tmp_path, anchor,
 ):
@@ -229,6 +858,39 @@ def test_shell_git_pull_with_ff_only_substring_in_branch_name_denies(
         _shell("git pull origin release/--ff-only", gp),
         env={}, home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git pull --server-option='foo --ff-only' origin main",
+        "git pull origin main -- --ff-only",
+    ],
+)
+def test_shell_git_pull_with_ff_only_argument_text_denies(
+    tmp_path, anchor, command,
+):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(command, gp), env={}, home=tmp_path,
+                     anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_pull_last_no_ff_mode_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell("git pull --ff-only --no-ff origin main", gp),
+        env={}, home=tmp_path, anchors=anchor,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_pull_last_ff_only_mode_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(
+        _shell("git pull --no-ff --ff-only origin main", gp),
+        env={}, home=tmp_path, anchors=anchor,
+    ) is None
 
 
 def test_shell_git_commit_with_pull_ff_only_in_message_denies(
@@ -435,6 +1097,91 @@ def test_shell_git_dashC_worktree_from_anchor_cwd_allows(tmp_path, anchor):
     assert d is None
 
 
+def test_shell_explicit_linked_worktree_targets_allow(tmp_path, anchor):
+    anchor_root = Path(anchor[0]["path"])
+    git_dir = anchor_root / ".git" / "worktrees" / "explicit"
+    git_dir.mkdir(parents=True)
+    wt = tmp_path / "myrepo.worktrees" / "explicit"
+    wt.mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {git_dir}\n", encoding="utf-8")
+
+    command = (
+        f'git --git-dir "{git_dir}" --work-tree "{wt}" commit -m example'
+    )
+    assert guard.decide(_shell(command, anchor_root), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_linked_worktree_git_dir_from_cwd_allows(tmp_path, anchor):
+    anchor_root = Path(anchor[0]["path"])
+    git_dir = anchor_root / ".git" / "worktrees" / "cwd-only"
+    git_dir.mkdir(parents=True)
+    wt = tmp_path / "myrepo.worktrees" / "cwd-only"
+    wt.mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {git_dir}\n", encoding="utf-8")
+
+    command = f'git --git-dir "{git_dir}" commit -m example'
+    assert guard.decide(_shell(command, wt), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_fake_linked_worktree_pointing_at_anchor_git_dir_denies(
+    tmp_path, anchor,
+):
+    anchor_root = Path(anchor[0]["path"])
+    external = tmp_path / "external-work-tree"
+    external.mkdir()
+    (external / ".git").write_text(
+        f"gitdir: {anchor_root / '.git'}\n",
+        encoding="utf-8",
+    )
+    command = (
+        f'git --git-dir "{anchor_root / ".git"}" '
+        f'--work-tree "{external}" commit -m example'
+    )
+    d = guard.decide(_shell(command, tmp_path), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_symlinked_anchor_git_dir_denies(tmp_path, anchor):
+    anchor_git = Path(anchor[0]["path"]) / ".git"
+    alias = tmp_path / "anchor-git-link"
+    try:
+        alias.symlink_to(anchor_git, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    d = guard.decide(
+        _shell(f'git --git-dir "{alias}" commit -m example', tmp_path),
+        env={}, home=tmp_path, anchors=anchor,
+    )
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_spoofed_linked_git_dir_symlink_denies(tmp_path, anchor):
+    anchor_git = Path(anchor[0]["path"]) / ".git"
+    spoof_parent = tmp_path / "outside" / ".git" / "worktrees"
+    spoof_parent.mkdir(parents=True)
+    spoof = spoof_parent / "id"
+    try:
+        spoof.symlink_to(anchor_git, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    external = tmp_path / "external-work-tree"
+    external.mkdir()
+    (external / ".git").write_text(
+        f"gitdir: {spoof}\n",
+        encoding="utf-8",
+    )
+    command = (
+        f'git --git-dir "{spoof}" --work-tree "{external}" '
+        "commit -m example"
+    )
+    d = guard.decide(_shell(command, tmp_path), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_git_read_from_anchor_cwd_allows(tmp_path, anchor):
     # A read-only git command from the anchor cwd is fine (no write verb).
     assert guard.decide(_shell("git status", anchor[0]["path"]),
@@ -488,7 +1235,7 @@ def test_shell_anchor_in_quoted_body_payload_allows(tmp_path, anchor):
     gp = anchor[0]["path"]
     body = (f'A read-only `git fetch ... 2>&1` in `{gp}` was denied. '
             f'A genuine `Set-Content "{gp}\\x"` / `git commit` must still deny.')
-    cmd = f'gh issue create --repo o/r --title "bug" --body "{body}"'
+    cmd = f"gh issue create --repo o/r --title 'bug' --body '{body}'"
     assert guard.decide(_shell(cmd, tmp_path), env={}, home=tmp_path,
                         anchors=anchor) is None
 

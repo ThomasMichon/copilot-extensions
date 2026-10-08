@@ -374,7 +374,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
-                 "statelessness_guard.py", "cross_repo_guard.py",
+                 "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
                  "nudge_status.py", "bind_nudge.py", "hook_client.py"):
         src = scripts / name
