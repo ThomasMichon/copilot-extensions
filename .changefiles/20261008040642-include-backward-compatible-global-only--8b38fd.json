@@ -1,0 +1,9 @@
+{
+  "comment": "Include backward-compatible global-only activation discovery in the shared plugin-activation dependency",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

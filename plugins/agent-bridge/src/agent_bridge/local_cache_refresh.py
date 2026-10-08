@@ -26,12 +26,12 @@ across a process boundary (a bounded subprocess whose whole tree is killed
 on timeout, never a bare ``subprocess.run(timeout=...)``, which only
 terminates its direct child).
 
-Every entry point here is deliberately best-effort and silent: customizing-
+Every entry point here is deliberately best-effort: customizing-
 copilot not being installed, the repo not resembling a projected-instruction
 root, a subprocess timeout, or any other failure are all absorbed rather
 than raised. This is a convenience refresh at a lifecycle boundary, never a
 gate on ``start_session`` succeeding -- a render failure must never fail a
-local spawn.
+local spawn. Structured outcomes and warning logs make degraded delivery visible.
 
 Unlike ``agent_worktrees.local_cache_refresh`` (an ordinary one-shot CLI
 command, free to block its own process), this module runs inside
@@ -43,19 +43,102 @@ timeout could only abandon, not actually stop) -- including plugin-identity
 resolution, which runs in its own throwaway subprocess (this module's own
 ``__main__`` entry point) rather than in-process, for the same reason
 ``agent_worktrees.local_cache_refresh`` isolates it: ``resolve_active_
-plugins()`` can spawn Git child processes verifying registered projects
-with no bound of its own, and calling it in-process here would block every
-other concurrent session this daemon is serving, not just this one spawn.
+plugins()`` performs identity verification and filesystem discovery.
+Global-only lookup avoids scanning unrelated registered projects; isolating
+discovery still bounds its I/O without blocking concurrent sessions.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import logging
 import os
 import sys
+import time
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+log = logging.getLogger(__name__)
+
+RefreshStatus = Literal["ready", "partial", "unavailable", "failed", "timeout", "skipped"]
+
+
+@dataclass(frozen=True)
+class RefreshResult:
+    status: RefreshStatus
+    changed: int = 0
+    unchanged: int = 0
+    warnings: int = 0
+    blocking: int = 0
+    detail: str = ""
+    removed: int = 0
+
+    @property
+    def diagnostic(self) -> str:
+        counts = (
+            f"{self.changed} installed, {self.unchanged} unchanged, "
+            f"{self.removed} removed, {self.warnings} warnings, {self.blocking} failures"
+        )
+        suffix = f"; {self.detail}" if self.detail else ""
+        return f"[local-guidance] {self.status}: {counts}{suffix}"
+
+
+@dataclass(frozen=True)
+class _RunResult:
+    status: Literal["completed", "failed", "timeout"]
+    stdout: str = ""
+    returncode: int | None = None
+    detail: str = ""
+
+
+def _report(result: RefreshResult) -> RefreshResult:
+    if result.status != "ready" or result.warnings or result.detail:
+        log.warning(result.diagnostic)
+    return result
+
+
+def _checkout_root(path: str | Path) -> Path:
+    candidate = Path(path).absolute()
+    for root in (candidate, *candidate.parents):
+        if (root / ".git").exists():
+            return root
+    return candidate
+
+
+def _render_result(stdout: str, returncode: int) -> RefreshResult:
+    data = json.loads(stdout)
+    if not isinstance(data, dict) or data.get("operation") != "render-local-cache":
+        raise ValueError("renderer returned an invalid result")
+    for key in ("changed", "written", "removed", "unchanged"):
+        value = data.get(key)
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError(f"renderer returned invalid {key} paths")
+    for key in ("warnings", "blocking"):
+        if type(data.get(key)) is not int or data[key] < 0:
+            raise ValueError(f"renderer returned an invalid {key} count")
+    if not isinstance(data.get("findings"), list) or any(
+        not isinstance(item, dict) for item in data["findings"]
+    ):
+        raise ValueError("renderer returned invalid findings")
+    changed, unchanged = len(data["written"]), len(data["unchanged"])
+    blocking = data["blocking"]
+    status: RefreshStatus = "ready"
+    if blocking:
+        status = "partial" if changed + unchanged else "failed"
+    elif returncode:
+        status = "failed"
+    detail = f"renderer exited {returncode}" if returncode else ""
+    findings = "; ".join(
+        f"{item.get('check')}: {item.get('path')}: {item.get('message')}"
+        for item in sorted(data["findings"], key=lambda item: item.get("severity") != "blocking")[:3]
+    )[:1000]
+    if findings:
+        detail = f"{detail}; {findings}" if detail else findings
+    return RefreshResult(status, changed, unchanged, data["warnings"], blocking, detail, len(data["removed"]))
+
 
 _SIBLING_PLUGIN_NAME = "customizing-copilot"
 _SIBLING_RELATIVE_SCRIPT = (
@@ -108,8 +191,9 @@ def _select_global_root(home: Path) -> Path | None:
     try:
         from plugin_activation import resolve_active_plugins
 
-        report = resolve_active_plugins(home=home)
-    except Exception:
+        report = resolve_active_plugins(home=home, include_projects=False)
+    except Exception as exc:
+        log.warning("Global projection renderer discovery failed: %s", exc)
         return None
     candidate_roots = [
         root
@@ -220,13 +304,13 @@ async def _kill_tree(
         await asyncio.wait_for(proc.wait(), timeout=_CLEANUP_GRACE_S)
 
 
-async def _run_bounded(
+async def _run_bounded_result(
     argv: list[str], *, timeout: float, env: dict[str, str] | None = None
-) -> str | None:
+) -> _RunResult:
     """Run ``argv``, bounded by ``timeout``; kill the whole process tree
     (see ``_kill_tree``) rather than just the direct child if it runs over.
-    Returns decoded stdout on a clean, in-budget, zero-exit completion --
-    ``None`` on any failure, non-zero exit, or timeout.
+    Returns a bounded outcome, retaining stdout even on a nonzero exit so
+    partial safe installation can be diagnosed.
 
     Windows: spawned via ``agent_procutil.spawn_in_kill_on_close_job`` --
     a per-invocation kill-on-close Job Object, closed unconditionally in
@@ -241,7 +325,7 @@ async def _run_bounded(
     fails to attach (``job_handle is None`` -- ``spawn_in_kill_on_close_
     job`` still resumes the process in that case, by its own contract),
     this function kills that unprotected process immediately and returns
-    ``None`` rather than ever calling ``communicate()`` against it --
+    a failed outcome rather than ever calling ``communicate()`` against it --
     never proceeding with a spawn this module's own whole-tree guarantee
     couldn't actually honor. POSIX: spawned with ``start_new_session=
     True`` so the child leads its own process group, reached via a direct,
@@ -270,8 +354,8 @@ async def _run_bounded(
             start_new_session=(sys.platform != "win32"),
             creationflags=no_window_flags(),
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        return _RunResult("failed", detail=f"subprocess launch failed: {exc}")
     expected_group_identity: str | None = None
     if sys.platform != "win32":
         with contextlib.suppress(Exception):
@@ -290,7 +374,7 @@ async def _run_bounded(
             proc.kill()
         with contextlib.suppress(Exception):
             await asyncio.wait_for(proc.wait(), timeout=_CLEANUP_GRACE_S)
-        return None
+        return _RunResult("failed", detail="mandatory Windows Job containment unavailable")
     try:
         try:
             stdout, _stderr = await asyncio.wait_for(
@@ -303,17 +387,31 @@ async def _run_bounded(
                 )
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            return None
-        if proc.returncode != 0:
-            return None
-        return stdout.decode("utf-8", errors="replace")
+            status = "timeout" if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) else "failed"
+            return _RunResult(status, detail=f"subprocess {status}: {exc}")
+        return _RunResult(
+            "completed",
+            stdout.decode("utf-8", errors="replace"),
+            proc.returncode,
+            _stderr.decode("utf-8", errors="replace").strip()[:1000],
+        )
     finally:
         if job_handle is not None:
             with contextlib.suppress(Exception):
                 job_handle.close()
 
 
-async def _resolve_cli_script(home: Path, *, timeout: float) -> Path | None:
+async def _run_bounded(
+    argv: list[str], *, timeout: float, env: dict[str, str] | None = None
+) -> str | None:
+    """Compatibility interface for callers requiring only clean stdout."""
+    result = await _run_bounded_result(argv, timeout=timeout, env=env)
+    return result.stdout if result.status == "completed" and result.returncode == 0 else None
+
+
+async def _resolve_cli_script(
+    home: Path, *, timeout: float, outcomes: list[RefreshResult] | None = None
+) -> Path | None:
     """Resolve customizing-copilot's ``render-local-cache`` CLI script
     through identity-verified active-plugin evidence, never a bare directory
     scan (``docs/patterns/marketplace-installation-cells.md`` -- a
@@ -324,21 +422,39 @@ async def _resolve_cli_script(home: Path, *, timeout: float) -> Path | None:
     ambiguous), its script isn't present at the reported root, resolution
     itself doesn't complete within ``timeout``, or the subprocess call
     raises for any other reason."""
+    discovery_detail = ""
     try:
-        output = await _run_bounded(
-            [sys.executable, "-m", "agent_bridge.local_cache_refresh", str(home)],
-            timeout=timeout,
-            env=dict(os.environ),
-        )
-    except Exception:
-        return None
-    if not output:
-        return None
-    output = output.strip()
-    if not output:
-        return None
-    script = Path(output) / _SIBLING_RELATIVE_SCRIPT
-    return script if script.is_file() else None
+        argv = [sys.executable, "-m", "agent_bridge.local_cache_refresh", str(home)]
+        if outcomes is None:
+            output = await _run_bounded(argv, timeout=timeout, env=dict(os.environ))
+        else:
+            run = await _run_bounded_result(argv, timeout=timeout, env=dict(os.environ))
+            if run.status != "completed" or run.returncode != 0:
+                status = "timeout" if run.status == "timeout" else "failed"
+                outcomes.append(RefreshResult(
+                    status, detail=f"renderer discovery: {run.detail or run.returncode}"
+                ))
+                return None
+            output = run.stdout
+            discovery_detail = run.detail
+        if not output or not output.strip():
+            detail = "no unique identity-verified global renderer"
+            if discovery_detail:
+                detail += f": {discovery_detail}"
+                if outcomes is not None:
+                    outcomes.append(RefreshResult("failed", detail=detail))
+                return None
+        else:
+            script = Path(output.strip()) / _SIBLING_RELATIVE_SCRIPT
+            if script.is_file():
+                return script
+            detail = "resolved renderer script is missing"
+        if outcomes is not None:
+            outcomes.append(RefreshResult("unavailable", detail=detail))
+    except Exception as exc:
+        if outcomes is not None:
+            outcomes.append(RefreshResult("failed", detail=f"renderer discovery: {exc}"))
+    return None
 
 
 def _resolve_same_cell_agent_worktrees_path() -> str | None:
@@ -455,7 +571,7 @@ async def refresh_local_cache(
     *,
     home: Path | None = None,
     timeout: float = LOCAL_SPAWN_MAX_TIMEOUT_S,
-) -> None:
+) -> RefreshResult:
     """Best-effort refresh of every enabled source's gitignored
     ``*.local.instructions.md`` sibling under ``repo_root``, before a local
     spawn's Copilot CLI process is launched.
@@ -466,8 +582,8 @@ async def refresh_local_cache(
     elevated relays, and other non-local providers; see ``session_start.
     py``). ``timeout`` bounds the subprocess ``wait_for`` budget, split
     between resolving the sibling's CLI script (capped at
-    ``_RESOLUTION_TIMEOUT_S``) and invoking it for whatever of ``timeout``
-    remains. The genuine hard ceiling on this call's own **total** wall
+    ``_RESOLUTION_TIMEOUT_S``) and invoking it with the actual elapsed-time
+    remainder. The genuine hard ceiling on this call's own **total** wall
     time is ``timeout + _CLEANUP_GRACE_S`` -- not ``timeout`` alone --
     since a timed-out subprocess's tree-kill cleanup (see ``_kill_tree``)
     adds that much more on top, at most once per call (only one of the two
@@ -478,14 +594,20 @@ async def refresh_local_cache(
     spawn itself) EXCEPT a genuine ``asyncio.CancelledError``, which always
     propagates (see ``_run_bounded``)."""
     home = home or Path.home()
+    started = time.monotonic()
     try:
+        if timeout <= 0:
+            return _report(RefreshResult("timeout", detail="no refresh budget remains"))
+        repo_root = _checkout_root(repo_root)
         resolution_timeout = min(timeout, _RESOLUTION_TIMEOUT_S)
-        script = await _resolve_cli_script(home, timeout=resolution_timeout)
+        outcomes: list[RefreshResult] = []
+        script = await _resolve_cli_script(
+            home, timeout=resolution_timeout, outcomes=outcomes
+        )
         if script is None:
-            return
-        render_timeout = timeout - resolution_timeout
-        if render_timeout <= 0:
-            return
+            return _report(outcomes[-1] if outcomes else RefreshResult(
+                "unavailable", detail="renderer discovery produced no script"
+            ))
         argv = [
             sys.executable,
             str(script),
@@ -502,12 +624,33 @@ async def refresh_local_cache(
             # silently discard that evidence by falling through to the
             # downstream CLI's own ambient lookup (docs/patterns/
             # marketplace-installation-cells.md). Skip this round.
-            return
+            return _report(RefreshResult(
+                "skipped", detail="same-cell agent-worktrees evidence unavailable"
+            ))
         if agent_worktrees_command:
             argv += ["--agent-worktrees-path", agent_worktrees_command]
-        await _run_bounded(argv, timeout=render_timeout, env=dict(os.environ))
-    except Exception:
-        pass
+        render_timeout = timeout - (time.monotonic() - started)
+        if render_timeout <= 0:
+            return _report(RefreshResult("timeout", detail="no render budget remains"))
+        run = await _run_bounded_result(
+            argv, timeout=render_timeout, env=dict(os.environ)
+        )
+        if run.status != "completed":
+            return _report(RefreshResult(run.status, detail=f"renderer: {run.detail}"))
+        if run.returncode is None:
+            raise ValueError("renderer returned no exit status")
+        try:
+            result = _render_result(run.stdout, run.returncode)
+        except (ValueError, TypeError) as exc:
+            return _report(RefreshResult(
+                "failed",
+                detail=f"renderer exited {run.returncode}; invalid result: {exc}; {run.detail}",
+            ))
+        if run.detail:
+            result = replace(result, detail=f"{result.detail}; stderr: {run.detail}".strip("; ")[:2000])
+        return _report(result)
+    except Exception as exc:
+        return _report(RefreshResult("failed", detail=f"local refresh failed: {exc}"))
 
 
 if __name__ == "__main__":
