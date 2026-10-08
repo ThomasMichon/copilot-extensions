@@ -114,7 +114,12 @@ can land in the WRONG project's file, corrupting that worktree's history.
       check against its one current match -- is never guessed: it is
       retained in a clearly-labeled `activity.jsonl.unmigrated` sidecar (or
       equivalent) and reported in the migration's own summary output, never
-      silently dropped or silently misfiled.
+      silently dropped or silently misfiled. **This sidecar is retained
+      history, not a discard pile** -- Phase 3's unscoped `agent-worktrees
+      activity` merge-discovery (`phase-3-journal-generalization.md`) must
+      read it as one of its retained sources, or this content silently
+      vanishes from the "full retained log" view the moment Phase 5 removes
+      the global file it currently lives in.
 
 ### Wiring
 

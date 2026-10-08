@@ -211,7 +211,10 @@ audit/decision: [`phase-3-journal-generalization.md`](phase-3-journal-generaliza
 - [ ] `activity.log_event()` writes to the per-worktree file; every
       remaining on-demand reader reads it directly.
 - [ ] Define the unfiltered `agent-worktrees activity` merge-discovery
-      contract.
+      contract -- covering **every** retained sink (per-worktree journals,
+      the Phase 6 archive, the unresolved-live-event holding location, any
+      worktree-less machine-scoped sink, and Phase 4's unmigrated
+      sidecar), not just per-worktree files.
 - [ ] Define authoritative project routing for every live writer (never
       guess via ambient fallback alone).
 - [ ] Audit every `activity.log_event()` call site for worktree-less

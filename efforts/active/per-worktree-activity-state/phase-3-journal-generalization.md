@@ -24,14 +24,33 @@ currently document a deliberately unscoped "full retained log" view (no
 `--worktree-id`/`--project` required) -- once there is no single global
 file, this needs an explicit, chosen behavior rather than silently breaking.
 
-- [ ] An unscoped call discovers and merges every project's per-worktree
-      journal files -- including the archived location Phase 6 introduces
-      (a pure filesystem read of a known path convention, not a call into
-      `agent-logger`; see `phase-6-archival.md`) -- globally time-ordered,
-      matching today's output shape (same fields, same sort) -- preserving
-      existing UX/back-compat. This remains an on-demand diagnostic read
-      only (the `activity` CLI verb, never a hot path), so the extra
-      discovery I/O is acceptable there.
+- [ ] An unscoped call discovers and merges **every retained sink this
+      effort introduces**, not just per-worktree journal files -- "full
+      retained log" means every record that is still kept somewhere, and
+      each of the following is a place genuine, retained history can now
+      live:
+  - every project's per-worktree journal files;
+  - the archived location Phase 6 introduces (a pure filesystem read of a
+    known path convention, not a call into `agent-logger`; see
+    `phase-6-archival.md`);
+  - the unresolved-live-event holding location this same phase introduces
+    below (a write that genuinely couldn't resolve its owning project);
+  - the machine-scoped sink for worktree-less events, if that's the chosen
+    outcome of the audit below (not applicable if those event kinds are
+    instead deliberately retired);
+  - Phase 4's `activity.jsonl.unmigrated` sidecar (`phase-4-migration.md`)
+    -- an ambiguous/orphaned historical record is still retained history,
+    and omitting it from the unscoped view would make it silently vanish
+    the moment Phase 5 removes the global file it currently lives in.
+- [ ] All of the above, globally time-ordered, matching today's output
+      shape (same fields, same sort) -- preserving existing UX/back-compat.
+      This remains an on-demand diagnostic read only (the `activity` CLI
+      verb, never a hot path), so the extra discovery I/O across several
+      sinks is acceptable there.
+- [ ] Test: seed at least one record in each retained sink above (including
+      the unmigrated sidecar and the unresolved-live-event holding
+      location), confirm an unscoped `activity` call surfaces all of them,
+      not only the per-worktree-journal subset.
 
 ### Authoritative project routing for live writes
 
