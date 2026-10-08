@@ -525,7 +525,9 @@ an AES-256-GCM-encrypted full identity, decryptable only by the holder of a
 shared symmetric key, emitted automatically whenever one is configured (see
 `docs/architecture.md`'s *PR Attribution & Codenames* section for key
 custody and the decode command). Opaque ciphertext to anyone else, so it
-needs no additional config to appear.
+needs no additional config to appear -- scoped to this `"codename"` mode
+specifically; it never appears under `true` (already plaintext) or `false`
+(the anonymous opt-out).
 (This is the *author's* path back to their own worktree; a maintainer or
 reviewer tracing a PR they didn't open should instead read
 [pr-attribution.md](pr-attribution.md), written from that side.)

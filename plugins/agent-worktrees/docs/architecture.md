@@ -1065,16 +1065,21 @@ safely carry.
 - **`false` (anonymous opt-out).** No marker at all.
 
 **A third, independent layer: the encrypted identity marker (`enc=`).**
-Alongside `codename=`/`root=` (never replacing either), the marker may also
-carry an `enc=<token>` field -- an AES-256-GCM-encrypted blob
-(`agent_worktrees.identity_marker`) of the FULL raw identity (worktree id,
-machine, session, head SHA, project, timestamp), the same information the
-raw `true` marker carries in plaintext, just encrypted. Only the holder of a
-shared symmetric key can decrypt it; to everyone else it is opaque
+Alongside `codename=`/`root=` (never replacing either), the `"codename"`-mode
+marker may also carry an `enc=<token>` field -- an AES-256-GCM-encrypted
+blob (`agent_worktrees.identity_marker`) of the FULL raw identity (worktree
+id, machine, session, head SHA, project, timestamp), the same information
+the raw `true` marker carries in plaintext, just encrypted. Only the holder
+of a shared symmetric key can decrypt it; to everyone else it is opaque
 ciphertext -- exactly as public-safe as `codename=` itself. Because of that,
-it is emitted **automatically** whenever a key is configured, on ANY repo and
-in ANY `pr.source_attribution` mode (including `codename`) -- no new
-per-repo opt-in is needed, mirroring how `root=` was added. Key custody is
+it is emitted **automatically** under `"codename"` mode whenever a key is
+configured -- no new per-repo opt-in is needed, mirroring how `root=` was
+added. Scoped to `"codename"` mode specifically: `true` mode already
+discloses the exact same identity in plaintext (encrypting it alongside
+would add ciphertext with no additional privacy value), and `false` (the
+anonymous opt-out) continues to emit no marker of any kind, encrypted or
+not -- an operator who explicitly chose full anonymity gets it, full stop.
+Key custody is
 deliberately lightweight (an operator-confirmed design choice, effort
 `pr-attribution-codenames`): a single raw base64-encoded 32-byte key file,
 **not** machine-bound (unlike `agent_vault.kek`'s DPAPI-wrapped KEKs) so the

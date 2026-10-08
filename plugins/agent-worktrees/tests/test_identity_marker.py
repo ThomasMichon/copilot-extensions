@@ -2,23 +2,20 @@
 ``pr-attribution-codenames``, encrypted-identity-marker slice): key
 resolution/generation, the AES-256-GCM encrypt/decrypt round trip, and the
 standalone CLI.
+
+``cryptography`` is a hard runtime dependency of this plugin (not optional,
+unlike ``agent_vault``'s ``cache``/``kek`` extras) -- the encrypt/decrypt
+tests below are unconditional, not skipped.
 """
 
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 
 import pytest
 
 from agent_worktrees import identity_marker
-
-# AES-256-GCM needs the optional 'cryptography' dep -- the key-resolution /
-# path-only tests below don't, so only the encrypt/decrypt round trip is
-# skipped without it (same pattern as agent-vault's test_kek.py).
-_HAS_CRYPTO = importlib.util.find_spec("cryptography") is not None
-_needs_crypto = pytest.mark.skipif(not _HAS_CRYPTO, reason="cryptography not installed")
 
 
 class TestKeyResolution:
@@ -114,7 +111,6 @@ class TestBuildIdentityPayload:
         assert payload["project"] == "repo"
 
 
-@_needs_crypto
 class TestEncryptDecryptRoundTrip:
     @pytest.fixture
     def key(self):
@@ -188,7 +184,6 @@ class TestIdentityMarkerFieldForRecord:
     def test_never_raises_on_bad_record(self):
         assert identity_marker.identity_marker_field_for_record(object()) is None  # type: ignore[arg-type]
 
-    @_needs_crypto
     def test_uses_live_session_over_ended_one(self, monkeypatch):
         import types
 
@@ -221,7 +216,6 @@ class TestCli:
         assert rc == 1
         assert "error" in capsys.readouterr().out
 
-    @_needs_crypto
     def test_decode_round_trips_a_real_token(self, tmp_path, monkeypatch, capsys):
         key_path = tmp_path / "identity.key"
         identity_marker._cli(["generate", "--path", str(key_path)])

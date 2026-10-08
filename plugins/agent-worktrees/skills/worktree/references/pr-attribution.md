@@ -38,8 +38,9 @@ repo's `pr.source_attribution` config key. Its shape depends on the mode:
   `enc=<token>` field may also be present: an AES-256-GCM-encrypted blob
   decryptable only by the holder of a shared symmetric identity key (see
   *Decrypting the `enc=` field* below) -- opaque ciphertext to anyone else,
-  so it is emitted automatically whenever that key is configured, on any
-  repo, regardless of `pr.source_attribution` mode.
+  so it is emitted automatically whenever that key is configured. Scoped
+  to this `"codename"` mode specifically -- it never appears under `true`
+  (already plaintext) or `false` (the anonymous opt-out).
 - **`true` (raw marker, closed-circuit repos only).** Embeds the full raw
   worktree id, machine name, session id, and head SHA directly. Never used
   on a public repo.

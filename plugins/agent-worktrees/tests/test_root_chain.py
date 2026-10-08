@@ -780,7 +780,6 @@ class TestIdentityMarkerIntegration:
 
     @pytest.fixture
     def _with_identity_key(self, monkeypatch):
-        pytest.importorskip("cryptography")
         from agent_worktrees import identity_marker
 
         key = b"\x11" * identity_marker.KEY_BYTES

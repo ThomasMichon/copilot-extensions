@@ -10,8 +10,12 @@ carrying the **full raw identity** (worktree id, machine, session, head SHA,
 project, timestamp -- mirroring the raw ``source_attribution: true`` marker's
 own fields) that only the holder of a shared symmetric key can decrypt --
 anyone else sees only opaque ciphertext, so it is exactly as public-safe as
-``codename=`` itself and may be emitted unconditionally whenever a key
-resolves, on any repo, in any ``pr.source_attribution`` mode.
+``codename=`` itself. This module is mode-agnostic (it builds/decrypts a
+payload regardless of why it was called); ``codename`` is the one caller
+that actually wires it into a published marker (see
+:func:`agent_worktrees.root_chain.build_codename_marker_with_root`) --
+``true`` mode already discloses the same identity in plaintext, and
+``false`` (anonymous opt-out) never publishes any marker, encrypted or not.
 
 Key custody (operator-confirmed design, effort README): a single raw
 base64-encoded 32-byte key file, deliberately **not** machine-bound (no
@@ -178,11 +182,15 @@ def generate_identity_key(path: Path | None = None, *, force: bool = False) -> P
 def _aesgcm(key: bytes):
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    except ImportError as exc:  # pragma: no cover - env-dependent
+    except ImportError as exc:  # pragma: no cover - cryptography is a
+        # hard runtime dependency of this plugin (pyproject.toml); this
+        # branch is a defensive backstop against a corrupted/out-of-sync
+        # installed venv, not an expected runtime path.
         raise IdentityMarkerError(
             "the 'cryptography' package is required for the encrypted "
-            "identity marker -- install it (e.g. `uv pip install "
-            "cryptography`)"
+            "identity marker but is not importable -- the installed venv "
+            "may be corrupted or out of sync with this plugin's "
+            "pyproject.toml; reinstall (e.g. `uv pip install cryptography`)"
         ) from exc
     return AESGCM(key)
 
