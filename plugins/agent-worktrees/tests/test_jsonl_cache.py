@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,7 +37,8 @@ def test_append_work_is_linear_in_new_bytes_not_history(tmp_path, monkeypatch):
     path = tmp_path / "log.jsonl"
     line = b'{"event":"existing","nested":{"value":123}}\n'
     path.write_bytes(line * 100_000)
-    jsonl_cache.read_jsonl(path)
+    original = jsonl_cache.read_jsonl(path)
+    history = jsonl_cache._cache[(str(path), "strict")].complete
     reads = []
     parses = []
     read = jsonl_cache._read_snapshot
@@ -53,7 +56,11 @@ def test_append_work_is_linear_in_new_bytes_not_history(tmp_path, monkeypatch):
     monkeypatch.setattr(jsonl_cache.json, "loads", counted_loads)
     for i in range(20):
         _append(path, line)
-        assert len(jsonl_cache.read_jsonl(path)) == 100_001 + i
+        snapshot = jsonl_cache.read_jsonl(path)
+        assert len(snapshot) == 100_001 + i
+        assert jsonl_cache._cache[(str(path), "strict")].complete is history
+        assert snapshot.records is history
+        assert len(original) == 100_000
     assert reads == [len(line)] * 20
     assert len(parses) == 20
 
@@ -75,15 +82,15 @@ def test_unterminated_record_is_revisited_without_loss_or_duplicates(tmp_path, i
 def test_partial_utf8_at_eof_completes_on_append(tmp_path):
     path = tmp_path / "log.jsonl"
     path.write_bytes(b'{"event":"\xe2')
-    assert jsonl_cache.read_jsonl(path) == []
+    assert list(jsonl_cache.read_jsonl(path)) == []
     _append(path, b'\x82\xac"}\n')
-    assert jsonl_cache.read_jsonl(path) == [{"event": "\u20ac"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "\u20ac"}]
 
 
 def test_same_stamp_atomic_replacement_invalidates_without_reader_signal(tmp_path):
     path = tmp_path / "log.jsonl"
     path.write_bytes(b'{"event":"old"}\n')
-    assert jsonl_cache.read_jsonl(path) == [{"event": "old"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "old"}]
     stamp = path.stat()
     replacement = tmp_path / "replacement.jsonl"
     replacement.write_bytes(b'{"event":"new"}\n')
@@ -91,7 +98,7 @@ def test_same_stamp_atomic_replacement_invalidates_without_reader_signal(tmp_pat
     replacement.replace(path)
     assert path.stat().st_size == stamp.st_size
     assert path.stat().st_mtime_ns == stamp.st_mtime_ns
-    assert jsonl_cache.read_jsonl(path) == [{"event": "new"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "new"}]
 
 
 def test_delete_then_recreate_does_not_inherit_events(tmp_path):
@@ -99,9 +106,9 @@ def test_delete_then_recreate_does_not_inherit_events(tmp_path):
     path.write_bytes(b'{"event":"old"}\n')
     jsonl_cache.read_jsonl(path)
     path.unlink()
-    assert jsonl_cache.read_jsonl(path) == []
+    assert list(jsonl_cache.read_jsonl(path)) == []
     path.write_bytes(b'{"event":"new"}\n')
-    assert jsonl_cache.read_jsonl(path) == [{"event": "new"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "new"}]
 
 
 @pytest.mark.parametrize("new", [b'{}\n', b'{"event":"new"}\n'])
@@ -112,7 +119,7 @@ def test_truncation_or_same_size_rewrite_resets_reader(tmp_path, new):
     old = path.stat()
     path.write_bytes(new)
     os.utime(path, ns=(old.st_atime_ns, old.st_mtime_ns + 1_000_000))
-    assert jsonl_cache.read_jsonl(path) == [json.loads(new)]
+    assert list(jsonl_cache.read_jsonl(path)) == [json.loads(new)]
 
 
 def test_concurrent_append_cannot_extend_this_read_past_opening_size(tmp_path, monkeypatch):
@@ -127,9 +134,9 @@ def test_concurrent_append_cannot_extend_this_read_past_opening_size(tmp_path, m
         return read(handle, offset, size)
 
     monkeypatch.setattr(jsonl_cache, "_read_snapshot", append_before_read)
-    assert jsonl_cache.read_jsonl(path) == [{"event": "first"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "first"}]
     monkeypatch.setattr(jsonl_cache, "_read_snapshot", read)
-    assert jsonl_cache.read_jsonl(path) == [{"event": "first"}, {"event": "next"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "first"}, {"event": "next"}]
     assert len(calls) == 1
 
 
@@ -151,13 +158,13 @@ def test_replacement_between_stat_and_open_uses_opened_identity(tmp_path, monkey
         return original_open(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", racing_open)
-    assert jsonl_cache.read_jsonl(path) == [{"event": "replacement"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "replacement"}]
 
 
 def test_decode_policy_isolated_and_malformed_lines_skipped(tmp_path):
     path = tmp_path / "log.jsonl"
     path.write_bytes(b'not json\n{"event":"ok","value":"a\xe2\x80\xa8b"}\n')
-    assert jsonl_cache.read_jsonl(path) == [{"event": "ok", "value": "a\u2028b"}]
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "ok", "value": "a\u2028b"}]
     _append(path, b'{"event":"bad \xff"}\n')
     with pytest.raises(UnicodeDecodeError):
         jsonl_cache.read_jsonl(path)
@@ -176,3 +183,47 @@ def test_cursors_are_bounded_and_explicitly_invalidated(tmp_path, monkeypatch):
     assert len(jsonl_cache._cache) == 1
     jsonl_cache.clear()
     assert not jsonl_cache._cache
+
+
+def test_provisional_eof_view_does_not_copy_or_extend_prior_snapshot(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"first"}\n{"event":"provisional"}')
+    first = jsonl_cache.read_jsonl(path)
+    storage = jsonl_cache._cache[(str(path), "strict")].complete
+    assert first.records is storage
+    assert len(first.tail) == 1
+    _append(path, b'\n{"event":"last"}\n')
+    second = jsonl_cache.read_jsonl(path)
+    assert second.records is storage
+    assert list(first) == [{"event": "first"}, {"event": "provisional"}]
+    assert list(second) == [
+        {"event": "first"}, {"event": "provisional"}, {"event": "last"},
+    ]
+    assert second[-1] == {"event": "last"}
+    assert second[1:] == [{"event": "provisional"}, {"event": "last"}]
+    with pytest.raises(IndexError):
+        _ = first[2]
+    with pytest.raises(IndexError):
+        _ = first[-3]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows handle identity")
+def test_zero_fstat_identity_still_hits_and_detects_larger_replacement(tmp_path, monkeypatch):
+    real_fstat = os.fstat
+
+    def zero_identity(fd):
+        stat = real_fstat(fd)
+        return SimpleNamespace(
+            st_dev=0, st_ino=0, st_mtime_ns=stat.st_mtime_ns, st_size=stat.st_size,
+        )
+
+    monkeypatch.setattr(jsonl_cache, "os", SimpleNamespace(fstat=zero_identity))
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    first = jsonl_cache.read_jsonl(path)
+    assert jsonl_cache.read_jsonl(path) is first
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_bytes(b'{"event":"new-and-larger"}\n')
+    replacement.replace(path)
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "new-and-larger"}]
+    assert list(first) == [{"event": "old"}]

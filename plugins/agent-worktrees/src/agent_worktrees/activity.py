@@ -125,6 +125,7 @@ swallows its own exceptions.
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 import json
 import logging
 import os
@@ -588,7 +589,7 @@ def parse_since(value: str) -> datetime | None:
     return dt
 
 
-def _parse_all_events(path: Path) -> list[dict]:
+def _parse_all_events(path: Path) -> Sequence[dict]:
     """Read an incremental, opening-size-bounded activity-log snapshot."""
     return jsonl_cache.read_jsonl(path)
 

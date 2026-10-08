@@ -41,6 +41,7 @@ worktree id never inherits a stale trace.
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 import json
 import os
 import re
@@ -147,7 +148,7 @@ def append_event(
         return False
 
 
-def _parse_trace_file(path: Path) -> list[dict]:
+def _parse_trace_file(path: Path) -> Sequence[dict]:
     """Read a bounded incremental snapshot, tolerating damaged UTF-8."""
     return jsonl_cache.read_jsonl(path, errors="replace")
 
@@ -168,7 +169,7 @@ def read_trace(project: str, worktree_id: str) -> list[dict]:
         path = trace_path(project, worktree_id)
     except ValueError:
         return []
-    return copy.deepcopy(_parse_trace_file(path))
+    return [copy.deepcopy(event) for event in _parse_trace_file(path)]
 
 
 def remove_trace(project: str | None, worktree_id: str | None) -> None:

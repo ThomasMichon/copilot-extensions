@@ -17,11 +17,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
 from collections import OrderedDict
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, overload
 
 _Stamp = tuple[int, int, int, int]
 _cache_lock = threading.Lock()
@@ -34,14 +37,75 @@ class _Entry:
     stamp: _Stamp
     offset: int
     complete: list[dict]
-    visible: list[dict]
+    visible: "_Snapshot"
+
+
+@dataclass(frozen=True)
+class _Snapshot(Sequence[dict]):
+    """A fixed-length view of appendable history, with a provisional EOF tail."""
+
+    records: list[dict]
+    length: int
+    tail: tuple[dict, ...] = ()
+
+    def __len__(self) -> int:
+        return self.length + len(self.tail)
+
+    @overload
+    def __getitem__(self, index: int) -> dict: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[dict]: ...
+
+    def __getitem__(self, index: int | slice) -> dict | list[dict]:
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        return self.records[index] if index < self.length else self.tail[index - self.length]
+
+    def __iter__(self) -> Iterator[dict]:
+        yield from islice(self.records, self.length)
+        yield from self.tail
 
 
 _cache: OrderedDict[tuple[str, str], _Entry] = OrderedDict()
 
 
-def _stamp(stat: os.stat_result) -> _Stamp:
-    return stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size
+def _stamp(handle: BinaryIO) -> _Stamp:
+    stat = os.fstat(handle.fileno())
+    identity = stat.st_dev, stat.st_ino
+    if sys.platform == "win32":
+        # Python 3.10 fstat reports zero device/inode on Windows. Obtain file
+        # identity from the actual open handle, never a potentially replaced path.
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        class FileInformation(ctypes.Structure):
+            _fields_ = [
+                ("attributes", wintypes.DWORD),
+                ("created", wintypes.FILETIME),
+                ("accessed", wintypes.FILETIME),
+                ("written", wintypes.FILETIME),
+                ("volume", wintypes.DWORD),
+                ("size_high", wintypes.DWORD),
+                ("size_low", wintypes.DWORD),
+                ("links", wintypes.DWORD),
+                ("index_high", wintypes.DWORD),
+                ("index_low", wintypes.DWORD),
+            ]
+
+        api = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandle
+        api.argtypes = [wintypes.HANDLE, ctypes.POINTER(FileInformation)]
+        api.restype = wintypes.BOOL
+        info = FileInformation()
+        if not api(msvcrt.get_osfhandle(handle.fileno()), ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        identity = info.volume, (info.index_high << 32) | info.index_low
+    return identity[0], identity[1], stat.st_mtime_ns, stat.st_size
 
 
 def _read_snapshot(handle: BinaryIO, offset: int, size: int) -> bytes:
@@ -62,7 +126,7 @@ def _decode(raw: bytes, errors: str) -> list[dict]:
     return out
 
 
-def read_jsonl(path: Path, *, errors: str = "strict") -> list[dict]:
+def read_jsonl(path: Path, *, errors: str = "strict") -> Sequence[dict]:
     """Return a read-only parsed snapshot, reusing complete lines on append.
 
     File identity is observed on the opened handle, not inferred from a path
@@ -74,12 +138,11 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> list[dict]:
     with _cache_lock:
         previous = _cache.get(key)
         try:
-            observed = _stamp(path.stat())
-            if previous is not None and previous.stamp == observed:
-                _cache.move_to_end(key)
-                return previous.visible
             with path.open("rb") as handle:
-                stamp = _stamp(os.fstat(handle.fileno()))
+                stamp = _stamp(handle)
+                if previous is not None and previous.stamp == stamp:
+                    _cache.move_to_end(key)
+                    return previous.visible
                 append = (
                     previous is not None
                     and previous.stamp[:2] == stamp[:2]
@@ -102,7 +165,11 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> list[dict]:
             return []
         boundary = raw.rfind(b"\n") + 1
         decoded = _decode(raw[:boundary], errors)
-        complete = previous.complete + decoded if append else decoded
+        if append:
+            complete = previous.complete
+            complete.extend(decoded)
+        else:
+            complete = decoded
         tail: list[dict] = []
         if boundary < len(raw):
             try:
@@ -110,7 +177,7 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> list[dict]:
             except UnicodeDecodeError as exc:
                 if exc.reason != "unexpected end of data":
                     raise
-        visible = complete + tail if tail else complete
+        visible = _Snapshot(complete, len(complete), tuple(tail))
         entry = _Entry(stamp, offset + boundary, complete, visible)
         _cache[key] = entry
         _cache.move_to_end(key)

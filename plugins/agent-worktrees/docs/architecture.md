@@ -962,7 +962,11 @@ trace.
 process-local cursors for up to 64 recently read files. A read consumes only
 the file size observed at open, so a continuously appending writer cannot keep
 that read running indefinitely. Subsequent appends decode only new bytes;
-incomplete trailing records are revisited when more bytes arrive. Atomic
+incomplete trailing records are revisited when more bytes arrive. Fixed-length
+snapshot views share appendable history without copying earlier record references
+or changing a snapshot already being consumed. File identity comes from the open
+handle, using the native Windows file ID rather than zero-valued legacy `fstat`
+identity fields. Atomic
 replacement, truncation, and same-size modifications reset the cursor.
 Writers append or replace atomically rather than editing earlier bytes and
 then growing the same file. Public readers independently copy their final
