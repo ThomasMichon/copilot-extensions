@@ -634,7 +634,9 @@ def test_delegate_to_pr_watch_daemon_subscribes_and_arms(monkeypatch):
     from agent_dispatch import execution_cli, hibernation, procutil
 
     monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
-    monkeypatch.setattr(execution_cli.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        procutil, "agent_pull_requests_launch_prefix", lambda: ["/bin/agent-pull-requests"]
+    )
 
     calls = {}
 
@@ -675,6 +677,10 @@ def test_delegate_to_pr_watch_daemon_subscribes_and_arms(monkeypatch):
     assert argv[0] == "/bin/agent-pull-requests"
     assert argv[1:4] == ["watch", "subscribe", "--repo"]
     assert "--subscriber-id" in argv and "t-1:7" in argv
+    # a bounded default timeout is always forwarded -- never unbounded
+    assert "--timeout" in argv
+    expected_timeout = execution_cli._DEFAULT_PR_WATCH_TIMEOUT_SECONDS
+    assert float(argv[argv.index("--timeout") + 1]) == expected_timeout
     assert argv.count("--until") == 2
     assert "merged" in argv and "closed" in argv
     notify_idx = argv.index("--notify-argv")
@@ -683,20 +689,123 @@ def test_delegate_to_pr_watch_daemon_subscribes_and_arms(monkeypatch):
     assert "--finish-delegated-waiter" in notify_argv
     assert "--waiter-generation" in notify_argv
     assert str(notify_argv[notify_argv.index("--waiter-generation") + 1]) == "7"
-    # arm_run_waiter was called with the sentinel identity, not a real pid/host
+    # never a bearer credential in durable/persisted argv (review finding)
+    assert "--token" not in notify_argv
+    assert "--control-token" not in notify_argv
+    # arm_run_waiter was called with the sentinel identity and kind='delegated',
+    # not a real pid/host
     assert fake.calls[0][0] == "t-1"
     arm_kwargs = fake.calls[0][1]
     assert arm_kwargs["generation"] == 7
     assert arm_kwargs["pid"] == execution_cli._PR_WATCH_DAEMON_PID
     assert arm_kwargs["host"] == execution_cli._PR_WATCH_DAEMON_HOST
+    assert arm_kwargs["kind"] == "delegated"
     assert arm_kwargs["start_token"] in notify_argv
+
+
+def test_delegate_to_pr_watch_daemon_forwards_custom_timeout(monkeypatch):
+    from agent_dispatch import execution_cli, hibernation, procutil
+
+    monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
+    monkeypatch.setattr(
+        procutil, "agent_pull_requests_launch_prefix", lambda: ["/bin/agent-pull-requests"]
+    )
+    calls = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"registered": True})
+        stderr = ""
+
+    def fake_run(argv, **k):
+        calls["argv"] = argv
+        return _Proc()
+
+    monkeypatch.setattr(execution_cli.subprocess, "run", fake_run)
+    fake = _FakeWaiterFinishClient()
+    monkeypatch.setattr(
+        execution_cli, "_core",
+        lambda: type("M", (), {"_client": staticmethod(lambda _a: fake)})(),
+    )
+
+    args = _args(
+        [
+            "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+            "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+            "--pr-watch-timeout", "60",
+        ]
+    )
+    spec = hibernation.RunSpec(command=("<delegated>",), resume_worktree="m/wt-1", task_id="t-1")
+
+    execution_cli._delegate_to_pr_watch_daemon(args, spec, {"generation": 7})
+
+    argv = calls["argv"]
+    assert float(argv[argv.index("--timeout") + 1]) == 60.0
+
+
+def test_delegate_to_pr_watch_daemon_raises_when_runtime_unresolvable(monkeypatch):
+    """No installed ``agent-pull-requests`` runtime -- never falls back to an
+    ambient ``PATH`` lookup (review finding: that could select an unrelated
+    or attacker-controlled executable)."""
+    from agent_dispatch import execution_cli, hibernation, procutil
+
+    monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
+    monkeypatch.setattr(procutil, "agent_pull_requests_launch_prefix", lambda: None)
+
+    def _boom(*_a, **_k):  # pragma: no cover - must never be reached
+        raise AssertionError("must not shell out when no runtime is resolvable")
+
+    monkeypatch.setattr(execution_cli.subprocess, "run", _boom)
+
+    args = _args(
+        [
+            "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+            "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+        ]
+    )
+    spec = hibernation.RunSpec(command=("<delegated>",), resume_worktree="m/wt-1", task_id="t-1")
+
+    try:
+        execution_cli._delegate_to_pr_watch_daemon(args, spec, {"generation": 7})
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "could not resolve" in str(exc)
+
+
+def test_global_cli_flags_never_forwards_bearer_credentials():
+    """Review finding: ``--token``/``--control-token`` must never be baked
+    into durable notify-argv (persisted to disk by the daemon, later visible
+    in the callback process's own command line) -- only routing intent
+    (``--url``/``--shared``), never a secret."""
+    from agent_dispatch.execution_cli import _global_cli_flags
+
+    args = _args(
+        [
+            "--url", "http://coordinator", "--token", "super-secret-bearer",
+            "--control-token", "super-secret-control",
+            "run", "--resume", "m/wt-1", "--", "sleep", "1",
+        ]
+    )
+    flags = _global_cli_flags(args)
+    assert flags == ["--url", "http://coordinator"]
+    assert "super-secret-bearer" not in flags
+    assert "super-secret-control" not in flags
+
+
+def test_global_cli_flags_prefers_shared_over_url():
+    from agent_dispatch.execution_cli import _global_cli_flags
+
+    args = _args(["--shared", "--url", "http://ignored", "run", "--resume", "m/wt-1", "--", "x"])
+    assert _global_cli_flags(args) == ["--shared"]
 
 
 def test_delegate_to_pr_watch_daemon_raises_when_subscribe_fails(monkeypatch):
     from agent_dispatch import execution_cli, hibernation, procutil
 
     monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
-    monkeypatch.setattr(execution_cli.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        procutil, "agent_pull_requests_launch_prefix", lambda: ["/bin/agent-pull-requests"]
+    )
 
     class _Proc:
         returncode = 1
@@ -724,7 +833,9 @@ def test_delegate_to_pr_watch_daemon_raises_when_arm_rejected(monkeypatch):
     from agent_dispatch import execution_cli, hibernation, procutil
 
     monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
-    monkeypatch.setattr(execution_cli.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        procutil, "agent_pull_requests_launch_prefix", lambda: ["/bin/agent-pull-requests"]
+    )
 
     class _Proc:
         returncode = 0
@@ -762,6 +873,88 @@ def test_delegate_to_pr_watch_daemon_raises_when_arm_rejected(monkeypatch):
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
         assert "refused to arm" in str(exc)
+
+
+def test_finish_delegated_waiter_retries_while_not_yet_armed(capsys, monkeypatch):
+    """The narrow arm/subscribe race (review finding): the daemon's poller
+    can fire before the foreground ``_delegate_to_pr_watch_daemon`` call's
+    own very next ``arm_run_waiter`` request lands. A rejected
+    ``finish_run_waiter`` must retry rather than giving up on the first
+    rejection and leaving the task suspended forever."""
+    from agent_dispatch import execution_cli
+
+    class _FlakyClient:
+        def __init__(self):
+            self.attempts = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def finish_run_waiter(self, task_id, **payload):
+            self.attempts += 1
+            if self.attempts < 3:
+                return {"accepted": False, "waiter": None}
+            return {"accepted": True, "waiter": {"generation": payload["generation"]}}
+
+    fake = _FlakyClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr(execution_cli, "_FINISH_DELEGATED_WAITER_RETRY_DELAY_S", 0.0)
+    monkeypatch.setattr(
+        "sys.stdin",
+        type("S", (), {"read": staticmethod(lambda: json.dumps({
+            "repo": "o/n", "number": 42, "transitions": ["merged"],
+        }))})(),
+    )
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--finish-delegated-waiter",
+                "--resume", "m/wt-1", "--task", "t-1",
+                "--waiter-generation", "7",
+                "--pr-watch-start-token", "pr-watch:o/n#42:t-1:7",
+            ]
+        )
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["accepted"] is True
+    assert fake.attempts == 3
+
+
+def test_finish_delegated_waiter_gives_up_after_retry_budget(capsys, monkeypatch):
+    from agent_dispatch import execution_cli
+
+    class _AlwaysRejectingClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def finish_run_waiter(self, task_id, **payload):
+            return {"accepted": False, "waiter": None}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: _AlwaysRejectingClient())
+    monkeypatch.setattr(execution_cli, "_FINISH_DELEGATED_WAITER_RETRY_DELAY_S", 0.0)
+    monkeypatch.setattr("sys.stdin", type("S", (), {"read": staticmethod(lambda: "{}")})())
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--finish-delegated-waiter",
+                "--resume", "m/wt-1", "--task", "t-1",
+                "--waiter-generation", "7",
+                "--pr-watch-start-token", "pr-watch:o/n#42:t-1:7",
+            ]
+        )
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["accepted"] is False
 
 
 def test_finish_delegated_waiter_retires_via_finish_run_waiter(capsys, monkeypatch):

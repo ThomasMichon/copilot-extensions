@@ -421,7 +421,8 @@ class TaskQueue(
             "  state TEXT NOT NULL,"
             "  retired_reason TEXT,"
             "  created_at REAL NOT NULL,"
-            "  updated_at REAL NOT NULL"
+            "  updated_at REAL NOT NULL,"
+            "  kind TEXT NOT NULL DEFAULT 'process'"
             ")"
             )
             run_waiter_columns = {r["name"] for r in conn.execute("PRAGMA table_info(run_waiters)")}
@@ -433,6 +434,17 @@ class TaskQueue(
                 conn.execute("ALTER TABLE run_waiters ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
             if "owner_session_id" not in run_waiter_columns:
                 conn.execute("ALTER TABLE run_waiters ADD COLUMN owner_session_id TEXT")
+            if "kind" not in run_waiter_columns:
+                # 'process' (the default, a real OS process this machine
+                # supervises) vs 'delegated' (e.g. a pr-watch-daemon
+                # subscription with no local process at all -- see
+                # execution_cli._delegate_to_pr_watch_daemon). The dead-waiter
+                # recovery sweep (run_waiter_recovery.py) uses this, never a
+                # host-string heuristic, to decide whether PID/host liveness
+                # checking applies at all.
+                conn.execute(
+                    "ALTER TABLE run_waiters ADD COLUMN kind TEXT NOT NULL DEFAULT 'process'"
+                )
             conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_run_waiters_task "
             "ON run_waiters(task_id, generation)"

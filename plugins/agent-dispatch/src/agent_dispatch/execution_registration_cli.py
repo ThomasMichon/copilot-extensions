@@ -70,6 +70,17 @@ def register_execution_commands(sub) -> None:
             "checks_changed); default: its own 'merged,closed'"
         ),
     )
+    rnp.add_argument(
+        "--pr-watch-timeout",
+        type=float,
+        metavar="SECONDS",
+        help=(
+            "bound on how long the delegated subscription stays active "
+            "before firing a timed-out event on its own (default: 3 days) "
+            "-- never unbounded, so an abandoned PR's subscription always "
+            "eventually clears"
+        ),
+    )
     rnp.add_argument("--finish-delegated-waiter", action="store_true", help=argparse.SUPPRESS)
     rnp.add_argument("--pr-watch-start-token", help=argparse.SUPPRESS)
     rnp.add_argument(

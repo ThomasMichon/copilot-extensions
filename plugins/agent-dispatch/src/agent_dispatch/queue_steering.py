@@ -195,9 +195,16 @@ class QueueSteeringMixin:
         payload = json.dumps(fields, separators=(",", ":"))
         wake_enqueued = False
         notify_owned_transition = False
+        # Normalize an empty-string key to "no key" -- the partial unique
+        # index is on ``idempotency_key IS NOT NULL``, so a blank string is
+        # still indexed; without this, the truthiness check below would
+        # silently skip the dedup lookup for a blank key while the INSERT
+        # still collided with it on retry, raising a raw SQLite uniqueness
+        # error instead of returning the committed result (review finding).
+        idempotency_key = idempotency_key or None
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if idempotency_key:
+            if idempotency_key is not None:
                 duplicate = conn.execute(
                     "SELECT 1 FROM task_steer WHERE task_id = ? AND idempotency_key = ?",
                     (task_id, idempotency_key),

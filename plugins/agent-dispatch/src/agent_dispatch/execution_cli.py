@@ -6,7 +6,6 @@ import argparse
 import dataclasses
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -247,31 +246,36 @@ def _pr_watch_start_token(repo: str, number: int, subscriber_id: str) -> str:
 
 
 def _global_cli_flags(args: argparse.Namespace) -> list[str]:
-    """Reconstruct the top-level ``--url``/``--token``/``--control-token``/
-    ``--shared`` flags from a parsed ``args``, so a notify-argv invoked much
-    later by an external daemon (never inheriting this process's environment
-    or argv) still resolves the same coordinator this call used."""
+    """Reconstruct the top-level ``--url``/``--shared`` flags (never a
+    bearer credential) from a parsed ``args``, so a notify-argv invoked much
+    later by an external daemon -- never inheriting this process's own
+    environment -- still targets the same coordinator this call used.
+
+    Deliberately never forwards ``--token``/``--control-token``: this argv is
+    durably persisted by the daemon (``watch-subscriptions.json``) and later
+    becomes visible in the callback process's own command line -- exactly
+    the exposure this plugin's README already warns against for the control
+    token ("keep it out of process arguments"). A caller that needs the
+    finish callback to authenticate relies on the same default resolution
+    (``AGENT_DISPATCH_URL``/``AGENT_DISPATCH_TOKEN``/config) an ordinary CLI
+    invocation would -- present in the daemon's own ambient environment, not
+    baked into durable, world-readable argv.
+    """
     flags: list[str] = []
     if getattr(args, "shared", False):
         flags.append("--shared")
     elif getattr(args, "url", None):
         flags += ["--url", str(args.url)]
-    if getattr(args, "token", None):
-        flags += ["--token", str(args.token)]
-    if getattr(args, "control_token", None):
-        flags += ["--control-token", str(args.control_token)]
     return flags
 
 
-def _resolve_agent_pull_requests_exe() -> str:
-    exe = shutil.which("agent-pull-requests")
-    if not exe:
-        raise RuntimeError(
-            "could not find the 'agent-pull-requests' binstub on PATH -- "
-            "install the agent-pull-requests plugin (it owns the shared "
-            "PR-watch daemon --pr-watch-repo/--pr-watch-number delegates to)"
-        )
-    return exe
+#: Default deadline (seconds) a delegated pr-watch subscription is bounded
+#: by when the caller doesn't pass ``--pr-watch-timeout`` -- long enough to
+#: cover a normal multi-day review cycle, but never unbounded: an operator
+#: this plugin's own docstring promises will eventually time out must
+#: actually do so (confirmed review finding: omitting a timeout altogether
+#: leaves the daemon's poller running forever for an abandoned PR).
+_DEFAULT_PR_WATCH_TIMEOUT_SECONDS = 259200.0  # 3 days
 
 
 def _delegated_waiter_message(payload: dict) -> str:
@@ -305,9 +309,22 @@ def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: 
     after the daemon confirms registration -- so the gap between
     ``prepare_run_waiter`` and ``arm_run_waiter`` stays as short as a real
     process spawn's, and the existing "never armed within the grace period"
-    recovery path is unaffected. See :data:`_PR_WATCH_DAEMON_HOST` for how
-    the *armed* (but process-less) waiter survives the dead-waiter sweep
-    indefinitely instead of being falsely reaped.
+    recovery path is unaffected. Armed with ``kind="delegated"`` -- the dead-
+    waiter recovery sweep (:mod:`agent_dispatch.run_waiter_recovery`) checks
+    this explicitly and never attempts PID/host liveness for it at all,
+    regardless of what its sentinel host string happens to be (a host-string
+    heuristic alone is not reliable: ``AGENT_DISPATCH_SUPERVISE_MACHINE``
+    could coincidentally be configured to the same sentinel value).
+
+    Subscribing happens *before* arming (never the reverse): if the daemon
+    call fails, the waiter is simply never armed and the ordinary "never
+    armed within the grace period" recovery reclaims it -- whereas arming
+    first and then failing to subscribe would leave an active, permanently
+    orphaned waiter with no subscription anything will ever fire. The
+    narrow resulting race (the daemon's poller fires an already-terminal PR
+    before this call's own, very next, arm request lands) is handled on the
+    *finish* side instead -- see :func:`_cmd_run_finish_delegated_waiter`'s
+    bounded retry.
 
     When the daemon later fires (a real transition, or its own timeout), its
     ``notify_argv`` re-invokes this same CLI with ``--finish-delegated-waiter``
@@ -318,8 +335,7 @@ def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: 
     Known gap: if the task's run waiter is retired through a different path
     (e.g. an operator aborts the task directly) the agent-pull-requests
     subscription is not automatically cancelled -- it lingers harmlessly
-    until the PR itself resolves or times out. Tracked as a follow-up, not a
-    correctness problem (the daemon's poller exits once genuinely idle).
+    until the PR itself resolves or the bounded timeout above fires.
     """
     generation = int(prepared["generation"])
     repo = str(args.pr_watch_repo)
@@ -327,7 +343,7 @@ def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: 
     subscriber_id = _pr_watch_subscriber_id(str(spec.task_id), generation)
     start_token = _pr_watch_start_token(repo, number, subscriber_id)
 
-    from .procutil import resolve_own_runtime_python
+    from .procutil import agent_pull_requests_launch_prefix, resolve_own_runtime_python
 
     python = resolve_own_runtime_python()
     notify_argv = [
@@ -347,12 +363,22 @@ def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: 
         start_token,
     ]
 
-    exe = _resolve_agent_pull_requests_exe()
+    prefix = agent_pull_requests_launch_prefix()
+    if prefix is None:
+        raise RuntimeError(
+            "could not resolve an installed 'agent-pull-requests' runtime -- "
+            "install the agent-pull-requests plugin (it owns the shared "
+            "PR-watch daemon --pr-watch-repo/--pr-watch-number delegates to)"
+        )
+    timeout_s = getattr(args, "pr_watch_timeout", None)
+    if timeout_s is None:
+        timeout_s = _DEFAULT_PR_WATCH_TIMEOUT_SECONDS
     argv = [
-        exe, "watch", "subscribe",
+        *prefix, "watch", "subscribe",
         "--repo", repo,
         "--number", str(number),
         "--subscriber-id", subscriber_id,
+        "--timeout", str(float(timeout_s)),
     ]
     until = getattr(args, "pr_watch_until", None)
     if until:
@@ -361,7 +387,7 @@ def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: 
             if item:
                 argv += ["--until", item]
     argv += ["--json", "--notify-argv", *notify_argv]
-    proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via provenance-checked runtime
         argv, capture_output=True, text=True, timeout=30, check=False, **no_window_kwargs()
     )
     if proc.returncode != 0:
@@ -385,6 +411,7 @@ def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: 
             pid=_PR_WATCH_DAEMON_PID,
             host=_PR_WATCH_DAEMON_HOST,
             start_token=start_token,
+            kind="delegated",
         )
     if not armed or not armed.get("accepted"):
         raise RuntimeError(
@@ -402,6 +429,13 @@ def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: 
     }
 
 
+#: Bounded retry for :func:`_cmd_run_finish_delegated_waiter`'s own
+#: ``finish_run_waiter`` call -- see that function's docstring for the
+#: narrow arm/subscribe race this closes.
+_FINISH_DELEGATED_WAITER_RETRIES = 5
+_FINISH_DELEGATED_WAITER_RETRY_DELAY_S = 0.5
+
+
 def _cmd_run_finish_delegated_waiter(args: argparse.Namespace) -> int:
     """The ``--finish-delegated-waiter`` mode: invoked as the ``notify_argv``
     of an ``agent-pull-requests watch subscribe`` registration made by
@@ -411,7 +445,20 @@ def _cmd_run_finish_delegated_waiter(args: argparse.Namespace) -> int:
     ``finish_run_waiter`` coordinator call -- the ``(pid, host, start_token)``
     triple must match exactly what :func:`_delegate_to_pr_watch_daemon` armed
     it with -- and lets the coordinator's existing wake-delivery subsystem
-    (``run_waiter_wakes``) take it from there. No new resume mechanism."""
+    (``run_waiter_wakes``) take it from there. No new resume mechanism.
+
+    Retries a rejected ``finish_run_waiter`` a bounded number of times: the
+    daemon's poller can fire near-instantly for an already-terminal PR (its
+    very first poll, started the moment ``subscribe`` registers it), racing
+    the foreground ``_delegate_to_pr_watch_daemon`` call's own very next
+    ``arm_run_waiter`` request. A rejection this early almost always means
+    "not armed *yet*", not "gone" -- the retry window here (a few seconds)
+    comfortably covers that one extra local HTTP round trip without masking
+    a genuinely stuck/retired waiter, which simply keeps failing after the
+    budget is exhausted exactly as it did before this retry existed.
+    """
+    import time
+
     try:
         raw = sys.stdin.read()
     except OSError:
@@ -435,15 +482,21 @@ def _cmd_run_finish_delegated_waiter(args: argparse.Namespace) -> int:
         return 2
 
     message = _delegated_waiter_message(payload)
-    with _core()._client(args) as c:
-        result = c.finish_run_waiter(
-            task_id,
-            generation=int(generation),
-            pid=_PR_WATCH_DAEMON_PID,
-            host=_PR_WATCH_DAEMON_HOST,
-            start_token=str(start_token),
-            message=message,
-        )
+    result: dict | None = None
+    for attempt in range(_FINISH_DELEGATED_WAITER_RETRIES + 1):
+        with _core()._client(args) as c:
+            result = c.finish_run_waiter(
+                task_id,
+                generation=int(generation),
+                pid=_PR_WATCH_DAEMON_PID,
+                host=_PR_WATCH_DAEMON_HOST,
+                start_token=str(start_token),
+                message=message,
+            )
+        if isinstance(result, dict) and result.get("accepted"):
+            break
+        if attempt < _FINISH_DELEGATED_WAITER_RETRIES:
+            time.sleep(_FINISH_DELEGATED_WAITER_RETRY_DELAY_S)
     return _core()._emit(
         {
             "delegated": True,

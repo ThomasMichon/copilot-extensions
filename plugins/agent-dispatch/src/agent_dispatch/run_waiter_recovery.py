@@ -46,6 +46,17 @@ def recover_run_waiters(
         counts["recovered"] += 1
     for waiter in queue.list_active_run_waiters():
         counts["checked"] += 1
+        if waiter.get("kind", "process") != "process":
+            # A delegated waiter (e.g. a pr-watch-daemon subscription, see
+            # execution_cli._delegate_to_pr_watch_daemon) has no local OS
+            # process to supervise at all -- its liveness backstop is the
+            # daemon's own durable, restart-reattaching subscriber state,
+            # never this machine's PID/host liveness check. Never attempt to
+            # reap it here, regardless of what its recorded host happens to
+            # be (a host-string heuristic alone is not reliable -- it could
+            # coincidentally collide with a real configured machine alias).
+            counts["unknown"] += 1
+            continue
         host = waiter.get("host")
         if not current_machine or not host or host != current_machine:
             counts["unknown"] += 1

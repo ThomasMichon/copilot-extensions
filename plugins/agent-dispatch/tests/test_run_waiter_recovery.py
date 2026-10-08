@@ -161,12 +161,15 @@ def test_recover_run_waiters_treats_missing_start_token_as_unknown(tmp_path):
 def test_recover_run_waiters_never_reaps_a_delegated_pr_watch_waiter(tmp_path):
     """A waiter armed by :func:`agent_dispatch.execution_cli
     ._delegate_to_pr_watch_daemon` has no real OS process -- it is armed
-    with the sentinel host ``_PR_WATCH_DAEMON_HOST``/pid ``1`` instead. This
-    sentinel host never matches a real ``current_machine``, so the recovery
-    sweep must treat it as perpetually 'unknown' and never call
+    with ``kind="delegated"`` (plus the sentinel host/pid, kept only as a
+    human-readable diagnostic, never as the actual liveness signal). The
+    recovery sweep must check ``kind`` explicitly and never call
     ``process_exists``/``start_token_for_pid`` for it at all -- regardless
-    of what those would report -- rather than falsely declaring it dead.
-    """
+    of what those would report, and regardless of whether its recorded host
+    happens to collide with the real ``current_machine`` (a host-string
+    heuristic alone is not a reliable signal: ``current_machine`` is
+    operator-configurable via ``AGENT_DISPATCH_SUPERVISE_MACHINE`` and could
+    coincidentally match the sentinel -- review finding)."""
     from agent_dispatch.execution_cli import _PR_WATCH_DAEMON_HOST, _PR_WATCH_DAEMON_PID
 
     queue = TaskQueue(tmp_path / "tasks.db")
@@ -178,10 +181,14 @@ def test_recover_run_waiters_never_reaps_a_delegated_pr_watch_waiter(tmp_path):
         start_token="pr-watch:o/n#42:t-1:1",
         resume_worktree="m/wt-1",
         command=["<delegated-to-agent-pull-requests-watch-daemon:o/n#42>"],
+        kind="delegated",
     )
 
     # Even a maximally-hostile fake liveness check (always "dead", never
-    # "exists") must never be consulted for a delegated waiter.
+    # "exists") must never be consulted for a delegated waiter -- proven
+    # here with ``current_machine`` set to the EXACT sentinel host value,
+    # the precise coincidental-collision scenario a host-string-only check
+    # would get wrong.
     counts = recover_run_waiters(
         queue,
         process_exists=lambda _pid: (_ for _ in ()).throw(
@@ -190,7 +197,7 @@ def test_recover_run_waiters_never_reaps_a_delegated_pr_watch_waiter(tmp_path):
         start_token_for_pid=lambda _pid: (_ for _ in ()).throw(
             AssertionError("start_token_for_pid must not be called for a delegated waiter")
         ),
-        current_machine=TEST_HOST,
+        current_machine=_PR_WATCH_DAEMON_HOST,
     )
 
     assert counts == {"checked": 1, "live": 0, "unknown": 1, "recovered": 0}

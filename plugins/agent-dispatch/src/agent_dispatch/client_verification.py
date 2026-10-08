@@ -58,6 +58,7 @@ class VerificationClientMixin:
         pid: int,
         host: str,
         start_token: str,
+        kind: str = "process",
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -67,6 +68,7 @@ class VerificationClientMixin:
                     "pid": pid,
                     "host": host,
                     "start_token": start_token,
+                    "kind": kind,
                 },
             )
         )

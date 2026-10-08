@@ -557,6 +557,25 @@ def test_submit_steer_without_idempotency_key_behaves_as_before(q):
     assert [entry["fields"] for entry in log] == [{"f": "one"}, {"f": "two"}]
 
 
+def test_submit_steer_empty_idempotency_key_never_raises_a_uniqueness_error(q):
+    """Review finding: an empty string is a non-``None`` value the partial
+    unique index still indexes, but the old truthiness check (``if
+    idempotency_key:``) treated it as "no key" and skipped the dedup lookup
+    -- a second empty-keyed submission then hit a raw SQLite uniqueness
+    error instead of a clean dedup return. An empty key must behave
+    identically to no key at all: every call is independent."""
+    t = _held(q, worker="w1")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=[{"name": "f", "type": "text"}]))
+
+    first = q.submit_steer(t.id, fields={"f": "one"}, sender="operator", idempotency_key="")
+    second = q.submit_steer(t.id, fields={"f": "two"}, sender="operator", idempotency_key="")
+
+    assert first.awaiting_steer is False
+    assert second.awaiting_steer is False
+    log = q.steer_log(t.id)
+    assert [entry["fields"] for entry in log] == [{"f": "one"}, {"f": "two"}]
+
+
 def test_submit_steer_requests_resume_of_suspended_headless_owner(q):
     t = q.create("review PR 42")
     reservation, _ = q.reserve_spawn(t.id)
