@@ -131,10 +131,13 @@ successor already running in my own tree?*
    walk run *after the fact* cannot be made durable against that: it has
    nothing to re-check if the thing it needs to check has already vanished.
    Instead, provenance is captured **at spawn time**, while every process in
-   the chain is still guaranteed alive, via one narrowly scoped
-   instrumentation point rather than a suite-wide requirement: `deploy`'s own
-   spawn of the passive daemon (already inside `zdd.cutover`'s Windows
-   breakaway path, the one known call site that produces this chain) creates
+   the chain is still guaranteed alive, via a shared, one-time instrumented
+   **passive-spawn contract** (see "What does not change" below for why this
+   is a migration each Windows adopter's own `spawn_passive` callback must
+   make, not one single internal call site) rather than a suite-wide
+   requirement on every spawn site generally: `deploy`'s own spawn of the
+   passive daemon (inside `zdd.cutover`'s Windows breakaway path, driven by
+   whichever adopter callback now calls the shared contract) creates
    it with `CREATE_SUSPENDED` — `CreateProcess` can schedule the child's
    primary thread before it even returns to the caller, so without this flag
    there is no guarantee the passive daemon is still unstarted (and has not
@@ -341,33 +344,46 @@ successor already running in my own tree?*
       handle-closes trigger) before the bridge is even scheduled to run,
       which would kill the live daemon as collateral, the exact failure
       this whole bridge exists to prevent. The bridge, once scheduled,
-      calls `OpenJobObject` on the same **named** Job (item 4) and writes a
-      ready signal back to the old manager over an inherited pipe
-      (mirroring the IPC channel item 1 already uses for `deploy`). The
-      bridge also creates a **named pipe** (`\\.\pipe\<name>`, the name
-      deterministically derived from `manager_state_dir` the same way the
-      Job's own name already is) and starts listening on it — this is the
-      channel the *next* manager, launched independently by Task Scheduler
-      with no inherited handle or pipe of its own, will use to request the
-      daemon handle in step 3; an inherited pipe (as item 1 uses for
-      `deploy`, itself a direct child of the process holding the other end)
-      cannot serve this purpose, since the new manager process shares no
-      ancestry with the bridge at all. Only once the old manager has read
-      the bridge-ready signal does it (a) duplicate its own trusted daemon
-      handle (the one item 1's spawn-time capture already gave it) into the
-      bridge via `DuplicateHandle` — the same kind of
-      handle-plus-IPC-acknowledgement handoff item 1 already defines, now
-      reused for this second transfer instead of invented fresh — and (b),
-      only once the bridge acks receipt of that handle, records the
-      bridge's pid, `process_start_time` token, **and the named pipe's
-      identifier** as a separate, transient `handoff` record (distinct from
+      makes itself **fully self-sufficient** before ever signaling ready —
+      deliberately **not** depending on a handle relayed from the old
+      manager at all, since that relay's own timing was exactly the
+      earlier source of an unrecorded-handoff race: (a) it calls
+      `OpenJobObject` on the same **named** Job (item 4); (b) it
+      independently establishes its **own** trusted handle to the daemon by
+      reading the persisted `daemon` record's pid and baseline token (item
+      2 — already durable, already published, needing no relay from
+      anyone), calling `OpenProcess` for that pid, and running the exact
+      same baseline-comparison check item 2 already defines before trusting
+      the resulting handle; (c) it creates a **named pipe**
+      (`\\.\pipe\<name>`, the name deterministically derived from
+      `manager_state_dir` the same way the Job's own name already is,
+      created with a discretionary ACL restricting connection to the same
+      principal the manager itself runs as) and starts listening on it —
+      this is the channel the *next* manager, launched independently by
+      Task Scheduler with no inherited handle or pipe of its own, will use
+      to request the daemon handle in step 3; an inherited pipe (as item 1
+      uses for `deploy`, itself a direct child of the process holding the
+      other end) cannot serve this purpose, since the new manager process
+      shares no ancestry with the bridge at all. Only once all three of
+      these are independently true — Job opened, daemon handle established
+      and baseline-verified, pipe listening — does the bridge signal ready
+      back to the old manager over the inherited pipe (mirroring the IPC
+      channel item 1 already uses for `deploy`), carrying its pid,
+      `process_start_time` token, and the named pipe's identifier. The old
+      manager's **only** remaining action before step 2 is to persist that
+      exact information as the transient `handoff` record (distinct from
       the `daemon` record above, in the same manager-scoped state
-      directory) and proceeds to step 2. The persisted `daemon` record
-      itself is **never** overwritten by the bridge's identity — the two
-      records have different lifetimes and different purposes: conflating
-      them would let the bridge's own identity silently clobber the
-      daemon's. If the bridge-ready acknowledgement or the handle-receipt
-      acknowledgement does not arrive within a bounded timeout, the old
+      directory) — this is now the single commit point, reached only after
+      the bridge is already fully self-sufficient, so there is no window
+      where the record could exist without the bridge backing it, or the
+      bridge could hold readiness without the record describing it: the
+      two become durable together, in one write, right after the one
+      precondition (bridge self-sufficiency) that makes persisting them
+      meaningful. The persisted `daemon` record itself is **never**
+      overwritten by the bridge's identity — the two records have
+      different lifetimes and different purposes: conflating them would
+      let the bridge's own identity silently clobber the daemon's. If the
+      bridge-ready signal does not arrive within a bounded timeout, the old
       manager **aborts the update** and keeps running as the current
       version rather than proceeding blind — a failed or slow bridge is a
       reason to retry later, never a reason to exit without
@@ -490,13 +506,25 @@ successor already running in my own tree?*
   orchestrator (`start_new_session=True`), and the manager's subreaper claim
   composes with that transparently regardless, with no re-check needed at
   this call site at all. On Windows its existing `CREATE_BREAKAWAY_FROM_JOB`
-  flag also stays unchanged, but (per item 1's redesign) this one known call
-  site — and `deploy`'s own subsequent spawn of the passive daemon — gains a
-  small, scoped instrumentation point: threading the manager's inheritable
-  handle down and duplicating a handle to the passive daemon into the
-  manager at creation time. This is a bounded addition to one specific,
-  already-`zdd`-aware chain, not a requirement that spawn sites across the
-  suite generally become manager-aware.
+  flag also stays unchanged. The call-site reality here is **not** "one
+  known call site inside `zdd.cutover`": `CutoverOrchestrator` itself only
+  *calls* a consumer-supplied `spawn_passive: Callable[[int], Handle]`
+  callback (`libs/zdd/src/zdd/cutover.py`) — it never creates the passive
+  process itself. Each adopter owns its own callback (today:
+  `agent_dispatch/coordinator_cli.py`'s and `agent_bridge/venue_cli.py`'s
+  own passive-spawn implementations), so item 1's Windows instrumentation
+  (`CREATE_SUSPENDED`, the manager IPC channel, handle duplication, Job
+  assignment, acknowledgement) cannot be added at a single internal
+  `zdd.cutover` call site. Instead, `zdd`
+  must define one **shared passive-spawn contract** implementing that
+  instrumentation once (a `zdd.cutover.windows_spawn_passive_with_manager`
+  helper, or equivalent), and every existing Windows adopter's own
+  `spawn_passive` callback migrates to call it instead of reimplementing
+  process creation ad hoc. This is still a bounded, one-time integration
+  cost — not a requirement that spawn sites *outside* this one contract
+  become manager-aware — but it is a **multi-consumer migration**, not a
+  single call-site edit, and any implementation PR must account for both
+  named adopters explicitly.
 - The stable, register-once launcher beneath the service manager (the
   `serve-service.sh` / Scheduled-Task-launcher layer from
   [`service-lifecycle-supervision`](service-lifecycle-supervision.md)) on
@@ -554,18 +582,20 @@ meets the `zdd` consumer contract (publishes `active.json` via
 already does) — **zero daemon-protocol changes**, not zero changes to this
 suite's Windows cutover machinery: the Windows mechanisms above (item 1's
 `CREATE_SUSPENDED` creation, manager IPC, handle duplication, Job
-assignment, and acknowledgement at `deploy`'s own spawn of the passive
-daemon) are a required, one-time **Windows cutover-adapter integration** at
-that specific call site inside `zdd.cutover`'s own breakaway path — not
-something every daemon author writes, but also not something an
-implementer may skip or treat as optional, or this pattern's entire Windows
-trust boundary goes missing silently. The manager itself is wired in
-exactly once, at the launcher boundary. Two distinct paths are required,
-not one: `config_dir` is the daemon's **own** `zdd.routing` liveness record
-(`active.json`), unowned and unwritten by the manager; `manager_state_dir`
-is a **separate** directory the manager owns entirely, holding its own
-`daemon` record (item 5's persisted watched-pid/token, used for
-re-adoption across any restart) and, transiently during a Windows
+assignment, and acknowledgement) are a required, one-time **shared
+passive-spawn contract** that `zdd.cutover` must define once, which every
+existing Windows adopter's own `spawn_passive` callback (today:
+`agent_dispatch/coordinator_cli.py`, `agent_bridge/venue_cli.py`) migrates
+to call instead of reimplementing process creation ad hoc — not something
+every daemon author writes, but also not something an implementer may skip
+or treat as optional, or this pattern's entire Windows trust boundary goes
+missing silently for whichever adopter hasn't migrated. The manager itself
+is wired in exactly once, at the launcher boundary. Two distinct paths are
+required, not one: `config_dir` is the daemon's **own** `zdd.routing`
+liveness record (`active.json`), unowned and unwritten by the manager;
+`manager_state_dir` is a **separate** directory the manager owns entirely,
+holding its own `daemon` record (item 5's persisted watched-pid/token, used
+for re-adoption across any restart) and, transiently during a Windows
 self-update, the `handoff` record (the bridge's pid/token). The manager's
 own bookkeeping must never collide with, or be mistaken for, the daemon's
 own routing publication it only ever reads.
