@@ -371,7 +371,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         session_id=s.session_id,
         name=s.name,
         agent_name=s.agent_name,
-        caller_id=s.caller_id,
+        caller_id=s.caller_id, caller_session_id=getattr(s, "caller_session_id", None),
         acp_session_id=s.acp_session_id,
         durable_session_id=s.acp_session_id or s.session_id,
         target_dir=s.target.cwd,
@@ -444,7 +444,7 @@ def _persisted_session_info(
         session_id=row["id"],
         name=row["name"],
         agent_name=row.get("agent_name"),
-        caller_id=row.get("caller_id"),
+        caller_id=row.get("caller_id"), caller_session_id=row.get("caller_session_id"),
         acp_session_id=row.get("acp_session_id"),
         durable_session_id=row.get("acp_session_id") or row["id"],
         target_dir=target.cwd,
@@ -655,7 +655,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             return StartSessionResponse(
                 session_id=existing.session_id,
                 name=existing.name,
-                status=existing.status,
+                status=existing.status, caller_session_id=getattr(existing, "caller_session_id", None),
             )
 
     # Session-lifecycle head guard (agent-fabric
@@ -736,7 +736,7 @@ async def start_session(req: StartSessionRequest, request: Request):
     try:
         session = await mgr.start_session(
             target, agent_name=agent_name, caller_id=req.caller_id,
-            mcp_servers=req.mcp_servers,
+            caller_session_id=req.caller_session_id, mcp_servers=req.mcp_servers,
             copilot_args=req.copilot_args,
             env_overrides=req.env,
             caller_owner_ref=req.caller_owner_ref,
@@ -767,7 +767,7 @@ async def start_session(req: StartSessionRequest, request: Request):
         session_id=session.session_id,
         name=session.name,
         status=session.status,
-        parity_fault_result=parity_fault_result,
+        parity_fault_result=parity_fault_result, caller_session_id=getattr(session, "caller_session_id", None),
     )
 
 
@@ -917,7 +917,7 @@ async def get_session_status(
         "session_id": session.session_id,
         "name": session.name,
         "agent_name": session.agent_name,
-        "caller_id": session.caller_id,
+        "caller_id": session.caller_id, "caller_session_id": getattr(session, "caller_session_id", None),
         "status": status.value,
         "at_rest": at_rest,
         "turn_count": session.turn_count,

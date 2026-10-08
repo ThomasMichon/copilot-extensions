@@ -1146,6 +1146,7 @@ async def resume_worktree(
                 restart_target,
                 agent_name=session.agent_name,
                 caller_id=session.caller_id,
+                caller_session_id=getattr(session, "caller_session_id", None),
             )
         except Exception as start_exc:
             raise HTTPException(

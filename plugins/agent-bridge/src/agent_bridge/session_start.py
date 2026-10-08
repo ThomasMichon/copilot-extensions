@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import Any
 
 from .acp_client import AcpClient
+from .caller_session import normalize_caller_session_id
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .events import EventLog
 from .models import SessionStatus
@@ -67,6 +68,7 @@ class _SessionStartMixin:
         target: SpawnTarget,
         agent_name: str | None = None,
         caller_id: str | None = None,
+        caller_session_id: str | None = None,
         permission_callback: Any | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         copilot_args: list[str] | None = None,
@@ -90,6 +92,8 @@ class _SessionStartMixin:
             caller_id: Optional caller identity (e.g. worktree ID) for
                 session affinity.  Sessions with matching (agent_name,
                 caller_id) are reused instead of creating new ones.
+            caller_session_id: Optional id of the Copilot session that
+                created this one; recorded only when it is a safe id.
             permission_callback: Optional async callback for permission
                 requests. Signature: (session_id, options, tool_call) ->
                 RequestPermissionResponse. If set, auto_approve is disabled.
@@ -205,6 +209,7 @@ class _SessionStartMixin:
                 )
 
         session = Session(session_id, name, target, agent_name, caller_id=caller_id)
+        session.caller_session_id = normalize_caller_session_id(caller_session_id)
         # Per-session model / reasoning-effort override (agent-bridge create
         # --model/--effort). Retained on the Session so within-daemon resume /
         # reattach re-applies it (copilot ignores --model under --acp; the model
@@ -256,6 +261,7 @@ class _SessionStartMixin:
             name=name,
             agent_name=agent_name,
             caller_id=caller_id,
+            caller_session_id=session.caller_session_id,
             target_dir=target.cwd,
             target_type=target.type,
             status=SessionStatus.STARTING.value,

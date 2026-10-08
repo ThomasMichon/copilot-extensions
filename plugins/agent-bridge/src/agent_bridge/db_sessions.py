@@ -20,13 +20,16 @@ class _SessionsMixin:
         config_json: str | None = None,
         target_json: str | None = None,
         caller_id: str | None = None,
+        caller_session_id: str | None = None,
     ) -> None:
         self.execute_write(
-            "INSERT INTO sessions (id, name, agent_name, caller_id, target_dir, "
+            "INSERT INTO sessions (id, name, agent_name, caller_id, "
+            "caller_session_id, target_dir, "
             "target_type, status, config_json, target_json, "
             "background_recovery_enabled, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, name, agent_name, caller_id, target_dir, target_type,
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, name, agent_name, caller_id, caller_session_id,
+             target_dir, target_type,
              status, config_json, target_json, 1, now, now),
         )
 

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 import yaml
 
+from .caller_session import gate_caller_session_id
 from .client_cli_mode import CliModeClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
 if TYPE_CHECKING:
@@ -990,6 +991,7 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
         charter: str | None = None,
         target_dir: str | None = None,
         caller_id: str | None = None,
+        caller_session_id: str | None = None,
         sender_repo: str | None = None,
         caller_owner_ref: str | None = None,
         force_new: bool = False,
@@ -1011,24 +1013,22 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
         -- ``resume_worktree(reclaim=True)`` resumes-or-creates it instead.
 
         ``charter`` binds a ``.github/agents/<charter>.agent.md`` overlay via
-        ``copilot_args`` (``--agent <charter>``), independent of ``agent``.
-        ``env`` sets per-session environment overrides merged onto the resolved
-        agent's declared env and applied to the spawned Copilot CLI -- e.g. BYOK
-        provider selection (``COPILOT_PROVIDER_BASE_URL`` / ``COPILOT_MODEL``).
+        ``copilot_args`` (``--agent <charter>``). ``env`` adds per-session env
+        overrides for the spawned Copilot CLI (e.g. BYOK provider selection).
+        ``caller_session_id`` is sent only to a daemon that records it.
         """
         body: dict[str, Any] = {}
         if agent:
             body["agent"] = agent
         if args := (["--agent", charter, *(copilot_args or [])] if charter else copilot_args):
             body["copilot_args"] = args
-        if target_dir:
-            body["target_dir"] = target_dir
-        if caller_id:
-            body["caller_id"] = caller_id
-        if sender_repo:
-            body["sender_repo"] = sender_repo
-        if caller_owner_ref:
-            body["caller_owner_ref"] = caller_owner_ref
+        for key, value in (
+            ("target_dir", target_dir), ("caller_id", caller_id), ("sender_repo", sender_repo),
+            ("caller_session_id", gate_caller_session_id(self, caller_session_id)),
+            ("caller_owner_ref", caller_owner_ref),
+        ):
+            if value:
+                body[key] = value
         if force_new:
             body["force_new"] = True
         if parity_fault:

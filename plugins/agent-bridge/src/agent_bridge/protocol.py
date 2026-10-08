@@ -138,9 +138,17 @@ AGENT_ROSTER_CACHE_PROTOCOL_VERSION = 22
 # and open an SSE stream instead.
 EVENTS_BEFORE_PAGING_PROTOCOL_VERSION = 23
 
+# First version whose ``POST /api/v1/sessions`` records an optional
+# ``caller_session_id`` (the creating Copilot session's id) on the new session
+# and echoes it in the create response. A caller gates sending it on this
+# rather than blind-sending it to an older daemon that would silently ignore it
+# and lose the attribution; against an older daemon the client omits the field
+# and warns once.
+CALLER_SESSION_ID_PROTOCOL_VERSION = 24
+
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 23
+HTTP_PROTOCOL_VERSION = 24
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

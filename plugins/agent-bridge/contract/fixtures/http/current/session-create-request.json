@@ -22,6 +22,7 @@
     "topology": null,
     "worktree_id": null,
     "caller_id": "example-caller",
+    "caller_session_id": null,
     "sender_repo": null,
     "caller_owner_ref": null,
     "force_new": false,

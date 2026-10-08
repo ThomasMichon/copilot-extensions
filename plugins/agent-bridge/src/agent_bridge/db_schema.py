@@ -619,3 +619,16 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (24,))
             conn.commit()
             log.info("Schema migrated to version 24: live-session aliases")
+
+        if from_version < 25:
+            # v24 -> v25: sessions.caller_session_id records the Copilot session
+            # (COPILOT_AGENT_SESSION_ID) that created a bridge session, alongside
+            # the folder-scoped caller_id. Nullable, so existing rows stay valid.
+            cols = [
+                r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()
+            ]
+            if "caller_session_id" not in cols:
+                conn.execute("ALTER TABLE sessions ADD COLUMN caller_session_id TEXT")
+            conn.execute("UPDATE schema_version SET version=?", (25,))
+            conn.commit()
+            log.info("Schema migrated to version 25: sessions.caller_session_id")
