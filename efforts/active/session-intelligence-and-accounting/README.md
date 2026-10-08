@@ -261,8 +261,17 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 - Opened PR #5710. Copilot review posted seven verdicts (not six, as an
   earlier draft of this entry incorrectly stated), COMMENTED throughout
   (verdict tier softened from "Changes recommended" to "Needs a closer
-  look" only on the seventh and final round), closing a real progression
-  of findings across the first six:
+  look" only on the seventh and final round). The seventh round also
+  introduced its own new finding rather than merely softening tier on an
+  old one: "Repeated process-log failures cannot advance the persisted
+  partial streak to the fleet-health alert threshold" -- `_mark_sync_meta_partial`
+  only ever writes a flat `status: partial` with the latest failure
+  reason, with no persisted counter/timestamp of how long a machine has
+  been stuck there, so nothing downstream can distinguish a fresh
+  degradation from one unresolved for weeks. This is now tracked as item
+  3 of #5727 alongside the other two declines below, rather than treated
+  as closed by the tier softening alone. The first six rounds closed a
+  real progression of findings:
   POSIX root-pinning for the process-log directory walk (reusing
   `process_logs.py`'s own primitives, now promoted to public:
   `supports_dir_fd`/`open_root_dir`/`open_regular_at`); rotation/deletion
@@ -295,10 +304,12 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   symlinked ancestor (e.g. a relocated `$HOME`). A related Medium
   (composing one clearable status across both transfer legs, rather than
   requiring explicit operator investigation to clear a `partial`) was
-  also declined as a bounded follow-up. **Both declines were originally
-  recorded only as docstring/PR-description prose, with no tracking
-  issue -- a documented limitation is not remediation.** They are now
-  tracked as [#5727](https://github.com/ThomasMichon/copilot-extensions/issues/5727)
+  also declined as a bounded follow-up. **All three of these declines
+  (the two HIGH findings above, this Medium, and the seventh-round
+  streak-escalation finding noted above) were originally recorded only
+  as docstring/PR-description prose, with no tracking issue -- a
+  documented limitation is not remediation.** They are now tracked as
+  [#5727](https://github.com/ThomasMichon/copilot-extensions/issues/5727)
   so the deferral doesn't silently stay undone.
 - **This did not actually meet CONTRIBUTING.md's documented review bar.**
   `CONTRIBUTING.md:124-130` requires zero *open* Medium/High findings to
