@@ -241,7 +241,7 @@ be decided by stable content provenance (e.g. a declared version), never
 by the local artifact's mere existence or render recency.
 
 Applicable worktree and session-creation boundaries should establish that
-local guidance before the agent begins loading instructions. Session-start
+local guidance is available before the agent begins loading instructions. Session-start
 should repair missing or stale local guidance as a backup, not be the sole
 delivery opportunity on a path that can prepare it earlier.
 

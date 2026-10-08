@@ -1,0 +1,9 @@
+{
+  "comment": "Install complete safe local projections despite context-budget excess; retain independent budget auditing and ownership protections.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
