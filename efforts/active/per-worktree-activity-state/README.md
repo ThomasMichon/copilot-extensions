@@ -210,23 +210,46 @@ follow-ons.
       spawned-but-not-retired handoff and a pre-upgrade spawned-and-retired
       one, confirming each backfills to the correct slot state rather than
       appearing unattempted after the cutover.
-- [ ] **The backfill can race live mutations -- it must merge under the
-      record lock, with an explicit cutover boundary.** A one-time
-      read-then-later-write backfill can lose a race against an in-flight
-      handoff: a legacy (journal-only) writer that appends newer state
-      *after* the backfill read but *before* it saves would have that
-      newer fact silently overwritten by the backfill's now-stale
-      computed value. The backfill must therefore (a) run its
-      read-current-journal-state-and-write as one atomic operation under
-      the same `_RecordLock` the rest of this phase's writes use -- never
-      read outside the lock and write later -- and (b) define an explicit
-      cutover boundary: Phase 2's slot-trusting readers must not go live
-      for a given handoff until *after* its backfill has completed under
-      lock, so no legacy producer can still mutate journal-only truth
-      inside the window where slots are already being trusted. Add a
-      concurrent-write test: a legacy writer appends new journal state
-      for a token while its backfill is in flight; confirm the backfilled
-      slot reflects the newer state, never the stale pre-write snapshot.
+- [ ] **The backfill can race live mutations -- `_RecordLock` alone does
+      not make it race-safe, because legacy journal writers don't hold
+      it.** A one-time read-then-later-write backfill can lose a race
+      against an in-flight handoff: a legacy (journal-only) writer that
+      appends newer state *after* the backfill read but *before* it saves
+      would have that newer fact silently overwritten by the backfill's
+      now-stale computed value. Serializing the backfill's own
+      read-and-write under `_RecordLock` is **not sufficient** to close
+      this: today's legacy writers append `activity.jsonl` with no lock
+      at all (`activity.py:286-350`) and append `handoff_trace.py`'s
+      per-project/per-worktree trace under its own separate lock
+      (`handoff_trace.py:138-144`) -- neither is serialized against
+      `_RecordLock`, so a legacy append can land in the gap between the
+      backfill's read and its save even while `_RecordLock` is held
+      throughout the backfill's own critical section.
+
+      The real fix needs a synchronization protocol **shared by the
+      backfill and every legacy writer it races against**, not a lock
+      only the backfill takes: during the one-time backfill pass, acquire
+      every lock a legacy writer for that token could take -- `handoff_trace`'s
+      per-project/per-worktree lock first, then `_RecordLock` -- in a
+      fixed, documented order (to avoid introducing a new deadlock
+      between the backfill and a legacy writer that might acquire them in
+      the opposite order), perform the read-current-journal-state-and-write
+      as one atomic operation while holding both, then release in reverse
+      order. (`activity.jsonl`'s own append has no lock to join today;
+      either add one for the duration of the backfill window, or treat a
+      race against the unlocked global-log append as already closed by
+      Phase 2's cutover boundary below, since Phase 3-4 keep it
+      dual-written and reconciled by UUID regardless.) Define an explicit
+      cutover boundary on top of that: Phase 2's slot-trusting readers
+      must not go live for a given handoff until *after* its backfill has
+      completed under this full lock set, so no legacy producer can still
+      mutate journal-only truth inside the window where slots are already
+      being trusted. Add a concurrent-write test: a legacy writer appends
+      new journal state for a token while its backfill is in flight
+      (exercised under the real lock order, not just a single-threaded
+      read/write replay); confirm the backfilled slot reflects the newer
+      state, never the stale pre-write snapshot, and that no deadlock
+      occurs under contention.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
 - [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
@@ -397,9 +420,12 @@ _Pending review of Phase 1's PR (first reviewable slice)._
 ### 2026-10-08 — Plan review (PR #5669), 9 rounds
 - Drove the plan-only PR through 9 review rounds, resolving a long run of
   genuine migration/archival/state-model correctness gaps: a crash-safe
-  slot/log commit ordering and the EXACT (verified against the real code,
-  not a reinterpretation) permanent non-terminal-disqualification
-  abandonment semantics (Phase 1), two additional automatic journal
+  slot/log commit ordering and a non-terminal-disqualification
+  abandonment slot design verified against the real code (Phase 1 --
+  later corrected again in round 14, see below: the new permanent
+  semantics are a deliberate, safer behavior *change* from today's
+  bounded-window reality, not an exact preservation of it), two
+  additional automatic journal
   readers (Phase 2), an unscoped-`activity`-view contract, live-write
   project-routing, and a full worktree-less-events audit beyond just
   `boot_trace` (Phase 3), a UUID-based stable per-event identity (not a
@@ -419,4 +445,38 @@ _Pending review of Phase 1's PR (first reviewable slice)._
   (`phase-3-journal-generalization.md`, `phase-4-migration.md`,
   `phase-6-archival.md`), keeping the shared coordination README a
   concise, navigable map.
+
+### 2026-10-08 — Plan review (PR #5669), rounds 10-15
+- Fixed an archive-key collision across same-project worktree-id reuse by
+  adding a `creation_nonce` incarnation identifier (Phase 6), bounded the
+  retention of the new unresolved-live-event holding location (Phase 3),
+  and broadened the unscoped `agent-worktrees activity` merge-discovery
+  contract to cover every retained sink, not just per-worktree files.
+- Added a one-time pre-upgrade `SessionHandoff` backfill requirement so
+  Phase 2's cutover doesn't make pre-upgrade handoffs look unattempted,
+  then (round 13) fixed that backfill's own race condition by requiring
+  an atomic read-and-write, and (round 15, this round) corrected it
+  again: holding `_RecordLock` alone is insufficient because today's
+  legacy journal writers (`activity.jsonl` appends, the separate
+  `handoff_trace` lock) aren't serialized against it at all -- the plan
+  now specifies a fixed lock order across every writer the backfill
+  races, plus an explicit cutover boundary.
+- Added a recurring, independently bounded GC pass for Phase 6's
+  retention floor (round 12), then bounded that GC pass itself (round
+  13) so it can't grow unbounded with total cleanup history -- the exact
+  problem this effort exists to fix, just relocated.
+- **Round 14/15 -- corrected a false "exact preservation" claim.**
+  Verified directly against `activity.py` that today's real
+  abandon-after-N-unrecoverable-failures behavior is a **bounded,
+  self-healing trailing window** (`handoff_trace` only records a retire
+  outcome when it's `"gone"`; the global-log fallback read is capped at
+  the newest 64 events) -- not permanent disqualification. The plan
+  previously claimed its new always-sticky slot fields were an exact,
+  behavior-preserving model of that; they aren't, and can't be without
+  reintroducing a bounded ring-buffer replay. Corrected the plan (and
+  this Journal, which round 15's review caught still calling the new
+  semantics "EXACT") to explicitly adopt permanent, non-expiring
+  disqualification as a deliberate, safer behavior *change* instead of a
+  preservation claim, and updated the matching Validation Plan item to
+  test the actual new behavior.
 

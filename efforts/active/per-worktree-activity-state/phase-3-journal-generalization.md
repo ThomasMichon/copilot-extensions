@@ -51,11 +51,26 @@ file, this needs an explicit, chosen behavior rather than silently breaking.
     not-yet-migrated history silently disappear; merging it in naively
     (without deduplication) would make every event Phase 3's own
     dual-write already delivered into its per-worktree file appear
-    *twice*. Deduplicate by the same stable per-event UUID
-    (`phase-4-migration.md`'s identity scheme) across the global and
-    per-worktree copies -- an event present in both counts once. This
-    source drops out of the merge entirely once Phase 5 removes the file
-    for good.
+    *twice*. **UUID dedup alone is not sufficient here, because it only
+    covers events written after the UUID-stamping cutover.** Today, every
+    stage-mapped `log_event` call is *already* mirrored into both the
+    global log and the per-project/per-worktree `handoff_trace` store
+    (`activity.py:343-350`) -- that pre-existing mirroring predates this
+    effort entirely and carries no UUID. If the per-worktree retained
+    sink includes (or is seeded from) `handoff_trace`'s existing data,
+    those legacy mirrored copies will collide with the same events
+    replayed from the global file, and a UUID-only comparison can't
+    detect the collision (neither copy has one). Apply **two dedup
+    passes** during the transition window: UUID-based matching for any
+    event carrying the new identity field (post-cutover writes, and any
+    already-dual-written per-worktree copy), and, for events with no
+    UUID, the **same content-based multiset reconciliation**
+    `phase-4-migration.md` already specifies for its own legacy-event
+    migration (worktree + event-type + timestamp + payload-field
+    equality, consumed one-for-one rather than by set membership, so two
+    genuinely identical legacy events aren't collapsed into one). An
+    event present in both counts once either way. This source drops out
+    of the merge entirely once Phase 5 removes the file for good.
 - [ ] All of the above, globally time-ordered, matching today's output
       shape (same fields, same sort) -- preserving existing UX/back-compat.
       This remains an on-demand diagnostic read only (the `activity` CLI
@@ -65,10 +80,15 @@ file, this needs an explicit, chosen behavior rather than silently breaking.
       the unmigrated sidecar and the unresolved-live-event holding
       location), confirm an unscoped `activity` call surfaces all of them,
       not only the per-worktree-journal subset.
-- [ ] Test (transition window): seed the same UUID-identified event in
-      both the still-live global file and its already-dual-written
+- [ ] Test (transition window, UUID path): seed the same UUID-identified
+      event in both the still-live global file and its already-dual-written
       per-worktree copy; confirm an unscoped call surfaces it exactly
       once, not twice.
+- [ ] Test (transition window, legacy-mirrored path): seed a pre-cutover,
+      UUID-less `handoff_predecessor_retire`-class event that `activity.py`
+      already mirrors into both the global log and `handoff_trace` today;
+      confirm an unscoped call surfaces it exactly once via content-based
+      reconciliation, not twice just because neither copy carries a UUID.
 
 ### Authoritative project routing for live writes
 
