@@ -589,7 +589,7 @@ the WSL-`bash`-shim and `python3`-alias-stub PATH-resolution findings)
 would never have been caught by any existing CI gate, on any branch,
 regardless of this effort's local fixes.
 
-- [ ] Add a **detection-only, daily-rotating Windows coverage job**
+- [x] Add a **detection-only, daily-rotating Windows coverage job**
       (`.github/workflows/windows-coverage-rotation.yml` + a new
       `tools/select_windows_rotation.py`) rather than duplicating every
       plugin's full suite on both OSes every run (true 2x wall-clock cost
@@ -609,14 +609,23 @@ regardless of this effort's local fixes.
       reselects next time that date recurs in the cycle. A failure files/
       updates a tracking issue (same shape as `module-health-watchdog.yml`)
       rather than blocking promotion — this is new, exploratory coverage,
-      not a replacement for the existing Linux-side gate.
-- [ ] **Known landing constraint:** `workflow-lockdown-guard` blocks any
-      `.github/workflows/*` change from a PR not authored by the exact
-      repo-owner account — this change cannot self-merge through the usual
-      contributor flow (same constraint already hit once this effort,
-      routing the CI-fix PR #5507/#5535 through the operator directly).
-      Drafted in the worktree for the operator's own review/application
-      rather than attempted as a normal contributor PR.
+      not a replacement for the existing Linux-side gate. **Landed and
+      merged, 2026-10-08 (PR #5662)** — see Journal: the expected
+      `workflow-lockdown-guard` blocker turned out not to apply (the PR
+      was opened under the repo-owner account via this tool's own
+      per-repo account resolution, not the raw session identity); the
+      real blocker hit instead was `identifier-leak-guard` catching a
+      personal username accidentally pasted into an earlier journal entry
+      (fixed in the same PR).
+- [ ] **Bootstrap-order caveat, not yet satisfied:** like
+      `workflow-lockdown-guard` itself, a `schedule:`-triggered workflow
+      only actually fires once its file exists on the repo's **default**
+      branch (`main` here, confirmed via the repo API — not `dev`, this
+      repo's own "contribution default"). The new workflow merged to
+      `dev`; its first real scheduled run won't happen until the next
+      `dev`→`main` promotion carries it across (one was already in
+      flight at merge time — nothing further to do, just not yet
+      confirmed firing for real).
 - [ ] Once landed and the rotation has run for a few cycles, revisit
       whether any plugin's `windows_only`-marked test set (the existing,
       narrower pattern already proven by
@@ -685,6 +694,58 @@ regardless of this effort's local fixes.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-08 — Phase 6: Windows coverage rotation drafted, landed, and merged (PR #5662)
+Direct follow-up to reviewing CI build history after Phase 3.5 wrapped
+(at the operator's request): confirmed via `gh run list`/`gh run view`
+that every "full suite" CI job in this repo — the per-PR `smoke` matrix
+and the `dev`→`main` promotion's `full` matrix (itself a fixed 9-plugin
+list excluding `agent-machines`/`agent-index` entirely) — runs on
+`ubuntu-latest` only. Sampled ~30 recent `full - agent-dispatch` runs
+(700–1200s, stable, zero timeout failures post-PR #5485) and the last 100
+`Validate and promote` runs' failure breakdown (21 failures: 18
+`agent-worktrees`, 1 `agent-dispatch` flake, 1 `worktree-manager`, **zero**
+from `agent-vault`/`agent-mcp`/`agent-machines`/`agent-index`) to confirm
+this session's fixes hadn't regressed anything and weren't adding
+meaningful CI duration. Also confirmed the repo is public, so
+`windows-latest` GitHub-hosted runners are free regardless of OS — the
+"doubling cost" concern is wall-clock/maintenance, not dollars.
+
+**Designed and landed** a detection-only, daily-rotating Windows coverage
+job rather than duplicating every plugin's full suite on both OSes:
+`tools/select_windows_rotation.py` (8 unit tests: deterministic selection,
+Tier A/B disjointness, full rotation-cycle reachability, both CLI output
+formats) picks 2 "Tier A" (real OS-divergent code) plugins and 1 "Tier B"
+(lower-risk) plugin per day, keyed off the date's ordinal day number (no
+persisted cursor, so a missed run never permanently skips a plugin); a new
+`.github/workflows/windows-coverage-rotation.yml` runs their full suites
+on `windows-latest` and files/updates a tracking issue on failure (same
+shape as `module-health-watchdog.yml`), never blocking promotion.
+
+**The expected landing blocker didn't apply, and a different one did.**
+Opened PR #5662 expecting `workflow-lockdown-guard` to block it (this
+touches `.github/workflows/*`, which that guard restricts to the exact
+repo-owner account) — it passed instead, because `agent-worktrees
+create-pr`'s own per-repo account resolution opened the PR under the
+actual repo-owner account, not this session's raw `gh auth` identity (a
+distinction the effort's own custom instructions describe but I hadn't
+seen play out concretely until checking `gh pr view --json author`). The
+real blocker was `identifier-leak-guard`: it correctly caught a personal
+Windows username (`tmichon`) pasted verbatim into an earlier journal
+entry's example error path (documenting the `agent-ssh` bash-shim
+finding) — fixed in the same PR by genericizing it to `your_user`, the
+denylist message's own suggested replacement. Confirmed via a repo grep
+that the same string appears once more, in an unrelated effort doc
+(`mux-bind-relay/README.md`) this PR never touched — left alone as
+out-of-scope, not this PR's responsibility.
+
+**Bootstrap-order caveat, not yet resolved:** like `workflow-lockdown-guard`
+itself, a `schedule:` trigger only fires for a workflow file once it
+exists on the repo's actual **default branch** (confirmed via the repo
+API: `main`, not `dev`). The new workflow merged to `dev`; a `dev`→`main`
+promotion run was already in flight at merge time, which should carry it
+across, but the first real scheduled firing isn't yet confirmed as of this
+entry — logged as the one remaining open item for this phase.
 
 ### 2026-10-07 — Phase 3.5: `agent-vault`/`agent-mcp` `uv`-PATH gap fixed; a systemic `bash`/`python3` resolution finding generalized across plugins
 Continuing the never-tested-plugin sweep: `agent-remote-driver` (no test
