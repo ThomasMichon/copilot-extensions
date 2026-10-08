@@ -120,6 +120,20 @@ def test_classify_findings_all_plain_is_clean() -> None:
     assert result.is_clean
 
 
+def test_only_warning_aggregate_budget_findings_are_advisory() -> None:
+    advisory = SimpleNamespace(check="projection-aggregate-budget", severity="warning")
+    blocking = SimpleNamespace(check="projection-aggregate-budget", severity="blocking")
+    file_budget = SimpleNamespace(check="projection-budget", severity="blocking")
+    unknown = SimpleNamespace(check="projection-unknown-check", severity="warning")
+    result = reflect.classify_findings([advisory, blocking, file_budget, unknown])
+    assert result.advisory == (advisory,)
+    assert result.conflict == (blocking, file_budget, unknown)
+    assert reflect.bypass_decision(
+        findings=[advisory], changed_lock_entries=[],
+        trusted_marketplaces=["copilot-extensions"],
+    ).eligible
+
+
 def test_has_actionable_change_requires_changed_or_lock_updated() -> None:
     assert not reflect.has_actionable_change(changed=[], lock_updated=False)
     assert reflect.has_actionable_change(changed=[], lock_updated=True)
