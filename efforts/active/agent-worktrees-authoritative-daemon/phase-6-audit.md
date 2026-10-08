@@ -24,9 +24,9 @@ consolidation shape for 6b.
   response, or an id-set mismatch).
 - **Either way** the actual git work is `_classify_one_record`, which calls
   `git_ops.classify_worktree(..., fetch=False, ...)` — confirmed at
-  `__main__.py:997`. This path is **always fetch-free**: `behind`/`ahead`
-  reflect the last fetch, never a fresh one. ~5 git calls/worktree,
-  batched.
+  `__main__.py:997`. This path is **fetch-free by construction**:
+  `behind`/`ahead` reflect the last fetch, never a fresh one. ~5 git calls/
+  worktree, batched.
 - Writes back: `list_cli._build_list_json_payload` calls
   `picker_support.data_local._stamp_from_raw` after a classify pass, which
   persists `git_state=raw.get("state")` onto the tracking record (so the
@@ -38,10 +38,17 @@ consolidation shape for 6b.
   with a TTL cache by `worktree_status_daemon.py` (not read in this pass,
   wiring confirmed via `__main__.py`'s re-export of `_worktree_status_compute
   = worktree_status_compute.compute`).
-- Calls `git_ops.classify_worktree(..., fetch=True, ...)` — confirmed:
-  **always fetches**, unconditionally. This is the opposite freshness
-  contract from Path A, by design (a per-worktree bundle read, not a
-  batch list render).
+- Calls `git_ops.classify_worktree(..., fetch=True, ...)` — this
+  **requests** a fetch on every call (`fetch=True` passed unconditionally),
+  but is not guaranteed to have *performed* one: `WorktreeStateInfo
+  .fetch_requested`/`fetch_failed` (`git_ops.py:262-268`) distinguish a
+  genuine fetch attempt from an early return (e.g. a missing/zombie
+  checkout) or a failed fetch — so this path is **fetch-requesting**, with
+  `git_confirmed = not (info.fetch_requested and info.fetch_failed)`
+  gating the bundle's own `confirmed` flag, not an unconditional guarantee
+  of fresh data. This is still the opposite freshness *intent* from Path
+  A's fetch-free-by-construction contract, by design (a per-worktree
+  bundle read, not a batch list render).
 - Consumed by `agent_dispatch.worktree_status_relay` — a SQLite relay table
   for agent-dispatch's own Tasks board. Confirmed via that module: it only
   stores/serves bundle rows this compute already produced; it never
@@ -76,182 +83,155 @@ consolidation shape for 6b.
   Mux Companion), not the Worktrees-pivot row list, and it deliberately
   avoids the liveness-override mechanism that causes the symptom.
 
-## The actual oscillation mechanism (traced, re-confirmed after review correction)
-
-**Revision note (2026-10-08):** this section's first draft claimed the
-classify pass unconditionally "corrects back" to the stale git state while
-a session stays live, and that removing `_overlay_cached_state`'s `state`
-override alone would fix the rendered display. This repo's own review
-(PR #5659, round 1) correctly disproved both claims with specific line
-references — see "What review round 1 disproved" below. This section is
-rewritten with the actual, code-confirmed mechanism found on re-trace.
+## The oscillation mechanism — what's confirmed, and what remains open
 
 The reported symptom — a Worktrees-pivot row rendering `MERGED` → `WIP`/
 `ACTIVE` → back to `MERGED`, with no real underlying change — is **not**
 two compute paths disagreeing on git state (Paths B and C remain confirmed
-uninvolved, as above). It is a **field-population gap between the two
-render phases' payloads**, specifically around mux-session visibility:
+uninvolved, as above). Two successive hypotheses for the exact trigger have
+each been disproven by this effort's own repo review, with concrete code
+evidence each time (see the Journal for the dated record); this section
+states only what is actually confirmed by code, and names what is not yet
+confirmed.
 
-1. **First paint (`classify=False`, cache-only).** The production call
-   chain is `worktree_manager.production_picker.picker_tui.data_local.load()`
-   → `engine_client.list_worktree_rows(cache_only=True)` → subprocess
-   `agent-worktrees list --json --cache-only` → `list_cli.cmd_list`'s
-   `--cache-only` branch (confirmed, `list_cli.py` ~452-468): it calls
-   `_worktree_to_dict(rec, include_profile_assignment_history=...)` **with
-   no `mux_info` and no `session_ctx` arguments at all**, then
-   `picker_support.data_local._overlay_cached_state(raw, rec)`.
-   - `_worktree_to_dict` (`__main__.py:1105`+) only sets `mux_session`/
-     `mux_attached` when `mux_info is not None` (line 1333-1335), and only
-     sets `session_lock_live`/`live_session_ids` from `session_ctx
-     .active_sessions` when `session_ctx is not None` — **neither
-     condition holds in the cache-only branch**, so this payload can
-     *never* carry `mux_session`/`mux_attached`, regardless of the
-     worktree's actual mux state.
-   - The only liveness signals this branch *can* carry are
-     `_overlay_cached_state`'s own direct `sessions
-     .worktree_session_lock_state(rec)` check (a targeted
-     `inuse.<pid>.lock` glob) and `_worktree_to_dict`'s always-computed,
-     already-freshness-gated `_fresh_bound_live_hint(rec)` →
-     `session_bound_live`.
-2. **Authoritative populate (`classify=True`).** `list_worktree_rows
-   (classify=True, mux_details=True, cache_only=False)` →
-   `list_cli._build_list_json_payload`, which **does** pass
-   `mux_map.get(rec.worktree_id)` (from a batched `sessions
-   .mux_status_many` call) and `session_ctx` (from `sessions
-   .scan_sessions_fast`) into `_worktree_to_dict` — so `mux_session`/
-   `mux_attached`/`session_lock_live` (via `session_ctx`) are populated
-   whenever genuinely true. Separately, `_classify_records`'s
-   `active_paths` (`_build_active_paths`, which unions lock files,
-   `session_ctx.active_sessions`, the batched mux-session list, the fresh
-   `bound_live` hint, and bridge-lock) makes `git_ops.classify_worktree`
-   return `ACTIVE` outright for any of these signals — confirmed via
-   `active_paths is not None` short-circuiting *before* any git status
-   check (`git_ops.py:391-405`).
+**Confirmed, by code:**
 
-**The confirmed divergence**: a worktree that is live **only** via an
-attached mux session — no registered `inuse.<pid>.lock` in that worktree's
-own session directory, no fresh cached `bound_live` hint (e.g. a plain
-mux-attached terminal the bare-resume reconciler hasn't stamped, or one
-whose lock file genuinely lives in a different session dir than the one
-`worktree_session_lock_state` scans) — renders correctly on the classify
-pass (`ACTIVE`, via either `active_paths` or the `mux_attached` marker
-`derive.py`'s `_state()` checks), but on the **next** cache-only first
-paint the mux signal is invisible to that payload entirely, so it falls
-back to whatever `rec.git_state` was last classified+stamped as (e.g.
-`MERGED`, if the branch is in fact merged) — then flips back to `ACTIVE`
-on the next classify populate, and so on. This is a real, repeating,
-code-confirmed cycle, matching the reported "after a brief wait, swings
-back" recurrence (it recurs on every first-paint → populate → first-paint
-render cycle, not once).
+- The classify pass's own `active_paths` (`_build_active_paths`, unioning
+  lock files, `session_ctx.active_sessions`, the batched mux-session list,
+  the fresh `bound_live` hint, and bridge-lock) makes
+  `git_ops.classify_worktree` return `ACTIVE` **before** any git status
+  check (`git_ops.py:391-405`) whenever it agrees the worktree is live —
+  so the classify pass does not generically "correct back" to stale state
+  while a session is genuinely live by every signal it checks.
+- `_worktree_to_dict`'s `_classify_records`/`_stamp_from_raw` write-back
+  (`picker_support/data_local.py:379-394`) persists whatever `state` the
+  classify pass computed (including `"active"`) onto `rec.git_state`
+  **durably** before the `list --json --classify` subprocess exits: the
+  write is queued on `tracking._STAMP_QUEUE` (async, off the render
+  thread) but that queue's `flush()` is registered via `atexit`
+  (`tracking.py:3763`) and additionally drained synchronously by
+  `flush_stamp_writes()` at the CLI's own normal exit path, so a
+  *subsequent* cache-only read is not reading a value the classify pass
+  hasn't finished writing yet, except on an abnormal process termination
+  (a kill, not a normal exit) — a narrow, not the general, case.
+- The cache-only (`list_cli.cmd_list`'s `--cache-only` branch) payload
+  never carries `mux_session`/`mux_attached` (confirmed: it calls
+  `_worktree_to_dict(rec, ...)` with no `mux_info`/`session_ctx` at all,
+  and those fields are only set when those arguments are given —
+  `__main__.py:1333-1335`). This remains a real, confirmed field-coverage
+  gap between the two payloads — but, per the point above, it does **not**
+  by itself explain a *repeated* MERGED↔ACTIVE flap for a worktree whose
+  liveness is otherwise stable, since the classify pass's own durable
+  `git_state` write-back already carries the correct value forward into
+  the next cache-only read in the ordinary (clean-exit) case.
 
-### What review round 1 disproved, and why it matters
+**Not yet confirmed — the actual trigger requires one more investigative
+step before 6b's narrow oscillation-fix item (below) can be scoped with
+confidence:**
 
-- **"The classify pass corrects back to stale state while live" is false
-  in general.** `_classify_daemon_compute`/`_classify_records_live` builds
-  `active_paths` from `_build_active_paths` and passes it into
-  `_classify_one_record` → `git_ops.classify_worktree`, which returns
-  `ACTIVE` **before** doing any git status check when the worktree's path
-  is in `active_paths` (`git_ops.py:391-405`). So whenever the classify
-  pass's own (broader) liveness check agrees the worktree is live, it also
-  renders `ACTIVE` — it does not revert to `MERGED` merely because the
-  session continued. The genuine revert only happens when the classify
-  pass's liveness check **misses** a signal the UI otherwise relies on —
-  which is exactly the mux-visibility gap above, not a guaranteed
-  "always corrects back while live" behavior.
-- **"Stop overwriting `raw['state']`" would not change the display.**
-  `picker_support/derive.py`'s `_state()` (the actual row-label function)
-  checks `mux_session`/`mux_attached`/`session_lock_live`/
-  `session_bound_live`/etc. **before** ever examining `state` — so for the
-  lock-file and bound-live-hint liveness signals specifically, a live
-  worktree already renders `ACTIVE` via these marker fields regardless of
-  what `_overlay_cached_state` does to `state`. The originally-proposed
-  "don't overwrite `state`" fix would do nothing for those two signals; it
-  would only ever have mattered for a liveness source `_overlay_cached_state`
-  detects but no marker field exists for — which is not the case here
-  (it already sets `session_lock_live` for the lock case). The real,
-  necessary fix is the mux-visibility gap identified above, not the
-  `state`-field overwrite this draft originally targeted.
+A field-coverage gap that never manifests under a durable, agreeing
+write-back needs a *timing* fault to actually produce the reported flap.
+The most concrete remaining candidate, not yet traced to a conclusion: a
+**disagreement in time**, not in coverage, between the liveness checks the
+two passes use — e.g. the classify pass's batched `sessions
+._list_mux_sessions()` (one `list-sessions` snapshot, diffed against every
+record) momentarily lagging a genuine mux attach/detach event relative to
+the cache-only pass's own direct, per-record `sessions
+.worktree_session_lock_state()` glob, or vice versa. Confirming this
+requires either live reproduction (repeated `list --json --classify` /
+`--cache-only` calls against a real worktree while toggling its mux
+attachment, observing `rec.git_state` and each payload's marker fields
+across the transition) or tracing the batched mux-list's own staleness
+window in `sessions.py` more closely than this pass did. **This is
+explicitly left open** rather than asserted — 6a's purpose was the
+dataflow trace and the consolidation-shape decision (both done below);
+pinning the exact non-deterministic trigger is scoped as a prerequisite
+check for the narrow oscillation fix in 6b's recommendation, not asserted
+as already resolved.
 
 ## Recommendation for 6b (updated scope)
 
-Two distinct fixes are needed, and they should **not** be conflated into
-a single change:
+Two distinct work items are needed, and they should **not** be conflated
+into a single change:
 
-1. **The structural consolidation** the Phase 6 title names: merge Path A
-   (`classify_daemon`/`_classify_records`, no-fetch) and Path B
-   (`worktree_status_compute.compute`, fetch-confirmed) so they share one
-   leaf computation, per the existing checklist's shape (i) — generalize
-   `worktree_status_compute` with a `fetch: bool` parameter, and make
-   `classify_daemon`'s fast, coalesced path a thin no-fetch view over it.
-   Shape (i) is recommended over (ii): `worktree_status_compute.compute()`
-   already assembles the richer, more complete fact set (lineage, claims,
-   disposition, liveness — Path A/`WorktreeStateInfo` is a strict subset:
-   state/ahead/behind/dirty/title/branch_drift), so generalizing the
-   richer function to serve the narrower, faster call site is less
-   duplication than the reverse.
+1. **The structural consolidation** the Phase 6 title names. Both Path A
+   and Path B already call the same leaf (`git_ops.classify_worktree`,
+   with different `fetch` values) — so sharing *only* that leaf is not a
+   new seam at all, and a 6c delegation test asserting delegation to it
+   would trivially pass today, before any real consolidation. The
+   genuinely new, narrow seam worth building is one level up: factor
+   `_classify_one_record`'s **full** wrapper (`active_paths` handling,
+   the `classify_worktree` call itself, `_apply_tracking_override`'s
+   FINAL/MERGED closure refinement, and `refine_state_with_session`'s
+   `CONVO` refinement) into one function parametrized by `fetch: bool` —
+   call it `_compute_worktree_git_facts(record, *, fetch, active_paths,
+   session_ctx, repo) -> WorktreeStateInfo` — and have **both**
+   `_classify_daemon_compute` (today's Path A caller, `fetch=False`) *and*
+   `worktree_status_compute.compute()`'s own `facts["git_state"]`
+   assembly (today's Path B caller, `fetch=True`) call it, instead of
+   `compute()` calling `git_ops.classify_worktree` directly. This is
+   genuinely narrower than routing all of Path A through Path B's full
+   `compute()` bundle (which would wrongly force Path A's fast batch-list
+   render to also pay for `compute()`'s lineage/liveness/claims/
+   disposition assembly on every row) — only the richer, already-correct
+   git-state wrapper is shared; `compute()` keeps assembling its other
+   facts exactly as today, now just by calling the shared helper for one
+   of them. This also gives Path B's bundle the `active_paths`/closure/
+   `CONVO` refinement it currently lacks, which only ever adds a more
+   complete answer for its own consumer (agent-dispatch's Tasks board),
+   never changes Path A's existing contract.
    - **Neither existing `work_coalescing_singleton` server/rendezvous is
      retired by this shape.** `classify_daemon`'s `CoalescingServer`
-     (`KIND = "classify"`) answers a whole-project **batch** request (all
-     of a project's records, filtered by `status_filter`/
-     `platform_filter`/`all`); `worktree_status_daemon`'s own
-     `CoalescingServer` (`KIND = "worktree_status"`) answers a
-     **single-worktree** bundle request (`compute(project, worktree_id)`).
-     These are genuinely different request granularities serving
-     genuinely different consumers (the Picker's batch list render vs.
-     agent-dispatch's per-task board lookup) — consolidating the *leaf*
-     git-classification call does not collapse these into one server or
-     one rendezvous protocol. Both daemons, both `KIND`s, and both sets of
-     lock-file rendezvous fields remain live after 6b; only
-     `git_ops.classify_worktree` (and its `fetch` parameter) becomes the
-     one shared implementation each daemon's own `compute` callback calls
-     into.
-   - **The shared seam must preserve Path A's own adapter-layer facts**,
-     which Path B's `compute()` does not produce at all:
-     `active_paths`-forced `ACTIVE` (`classify_worktree`'s own
-     `active_paths` parameter, used only by Path A today),
-     `_apply_tracking_override`'s FINAL/MERGED closure refinement
-     (`__main__.py:603-608`), and `refine_state_with_session`'s `CONVO`
-     refinement. These stay in Path A's own wrapper around the shared
-     `classify_worktree` call — not inside the generalized function
-     itself — so a naive "thin `fetch=False` view" does not silently drop
-     any of them and change Picker-rendered states.
+     (`KIND = "classify"`) answers a whole-project **batch** request;
+     `worktree_status_daemon`'s own `CoalescingServer`
+     (`KIND = "worktree_status"`) answers a **single-worktree** bundle
+     request. These remain genuinely different request granularities for
+     genuinely different consumers — consolidating the shared helper does
+     not collapse them into one server or protocol. Both daemons, both
+     `KIND`s, and both sets of lock-file rendezvous fields remain live
+     after 6b; only the one new `_compute_worktree_git_facts` helper is
+     shared between their two `compute` callbacks.
    This closes 6b/6c/6d as scoped, and genuinely serves the effort's own
    stated purpose — but **does not by itself fix the reported
-   oscillation**, since neither Path A nor Path B was ever the disagreeing
-   party for it (Path A already renders `ACTIVE` correctly whenever its
-   own liveness check sees it; the gap is in which fields the cache-only
-   *first paint* payload carries at all).
-2. **The actual oscillation fix** (new, scoped here since 6a's own
-   purpose is to confirm/rule out a direct mechanism before consolidation
-   starts): give the `--cache-only` branch of `list_cli.cmd_list` a cached
-   mux-liveness signal to pass into `_worktree_to_dict`/
-   `_overlay_cached_state`, so a worktree whose only liveness source is an
-   attached mux session doesn't fall back to a stale `state` on every
-   first-paint render. The exact mechanism needs its own short design
-   pass (options include: a cached `mux_attached` hint on the tracking
-   record, reconciled off the hot path the same way `bound_live` already
-   is via `reconcile_bound_live()`; or extending
-   `_overlay_cached_state`'s own direct per-record check to include a
-   cheap, single-record mux probe). This is a narrow, independent fix — it
-   does not require or block on the Path A/B consolidation, and per the
-   effort's own prior note should land as its own change, not be read as
-   satisfying the structural consolidation claim on `#5555`.
+   oscillation**, since the oscillation's actual trigger (still open,
+   above) was never in disagreement between Path A and Path B to begin
+   with — both already compute from the identical leaf.
+2. **The oscillation fix** (new, scoped here since 6a's own purpose is to
+   establish the dataflow before consolidation starts — but gated on
+   confirming the timing trigger above first, not assumed): if the
+   cache-only payload's mux-visibility gap is confirmed as a genuine
+   contributor once the timing question is resolved, close it by
+   **surfacing the existing cached mux-liveness signal the tracking
+   record already carries** — `WorktreeRecord.mux_live`/`mux_live_at`,
+   refreshed by `reconcile_bound_live()` from the same batched
+   `mux_status_many` call `_build_active_paths` uses, and already
+   freshness-gated by `_fresh_mux_live_hint()`
+   (`picker_support/data_local.py:112-123`, `__main__.py:524-548`) — into
+   the cache-only branch's `_worktree_to_dict`/`_overlay_cached_state`
+   call, rather than adding a second, new liveness source or probe. This
+   is a narrow, independent fix — it does not require or block on the
+   Path A/B consolidation, and per the effort's own prior note should
+   land as its own change, not be read as satisfying the structural
+   consolidation claim on `#5555`.
 
-Recommend sequencing: scope and land fix 2 first (small, isolated,
-directly answers the operator's reported symptom) as its own PR; then
-proceed with 6b/6c/6d for the structural consolidation already scoped.
-Both are required before this phase's closing claim on `#5555` is
-complete — 6d's own checklist item already requires not letting 6a-6c's
-completion alone read as "the Worktrees-pivot half of #5555 is done" if a
-known gap is left silently open; this oscillation fix is exactly such a
-gap and must not be silently dropped once 6b/6c land.
+Recommend sequencing: confirm the timing trigger (above) first — live
+reproduction, not more static tracing — before scoping fix 2's exact
+diff; land it as its own small PR once confirmed. Proceed with 6b/6c/6d
+for the structural consolidation in parallel, since it is independently
+justified regardless of the oscillation fix's own timing. Both are
+required before this phase's closing claim on `#5555` is complete — 6d's
+own checklist item already requires not letting 6a-6c's completion alone
+read as "the Worktrees-pivot half of #5555 is done" if a known gap is
+left silently open; this oscillation fix is exactly such a gap and must
+not be silently dropped once 6b/6c land.
 
 ## Enumerated facts: Path A (`WorktreeStateInfo`) vs. Path B (`compute()` bundle)
 
 | Fact | Path A (`classify_daemon`) | Path B (`worktree_status_compute`) | Overlap? |
 |---|---|---|---|
-| `state` (git disposition) | yes (no-fetch) | yes, via `facts["git_state"]` (fetch-confirmed) | **Same fact, different freshness — shape (i) target** |
-| `ahead`/`behind`/`dirty`/`branch_drift`/`current_branch` | yes | yes (inside `facts["git_state"]`'s `WorktreeStateInfo` asdict) | **Same fact, different freshness — shape (i) target** |
+| `state` (git disposition) | yes (fetch-free) | yes, via `facts["git_state"]` (fetch-requesting) | **Same leaf call today; shared wrapper is 6b's actual target** |
+| `ahead`/`behind`/`dirty`/`branch_drift`/`current_branch` | yes | yes (inside `facts["git_state"]`'s `WorktreeStateInfo` asdict) | **Same leaf call today; shared wrapper is 6b's actual target** |
+| `active_paths`/closure/`CONVO` refinement | yes (Path A only) | no | Path-A-only today; 6b's shared wrapper extends this to Path B |
 | `title` | yes (session-summary refined) | no (session_length only has turn/session counts) | distinct |
 | session turn/count | no (separate `_worktree_to_dict` field) | yes (`facts["session_length"]`) | distinct, Path-B-only |
 | liveness (mux/bound) | no (separate overlay — see above) | yes (`facts["liveness"]`, `verify_worktree_active`) | distinct, Path-B-only |
@@ -259,31 +239,31 @@ gap and must not be silently dropped once 6b/6c land.
 | claims/owner_ref | no | yes (`facts["claims"]`) | distinct, Path-B-only |
 | disposition (title/summary/follow_up/paused/history) | no | yes (`facts["disposition"]`) | distinct, Path-B-only |
 
-Only the git-classification fact (`state` + its `ahead`/`behind`/`dirty`/
-`branch_drift`/`current_branch` companions) is actually duplicated between
-Path A and Path B — confirming shape (i)'s premise that the two can share
-exactly that one sub-computation (`git_ops.classify_worktree`, parametrized
-by `fetch: bool`) while each keeps its other, non-overlapping facts
-entirely its own.
+Both paths already call the same leaf (`git_ops.classify_worktree`) today
+— the git-classification fact row above is not a candidate for a *new*
+seam on its own; 6b's actual target is the richer wrapper (active_paths/
+closure/CONVO) one level up, which Path A already has and Path B does
+not, per the Recommendation above.
 
 ## Status
 
-6a complete as scoped: both consumer dataflows traced (plus the third,
-`status-segment`, path), the two additional findings (`current_worktree_status`'s
+6a complete as scoped: all three consumer dataflows traced, the two
+additional findings from before this session (`current_worktree_status`'s
 non-daemon pass; `_overlay_cached_state`'s `live` override) investigated —
-the first ruled out, the second revised after review correction into the
-actual confirmed mechanism (the cache-only payload's mux-visibility gap)
-— and the consolidation shape decided (shape (i), with neither
-`work_coalescing_singleton` server retired). This closes 6a's own scope
-for 6b/6c (the shared compute seam's implementation target and test
-surface); it does **not** close 6d — sharing the polling compute seam
-between Path A and Path B does not touch 6d's own still-pending
-snapshot/stream decision (`list --json --classify` remaining a polled call
-vs. `pivot-streaming-transport`'s `stream`/`subscribe` contract), which
-stays open and unaffected by anything in this trace. Not yet done: 6b
-implementation, the separately-scoped mux-visibility oscillation fix
-above, 6c's delegation test, and 6d's own snapshot/stream closing
-decision.
+the first ruled out; the second's exact timing trigger is explicitly left
+open pending live reproduction, not asserted as resolved — and the
+consolidation shape decided (6b's actual new seam is the `active_paths`/
+closure/CONVO-refining wrapper one level above the shared leaf call, with
+neither `work_coalescing_singleton` server retired). This closes 6a's own
+scope for 6b/6c (the shared seam's implementation target and test
+surface); it does **not** close 6d — sharing a compute seam between Path A
+and Path B does not touch 6d's own still-pending snapshot/stream decision
+(`list --json --classify` remaining a polled call vs.
+`pivot-streaming-transport`'s `stream`/`subscribe` contract), which stays
+open and unaffected by anything in this trace. Not yet done: confirming
+the oscillation's timing trigger via live reproduction, 6b implementation,
+the separately-scoped mux-visibility fix (gated on that confirmation),
+6c's delegation test, and 6d's own snapshot/stream closing decision.
 
 ## Documentation impact
 
