@@ -243,6 +243,64 @@ def get_container(config: ContainersConfig, name: str) -> DockerContainerInfo | 
     return None
 
 
+def _resolve_member_info(config: ContainersConfig, name: str) -> DockerContainerInfo | None:
+    """Resolve one container's info independently of fleet-membership
+    discovery filtering.
+
+    ``get_container`` (via ``list_containers``/``_is_fleet_member``) drops
+    ANY container with no fleet/devcontainer label and no matching image
+    prefix -- including one that still carries a real restricted
+    security-profile label (e.g. an unlabeled/legacy member). The
+    single-container ``stop``/``remove`` commands must never let that
+    filtering silently reclassify a restricted container as "no info,
+    assume safe to destroy bare": fall back to a raw ``docker inspect``
+    (bypassing the fleet-membership filter entirely) before giving up.
+    """
+    info = get_container(config, name)
+    if info is not None:
+        return info
+    try:
+        doc = inspect_container(name)
+    except RuntimeError:
+        return None
+    state = ((doc.get("State") or {}).get("Status") or "").lower()
+    container_cfg = doc.get("Config") or {}
+    labels = container_cfg.get("Labels") or {}
+    raw_name = (doc.get("Name") or "").lstrip("/")
+    return DockerContainerInfo(
+        name=raw_name or name,
+        container_id=doc.get("Id", ""),
+        image=container_cfg.get("Image", ""),
+        state=state,
+        status=state,
+        labels=labels,
+        fleet=labels.get(FLEET_LABEL),
+        local_folder=labels.get("devcontainer.local_folder"),
+        security_profile=labels.get(SECURITY_PROFILE_LABEL, TRUSTED_PROFILE),
+        security_policy=labels.get(SECURITY_POLICY_LABEL),
+        security_image_id=labels.get(SECURITY_IMAGE_ID_LABEL),
+    )
+
+
+def _resolve_member_fleet(config: ContainersConfig, info: DockerContainerInfo) -> FleetConfig | None:
+    """Resolve the configured fleet a member belongs to.
+
+    Matches both an explicit ``agent-containers.fleet`` label AND the
+    configured name-prefix convention ``_fleet_members`` (fleet.py) uses
+    for fleet-wide operations -- a single-container command must recognize
+    the exact same membership a fleet-wide ``down``/``rm`` would, or an
+    unlabeled/image-prefix-discovered member (``fleet=None``) can silently
+    bypass its fleet's restricted-ness.
+    """
+    if info.fleet and info.fleet in config.fleets:
+        return config.fleets[info.fleet]
+    for fleet_name, fleet in config.fleets.items():
+        prefix = fleet.prefix(fleet_name)
+        if prefix and info.name.startswith(f"{prefix}-"):
+            return fleet
+    return None
+
+
 def inspect_state(name: str) -> str | None:
     """Return the container's state string, or None if it does not exist."""
     res = _docker(["inspect", "-f", "{{.State.Status}}", name])
@@ -626,9 +684,9 @@ def cmd_stop(config: ContainersConfig, name: str) -> int:
         )
         return 1
 
-    info = get_container(config, name)
+    info = _resolve_member_info(config, name)
     if info is not None:
-        fleet = config.fleets.get(info.fleet) if info.fleet else None
+        fleet = _resolve_member_fleet(config, info)
         restricted = bool(fleet and fleet.restricted) or info.security_profile == RESTRICTED_PROFILE
         if restricted and (fleet is None or not fleet.restricted):
             # Mirrors down_fleet's exact admission check: a restricted-
@@ -662,6 +720,23 @@ def cmd_stop(config: ContainersConfig, name: str) -> int:
                 return _BUSY_EXIT
             print(f"Stopped: {name}")
             return 0
+        if restricted and info.state in {"exited", "created"}:
+            # Already stopped -- nothing to protect, nothing to do.
+            print(f"Stopped: {name} (already stopped)")
+            return 0
+        if restricted:
+            # Mirrors down_fleet's final catch-all: paused/restarting/dead/
+            # other nonterminal states never reach the bare fallback below
+            # unrescued -- stop_restricted_member is the only safe path for
+            # a live-but-not-plain-running restricted member, and it isn't
+            # safe to invoke blind here (its own liveness probe assumes a
+            # running container), so defer instead of guessing.
+            print(
+                f"Deferred: {name} (container state {info.state!r} is not "
+                "safely stoppable)",
+                file=sys.stderr,
+            )
+            return _BUSY_EXIT
 
     try:
         stop_container(name)
@@ -696,9 +771,9 @@ def cmd_remove(config: ContainersConfig, name: str, *, force: bool = False) -> i
         )
         return 1
 
-    info = get_container(config, name)
+    info = _resolve_member_info(config, name)
     if info is not None:
-        fleet = config.fleets.get(info.fleet) if info.fleet else None
+        fleet = _resolve_member_fleet(config, info)
         # Mirrors remove_fleet's exact admission logic -- see its own
         # docstring/comments for the full case table:
         #   - fleet exists and is restricted            -> rescue, no migration
