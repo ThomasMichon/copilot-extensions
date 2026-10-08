@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -141,14 +139,6 @@ def _user_settings(copilot_home: Path) -> _SettingsLoad:
         copilot_home,
         (("settings.json",), ("settings.local.json",)),
     )
-
-
-def _platform_key() -> str:
-    if platform.system() == "Windows":
-        return "windows"
-    if os.environ.get("WSL_DISTRO_NAME"):
-        return "wsl"
-    return "linux"
 
 
 def _load_yaml_object(path: Path) -> tuple[ScanAuthority, dict, list[Finding]]:
