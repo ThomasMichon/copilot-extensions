@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-05
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -150,8 +150,8 @@ claim candidates remain observably audited rather than silently skipped.
 
 ### The lifecycle
 A task moves through a small set of states: **proposed → queued → claimed**
-(held for evaluation) → **started** (under active work) → **completed** →
-**confirmed**, with an **abandoned** terminal path reachable from any
+(held for evaluation) → **started** (under active work) → **submitted** →
+**completed**, with an **abandoned** terminal path reachable from any
 non-terminal state for duplicates, dropped priorities, or a completion claim
 that doesn't hold up. The two entry states are two deliberate operations: to
 **propose** is to draft a task — its concise **goal**, its detailed **goal
@@ -162,14 +162,21 @@ layer **binds it to an agent whose pool filter accepts it**. The
 **claim→start** gap is then a deliberate **evaluation window**: a worker holds
 a queued task exclusively while it decides whether to accept, decline (returning it
 with a "not me" so it isn't re-offered the same task), or retire it as a duplicate.
-**completed** is likewise a deliberate gap rather than a true terminal: it is
-the worker's *claim* that the goal is met, and the task only reaches the real
-terminal, **confirmed**, once that claim is corroborated — automatically, by
-an evaluator, for emitter-driven work, or explicitly, by whoever is tracking
-it, for self-tracked work with none (see *verify-the-completion-claim*). A
-completed-but-unconfirmed task may instead be **re-queued** — returning to
+**submitted** is a deliberate review gap: it is the worker's *claim* that the
+goal is met, not a request for another instruction. Workers uniformly submit;
+only the task's designated confirmation authority makes it **completed**.
+An emitter may explicitly choose automatic confirmation by its default
+evaluator; manual tasks require operator approval unless the operator opts
+that particular task into automatic confirmation. The policy belongs to the
+task, not to the worker's confidence. A submitted task may instead be
+**re-queued** — returning to
 **queued** with its progress and any newly added steering carried forward —
-or **abandoned**, exactly like any other non-terminal task.
+or **abandoned**, exactly like any other non-terminal task. A completed task
+is not reopened: further conversation creates a new, linked task.
+
+The [task outputs and review child vision](task-outputs-and-review/README.md)
+owns the deeper output-contract, conversation-history, confirmation, and
+follow-up guarantees.
 
 ### The recipe — an emitter/evaluator template
 The common **shapes** of long-running agentic work ship with the layer as named,
@@ -228,7 +235,7 @@ human operator authoring a task **by hand** through the layer's own surfaces —
 not scripting an emitter — is simply the caller in this same sentence: the
 manual path is not a special mode, it is *this* path, walked by a person instead
 of a domain's automation. Closing that loop is what the **monitor** and
-**confirmed** primitives below exist for.
+**submission review** primitives below exist for.
 
 ### The monitor — a suspend's resolution handler
 Just as an **evaluator** is the emitter's companion handler for a task's
@@ -295,10 +302,13 @@ is what reads that whole vocabulary from the other side.
 
 ### recorded-outcome
 A worker reports **progress toward the goal** at meaningful transitions and a
-**recorded outcome** on completion — a durable, queryable result distinct from
+**recorded outcome** on submission — a durable, queryable result distinct from
 the live transcript (the coordination layer's *summary-status-is-first-class*,
 seen from the delegation side). A caller or operator surveys the fleet's progress
-at a glance without reading each session.
+at a glance without reading each session. Results and input requests share
+human-readable formatted output and optional contract-checked data, with
+durable revision history; see
+[task outputs and review](task-outputs-and-review/README.md).
 
 ### durable-attachment-history
 A task's **current** owner session and worktree are only its latest chapter —
@@ -731,53 +741,36 @@ returns to reflecting only live, in-flight work. Persistent, undraining buildup
 is surfaced as the failure it represents.
 
 ### complete-means-done
-A task reaches **completed** when its *work* is done, not when a baton merely
-changed hands. A worker that takes over a delegated or embodied task **completes
-it explicitly** once it judges the goal reached (deferred completion). The one
+A task reaches **completed** when its submitted work is accepted under its
+confirmation policy, not when a baton merely changed hands or a worker asserts
+success. A worker that takes over delegated or embodied work **submits
+its outcome explicitly** once it judges the goal reached. The one
 exception is a **continuation baton**: a handoff task is spent the moment it is
 picked up, because the continuing *work* is tracked by its own effort or issue,
 not by the handoff record.
 
 ### verify-the-completion-claim
-A worker's completion is a **claim to verify**, not a fact to trust on faith. For
-a **goal-bearing** task the layer corroborates the claim against what was actually
-recorded — a result reference, and progress consistent with the stated
-done-criteria — before treating the goal as met. A completion asserted with **no
-recorded result and no progress** toward a real goal is **held for attention**
-rather than silently accepted, so a worker that declares done without doing the
-work cannot quietly close a goal. This is *complete-means-done* made defensive:
-the worker still self-judges completion, but a goal's closure is corroborated, not
-assumed. (A plain one-shot task with no goal keeps the simple deferred-completion
-contract.) Corroboration is what turns **completed** into **confirmed**
-(*The lifecycle*): for emitter-driven work the evaluator runs this check
-automatically the moment completion is asserted; for **self-tracked** work with
-no evaluator, there is nothing else to run it — the caller tracking the task
-*is* the verifier, and a completed-but-unconfirmed self-tracked task sits
-waiting for exactly that person's review. Reviewing is one of three honest
-acts, never a fourth silent one: **confirm** it (the claim holds, close as
-confirmed), **re-queue** it (the claim doesn't hold, or more is wanted — back
-to queued, progress and any newly given steering carried forward), or
-**abandon** it (the claim doesn't matter anymore). Leaving it unreviewed
-indefinitely is a legitimate resting state — see *self-tracked-review-is-not-a-lane*
-— not a silent default that quietly counts as done.
+A worker's submission is a **claim to review**, not authority to confirm
+itself. Every task records who may accept its outcome: its operator, its
+configured evaluator, or an explicitly selected auto-confirming default
+evaluator. Emitters declare their automatic-confirmation intent, which is
+resolved onto each task when created; later emitter edits do not silently
+change an outstanding task's review policy. Manual tasks default to operator
+approval and expose a per-task choice to waive that review.
 
-The explicit switch for which path a task takes is `require_verification`.
-When it is **false** (the default), the worker's `complete()` call performs
-the assertion and the caller-self-attested corroboration together: the task
-lands at `submitted` internally and is immediately confirmed in the same
-atomic transition, because in this path the caller tracking the task really
-*is* the verifier. When `require_verification` is **true**, `complete()`
-stops at `submitted` only and the task stays there until an evaluator or a
-manual reviewer explicitly **confirm**/**re-queue**/**abandon**s it. The
-existing prose above still governs *who* the verifier is; the flag makes the
-two routes first-class instead of leaving the self-attested one implicit.
+Contract validity and substantive correctness are distinct. All output must
+meet its declared contract; an automatic default evaluator may then confirm
+without a substantive review. A domain evaluator or operator may instead
+accept, reject with steering, or abandon. An absent or failing evaluator
+never becomes implicit permission to accept. Reviews address the exact
+submission being judged, and rejected outcomes remain in history.
 
 ### self-tracked-review-is-not-a-lane
-A **completed-but-unconfirmed** task holds no lane and blocks no pool slot —
-the worker that completed it has already finished and released its claim; only
+A **submitted** task holds no lane and blocks no pool slot —
+the worker that submitted it has already finished and released its claim; only
 the *review* remains outstanding, and review is a caller act, not agent work.
-An arbitrary backlog of unconfirmed completions may sit for as long as the
-caller needs before being confirmed, re-queued, or abandoned, exactly the way
+An arbitrary backlog of submissions may sit for as long as the
+caller needs before being accepted, re-queued, or abandoned, exactly the way
 a *queued*, not-yet-embodied task may sit before a worker binds to it — waiting
 for review is cheap, unlike waiting for a worker.
 
@@ -1102,8 +1095,11 @@ parallel contract.
   backlog-batch archetype's declarative adoption, provider-neutral capability,
   and declarative worker-identity contract.
 - Child leaf: [Tasks-pane UX](tasks-pane-ux/README.md) — the operator surface
-  that realizes manual, no-emitter task authoring and the completed→confirmed
+  that realizes manual, no-emitter task authoring and the submitted→completed
   review loop (*New Task* composer, *Completion Review* card).
+- Child leaf: [task outputs and review](task-outputs-and-review/README.md) —
+  formatted and contract-checked output, history, confirmation authority,
+  asynchronous steering receipts, and completed-task follow-ups.
 - Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer this
   layer's cross-machine reach rides on.
 - Consumer: [agent-logger](../agent-logger/README.md) — the **chronicler**, a

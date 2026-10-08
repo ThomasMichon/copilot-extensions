@@ -4,11 +4,21 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-slice PRs off `dev`
 - **Created:** 2026-09-25
-- **Status:** Draft
+- **Status:** Active - submission/output/delivery amendment proposed 2026-10-08
 - **Umbrella issue:** #3681
 - **Sub-issues:** _none yet_
 
 ## Guiding Intent
+
+**Current direction (2026-10-08):** extend the existing lifecycle, result
+storage, evaluator, and steering machinery into a durable task conversation.
+Workers only SUBMIT; independent policy-driven confirmation makes a task
+COMPLETED. Manual tasks default to operator approval. The
+[task outputs and review vision](../../../visions/plugins/agent-dispatch/task-outputs-and-review/README.md)
+is canonical intent; [the current amendment](task-conversation-amendment.md)
+contains the approved design decisions, dependencies, and validation matrix.
+The older `completed`/`confirmed` terminology below records earlier phases;
+new work uses `SUBMITTED`/`COMPLETED`, not a new `CONFIRMED` state.
 
 Realize the two new core primitives the
 [agent-dispatch vision](../../../visions/plugins/agent-dispatch/README.md)
@@ -89,6 +99,11 @@ particularly for Phase 3's crash-recovery behavior.
 
 ## Request
 
+The 2026-10-07/08 direction is captured in
+[operator-direction.md](operator-direction.md), with settled decisions and
+agent-recommended implementation safeguards separated in
+[task-conversation-amendment.md](task-conversation-amendment.md).
+
 Operator (verbatim, this session):
 
 > For suspension, the default monitor could be to just wake the task up
@@ -114,6 +129,24 @@ holding a lane while waiting on an externality, but should not bare
 "end-turn"; suspension should be constrained to monitor-backed waits with
 known end-states; a `monitors` system should complement `emitters`/
 `evaluators`.
+
+## Participants
+
+| Participant | Role | Reached via |
+|-------------|------|-------------|
+| Planning owner | Vision/effort amendment and its PR only | This effort's coordination issue #3681 |
+| Backend slice owner | One approved implementation phase at a time | Claim the phase on #3681 before creating its worktree |
+| Tasks-pane slice owner | UI consumers after backend contracts land | The linked Tasks-pane effort and its coordination record |
+
+## Coordination
+
+One canonical backend effort; the Tasks-pane effort owns only its UI consumers.
+The planning owner lands this documentation amendment before implementation.
+Later phase owners claim distinct slices on #3681 and drive their own PRs
+through merge, journaling results and handing unresolved work to a named
+successor. The current planning slice does not adopt responsibility for
+executing every historical open phase. Reconcile #5701/#5668 after merge rather
+than opening competing implementations.
 
 ## Plan
 
@@ -306,7 +339,51 @@ single phase that must land both together.
       assert the resumed task's audit trail / delivered message contains
       the honest failure note, not a bare unlabeled resume.
 
+### Phase 5 - Uniform submission and task-owned confirmation policy
+
+- [ ] Resolve emitter `auto_confirm` and manual per-task review choices into
+      immutable-at-creation effective policy; manual approval is the default.
+- [ ] Make all worker completion surfaces submit only. Independent default
+      evaluator confirmation may be immediate but must be a separate decision.
+- [ ] Define migration of `require_verification` and existing tasks without
+      silently auto-confirming pending reviews or breaking domain evaluators.
+- [ ] Preserve no-lane/no-live-worker review and terminal COMPLETED semantics.
+
+### Phase 6 - Contract-bearing output and durable conversation
+
+- [ ] Extend bounded result storage with Markdown and optional structured data
+      on submissions and steering requests; retain input forms separately.
+- [ ] Enforce a task-owned, versioned JSON Schema at every output write boundary.
+- [ ] Journal card/output revisions, related answers, and review decisions;
+      preserve rejected results and fence acceptance to the reviewed revision.
+- [ ] Add explicit completed-task follow-up creation with outcome/history
+      lineage; never reopen the completed parent.
+
+### Phase 7 - Fast acceptance and affirmative asynchronous delivery
+
+- [ ] Measure Picker/CLI resolution, HTTP, DB commit, acknowledgment, bridge
+      acceptance, and worker consumption; diagnose latency rather than infer it
+      from outer timeout constants.
+- [ ] Consume #5701's idempotent acceptance work after it lands; do not build
+      a competing retry/dedup implementation.
+- [ ] Acknowledge saved steering and durable delivery identity without waiting
+      for startup; make continuation queued/claimed while preserving assignment
+      and preventing overlap with a retiring worker.
+- [ ] Separate transport acceptance from worker receipt and reconcile missing
+      acknowledgments with bounded retries, fencing, and visible failures.
+- [ ] Emit correlated attempt/outcome diagnostics outside conversation history;
+      prevent wake-to-sleep churn without work-bearing cause.
+
+Phases 5-7 follow the detailed
+[amendment](task-conversation-amendment.md); their UI consumer is owned by
+[Tasks-pane Phases 10-12](../agent-dispatch-tasks-pane-ux-overhaul/README.md).
+These are planned extensions, not claims that the implementation exists.
+
 ## Validation Plan
+
+- [ ] Complete the [amendment validation matrix](task-conversation-amendment.md#validation-matrix)
+      across queue, HTTP, CLI, MCP, evaluator, service restart, and real worker
+      boundaries, including the manual `2 + 2` scenario.
 
 - [x] `task_state_machine.py`'s own shape checks (`reachable_states`,
       `states_without_exit`, `terminal_states_with_exit`) pass with
@@ -319,9 +396,9 @@ single phase that must land both together.
       (confirmed via `git stash` against the unmodified baseline).
 - [ ] A hand-run scenario end-to-end: propose → queue → claim → start →
       suspend (no explicit monitor) → (fake-clock-advance) → auto-resume →
-      complete → confirm; and the sibling reopen path: complete → reopen →
-      queue → claim → ... → confirm. (Deferred to Phase 3: the
-      no-explicit-monitor auto-resume leg doesn't exist yet.)
+      submit → confirm; and the sibling rejection path: submit → reject →
+      queue → claim → ... → confirm. Re-check the shipped monitor path
+      alongside the new policy; no completed task can originate rejection.
 - [ ] A hand-run crash scenario: suspend with a cooldown pending → kill the
       supervisor process → restart it → assert the honest recovery note
       lands, per Phase 4.
@@ -332,7 +409,8 @@ single phase that must land both together.
 
 ## Proposal
 
-Phase 2's concrete API shapes, as landed:
+Historical Phase 2 API shapes, as recorded then (current state vocabulary and
+extension policy are in the 2026-10-08 amendment):
 
 - `TaskQueue.confirm(task_id, *, actor=None, expected_status=None,
   expected_generation=None, now=None) -> Task` -- `COMPLETED -> CONFIRMED`,
@@ -493,3 +571,14 @@ Phase 3/4's shapes are still pending their own design pass.
 - Phase 4 (crash-recovery honesty) remains open and is next; genuinely
   unexplored per the Phase 4 checklist.
 
+### 2026-10-08 - Task conversation direction reconciled
+
+Extended the canonical vision and this existing effort rather than creating a
+parallel campaign. Added Phases 5-7 and the linked design/validation amendment;
+preserved historical checklists and journals without marking unverified work
+done. Source inspection found bounded results, operator-answer history,
+submitted-task confirm/reject, and a fenced wake outbox already present.
+Card revisions, task-owned output schemas, policy separation, and completed-task
+follow-ups remain explicit implementation deltas. #5701 owns existing
+idempotent-steer work; #5668 owns the attention aggregation interface. No
+runtime changes or delivery fixes are claimed by this documentation update.

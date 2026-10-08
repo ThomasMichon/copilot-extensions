@@ -1,11 +1,12 @@
 """Per-worktree status bundle fact-assembly (agent-worktrees-external-status-
 accelerator effort, Phase 2).
 
-Split out of ``__main__.py`` to keep that module under its shrink-only size
-baseline (``tools/check-module-size.py``) -- purely a location move, no
-behavior change. :mod:`worktree_status_daemon` wraps :func:`compute` with the
-cache layer; :mod:`session_tracking_cli` (via ``__main__``'s ``core`` alias)
-calls it directly as the uncoalesced fallback.
+Git disposition shares :mod:`worktree_git_facts` with the classify/list path,
+including tracking closure and session-turn refinement. Bundles request a
+fetch, keep liveness separate from git, and use the record's cached turn count.
+:mod:`worktree_status_daemon` wraps :func:`compute` with the cache layer;
+:mod:`session_tracking_cli` calls it as the uncoalesced fallback. Both request
+servers run inside the same resident status-monitor, with distinct wire shapes.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import dataclasses
 import time
 
 from . import config as cfg
-from . import disposition_history, git_ops, sessions, tracking
+from . import disposition_history, sessions, tracking, worktree_git_facts
 
 
 def _worktree_status_fact(value, *, confirmed: bool, observed_at: float) -> dict:
@@ -88,12 +89,12 @@ def compute(project: str, worktree_id: str) -> dict:
             include_control_plane_related_pr=False,
         )
         repo = config.default_repo
-        info = git_ops.classify_worktree(
-            record.worktree_path,
-            record.branch,
+        info = worktree_git_facts.compute(
+            record,
+            repo=repo,
             fetch=True,
-            remote=repo.remote,
-            default_branch=repo.default_branch,
+            active_paths=None,
+            session_turns=record.session_turns or 0,
         )
         git_confirmed = not (info.fetch_requested and info.fetch_failed)
         facts["git_state"] = _worktree_status_fact(
