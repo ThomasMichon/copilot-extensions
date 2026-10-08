@@ -1,0 +1,9 @@
+{
+  "comment": "Update a code comment's path reference after pivot-streaming-transport was archived",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

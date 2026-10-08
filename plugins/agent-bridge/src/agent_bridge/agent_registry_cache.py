@@ -17,7 +17,7 @@ This module deliberately does **not** cache the non-namespaced
 dict walk, not a scan, so caching it would only add a staleness class with
 no benefit.
 
-See ``efforts/active/pivot-streaming-transport/phase-3-design.md``'s 3b
+See ``efforts/2026/10/07 pivot-streaming-transport/phase-3-design.md``'s (archived) 3b
 section for the full design rationale (last-known-good retention,
 uninitialized vs. failed vs. fresh per-namespace state, single-flight plus
 generation-guarded publication, the ``force_refresh``/``require_complete``

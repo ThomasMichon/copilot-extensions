@@ -1,5 +1,19 @@
 # Phase 3 — CLI-relayed daemon fast path (detailed design)
 
+> **Archived 2026-10-07.** 3a and 3b's requirements below were implemented
+> and shipped as part of `pivot-streaming-transport` (see the parent
+> `README.md`'s own Journal for the landed PRs and validation evidence —
+> `#4994`, `#5166`, and `#5585`'s follow-up fix). **3c was deferred, not
+> shipped** — tracked at `ThomasMichon/copilot-extensions#5640`; its own
+> design below remains a live reference if that issue is ever picked up.
+> This file's own checkboxes are left exactly as originally written, by
+> design (per its own header below: "Review-round history for this design
+> lives in the README's own dated Journal, not here") — it is the original
+> design record, not a parallel completion tracker. Do not read an
+> unchecked box here as still-open work for 3a/3b; the README's own Plan
+> and Validation Plan are the authoritative completion record, and #5640
+> is the authoritative record for 3c's deferred status.
+
 Extracted from [`README.md`](README.md)'s Plan per `efforts/README.md`'s
 "extract substantial phase designs into sibling documents" convention. The
 README keeps a concise checklist and links here; this file is the

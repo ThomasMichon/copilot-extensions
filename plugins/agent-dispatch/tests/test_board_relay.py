@@ -312,8 +312,8 @@ def test_event_loop_serializes_every_writer_never_running_concurrently(
 ):
     """The effort's Validation Plan requires proving the event-woken fetch,
     the long reconcile, and the local recompute tick never run
-    concurrently (`efforts/active/pivot-streaming-transport/README.md`'s
-    Validation Plan; `phase-3-design.md`'s "serialize every writer" design
+    concurrently (`efforts/2026/10/07 pivot-streaming-transport/README.md`'s
+    (archived) Validation Plan; `phase-3-design.md`'s "serialize every writer" design
     bullet). The single-threaded control loop achieves this by
     construction -- there is only ever one writer active at a time, with no
     explicit lock needed -- rather than the design document's own literal

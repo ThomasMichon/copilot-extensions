@@ -1,0 +1,9 @@
+{
+  "comment": "Update code comment path references after pivot-streaming-transport was archived",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
