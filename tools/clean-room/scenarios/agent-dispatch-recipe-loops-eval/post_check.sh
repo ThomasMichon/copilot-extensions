@@ -188,8 +188,19 @@ print(chosen.get("id", ""))
             cr_meta "${_recipe}_final_status" "$_status"
             cr_meta "${_recipe}_result_ref" "$_result_ref"
             case "$_status" in
-                submitted|completed)
+                completed)
                     pass "$_recipe: task $_selected_id reached terminal status '$_status'"
+                    ;;
+                submitted)
+                    # This fixture's declarations all set
+                    # require_verification: false specifically so a
+                    # genuinely healthy run reaches 'completed' directly --
+                    # 'submitted' here means the completion claim is still
+                    # awaiting evaluator/manual verification
+                    # (repository-issue-loop-adoption.md's diagnosis table),
+                    # which is real evidence of a configuration/transition
+                    # mismatch, not of recipe success. Do not PASS it.
+                    info "$_recipe: task $_selected_id reached 'submitted', not 'completed' -- this fixture disables verification (require_verification: false), so 'submitted' indicates a real configuration/transition mismatch, not recipe success"
                     ;;
                 abandoned|dead_letter)
                     info "$_recipe: task $_selected_id ended '$_status' -- check the transcript for the stated reason"

@@ -72,15 +72,24 @@ anything, registered the repo with exactly one documented
 declarations were picked up by that single registration, let the real
 coordinator's own cadence drive ticking (never fabricating a manual trigger),
 and reported -- for **every one of the four recipes** -- a real terminal
-coordinator task state (`completed` or `submitted`) corroborated by real,
-independently-observed GitHub-side evidence. It never acted as a recipe worker
-itself. **An accurate `doctor` diagnosis or a failed terminal state
-(`abandoned`/`dead_letter`) for even one recipe is NOT a PASS for that recipe**
--- this scenario's whole purpose is proving all four recipes complete real
-work end to end, not merely that the orchestrator can diagnose/report
-accurately when one doesn't. A correct diagnosis is good evidence the
-orchestrator followed the docs faithfully, but it downgrades that recipe (and
-the overall run) to INCONCLUSIVE/FAIL rather than PASS -- see below.
+coordinator task state of `completed` (never `submitted` -- see below)
+corroborated by real, independently-observed GitHub-side evidence. It never
+acted as a recipe worker itself. **An accurate `doctor` diagnosis, a failed
+terminal state (`abandoned`/`dead_letter`), or a task left at `submitted` for
+even one recipe is NOT a PASS for that recipe** -- this scenario's whole
+purpose is proving all four recipes complete real work end to end, not merely
+that the orchestrator can diagnose/report accurately when one doesn't. A
+correct diagnosis is good evidence the orchestrator followed the docs
+faithfully, but it downgrades that recipe (and the overall run) to
+INCONCLUSIVE/FAIL rather than PASS -- see below.
+
+`submitted` is a completion **claim** still awaiting evaluator/manual
+verification (`repository-issue-loop-adoption.md`'s diagnosis table), not a
+closed outcome -- and every one of this fixture's declarations sets
+`require_verification: false` specifically so a genuinely healthy run reaches
+`completed` directly. A task still sitting at `submitted` here is evidence of
+a real configuration/transition mismatch, not of recipe success, and must be
+scored INCONCLUSIVE/FAIL for that recipe rather than PASS.
 
 ## FALSE-PASS → FAIL (the tripwires)
 
@@ -114,16 +123,16 @@ the overall run) to INCONCLUSIVE/FAIL rather than PASS -- see below.
 ## Inconclusive / FAIL (less than all four recipes genuinely complete)
 
 If the transcript is truncated before every one of the four recipes reaches a
-real `completed`/`submitted` terminal state (the live headless workers may
-genuinely still be in flight when the turn's timeout is reached), mark the
-affected recipe(s) `INCONCLUSIVE` and name the artifact that would settle it
+real `completed` terminal state (the live headless workers may genuinely
+still be in flight when the turn's timeout is reached), mark the affected
+recipe(s) `INCONCLUSIVE` and name the artifact that would settle it
 (`eval/transcript.txt` for the orchestrator's own narrative, `cr-logs/pc-*.log`
 / `cr-report.json` for `post_check.sh`'s independent ground-truth read taken
 immediately after the turn ends). If the turn instead ENDED with one or more
-recipes still showing no task, a `doctor` diagnosis, or a failed terminal
-(`abandoned`/`dead_letter`) with no further headless work plausibly in
-flight, that is not inconclusive -- it is a **FAIL for this scenario's stated
-purpose** on those recipe(s), even when the orchestrator reported it
-perfectly accurately. Score the orchestrator's own doc-following/reporting
-behavior separately from whether the scenario's end-to-end claim (all four
-recipes complete real work) actually held.
+recipes still showing no task, a `doctor` diagnosis, a failed terminal
+(`abandoned`/`dead_letter`), or a task left at `submitted` with no further
+headless work plausibly in flight, that is not inconclusive -- it is a **FAIL
+for this scenario's stated purpose** on those recipe(s), even when the
+orchestrator reported it perfectly accurately. Score the orchestrator's own
+doc-following/reporting behavior separately from whether the scenario's
+end-to-end claim (all four recipes complete real work) actually held.
