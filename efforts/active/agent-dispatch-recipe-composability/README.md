@@ -12,12 +12,20 @@
   override values that may themselves be script-path hooks the base engine
   invokes."
 - **Umbrella issue:** [#4959](https://github.com/ThomasMichon/copilot-extensions/issues/4959)
-- **Related:** [`agent-dispatch-recipe-library`](../agent-dispatch-recipe-library/README.md)
+- **Related:** [`agent-dispatch-recipe-library`](../../2026/10/08%20agent-dispatch-recipe-library/README.md)
   (#4691) — this effort builds on, and does not replace, that effort's
   `extends:` resolution mechanism (`registrar_recipes.py`: `resolve_extends`
   / `resolve_recipe_ref` / `deep_merge` / `substitute_placeholders`). Land
   this effort's Phase 1 only after confirming it doesn't collide with any
-  concurrent recipe-library work in the same module.
+  concurrent recipe-library work in the same module. That effort also
+  deferred its own Phase 3 single-`emitter`-producer-primitive taxonomy
+  refactor (schedule/webhook/websocket as emitter *triggers* rather than
+  separate `kind` values) to
+  [`ThomasMichon/copilot-extensions#5732`](https://github.com/ThomasMichon/copilot-extensions/issues/5732)
+  when it archived — a related but distinct registrar-taxonomy refactor,
+  not part of this effort's own scope (this effort generalizes `extends:`
+  *resolution* and override values; #5732 generalizes *producer kind*).
+  Worth checking for sequencing overlap before either lands.
 
 ## Guiding Intent
 
@@ -72,9 +80,9 @@ fits.
   tracked here (see `references/efforts.md` §Cross-repo placement — this
   is the "Build directly in the target repo" model, confirmed via
   `scripts/emit-policy.sh --check-adoption`).
-- **Builds on `agent-dispatch-recipe-library`** (#4691, status: in progress):
-  that effort shipped `extends:`'s resolution mechanism and four named
-  global recipes. This effort generalizes the *resolution* (any base, not
+- **Builds on `agent-dispatch-recipe-library`** (#4691, status: Done, archived
+  2026-10-08): that effort shipped `extends:`'s resolution mechanism and four
+  named global recipes. This effort generalizes the *resolution* (any base, not
   only a named recipe; chaining) and the *override model* (a script-path
   hook, not only scalar substitution) without changing that effort's own
   shipped behavior — every existing direct `kind:` declaration and every

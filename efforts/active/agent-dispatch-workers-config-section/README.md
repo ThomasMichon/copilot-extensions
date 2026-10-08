@@ -16,7 +16,7 @@
 - **Umbrella issue:** See effort
 - **Sub-issues:** none yet
 - **Related efforts:**
-  [`agent-dispatch-recipe-library`](../agent-dispatch-recipe-library/README.md)
+  [`agent-dispatch-recipe-library`](../../2026/10/08%20agent-dispatch-recipe-library/README.md)
   (shipped the `extends:`/recipe-template model this section surfaces),
   [`agent-dispatch-tasks-pane-ux-overhaul`](../agent-dispatch-tasks-pane-ux-overhaul/README.md)
   Phase 9 (the richer Configuration → Registrars viewer/editor; this effort's

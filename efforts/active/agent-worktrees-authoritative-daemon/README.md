@@ -691,7 +691,7 @@ survey above.
       `direct-read-is-a-degrade-not-a-peer` reads remain sanctioned;
       writes do not.
 
-### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(in progress — 6b/6c implemented and validated; 6d open)_
+### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(in progress — 6b/6c merged; 6d open)_
 _(Added 2026-10-06, operator-directed formal follow-on from
 `pivot-streaming-transport`. Addresses the Worktrees-pivot half of
 [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555):
@@ -905,6 +905,14 @@ than hypothetical:
       tracked follow-on issue for the snapshot/stream cutover — do not let
       6a-6c's completion read as "the Worktrees-pivot half of #5555 is
       done" if this gap is left open silently.
+
+      The chosen continuation is the cutover, not a silent narrowing:
+      [Phase 6d execution plan](phase-6d-authority.md) scopes resident list
+      authority, a coherent snapshot/held feed, and actual consumer
+      row-stability acceptance. It explicitly covers whole-payload cache,
+      caller-side session/mux enrichment, and Group C reconcile overlays.
+      The execution detail is agent-recommended and must clear review before
+      implementation; live-daemon errors never authorize direct computation.
 - [x] Update `classify_daemon.py`'s and `worktree_status_compute.py`'s own
       module docstrings to describe the consolidated architecture, so a
       future reader doesn't rediscover this effort's own "two daemons, one
@@ -951,7 +959,25 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-10-08 — Phase 6d: scoped the remaining authority/stream cutover
+
+Source tracing after #5743 confirmed that the gap is larger than the git
+fallback: normal classified reads may serve whole-payload cache, cache-only
+paints use record hints, streaming computes locally, and the production local
+loader overlays a separate reconcile batch. Coalescing-library `subscribe`
+is lifetime accounting, not a change feed. `phase-6d-authority.md` records the
+agent-recommended execution slices and validation obligations for closing
+those competing read paths without changing the parent's hard requirement.
+The live oscillation's actual cadence remains unverified; neither this plan
+nor the already-merged repairs are a substitute for its consumer acceptance.
+
 ### 2026-10-08 — Phase 6b/6c: one shared wrapper; stamp release verified
+
+The shared-wrapper implementation and its structural/freshness tests merged
+as #5743 (merge commit `9a09837d699600b47888bf053769f8a89654752f`).
+Its promotion/deployment remains a separate pending obligation.
+The implementation worktree is retained for Phase 6d, not finalized merely
+because this slice landed.
 
 The cache-stamp fix merged as #5700 and is now present in the released
 `main` source (the original dev CI run completed successfully; promotion
