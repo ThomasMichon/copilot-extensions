@@ -81,7 +81,9 @@ def creation_point(ref: str, cwd: str) -> str:
     remote-tracking branch (its reflog's oldest entry, ``branch: Created from
     origin/main``) that is proven to have held that commit: everything reachable
     from it was already published when the branch was made, so it is never this
-    branch's own work -- even after that remote rewrites its history.
+    branch's own work -- even after that remote rewrites its history. When the
+    branch's only later moves reset it to newer tips of that same source (a sync),
+    the point is the latest of those (:func:`_later_resets_to_source`).
 
     The reflog message alone doesn't prove where the commit came from (a local
     branch can be named ``origin/x``), so no local branch may share the source's
@@ -111,13 +113,34 @@ def creation_point(ref: str, cwd: str) -> str:
                    check=False).returncode == 0:
         return ""  # a local branch with that name: the message can't tell which it was
     remote = source.partition("/")[0]
+    created = ""
     for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
         tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
         if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
-            return sha
-    held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
-                           f"refs/remotes/{remote}/", cwd=cwd, check=False)
-    return sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
+            created = sha
+            break
+    if not created:
+        held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
+                               f"refs/remotes/{remote}/", cwd=cwd, check=False)
+        created = sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
+    return _later_resets_to_source(entries, created, source, cwd) if created else ""
+
+
+def _later_resets_to_source(entries: list[str], created: str, source: str, cwd: str) -> str:
+    """Advance *created* through the branch's later moves that only reset it to a
+    commit the source was proven to hold -- one its own remote-tracking reflog
+    names (a sync to ``origin/main``'s then-tip): those commits were published, not
+    made here. Stops at the first other move (a commit, a rebase, a reset elsewhere)."""
+    tips = git_ops.git("reflog", "show", "--format=%H", f"refs/remotes/{source}", "--",
+                       cwd=cwd, check=False)
+    held = {ln.strip() for ln in tips.stdout.splitlines()} if tips.returncode == 0 else set()
+    point = created
+    for entry in reversed(entries[:-1]):  # oldest first, after the creation
+        sha, _, subject = entry.partition("\t")
+        if not subject.startswith(("branch: Reset to ", "reset: moving to ")) or sha.strip() not in held:
+            break
+        point = sha.strip()
+    return point
 
 
 def landing(branch: str, upstream: str, cwd: str, *, explain: bool = False) -> Landing:

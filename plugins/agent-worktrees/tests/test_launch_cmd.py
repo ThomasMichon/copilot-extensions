@@ -932,6 +932,132 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
     assert marker.read_text(encoding="utf-8").strip() == "launched"
 
 
+def test_default_setup_ps1_double_dash_copilot_args_not_mis_bound_positionally(
+    tmp_path,
+):
+    """Regression for the incident where a real session launch failed with
+    `Write-Error: Configured Copilot executable not found: --model`.
+
+    default-setup.ps1 has several OPTIONAL string parameters (-SessionPath,
+    -EnvScript, -CopilotPath) that a real launch plan only passes by name
+    when actually needed -- exactly like the launcher's own real invocation,
+    which names only -Machine/-SetupHook/-ConfigRoot/-RuntimePython and
+    leaves the GNU-style double-dash Copilot CLI flags (--allow-all,
+    --experimental, --model claude-sonnet-5, ...) to fall through via
+    ValueFromRemainingArguments.
+
+    Calling default-setup.ps1 directly via `pwsh -File` does NOT reproduce
+    this -- PowerShell's `-File` script-argument binder tolerates the gap.
+    The incident is specific to **launch-command.ps1's own dot-source fast
+    path** (copilot-extensions#5579): it reconstructs the forwarded
+    arguments as a quoted command-line STRING (every non-flag-shaped token,
+    including each double-dash Copilot CLI flag, individually quoted) and
+    dot-sources that via `[scriptblock]::Create(...)`. In THAT invocation
+    shape, PowerShell's named-parameter matcher requires a single leading
+    dash, so the quoted double-dash tokens don't match any parameter name
+    and fall back to positional binding -- silently consumed by
+    default-setup.ps1's own unbound optional string parameters
+    (SessionPath / EnvScript / CopilotPath) in declaration order. E.g.
+    `$CopilotPath` ends up set to the literal string `--model`, which the
+    script then fails to resolve as an executable and aborts the whole
+    launch before Copilot ever starts.
+
+    This test therefore drives the REAL launch-command.ps1 (staged, so its
+    fast-path self-identity check for "launch-command.ps1's own canonical
+    default-setup.ps1" resolves) against the REAL default-setup.ps1 (not a
+    simplified stand-in param block), with the same command shape as the
+    actual incident: -Machine named, -SetupHook/-ConfigRoot/-RuntimePython
+    omitted (so SessionPath/EnvScript/CopilotPath are the first unbound
+    optional positions), followed directly by double-dash Copilot CLI
+    flags.
+    """
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+
+    staged_launch_command = _stage_launch_command(tmp_path)
+    # launch-command.ps1's fast path only engages when the requested script
+    # resolves to ITS OWN canonical default-setup.ps1 (same directory as
+    # the staged launch-command.ps1) -- stage the real default-setup.ps1
+    # content alongside it so the self-identity check passes and the fast
+    # (dot-source) path actually fires, exactly as it does in production.
+    real_scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+    staged_default_setup = tmp_path / "default-setup.ps1"
+    staged_default_setup.write_text(
+        (real_scripts_dir / "default-setup.ps1").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    marker = tmp_path / "launched"
+    argv_marker = tmp_path / "argv.txt"
+    home = tmp_path / "home"
+    home.mkdir()
+
+    path_dir = tmp_path / "bin"
+    path_dir.mkdir()
+    if os.name == "nt":
+        copilot = path_dir / "copilot.cmd"
+        copilot.write_text(
+            "@echo off\r\n"
+            "> \"%COPILOT_LAUNCH_MARKER%\" echo launched\r\n"
+            "> \"%COPILOT_ARGV_MARKER%\" echo %*\r\n",
+            encoding="utf-8",
+        )
+        env_path = str(path_dir)
+    else:
+        copilot = path_dir / "copilot"
+        copilot.write_text(
+            "#!/bin/sh\n"
+            'printf launched > "$COPILOT_LAUNCH_MARKER"\n'
+            'printf \'%s\\n\' "$@" > "$COPILOT_ARGV_MARKER"\n',
+            encoding="utf-8",
+        )
+        copilot.chmod(0o755)
+        env_path = f"/usr/bin:/bin:{path_dir}"
+
+    env = os.environ.copy()
+    env.pop("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", None)
+    env["AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED"] = "1"
+    env["HOSTNAME"] = "test-host"
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["COPILOT_LAUNCH_MARKER"] = str(marker)
+    env["COPILOT_ARGV_MARKER"] = str(argv_marker)
+    env["PATH"] = env_path
+
+    proc = subprocess.run(
+        [
+            shell, "-NoProfile", "-NoLogo", "-File", str(staged_launch_command),
+            "--", shell, "-NoProfile", "-NoLogo", "-File", str(staged_default_setup),
+            "-Machine", "test", "-Recovery",
+            # No -SetupHook / -ConfigRoot / -RuntimePython -- same shape as
+            # the real incident's launch plan (minus the setup-hook guard,
+            # which -Recovery skips so this test needs no real
+            # agent-worktrees runtime to validate a config root). Everything
+            # below must land in $CopilotArgs, not get swallowed by
+            # SessionPath/EnvScript/CopilotPath.
+            "--allow-all", "--experimental", "--model", "claude-sonnet-5",
+            "--reasoning-effort", "medium", "--context", "long_context",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Configured Copilot executable not found" not in proc.stderr
+    assert proc.returncode == 0, proc.stderr
+    assert marker.read_text(encoding="utf-8").strip() == "launched"
+    # The two fake `copilot` stand-ins format argv differently (Windows
+    # `.cmd`'s `%*` is one space-joined line; the POSIX one prints one arg
+    # per line) -- split on any whitespace so the comparison is agnostic to
+    # which form produced it.
+    forwarded = argv_marker.read_text(encoding="utf-8").split()
+    assert forwarded == [
+        "--allow-all", "--experimental", "--model", "claude-sonnet-5",
+        "--reasoning-effort", "medium", "--context", "long_context",
+    ]
+
+
 def _stage_launch_command(tmp_path: Path) -> Path:
     """Copy the real launch-command.ps1 into *tmp_path* so a fake
     default-setup.ps1 placed alongside it resolves as launch-command.ps1's

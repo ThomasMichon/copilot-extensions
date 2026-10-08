@@ -1754,13 +1754,17 @@ def _reconcile_active_pr(
     if tracking._pr_is_terminal(active):
         return
     prcfg = config.default_repo.pr
-    provider_name = active.provider or prcfg.provider
-    target_repo = active.repo or (record.repo or "")
     api_base = getattr(prcfg, "api_base", "") or ""
+    from .finalize_open_pr_gate import trusted_target
+    target = trusted_target(active, prcfg, record.repo or "")
+    if not target:
+        # Unresolvable, or not provably this PR at the configured provider and
+        # authority: keep the local state rather than confirm an unrelated PR.
+        return
+    provider, target_repo = target
     try:
         from . import providers
 
-        provider = providers.get_provider(provider_name)
         token = providers.account_token_for_slug(target_repo, prcfg)
         pull = provider.get_pull(
             target_repo, active.number, api_base=api_base, token=token,

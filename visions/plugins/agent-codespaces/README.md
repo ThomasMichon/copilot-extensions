@@ -9,7 +9,7 @@
   contract** as a local one.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-06
+- **Last revised:** 2026-10-07
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) (install
   topology, the credential-relay path, the `codespace:` resolver) · the plugin's
   [`README`](../../../plugins/agent-codespaces/README.md) and its skills
@@ -289,12 +289,12 @@ reading it** — a pure hand-off, not a pass-through. A host port the venue's
 work needs (a browser's live DevTools endpoint) and a venue port the host
 needs to reach (a worker's dev server) are each bridgeable on request, so
 verifying work that spans the host/venue boundary does not require a
-second, ad hoc transport. This feature is the **venue-launch layer** only —
-preparing the venue, the transport, and the muxed process itself; whether
-that interactive session becomes a first-class, discoverable,
-reservation-bound peer in the coordination layer's own `live_sessions`
-registry is a separate, fabric-wide concern this vision defers entirely to
-[remote-interactive-sessions](../../remote-interactive-sessions/README.md).
+second, ad hoc transport. The resulting interactive session is a
+first-class, discoverable, reservation-bound peer in the coordination
+layer's own `live_sessions` registry, not a fabric-invisible raw SSH
+session — the should-be contract for that integration is owned by
+[remote-interactive-sessions](../../remote-interactive-sessions/README.md),
+which this feature already realizes end to end.
 
 ### config-by-adoption
 A repo's venue policy lives **in that repo** and is **read live** (no generated
@@ -615,10 +615,11 @@ tooling.)
   that compiles and mines the rescued CodeSpace session data into logs and usage
   telemetry (this vision guarantees the *capture*; agent-logger owns the analysis).
 - Related vision: [remote-interactive-sessions](../../remote-interactive-sessions/README.md) —
-  owns the coordination-layer integration (worktree-keyed reservation,
-  `live_sessions` discoverability, honest marking) that turns this vision's
-  *dual-mode-session-reach* venue launch into a first-class coordinated peer;
-  this vision owns the launch primitive itself, not that integration.
+  owns the should-be contract for the coordination-layer integration
+  (worktree-keyed reservation, `live_sessions` discoverability, honest
+  marking) that turns this vision's *dual-mode-session-reach* venue launch
+  into a first-class coordinated peer; this vision owns the launch
+  primitive, and the integration is already realized end to end.
 - Reality docs: [`docs/architecture.md`](../../../docs/architecture.md) · the
   `plugins/agent-codespaces/` skills (`codespaces-lifecycle`, `codespaces-setup`,
   `borrowing-codespaces`, `recovering-codespaces`, `cleaning-codespaces`).
@@ -735,3 +736,17 @@ tooling.)
   not invariant violations. Phase 3's cutover/immutable-runtime conformance
   audit already covers this plugin's `install.ps1` separately (see `#5472`)
   and is unaffected by this slice.
+
+- **2026-10-07** — Corrected *dual-mode-session-reach*'s own "venue-launch
+  layer only, coordination-layer integration deferred to
+  remote-interactive-sessions" framing from the entry above: that was
+  itself a stale claim, carried through from `remote-interactive-sessions`'
+  own stale text rather than verified against code. Checked against
+  `efforts/active/agent-bridge-cli-mode-sessions/README.md` (the owning
+  effort) and `copilot_venue.py`: the coordination-layer integration
+  (worktree-keyed reservation, daemon-port reverse-forward, `live_sessions`
+  registration with honest CLI-mode marking) is already realized and
+  live-clean-room-validated, not deferred. Reworded the feature and the See
+  Also cross-link to state the integration as realized. No new intent
+  added — a stale current-state claim corrected a second time, this time
+  against the owning effort/code rather than against another vision.

@@ -91,12 +91,14 @@ _SUBSUITE_TIMEOUT_OVERRIDES: dict[str, float] = {
     # agent-index's 2nd 25-file sub-suite carries several real PowerShell/
     # venv-heavy installer tests (Phase 3.5, 2026-10-07): measured at
     # ~374s under real full-matrix host load, past the global 300s default
-    # but a real, passing runtime rather than a hang.
-    "agent-index": 600.0,
+    # but a real, passing runtime rather than a hang. Raised to 900s
+    # alongside the per-test bump below, so a sub-suite with several
+    # individually-slow tests near the new 180s test ceiling still fits.
+    "agent-index": 900.0,
 }
 _PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {
     "agent-dispatch": 1800.0,
-    "agent-index": 1800.0,
+    "agent-index": 2700.0,
 }
 # Several agent-index installer tests genuinely need real PowerShell/venv
 # subprocess work that can exceed the global blanket 30s-per-test
@@ -106,8 +108,18 @@ _PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {
 # fast-fail-elsewhere reason as the other overrides above. A test whose
 # own real work is exceptionally long still carries its own explicit
 # @pytest.mark.timeout(N), which always wins over this plugin default.
+# Raised 90s -> 180s, 2026-10-07: a broad AST audit found ~40+ test-only
+# subprocess.run() call sites across this plugin's own suite with no
+# internal timeout of their own, each individually and unpredictably
+# capable of exceeding 90s under genuine full-matrix host contention
+# (which specific one varies run to run -- not one fixed slow test).
+# Patching every call site with its own internal subprocess timeout is a
+# separate, larger follow-up; this blanket bump is the proportionate
+# near-term mitigation for test-only code, not production code (compare
+# the real production fix in cell-runtime.py's _run_cell_deploy, which
+# DOES carry its own internal subprocess timeout regardless of this).
 _TEST_TIMEOUT_OVERRIDES: dict[str, float] = {
-    "agent-index": 90.0,
+    "agent-index": 180.0,
 }
 
 # The runner is a repository tool, so consume the canonical shared source

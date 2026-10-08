@@ -17,7 +17,18 @@
     calling this script. Context (project) resolves from CWD, git-like --
     no ambient WORKTREE_PROJECT is required.
 #>
-[CmdletBinding()]
+# PositionalBinding=$false is required here: forwarded Copilot CLI flags
+# (--allow-all, --model, --reasoning-effort, --context, --resume=...) use a
+# single or double leading dash that PowerShell's named-parameter matcher
+# does not recognize as this script's own named parameters (which need an
+# exact `-Name` match). Without this, PowerShell falls back to binding them
+# POSITIONALLY against this script's own unbound optional string parameters
+# (SessionPath / EnvScript / CopilotPath) in declaration order whenever a
+# caller omits one of those optional flags by name -- silently mis-routing
+# e.g. `--model` into $CopilotPath instead of $CopilotArgs. Forcing
+# name-only binding makes every unmatched token fall through to
+# $CopilotArgs via ValueFromRemainingArguments, as intended.
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Machine = $env:COMPUTERNAME,
     [switch]$Recovery,

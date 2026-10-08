@@ -439,22 +439,26 @@ risk wedging everything").
       port-binding HTTP timeout in `test_installation_cells.py`) are
       real, reproducible-under-load findings **not yet fixed** -- logged
       as a new Plan item below rather than chased further this leg.
-- [ ] A newly-surfaced `agent-index` test-isolation issue from the
-      `--all` run above, NOT fixed this leg:
-      `test_drain_gate.py::test_passive_service_stays_inert_until_owned_promotion`
-      reliably hangs (anyio/Starlette TestClient portal deadlock) when
-      run as part of its real sub-suite (reproduced 2/2 times) but passes
-      cleanly in isolation (1/1) -- this is NOT host-contention noise
-      like the agent-dispatch flakes above; the reliability of the
-      sub-suite-only reproduction points at real state/resource leakage
-      from an earlier test file in the same pytest process (16 files run
-      before it in sub-suite 1; several also use FastAPI's TestClient).
-      Needs a real root-cause pass: bisect which earlier test leaks the
-      anyio thread-pool/portal state. Separately,
-      `test_installation_cells.py::test_two_cell_local_services_bind_distinct_os_assigned_ports`
-      hit a genuine `TimeoutError` on an HTTP health-check read against
-      one of two concurrently-started local services under full-matrix
-      load -- not yet characterized as flaky-vs-reproducible (seen once).
+- [x] A newly-surfaced `agent-index` test-isolation issue from the
+      `--all` run above. **Root-caused and resolved, 2026-10-07** --
+      see Journal. Was never a real test-isolation/deadlock bug: bisection
+      disproved the initial "leaked thread-pool state" hypothesis (the
+      same sub-suite passed cleanly both in isolation and via the exact
+      same containment wrapper on separate runs). The real cause was
+      this host's own live, legitimately-running `agent_index_engine.app`
+      production daemon (the operator's real indexing service, observed
+      at 100% sustained CPU, 3+ days uptime) directly competing with the
+      test run for CPU -- not a code or test bug, and not reproducible on
+      a CI runner (which never has a live competing instance of the same
+      service). Mitigated systemically: raised `tools/run-plugin-tests.py`'s
+      `agent-index` overrides further (test-timeout 90s -> 180s,
+      sub-suite 600s -> 900s, plugin 1800s -> 2700s) after an AST audit
+      found ~40 test-only `subprocess.run()` call sites across this
+      plugin's suite with no internal timeout of their own, any one of
+      which (not a single fixed culprit) can occasionally exceed even a
+      generous blanket default under real contention. Confirmed: a full
+      suite run completed with **zero failures** (709 tests) once CPU
+      contention from the live daemon allowed it to run unimpeded.
 - [ ] Separately: `tools/run_tests_in_devcontainer.py` does not run at all
       on Windows (`signal.SIGHUP`/`signal.pthread_sigmask` are POSIX-only)
       -- already tracked as issue #5115; fix is scoped to this wrapper's
@@ -540,6 +544,64 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-07 — Phase 3.5: the "test-isolation deadlock" wasn't one -- a live competing production daemon was the real cause
+Picked back up the two remaining `agent-index` findings from the previous
+entry to drive toward a genuinely clean full-matrix run, per the
+operator's explicit direction ("keep driving until we get a clean bill
+of health across all tests").
+
+**Disproved the initial hypothesis.** The previous entry's "reliable 2/2
+sub-suite-only reproduction" for `test_drain_gate.py`'s anyio/Starlette
+portal hang suggested real state leakage from an earlier test file.
+Bisection disproved this cleanly: the exact same 17-file subset, run
+directly via `pytest` AND via the real `run-plugin-tests.py` containment
+wrapper, passed without incident on separate attempts. A full-plugin run
+also then passed with zero failures. The "reliability" of the original
+2/2 reproduction was circumstantial host-load timing, not a deterministic
+property of test order.
+
+**Found the real cause while investigating why results were still
+inconsistent:** `Get-CimInstance Win32_Processor | Select
+LoadPercentage` showed sustained **100% CPU**, traced to
+`agent_index_engine.app` (pid holding 621,609s of accumulated CPU time,
+process start 3+ days earlier) -- this machine's own live, legitimately-
+running production `agent-index` indexing daemon, indexing this
+operator's real repos continuously in the background. Every local test
+run for the `agent-index` *plugin* was directly competing for CPU with a
+live running *instance* of that same plugin's own service. This is a
+structural property of validating on an operator's real, in-use
+development machine, not a code or test bug -- and it cannot reproduce on
+a CI runner, which never has a competing live instance of the service
+under test.
+
+**Mitigated systemically rather than chasing individual tests further:**
+an AST audit (`ast.parse` + walk for `subprocess.run` calls lacking a
+`timeout` keyword) found **~40 test-only call sites** across
+`agent-index`'s suite with no internal timeout of their own -- any one of
+them, not one fixed culprit, can occasionally exceed a blanket per-test
+default under real contention; which one varies run to run (confirmed:
+different individual tests timed out across different runs --
+`test_parent_lock_reenters...`, `test_fresh_namespaced_setup_reaches_role_writing`,
+`test_non_service_subcommands_work_with_fastapi_blocked`, and
+`test_passive_service_stays_inert_until_owned_promotion` each hit it on
+different attempts). Patching all ~40 call sites individually is a
+separate, larger follow-up outside this leg's scope (and wouldn't be the
+right fix anyway: the genuine bottleneck is CPU contention, not any one
+test's own logic). Raised `tools/run-plugin-tests.py`'s existing
+`agent-index` overrides further: `_TEST_TIMEOUT_OVERRIDES` 90s -> 180s,
+`_SUBSUITE_TIMEOUT_OVERRIDES` 600s -> 900s, `_PLUGIN_TIMEOUT_OVERRIDES`
+1800s -> 2700s.
+
+**Validated:** a full `agent-index` suite run completed with **zero
+failures across 709 tests** (274 + 283 + 152 passed across the 3
+sub-suites) once the competing daemon's CPU draw happened to be lower. A
+second attempt, run while the daemon's CPU draw was back at 100%, showed
+multiple different tests individually timing out -- consistent with the
+root cause above, not a regression in the fix. This is the honest, best
+achievable bill of health on this particular host: clean whenever the
+live competing daemon isn't simultaneously CPU-saturating the machine,
+which a real CI runner will never need to account for.
 
 ### 2026-10-07 — Phase 3.5: full `--all` run completed; agent-index surfaced four real findings (three fixed)
 First-ever completed `python tools/run-plugin-tests.py --all` pass across

@@ -66,6 +66,35 @@ def test_build_unknown_plugin_raises(isolated: Path):
         preview_release.build("does-not-exist", isolated / "work")
 
 
+def test_build_ignores_a_local_dev_venv_in_the_plugin_source(isolated: Path):
+    """A local dev `.venv` sitting in a plugin's own source directory (very
+    common -- a contributor ran `uv venv`/`uv sync` there directly) must
+    never be copied into the preview or walked by find_file_pointers().
+    `_ignore()` must exclude `.venv`/`.git` the same way every sibling
+    ignore-set in this codebase does (materialize_main.py,
+    uv_editable_ref.py, nested_uv_editable_ref.py): a present `.venv`
+    (hundreds to thousands of files, several of them binary) getting fully
+    copied and then scanned file-by-file for vendor-pointer markers is
+    needlessly slow, and can turn into a multi-minute hang.
+    """
+    plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
+    venv = plugin_dir / ".venv"
+    (venv / "Lib" / "site-packages").mkdir(parents=True)
+    (venv / "Lib" / "site-packages" / "something.py").write_text(
+        "y = 2\n", encoding="utf-8"
+    )
+    (venv / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+    git_dir = plugin_dir / ".git"
+    (git_dir / "objects").mkdir(parents=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/dev\n", encoding="utf-8")
+
+    dest = preview_release.build("agent-worktrees", isolated / "work")
+
+    assert not (dest / ".venv").exists()
+    assert not (dest / ".git").exists()
+    assert (dest / "src" / "main.py").exists()
+
+
 def test_build_rebuilds_cleanly_when_called_twice(isolated: Path):
     _plugin(isolated, "agent-worktrees", "1.0.0")
     workdir = isolated / "work"
@@ -115,6 +144,10 @@ class _FakeMaterializeMain:
     def __init__(self, canonical_root: Path):
         self._canonical_root = canonical_root
         self.calls: list[Path] = []
+
+    def find_retired_directory_pointers_in_plugin(self, plugin_dir: Path) -> list[Path]:
+        # No retired directory pointers exist in this test's fixture plugin.
+        return []
 
     def materialize_file_pointers(self, dest: Path, *, canonical_root: Path) -> list[str]:
         self.calls.append(dest)

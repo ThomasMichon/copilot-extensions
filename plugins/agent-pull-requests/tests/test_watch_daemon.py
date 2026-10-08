@@ -119,3 +119,38 @@ def test_idle_poller_exits_after_last_subscriber_fires():
     assert _wait_until(
         lambda: not any(t.name == "pr-watch:o/n#4" for t in threading.enumerate()), timeout=2.0
     )
+
+
+def test_a_restarted_daemon_reattaches_persisted_subscriptions(tmp_path, monkeypatch):
+    """The stop/restart (update) path: a brand-new ``WatchDaemon`` process
+    (simulated here by constructing a second instance against the same
+    durable state dir) must resume every subscription the first one was
+    still tracking -- without the caller ever re-subscribing."""
+    monkeypatch.setenv("AGENT_PULL_REQUESTS_HOME", str(tmp_path))
+    fetcher = _FakeFetcher()
+    fetcher.set("o/n", 7, PRSnapshot(pr_state="open"))
+
+    first = WatchDaemon(fetch=fetcher, notify=lambda event: None, poll_interval=0.02)
+    first.compute(
+        "register",
+        {"repo": "o/n", "number": 7, "subscriber_id": "carried-over", "until": [MERGED]},
+    )
+    assert _wait_until(lambda: first.status()["subscribers"].get("o/n#7") == ["carried-over"])
+
+    # Simulate the old process exiting (its poller threads are daemon
+    # threads, not explicitly stopped here) and a fresh one starting --
+    # reattachment happens entirely in __init__, before any register call.
+    events: list[dict] = []
+    second = WatchDaemon(
+        fetch=fetcher,
+        notify=lambda event: events.append({"id": event.subscriber.subscriber_id}),
+        poll_interval=0.02,
+    )
+    assert second.status()["subscribers"].get("o/n#7") == ["carried-over"]
+
+    # And the reattached subscription is genuinely live, not just listed --
+    # a real merge fires it without any new subscribe call.
+    fetcher.set("o/n", 7, PRSnapshot(pr_state="closed", merged=True))
+    assert _wait_until(lambda: len(events) == 1)
+    assert events[0]["id"] == "carried-over"
+

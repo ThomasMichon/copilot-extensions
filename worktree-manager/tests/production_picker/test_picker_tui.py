@@ -9883,6 +9883,160 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_steer_confirm_shows_blocking_progress_overlay_until_delivered(tmp_path, monkeypatch):
+    """Operator report, 2026-10-07: Confirm used to dismiss straight back to
+    the list with only a footer status line as evidence of an in-flight
+    delivery -- a slow/hung coordinator round-trip was indistinguishable
+    from "it worked" until the result silently landed. Confirm must now show
+    a modal progress overlay for the whole round-trip (blocking input, but
+    never freezing the render loop -- the submission still runs off-thread),
+    staying up to show the done result rather than vanishing the instant the
+    background worker finishes.
+    """
+    import threading
+
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import (
+        ProgressScreen,
+        _AutoExpandTextArea,
+    )
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_steering_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
+    rows = [
+        {"id": "t1", "title": "PR 123", "task_id": "t1", "awaiting_steer": True,
+         "card": {"title": "Review PR 123", "status": "rec", "body": "b",
+                  "request_input": [
+                      {"name": "feedback", "type": "textarea"},
+                      {"name": "decision", "type": "choice",
+                       "options": ["revise", "post-approved"]}]}},
+    ]
+    src = _fixture_source()
+
+    class _GatedRuntime(_FakeRuntime):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.gate = threading.Event()
+            self.resolved = None
+
+        def run_resolved(self, argv):
+            self.gate.wait(5)
+            self.resolved = list(argv)
+            return (True, "delivered to coordinator")
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = scr.htabs.index("Tasks")
+            await pilot.pause()
+            reg = scr._reg_pivot()
+            rt = _GatedRuntime(rows)
+            scr._pivot_runtimes[reg.name] = rt
+            actions = {a.key: a for a in reg.actions}
+            scr._run_task_action(reg, actions["steer"], rows[0])
+            await pilot.pause()
+            form = app.screen
+            form.query_one("#q-0", _AutoExpandTextArea).text = "ship it"
+            await pilot.pause()
+            form._confirm()
+            await pilot.pause()
+
+            # The overlay is up WHILE the submission is still gated (in-flight).
+            assert rt.resolved is None
+            assert isinstance(app.screen, ProgressScreen)
+            assert scr.progress is not None
+            assert scr.progress["done"] is False
+
+            rt.gate.set()
+            for _ in range(200):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if rt.resolved is not None and scr.progress is not None and scr.progress["done"]:
+                    break
+
+            # Still up (not auto-dismissed) once delivery succeeds, showing
+            # the done state -- the operator sees confirmation, not an
+            # instant disappearance.
+            assert isinstance(app.screen, ProgressScreen)
+            assert scr.progress["done"] is True
+            assert not scr.progress["error"]
+
+            # Dismiss it like any other finished action-stream run.
+            await pilot.press("enter")
+            await pilot.pause()
+            assert scr.progress is None
+
+    asyncio.run(run())
+
+
+def test_steer_confirm_failure_replaces_progress_overlay_with_error_screen(tmp_path, monkeypatch):
+    """On a failed delivery the in-flight progress overlay hands off to the
+    richer, full-detail ``SubmitErrorScreen`` (draft-recovery guidance an
+    action-stream run's own terse inline error can't carry) instead of
+    showing the bare 'failed' state itself."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import (
+        ProgressScreen,
+        SubmitErrorScreen,
+        _AutoExpandTextArea,
+    )
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_steering_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
+    rows = [
+        {"id": "t1", "title": "PR 123", "task_id": "t1", "awaiting_steer": True,
+         "card": {"title": "Review PR 123", "status": "rec", "body": "b",
+                  "request_input": [
+                      {"name": "feedback", "type": "textarea"},
+                      {"name": "decision", "type": "choice",
+                       "options": ["revise", "post-approved"]}]}},
+    ]
+    src = _fixture_source()
+
+    class _FailingRuntime(_FakeRuntime):
+        def run_resolved(self, argv):
+            return (False, "coordinator unreachable: connection refused")
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = scr.htabs.index("Tasks")
+            await pilot.pause()
+            reg = scr._reg_pivot()
+            rt = _FailingRuntime(rows)
+            scr._pivot_runtimes[reg.name] = rt
+            actions = {a.key: a for a in reg.actions}
+            scr._run_task_action(reg, actions["steer"], rows[0])
+            await pilot.pause()
+            form = app.screen
+            form.query_one("#q-0", _AutoExpandTextArea).text = "ship it"
+            await pilot.pause()
+            form._confirm()
+            for _ in range(200):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if isinstance(app.screen, SubmitErrorScreen):
+                    break
+
+            # The overlay was replaced, not stacked under/over.
+            assert isinstance(app.screen, SubmitErrorScreen)
+            assert not any(isinstance(s, ProgressScreen) for s in app.screen_stack)
+            assert scr.progress is None
+            assert "coordinator unreachable" in app.screen._detail
+
+    asyncio.run(run())
+
+
 def test_run_bg_logs_when_waking_the_render_flow_fails(caplog):
     """`_run_bg` must never let a worker's outcome vanish with zero signal.
 

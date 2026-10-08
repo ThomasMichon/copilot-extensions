@@ -58,8 +58,17 @@ def _git_head() -> str:
 
 
 def _ignore(_dir: str, names: list[str]) -> set[str]:
+    # Mirrors the sibling ignore-sets used everywhere else dev/build/cache
+    # artifacts must never leak into a materialized tree (e.g.
+    # materialize_main.py's own `_ignore`, uv_editable_ref.py,
+    # nested_uv_editable_ref.py): a plugin directory with a local dev venv
+    # on disk would otherwise get that whole venv (often 1000+ files)
+    # copied into the preview AND walked file-by-file by
+    # find_file_pointers() below -- needlessly slow, and a potential
+    # multi-minute hang.
     return {n for n in names if n in {
-        "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
+        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
+        "build", "dist",
     } or n.endswith((".pyc", ".pyo"))}
 
 
@@ -122,10 +131,14 @@ def _materialize_launch_wrapper_assets_into_preview(dest: Path, plugin: str) -> 
 
 
 def _retired_pointer_log(dest: Path) -> list[str]:
+    """``dest`` is a SINGLE plugin's own directory (``workdir/plugin``), not
+    a whole-repo root -- use the plugin-scoped finder, not
+    ``find_retired_directory_pointers`` (whose ``plugins/*/libs/*/`` glob
+    assumes a repo root and would never match here)."""
     mm = _load_materialize_main()
     return [
         f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
-        for pointer_path in mm.find_retired_directory_pointers(dest)
+        for pointer_path in mm.find_retired_directory_pointers_in_plugin(dest)
     ]
 
 

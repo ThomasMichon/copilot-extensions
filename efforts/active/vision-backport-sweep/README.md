@@ -14,7 +14,11 @@
   `visions/plugins/agent-codespaces` (repo-sourced-provenance,
   in-venue-plugin-injection, dual-mode-session-reach),
   `visions/remote-interactive-sessions` §Purpose & Intent (stale-framing
-  correction, carried by the same slice's PR review)
+  correction, carried by the same slice's PR review),
+  `visions/plugins/agent-ssh` (local-process reach, fragment provenance,
+  mesh self-healing, machine maintenance escalation, venue-contract-reach),
+  `visions/plugins/agent-containers` (interactive-venue-reach-trusted,
+  restricted-venue-picker-discovery, host-backed persistence)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -155,6 +159,51 @@ Operator, end of a long multi-repo session:
             when authored" sibling reference and widened the reality-docs
             skill list (`recovering-codespaces`, `cleaning-codespaces`). No
             conformance gap found — all fold-back, no issue carved.
+      - [x] `visions/plugins/agent-ssh/README.md` — reconciled against 139
+            commits of drift since its single-day 2026-07-22 authoring,
+            never revisited since. Folded back *local-process reach* (the
+            `wsl` in-box transport), fragment provenance/staleness
+            detection (`doctor`'s managed-fragment audit), continuous mesh
+            self-healing (`refresh-mesh` wired into `agent-machines`'
+            hourly watchdog), a new *Machine maintenance escalation*
+            concept, and *venue-contract-reach* (`agent-ssh copilot
+            <ssh-target>` — an adopted mesh machine driven as a CLI-mode
+            venue under the same contract agent-codespaces/agent-containers
+            use). The last of these required reconciling a real textual
+            contradiction: the vision's "Not a venue provider" Non-Goal
+            flatly ruled out exactly this shipped capability. Reworded it
+            to "Not a compute provisioner" (agent-ssh never creates
+            compute; reaching an existing mesh member as a venue is
+            squarely in scope) — consistent with
+            `remote-interactive-sessions`'s own subject line, which already
+            named "any agent-ssh-reachable machine" as a venue type
+            alongside CodeSpaces/containers. `install.ps1`'s
+            nonconformance is already tracked by `#5472` (Phase 3). PR
+            review (#5627) caught one overstatement (WSL's "no daemon"
+            claim — its own `sshd` + keepalive are still real
+            prerequisites, only the network hop is removed; corrected) and
+            one genuine pre-existing implementation gap the self-healing
+            fold-back assumed worked end to end (`refresh_mesh`'s
+            temp-directory provenance bug) — already tracked independently
+            as `#5478`; cross-linked rather than refiled.
+      - [x] `visions/plugins/agent-containers/README.md` — reconciled
+            against 123 commits of drift since its 2026-08-27 last
+            revision. Folded back *interactive-venue-reach-trusted*
+            (`agent-containers copilot <name>` / `--detach` — the exact
+            same CLI-mode venue contract agent-codespaces/agent-ssh use,
+            deliberately excluded for restricted venues),
+            *restricted-venue-picker-discovery* (`ssh-profile <name>
+            --project` — a named, read-only Worktree Picker source), and
+            extended `full-harness-projection-trusted` with host-backed
+            persistence + `systemd_capable` self-maintenance for
+            image-backed trusted fleets — a capability that had moved from
+            the vision's own "as the capability matures" aspiration to
+            shipped reality without the vision being told. Added a
+            cross-link to `remote-interactive-sessions`, matching the
+            ownership split already established there for
+            agent-codespaces/agent-ssh. No conformance gap found requiring
+            a new issue — `init.ps1`'s nonconformance is already
+            tracked by `#5472` (Phase 3).
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -437,4 +486,161 @@ then rather than assuming either answer.
   cross-link naming the ownership split. This is itself a small, in-scope
   Phase 2 fold-back on a second vision, carried by the same review round
   rather than deferred to a separate slice.
-- Worktree not yet finalized as of this entry; PR pending merge.
+- PR #5575 merged; worktree finalized.
+
+### 2026-10-07 — Operator follow-up: attended sessions must stay bridge-driven
+- Operator confirmed, after reviewing this slice's summary, that attended
+  (human-interactive) remote CodeSpace sessions should still be driven via
+  agent-bridge, not treated as a bridge-invisible raw SSH mux escape hatch
+  — exactly the coordination-layer gap `remote-interactive-sessions`
+  already defers to from `agent-codespaces`' `dual-mode-session-reach`.
+- Searched for an existing tracked issue before filing (dedup discipline):
+  found `#3346` ("Detached (agent-facing) CLI-mode venue sessions..."),
+  which proposes the matching daemon-port-reverse-forward +
+  `live_sessions` registration machinery but is explicitly scoped to the
+  **detached**/agent-facing launch only — no issue covered the
+  **attended**/human-interactive counterpart.
+- Filed `#5614` for the attended case, cross-referencing `#3346` and the
+  two visions (`remote-interactive-sessions`'s stated gap,
+  `agent-codespaces`'s `dual-mode-session-reach` deferral). Left a
+  cross-link comment on `#3346` pointing back.
+- No vision text changed this entry — the visions already correctly state
+  this as the should-be contract; only the tracked-issue gap needed
+  closing.
+
+### 2026-10-07 — Self-correction: #5614 was a phantom gap, both visions were stale
+- While scoping the next Phase 2 vision (`agent-ssh`), its plugin README's
+  `copilot <ssh-target>` description ("if another process already holds the
+  bridge reverse-forward route, the attached command reuses that route")
+  read as inconsistent with the "daemon port isn't reverse-forwarded yet"
+  claim just relied on to file `#5614`. Checked directly against
+  `copilot_venue.py` (`cmd_copilot`/`_cmd_copilot_connect`) and the owning
+  effort, `efforts/active/agent-bridge-cli-mode-sessions/README.md`: the
+  attended `copilot <name>` path already places a worktree-keyed
+  reservation, a Connection Owner tenant hold carrying **both** the
+  credential-relay **and** a daemon-port reverse-forward, and
+  self-registers into `live_sessions` marked `driven_by: cli-mode` —
+  landed and **live-clean-room-validated end to end on 2026-09-20/22**,
+  weeks before this slice's PR #5575 was opened.
+- This means the prior entry's premise was wrong on two counts: (1) `#5614`
+  described a gap that doesn't exist — **closed it** with the evidence
+  above, and corrected the misleading cross-link comment left on `#3346`.
+  (2) The `remote-interactive-sessions` and `agent-codespaces` vision text
+  PR #5575 shipped was *also* wrong — it preserved/extended a stale
+  "coordination-layer integration still missing" claim instead of
+  recognizing it as already realized. Root cause: round 3's correction
+  trusted `remote-interactive-sessions`' own existing prose as ground
+  truth instead of checking it against the owning effort/code, the same
+  verification gap that produced `#5614`.
+- Corrected both vision files in place (not a revert — a second, verified
+  correction): `remote-interactive-sessions`' Purpose & Intent and "CLI
+  mode needs no Session Host" concept section now state the integration as
+  realized, citing the owning effort's Phase 4/Validation Plan; its
+  Provenance records this as superseding the 10-06 entry rather than
+  silently overwriting it. `agent-codespaces`' `dual-mode-session-reach`
+  no longer claims the integration is "deferred" to a sibling vision.
+  Checked off that owning effort's own Phase 5 "confirm realized behavior
+  against the vision" item, since this sweep is exactly that confirmation
+  (its sibling Phase 5 item, plugin docs/architecture sync, is unaffected
+  and still open).
+- **Lesson for the rest of this sweep:** a vision's own prose is not
+  sufficient evidence for "is this still true" — verify against the owning
+  effort's journal/validation-plan and, when in doubt, the actual code,
+  before either folding something back *or* preserving an existing gap
+  claim. Apply this going forward, not only when a reviewer or a sibling
+  plugin's README happens to surface the inconsistency.
+- Next: continue Phase 2 by picking the next stale/high-traffic vision
+  (candidates from the prior ranking: `agent-ssh` 139 commits since
+  2026-07-22, `agent-containers` 123 commits since 2026-08-27) — with the
+  verification lesson above applied from the start this time.
+
+### 2026-10-07 — Phase 2 slice: `agent-ssh` vision reconciliation
+- Operator clarified the sweep's standing methodology (recorded here for
+  future slices): visions are the **shared, published superset** — folded
+  back from reality, with gaps/contradictions never described as prose in
+  the vision itself. Any genuine gap/contradiction found gets a **GitHub
+  issue**, not a note left in the vision. Efforts (private in dotfiles, or
+  this repo's own in-repo `efforts/active/` convention) exist to *drive*
+  closing those issues or land a specific build-out — downstream of the
+  issue, never a substitute for filing one.
+- Picked `agent-ssh` (139 commits since its single-day 2026-07-22
+  authoring, never revisited) per the prior ranking. Read the vision in
+  full against `plugins/agent-ssh/README.md`. Applied the verification
+  lesson from the self-correction above throughout — checked each
+  candidate fold-back against the plugin's actual shipped CLI/behavior
+  (not just vision prose), and before reconciling the venue-reach
+  capability specifically, cross-checked `remote-interactive-sessions`'s
+  own subject line (confirmed it already names "any agent-ssh-reachable
+  machine" as a venue type, so this fold-back is consistent with — not in
+  tension with — that vision too).
+- Found and folded back five previously-unstated, already-shipped
+  capabilities (see the Phase 2 checklist entry above for detail):
+  *local-process reach* (`wsl` transport), fragment
+  provenance/staleness detection, continuous mesh self-healing via
+  `agent-machines`' watchdog, a new *Machine maintenance escalation*
+  concept, and *venue-contract-reach*. The last required resolving a real
+  **vision-text contradiction** (the "Not a venue provider" Non-Goal vs.
+  the shipped `copilot <ssh-target>` verb) — reworded the Non-Goal rather
+  than filing a bug, since the contradiction was in the vision's own prose
+  against already-working reality, not a functional gap or inconsistency
+  in the system itself.
+- **PR #5627 review** caught two real issues the slice missed: (1) the
+  *local-process reach* wording overstated the `wsl` transport as
+  needing "no daemon" — it avoids the Windows→WSL network hop only; WSL's
+  own `sshd` + a keepalive are still real prerequisites. Corrected in
+  both the Features and Provenance text. (2) A **genuine pre-existing
+  implementation gap**, exactly the kind this methodology exists to
+  surface rather than paper over: `refresh_mesh` writes a fragment whose
+  provenance points at a registry file inside a `TemporaryDirectory` it
+  then deletes, so the audit the vision's `derived-ssh-config` fold-back
+  describes reports a false `missing-target` and blocks the refreshed
+  aliases. Searched before filing (dedup discipline) — already tracked
+  independently as `#5478` (filed before this slice, same root cause,
+  confirmed by direct code read of
+  `plugins/agent-ssh/src/agent_ssh/mesh_refresh.py:113-153`). Cross-linked
+  rather than refiled; left a comment on `#5478` pointing back at the
+  vision sections now citing it. This is the methodology working as
+  intended: the should-be text stands (self-healing is the correct
+  intent), the tracked issue owns the gap in realizing it, no prose in
+  the vision describes the gap itself.
+- PR merged; worktree finalized.
+
+### 2026-10-07 — Phase 2 slice: `agent-containers` vision reconciliation
+- Continued Phase 2, picking `agent-containers` (123 commits since its
+  2026-08-27 last revision) per the standing ranking. Read the vision in
+  full against `plugins/agent-containers/README.md`, applying the
+  verification discipline from the two prior corrections: checked each
+  candidate fold-back against the plugin's actual shipped CLI/config
+  surface, not just vision prose.
+- Found and folded back three previously-unstated, already-shipped
+  capabilities (see the Phase 2 checklist entry above for detail):
+  *interactive-venue-reach-trusted* (the same CLI-mode venue contract
+  agent-codespaces/agent-ssh already got folded back, now shipped here
+  too — trusted-only, restricted venues correctly excluded),
+  *restricted-venue-picker-discovery* (Worktree Picker source
+  registration for a restricted venue), and host-backed
+  persistence/`systemd_capable` self-maintenance extending
+  `full-harness-projection-trusted` — the last notable because the
+  vision's own text had already hedged it as "as the capability matures,"
+  so this is the should-be aspiration catching up to reality rather than
+  reality drifting from should-be.
+- No vision-text contradiction this time (unlike `agent-ssh`'s Non-Goal
+  rework) and no genuine code gap found requiring a new issue — every
+  fold-back traces to real, working, already-documented capability.
+  `init.ps1`'s nonconformance is already tracked by `#5472`.
+- **PR #5631 review** caught three real nits: an `install.ps1` →
+  `init.ps1` reference mix-up (agent-containers' own installer script, not
+  the other plugins' `install.ps1`); an implementation-progress phrase
+  ("not yet every fleet...") that didn't belong in the vision's standing
+  intent (moved here, removed there); and an inaccurate claim that both
+  CLI-mode reach modes share one forward-keeper owner — corrected to
+  distinguish attached (forwards on the interactive SSH process itself)
+  from detached (a separate host-side keeper, independent of the
+  launcher's lifetime), verified against `copilot_venue.py`/
+  `copilot_detach.py`.
+- Next: continue Phase 2 with the next vision in the index not yet swept
+  (the three stale-high-traffic candidates from the original ranking are
+  now all reconciled — `agent-codespaces`, `agent-ssh`,
+  `agent-containers` — so the next pick should re-rank the remainder of
+  `visions/README.md`'s ~29-vision index, prioritizing branch visions
+  (`agent-fabric`, `native-convergence`) per the effort's own Plan).

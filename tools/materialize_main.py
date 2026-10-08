@@ -88,10 +88,21 @@ def find_file_pointers(root: Path) -> list[Path]:
 
 
 def find_retired_directory_pointers(root: Path) -> list[Path]:
-    """Every retired directory-pointer marker still present under ``root``."""
+    """Every retired directory-pointer marker still present under ``root``,
+    a whole-repo-shaped tree (``plugins/<name>/libs/<lib>/`` or
+    ``worktree-manager/libs/<lib>/``)."""
     return sorted(root.glob("plugins/*/libs/*/" + POINTER_NAME)) + sorted(
         root.glob("worktree-manager/libs/*/" + POINTER_NAME)
     )
+
+
+def find_retired_directory_pointers_in_plugin(plugin_dir: Path) -> list[Path]:
+    """Every retired directory-pointer marker still present under a SINGLE
+    plugin's own directory (e.g. ``preview_release.py``'s per-plugin
+    ``dest``, which already IS ``plugins/<name>`` -- not a whole-repo root,
+    so ``find_retired_directory_pointers``'s ``plugins/*/libs/*/`` glob can
+    never match inside it)."""
+    return sorted(plugin_dir.glob("libs/*/" + POINTER_NAME))
 
 
 def materialize_uv_editable_ref_into(
