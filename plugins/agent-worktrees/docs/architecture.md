@@ -970,7 +970,12 @@ identity fields. Atomic
 replacement, truncation, and same-size modifications reset the cursor.
 Writers append or replace atomically rather than editing earlier bytes and
 then growing the same file. Public readers independently copy their final
-selected events, so caller mutations never alter cached history.
+selected events, so caller mutations never alter cached history. Exact activity
+filters share lazy indexes by field combination (up to eight per file), not by
+individual worktree or event value. Appends index only new complete records;
+provisional EOF records remain separate until completed. Tail-limited queries
+without a time cutoff select only the final matching records before iteration
+and copying, avoiding repeated full-history filtering during monitor sweeps.
 Trace writers initialize their lock-file sentinel only after acquiring the
 advisory lock, avoiding a first-write Windows byte-lock conflict; failed trace
 appends remain best-effort but emit a diagnostic warning.

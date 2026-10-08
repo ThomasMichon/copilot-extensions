@@ -589,9 +589,9 @@ def parse_since(value: str) -> datetime | None:
     return dt
 
 
-def _parse_all_events(path: Path) -> Sequence[dict]:
+def _parse_all_events(path: Path, *, match: dict[str, str]) -> Sequence[dict]:
     """Read an incremental, opening-size-bounded activity-log snapshot."""
-    return jsonl_cache.read_jsonl(path)
+    return jsonl_cache.read_jsonl(path, match=match)
 
 
 def _rec_ts(rec: dict) -> datetime | None:
@@ -615,14 +615,16 @@ def read_events(
 ) -> list[dict]:
     """Return matching events, oldest first."""
     path = log_path()
+    filters = {
+        name: value for name, value in (
+            ("worktree_id", worktree_id), ("launch_id", launch_id), ("event", event),
+        ) if value
+    }
+    records = _parse_all_events(path, match=filters)
+    if since is None and limit is not None and limit > 0:
+        records = records[-limit:]
     matched: list[dict] = []
-    for rec in _parse_all_events(path):
-        if worktree_id and rec.get("worktree_id") != worktree_id:
-            continue
-        if launch_id and rec.get("launch_id") != launch_id:
-            continue
-        if event and rec.get("event") != event:
-            continue
+    for rec in records:
         if since is not None:
             ts = _rec_ts(rec)
             if ts is not None and ts < since:

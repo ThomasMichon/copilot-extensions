@@ -21,7 +21,7 @@ import sys
 import threading
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from itertools import islice
 from pathlib import Path
@@ -30,7 +30,14 @@ from typing import BinaryIO, overload
 _Stamp = tuple[int, int, int, int]
 _cache_lock = threading.Lock()
 _MAX_FILES = 64
+_MAX_INDEXES = 8
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class _Index:
+    buckets: dict[tuple[str, ...], list[dict]] = field(default_factory=dict)
+    length: int = 0
 
 
 @dataclass
@@ -39,6 +46,7 @@ class _Entry:
     offset: int
     complete: list[dict]
     visible: "_Snapshot"
+    indexes: OrderedDict[tuple[str, ...], _Index] = field(default_factory=OrderedDict)
 
 
 @dataclass(frozen=True)
@@ -136,13 +144,42 @@ def _decode(raw: bytes, errors: str) -> list[dict]:
     return out
 
 
-def read_jsonl(path: Path, *, errors: str = "strict") -> Sequence[dict]:
+def _index_key(rec: dict, fields: tuple[str, ...]) -> tuple[str, ...] | None:
+    values = tuple(rec.get(name) for name in fields)
+    return values if all(isinstance(value, str) for value in values) else None
+
+
+def _matching_snapshot(entry: _Entry, match: dict[str, str] | None) -> _Snapshot:
+    if not match:
+        return entry.visible
+    fields = tuple(sorted(match))
+    index = entry.indexes.setdefault(fields, _Index())
+    # Direct indexing avoids islice's O(history) skip on every append.
+    for position in range(index.length, entry.visible.length):
+        rec = entry.complete[position]
+        key = _index_key(rec, fields)
+        if key is not None:
+            index.buckets.setdefault(key, []).append(rec)
+        index.length = position + 1
+    entry.indexes.move_to_end(fields)
+    while len(entry.indexes) > _MAX_INDEXES:
+        entry.indexes.popitem(last=False)
+    values = tuple(match[name] for name in fields)
+    records = index.buckets.get(values, [])
+    tail = tuple(rec for rec in entry.visible.tail if _index_key(rec, fields) == values)
+    return _Snapshot(records, len(records), tail)
+
+
+def read_jsonl(
+    path: Path, *, errors: str = "strict", match: dict[str, str] | None = None,
+) -> Sequence[dict]:
     """Return a read-only parsed snapshot, reusing complete lines on append.
 
     File identity is observed on the opened handle, not inferred from a path
     stat preceding open. A replaced path therefore never labels old bytes with
     the new file's identity. Serializing cache fills also prevents an older
-    concurrent reader from overwriting a newer cursor.
+    concurrent reader from overwriting a newer cursor. Exact string-field
+    matches use bounded, lazy indexes extended only with new complete records.
     """
     key = str(path), errors
     with _cache_lock:
@@ -152,7 +189,7 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> Sequence[dict]:
                 stamp = _stamp(handle)
                 if previous is not None and previous.stamp == stamp:
                     _cache.move_to_end(key)
-                    return previous.visible
+                    return _matching_snapshot(previous, match)
                 append = (
                     previous is not None
                     and previous.stamp[:2] == stamp[:2]
@@ -190,12 +227,15 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> Sequence[dict]:
         else:
             complete = decoded
         visible = _Snapshot(complete, len(complete), tuple(tail))
-        entry = _Entry(stamp, offset + boundary, complete, visible)
+        entry = _Entry(
+            stamp, offset + boundary, complete, visible,
+            previous.indexes if append else OrderedDict(),
+        )
         _cache[key] = entry
         _cache.move_to_end(key)
         while len(_cache) > _MAX_FILES:
             _cache.popitem(last=False)
-        return visible
+        return _matching_snapshot(entry, match)
 
 
 def clear() -> None:
