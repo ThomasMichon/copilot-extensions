@@ -343,25 +343,35 @@ successor already running in my own tree?*
       this whole bridge exists to prevent. The bridge, once scheduled,
       calls `OpenJobObject` on the same **named** Job (item 4) and writes a
       ready signal back to the old manager over an inherited pipe
-      (mirroring the IPC channel item 1 already uses for `deploy`). Only
-      once the old manager has read that signal does it (a) duplicate its
-      own trusted daemon handle (the one item 1's spawn-time capture
-      already gave it) into the bridge via `DuplicateHandle` — the same
-      kind of handle-plus-IPC-acknowledgement handoff item 1 already
-      defines, now reused for this second transfer instead of invented
-      fresh — and (b), only once the bridge acks receipt of that handle,
-      records the bridge's pid and `process_start_time` token as a
-      separate, transient `handoff` record (distinct from the `daemon`
-      record above, in the same manager-scoped state directory) and
-      proceeds to step 2. The persisted `daemon` record itself is **never**
-      overwritten by the bridge's identity — the two records have
-      different lifetimes and different purposes: conflating them would
-      let the bridge's own identity silently clobber the daemon's. If the
-      bridge-ready acknowledgement or the handle-receipt acknowledgement
-      does not arrive within a bounded timeout, the old manager **aborts
-      the update** and keeps running as the current version rather than
-      proceeding blind — a failed or slow bridge is a reason to retry
-      later, never a reason to exit without handle-continuity confirmed.
+      (mirroring the IPC channel item 1 already uses for `deploy`). The
+      bridge also creates a **named pipe** (`\\.\pipe\<name>`, the name
+      deterministically derived from `manager_state_dir` the same way the
+      Job's own name already is) and starts listening on it — this is the
+      channel the *next* manager, launched independently by Task Scheduler
+      with no inherited handle or pipe of its own, will use to request the
+      daemon handle in step 3; an inherited pipe (as item 1 uses for
+      `deploy`, itself a direct child of the process holding the other end)
+      cannot serve this purpose, since the new manager process shares no
+      ancestry with the bridge at all. Only once the old manager has read
+      the bridge-ready signal does it (a) duplicate its own trusted daemon
+      handle (the one item 1's spawn-time capture already gave it) into the
+      bridge via `DuplicateHandle` — the same kind of
+      handle-plus-IPC-acknowledgement handoff item 1 already defines, now
+      reused for this second transfer instead of invented fresh — and (b),
+      only once the bridge acks receipt of that handle, records the
+      bridge's pid, `process_start_time` token, **and the named pipe's
+      identifier** as a separate, transient `handoff` record (distinct from
+      the `daemon` record above, in the same manager-scoped state
+      directory) and proceeds to step 2. The persisted `daemon` record
+      itself is **never** overwritten by the bridge's identity — the two
+      records have different lifetimes and different purposes: conflating
+      them would let the bridge's own identity silently clobber the
+      daemon's. If the bridge-ready acknowledgement or the handle-receipt
+      acknowledgement does not arrive within a bounded timeout, the old
+      manager **aborts the update** and keeps running as the current
+      version rather than proceeding blind — a failed or slow bridge is a
+      reason to retry later, never a reason to exit without
+      handle-continuity confirmed.
    2. Only now does the old manager exit — and it exits with a
       **documented, non-zero self-update exit status** (distinct from a
       real crash's own exit codes, and distinct from Linux's
@@ -403,14 +413,18 @@ successor already running in my own tree?*
       same as a failed bracket (abort re-adoption, log the platform
       mismatch) rather than silently continuing unassigned. The new
       manager also — this is the part a Job-membership check alone cannot
-      provide — requests the bridge duplicate *its* daemon handle onward
-      into the new manager, the same handle-plus-IPC-acknowledgement shape
-      as step 1's own transfer. Only once the new manager holds its own
-      duplicated daemon handle does it cross-check that handle's pid
-      against the persisted `daemon` record's baseline token via item 2's
-      adoption check, and publish its own liveness over the bridge's. This
-      is the **same** persisted-identity re-adoption path item 5's Linux
-      discussion above defines, not a Windows-specific special case: the
+      provide — connects to the bridge's named pipe (its identifier read
+      from the `handoff` record) and requests the bridge duplicate *its*
+      daemon handle onward into the new manager, the same
+      handle-plus-IPC-acknowledgement shape as step 1's own transfer, now
+      carried over this named-pipe rendezvous instead of an inherited one
+      since the new manager and the bridge share no process ancestry at
+      all. Only once the new manager holds its own duplicated daemon handle
+      does it cross-check that handle's pid against the persisted `daemon`
+      record's baseline token via item 2's adoption check, and publish its
+      own liveness over the bridge's. This is the **same** persisted-
+      identity re-adoption path item 5's Linux discussion above defines,
+      not a Windows-specific special case: the
       new manager re-adopts the already-recorded watched daemon and never
       calls `spawn` here — calling `spawn` on this path would create a
       second, redundant daemon racing the one the bridge has been holding
@@ -419,6 +433,22 @@ successor already running in my own tree?*
       Job handle are all confirmed does it signal the bridge to exit (e.g.
       a named event). The bridge closing its handles is now safe — the new
       manager already holds its own, independent copies of both.
+   The bridge does not simply wait on its named pipe forever: it carries a
+   **bounded adoption deadline** (started the moment it finishes step 1's
+   handoff) and a **fail-closed cleanup path** for when that deadline
+   expires without a new manager ever connecting — Task Scheduler
+   exhausting its own configured restart retries, or a new manager crashing
+   before it reaches step 3, are real failure modes this pattern must not
+   leave unhandled. On expiry, the bridge **itself** initiates the
+   real-crash path: it closes its own Job handle (now genuinely the last
+   one, correctly triggering `KILL_ON_JOB_CLOSE` — the daemon dying here is
+   the *correct* outcome, since no Task-tracked manager ever reclaimed it)
+   and deletes the `handoff` record so no later process mistakes a dead
+   rendezvous for a still-pending one. Left unhandled, a hung bridge would
+   otherwise hold the Job open indefinitely, silently preventing
+   `KILL_ON_JOB_CLOSE` from ever protecting against exactly the stray-
+   survivor class item 3/4 exist to close — recreating, via a different
+   path, the same untracked-daemon failure this entire pattern is for.
    From here the new manager proceeds exactly like any other launch,
    entering `run()` and supervising the daemon going forward — it never
    exits early, so a later crash of *this* instance still triggers a real
