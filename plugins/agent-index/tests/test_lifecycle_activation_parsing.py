@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -104,6 +105,44 @@ def test_repository_role_fails_closed_without_designation(tmp_path, monkeypatch)
     monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
 
     assert MODULE.resolve_repository(str(repo), "host") == "unconfigured"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer error handling")
+def test_posix_resolver_failure_is_reported_and_does_not_abort(tmp_path):
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is unavailable")
+    source = (SCRIPT.parent / "install.sh").read_text(encoding="utf-8")
+    activation = source.split("_activation_role() {", 1)[1].split("\n_install_engine()", 1)[0]
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    python = tools / "python3"
+    python.write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    python.chmod(0o755)
+    script = (
+        "set -e\n"
+        "_warn() { printf '%s\\n' \"$1\" >&2; }\n"
+        "_activation_role() {" + activation + "\n"
+        "role=\"$(_activation_role)\"\n"
+        "printf '%s\\n' \"$role\" survived\n"
+    )
+    result = subprocess.run(
+        [bash, "-c", script],
+        env={
+            **os.environ,
+            "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+            "AGENT_INDEX_REPO": str(tmp_path),
+            "AGENT_INDEX_MACHINE": "host",
+            "SCRIPT_DIR": str(SCRIPT.parent),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["unconfigured", "survived"]
+    assert "Activation role resolver failed" in result.stderr
 
 
 def test_fallback_parser_handles_canonical_and_inline_forms():

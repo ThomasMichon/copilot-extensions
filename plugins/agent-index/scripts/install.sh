@@ -1435,7 +1435,11 @@ _activation_role() {
     local py role
     py="$(command -v python3 || command -v python || true)"
     [[ -n "$py" ]] || { printf 'unconfigured'; return 0; }
-    role="$("$py" -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" --repo "$repo_root" --machine "$me")"
+    if ! role="$("$py" -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" --repo "$repo_root" --machine "$me" 2>/dev/null)"; then
+        _warn 'Activation role resolver failed -- leaving this repository unconfigured'
+        printf 'unconfigured'
+        return 0
+    fi
     case "$role" in host|client) printf '%s' "$role" ;; *) printf 'unconfigured' ;; esac
 }
 
