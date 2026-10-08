@@ -100,8 +100,8 @@ def test_resolve_machine_matching_the_local_machine_is_a_no_op_not_a_self_ssh_ha
 
 def test_resolve_machine_matching_local_but_environment_cross_platform_still_dispatches(monkeypatch):
     """Regression for the Windows Worktree Picker launching a same-machine
-    WSL worktree (e.g. `--machine lambda-core --environment WSL` run from
-    lambda-core's own Windows side): the self-targeting no-op above must
+    WSL worktree (e.g. `--machine some-host --environment WSL` run from
+    that same host's own Windows side): the self-targeting no-op above must
     NOT swallow this case merely because `--machine` names the local
     machine -- that worktree lives in a different OS/filesystem with its
     own tracking directory, invisible to this process's local

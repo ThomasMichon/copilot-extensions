@@ -506,7 +506,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # resolving locally.
     #
     # BUT a same-machine target can still legitimately name a DIFFERENT
-    # --environment (e.g. --machine lambda-core --environment WSL, invoked
+    # --environment (e.g. --machine some-host --environment WSL, invoked
     # from the Windows side of the same physical box) -- exactly the case
     # `_load_remote_machines` itself special-cases ("for the local machine,
     # only environments that differ from the current platform are
