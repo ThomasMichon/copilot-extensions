@@ -841,7 +841,15 @@ than hypothetical:
       that both `_classify_daemon_compute` and `worktree_status_compute
       .compute()`'s own `facts["git_state"]` assembly call — not merely
       sharing the already-shared leaf `git_ops.classify_worktree` call,
-      which both paths invoke today with no new seam at all.
+      which both paths invoke today with no new seam at all. **Path B
+      must keep passing `active_paths=None`** to the shared helper: for a
+      live worktree, `classify_worktree`'s `active_paths` short-circuits
+      to a zero-valued `ACTIVE` *before* its requested fetch even runs,
+      which would silently replace `compute()`'s actual git disposition
+      fact with a placeholder — `compute()`'s bundle already has its own
+      separate `facts["liveness"]` fact for this, so the shared helper's
+      `active_paths` parameter stays an opt-in Path A only passes, not a
+      value both callers share.
 - [ ] **6c — Structural delegation test proving one shared compute seam,**
       not a same-answer coincidence test: a same-repository-state agreement
       check cannot distinguish "two implementations that happen to agree on

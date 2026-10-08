@@ -66,14 +66,17 @@ consolidation shape for 6b.
 
 - `worktree_manager.engine_client.current_worktree_status()` shells out to
   `agent-worktrees status-segment --json`, which resolves to
-  `status_bar_cli.cmd_status_segment` → `_status_segment_json` →
-  `_render_status_segment`.
-- Confirmed: `_render_status_segment` calls `git_ops.classify_worktree(...,
+  `status_bar_cli.cmd_status_segment`'s `--json` branch, which calls
+  **`_status_segment_json` directly** — not `_render_status_segment`
+  (that function renders the live, every-`status-interval` mux bar; the
+  JSON path is a deliberate sibling with its own, separate
+  `git_ops.classify_worktree` call, per its own docstring: "kept as a
+  deliberate sibling... rather than a shared refactor").
+- Confirmed: `_status_segment_json` calls `git_ops.classify_worktree(...,
   fetch=bool(fetch), ..., active_paths=None)` **directly** — no daemon, no
-  `_classify_records`, no coalescing. Its own docstring's "reuses the status
-  bar's own non-daemon classify pass" is accurate: this is a third, fully
-  independent inline compute, fetch-free by default (same as Path A) but
-  with its own code path end to end.
+  `_classify_records`, no coalescing. This is a third, fully independent
+  inline compute, fetch-free by default (same as Path A) but with its own
+  code path end to end.
 - Crucially, it passes **`active_paths=None`**, and its own docstring says
   this renders "raw git disposition — never ACTIVE." This path is
   structurally immune to the live-override oscillation described below:
@@ -181,7 +184,14 @@ into a single change:
    disposition assembly on every row) — only the richer, already-correct
    git-state wrapper is shared; `compute()` keeps assembling its other
    facts exactly as today, now just by calling the shared helper for one
-   of them. This also gives Path B's bundle the `active_paths`/closure/
+   of them. **`compute()` must keep passing `active_paths=None`** to the
+   shared helper: for a live worktree, `active_paths` short-circuits to a
+   zero-valued `ACTIVE` *before* its requested fetch even runs, which
+   would silently replace `compute()`'s actual git disposition fact with
+   a placeholder — the bundle already has its own separate
+   `facts["liveness"]` fact for this, so `active_paths` stays an opt-in
+   parameter only Path A passes a real value for, not something both
+   callers share. This also gives Path B's bundle the closure/
    `CONVO` refinement it currently lacks, which only ever adds a more
    complete answer for its own consumer (agent-dispatch's Tasks board),
    never changes Path A's existing contract.
@@ -208,8 +218,12 @@ into a single change:
    contributor once the timing question is resolved, close it by
    **surfacing the existing cached mux-liveness signal the tracking
    record already carries** — `WorktreeRecord.mux_live`/`mux_live_at`,
-   refreshed by `reconcile_bound_live()` from the same batched
-   `mux_status_many` call `_build_active_paths` uses, and already
+   refreshed by `reconcile_bound_live()` via its own `mux_status_many`
+   call (a **separate** observation from `_build_active_paths`'s own
+   direct `_list_mux_sessions()` call — `__main__.py:453-477` — not the
+   same batched call; both ultimately read the same underlying mux
+   primitive but as two distinct point-in-time observations, which
+   matters for the still-open timing question above), and already
    freshness-gated by `_fresh_mux_live_hint()`
    (`picker_support/data_local.py:112-123`, `__main__.py:524-548`) — into
    the cache-only branch's `_worktree_to_dict`/`_overlay_cached_state`
@@ -236,7 +250,8 @@ not be silently dropped once 6b/6c land.
 |---|---|---|---|
 | `state` (git disposition) | yes (fetch-free) | yes, via `facts["git_state"]` (fetch-requesting) | **Same leaf call today; shared wrapper is 6b's actual target** |
 | `ahead`/`behind`/`dirty`/`branch_drift`/`current_branch` | yes | yes (inside `facts["git_state"]`'s `WorktreeStateInfo` asdict) | **Same leaf call today; shared wrapper is 6b's actual target** |
-| `active_paths`/closure/`CONVO` refinement | yes (Path A only) | no | Path-A-only today; 6b's shared wrapper extends this to Path B |
+| `active_paths`-forced `ACTIVE` | yes (Path A only) | no | Path-A-only; stays so after 6b (`compute()` must pass `active_paths=None`) |
+| closure/`CONVO` refinement | yes | no | Path-A-only today; 6b's shared wrapper extends this to Path B |
 | `title` | yes (session-summary refined) | no (session_length only has turn/session counts) | distinct |
 | session turn/count | no (separate `_worktree_to_dict` field) | yes (`facts["session_length"]`) | distinct, Path-B-only |
 | liveness (mux/bound) | no (separate overlay — see above) | yes (`facts["liveness"]`, `verify_worktree_active`) | distinct, Path-B-only |
