@@ -72,14 +72,8 @@ DEFAULT_DB = _HERE / "ci_telemetry.sqlite3"
 # and are few enough in practice to track by hand rather than justifying a
 # second live-fetch path this phase does not need. Remove an entry here once
 # its owning effort resolves it (confirmed via a fresh `refresh` + `report`
-# showing it no longer applies).
-#
-# The sole prior entry (`identifier-leak-guard-unconfigured`, the
-# `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK`-unset noise) was removed
-# 2026-10-06: `efforts/active/ci-identifier-leak-guard/` (#3923) provisioned
-# the secrets, and `identifier leak guard` now reports `pass` consistently
-# across live PRs (spot-checked #5553, #5440, #5383, #5325) -- it is no
-# longer unconditionally red and does not belong in this tuple.
+# showing it no longer applies). Currently empty -- no check is both
+# permanently noisy and non-blocking right now.
 KNOWN_NOISY_NONBLOCKING_CHECKS: tuple[dict, ...] = ()
 
 
@@ -340,19 +334,14 @@ def load_failures(conn: sqlite3.Connection) -> list[FailureRecord]:
 # PR-triggered `ci.yml` runs carry a job name that must never become a
 # per-run failure signature of its own: `PR gate (required check)` is a
 # redundant aggregate of whatever real job already failed (double-counting
-# it). `identifier leak guard` used to be skipped here too, while it was
-# the *already-known*, unconditionally red, non-blocking check tracked
-# once via `KNOWN_NOISY_NONBLOCKING_CHECKS` above -- that rationale is gone
-# now that entry has been removed (2026-10-06, #3923 provisioned the
-# denylist secrets and the check reports real pass/fail). Removing it from
-# this skip-list does NOT make a future leak-guard failure visible to this
-# miner, though: `identifier leak guard` is a custom Check Run created by a
-# separate `workflow_run` follow-up workflow (whose own Actions job is
-# named `scan + report`), not a job inside the `push`/`pull_request`-event
-# `ci.yml` runs `fetch_runs`/`fetch_failures_for_run` enumerate here -- it
-# was arguably never reachable by job-name matching in the first place.
-# Ingesting the PR head's check-runs API explicitly (with its own
-# regression test) would be needed to cover it; not yet done.
+# it). `identifier leak guard` is a custom Check Run created by a separate
+# `workflow_run` follow-up workflow (whose own Actions job is named `scan +
+# report`), not a job inside the `push`/`pull_request`-event `ci.yml` runs
+# `fetch_runs`/`fetch_failures_for_run` enumerate here -- job-name matching
+# can never see it, so it needs no entry in this skip-list. Ingesting the
+# PR head's check-runs API explicitly (with its own regression test) would
+# be needed to cover a real leak-guard failure in this telemetry at all;
+# not yet done.
 PR_SKIP_JOB_NAMES = frozenset({"PR gate (required check)"})
 
 
