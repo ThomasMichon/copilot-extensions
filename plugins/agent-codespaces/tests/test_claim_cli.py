@@ -258,8 +258,36 @@ def test_leases_json_filters_by_owner(monkeypatch, capsys):
 
     payload = json.loads(capsys.readouterr().out)
     assert payload == [
-        {"codespace": "cs-a", "owner": "/wt/a", "kind": "claim", "host": "h", "pid": 1},
+        {"codespace": "cs-a", "owner": "/wt/a", "kind": "claim", "host": "h", "pid": 1,
+         "in_use": None, "live_users": []},
     ]
+
+
+def test_leases_json_reports_live_users_not_dead_writer_pid(monkeypatch, capsys):
+    """A lease whose writer pid is long dead is still IN USE while a live local
+    process (here a detached SSH ControlMaster) rides the box."""
+    from agent_codespaces import live_users
+
+    lease = _fake_lease("cs-a", "/wt/a")
+    lease.host = lease_mod._this_host()
+    lease.pid = 999999
+    monkeypatch.setattr(lease_mod, "list_leases", lambda: [lease])
+    monkeypatch.setattr(live_users, "lock_holder", lambda name, table=None: None)
+    master = live_users.ProcInfo(4242, 1, (
+        "ssh", "-F", "/x/cs-a.config", "-o", "ControlMaster=yes", "-N", "h"))
+    monkeypatch.setattr(live_users, "process_table", lambda: [master])
+
+    assert main(["leases", "--json"]) == 0
+    import json
+
+    (row,) = json.loads(capsys.readouterr().out)
+    assert row["in_use"] is True
+    assert row["live_users"][0]["pid"] == 4242
+    assert row["live_users"][0]["role"] == "ssh-control-master"
+
+    monkeypatch.setattr(live_users, "process_table", lambda: [])
+    assert main(["leases"]) == 0
+    assert "IN-USE" in capsys.readouterr().out
 
 
 def test_leases_json_without_owner_lists_everything(monkeypatch, capsys):

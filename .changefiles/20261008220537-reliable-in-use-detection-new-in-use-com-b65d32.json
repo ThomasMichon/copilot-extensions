@@ -1,0 +1,9 @@
+{
+  "comment": "Reliable in-use detection: new 'in-use' command and leases/pool live-user overlay account for SSH ControlMasters, forwards and gh ssh sessions; BUSY from stop/finalize/delete names the live holders",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

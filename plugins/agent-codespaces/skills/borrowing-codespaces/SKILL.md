@@ -64,6 +64,14 @@ fleet, there is no "pick a free one").
 - **TTL-based reclamation:** a lease is held by an *effort* (a logical entity),
   not the CLI process, so a forgotten lease self-expires after the TTL (24h
   default). Always `release` explicitly so the CodeSpace frees immediately.
+- **Is it actually in use? Never infer it from the lease `pid`.** That pid is
+  the short-lived process that *wrote* the lease, so it is usually dead. Use
+  `<agent-codespaces catalog argv[0]> in-use <codespace> [--json]` (exit 0 idle,
+  75 in use): it lists every live local user -- the SSH target-lock holder,
+  detached SSH ControlMasters (with their `ControlPath`), port-forward carriers,
+  mux clients, and `gh codespace ssh` sessions. `leases --json` carries the same
+  `in_use` / `live_users` per row, and `stop` / `finalize` / `delete` name these
+  users when they report `[BUSY]`.
 
 ### Check-out / check-in wiring (automatic)
 
@@ -191,7 +199,8 @@ active (a candidate for `release`):
   holder, or `--force` if it's stale.
 - **Effort spans a CodeSpace *and* a container:** independent dispatch targets
   (`codespace:<name>` vs `container:<name>`); record both in the effort file.
-- **Stale lease (effort gone):** `leases` shows it; `release <effort>` frees it,
+- **Stale lease (effort gone):** a lease is only stale when `leases` shows
+  `in_use: false` (or `in-use <codespace>` exits 0); `release <effort>` frees it,
   or it self-expires after the TTL.
 - **CodeSpace slow to appear in `gh codespace list`:** `wait` tolerates transient
   list errors (retries); it only reports `FAILED` on an actual terminal state.

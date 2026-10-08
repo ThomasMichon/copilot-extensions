@@ -1,0 +1,348 @@
+"""Host-side "is this CodeSpace actually in use?" probe.
+
+A lease record's ``pid`` is the process that *wrote* the lease (usually a
+short-lived CLI invocation), so "lease pid is dead" is NOT evidence that a box
+is free: an SSH ControlMaster started with ``ControlPersist=yes`` deliberately
+outlives the process that spawned it, and a daemon-spawned ``agent-codespaces
+ssh --stdio`` session, a port-forward carrier, a mux client, or an interactive
+``gh codespace ssh`` can all still be riding the box.
+
+This module derives the set of **live local users** of a CodeSpace from:
+
+* the ``ssh_manager`` per-target lock holder (when its pid is alive), and
+* the local process table: every ``ssh`` whose ``-F`` config is this
+  CodeSpace's ``ssh-manager`` config file (classified as control master,
+  port-forward carrier, mux client, or plain session), and every
+  ``gh codespace|cs ssh|ports|cp -c <name>`` process that is not merely the
+  ProxyCommand child of an ``ssh`` already counted.
+
+It owns no state and never mutates anything. Degrade-safe: when the process
+table cannot be read (e.g. native Windows, where ssh-manager uses direct mode
+with no persistent masters) only the lock holder is considered.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from dataclasses import asdict, dataclass
+
+ROLE_LOCK = "ssh-target-lock"
+ROLE_CONTROL_MASTER = "ssh-control-master"
+ROLE_FORWARD = "ssh-port-forward"
+ROLE_MUX = "ssh-mux-client"
+ROLE_SSH = "ssh-session"
+ROLE_GH = "gh-codespace-session"
+
+_GH_SUBCOMMANDS = {"ssh", "ports", "cp", "code", "logs", "jupyter"}
+
+
+@dataclass(frozen=True)
+class ProcInfo:
+    """One local process: pid, parent pid, and argv."""
+
+    pid: int
+    ppid: int
+    argv: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LiveUser:
+    """A live local process using a CodeSpace."""
+
+    pid: int
+    role: str
+    command: str
+    detail: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def describe(self) -> str:
+        extra = f" ({self.detail})" if self.detail else ""
+        return f"pid {self.pid} [{self.role}]{extra}: {self.command}"
+
+
+def config_file_name(name: str) -> str:
+    """The ssh-manager per-CodeSpace ``-F`` config file name for ``name``.
+
+    Mirrors ``ssh_manager.codespace_source.CodespaceConfigSource``.
+    """
+    return re.sub(r"[^\w\-.]", "_", name) + ".config"
+
+
+def _read_proc_linux() -> list[ProcInfo] | None:
+    procs: list[ProcInfo] = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/cmdline", "rb") as fh:
+                raw = fh.read()
+            with open(f"/proc/{entry}/stat", encoding="ascii", errors="replace") as fh:
+                stat = fh.read()
+        except OSError:
+            continue
+        argv = tuple(p.decode(errors="replace") for p in raw.split(b"\0") if p)
+        if not argv:
+            continue
+        try:
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (IndexError, ValueError):
+            ppid = 0
+        procs.append(ProcInfo(int(entry), ppid, argv))
+    return procs
+
+
+def _read_proc_ps() -> list[ProcInfo] | None:
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,command="],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    procs: list[ProcInfo] = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        try:
+            procs.append(ProcInfo(int(parts[0]), int(parts[1]), tuple(parts[2:])))
+        except ValueError:
+            continue
+    return procs
+
+
+def process_table() -> list[ProcInfo] | None:
+    """Snapshot the local process table, or ``None`` when unavailable."""
+    if sys.platform == "win32":
+        return None
+    if os.path.isdir("/proc/self"):
+        return _read_proc_linux()
+    return _read_proc_ps()
+
+
+def _basename(arg: str) -> str:
+    base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return base[:-4] if base.endswith(".exe") else base
+
+
+def _option_value(argv: tuple[str, ...], *flags: str, attached: bool = False) -> str | None:
+    """Value of the first of ``flags`` in ``argv`` (``-f v``, ``-f=v``, or ``-fv``)."""
+    for i, arg in enumerate(argv[1:], start=1):
+        if arg in flags:
+            return argv[i + 1] if i + 1 < len(argv) else None
+        for flag in flags:
+            if arg.startswith(flag + "="):
+                return arg[len(flag) + 1:]
+            if attached and arg.startswith(flag) and len(arg) > len(flag):
+                return arg[len(flag):]
+    return None
+
+
+def _ssh_options(argv: tuple[str, ...]) -> dict[str, str]:
+    opts: dict[str, str] = {}
+    for i, arg in enumerate(argv):
+        val = None
+        if arg == "-o" and i + 1 < len(argv):
+            val = argv[i + 1]
+        elif arg.startswith("-o") and len(arg) > 2:
+            val = arg[2:]
+        if val and "=" in val:
+            key, _, value = val.partition("=")
+            opts[key.strip().lower()] = value.strip()
+    return opts
+
+
+def _ssh_role(argv: tuple[str, ...]) -> tuple[str, str] | None:
+    """Classify an ``ssh`` argv into (role, detail); None for a transient ``-O``."""
+    if "-O" in argv:
+        return None
+    opts = _ssh_options(argv)
+    control_path = opts.get("controlpath", "")
+    detail = f"ControlPath={control_path}" if control_path else ""
+    if opts.get("controlmaster", "").lower() in ("yes", "auto", "autoask", "ask"):
+        return ROLE_CONTROL_MASTER, detail
+    if "-N" in argv:
+        return ROLE_FORWARD, detail
+    if control_path:
+        return ROLE_MUX, detail
+    return ROLE_SSH, detail
+
+
+def _gh_codespace_target(argv: tuple[str, ...]) -> str | None:
+    """The CodeSpace a ``gh codespace|cs <sub> -c <name>`` argv targets."""
+    if len(argv) < 3 or _basename(argv[0]) != "gh":
+        return None
+    if argv[1] not in ("codespace", "cs") or argv[2] not in _GH_SUBCOMMANDS:
+        return None
+    return _option_value(argv, "-c", "--codespace")
+
+
+def _is_ssh(argv: tuple[str, ...]) -> bool:
+    return bool(argv) and _basename(argv[0]) == "ssh"
+
+
+def users_from_table(
+    name: str, table: list[ProcInfo], *, exclude_pids: frozenset[int] = frozenset(),
+) -> list[LiveUser]:
+    """Live users of ``name`` found in a process-table snapshot."""
+    cfg = config_file_name(name)
+    by_pid = {p.pid: p for p in table}
+    users: list[LiveUser] = []
+    ssh_pids: set[int] = set()
+    for proc in table:
+        if proc.pid in exclude_pids or not _is_ssh(proc.argv):
+            continue
+        config = _option_value(proc.argv, "-F", attached=True)
+        if not config or _basename(config) != cfg.lower():
+            continue
+        classified = _ssh_role(proc.argv)
+        if classified is None:
+            continue
+        role, detail = classified
+        parent = by_pid.get(proc.ppid)
+        if role == ROLE_CONTROL_MASTER and (proc.ppid <= 1 or parent is None):
+            detail = (detail + "; " if detail else "") + "detached (spawning process exited)"
+        ssh_pids.add(proc.pid)
+        users.append(LiveUser(proc.pid, role, " ".join(proc.argv), detail))
+    for proc in table:
+        if proc.pid in exclude_pids or proc.ppid in ssh_pids:
+            continue  # the ProxyCommand child of an ssh already counted
+        if ssh_pids and "--stdio" in proc.argv:
+            continue  # a ProxyCommand carrier whose ssh parent detached
+        if _gh_codespace_target(proc.argv) == name:
+            users.append(LiveUser(proc.pid, ROLE_GH, " ".join(proc.argv)))
+    return users
+
+
+def lock_holder(name: str, table: list[ProcInfo] | None = None) -> LiveUser | None:
+    """The live ``ssh_manager`` target-lock holder for ``name`` (not ourselves)."""
+    try:
+        from ssh_manager import TargetLock
+        from ssh_manager.locks import pid_alive
+
+        holder = TargetLock(name).read_holder()
+    except Exception:
+        return None
+    if holder is None or holder.pid == os.getpid() or not pid_alive(holder.pid):
+        return None
+    command = ""
+    for proc in table or ():
+        if proc.pid == holder.pid:
+            command = " ".join(proc.argv)
+            break
+    detail = f"op={holder.op}, held {holder.age_seconds:.0f}s"
+    return LiveUser(holder.pid, ROLE_LOCK, command or "<unknown command>", detail)
+
+
+def live_users(name: str, *, table: list[ProcInfo] | None = None) -> list[LiveUser]:
+    """Every live local user of CodeSpace ``name`` (lock holder first)."""
+    if table is None:
+        table = process_table()
+    users: list[LiveUser] = []
+    holder = lock_holder(name, table)
+    if holder is not None:
+        users.append(holder)
+    if table:
+        own = frozenset({os.getpid()})
+        users.extend(u for u in users_from_table(name, table, exclude_pids=own)
+                     if holder is None or u.pid != holder.pid)
+    return users
+
+
+def codespaces_in_use(
+    names: list[str], *, table: list[ProcInfo] | None = None,
+) -> dict[str, list[LiveUser]]:
+    """``{name: users}`` for every name with at least one live user (one scan).
+
+    Never raises: any failure degrades to "no live users seen" (``{}``).
+    """
+    found: dict[str, list[LiveUser]] = {}
+    try:
+        if table is None:
+            table = process_table()
+        for name in names:
+            users = live_users(name, table=table)
+            if users:
+                found[name] = users
+    except Exception:
+        return {}
+    return found
+
+
+def holder_worktree_gone(worktree_path: str | None) -> bool:
+    """True when a #897 **claim**'s owner worktree PATH is positively gone.
+
+    A cheap, host-local check (no subprocess): the host-local ``leases.json``
+    only records claims made on THIS host, so the claim's worktree path is local
+    -- an absolute path no longer on disk means the owning worktree was
+    finalized/pruned while the lease lingered (an **orphaned** lock). Conservative
+    (biased toward alive): a non-path/legacy owner (an advisory borrow's effort)
+    or an unreadable path is treated alive, so a live hold is never false-flagged,
+    and a cross-machine hold (which rides the beacon/L2 overlay, not a local
+    lease) is never seen here at all.
+    """
+    if not worktree_path or not os.path.isabs(worktree_path):
+        return False
+    try:
+        return not os.path.exists(worktree_path)
+    except OSError:
+        return False
+
+
+
+def claim_orphaned(worktree_path: str | None, users: list[LiveUser] | None) -> bool:
+    """A claim is orphaned only when its owner worktree is gone AND nothing local
+    is still using the box -- a lingering ControlMaster/session keeps it live."""
+    return holder_worktree_gone(worktree_path) and not users
+
+
+def describe(users: list[LiveUser], indent: str = "    ") -> str:
+    return "\n".join(f"{indent}- {u.describe()}" for u in users)
+
+
+def busy_report(name: str, busy: object) -> str:
+    """A BUSY message that names what is actually holding ``name``."""
+    lines = [f"[BUSY] {busy}"]
+    users = live_users(name)
+    if users:
+        lines.append(f"  Live local users of '{name}':")
+        lines.append(describe(users))
+        masters = [u for u in users if u.role == ROLE_CONTROL_MASTER]
+        if masters:
+            lines.append(
+                "  A leftover ControlMaster can be closed with "
+                "`ssh -O exit -o ControlPath=<path> _` (path shown above).")
+    lines.append(f"  Inspect: agent-codespaces in-use {name} --json")
+    return "\n".join(lines)
+
+
+def cmd_in_use(args) -> int:
+    """``agent-codespaces in-use <name>``: exit 0 when idle, 75 when in use."""
+    table = process_table()
+    users = live_users(args.name, table=table)
+    if getattr(args, "json_output", False):
+        print(json.dumps({
+            "codespace": args.name,
+            "in_use": bool(users),
+            "process_scan": table is not None,
+            "live_users": [u.to_dict() for u in users],
+        }))
+    elif users:
+        print(f"{args.name}: IN USE by {len(users)} live local process(es):")
+        print(describe(users))
+    else:
+        scope = "" if table is not None else " (process table unavailable; lock only)"
+        print(f"{args.name}: not in use by any local process{scope}")
+    return 75 if users else 0
