@@ -304,7 +304,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     try:
         config = cfg.load_config()
     except Exception as exc:
-        output.warn(f"Cannot load machine context config: {exc}")
+        print(f"warning: Cannot load machine context config: {exc}", file=sys.stderr)
         return _empty()
 
     project = getattr(config, "repo_name", "") or project
@@ -332,22 +332,22 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         return _identity_only()
     except ValueError as exc:
-        output.warn(f"Cannot load machine topology: {exc}")
+        print(f"warning: Cannot load machine topology: {exc}", file=sys.stderr)
         return _identity_only()
 
     try:
         entry = cfg.find_machine_metadata(registry, machine)
     except ValueError as exc:
-        output.warn(f"Cannot resolve machine metadata: {exc}")
+        print(f"warning: Cannot resolve machine metadata: {exc}", file=sys.stderr)
         return _identity_only()
     if entry is None:
-        output.warn(f"Machine topology has no metadata for {machine!r}")
+        print(f"warning: Machine topology has no metadata for {machine!r}", file=sys.stderr)
         return _identity_only()
 
     try:
         raw = cfg.render_copilot_instructions(entry, project=project, machine=machine).rstrip()
     except Exception as exc:
-        output.warn(f"Cannot render machine context: {exc}")
+        print(f"warning: Cannot render machine context: {exc}", file=sys.stderr)
         return _identity_only()
     if not raw:
         return _empty()

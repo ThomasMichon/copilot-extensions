@@ -147,6 +147,37 @@ def test_renderer_uses_explicit_platform_and_wrapper_remains_patchable(monkeypat
     assert direct.endswith("Binstub: example\n")
 
 
+@pytest.mark.parametrize("failure", ["config", "topology", "metadata", "missing", "render"])
+def test_machine_context_warning_stream(monkeypatch, capsys, failure):
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
+    monkeypatch.setattr(cfg, "set_active_project", lambda _p: None)
+    monkeypatch.setattr(cfg, "load_config", lambda: _Config(machine="example-host-wsl"))
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _repo: {})
+    monkeypatch.setattr(cfg, "find_machine_metadata", lambda *_args: object())
+    monkeypatch.setattr(
+        cfg, "render_copilot_instructions", lambda *_args, **_kwargs: "Machine: example-host-wsl",
+    )
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("fixture error")
+
+    if failure == "missing":
+        monkeypatch.setattr(cfg, "find_machine_metadata", lambda *_args: None)
+    else:
+        target = {
+            "config": "load_config", "topology": "load_machines_yaml",
+            "metadata": "find_machine_metadata", "render": "render_copilot_instructions",
+        }[failure]
+        monkeypatch.setattr(cfg, target, fail)
+    assert m.cmd_machine_context(_Args()) == 0
+    captured = capsys.readouterr()
+    assert len(captured.out.splitlines()) == 1
+    payload = json.loads(captured.out.splitlines()[0])
+    assert payload == {} if failure == "config" else "additionalContext" in payload
+    assert "warning:" in captured.err
+
+
 def test_deploy_retires_machine_files(tmp_path: Path):
     proj = tmp_path / ".proj"
     instr = proj / ".github" / "instructions"

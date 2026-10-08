@@ -230,6 +230,29 @@ def test_display_metadata_collision_does_not_override_machine_key(tmp_path):
     assert "example-host" not in other.accepted
 
 
+@pytest.mark.parametrize("owner", ["example-host", "other-host"])
+def test_guest_fallback_collision(tmp_path, monkeypatch, owner):
+    from agent_machines import identity as identity_module
+
+    machines = {"example-host": {"hostname": "generated-host"}}
+    machines.setdefault(owner, {})["alias"] = "example-host-wsl"
+    _topology(tmp_path, machines)
+    monkeypatch.setattr(identity_module.platform, "node", lambda: "generated-host")
+    monkeypatch.setattr(identity_module, "detect_platform", lambda: "wsl")
+    with pytest.raises(ManifestError, match="guest identity.*collides.*native machine"):
+        resolve_machine(topology_repos=[tmp_path])
+
+
+def test_guest_fallback_collision_with_native_hostname(tmp_path, monkeypatch):
+    from agent_machines import identity as identity_module
+
+    _topology(tmp_path, {"native-host": {"hostname": "generated-host-wsl"}})
+    monkeypatch.setattr(identity_module.platform, "node", lambda: "generated-host")
+    monkeypatch.setattr(identity_module, "detect_platform", lambda: "wsl")
+    with pytest.raises(ManifestError, match="guest identity.*collides.*native machine"):
+        resolve_machine(topology_repos=[tmp_path])
+
+
 def test_per_machine_overlay_and_nested_gates_accept_alias(tmp_path):
     repo = tmp_path / "repo"
     package = base_package(gate=["generated-host"])

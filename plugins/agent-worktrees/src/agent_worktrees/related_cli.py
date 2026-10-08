@@ -11,6 +11,7 @@ from machine_transport import IdentityError
 from . import config as cfg
 from . import output, state_root as state_root_mod
 from . import status_updater_cli
+from .related_availability import MachineMatch
 
 
 def _core():
@@ -124,6 +125,30 @@ def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
         except OSError:
             continue
     return cfg.detect_machine(base_anchor)
+
+
+def _related_machine_matcher(anchors: list[str], base_anchor: str) -> MachineMatch:
+    """Resolve topology equivalence for availability, never ownership migration."""
+    from . import related
+
+    entries: dict[str, cfg.MachineEntry] = {}
+    for candidate in dict.fromkeys([base_anchor, *anchors]):
+        if not candidate:
+            continue
+        try:
+            entries = cfg.load_machines_yaml(candidate)
+        except FileNotFoundError:
+            continue
+        break
+
+    def matches(key: str, current: str) -> bool:
+        target = cfg.find_machine_entry(entries, key)
+        local = cfg.find_machine_entry(entries, current)
+        if target is not None and local is not None:
+            return target.key.casefold() == local.key.casefold()
+        return related.machine_matches(key, current)
+
+    return matches
 
 
 def _related_config_source_anchors(
@@ -252,6 +277,7 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
         machines_known_available=machines_known_available,
         registry_has=_registry_has,
         registry_remote=_registry_remote,
+        machine_match=_related_machine_matcher(anchors, anchor),
     )
 
     for f in findings:
@@ -689,6 +715,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             repo_path=(reg.local_path() if reg else None),
             adopted=adopted,
             base_repo=base_repo,
+            machine_match=_related_machine_matcher(anchors, anchor),
         )
         _gh_slug = repos.github_slug(reg.remote) if (reg and reg.remote) else None
         if json_out:

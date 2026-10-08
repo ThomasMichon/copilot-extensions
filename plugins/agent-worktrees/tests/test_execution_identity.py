@@ -244,3 +244,84 @@ def test_shared_display_names_are_metadata(topology, monkeypatch):
     assert cfg.find_machine_entry(entries, "example-host-wsl").key == "example-host-wsl"
     with pytest.raises(ValueError, match="display label.*multiple machines"):
         cfg.find_machine_entry(entries, "Example workstation")
+
+
+@pytest.mark.parametrize("field", ["hostname", "alias", "display_name"])
+def test_null_topology_labels(tmp_path, field):
+    (tmp_path / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": {"example-host": {field: None}}}),
+        encoding="utf-8",
+    )
+    entries = cfg.load_machines_yaml(tmp_path)
+    assert cfg.find_machine_entry(entries, "example-host").key == "example-host"
+
+
+@pytest.mark.parametrize("owner", ["example-host", "other-host"])
+def test_guest_fallback_collision(tmp_path, monkeypatch, owner):
+    machines = {"example-host": {"hostname": "generated-host"}}
+    machines.setdefault(owner, {})["alias"] = "example-host-wsl"
+    (tmp_path / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": machines}), encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    with pytest.raises(ValueError, match="guest identity.*collides.*native machine"):
+        cfg.detect_machine(tmp_path)
+    config = cfg.Config(
+        srcroot="", machine="example-host-wsl", platform="wsl", repo_name="example",
+        repos={"example": cfg.RepoConfig(anchor=str(tmp_path), worktree_root="")},
+    )
+    assert not is_local_machine(owner, config)
+
+
+@pytest.mark.parametrize("environment", ["windows", "linux"])
+@pytest.mark.parametrize("selector", ["example-host", "example-transport", "example-host-wsl"])
+@pytest.mark.parametrize("kind", ["local", "machine", "container", "codespace"])
+def test_related_native_topology_availability(
+    topology, tmp_path, monkeypatch, capfd, environment, selector, kind,
+):
+    from agent_worktrees import __main__ as cli, doctor, related, related_cli, repos
+
+    local = tmp_path / "local.yaml"
+    local.write_text(yaml.safe_dump({
+        "repo_name": "example", "repos": {"example": {"anchor": str(topology)}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: environment)
+    config = cfg.load_config(local, include_control_plane_related_pr=False)
+    monkeypatch.setattr(cfg, "load_config", lambda **_kwargs: config)
+    monkeypatch.setattr(
+        related_cli, "_related_config_source_anchors", lambda *_args, **_kwargs: [str(topology)],
+    )
+    monkeypatch.setattr(repos, "find_repo", lambda _name: None)
+    monkeypatch.setattr(doctor, "_read_projects", lambda: {"example-product": {}})
+    monkeypatch.setattr(related_cli, "_hunt_checkout", lambda _name: None)
+    locus = related.Locus(
+        preferred=f"machine:{selector}" if kind == "machine" else kind,
+        machines=[selector] if kind == "local" else [],
+        container={"repo": "example/product", "machines": [selector]}
+        if kind in ("container", "codespace") else {},
+        codespace={"repo": "example/product"} if kind == "codespace" else {},
+    )
+    related.write_related(topology, related.RelatedConfig(related={
+        "example-product": related.RelatedEntry(name="example-product", locus=locus),
+    }))
+    assert cli.cmd_related_dispatch(
+        ["resolve", "example-product", "--repo", str(topology), "--json"],
+    ) == 0
+    payload = json.loads(capfd.readouterr().out)
+    local = selector != "example-host-wsl"
+    assert payload["available_here"] is (True if kind == "codespace" else local)
+    if kind == "codespace":
+        assert any("local container fleet" in note for note in payload["notes"]) is local
+    if kind == "machine":
+        assert payload["target_machine"] == selector
+    assert config.machine == "generated-host"
+    assert payload["current_machine"] == "generated-host"
+    if kind in ("local", "machine"):
+        assert cli.cmd_related_dispatch(["doctor", "--repo", str(topology), "--json"]) == 0
+        report = json.loads(capfd.readouterr().out)
+        expected = "local_repo_unregistered" if local else "crossmachine_unverifiable"
+        assert [finding["kind"] for finding in report["findings"]] == [expected]
+        assert report["current_machine"] == config.machine

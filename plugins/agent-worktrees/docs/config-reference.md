@@ -152,17 +152,24 @@ only once, including when a local/global setting still names the host.
 Qualification follows the actual execution environment, not an inherited
 `platform` path-selection override.
 
+Related-repo availability compares topology-equivalent keys, hostnames, and
+identity aliases without rewriting `config.machine` or the declared routing
+target. This applies to local/machine loci, container availability, and doctor
+checks even when native config retains its raw hostname.
+
 Host and guest entries may share a raw `hostname`; the guest's hostname lookup
 is qualified. Key/hostname/alias conflicts fail closed. `display_name` is human
 metadata and may be shared between entries; unique legacy display lookups remain
 compatible without shadowing identity fields. Explicitly selecting a duplicated
 display label fails with an instruction to use an identity field.
-Missing guest entries produce
-a warning and retain the qualified key; machine context may borrow host metadata
+Missing guest entries produce a warning and retain the qualified key only if it
+is not already owned by a native entry; a collision fails closed. Optional null
+hostname/alias/display-name labels are treated as absent. Machine context may borrow host metadata
 without treating the host as local. With no topology, context still emits the
 execution identity. `ssh.environments[].alias` is an independently configured
 transport name and is never rewritten or used as execution identity.
 Detection/config loading does not migrate historical worktree or claim owners.
+Machine-context warnings go to stderr; stdout remains one JSON hook response.
 
 ### Same-machine AHP sessions
 
