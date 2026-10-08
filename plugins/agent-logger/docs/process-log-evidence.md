@@ -1,9 +1,11 @@
 # Process-log evidence
 
 The `agent_logger.process_logs` library supplies archive-transparent, bounded
-line reads for the session-intelligence accounting pipeline. It does not yet
-enable process-log synchronization, scheduled compression, or usage ingestion.
-Those remain separate implementation slices.
+line reads for the session-intelligence accounting pipeline. `session-sync`
+can now additionally publish process-log evidence alongside session-state for
+the ordinary local-machine sync path (`sync.process_logs.enabled`, opt-in,
+filesystem targets only); scheduled compression and usage ingestion remain
+separate implementation slices.
 
 ## Supported observations
 
@@ -57,3 +59,29 @@ platform gap, not an equivalent guarantee.
 
 - [Architecture](architecture.md).
 - [Session intelligence effort](../../../efforts/active/session-intelligence-and-accounting/README.md).
+
+## Sync publication (`session-sync`)
+
+`sync.process_logs.enabled` (default `false`) opts a machine's `session-sync`
+into publishing `<sync_source>/logs/` (process-log evidence; raw, gzip, and
+flat ZIP files, selected by `is_process_log_candidate`) alongside
+session-state, under the target's `{machine}/logs/` subpath. It reuses the
+same incremental size/mtime copy and locked-file deferral as the session
+push, but is a flat, non-recursive directory copy -- process logs are never
+a directory tree the way a session is.
+
+Two scope limits, both deliberate rather than overlooked:
+
+- **Filesystem targets only** (`local`/`onedrive`, via
+  `Target.push_process_logs`). SSH and ingest targets fall back to the base
+  class's unsupported response; wiring them in is a follow-up slice.
+- **Unfiltered passes only.** A repo-scoped sync (`repo_allowlist`/
+  `repo_denylist`/`require_repo_opt_in`) skips process-log publication
+  entirely rather than attempting to filter it: a process log is not scoped
+  per-repo the way session-state is (one CLI process's log can span several
+  repos/worktrees across its lifetime), so admission fencing for a
+  repo-scoped sync needs its own design -- a known, explicit follow-up, never
+  silently approximated here.
+
+Scheduled settled-log ZIP compaction, SSH/ingest target support, and
+admission fencing for repo-scoped syncs remain outstanding.

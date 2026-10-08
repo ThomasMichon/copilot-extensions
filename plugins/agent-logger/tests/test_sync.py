@@ -3050,3 +3050,444 @@ def test_main_honors_repo_local_sync_local_path(monkeypatch, tmp_path):
 
     assert engine.main(["run"]) == 0
     assert captured["sync_path"] == tmp_path / "declared-target"
+
+
+# -- process-log sync publication ------------------------------------------
+
+
+def _make_process_logs(root: Path) -> Path:
+    """Create a fake ``<sync_source>/logs`` directory with mixed evidence."""
+    logs = root / "copilot" / "logs"
+    logs.mkdir(parents=True)
+    (logs / "process-111-1.log").write_text("line one\n", encoding="utf-8")
+    (logs / "process-222-2.log.gz").write_bytes(b"\x1f\x8b\x08\x00fake-gzip")
+    (logs / "process-333-3.zip").write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+    (logs / "notes.log").write_text("not a process log\n", encoding="utf-8")
+    (logs / "process-444-4.log.tmp").write_text("in-flight\n", encoding="utf-8")
+    return logs
+
+
+def test_is_process_log_candidate() -> None:
+    from agent_logger.process_logs import is_process_log_candidate
+
+    assert is_process_log_candidate("process-111-1.log")
+    assert is_process_log_candidate("process-111-1.log.gz")
+    assert is_process_log_candidate("anything.zip")
+    assert not is_process_log_candidate("notes.log")
+    assert not is_process_log_candidate("process-111-1.log.tmp")
+    assert not is_process_log_candidate("process-.log")
+
+
+def test_is_process_log_candidate_rejects_path_separators() -> None:
+    """A bare filename is the documented contract; a path-like value must
+    never satisfy the .zip branch's plain `str.endswith` check, regardless
+    of which separator convention the host or the value itself uses."""
+    from agent_logger.process_logs import is_process_log_candidate
+
+    assert not is_process_log_candidate("../outside.zip")
+    assert not is_process_log_candidate("sub/outside.zip")
+    assert not is_process_log_candidate("sub\\outside.zip")
+    assert not is_process_log_candidate("..\\outside.zip")
+    assert not is_process_log_candidate("sub/process-111-1.log")
+    assert not is_process_log_candidate("sub\\process-111-1.log")
+
+
+def test_local_target_push_process_logs_selects_candidates_only(
+    tmp_path: Path,
+) -> None:
+    logs = _make_process_logs(tmp_path)
+    dest_root = tmp_path / "dest"
+    target = LocalTarget({"path": str(dest_root)})
+
+    result = target.push_process_logs(logs, "m1")
+
+    assert result.ok
+    assert result.file_count == 3
+    machine_logs = dest_root / "m1" / "logs"
+    assert (machine_logs / "process-111-1.log").read_text(encoding="utf-8") == "line one\n"
+    assert (machine_logs / "process-222-2.log.gz").is_file()
+    assert (machine_logs / "process-333-3.zip").is_file()
+    assert not (machine_logs / "notes.log").exists()
+    assert not (machine_logs / "process-444-4.log.tmp").exists()
+
+
+def test_local_target_push_process_logs_is_incremental(tmp_path: Path) -> None:
+    logs = _make_process_logs(tmp_path)
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    target.push_process_logs(logs, "m1")
+
+    second = target.push_process_logs(logs, "m1")
+
+    assert second.ok
+    assert second.file_count == 0
+
+
+def test_local_target_push_process_logs_missing_source_is_ok(tmp_path: Path) -> None:
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+
+    result = target.push_process_logs(tmp_path / "copilot" / "logs", "m1")
+
+    assert result.ok
+    assert result.file_count == 0
+    assert not (tmp_path / "dest").exists()
+
+
+def test_base_target_push_process_logs_reports_unsupported(tmp_path: Path) -> None:
+    target = IngestTarget({})
+
+    result = target.push_process_logs(tmp_path, "m1")
+
+    assert result.ok
+    assert "does not support process-log sync" in result.detail
+
+
+@pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
+def test_copy_process_logs_rejects_symlinked_root(tmp_path: Path) -> None:
+    """A deterministic stand-in for the TOCTOU race: once the configured
+    root names a symlink (whether swapped in after the caller's own
+    validation, or from the start), the copy must refuse it rather than
+    traversing through it -- enumeration and every per-entry open are
+    pinned to one directory handle opened with O_NOFOLLOW, not re-resolved
+    by path for each entry (mirroring agent_logger.process_logs's own
+    root-pinning guarantee)."""
+    from agent_logger.sync.targets.filesystem import _copy_process_logs
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "process-111-1.log").write_text("outside evidence\n", encoding="utf-8")
+    configured_root = tmp_path / "configured"
+    configured_root.symlink_to(outside, target_is_directory=True)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ValueError, match="not a directory"):
+        _copy_process_logs(configured_root, dest)
+
+    assert list(dest.iterdir()) == []
+
+
+def test_push_process_logs_reports_failure_for_symlinked_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    configured_root = tmp_path / "configured"
+    try:
+        configured_root.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+
+    result = target.push_process_logs(configured_root, "m1")
+
+    assert not result.ok
+    assert "process-log" in result.detail
+
+
+def test_copy_process_logs_skips_file_rotated_away_mid_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A live log rotated/deleted between this pass's directory scan and its
+    per-file open must be skipped as an ordinary candidate, never crash the
+    whole process-log push -- disappearance is expected for a live source."""
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.filesystem import _copy_process_logs
+
+    logs = _make_process_logs(tmp_path)
+    survivor = logs / "process-555-5.log"
+    survivor.write_text("still here\n", encoding="utf-8")
+    victim = logs / "process-111-1.log"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    if os.name != "nt":
+        real_open_regular_at = filesystem._process_logs.open_regular_at
+
+        def flaky_open_regular_at(dir_fd, name):
+            if name == victim.name:
+                victim.unlink()
+                raise FileNotFoundError(2, "No such file or directory", name)
+            return real_open_regular_at(dir_fd, name)
+
+        monkeypatch.setattr(filesystem._process_logs, "open_regular_at", flaky_open_regular_at)
+    else:
+        real_needs_copy = filesystem._needs_copy
+
+        def flaky_needs_copy(src, dst):
+            if src.name == victim.name:
+                victim.unlink()
+            return real_needs_copy(src, dst)
+
+        monkeypatch.setattr(filesystem, "_needs_copy", flaky_needs_copy)
+
+    copied, _nbytes, locked = _copy_process_logs(logs, dest)
+
+    assert locked == []
+    assert not (dest / victim.name).exists()
+    assert (dest / survivor.name).read_text(encoding="utf-8") == "still here\n"
+    assert copied >= 1
+
+
+def test_copy_stream_replace_rejects_source_changed_during_copy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """If the source file's identity/size changes between opening it and
+    finishing the byte copy (e.g. rotated/truncated-and-rewritten under the
+    same name), the destination must not land -- landing it anyway would
+    carry the OLD bytes under the replacement's NEW size/mtime, which would
+    make a future incremental size/mtime check believe the replacement is
+    already synced, permanently masking it. Metadata/identity must come
+    from the already-open descriptor (``os.fstat``), never a later
+    path-based restat that could observe the replacement instead."""
+    from agent_logger.sync.targets.filesystem import (
+        _copy_stream_replace,
+        _SourceChangedDuringCopy,
+    )
+
+    src = tmp_path / "process-111-1.log"
+    src.write_text("original\n", encoding="utf-8")
+    dst = tmp_path / "dest.log"
+
+    real_fsync = os.fsync
+    state = {"rotated": False}
+
+    def flaky_fsync(fd):
+        if not state["rotated"]:
+            # Fires right after the byte copy's own fsync, before this
+            # function's post-copy fstat -- simulates the source changing
+            # under the still-open descriptor mid-transfer.
+            state["rotated"] = True
+            src.write_text("replaced with different length\n", encoding="utf-8")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", flaky_fsync)
+
+    with open(src, "rb") as stream:
+        with pytest.raises(_SourceChangedDuringCopy):
+            _copy_stream_replace(stream, dst)
+
+    assert not dst.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
+def test_copy_process_logs_detects_rename_based_rotation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A rename-based rotation (the writer renames the old file aside and
+    creates a fresh one under the same name) never changes the already-open
+    descriptor's own identity -- the fd-only `_SourceChangedDuringCopy`
+    check in `_copy_stream_replace` cannot observe it. `_copy_process_logs`
+    must catch it anyway by revalidating the directory ENTRY's identity
+    (by name, via the pinned root_fd) BEFORE committing the replace, so a
+    same-name replacement can neither be mistaken for "already synced" NOR
+    destroy a previously landed, still-good destination copy."""
+    import contextlib
+
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.filesystem import _copy_process_logs
+
+    logs = _make_process_logs(tmp_path)
+    target = logs / "process-111-1.log"
+    target.write_text("original\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    # A previously synced, still-good copy of this same destination name --
+    # the fix this test guards must never delete it.
+    (dest / "process-111-1.log").write_text("previously synced\n", encoding="utf-8")
+
+    real_open_regular_at = filesystem._process_logs.open_regular_at
+
+    @contextlib.contextmanager
+    def rotating_open_regular_at(dir_fd, name):
+        with real_open_regular_at(dir_fd, name) as stream:
+            if name == target.name:
+                # The copy now holds an fd to the ORIGINAL inode (opened
+                # before this rename, same as a real rename-rotation race)
+                # -- reassign the name to a fresh inode while that fd is
+                # still in use, before any bytes are read from it.
+                target.rename(logs / "process-111-1.log.bak")
+                target.write_text("original\n", encoding="utf-8")
+            yield stream
+
+    monkeypatch.setattr(
+        filesystem._process_logs, "open_regular_at", rotating_open_regular_at,
+    )
+
+    _copied, _nbytes, locked = _copy_process_logs(logs, dest)
+
+    assert (
+        dest / "process-111-1.log"
+    ).read_text(encoding="utf-8") == "previously synced\n"
+    assert any(path.name == "process-111-1.log" for path in locked)
+
+
+def test_engine_run_sync_reports_failure_when_process_log_push_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A failed opt-in process-log push must surface as a nonzero exit code
+    (after any remaining cleanup/notify work still runs) -- the base
+    unsupported-capability response already returns ok=True, so ok=False
+    here specifically represents a real failure schedulers/monitoring must
+    not silently record as a successful sync."""
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.base import PushResult
+
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    data = dict(cfg.as_dict())
+    data["sync"]["process_logs"] = {"enabled": True}
+    cfg = Config(data, cfg.home)
+
+    monkeypatch.setattr(
+        filesystem.LocalTarget,
+        "push_process_logs",
+        lambda self, log_root, machine: PushResult(ok=False, detail="simulated failure"),
+    )
+
+    assert engine.run_sync(cfg) == 1
+    # The session-state push itself still landed -- only the process-log
+    # leg failed.
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert (machines[0] / "session-state" / "abc-123" / "events.jsonl").is_file()
+
+
+def test_engine_run_sync_publishes_process_logs_when_enabled(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    data = dict(cfg.as_dict())
+    data["sync"]["process_logs"] = {"enabled": True}
+    cfg = Config(data, cfg.home)
+
+    assert engine.run_sync(cfg) == 0
+
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert (
+        machines[0] / "logs" / "process-999-9.log"
+    ).read_text(encoding="utf-8") == "evidence\n"
+
+
+def test_engine_run_sync_skips_process_logs_when_repo_scoped(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    data = dict(load_config(home=tmp_path / "home").as_dict())
+    data["sync"]["source"] = str(src)
+    data["sync"]["targets"]["local"]["path"] = str(dest)
+    data["sync"]["process_logs"] = {"enabled": True}
+    data["sync"]["repo_allowlist"] = ["some-other-repo"]
+    cfg = Config(data, tmp_path / "home")
+
+    assert engine.run_sync(cfg, verbose=True) == 0
+
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert not (machines[0] / "logs").exists()
+
+
+def test_engine_run_sync_process_logs_disabled_by_default(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert not (machines[0] / "logs").exists()
+
+
+def test_engine_run_sync_reports_unsupported_target_without_verbose(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+) -> None:
+    """An operator who explicitly enables sync.process_logs on a target that
+    doesn't support it (SSH/ingest) must see that it's a no-op on every
+    ordinary scheduled run -- not only when --verbose is passed."""
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.base import PushResult
+
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    data = dict(cfg.as_dict())
+    data["sync"]["process_logs"] = {"enabled": True}
+    cfg = Config(data, cfg.home)
+
+    monkeypatch.setattr(
+        filesystem.LocalTarget,
+        "push_process_logs",
+        lambda self, log_root, machine: PushResult(
+            ok=True, detail=f"{self.describe()} does not support process-log sync",
+        ),
+    )
+
+    assert engine.run_sync(cfg) == 0
+    assert "does not support process-log sync" in capsys.readouterr().out
+
+
+def test_push_process_logs_failure_downgrades_sync_meta_to_partial(tmp_path: Path) -> None:
+    """A process-log leg failing after the session-state leg already wrote
+    `sync-meta.json` with status `ok` must not leave that status standing --
+    otherwise `session-sync status`/fleet health reports this machine as
+    fresh and healthy despite the requested evidence not landing. The
+    downgrade must also preserve the session-state leg's own recorded
+    detritus-exclusion fields rather than resetting them to defaults --
+    only `status`/`deferred_files` describe the process-log leg's outcome."""
+    from agent_logger.sync import meta
+
+    src = _make_source(tmp_path)
+    _add_chromium_profile(src / "session-state" / "abc-123")
+    dest_root = tmp_path / "dest"
+    target = LocalTarget({"path": str(dest_root)})
+
+    result = target.push(src, "m1")
+    assert result.ok
+    machine_root = dest_root / "m1"
+    original = meta.read_sync_meta(machine_root)
+    assert original["status"] == "ok"
+    assert original["excluded_detritus_file_count"] > 0
+
+    # A root that exists but is unsafe (a symlink) fails push_process_logs
+    # via its own "unsafe process-log source" branch.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    bad_root = tmp_path / "bad-logs-root"
+    try:
+        bad_root.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    plog_result = target.push_process_logs(bad_root, "m1")
+
+    assert not plog_result.ok
+    downgraded = meta.read_sync_meta(machine_root)
+    assert downgraded["status"] == "partial"
+    assert downgraded["session_count"] == original["session_count"]
+    assert (
+        downgraded["excluded_detritus_file_count"]
+        == original["excluded_detritus_file_count"]
+    )
+    assert (
+        downgraded["excluded_detritus_roots"] == original["excluded_detritus_roots"]
+    )
+    assert (
+        downgraded["excluded_detritus_measurement_complete"]
+        == original["excluded_detritus_measurement_complete"]
+    )
+
+
+def test_process_logs_enabled_and_source_config() -> None:
+    from agent_logger.config import load_config
+
+    cfg = load_config(home=Path("/tmp/does-not-exist-agent-logger-home"))
+    assert cfg.process_logs_enabled is False
+    assert cfg.process_logs_source == cfg.sync_source / "logs"
