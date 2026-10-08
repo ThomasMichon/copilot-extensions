@@ -802,12 +802,15 @@ than hypothetical:
       field-coverage gap versus the classify payload — but by itself this
       does not explain a *repeated* flap given the durable write-back
       above; the exact timing trigger that would make this gap visible
-      (e.g. the classify pass's batched mux-session list momentarily
-      lagging a genuine attach/detach event) remains open, requiring live
-      reproduction rather than further static tracing, before the narrow
-      fix below is scoped with confidence. Decided the consolidation
-      shape for 6b: both paths already call the shared leaf
-      (`git_ops.classify_worktree`); the genuinely new, narrow seam is one
+      (a lag in when a worktree's mux session is actually created or
+      destroyed — `_build_active_paths` checks only session existence, not
+      attach/detach client-count changes — or in the separate registered-
+      lock transition, relative to when each render pass observes it)
+      remains open, requiring live reproduction rather than further static
+      tracing, before the narrow fix below is scoped with confidence.
+      Decided the consolidation shape for 6b: both paths already call the
+      shared leaf (`git_ops.classify_worktree`); the genuinely new, narrow
+      seam is one
       level up — `_classify_one_record`'s full wrapper (`active_paths`,
       the classify call, tracking-override closure refinement, and
       session-turn `CONVO` refinement), factored into one function both
@@ -931,9 +934,12 @@ already forces `ACTIVE` while genuinely live, and its write-back durably
 persists that value (via `tracking._STAMP_QUEUE`'s `atexit`-registered
 flush) before the subprocess exits, so the gap alone does not explain a
 *repeated* flap in the ordinary case. The actual timing trigger — most
-likely a lag between the classify pass's batched mux-session list and a
-genuine attach/detach event — is left explicitly open, requiring live
-reproduction rather than further static tracing. Decided the
+likely a lag in when a worktree's mux session is actually created or
+destroyed (`_build_active_paths` checks only session existence, not
+attach/detach client-count changes), or in the separate registered-lock
+transition, relative to when each render pass observes it — is left
+explicitly open, requiring live reproduction rather than further static
+tracing. Decided the
 consolidation shape for 6b: both paths already call the shared leaf
 (`git_ops.classify_worktree`); the genuinely new seam is
 `_classify_one_record`'s full wrapper (`active_paths`, the classify call,

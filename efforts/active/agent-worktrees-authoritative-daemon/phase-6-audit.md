@@ -88,11 +88,9 @@ consolidation shape for 6b.
 The reported symptom — a Worktrees-pivot row rendering `MERGED` → `WIP`/
 `ACTIVE` → back to `MERGED`, with no real underlying change — is **not**
 two compute paths disagreeing on git state (Paths B and C remain confirmed
-uninvolved, as above). Two successive hypotheses for the exact trigger have
-each been disproven by this effort's own repo review, with concrete code
-evidence each time (see the Journal for the dated record); this section
-states only what is actually confirmed by code, and names what is not yet
-confirmed.
+uninvolved, as above). This section states only what is actually confirmed
+by code, and names what is not yet confirmed (see the Journal for the
+dated investigation history).
 
 **Confirmed, by code:**
 
@@ -108,12 +106,13 @@ confirmed.
   classify pass computed (including `"active"`) onto `rec.git_state`
   **durably** before the `list --json --classify` subprocess exits: the
   write is queued on `tracking._STAMP_QUEUE` (async, off the render
-  thread) but that queue's `flush()` is registered via `atexit`
-  (`tracking.py:3763`) and additionally drained synchronously by
-  `flush_stamp_writes()` at the CLI's own normal exit path, so a
-  *subsequent* cache-only read is not reading a value the classify pass
-  hasn't finished writing yet, except on an abnormal process termination
-  (a kill, not a normal exit) — a narrow, not the general, case.
+  thread), and that queue's `flush()` is registered via `atexit`
+  (`tracking.py:3763`) — including on the CLI's hard-exit path
+  (`_shutdown_exit.run_and_exit` explicitly runs registered `atexit`
+  handlers) — so a *subsequent* cache-only read is not reading a value
+  the classify pass hasn't finished writing yet, except where the
+  process is killed outright (bypassing `atexit` entirely), not an
+  ordinary exit.
 - The cache-only (`list_cli.cmd_list`'s `--cache-only` branch) payload
   never carries `mux_session`/`mux_attached` (confirmed: it calls
   `_worktree_to_dict(rec, ...)` with no `mux_info`/`session_ctx` at all,
@@ -133,18 +132,24 @@ A field-coverage gap that never manifests under a durable, agreeing
 write-back needs a *timing* fault to actually produce the reported flap.
 The most concrete remaining candidate, not yet traced to a conclusion: a
 **disagreement in time**, not in coverage, between the liveness checks the
-two passes use — e.g. the classify pass's batched `sessions
-._list_mux_sessions()` (one `list-sessions` snapshot, diffed against every
-record) momentarily lagging a genuine mux attach/detach event relative to
-the cache-only pass's own direct, per-record `sessions
-.worktree_session_lock_state()` glob, or vice versa. Confirming this
-requires either live reproduction (repeated `list --json --classify` /
-`--cache-only` calls against a real worktree while toggling its mux
-attachment, observing `rec.git_state` and each payload's marker fields
-across the transition) or tracing the batched mux-list's own staleness
-window in `sessions.py` more closely than this pass did. **This is
-explicitly left open** rather than asserted — 6a's purpose was the
-dataflow trace and the consolidation-shape decision (both done below);
+two passes use — but the candidate boundary must be the signal
+`_build_active_paths` actually consumes: `sessions._list_mux_sessions()`
+checks only whether a worktree's `wt-*` **mux session exists at all**
+(created vs. destroyed), not whether a client is currently attached to it
+— attach/detach changes only a session's client count, which
+`_build_active_paths` never inspects. The real candidate timing fault is
+therefore a lag between a worktree's mux session being **created or
+destroyed** (and, separately, the registered-lock transition
+`worktree_session_lock_state` itself checks) and when each of the two
+render passes observes that transition — not a mux attach/detach event.
+Confirming this requires either live reproduction (repeated `list --json
+--classify` / `--cache-only` calls against a real worktree while actually
+creating/destroying its mux session or its registered lock, observing
+`rec.git_state` and each payload's marker fields across the transition)
+or tracing those two signals' own transition/staleness windows directly
+in `sessions.py`. **This is explicitly left open** rather than asserted —
+6a's purpose was the dataflow trace and the consolidation-shape decision
+(both done below);
 pinning the exact non-deterministic trigger is scoped as a prerequisite
 check for the narrow oscillation fix in 6b's recommendation, not asserted
 as already resolved.
