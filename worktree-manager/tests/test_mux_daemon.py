@@ -795,7 +795,7 @@ def test_republish_refreshes_clients_without_changed_status_options(tmp_path, mo
     assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
     assert registry.get("proj", "wt-1")["attached_clients"] == 0
     assert observations == [2, 0]
-    assert refreshed["mapping_revision"] == 1
+    assert registry.get("proj", "wt-1")["mapping_revision"] == 1
 
 
 def test_republish_leaves_attached_clients_unchanged_on_probe_failure(tmp_path, monkeypatch):

@@ -37,11 +37,14 @@ def mux_attached_clients(mux_bin: str, session: str, timeout_s: float = 1.0) -> 
             creationflags=no_window_flags(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        logging.getLogger(__name__).warning("Mux attachment probe failed for %s: %s", session, exc)
+        logging.getLogger(__name__).warning(
+            "Mux attachment probe failed using %s for %s: %s", mux_bin, session, exc
+        )
         return None
     if result.returncode != 0:
-        logging.getLogger(__name__).warning(
-            "Mux attachment probe failed for %s with exit code %s", session, result.returncode
+        logging.getLogger(__name__).debug(
+            "Mux attachment probe using %s for %s exited with code %s",
+            mux_bin, session, result.returncode,
         )
         return None
     stdout = result.stdout or ""

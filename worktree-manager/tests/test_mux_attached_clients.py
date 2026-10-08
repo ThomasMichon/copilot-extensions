@@ -35,17 +35,22 @@ def test_mux_attached_clients_reports_zero_for_empty_but_successful_listing(monk
     assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") == 0
 
 
-def test_mux_attached_clients_returns_none_on_nonzero_exit(monkeypatch):
+def test_mux_attached_clients_returns_none_on_nonzero_exit(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=mux_attached_clients.__name__)
     monkeypatch.setattr(subprocess, "run", _fake_run_factory(list_clients_ok=False))
     assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") is None
+    assert caplog.records[-1].levelname == "DEBUG"
+    assert "psmux" in caplog.text and "wt-1" in caplog.text
 
 
-def test_mux_attached_clients_returns_none_on_exception(monkeypatch):
+def test_mux_attached_clients_returns_none_on_exception(monkeypatch, caplog):
     def _fake_run(argv, **kwargs):
         raise OSError("no such binary")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
     assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") is None
+    assert caplog.records[-1].levelname == "WARNING"
+    assert "psmux" in caplog.text and "wt-1" in caplog.text
 
 
 def _entry(**overrides) -> dict:
