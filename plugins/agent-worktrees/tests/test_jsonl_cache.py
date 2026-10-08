@@ -240,6 +240,18 @@ def test_excessively_nested_json_does_not_hide_later_records(tmp_path):
     ]
 
 
+def test_oversized_integer_does_not_hide_later_records(tmp_path):
+    limit = getattr(sys, "get_int_max_str_digits", lambda: 0)()
+    if not limit:
+        pytest.skip("Integer-string conversion limit is not enabled")
+    path = tmp_path / "log.jsonl"
+    oversized = b'{"number":' + b"1" * (limit + 1) + b"}"
+    path.write_bytes(b'{"event":"before"}\n' + oversized + b'\n{"event":"after"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [
+        {"event": "before"}, {"event": "after"},
+    ]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows handle identity")
 def test_zero_fstat_identity_still_hits_and_detects_larger_replacement(tmp_path, monkeypatch):
     real_fstat = os.fstat
@@ -260,3 +272,11 @@ def test_zero_fstat_identity_still_hits_and_detects_larger_replacement(tmp_path,
     replacement.replace(path)
     assert list(jsonl_cache.read_jsonl(path)) == [{"event": "new-and-larger"}]
     assert list(first) == [{"event": "old"}]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ctypes lifetime")
+def test_windows_identity_binding_and_pointer_type_are_reused():
+    first = jsonl_cache._windows_identity_api()
+    for _ in range(100):
+        assert jsonl_cache._windows_identity_api() is first
+    assert jsonl_cache._windows_identity_api.cache_info().currsize == 1

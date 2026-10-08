@@ -22,6 +22,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import islice
 from pathlib import Path
 from typing import BinaryIO, overload
@@ -74,6 +75,32 @@ class _Snapshot(Sequence[dict]):
 _cache: OrderedDict[tuple[str, str], _Entry] = OrderedDict()
 
 
+@lru_cache(maxsize=1)
+def _windows_identity_api():
+    """Reuse the DLL binding and ctypes pointer type for the process lifetime."""
+    import ctypes
+    from ctypes import wintypes
+
+    class FileInformation(ctypes.Structure):
+        _fields_ = [
+            ("attributes", wintypes.DWORD),
+            ("created", wintypes.FILETIME),
+            ("accessed", wintypes.FILETIME),
+            ("written", wintypes.FILETIME),
+            ("volume", wintypes.DWORD),
+            ("size_high", wintypes.DWORD),
+            ("size_low", wintypes.DWORD),
+            ("links", wintypes.DWORD),
+            ("index_high", wintypes.DWORD),
+            ("index_low", wintypes.DWORD),
+        ]
+
+    api = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandle
+    api.argtypes = [wintypes.HANDLE, ctypes.POINTER(FileInformation)]
+    api.restype = wintypes.BOOL
+    return api, FileInformation
+
+
 def _stamp(handle: BinaryIO) -> _Stamp:
     stat = os.fstat(handle.fileno())
     identity = stat.st_dev, stat.st_ino
@@ -82,25 +109,8 @@ def _stamp(handle: BinaryIO) -> _Stamp:
         # identity from the actual open handle, never a potentially replaced path.
         import ctypes
         import msvcrt
-        from ctypes import wintypes
 
-        class FileInformation(ctypes.Structure):
-            _fields_ = [
-                ("attributes", wintypes.DWORD),
-                ("created", wintypes.FILETIME),
-                ("accessed", wintypes.FILETIME),
-                ("written", wintypes.FILETIME),
-                ("volume", wintypes.DWORD),
-                ("size_high", wintypes.DWORD),
-                ("size_low", wintypes.DWORD),
-                ("links", wintypes.DWORD),
-                ("index_high", wintypes.DWORD),
-                ("index_low", wintypes.DWORD),
-            ]
-
-        api = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandle
-        api.argtypes = [wintypes.HANDLE, ctypes.POINTER(FileInformation)]
-        api.restype = wintypes.BOOL
+        api, FileInformation = _windows_identity_api()
         info = FileInformation()
         if not api(msvcrt.get_osfhandle(handle.fileno()), ctypes.byref(info)):
             raise ctypes.WinError(ctypes.get_last_error())
@@ -121,7 +131,7 @@ def _decode(raw: bytes, errors: str) -> list[dict]:
             continue
         try:
             out.append(json.loads(line))
-        except (json.JSONDecodeError, RecursionError):
+        except (ValueError, RecursionError):
             continue
     return out
 
