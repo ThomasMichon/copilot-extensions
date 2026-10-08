@@ -10,7 +10,11 @@
 > [`local-endpoint-discovery`](local-endpoint-discovery.md),
 > [`process-slot-ownership`](process-slot-ownership.md) (the generation
 > self-retire and abandoned-passive reap that defend this cutover when the
-> orchestrator itself dies mid-flight).
+> orchestrator itself dies mid-flight),
+> [`versioned-singleton-manager`](versioned-singleton-manager.md) (keeps the
+> host's own service manager coherent across this protocol's two-overlapping-
+> processes shape — a service-manager-side concern this pattern itself does
+> not address).
 > **Origin:** the `correct-install-flows` effort, Thread B (dotfiles#1393),
 > building on the self-updating-runtime-integrity effort (dotfiles#533).
 

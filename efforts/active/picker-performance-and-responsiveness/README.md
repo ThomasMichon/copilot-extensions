@@ -13,7 +13,7 @@
 - **Umbrella issue:** _not yet filed — file once Phase 0 is sent for review_
 - **Sub-issues:** _filed per-phase as each is scoped for execution_
 - **Related, not absorbed — read these before picking up any phase:**
-  - [`efforts/active/pivot-streaming-transport`](../pivot-streaming-transport/README.md)
+  - [`efforts/2026/10/07 pivot-streaming-transport`](<../../2026/10/07 pivot-streaming-transport/README.md>)
     — owns the CLI-relayed daemon fast-path mechanism itself (Phases 3a/3b/3c),
     the render-diffing work (Phase 4), and the resident-monitor hint-trust work
     (Phase 5), for the two pivots (agent-dispatch, agent-bridge) already in its
@@ -217,8 +217,8 @@ manifest flags (`stream`/`subscribe` on `RegisteredPivot`) — this phase is
 wiring two more plugins into an existing mechanism, not inventing a new one.
 Coordinate with `pivot-streaming-transport` rather than duplicating its
 design review; this phase's own design doc should link back to
-`pivot-streaming-transport/phase-3-design.md` for the shared contract instead
-of restating it.)_
+`efforts/2026/10/07 pivot-streaming-transport/phase-3-design.md` (archived)
+for the shared contract instead of restating it.)_
 
 - [ ] Confirm whether agent-codespaces and agent-containers each already run
       a persistent, addressable daemon analogous to agent-bridge's/agent-

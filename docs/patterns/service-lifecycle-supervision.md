@@ -194,3 +194,7 @@ about every plugin service identically.
   [`install-contract.md`](../install-contract.md)
 - Teardown of unregistered, per-unit-of-work helper processes (not a
   supervised service): [`ephemeral-process-reaping`](ephemeral-process-reaping.md)
+- Keeping the registered supervisor's own liveness tracking coherent across a
+  **spawn-new-retire-old** cutover (the coordinator shape, not the
+  restart-in-place successor-with-same-argv shape this doc already covers):
+  [`versioned-singleton-manager`](versioned-singleton-manager.md)

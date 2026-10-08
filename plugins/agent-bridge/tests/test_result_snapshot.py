@@ -679,6 +679,12 @@ def test_represented_position_reports_discontinuity_after_store_reset(
     )
     first = client.get("/api/v1/live-sessions/live-1/result").json()
     app.state.live_event_store.drop("live-1")
+    # A log's continuity derives from its first event's wall-clock
+    # timestamp; on a coarse (Windows) clock the replacement log could
+    # otherwise share the dropped log's timestamp and continuity.
+    dropped_at = time.time()
+    while time.time() <= dropped_at:
+        time.sleep(0.001)
     _ingest_live(
         client,
         {"id": "2", "type": "assistant.message", "data": {"content": "after"}},

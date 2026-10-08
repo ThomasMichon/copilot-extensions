@@ -711,7 +711,45 @@ line ~344) and stamps the result — not
 `agent-dispatch/worktree_status_relay.py`. Whether/how these two consumers'
 answers can actually diverge against the same worktree — and whether that
 is the row-oscillation issue #5555 describes, or a distinct risk — is not
-yet traced; 6a establishes that before any consolidation work starts.)_
+yet traced; 6a establishes that before any consolidation work starts.
+
+**Additional concrete findings for 6a's own trace (2026-10-07, operator
+report of the live oscillation symptom — `MERGED` → `WIP`/`ACTIVE` →
+`MERGED`)**, incorporated into 6a's checklist below but not yet
+investigated/resolved, found while confirming the symptom was real rather
+than hypothetical:
+- `worktree_manager.engine_client.current_worktree_status()`'s own
+  docstring self-reports as **"the status bar's own non-daemon classify
+  pass"** — a third, separate compute path beyond the two 6a already names,
+  worth tracing alongside them for whether any Worktrees-pivot row render
+  (not only the status bar this docstring names) ever reaches it while the
+  daemon is reachable.
+- `worktree_manager.production_picker.picker_tui.data_local._overlay_cached_state()`
+  has the shape below, but repository usage shows it is called **only by
+  tests** — the actual production cache-only path is
+  `engine_client.list_worktree_rows(..., cache_only=True)` →
+  `agent_worktrees.list_cli` →
+  **`agent_worktrees.picker_support.data_local._overlay_cached_state()`**
+  (a second, separate function of the same name in a different module —
+  trace this one, not the unused `worktree_manager` copy, or 6a could
+  incorrectly rule out a live override that's actually running). It trusts
+  `rec.git_state` (the daemon-stamped value) and then
+  **unconditionally overrides it** — `if live: raw["state"] = "active"` —
+  whenever a *different* fact (`session_bound_live`/a live
+  `inuse.<pid>.lock`) is true, independent of whether git state actually
+  changed. Its own docstring documents this as intentional design for the
+  cache-only **fast pass** specifically ("a live bound Copilot -> ACTIVE,
+  authoritative in the fast pass -- wins over a cached terminal/unknown
+  state") — i.e. a deliberate precedence rule for one render phase, not an
+  oversight; whether that rule itself is what produces the *visible*
+  oscillation (reconciling against the subsequent `classify=True` pass's
+  own value) is exactly what 6a's trace needs to confirm or rule out. This
+  does not substitute for 6a-6c's own consolidation outcome even if it
+  turns out to be the dominant visible cause** — #5555 and this phase
+  require one authoritative compute path, not merely a quieter symptom; a
+  narrow overlay fix may legitimately land first (it addresses a real bug
+  regardless), but it closes neither 6a's own trace nor this phase's
+  closing claim on #5555 on its own.)_
 - [ ] **6a — Design sub-pass (do this first, in its own PR per this effort's
       own Phase 1 precedent):** first, trace both consumers' actual
       dataflow — the **production** Worktrees-pivot path
@@ -721,7 +759,12 @@ yet traced; 6a establishes that before any consolidation work starts.)_
       `plugins/agent-worktrees/picker_support/data_local.py` caller; and
       `agent-dispatch/worktree_status_relay.py`'s status-bundle consumer —
       to establish concretely whether/when they can disagree for the same
-      worktree, rather than assuming it. Then enumerate every fact
+      worktree, rather than assuming it. **Also trace the two additional
+      findings above** (`current_worktree_status()`'s non-daemon pass, and
+      `_overlay_cached_state()`'s unconditional `live` override) as
+      candidate direct mechanisms for the reported oscillation — confirm
+      or rule out before assuming the full classify/compute consolidation
+      is the only fix needed. Then enumerate every fact
       `classify_daemon` computes (`git_ops.WorktreeStateInfo`: `state`,
       `dirty`, `behind`, `ahead`, etc.) against every fact
       `worktree_status_compute.compute()` assembles, and classify each as

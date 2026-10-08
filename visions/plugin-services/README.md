@@ -477,6 +477,25 @@ the predecessor. A routine version bump therefore requires neither
 re-registration nor renewed elevation, and changing runtime configuration does
 not rewrite the supervisor definition.
 
+### cutover-coherent-service-tracking
+A host's native service manager's own view of "is this service running" stays
+**coherent** across a *zero-downtime-cutover*, not just the service's external
+behavior. When a cutover retires the process the service manager directly
+tracks in favor of a new one, the service manager's restart/failure accounting
+reflects that handoff as **intentional**, never as a crash to retry — so a
+cutover can never leave the service manager fighting a restart loop against an
+already-live, untracked survivor it cannot see. This holds equally for a
+restart-in-place supervisor (the new process *is* the tracked one, so an exit
+code the service manager's restart policy whitelists is sufficient on its
+own) and a spawn-new-retire-old cutover (two processes genuinely overlap, so
+the tracked identity itself must be **transferred or retained** — a bare
+whitelisted exit code only suppresses the restart-as-failure signal while
+leaving the unit inactive and the real successor outside its tracking,
+reproducing the same incoherence under a different name; a native identity
+handoff, or a thin version-agnostic intermediary the service manager tracks
+permanently and which itself mediates the handoff, are the mechanisms that
+actually close this case) — *which* mechanism is spec-level, not fixed here.
+
 ### payload-remains-replaceable
 The marketplace payload remains replaceable while services and launchers are
 running. No long-lived **service, daemon, installer, or service launcher** may

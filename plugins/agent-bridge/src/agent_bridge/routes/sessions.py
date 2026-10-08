@@ -57,6 +57,8 @@ from ..session_manager import (
 )
 from ..transport import SpawnTarget
 from ..worktree_head import resolve_head
+from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page
+from .event_pages import rows_to_events as _rows_to_events
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -73,15 +75,6 @@ _CURSOR_DEFAULT_KEY = "__default__"
 def _cursor_key(caller_id: str | None) -> str:
     """Normalize a caller_id into a non-null delivery_cursors key."""
     return caller_id if caller_id else _CURSOR_DEFAULT_KEY
-
-
-def _rows_to_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert durable event rows to the wire event-dict shape."""
-    return [
-        {"id": r["event_id"], "event": r["event_type"], "data": r["data"],
-         "timestamp": r["timestamp"]}
-        for r in rows
-    ]
 
 
 def _controlled_cursor_key(caller_id: str | None) -> str:
@@ -1225,6 +1218,8 @@ async def get_events(
         default=None, min_length=1, max_length=128
     ),
     transient: bool = False,
+    before: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
 ):
     """SSE event stream with durable event IDs.
 
@@ -1237,11 +1232,16 @@ async def get_events(
     The stream never advances the delivery cursor itself; the client acks
     delivered events via ``POST /{id}/cursor`` after flushing them, so
     delivery confirmation (not server-side production) drives the cursor.
+
+    ``?before=<id>[&limit=<n>]`` returns a JSON page (:func:`events_before_page`).
     """
     mgr: SessionManager = request.app.state.session_manager
     session = mgr.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if isinstance(before, int):  # direct callers see unresolved Query defaults
+        streaming_args = after is not None or controlled or transient
+        return events_before_page(session, mgr.db, before, limit, streaming_args, continuity_id)
     controlled_caller_id = (
         _controlled_cursor_key(caller_id) if controlled else None
     )
