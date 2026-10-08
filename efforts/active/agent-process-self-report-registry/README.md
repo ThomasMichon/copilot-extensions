@@ -148,6 +148,15 @@ defect trackers until their own repairs are verified.
 - [ ] Choose the folder/database/service arrangement. Prefer a small daemon
       for coordination and periodic snapshots, while retaining the operator's
       latitude on storage. Name its source owner and lifecycle before coding.
+- [ ] _(Agent-recommended)_ Define owner-scoped access to registration,
+      unregister, query, and stored state/snapshots. Follow
+      `docs/patterns/service-transport.md`: private UDS permissions or Windows
+      named-pipe DACLs; authenticated owner-scoped access if loopback TCP is
+      necessary. Protect files with equivalent permissions. Reject mutation
+      of another registration without its ownership proof; PID knowledge or
+      claimed session/cell strings alone are not authorization. State the
+      same-user trust boundary and exclude credentials/raw command payloads
+      from persisted records.
 - [ ] Define a snapshot journal of roughly two snapshots per hour in a folder,
       plus on-demand snapshots. _(Agent-recommended)_ Bound retention/disk
       use, write snapshots atomically, and record timestamps and coverage.
@@ -195,6 +204,10 @@ defect trackers until their own repairs are verified.
       restart, and denied OS inspection; no stale record removes a new process.
 - [ ] Verify installation-cell isolation and concurrent registration/query
       behavior on the explicitly supported Windows/Linux/macOS paths.
+- [ ] Attempt unauthorized register/unregister/query and state/snapshot-file
+      access; all are denied under the reviewed owner scope. Test forged
+      registration ownership and conditional removal without disclosing
+      private session/cwd/worktree data to untrusted callers.
 - [ ] Verify periodic snapshots at the chosen approximately twice-hourly cadence,
       folder output, retention bounds, atomic writes, and on-demand reports.
 - [ ] Disable/remove all telemetry configuration: registration, query, and
@@ -269,3 +282,6 @@ _Pending — Phase 1 design decisions above need to land here once settled._
 - Restored MCP shim adoption to required scope because the original operator
   request expressly asked to count them. Root-cause repairs for #5557/#5558
   remain separate from earlier one-time process cleanup.
+- Review of the revised stateful design required explicit owner-scoped
+  transport/storage access and anti-spoofing validation. Added these as
+  agent-recommended safety requirements without introducing telemetry export.
