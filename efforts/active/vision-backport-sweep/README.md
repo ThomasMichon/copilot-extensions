@@ -1080,3 +1080,7 @@ then rather than assuming either answer.
   generation. No new clean-room or live-venue run: no runtime, hook, installer,
   or payload behavior changes in this slice. No fresh process-reclamation
   guarantee is inferred from session-state confirmation tests.
+- PR `#5770` review corrected "forced retirement" to "forced stopping": even
+  forced stop preserves resumable state, whereas end/retirement is a separate
+  state-removal operation. Kept that lifecycle distinction explicit rather
+  than broadening the stop contract accidentally.

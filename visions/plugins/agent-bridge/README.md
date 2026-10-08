@@ -290,7 +290,7 @@ it is stopped and preserved for resume. The notice follows the session's
 ordinary serialized conversation instead of interrupting an existing turn.
 Request, observed acknowledgement, provider stop, and confirmed stopped state
 remain distinct; repeating a stop against an already-stopped or gone target
-is harmless. Explicit forced retirement remains available without pretending
+is harmless. Explicit forced stopping remains available without pretending
 it provided that cooperative opportunity.
 
 ### standards-compatible-host-control
