@@ -98,6 +98,59 @@ def test_resolve_machine_matching_the_local_machine_is_a_no_op_not_a_self_ssh_ha
     assert not called  # must never dispatch to itself over SSH
 
 
+def test_resolve_machine_matching_local_but_environment_cross_platform_still_dispatches(monkeypatch):
+    """Regression for the Windows Worktree Picker launching a same-machine
+    WSL worktree (e.g. `--machine some-host --environment WSL` run from
+    that same host's own Windows side): the self-targeting no-op above must
+    NOT swallow this case merely because `--machine` names the local
+    machine -- that worktree lives in a different OS/filesystem with its
+    own tracking directory, invisible to this process's local
+    `cfg.tracking_dir()`. Before the fix this fell through to local
+    resolution and failed closed with "Worktree not found" instead of
+    dispatching the SSH handoff into the requested environment."""
+    from agent_worktrees import resolve_cli as resolve_cli_mod
+
+    monkeypatch.setattr(resolve_cli_mod.cfg, "detect_platform", lambda: "windows")
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(seed=None, environment="WSL")
+    )
+    state.config = SimpleNamespace(machine=state.requested_machine)  # self-match
+    called = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *a, **k: called.append((a, k)) or 0,
+    )
+
+    rc = resolve_cli._resolve_json_mode(state)
+
+    assert rc == 0
+    assert called  # must still dispatch -- the environment differs from "windows"
+
+
+def test_resolve_machine_matching_local_and_environment_matches_current_platform_is_a_no_op(monkeypatch):
+    """Sibling of the above: when `--environment` is given but it names the
+    SAME platform this process is already running on (e.g. `--environment
+    Win` from Windows), the self-targeting no-op still applies -- this is
+    genuinely local, not a cross-platform handoff."""
+    from agent_worktrees import resolve_cli as resolve_cli_mod
+
+    monkeypatch.setattr(resolve_cli_mod.cfg, "detect_platform", lambda: "windows")
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(seed=None, environment="Win")
+    )
+    state.config = SimpleNamespace(machine=state.requested_machine)  # self-match
+    called = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *a, **k: called.append((a, k)) or 0,
+    )
+
+    with contextlib.suppress(Exception):  # fake config is too bare for the local path to finish
+        resolve_cli._resolve_json_mode(state)
+
+    assert not called  # same machine, same platform -- must stay local
+
+
 def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remotely(monkeypatch):
     """Sibling of the self-match regression above: a genuinely different
     `--machine` must still reach `_emit_remote_plan_for_env` -- the new guard

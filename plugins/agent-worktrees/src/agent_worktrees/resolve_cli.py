@@ -504,7 +504,28 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # `agent-worktrees copilot`/Worktree Manager flow invoked with this
     # machine's own alias round-tripped through SSH back to itself instead of
     # resolving locally.
-    if state.requested_machine and state.requested_machine != getattr(config, "machine", None):
+    #
+    # BUT a same-machine target can still legitimately name a DIFFERENT
+    # --environment (e.g. --machine some-host --environment WSL, invoked
+    # from the Windows side of the same physical box) -- exactly the case
+    # `_load_remote_machines` itself special-cases ("for the local machine,
+    # only environments that differ from the current platform are
+    # included"). That worktree lives in a separate OS/filesystem with its
+    # own tracking directory, never visible to this process's local
+    # `cfg.tracking_dir()`. Treating same-machine-name as proof of "no
+    # dispatch needed" regardless of --environment made every same-machine
+    # cross-platform resume (e.g. the Windows Worktree Picker launching a
+    # WSL worktree) fail closed with a bogus "Worktree not found" instead of
+    # SSHing into the requested environment -- confirmed live.
+    same_machine = state.requested_machine == getattr(config, "machine", None)
+    requested_environment = getattr(state.args, "environment", None) or ""
+    same_environment = True
+    if requested_environment:
+        from . import resolve_machine_cli
+
+        want_platform = resolve_machine_cli._ENV_LABEL_TO_NAME.get(requested_environment.lower())
+        same_environment = want_platform is None or want_platform == cfg.detect_platform()
+    if state.requested_machine and not (same_machine and same_environment):
         remote_args: list[str] = []
         if state.use_base:
             remote_args.append("--base")
