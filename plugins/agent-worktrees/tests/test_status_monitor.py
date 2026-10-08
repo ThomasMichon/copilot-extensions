@@ -2995,14 +2995,19 @@ def _boom(*a, **k):  # pragma: no cover - only fires on regression
 def _write_valid_slot(tmp_path, version: str = "1.0.0-dev1", *, sub=("Scripts", "python.exe")):
     """Create a realistic ``versions/<version>/<sub>`` interpreter plus its
     matching ``.install-complete.json`` completion marker, so
-    ``current_runtime_python()``'s marker validation succeeds."""
+    ``current_runtime_python()``'s marker validation succeeds. Emits the
+    REAL canonical schema (``version``/``completed_at``/``pid``), matching
+    ``scripts/versioned_runtime.py``'s own ``validate_marker()`` -- not
+    just a bare ``{"version": ...}``, which the stricter schema check
+    would otherwise reject."""
     import json
     slot = tmp_path / "versions" / version
     python_path = slot.joinpath(*sub)
     python_path.parent.mkdir(parents=True)
     python_path.write_text("", encoding="utf-8")
     (slot / ".install-complete.json").write_text(
-        json.dumps({"version": version}), encoding="utf-8"
+        json.dumps({"version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 1}),
+        encoding="utf-8",
     )
     return python_path
 
@@ -3273,12 +3278,122 @@ def test_current_runtime_python_rejects_a_marker_naming_a_different_version(
     python_path.parent.mkdir(parents=True)
     python_path.write_text("", encoding="utf-8")
     (slot / ".install-complete.json").write_text(
-        json.dumps({"version": "0.9.0-dev1"}), encoding="utf-8"
+        json.dumps({"version": "0.9.0-dev1", "completed_at": "2026-01-01T00:00:00Z", "pid": 1}),
+        encoding="utf-8",
     )
     from agent_worktrees import config as _cfg
     monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
 
     assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def _write_marker(slot, marker_text: str) -> None:
+    slot.mkdir(parents=True, exist_ok=True)
+    (slot / ".install-complete.json").write_text(marker_text, encoding="utf-8")
+
+
+def test_current_runtime_python_rejects_a_marker_missing_required_fields(
+    monkeypatch, tmp_path,
+):
+    """A marker with a matching version but missing completed_at/pid (the
+    canonical schema's other two required fields, scripts/versioned_runtime.py's
+    validate_marker()) must not validate -- a truncated or partially-written
+    marker is exactly as untrustworthy as a missing one."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({"version": "1.0.0-dev1"}))  # no completed_at/pid
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_with_extra_unknown_keys(
+    monkeypatch, tmp_path,
+):
+    """The canonical schema rejects any key outside
+    version/completed_at/pid/payload_hash -- an extra/unknown key signals a
+    marker that doesn't match the canonical writer's own output and must
+    not be trusted."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({
+        "version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z",
+        "pid": 1, "unexpected_extra_field": "oops",
+    }))
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_with_duplicate_json_fields(
+    monkeypatch, tmp_path,
+):
+    """A marker with a duplicate JSON field (a truncated/concatenated write)
+    must not validate, matching scripts/versioned_runtime.py's own
+    _load_unique_json() duplicate-field rejection."""
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(
+        slot,
+        '{"version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z", '
+        '"pid": 1, "pid": 2}',
+    )
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_with_a_negative_pid(
+    monkeypatch, tmp_path,
+):
+    """pid must be a non-negative integer per the canonical schema -- a
+    negative or non-integer pid (e.g. a bool, which Python's int supertype
+    would otherwise let slip through an isinstance(x, int) check) must not
+    validate."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({
+        "version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z", "pid": -1,
+    }))
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_accepts_a_marker_with_optional_payload_hash(
+    monkeypatch, tmp_path,
+):
+    """payload_hash is the ONE optional key the canonical schema allows
+    beyond the three required fields -- a marker carrying it must still
+    validate."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({
+        "version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z",
+        "pid": 1, "payload_hash": "abc123",
+    }))
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == str(python_path)
 
 
 def test_current_runtime_python_does_not_fall_back_to_a_sibling_slot(

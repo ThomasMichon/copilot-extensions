@@ -58,18 +58,54 @@ MAX_DELAY_SECONDS = 3600.0
 
 def _slot_marker_valid(slot: Path, version: str) -> bool:
     """Whether ``slot`` carries a well-formed ``.install-complete.json``
-    marker naming exactly ``version`` -- the cheap half of the canonical
-    binstub resolvers' own validation (``scripts/resolve-runtime.ps1``'s
-    ``_Aw-MarkerValid``, ``resolve-runtime.sh``'s equivalent): a stale or
-    hand-edited ``current-version``/``last-known-good`` pointer, or a slot
-    directory mid-install with no completion marker yet, must not be
-    trusted as a complete, startable runtime."""
+    marker naming exactly ``version`` -- mirrors the canonical schema
+    ``scripts/versioned_runtime.py``'s own ``validate_marker()`` enforces
+    (required: ``version``/``completed_at``/``pid``; optional:
+    ``payload_hash``; no other keys; no duplicate JSON fields) rather than
+    accepting any JSON object with a matching ``version`` field, which
+    could let a truncated or malformed marker make an incomplete slot
+    trusted. Not import-shared with that module directly: ``scripts/`` is
+    a build/install-time tree, not part of the installed runtime package,
+    so it cannot be relied on to be importable from here at agent
+    runtime. A stale or hand-edited ``current-version``/``last-known-good``
+    pointer, or a slot directory mid-install with no completion marker
+    yet, must not be trusted as a complete, startable runtime."""
     try:
         import json
-        marker = json.loads((slot / ".install-complete.json").read_text("utf-8"))
-        return isinstance(marker, dict) and marker.get("version") == version
+
+        def _unique_object(pairs):
+            out: dict = {}
+            for key, value in pairs:
+                if key in out:
+                    raise ValueError(f"duplicate JSON field: {key}")
+                out[key] = value
+            return out
+
+        marker = json.loads(
+            (slot / ".install-complete.json").read_text("utf-8"),
+            object_pairs_hook=_unique_object,
+        )
     except Exception:
         return False
+    if not isinstance(marker, dict):
+        return False
+    allowed = {"version", "completed_at", "pid", "payload_hash"}
+    required = {"version", "completed_at", "pid"}
+    if not required.issubset(marker) or not set(marker).issubset(allowed):
+        return False
+    if not isinstance(marker["version"], str) or marker["version"] != version:
+        return False
+    if not isinstance(marker["completed_at"], str):
+        return False
+    if (
+        not isinstance(marker["pid"], int)
+        or isinstance(marker["pid"], bool)
+        or marker["pid"] < 0
+    ):
+        return False
+    if "payload_hash" in marker and not isinstance(marker["payload_hash"], str):
+        return False
+    return True
 
 
 def current_runtime_python() -> str:
