@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Draft | #5707 |
+| [Lean Session Lifecycle](active/lean-session-lifecycle/README.md) | Draft | #5579, #5664, #2619 |
 | [Session Intelligence and Accounting](active/session-intelligence-and-accounting/README.md) | Active | #5665 |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
 | [Resume Prompt: Durable `--interactive` Seed Delivery, No-Mux Parity](active/resume-prompt-durable-seed-and-mux-fix/README.md) | Active (Phase 1 done) | #5415 |
