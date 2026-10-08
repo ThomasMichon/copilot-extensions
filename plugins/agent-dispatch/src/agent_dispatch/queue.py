@@ -393,7 +393,13 @@ class TaskQueue(
             )
             task_steer_columns = {r["name"] for r in conn.execute("PRAGMA table_info(task_steer)")}
             if "idempotency_key" not in task_steer_columns:
-                conn.execute("ALTER TABLE task_steer ADD COLUMN idempotency_key TEXT")
+                try:
+                    conn.execute("ALTER TABLE task_steer ADD COLUMN idempotency_key TEXT")
+                except sqlite3.OperationalError as exc:
+                    # Another concurrently-starting coordinator may have added
+                    # this exact column after our PRAGMA snapshot.
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
             conn.execute(            "CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)"
             )
             # A client-side retry of an ambiguous (already-committed-but-the-
