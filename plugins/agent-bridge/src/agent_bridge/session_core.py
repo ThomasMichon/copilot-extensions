@@ -747,6 +747,7 @@ class _SessionCoreMixin:
                 target=target,
                 agent_name=row.get("agent_name"),
                 caller_id=row.get("caller_id"),
+                caller_session_id=row.get("caller_session_id"),
             )
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]

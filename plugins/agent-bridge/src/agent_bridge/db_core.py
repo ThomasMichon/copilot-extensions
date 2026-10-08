@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -24,6 +24,7 @@ SCHEMA_VERSION = 24
 # nullable so ``ADD COLUMN`` is always safe.
 _SESSIONS_ENSURE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("caller_id", "TEXT"),
+    ("caller_session_id", "TEXT"),
     ("context_size", "INTEGER"),
     ("context_used", "INTEGER"),
     ("usage_model", "TEXT"),
@@ -120,6 +121,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     name TEXT NOT NULL,
     agent_name TEXT,
     caller_id TEXT,
+    caller_session_id TEXT,
     target_dir TEXT,
     target_type TEXT NOT NULL DEFAULT 'local',
     target_json TEXT,

@@ -297,7 +297,7 @@ def test_migration_v24_alone_installs_aliases_triggers_and_start_time(tmp_path: 
         assert {fence, cleanup} <= triggers
         columns = {r[1] for r in conn.execute("PRAGMA table_info(live_sessions)")}
         assert "process_started_at" in columns
-        assert db.execute_read("SELECT version FROM schema_version")[0]["version"] == 24
+        assert db.execute_read("SELECT version FROM schema_version")[0]["version"] == SCHEMA_VERSION
     finally:
         db.close()
 

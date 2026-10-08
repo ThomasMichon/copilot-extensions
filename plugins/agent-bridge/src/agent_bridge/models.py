@@ -108,6 +108,7 @@ class SessionInfo(BaseModel):
     name: str
     agent_name: str | None = None
     caller_id: str | None = None
+    caller_session_id: str | None = None  # creating Copilot session (COPILOT_AGENT_SESSION_ID)
     acp_session_id: str | None = None  # ACP-sourced session id (durable identity)
     durable_session_id: str | None = None  # acp_session_id, or session_id if that's all there is
     target_dir: str | None = None
@@ -200,6 +201,7 @@ class StartSessionRequest(BaseModel):
     topology: str | None = None
     worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
     caller_id: str | None = None  # caller identity for session affinity
+    caller_session_id: str | None = None  # creating Copilot session's id; invalid -> dropped
     sender_repo: str | None = None  # caller's repo (agent-worktrees `get project`
     #                                 in the CLI cwd) -- bare-venue default source
     caller_owner_ref: str | None = None  # resource-obligation-settlement Ph3c: the
@@ -212,12 +214,10 @@ class StartSessionRequest(BaseModel):
     # supported value only for an exclusive ``venue-parity:`` caller using
     # ``force_new``; ordinary callers cannot alter the far-side ACP command.
     parity_fault: str | None = None
-    # Per-session model / reasoning-effort override for THIS session only. Copilot
-    # ignores the ``--model`` launch flag in ``--acp`` mode, so agent-bridge sets
-    # the model per-session via ``session/set_config_option``; these fields feed
-    # that path (``agent-bridge create --model/--effort``) at highest precedence
-    # over the daemon's env / host-settings default (see
-    # ``AcpClient._apply_model_config``). None / omitted keeps the daemon default.
+    # Per-session model / reasoning-effort override (``agent-bridge create
+    # --model/--effort``). Copilot ignores ``--model`` under ``--acp``, so these
+    # feed ``session/set_config_option`` at highest precedence over the daemon
+    # default (``AcpClient._apply_model_config``). None / omitted keeps the default.
     model: str | None = None
     effort: str | None = None
     # Per-session MCP servers mounted into the ACP session at session/new, giving
@@ -314,10 +314,10 @@ class StartSessionResponse(BaseModel):
     session_id: str
     name: str
     status: SessionStatus
+    caller_session_id: str | None = None  # recorded creating Copilot session (v24+)
     # The responding daemon's HTTP wire-contract version + supported range, so a
-    # (cross-host) caller learns which capabilities the remote speaks and can gate
-    # across version skew (dotfiles #632). Defaulted to this build's constants so
-    # every construction site advertises it without duplication.
+    # (cross-host) caller can gate capabilities across version skew (dotfiles
+    # #632). Defaulted to this build's constants at every construction site.
     protocol_version: int = HTTP_PROTOCOL_VERSION
     min_protocol_version: int = HTTP_PROTOCOL_MIN_SUPPORTED
     # Present only for an explicit harness-owned start fault. Contains boolean
