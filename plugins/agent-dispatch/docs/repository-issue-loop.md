@@ -352,8 +352,10 @@ eligible emitters.
 2. Move the adopter-owned declaration placement or its top-level
    `filters.permit.machine` authority to the new host.
 3. Release the old emitter lease with
-   `agent-dispatch schedule lease-release repository-issue-loop:<name>
-   --holder <old-holder>` or allow the declared lease to expire.
+   `agent-dispatch schedule lease-release emitter:<emitter-id>
+   --holder <old-holder>`. A lease TTL is observability-only: expiry never
+   transfers this pin. For report-first, renewal-fenced recovery of a stale
+   foreign pin, use [emitter diagnosis](emitter-recovery.md).
 4. Register/discover the declaration on the new host, enable it there, and
    confirm `status` shows the new source and worker lane served.
 5. Run `discover`, then inspect visible reservations and the active occurrence
