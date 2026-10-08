@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import types
 
-import pytest
-
 from agent_worktrees import config as agent_cfg
 from worktree_manager.production_picker.picker_tui import data_local
 
