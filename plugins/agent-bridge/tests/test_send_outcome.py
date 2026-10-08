@@ -270,6 +270,18 @@ def test_the_real_resolver_exits_unavailable_for_an_unknown_target(monkeypatch):
     assert exc.value.code == 69
 
 
+def test_a_session_gone_between_resolve_and_submit_is_refused_unavailable(monkeypatch, capsys):
+    class Gone(_PromptClient):
+        def submit_prompt(self, session_id, prompt, **_kw):
+            raise BridgeClientError(404, f"Session {session_id} not found")
+
+    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
+    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
+    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
+    code, out, _ = _run(monkeypatch, capsys, Gone({}))
+    assert code == 69 and out["outcome"] == "refused_unavailable" and out["reason"] == "not_found"
+
+
 def test_a_turn_that_starts_between_the_check_and_the_submit_is_refused_busy(monkeypatch, capsys):
     class Racing(_PromptClient):
         def submit_prompt(self, session_id, prompt, **_kw):

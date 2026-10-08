@@ -391,6 +391,12 @@ def _submit_and_stream(
             request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
         )
     except BridgeClientError as exc:
+        if exc.status == 404:
+            # The session vanished between resolving it and this submit.
+            from .send_outcome import SendRefused
+
+            raise SendRefused("refused_unavailable", reason="not_found", retryable=False,
+                              target=session_id, error=str(exc.detail)) from exc
         if exc.status != 409:
             raise
         # A turn started between the busy check and this submit: the same
@@ -811,13 +817,19 @@ def _cmd_create(args: argparse.Namespace) -> None:
             print(f"[OK] Session {session_id} created -- send work with: agent-bridge send {session_id} \"<prompt>\"")
         return
 
-    core._submit_and_stream(
-        client,
-        args,
-        session_id,
-        _companion_seed_prompt(prompt),
-        caller_id=caller_id,
-    )
+    from .send_outcome import SendRefused
+
+    try:
+        core._submit_and_stream(
+            client,
+            args,
+            session_id,
+            _companion_seed_prompt(prompt),
+            caller_id=caller_id,
+        )
+    except SendRefused as refused:
+        print(f"[FAIL] {refused.error}", file=sys.stderr)
+        sys.exit(refused.exit_code)
 
 
 def _write_session_id_file(path_value: str, session_id: str) -> None:
