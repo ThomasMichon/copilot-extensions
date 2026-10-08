@@ -60,6 +60,38 @@ of the exact hazard the migration's own ambiguity handling guards against.
       resolvable project context) -- confirm its event is held unresolved
       rather than misfiled.
 
+### Worktree-less events -- a full audit, not just `boot_trace`
+
+`boot_trace` is not the only event that can run without a resolvable
+worktree id. Confirmed by direct source inspection, at least three
+production call sites emit without one:
+
+- `boot_trace` -- written directly by the shell/PowerShell resolver and
+  dispatcher (`scripts/invoke-payload-runtime.sh`, `scripts/resolve-runtime.sh`,
+  and their Windows equivalents), bypassing `activity.log_event()` entirely,
+  **before** a project or worktree is known at all.
+- `launcher_shell_reaped` (`reap_cli.py`) -- a machine-scoped reap sweep
+  describing a reaped shell process, not any one worktree.
+- `handoff_retire_guard` -- at least two call sites
+  (`pane_lifecycle.py`, `sessions_pane_retire.py`) currently omit a
+  worktree id.
+
+Once the global file is retired, none of these has anywhere to land if
+every remaining sink is strictly per-worktree -- silently losing them, or
+leaving them unresolved forever, is not an acceptable default.
+
+- [ ] **Audit every `activity.log_event()` call site** (not just the three
+      above) for any path that can run without a resolvable worktree id --
+      this list is a confirmed floor, not necessarily the ceiling.
+- [ ] For each one found, make an **explicit** preserve/retire/reroute
+      decision (the same three options as `boot_trace` below), not a
+      silent default -- machine-scoped events that are still wanted need a
+      home; events judged no longer worth keeping are retired outright,
+      writers and tests together, in the same change.
+- [ ] Add a test enumerating these call sites (or their equivalent audit
+      surface) and asserting each has a recorded decision, so a future new
+      worktree-less call site can't silently slip through unresolved.
+
 ### Machine-scoped pre-resolution events (`boot_trace`)
 
 `boot_trace` records are **not** like other `activity.log_event()` events:
@@ -73,19 +105,22 @@ they're written.
 
 - [ ] Decide and implement one of:
   - **(a) Keep a small, separate, still-bounded machine-scoped sink**
-    exclusively for genuinely pre-resolution events (`boot_trace` and any
-    future event in the same class), distinct from (and much smaller than)
-    the retired general-purpose global log -- same age-based rolling
-    retention discipline, just scoped to this one narrow event class; or
-  - **(b) Deliberately retire `boot_trace` telemetry entirely**, removing
-    its writers and their tests in the same change, if it's judged no
-    longer worth the machine-scoped exception.
-- [ ] Whichever is chosen, update `docs/patterns/lifecycle-activity-logging.md`
+    exclusively for genuinely pre-resolution/worktree-less events
+    (`boot_trace`, `launcher_shell_reaped`, the `handoff_retire_guard`
+    sites above, and any future event in the same class), distinct from
+    (and much smaller than) the retired general-purpose global log --
+    same age-based rolling retention discipline, just scoped to this one
+    narrow class; or
+  - **(b) Deliberately retire the telemetry entirely**, per-event-kind,
+    removing its writers and their tests in the same change, for any of
+    the above judged no longer worth the machine-scoped exception.
+- [ ] Whichever is chosen (independently, per event kind), update
+  `docs/patterns/lifecycle-activity-logging.md`
   and `plugins/agent-worktrees/docs/cli-reference.md` to describe the new
   destination (or the explicit retirement) rather than leaving them
   describing a sink that no longer exists.
-- [ ] Add a test proving the chosen behavior: either boot-trace events are
-  still captured and readable post-migration (option a), or that their
+- [ ] Add a test proving the chosen behavior per event kind: either it's
+  still captured and readable post-migration (option a), or that its
   writers/tests are fully and consistently removed with no dangling
   references (option b).
 
@@ -98,6 +133,6 @@ they're written.
       behavior: seed per-worktree journals across 2+ projects, confirm an
       unfiltered call returns every entry, globally time-ordered, matching
       the pre-migration output shape.
-- [ ] The project-routing and `boot_trace` tests named inline above.
+- [ ] The project-routing and worktree-less-events tests named inline above.
 
 Back to the main plan: [`README.md`](README.md).

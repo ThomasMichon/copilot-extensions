@@ -126,7 +126,7 @@ follow-ons.
 - [ ] Extend `SessionHandoff` (tracking.py) with: `spawn_attempted_at`,
       `predecessor_retire_state` (`pending|retired|abandoned`),
       `retire_attempts`, `retire_last_attempt_at`, `retire_last_outcome`,
-      `retire_last_method`.
+      `retire_last_method`, **`retire_terminal_streak_started_at`**.
 - [ ] **Crash-safe commit ordering.** The slot and the diagnostic log are
       not one atomic commit -- a YAML write under `_RecordLock` and a
       best-effort JSONL append cannot both land atomically, and the
@@ -137,9 +137,19 @@ follow-ons.
       `activity.log_event()`/trace write after that commit succeeds. A
       crash between the two leaves the slot (authoritative) correct and
       only the diagnostic trail short one event -- never the reverse.
-- [ ] Preserve the existing abandon-after-N-unrecoverable-failures semantics
-      (`_RETIRE_TERMINAL_FAILURE_METHODS`, `_RETIRE_ABANDON_GRACE_S`) exactly,
-      now computed from the slot fields instead of log replay.
+- [ ] **Preserve the exact abandon-after-N-unrecoverable-failures semantics
+      (`_RETIRE_TERMINAL_FAILURE_METHODS`, `_RETIRE_ABANDON_GRACE_S`).** The
+      existing logic (`__main__.py`'s abandonment pass) requires *every*
+      recorded attempt to be terminal-class, and starts the grace-period
+      clock at the **earliest** attempt in that unbroken run -- a bare
+      "count + last outcome/method/time" cannot reconstruct this: it loses
+      both the original streak-start timestamp and whether a non-terminal
+      attempt ever interrupted the run. `retire_terminal_streak_started_at`
+      is set on the first terminal-class failure after a reset and left
+      untouched by subsequent terminal-class failures; it is explicitly
+      cleared to `None` the moment any non-terminal-class attempt occurs.
+      Abandonment then checks `now - retire_terminal_streak_started_at >=
+      _RETIRE_ABANDON_GRACE_S` directly off the slot -- no journal replay.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
 - [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
@@ -172,8 +182,8 @@ follow-ons.
 
 ### Phase 3 — Generalize the per-worktree journal
 
-Full design, project-routing requirements, and the `boot_trace`
-machine-scoped-events decision: [`phase-3-journal-generalization.md`](phase-3-journal-generalization.md).
+Full design, project-routing requirements, and the worktree-less-events
+audit/decision: [`phase-3-journal-generalization.md`](phase-3-journal-generalization.md).
 
 - [ ] Extend `handoff_trace.py`'s proven per-project/per-worktree
       JSONL-with-lock pattern to cover every `activity.log_event()` kind.
@@ -183,20 +193,23 @@ machine-scoped-events decision: [`phase-3-journal-generalization.md`](phase-3-jo
       contract.
 - [ ] Define authoritative project routing for every live writer (never
       guess via ambient fallback alone).
-- [ ] Decide and implement the `boot_trace` machine-scoped pre-resolution
-      events' destination (or their deliberate retirement).
+- [ ] Audit every `activity.log_event()` call site for worktree-less
+      callers (confirmed floor: `boot_trace`, `launcher_shell_reaped`,
+      two `handoff_retire_guard` sites) and make an explicit
+      preserve/retire/reroute decision for each.
 
 ### Phase 4 — One-time migration
 
-Full design (multiplicity-preserving dedup, resumable-offset cutover,
+Full design (stable-identity dedup, generation-safe resumable cutover,
 era-matched provenance, ambiguity handling): [`phase-4-migration.md`](phase-4-migration.md).
 
 - [ ] A migration pass copies the existing global `activity.jsonl`'s
-      history into the correct per-worktree files, safely: no duplicate
-      entries across retries or dual-writes, no stranding of a
-      concurrently-appended straggler, no misattributing a reused worktree
-      id's history across projects/eras, and no guessing at an ambiguous
-      or orphaned record.
+      history into the correct per-worktree files, safely: exact-identity
+      reconciliation (not content counting alone) across retries and
+      dual-writes, generation-safe resumability across the log's own
+      retention-prune file replacement, no misattributing a reused
+      worktree id's history across projects/eras, and no guessing at an
+      ambiguous or orphaned record.
 - [ ] Wired into `agent-worktrees update`/install, safe to re-run.
 
 ### Phase 5 — Retire the global log
@@ -211,8 +224,9 @@ era-matched provenance, ambiguity handling): [`phase-4-migration.md`](phase-4-mi
       into/merging with the existing Tier C description) and
       `plugins/agent-worktrees/docs/cli-reference.md`'s `activity` section
       (its documented machine-global retention/behavior, reconciled with
-      Phase 3's unscoped-merge decision), plus the `boot_trace` decision's
-      own documentation implications (see `phase-3-journal-generalization.md`).
+      Phase 3's unscoped-merge decision), plus the worktree-less-events
+      audit's own documentation implications (see
+      `phase-3-journal-generalization.md`).
 
 ### Phase 6 — Worktree-state archival (agent-logger)
 
@@ -238,13 +252,20 @@ archived-journal discovery, standalone-install retention floor):
       the diagnostic-event emission; assert the slot remains correct and
       authoritative regardless, and that the diagnostic write never
       precedes the slot commit (Phase 1).
+- [ ] A terminal-streak test: a non-terminal attempt followed by a run of
+      terminal-class failures must start the grace-period clock at the
+      first terminal failure *after* the non-terminal one, not any earlier
+      terminal failure before it; confirm `retire_terminal_streak_started_at`
+      resets correctly on a non-terminal attempt and abandonment fires at
+      exactly `_RETIRE_ABANDON_GRACE_S` past the correct streak start
+      (Phase 1).
 - [ ] Unit tests proving the 6 rewired hot-path functions never call
       `activity.read_events`/`handoff_trace.read_trace` (Phase 2) --
       e.g. a monkeypatch that raises if either is called during a sweep or
       during session registration.
 - [ ] Phase 3's validation: see [`phase-3-journal-generalization.md`](phase-3-journal-generalization.md)
       (journal writer/reader concurrency, unscoped merge-discovery,
-      project-routing, `boot_trace`).
+      project-routing, worktree-less-events audit).
 - [ ] Phase 4's validation: see [`phase-4-migration.md`](phase-4-migration.md)
       (idempotency, dedup multiplicity, concurrent-tail writes, temporal id
       reuse, ambiguity handling).
@@ -274,17 +295,18 @@ _Pending review of Phase 1's PR (first reviewable slice)._
   archival capability in `agent-logger`.
 - Filed ThomasMichon/copilot-extensions#5664 as the umbrella issue.
 
-### 2026-10-08 — Plan review (PR #5669), 7 rounds
-- Drove the plan-only PR through 7 review rounds, resolving 1 Critical
-  equivalent set of migration/archival correctness gaps (High findings):
-  a crash-safe slot/log commit ordering (Phase 1), two additional
-  automatic journal readers (Phase 2), an unscoped-`activity`-view
-  contract and live-write project-routing requirement (Phase 3),
-  migration safety across crashes/dual-writes/repeated-content/temporal
-  id reuse/project ambiguity (Phase 4), and a fail-open composition seam
-  plus a standalone-install retention floor for archival (Phase 6) --
-  plus a `boot_trace` machine-scoped pre-resolution-event gap the global
-  log's retirement would otherwise silently break.
+### 2026-10-08 — Plan review (PR #5669), 8 rounds
+- Drove the plan-only PR through 8 review rounds, resolving a long run of
+  genuine migration/archival/state-model correctness gaps: a crash-safe
+  slot/log commit ordering and exact terminal-failure-streak-start
+  tracking (Phase 1), two additional automatic journal readers (Phase 2),
+  an unscoped-`activity`-view contract, live-write project-routing, and a
+  full worktree-less-events audit beyond just `boot_trace` (Phase 3),
+  stable per-event identity (not content counting alone), generation-safe
+  resumability against the log's own retention-prune file replacement,
+  temporal id-reuse/era-matched provenance, and project ambiguity (Phase 4),
+  and a fail-open composition seam plus a standalone-install retention
+  floor for archival (Phase 6).
 - Restructured the README per a Low finding and this repo's own
   decompose-liberally convention: extracted Phases 3/4/6's detailed
   design and validation into linked sibling docs

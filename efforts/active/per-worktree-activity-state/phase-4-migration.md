@@ -11,20 +11,38 @@ A best-effort migration pass reads the existing global `activity.jsonl`
 once and copies each record's history into the correct per-worktree file it
 describes (established by Phase 3, `phase-3-journal-generalization.md`).
 
-### Multiplicity-preserving deduplication, not set-membership
+### Stable event identity, not content-based counting
 
-A content hash alone is not a stable per-record identity: `log_event()`
-timestamps only to whole seconds, so two *legitimate, independently
-occurring* events can share identical fields; naive set-style dedup (hash
-already seen -> skip) would silently collapse real, distinct history.
+Even multiset-by-content counting is insufficient: it cannot distinguish a
+genuinely new event from Phase 3's dual-write path (one whose per-worktree
+write succeeded but whose *corresponding* global write then failed, or vice
+versa) from an unrelated, independently-occurring event that happens to
+share identical content. A destination-only event from a partial dual-write
+failure can silently "consume" the count that should have matched an older,
+genuinely distinct global-only event with the same content -- causing
+migration to skip real history rather than duplicate it.
 
-- [ ] Match and de-duplicate by **multiset** comparison instead: for a given
-      identity (hash of content, or an existing unique field if one
-      qualifies), count how many copies already exist in the destination
-      and how many appear in the source segment being migrated, and append
-      only the excess -- never collapse to a single copy.
+- [ ] Give every event a **stable, explicit identity assigned at write
+      time**, not derived after the fact from content: Phase 3's
+      generalized writer (and, for the remaining transition window, the
+      legacy global writer too) stamps each event with a unique id (e.g. a
+      UUID, or a `(writer-pid, monotonic-sequence)` pair) at the moment
+      it's created. Migration then matches by this id, not by counting
+      look-alike content -- exact, not probabilistic.
+- [ ] Crash/retry-safe: if a writer crashes after assigning the id but
+      before the write durably lands on one or both sides, the retry must
+      reuse the *same* id (not mint a new one), so a later migration pass
+      can still recognize and reconcile it correctly.
+- [ ] Legacy, pre-Phase-3 history that was never stamped with this id has
+      no better option than the content+multiset heuristic above --
+      restrict that heuristic explicitly to entries that predate Phase 3's
+      id-stamping, and use exact id-matching for everything written during
+      or after the transition.
 - [ ] Migration tests must include a case with genuinely repeated,
-      identical-content events.
+      identical-content events (the pre-id-stamping heuristic path), a
+      case with a partial dual-write failure (per-worktree write landed,
+      corresponding global write didn't, or vice versa), and a crash-retry
+      case that reuses the same stamped id.
 
 ### A completed read pass is not itself a safe cutover boundary
 
@@ -39,8 +57,24 @@ global-only straggler from ever migrating.
       segment's writes are confirmed durable in the destination, and treat
       a later run as picking up from the last confirmed offset rather than
       a full rescan or a hard "never again" stamp.
+- [ ] **A saved offset is only valid against the same file generation.**
+      `activity.py`'s own retention worker (`_prune()`) periodically
+      rewrites and *replaces* `activity.jsonl` (a new, shorter file at the
+      same path) -- a byte offset recorded against the pre-prune file can
+      point at unrelated data (or past EOF) in the replacement, silently
+      stranding records rather than erroring loudly. Record a
+      generation fingerprint alongside the offset (e.g. a hash of the
+      file's first N bytes, or its inode/creation time where available);
+      if a later run finds the fingerprint no longer matches, treat it as
+      a new generation and fall back to a full rescan (safe, given the
+      stable-identity dedup above) rather than seeking to the stale offset.
+      Alternatively, serialize migration against the prune worker directly
+      (same lock) so the two can never interleave -- either approach is
+      acceptable, but the plan must pick one rather than leave the race
+      unaddressed.
 - [ ] Validate a writer appending concurrently with (and after) a migration
-      pass's own read.
+      pass's own read, AND a prune/replace cycle racing an in-progress or
+      resumed migration.
 
 ### A current unique project match does not prove historical provenance
 
@@ -82,7 +116,8 @@ can land in the WRONG project's file, corrupting that worktree's history.
 
 - [ ] Wire it into `agent-worktrees update`/install so every existing
       machine picks it up, automatically, safe to re-run given the
-      multiplicity-preserving and resumable-offset requirements above.
+      stable-identity and resumable-offset (with generation-fingerprint)
+      requirements above.
 
 ## Validation (phase-specific)
 
@@ -94,15 +129,31 @@ can land in the WRONG project's file, corrupting that worktree's history.
       the destination with events a Phase-3 dual-write already delivered
       before migration runs, and confirm migration recognizes and skips
       them rather than duplicating.
-- [ ] A repeated-identical-event test: seed the source with two or more
-      genuinely distinct events that happen to share identical content
-      (same second-resolution timestamp, same fields), confirm migration
-      preserves the full count in the destination rather than collapsing
-      to one via set-style dedup.
+- [ ] A partial-dual-write-failure test: a per-worktree write lands but its
+      corresponding global write fails (or vice versa), with an unrelated,
+      independently-occurring event of identical content also present;
+      confirm migration reconciles by stable id and neither skips the
+      genuinely distinct unrelated event nor duplicates the partial one.
+- [ ] A crash-retry-reuses-id test: a writer crashes after assigning an
+      event's stable id but before the write durably lands; confirm the
+      retry reuses the same id and migration reconciles correctly rather
+      than treating it as two events.
+- [ ] A repeated-identical-event test (legacy, pre-id-stamping history
+      only): seed the source with two or more genuinely distinct events
+      that happen to share identical content (same second-resolution
+      timestamp, same fields), confirm migration preserves the full count
+      in the destination rather than collapsing to one via set-style dedup.
 - [ ] A concurrent-tail-write test: start a migration pass, append a new
       event to the source after its read reaches EOF but before the stamp,
       confirm a subsequent migration run still picks up and migrates that
       straggler rather than treating the earlier stamp as final.
+- [ ] A prune-race test: trigger `activity.py`'s retention `_prune()` (file
+      replacement) between two migration runs that would otherwise resume
+      from a saved offset; confirm the generation-fingerprint mismatch is
+      detected and the resumed run falls back to a full rescan rather than
+      seeking into unrelated or past-EOF data in the replacement file (or,
+      if serializing against the prune worker instead, confirm the two
+      never interleave).
 - [ ] A temporal-id-reuse test: seed a historical event for a worktree id
       that belonged to project A (now reaped) at one time period, with that
       same id now uniquely resolving to an unrelated project B at the
