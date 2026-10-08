@@ -525,11 +525,12 @@ below — read it before starting any Phase 3 work).
       entries; no changes needed.
 - [x] A live fixture repo/issue/PR set exercises each of the four newly
       named recipes end-to-end per their own Phase's test item. **Done
-      2026-10-08** (see Journal): a real, personal-account scratch repo
-      (`tmichon_microsoft/agent-dispatch-recipe-fixture`) with real issues/
-      efforts was driven end-to-end against a real GitHub forge via a new
-      clean-room Tier-E scenario (`agent-dispatch-recipe-loops-eval`). All
-      four recipes reached real, independently-observed completion evidence:
+      2026-10-08** (see Journal): a real, operator-supplied personal-
+      account scratch GitHub repository (created fresh for this validation,
+      never under an organization) with real issues/efforts was driven
+      end-to-end against a real GitHub forge via a new clean-room Tier-E
+      scenario (`agent-dispatch-recipe-loops-eval`). All four recipes
+      reached real, independently-observed completion evidence:
       backlog-triager classified a real issue and linked it to a tracked
       effort via a merged PR; issue-reproducer posted a real reproduction-
       evidence comment with actual command output; effort-builder grouped
@@ -1755,20 +1756,20 @@ slice being explicitly spun off separately):
   this effort's own scope, since the live-fixture validation below is now
   done.
 - **Live fixture validation -- done 2026-10-08:** stood up a real,
-  personal-account scratch repository
-  (`tmichon_microsoft/agent-dispatch-recipe-fixture`, private, created
-  fresh, never under an org) with real GitHub issues (#1 a trivial real
-  README typo for backlog-triager; #2 a genuinely reproducible inverted-
-  condition bug in a tiny `scripts/is_even.py` for issue-reproducer; #3-#5
-  three small related repo-scaffolding asks for effort-builder) and two
-  pre-seeded `efforts/active/*` READMEs (`fixture-tracking` for
-  backlog-triager to link against; `scratch-effort` with one trivial
-  remaining Plan item -- add a one-line LICENSE file -- for effort-driver
-  to drive to archive state). Each of the four fixture issues/the
-  scratch-effort carries its own `fixture-for-*` scoping label so the three
-  forge-backed loops don't race each other over the same open issues (an
-  early iteration without this raced and cross-contaminated reservations
-  across issues).
+  operator-supplied personal-account scratch GitHub repository (private,
+  created fresh for this validation, never under an organization -- not
+  named here per this repo's own identifier-neutrality policy) with real
+  GitHub issues (#1 a trivial real README typo for backlog-triager; #2 a
+  genuinely reproducible inverted-condition bug in a tiny
+  `scripts/is_even.py` for issue-reproducer; #3-#5 three small related
+  repo-scaffolding asks for effort-builder) and two pre-seeded
+  `efforts/active/*` READMEs (`fixture-tracking` for backlog-triager to
+  link against; `scratch-effort` with one trivial remaining Plan item --
+  add a one-line LICENSE file -- for effort-driver to drive to archive
+  state). Each of the four fixture issues/the scratch-effort carries its
+  own `fixture-for-*` scoping label so the three forge-backed loops don't
+  race each other over the same open issues (an early iteration without
+  this raced and cross-contaminated reservations across issues).
   - **Scope decision (deliberate):** every fixture declaration sets
     `require_verification: false`, overriding the shipped recipes'
     `require_verification: true` default. Designing and registering a real
@@ -1841,32 +1842,26 @@ slice being explicitly spun off separately):
        arbitrary short name, confirmed empirically via direct
        `project_for_task()` invocation before trusting it inside a full
        run.
-  - **Real evidence produced** (fixture repo:
-    `tmichon_microsoft/agent-dispatch-recipe-fixture`):
+  - **Real evidence produced** (against the same operator-supplied scratch
+    repository, account/repo name withheld per this repo's own
+    identifier-neutrality policy; exact issue/PR numbers kept for the
+    operator's own private record):
     - **backlog-triager:** issue #1 classified `bug`, a real triage
-      comment posted
-      ([#1](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/issues/1)),
-      linked to the pre-seeded `fixture-tracking` effort via a real,
-      merged PR
-      ([#9](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/9)).
+      comment posted, linked to the pre-seeded `fixture-tracking` effort
+      via a real, merged PR.
     - **issue-reproducer:** issue #2 got a real reproduction-evidence
       comment with actual command output for the stated repro steps plus
-      nearby variants, confirmed 100% reproducible, `bug` label applied
-      ([#2](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/issues/2)).
+      nearby variants, confirmed 100% reproducible, `bug` label applied.
     - **effort-builder:** issues #3/#4/#5 grouped into a new tracked
       effort (`efforts/active/repo-scaffolding-essentials/README.md`) via
-      a real, opened PR
-      ([#7](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/7))
-      -- planning-only, no scaffolding file implemented, per the
-      identity's own done-criteria ("open or merged").
+      a real, opened PR -- planning-only, no scaffolding file implemented,
+      per the identity's own done-criteria ("open or merged").
     - **effort-driver:** implemented the scratch-effort's one real
       remaining Plan item (a one-line `LICENSE` file, content verified
-      verbatim) via a real, merged PR
-      ([#6](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/6)),
-      then archived the effort to the repo's own dated archive
-      (`efforts/2026/10/scratch-effort/`, confirmed via the real GitHub
-      contents API) via a second real, merged PR
-      ([#8](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/8)).
+      verbatim) via a real, merged PR, then archived the effort to the
+      repo's own dated archive (`efforts/2026/10/scratch-effort/`,
+      confirmed via the real GitHub contents API) via a second real,
+      merged PR.
   - **Honest caveats:** the daemon's fast 5-second cadence + no
     "already-triaged" exclude-label convention meant a couple of loops
     re-selected an already-handled issue on a later occurrence before the
@@ -1876,8 +1871,8 @@ slice being explicitly spun off separately):
     bounded setup, not a mechanism defect; a real adopter repo's identity/
     evaluator would apply its own "already handled" marker to prevent
     this. The fixture repo and its real issues/PRs/efforts are left in
-    place as durable evidence, per instruction; the `agent-dispatch-
-    recipe-fixture` repo is not deleted or archived.
+    place as durable evidence, per instruction, and are not deleted or
+    archived.
 - **Next:** get one complete, clean full-suite run (retry once #5582/#5584
   settle or the host machine is less loaded) to close this effort's one
   remaining Validation Plan item, or make an explicit call with the

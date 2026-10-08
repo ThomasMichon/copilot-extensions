@@ -349,14 +349,24 @@ nohup bash -lc 'agent-dispatch supervise serve --interval 5' > "$_daemon_log" 2>
 disown || true
 sleep 5
 _daemon_status_out="$CR_LOGDIR/supervisor-daemon-status.log"
-if ( bash -lc 'agent-dispatch supervise daemon-status' ) > "$_daemon_status_out" 2>&1; then
-    if grep -q '"running": *true' "$_daemon_status_out" 2>/dev/null || grep -q '"holds_scope": *true' "$_daemon_status_out" 2>/dev/null; then
-        pass "singleton supervisor daemon is running (see cr-logs/supervisor-daemon-status.log)"
-    else
-        info "supervisor daemon-status did not clearly report running -- see cr-logs/supervisor-daemon-status.log and supervisor-serve.log"
-    fi
+_daemon_running() {
+    bash -lc 'agent-dispatch supervise daemon-status' > "$_daemon_status_out" 2>&1 \
+        && grep -q '"running": *true' "$_daemon_status_out" 2>/dev/null
+}
+if _daemon_running; then
+    pass "singleton supervisor daemon is running (see cr-logs/supervisor-daemon-status.log)"
 else
-    jam "dispatch-config" "agent-dispatch supervise daemon-status failed (see cr-logs/supervisor-daemon-status.log)" "check cr-logs/supervisor-serve.log for why the daemon did not start"
+    # One bounded retry (the daemon may still be acquiring its lock) before
+    # treating this as a real failure -- every recipe depends on it, so
+    # setup must FAIL here, never merely log an INFO and let the eval
+    # proceed against a coordinator that is not actually serving anything.
+    sleep 5
+    if _daemon_running; then
+        pass "singleton supervisor daemon is running (confirmed on retry; see cr-logs/supervisor-daemon-status.log)"
+    else
+        jam "dispatch-config" "agent-dispatch supervise daemon-status does not report \"running\": true after two checks (see cr-logs/supervisor-daemon-status.log and supervisor-serve.log)" "every recipe depends on this daemon; fix before trusting any part of the eval"
+        cr_finalize
+    fi
 fi
 
 # =========================================================================

@@ -67,33 +67,44 @@ for _decl in "$REGISTRAR_DIR"/*.yaml; do
     cr_meta "${_recipe}_task_count" "${_count:-0}"
 
     if [ -n "${_count:-}" ] && [ "${_count:-0}" != "0" ]; then
-        _first_id="$(python3 -c '
+        # Task lists are newest-first, and a loop's fast cadence can create
+        # extra queued/abandoned occurrences after an earlier one already
+        # completed -- always picking items[0] would then report the LATER,
+        # less-interesting task and hide the real completion evidence.
+        # Prefer a completed/submitted entry; fall back to the newest only
+        # when none reached a terminal-with-evidence state.
+        _selected_id="$(python3 -c '
 import json, sys
 content = open(sys.argv[1], encoding="utf-8").read()
 idx = content.find("[")
 items = json.loads(content[idx:]) if idx >= 0 else []
-print(items[0].get("id", "") if items else "")
+if not items:
+    print("")
+    raise SystemExit
+preferred = next((t for t in items if t.get("status") in ("completed", "submitted")), None)
+chosen = preferred or items[0]
+print(chosen.get("id", ""))
 ' "$_list_out" 2>/dev/null)"
-        if [ -n "$_first_id" ]; then
+        if [ -n "$_selected_id" ]; then
             _show_out="$CR_LOGDIR/pc-show-${_recipe}.log"
-            capture "pc-show-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch show '$_first_id'" || true
+            capture "pc-show-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch show '$_selected_id'" || true
             _status="$(_json_field "$_show_out" status)"
             _result_ref="$(_json_field "$_show_out" result_ref)"
-            cr_meta "${_recipe}_task_id" "$_first_id"
+            cr_meta "${_recipe}_task_id" "$_selected_id"
             cr_meta "${_recipe}_final_status" "$_status"
             cr_meta "${_recipe}_result_ref" "$_result_ref"
             case "$_status" in
                 submitted|completed)
-                    pass "$_recipe: task $_first_id reached terminal status '$_status'"
+                    pass "$_recipe: task $_selected_id reached terminal status '$_status'"
                     ;;
                 abandoned|dead_letter)
-                    info "$_recipe: task $_first_id ended '$_status' -- check the transcript for the stated reason"
+                    info "$_recipe: task $_selected_id ended '$_status' -- check the transcript for the stated reason"
                     ;;
                 "")
-                    info "$_recipe: could not read a status for task $_first_id (see $_show_out)"
+                    info "$_recipe: could not read a status for task $_selected_id (see $_show_out)"
                     ;;
                 *)
-                    info "$_recipe: task $_first_id is still '$_status' (not yet terminal) -- real headless work may still be in flight"
+                    info "$_recipe: task $_selected_id is still '$_status' (not yet terminal) -- real headless work may still be in flight"
                     ;;
             esac
         else
