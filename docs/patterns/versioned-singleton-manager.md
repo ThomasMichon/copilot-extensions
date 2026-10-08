@@ -132,20 +132,32 @@ successor already running in my own tree?*
    called the instant `CreateProcess` returns, before the child has any
    chance to exit — into the manager's own process. The manager's own
    `hProcess`, needed as `DuplicateHandle`'s target, is threaded down to
-   `deploy` as an **inheritable** handle value (passed via an environment
-   variable and `bInheritHandles=TRUE` at `_spawn_self_deploy`'s own
-   `CreateProcess` call, then forwarded unchanged into `deploy`'s own spawn),
-   so this one call site can reach the manager directly without a lookup.
-   Because a `HANDLE` is a reference to the exact kernel process object, not
-   a reusable numeric pid, the manager's registry of duplicated handles is
-   immune to the PID-reuse failure a post-hoc walk cannot escape, and it
-   does not depend on any intermediary still being alive later to prove its
-   own ancestry — the proof was already captured the moment it mattered.
-   **Handle custody, established at spawn time, is the trust decision; Job
-   (re-)membership is purely bookkeeping for the crash-cleanup backstop
-   (item 3) afterward.** Once the manager holds a duplicated handle for a
-   candidate process, it calls `AssignProcessToJobObject` (via a freshly
-   opened
+   `deploy` as an inheritable handle value, but **scoped**, not blanket: a
+   bare `bInheritHandles=TRUE` at `_spawn_self_deploy`'s own `CreateProcess`
+   call would inherit *every* inheritable handle the manager's spawn call
+   currently holds into `deploy` — and, if `deploy` naively forwarded the
+   same flag onward, into the passive daemon too, needlessly exposing the
+   manager's own process handle to code that has no legitimate use for it.
+   Use this repository's existing scoped-inheritance pattern instead
+   (`plugins/agent-dispatch/src/agent_dispatch/companion.py`'s
+   `_launch_gated`: `STARTUPINFO.lpAttributeList = {"handle_list": [handle]}`
+   plus `close_fds=True`) at `_spawn_self_deploy`'s own spawn, so only the
+   one intended handle reaches `deploy` — nothing else inheritable leaks
+   across that boundary. `deploy` itself does **not** forward that handle
+   into its own spawn of the passive daemon at all: it already holds the
+   manager handle from its own inherited set, so it duplicates a *separate*
+   handle to the passive daemon it just created and sends that into the
+   manager — the passive daemon never needs, and never receives, a handle
+   to the manager itself. Because a `HANDLE` is a reference to the exact
+   kernel process object, not a reusable numeric pid, the manager's registry
+   of duplicated handles is immune to the PID-reuse failure a post-hoc walk
+   cannot escape, and it does not depend on any intermediary still being
+   alive later to prove its own ancestry — the proof was already captured
+   the moment it mattered. **Handle custody, established at spawn time, is
+   the trust decision; Job (re-)membership is purely bookkeeping for the
+   crash-cleanup backstop (item 3) afterward.** Once the manager holds a
+   duplicated handle for a candidate process, it calls
+   `AssignProcessToJobObject` (via a freshly opened
    `PROCESS_SET_QUOTA | PROCESS_TERMINATE` handle on the same object) to
    bring it back under the Job.
 2. **On child-exit, read the daemon's own liveness record** (`zdd.routing`'s
@@ -215,50 +227,74 @@ successor already running in my own tree?*
    already kills every process in the unit's cgroup (not just the tracked
    main pid) as part of the stop-then-start transition a `Restart=`
    directive drives — do not override it to `KillMode=process` for this
-   unit. On Windows, the manager's Job additionally sets
+   unit. On Windows, the manager's Job is **named** (deterministically, from
+   the manager-scoped `config_dir`), not anonymous, specifically so any
+   process — a crash-triggered restart, or the bridge in item 5 below — can
+   reopen the exact same Job by name rather than depending on a handle
+   handed down from a predecessor that might not get the chance to hand
+   anything down at all. The Job additionally sets
    `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the OS itself terminates every
-   remaining member the instant the job's last open handle closes (the
-   manager's own, on any exit path including a hard kill) — reconciled with
-   the manager's **own** clean self-update handoff (item 5 below) by having
-   the successor manager duplicate its own handle to the *same* Job object
-   before the predecessor exits, so that handoff is never itself the "last
-   handle" closing.
-5. **The manager updates itself in place, without the service manager ever
-   noticing.** "Version-agnostic" does not make a stale manager binary safe
-   on its own — it still needs an update path, just like the daemon it
-   watches. On Linux, the manager periodically re-checks the `current-version`
-   marker and, on a change, calls `os.execve` to replace its own process
-   image with the newer version's entry point: `execve` preserves the pid,
-   open file descriptors, and (per the Linux `prctl(2)` manual page)
-   subreaper status, so the service manager's own tracked identity never
-   changes and no handoff is needed at all — genuinely clean, no second
-   process, no race with anything.
-   Windows has no pid-preserving exec equivalent, so a spawn-successor-then-
-   exit shape is unavoidable there — but (see above: this same shape is why
-   the embody supervisor's own existing self-update is *not* a safe
-   exemplar to delegate to) that shape must not be adopted uncritically.
-   Reuse this pattern's **own already-defined adoption machinery** instead
-   of inventing a second one: the predecessor manager spawns the successor
-   manager, duplicates its Job handle into it (per item 4) so Job-based
-   crash coverage carries across the handoff, has the successor publish its
-   own liveness the same way the daemon does (`zdd.routing.publish_active`
-   against a manager-scoped `config_dir`, distinct from the daemon's own),
-   then exits. The Scheduled Task's own tracked process **is** the manager
-   (per "What does change" below), so when the predecessor exits here, the
-   Task's native restart policy *will* fire and re-invoke its Action — the
-   exact same "What does change" / Consumer contract shape used for the
-   manager's *very first* launch, not a separate always-running loop
-   process. The **stable launcher** the Task Action invokes (fresh, on
-   every attempt — real crash or self-update restart alike) is what closes
-   the race: before calling `zdd.singleton_manager.run()`, it performs the
-   identical liveness check the manager itself performs for the daemon in
-   item 2 (the manager-scoped `active.json` plus a Job-membership/handle
-   check) and, if a live successor manager is already found, exits
-   immediately without re-invoking `run()` — rather than spawning a second,
-   redundant manager. This closes the exact race the supervisor's own
-   exit-42 path leaves open against systemd, using the launcher that is
-   already wired in at the launch boundary rather than a second, independent
-   outer-identity mechanism.
+   remaining member the instant the job's *last* open handle closes — which
+   a graceful self-update handoff must never let happen, since the live
+   daemon (a Job member throughout) would be killed as collateral. Item 5
+   below describes the bridge that guarantees a second, overlapping handle
+   is already open before the predecessor's own handle closes, so the
+   self-update handoff is never itself the "last handle" closing.
+5. **The manager updates itself in place, without ever leaving the service
+   manager untracking a live process.** "Version-agnostic" does not make a
+   stale manager binary safe on its own — it still needs an update path,
+   just like the daemon it watches. On Linux, the manager periodically
+   re-checks the `current-version` marker and, on a change, calls
+   `os.execve` to replace its own process image with the newer version's
+   entry point: `execve` preserves the pid, open file descriptors, and (per
+   the Linux `prctl(2)` manual page) subreaper status, so the service
+   manager's own tracked identity never changes and no handoff is needed at
+   all — genuinely clean, no second process, no race with anything.
+   Windows has no pid-preserving exec equivalent, so a real process
+   boundary is unavoidable there — but unlike the daemon's own cutover, the
+   **manager** has no in-flight request to protect across that boundary; it
+   is a pure supervisor, so a genuine Task-Scheduler-driven restart (not a
+   spawn-a-permanent-second-instance-and-quietly-keep-running-it shape) is
+   the correct mechanism, not a workaround to avoid. The remaining problem
+   is narrower than "replace the manager": it is purely "keep the Job's
+   last-handle-closes trigger from firing against the live daemon during
+   the gap between the old manager's exit and the new one's startup." A
+   minimal, deliberately short-lived **bridge** process closes exactly that
+   gap and nothing more:
+   1. Before updating, the old manager (already Task-tracked) spawns the
+      bridge, which immediately opens its own handle to the same **named**
+      Job (item 4) — now two independent open handles exist (the old
+      manager's and the bridge's) — and the old manager records the
+      bridge's pid and `process_start_time` token in the manager-scoped
+      `active.json` (distinct from the daemon's own, exactly as before),
+      so a later manager process has something durable to look for.
+   2. The old manager exits. Because the bridge's handle is still open,
+      the Job's last-handle-closes trigger does not fire — the daemon and
+      every other Job member survive untouched. The manager deliberately
+      does **not** attempt to suppress the Scheduled Task's restart policy
+      here (no `SELF_UPDATE_EXIT_CODE`-style trick, unlike Linux): a real
+      restart is wanted every time, so Task Scheduler re-tracks a live
+      process rather than silently going idle.
+   3. Task Scheduler's restart policy fires and launches the stable
+      launcher fresh. **This new process is the permanently Task-tracked
+      successor from this point on** — never a check-and-exit shim, and
+      never a second, independent, permanently-running instance the Task
+      stays blind to. Before entering its own `run()` loop, it reads the
+      manager-scoped `active.json`, finds the bridge's recorded pid/token,
+      opens its *own* handle to the same named Job (now three handles
+      briefly overlap: the exiting bridge waits on this), confirms via the
+      Job's own membership list that the daemon is still present, and
+      publishes its own liveness record over the bridge's.
+   4. Only once the new manager's handle is confirmed open does it signal
+      the bridge to exit (e.g. a named event). The bridge closing its
+      handle is now safe — the new manager already holds its own.
+   From here the new manager proceeds exactly like any other launch,
+   entering `run()` and supervising the daemon going forward — it never
+   exits early, so a later crash of *this* instance still triggers a real
+   Task restart the same way item 4 already requires. The bridge is a
+   belt-and-suspenders handle-continuity helper only; it never does any of
+   the manager's own supervisory work and never outlives the handoff it
+   exists for.
 
 > **Validation status.** This pattern is a **design, not yet an
 > implementation** — the code (the `zdd.singleton_manager` module, both
@@ -324,17 +360,19 @@ suite, only for whichever one now carries the permanently-tracked manager.
 There is exactly **one** outer-identity model across this whole pattern on
 Windows, used consistently everywhere above: the Scheduled Task always
 re-invokes the same stable launcher fresh on every (re)start, real crash or
-self-update handoff alike — never a second, separate always-running loop
-process sitting between the Task and the manager. On Windows only (unneeded
-on Linux, where `execve` means the manager's own tracked identity never
-changes and the launcher is never re-invoked at all), that launcher performs
-one additional liveness check — identical in shape to the manager's own
-item-2 check for the daemon — before calling
-`zdd.singleton_manager.run()`: if the manager-scoped `active.json` already
-names a live, Job-verified successor manager (the self-update handoff from
-item 5), the launcher exits immediately instead of calling `run()` a second
-time; otherwise (a real crash, or the very first launch) it proceeds exactly
-as today.
+self-update handoff alike, and that fresh process **always** becomes
+`zdd.singleton_manager.run()`'s own tracked lifetime — it never checks for a
+successor and exits early instead of running. On Windows only (unneeded on
+Linux, where `execve` means the manager's own tracked identity never changes
+and the launcher is never re-invoked at all), that launcher performs one
+extra step first: it checks the manager-scoped `active.json` for a pending
+self-update's **bridge** (item 5) and, if one is recorded, takes over its
+Job handle and signals it to exit before proceeding — a handle-continuity
+bridge, never a second, separate always-running manager instance that the
+Task stays blind to. Either way (a real crash, the very first launch, or a
+self-update handoff), the launcher's own process is the one and only thing
+`run()` ever executes as, and it is the one and only thing the Scheduled
+Task is ever tracking from this point forward.
 
 ## Consumer contract
 
@@ -347,8 +385,9 @@ boundary:
 ```
 systemd ExecStart / Scheduled Task Action
     -> <stable launcher, resolves current-version marker, unchanged on
-        Linux; on Windows, additionally checks for a live successor
-        manager (per "What does change" above) before proceeding>
+        Linux; on Windows, additionally takes over a pending self-update
+        bridge's Job handle (per "What does change" above) if one is
+        recorded, before proceeding>
     -> zdd.singleton_manager.run(
            config_dir=...,                 # where active.json lives
            spawn=lambda: subprocess.Popen([resolved_python, "-m", "my_daemon", "serve"]),
@@ -358,6 +397,8 @@ systemd ExecStart / Scheduled Task Action
 `zdd.singleton_manager.run` blocks for the manager's own lifetime (mirroring
 `agent_dispatch serve`'s own blocking contract, so the service manager's
 view — "is the unit's main process still running" — needs no other change).
+This holds on every launch, Windows included: `run()` is always what the
+launcher ends up blocked inside, never skipped in favor of exiting early.
 
 ## Validation (planned — the implementation lands in a follow-up PR)
 
