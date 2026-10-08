@@ -22,7 +22,10 @@
   `visions/plugins/agent-worktrees/pull-requests` (confirmed realized;
   closed 2 stale issues, narrowed 1), `visions/plugins/agent-index`
   (per-source git ref override + authenticated fetch, multi-project corpus
-  grafting, shared dropin-registry library)
+  grafting, shared dropin-registry library),
+  `visions/plugins/context-handoff` (durable baton/pickup separation,
+  extension-independent recovery, objective authority, evidence-faithful
+  continuation, safe background-work transfer, attributable exclusive pickup)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -36,7 +39,10 @@
   agent-mcp/agent-index's unsafe races, agent-bridge's lock-safe-but-still-
   non-conforming rewrite (the only plugin that's actually lock-safe), and
   agent-ssh/agent-containers/agent-machines' unconditional in-place
-  reinstall; filed and expanded this slice)
+  reinstall; filed and expanded this slice) ·
+  `ThomasMichon/copilot-extensions#5683` (automatic force-tier background-work
+  transfer safety) · `ThomasMichon/copilot-extensions#5684` (consume drops
+  failed succession-promotion outcomes)
 
 ## Guiding Intent
 
@@ -250,6 +256,20 @@ Operator, end of a long multi-repo session:
             are not that issue's scope and are not separately tracked
             here, being cross-cutting infra outside this vision's own
             subject.
+      - [x] `visions/plugins/context-handoff/README.md` — reconciled against
+            41 commits since its 2026-09-13 revision. Folded back durable
+            baton storage distinct from pickup signaling, explicit manual
+            operation even with automatic behavior disabled, extension-free
+            recovery, exclusive attributable pickup, compact effort-backed
+            continuation, and preservation of original objective authority.
+            Sharpened evidence-faithful completion checks and safe transfer
+            of background work without moving execution mechanics into this
+            policy plugin. Not all guarantees are realized: automatic
+            force-tier quiescing remains a gap (`#5683`), and successful
+            consume discards failed lineage-promotion outcomes (`#5684`).
+            Closed stale feature-delivery issues `#2595` and `#2596` with
+            direct source/owning-effort evidence; their umbrella `#2594`
+            remains open, not inferred complete from these two closures.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -772,3 +792,59 @@ then rather than assuming either answer.
   file at once) or `plugins/agent-bridge`/`plugins/context-handoff` (not
   yet investigated).
 
+### 2026-10-07 — Phase 2 slice: `context-handoff` continuity and recovery
+- Read the full leaf vision and reconciled 41 commits since 2026-09-13
+  against the plugin README, continuation skill, SDK-free store/trigger/
+  consume core, extension pressure path, policy predicates, CLI surface,
+  shared successor directive, and `context-handoff-overhaul`'s owning plan.
+- Fold-back: durable storage versus live-pickup authorization, manual entry
+  points independent of automatic policy, extension-free recovery,
+  effort-backed compact batons, preserved objective/delegate authority,
+  completeness verification, and exclusive attributable pickup. Exact
+  command grammar, thresholds, lock formats, retention counts, and recovery
+  procedures remain implementation detail, not new vision specifications.
+- Superset check: retained every original Feature/Behavior and hosting
+  boundary. Manual operation remains legitimate; emergency uncertainty is
+  explicit; source-control refresh does not justify committing unrelated
+  work or losing the baton. Added no unintended teardown requirement.
+- Two genuine deltas, deduped before filing:
+  `#5683` covers automatic force-tier transfer while owned background work
+  remains active (the skill explicitly documents this exception);
+  `#5684` covers `consumeFileHandoff()`/`consumeDispatchHandoffTask()`
+  discarding `safePromoteHead()`'s outcome, so a failed/diverged lineage
+  update is not visible in the otherwise-successful consume response.
+  Guarding a diverged head is correct; hiding that outcome is the gap.
+- Closed two stale delivery trackers: `#2595`'s force tier is implemented
+  by `autoForceHandoff()`, the policy gate, and SDK permission classification;
+  `#2596`'s explicit background inventory and standing mandate are delivered
+  by the templates, shared constants, consume formatter, and sessionStart
+  writer. Both are marked complete in the owning overhaul plan and backed
+  by merged `#2643`/`#2663`. These closures do not close overhaul umbrella
+  `#2594`, or equate content capture with automatic quiescing.
+- Focused contract evidence: 36 existing Node tests pass across pressure
+  thresholds, force-tier classification, manual/automatic modes, and
+  successor-seed/mandate behavior. No runtime, hook, or plugin payload changes;
+  no changefile or installer gate applies. No new live cutover or clean-room
+  run was performed: this slice changes standing documentation and trackers,
+  not execution/provisioning. Source inspection, not those pure tests, is
+  the evidence for the two newly filed lifecycle gaps.
+- Scoped service-invariant audit (not the remaining repo-wide Phase 3):
+
+  | Contract | Status | Evidence / delta |
+  |---|---|---|
+  | Graceful composition / degrade gracefully | Conforms in inspected paths | `storeHandoff()` selects task or file storage; the CLI shares the extension's core; absent extension/host gets explicit recovery guidance. Safe storage still requires an adopted worktree/state namespace. |
+  | Install/adopt boundary | Conforms | Payload-only delivery has no runtime installer; sessionStart writes session guidance, not repository adoption configuration. |
+  | Relationship diagnosability | Partial | CLI lineage queries and consume predecessor/worktree identifiers exist; discarded promotion outcomes are `#5684`. |
+  | Immutable runtime / daemon cutover / single-instance service / endpoint exposure | N/A for this plugin | No installed venv, resident service, or listening endpoint; those contracts apply to its runtime providers, whose full audit remains Phase 3. |
+  | Exclusive handoff ownership | Conforms in inspected file-delivery path | `consumeFileHandoffOnce()` locks and re-reads, names a different claimant, and supports same-session retries; no live cross-process stress run this slice. |
+  | Safe background-work transfer | Partial | Agent-driven guidance captures/quiesces before sync; automatic force-tier path cannot do so (`#5683`). |
+  | Payload replacement / hook transience | Design inherited; not freshly stress-tested | SessionStart writer and non-extension CLI keep guidance/recovery independent of the live extension. No claim of runtime-reload conformance from documentation inspection alone. |
+
+- No new cross-cutting invariant blind spot identified: the leaf cites
+  composition, diagnosability, and replaceable payloads without restating
+  service mechanisms it does not own. Audit/gap prose stays here and in
+  issues, never in the vision.
+- Next: scope the parent `agent-worktrees` mega-vision into one coherent
+  section per slice, or reconcile `agent-bridge`; branch visions
+  (`agent-fabric`, `native-convergence`, `plugin-services`) and the remaining
+  Phase 3 invariants still await their own audits.
