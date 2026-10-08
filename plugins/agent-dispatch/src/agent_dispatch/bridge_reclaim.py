@@ -343,6 +343,13 @@ def resume_worktree_and_send(
         json_output=json_output, timeout=timeout,
     )
     if sent.returncode == _SEND_BUSY_EXIT:
+        if not allow_takeover:
+            from .bridge import BridgeCarriedSessionBusy
+
+            raise BridgeCarriedSessionBusy(
+                f"resumed conversation {session_id!r} is busy; "
+                "refusing to end or replace it during conversation resume"
+            )
         # The reused session is mid-turn -- this path only runs when the
         # caller already judged the worktree safe to take over, so end the
         # busy turn and resume again for its replacement (end deletes the

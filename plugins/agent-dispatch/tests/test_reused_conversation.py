@@ -21,7 +21,7 @@ def _task(ownership="reused"):
     }
 
 
-def _transport(monkeypatch, *, refusal=None):
+def _transport(monkeypatch, *, refusal=None, send_busy=False):
     calls = []
     monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: ["bridge"])
     monkeypatch.setattr(bridge, "_resolve_agent_record", lambda *a, **kw: None)
@@ -39,6 +39,10 @@ def _transport(monkeypatch, *, refusal=None):
                 argv, 0, json.dumps({"session_id": "replacement-conversation"}), "",
             )
         if argv[1] == "send" or argv[1:3] == ["--json", "send"]:
+            if send_busy:
+                return subprocess.CompletedProcess(
+                    argv, bridge_reclaim._SEND_BUSY_EXIT, "", "session busy",
+                )
             return subprocess.CompletedProcess(argv, 0, "sent", "")
         pytest.fail(f"unexpected bridge operation: {argv}")
 
@@ -83,6 +87,18 @@ def test_resume_failure_is_not_a_success_shaped_fresh_conversation(monkeypatch):
     assert ok is False
     assert "refused" in handle["error"]
     assert len(calls) == 1
+
+
+def test_busy_send_never_ends_or_replaces_the_resumed_conversation(monkeypatch):
+    calls = _transport(monkeypatch, send_busy=True)
+    ok, handle = make_headless_spawn()(_task())
+    assert ok is False
+    assert handle["deferred"] is True
+    assert len(calls) == 2
+    assert not any(
+        "end" in call or "restart-worktree" in call or "create" in call
+        for call in calls
+    )
 
 
 def test_gone_carried_body_falls_back_to_worktree_resume_not_create(monkeypatch):
