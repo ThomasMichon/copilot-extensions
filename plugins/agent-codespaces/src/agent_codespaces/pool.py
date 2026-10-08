@@ -370,8 +370,9 @@ def build_pool(
         except Exception:
             clean_records = {}
 
-    if live is None:  # live local users (one process scan), degrade-safe
+    if live is None:  # live local users (one process scan); None = census unknown
         live = codespaces_in_use([cs.name for cs in codespaces])
+    census_unknown, live = live is None, live or {}
     lease_by_cs = {ls.codespace: ls for ls in leases}
 
     members: list[PoolMember] = []
@@ -409,7 +410,7 @@ def build_pool(
             idle_age=idle_age,
             stale_after=stale_after,
             has_l2_hold=has_l2_hold,
-            has_live_users=bool(live.get(cs.name)),
+            has_live_users=bool(live.get(cs.name)) or census_unknown,
         )
 
         if running:
@@ -443,7 +444,8 @@ def build_pool(
             l2_expires_at=l2_expires_at,
             display_name=cs.display_name or "",
             # 3b: flag an orphaned claim (holder worktree positively gone).
-            orphaned=claim_orphaned(lease.worktree if lease else None, live.get(cs.name)),
+            orphaned=(not census_unknown
+                      and claim_orphaned(lease.worktree if lease else None, live.get(cs.name))),
             live_users=[u.to_dict() for u in live.get(cs.name, ())],
             # Cleanliness-beacon verdict (venue-pool Phase 3): tri-state safety
             # gate for the destructive Recycle -- True/False/None (unknown).

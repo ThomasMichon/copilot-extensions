@@ -71,9 +71,12 @@ fleet, there is no "pick a free one").
   user -- the SSH target-lock holder, detached SSH ControlMasters (with their
   `ControlPath`), port-forward carriers, mux clients, and `gh codespace ssh`
   sessions. `leases --json` carries the same `in_use` (`null` = unknown) /
-  `live_users` per row. `stop` / `finalize` / `delete` / `prune` refuse a box
-  with live users (`[BUSY]`, naming each one) unless `--force`; close a leftover
-  ControlMaster with `ssh -O exit -o ControlPath=<path> _` rather than forcing.
+  `live_users` per row. `stop` / `finalize` / `delete` refuse a box with live
+  users -- or whose users cannot be ruled out (unknown) -- with a `[BUSY]` that
+  names each one, unless `--force`; close a leftover ControlMaster with
+  `ssh -O exit -o ControlPath=<path> _` rather than forcing. `prune` (and the
+  create-time quota reclaim) has no `--force`: it just warns and skips such a
+  box for this pass.
 
 ### Check-out / check-in wiring (automatic)
 

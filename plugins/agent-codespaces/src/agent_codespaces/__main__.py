@@ -544,7 +544,8 @@ def main(argv: list[str] | None = None) -> int:
     in_use_p = sub.add_parser(
         "in-use",
         help="Is a CodeSpace in use by a live local process (target lock, SSH "
-             "ControlMaster, forward, gh codespace ssh)? Exit 0 idle, 75 in use",
+             "ControlMaster, forward, gh codespace ssh)? Exit 0 idle, 75 in use, 3 "
+             "unknown (process table unreadable)",
     )
     in_use_p.add_argument("name", help="CodeSpace name")
     in_use_p.add_argument("--json", dest="json_output", action="store_true")
@@ -3871,9 +3872,14 @@ def _reclaim_for_quota(err: str) -> str | None:
         for cs in running:
             st = get_status(cs.name)
             if st and st.state in (STATE_RECOVERED, STATE_PRUNABLE):
+                from ssh_manager import TargetBusyError
+
+                from .live_users import refuse_if_in_use
+
                 try:
+                    refuse_if_in_use(cs.name, "stop")  # never stop a box still in use
                     stop_codespace(cs.name)
-                except RuntimeError:
+                except (RuntimeError, TargetBusyError):
                     continue
                 return f"stopped eligible running box '{cs.name}' to free running quota"
         return None

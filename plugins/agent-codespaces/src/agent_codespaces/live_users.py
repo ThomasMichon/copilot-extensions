@@ -326,18 +326,21 @@ def codespaces_in_use(
 ) -> dict[str, list[LiveUser]]:
     """``{name: users}`` for every name with at least one live user (one scan).
 
-    Never raises: any failure degrades to "no live users seen" (``{}``).
+    Returns ``None`` when the process census is unavailable (unknown -- callers
+    must not treat that as idle). Never raises: a failure is also ``None``.
     """
     found: dict[str, list[LiveUser]] = {}
     try:
         if table is None:
             table = process_table()
+        if table is None:
+            return None
         for name in names:
             users = live_users(name, table=table)
             if users:
                 found[name] = users
     except Exception:
-        return {}
+        return None
     return found
 
 
@@ -419,17 +422,20 @@ class CodespaceInUseError(TargetBusyError):
     """
 
     def __init__(self, name: str, users: list[LiveUser], op: str = "this operation") -> None:
-        first = users[0]
+        first = users[0] if users else LiveUser(-1, "unknown", "")
         super().__init__(name, LockHolder(pid=first.pid, op=first.role, target=name,
                                           started_at=time.time()))
         self.users = users
-        self.args = (f"CodeSpace '{name}' is still in use by {len(users)} live local "
-                     f"process(es); refusing {op}. Close them, or re-run with --force "
-                     f"to proceed anyway.",)
+        why = (f"is still in use by {len(users)} live local process(es)" if users else
+               "could not be confirmed idle (local process table unreadable)")
+        self.args = (f"CodeSpace '{name}' {why}; refusing {op}. Close them, or re-run "
+                     f"with --force to proceed anyway.",)
 
 
 def refuse_if_in_use(name: str, op: str) -> None:
-    """Raise :class:`CodespaceInUseError` when ``name`` has live local users."""
-    users = live_users(name)
-    if users:
+    """Raise :class:`CodespaceInUseError` when ``name`` has live local users, or
+    when that cannot be ruled out (process table unreadable) -- fail closed."""
+    table = process_table()
+    users = live_users(name, table=table)
+    if users or table is None:
         raise CodespaceInUseError(name, users, op)

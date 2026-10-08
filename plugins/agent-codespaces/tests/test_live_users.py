@@ -114,7 +114,9 @@ def test_lock_holder_listed_first_and_not_duplicated(monkeypatch):
 def test_unreadable_process_table_is_unknown_not_idle(monkeypatch, capsys):
     monkeypatch.setattr(lu, "process_table", lambda: None)
     assert lu.live_users(NAME) == []
-    assert lu.codespaces_in_use([NAME]) == {}
+    assert lu.codespaces_in_use([NAME]) is None
+    with pytest.raises(lu.CodespaceInUseError, match="could not be confirmed idle"):
+        lu.refuse_if_in_use(NAME, "delete")
     assert lu.cmd_in_use(SimpleNamespace(name=NAME, json_output=True)) == 3
     assert json.loads(capsys.readouterr().out)["in_use"] is None
 
@@ -130,7 +132,7 @@ def test_codespaces_in_use_never_raises(monkeypatch):
     def boom():
         raise RuntimeError("ps exploded")
     monkeypatch.setattr(lu, "process_table", boom)
-    assert lu.codespaces_in_use([NAME]) == {}
+    assert lu.codespaces_in_use([NAME]) is None
 
 
 def test_real_lock_holder_is_reported(monkeypatch, tmp_path):
@@ -208,6 +210,46 @@ def test_pool_box_with_live_user_is_in_use_and_claim_not_orphaned(tmp_path):
     assert m.orphaned is True
     (m,), _ = pool.build_pool(leases=[], live={NAME: [user]}, **common)
     assert m.disposition == pool.IN_USE
+
+
+def test_pool_unknown_census_is_in_use_and_never_orphaned(monkeypatch, tmp_path):
+    from agent_codespaces import pool
+    from agent_codespaces.lease import Lease
+    from agent_codespaces.lifecycle import CodespaceInfo
+
+    monkeypatch.setattr(lu, "process_table", lambda: None)
+    cs = CodespaceInfo(
+        name=NAME, display_name="", repository="o/r", branch="main",
+        state="Available", machine="basicLinux32gb", last_used_at="", account="",
+    )
+    lease = Lease(NAME, "", 999999, "h", 0.0, time.time(),
+                  worktree=str(tmp_path / "gone-worktree"))
+    (m,), _ = pool.build_pool(codespaces=[cs], leases=[lease], markers={},
+                              l2_leases={}, clean_records={})
+    assert m.orphaned is False and m.disposition == pool.IN_USE
+
+
+def test_quota_running_reclaim_never_stops_a_box_in_use(monkeypatch):
+    from agent_codespaces import __main__ as cli
+    from agent_codespaces import status
+    from agent_codespaces.lifecycle import CodespaceInfo
+
+    cs = CodespaceInfo(
+        name=NAME, display_name="", repository="o/r", branch="main",
+        state="Available", machine="basicLinux32gb", last_used_at="", account="",
+    )
+    monkeypatch.setattr(cli, "list_codespaces", lambda: [cs])
+    monkeypatch.setattr(status, "get_status", lambda name: SimpleNamespace(
+        state=status.STATE_RECOVERED))
+    monkeypatch.setattr(lu, "process_table", lambda: _table(_master()))
+    stopped = []
+    monkeypatch.setattr(cli, "stop_codespace", lambda name: stopped.append(name) or True)
+
+    assert cli._reclaim_for_quota("too many codespaces running") is None
+    assert stopped == []
+    monkeypatch.setattr(lu, "process_table", lambda: _table())
+    assert cli._reclaim_for_quota("too many codespaces running") is not None
+    assert stopped == [NAME]
 
 
 # --- enforcement: lifecycle commands refuse a box with live users -----------
