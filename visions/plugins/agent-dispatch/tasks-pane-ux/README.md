@@ -6,7 +6,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-05
+- **Last revised:** 2026-10-08
 - **Reality docs:** `worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py`
   (`TasksView`, `WorktreesView`, `_TASK_PHASE_PALETTE`) ·
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py`
@@ -47,7 +47,7 @@ pace and volume the operator wants, and a **Completion Review card** to close
 the loop the parent vision's *verify-the-completion-claim* leaves to a
 self-tracked task's caller — confirm it, re-queue it with fresh steering, or
 abandon it. Together they make the fully hand-driven propose → queue →
-complete → review cycle require **no plugin, no registrar, and no opt-in**
+submit → review cycle require **no plugin, no registrar, and no opt-in**
 beyond this pane and the coordinator/supervisor agent-dispatch already ships
 with — the manual path is native, not an add-on.
 
@@ -170,26 +170,32 @@ the pools drain them exactly as they drain any other queued work.
 
 ### The Completion Review card — closing the self-tracked loop
 
-A task authored through the New Task composer carries no evaluator, so per
-the parent vision's *verify-the-completion-claim* nothing else corroborates
-its worker's completion claim — the operator who queued it is the tracker,
-and needs an actual surface to do that tracking on. The **Completion Review**
-card is the direct counterpart of the steering card, at the other end of the
-lifecycle: reached from a **completed** task that has not yet reached
-**confirmed**, it shows what the worker actually reports done — its result
-reference, the accumulated progress log, and any prominent artifacts it
-claimed (reusing the same shared artifacts surface as the Worktree Status
-card) — and offers exactly four honest next acts, never a silent fifth:
-**Confirm** (the claim holds; close as confirmed), **Re-queue with steering**
-(reuses the steering-card input verbatim; the task returns to queued with its
-progress preserved and the operator's new instructions as the first thing the
-next worker reads), **Abandon** (close as abandoned), or **Save for later**
-(leave it exactly where it is). Per the parent vision's
-*self-tracked-review-is-not-a-lane*, a saved-for-later card costs nothing —
-no pool slot, no worker, no lane — so a whole backlog of unconfirmed
-completions can sit safely until reviewed. For emitter-driven tasks whose
-evaluator already auto-confirms, this card simply never has anything to show:
-nothing sits completed-and-unconfirmed long enough to need it.
+Manual tasks require operator approval by default; their composer exposes a
+per-task choice to auto-confirm and an optional output contract. The
+**Completion Review** card presents a **submitted** task's formatted Markdown,
+structured output when present, progress, and artifacts. It offers **Accept**
+(confirm and complete), **Reject with steering** (return to queued work with
+feedback), **Abandon**, or **Save for later**. Each decision addresses the exact
+submission viewed; review consumes no worker or pool slot.
+
+Submitted and completed tasks both offer a chronological, navigable history
+of agent outputs, input requests, answers, and reviews. A completed task
+retains its final answer even after automatic confirmation. It offers
+**Create follow-up**, opening a new-task composer with the accepted outcome
+and relevant history as context; it never offers rejection or reopening.
+Steering cards use the same formatted/structured output presentation beside
+their input form. The
+[task outputs and review vision](../task-outputs-and-review/README.md) owns
+the shared backend guarantees.
+
+### Immediate acceptance, visible delivery
+
+Confirming steering acknowledges durable acceptance promptly, without a
+blocking progress dialog that waits for worker startup. The pane distinguishes
+accepted feedback with delivery pending from failed persistence and later
+delivery failure. Ambiguous acknowledgment is recoverable with the same
+operation identity; it must not invite a duplicate answer. Delivery diagnostics
+belong in normal logs, not as repeated entries in the conversation viewer.
 
 ### The suspended-task waiter — naming the actual blocker, not just "no live session"
 
