@@ -57,7 +57,9 @@ def _read(path: Path) -> dict[str, str]:
     except (OSError, ValueError):
         return {}
     entries = data.get("entries") if isinstance(data, dict) else None
-    return {k: v for k, v in (entries or {}).items() if isinstance(k, str) and isinstance(v, str)}
+    if not isinstance(entries, dict):
+        return {}  # malformed state is recovered as empty, like unreadable JSON
+    return {k: v for k, v in entries.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def _write(path: Path, entries: dict[str, str]) -> None:

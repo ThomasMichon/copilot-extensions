@@ -212,9 +212,10 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
 
     def run(name: str) -> None:
         try:
-            outcomes[name] = readers[name](read_at)
+            result = readers[name](read_at)
         except Exception as exc:  # noqa: BLE001 -- a source failure is that source's, never the aggregate's
-            outcomes[name] = ac.command_failure(f"{type(exc).__name__}: {exc}")
+            result = ac.command_failure(f"{type(exc).__name__}: {exc}")
+        outcomes[name] = (result, time.monotonic())
 
     # Daemon threads, not an executor: a reader that hangs past its timeout is
     # abandoned, and can't keep the CLI process alive at exit (an executor's
@@ -224,12 +225,15 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
     started = time.monotonic()
     for thread in threads.values():
         thread.start()
+    deadlines = {n: started + timeouts.get(n, DEFAULT_TIMEOUT) for n in names}
+    for name in sorted(names, key=deadlines.get):
+        threads[name].join(max(0.0, deadlines[name] - time.monotonic()))
     for name in names:
-        limit = timeouts.get(name, DEFAULT_TIMEOUT)
-        threads[name].join(max(0.0, started + limit - time.monotonic()))
-        raw = outcomes.get(name) if not threads[name].is_alive() else None
+        done = outcomes.get(name)
+        # Finished by its own deadline, whatever order the joins ran in.
+        raw = done[0] if done and done[1] <= deadlines[name] else None
         if raw is None:
-            raw = ac.command_failure(f"timed out after {limit:g}s")
+            raw = ac.command_failure(f"timed out after {timeouts.get(name, DEFAULT_TIMEOUT):g}s")
         raw.setdefault("read_at", read_at)
         results[name] = _finish(name, raw)
     store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at)

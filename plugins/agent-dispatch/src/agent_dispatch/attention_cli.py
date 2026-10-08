@@ -135,10 +135,17 @@ def _cmd_source(args: argparse.Namespace) -> int:
                               "config_errors": errors, "file": str(path)})
     spec = None
     if args.source_verb == "add":
-        argv = list(args.argv or [])
-        if argv[:1] == ["--"]:
-            argv = argv[1:]
-        spec = {"argv": argv, "timeout": args.timeout}
+        tokens = list(args.argv or [])
+        # REMAINDER takes everything after NAME, so options placed before `--`
+        # (the documented form) are parsed here; the command is what follows `--`.
+        head, argv = (tokens[:tokens.index("--")], tokens[tokens.index("--") + 1:]) if "--" in tokens else ([], tokens)
+        options = argparse.ArgumentParser(prog="attention source add", add_help=False)
+        options.add_argument("--timeout", type=float, default=args.timeout)
+        try:
+            parsed = options.parse_args(head)
+        except SystemExit:
+            return 2
+        spec = {"argv": argv, "timeout": parsed.timeout}
         error = srcs.registration_error(args.name, spec)
         if error:
             print(f"agent-dispatch: cannot register {args.name!r}: {error}", file=sys.stderr)
@@ -184,7 +191,7 @@ def register_attention_commands(sub: argparse._SubParsersAction) -> None:
     add = sverbs.add_parser("add", help="Register a command source: source add NAME [--timeout S] -- ARGV...")
     add.add_argument("name")
     add.add_argument("--timeout", type=float, default=srcs.DEFAULT_TIMEOUT)
-    add.add_argument("argv", nargs=argparse.REMAINDER)
+    add.add_argument("argv", nargs=argparse.REMAINDER, help="[--timeout S] -- the command and its arguments")
     rm = sverbs.add_parser("remove", help="Remove a registered command source")
     rm.add_argument("name")
     sverbs.add_parser("list", help="List built-in and registered sources, and rejected registrations")

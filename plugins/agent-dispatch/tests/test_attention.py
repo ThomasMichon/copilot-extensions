@@ -351,6 +351,34 @@ def test_cli_bad_cursor_is_a_usage_error(monkeypatch, capsys):
     assert rc == 2
 
 
+def test_cli_source_add_parses_options_before_the_command(monkeypatch, capsys):
+    rc, out = _cli(monkeypatch, capsys, ["attention", "source", "add", "ext", "--timeout", "5", "--",
+                                         "python", "-c", "print(1)"])
+    assert rc == 0 and json.loads(out.out) == {"registered": "ext", "argv": ["python", "-c", "print(1)"],
+                                               "timeout": 5.0}
+
+
+def test_a_short_deadline_is_honored_even_when_checked_after_a_long_one(tmp_path):
+    import time
+
+    def slow_ok(read_at):
+        time.sleep(0.6)
+        return {"items": [], "status": "ok"}
+
+    env = srcs.collect({"a-long": lambda r: (time.sleep(1.0), {"items": [], "status": "ok"})[1], "b-short": slow_ok},
+                       timeouts={"a-long": 2.0, "b-short": 0.2}, selected=None, config_errors=[],
+                       store=FirstObserved(tmp_path / "o.json"), read_at=T1)
+    by = {s["name"]: s["status"] for s in env["sources"]}
+    assert by == {"a-long": "ok", "b-short": "failed"}
+
+
+def test_a_malformed_store_is_recovered_not_a_crash(tmp_path):
+    path = tmp_path / "o.json"
+    path.write_text('{"entries": ["bad"]}', encoding="utf-8")
+    env = _collect({"s": _ok({**_item(), "created_at": None})}, FirstObserved(path), read_at=T2)
+    assert env["items"][0]["created_at"] == T2
+
+
 def test_a_real_steering_card_form_reaches_the_item():
     """steering.build_card stores request_input as a list of fields."""
     from agent_dispatch import steering
