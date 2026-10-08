@@ -1031,3 +1031,9 @@ then rather than assuming either answer.
   were run: the diff changes standing parent intent and journal attribution,
   not execution or installation. Prior provider/bridge implementation
   citations remain evidence, not a fresh full-venue validation claim.
+- PR `#5759` review found the same terminology contradiction still present in
+  the CodeSpace leaf. Extended the correction to all seven vision-tree
+  references there, preserving rescue-before-teardown, comprehensive capture,
+  optional-peer degradation, and logger-owned analysis. Rechecked the full
+  terminology family rather than only the flagged parent heading; the final
+  diff therefore touches three READMEs, not two.
