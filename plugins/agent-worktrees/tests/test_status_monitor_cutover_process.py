@@ -110,6 +110,14 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
     monkeypatch.setenv("PATH", env["PATH"])
     monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
     monkeypatch.setenv("PYTEST_CURRENT_TEST", env["PYTEST_CURRENT_TEST"])
+    # Never spawn a REAL, 120s-delayed detached subprocess during this test
+    # (copilot-extensions#5453 async backstop) -- it has its own dedicated
+    # unit tests, and this test's tmp HOME is torn down long before any
+    # such process would fire.
+    monkeypatch.setattr(
+        "agent_worktrees.status_monitor_reap_stale.schedule_delayed_daemon_health_reap",
+        lambda *a, **k: None,
+    )
 
     install_dir = home / ".agent-worktrees"
     registry = install_dir / "status-monitor.d"

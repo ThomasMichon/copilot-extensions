@@ -408,6 +408,7 @@ def activate_after_update(
     monitor_was_live: bool | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
+    from . import status_monitor_reap_stale
     from . import status_monitor_runtime as smr
 
     summary: dict[str, object] = {
@@ -422,6 +423,7 @@ def activate_after_update(
         if monitor_was_live:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor()
+            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
         summary["reason"] = "no-live-monitor"
         return summary
@@ -430,6 +432,7 @@ def activate_after_update(
         if monitor_was_live:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor()
+            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
         summary["reason"] = "no-routed-monitor"
         return summary
@@ -466,6 +469,12 @@ def activate_after_update(
         lease.release()
     summary["action"] = "cutover"
     summary["result"] = result.to_dict()
+    # Async backstop regardless of outcome (copilot-extensions#5453): a
+    # clean cutover's repair pass simply finds nothing to do, while an
+    # ambiguous rollback (duplicate or zero live monitors) self-heals on
+    # this delay instead of needing a human to notice and run
+    # `doctor --apply-daemon-health` by hand. Never blocks this return.
+    status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
     return summary
 
 

@@ -28,6 +28,8 @@ import single_instance_lease
 from agent_worktrees import __main__ as m
 from agent_worktrees import output
 from agent_worktrees import session_catalog
+from agent_worktrees import status_monitor_reap_stale
+from agent_worktrees import status_monitor_runtime
 from agent_worktrees import worktree_identity
 
 
@@ -3135,6 +3137,174 @@ def test_cmd_restart_reports_stale_runtime_reap_count(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "reaped 2 stale-runtime process(es)" in out
+
+
+# ---------------------------------------------------------------------------
+# schedule_delayed_daemon_health_reap / status-monitor-reap-stale --
+# copilot-extensions#5453's own-sanctioned async backstop: a cutover/restart
+# attempt that times out or rolls back ambiguously can leave either a stray
+# duplicate daemon or zero live daemons, with nothing today reconverging on
+# exactly one owner without a human running `doctor --apply-daemon-health`
+# by hand. This schedules that SAME identity-verified repair automatically,
+# on a delay, without ever blocking the installer or the caller.
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_delayed_daemon_health_reap_spawns_reap_stale_with_delay(monkeypatch):
+    spawned = {"argv": None}
+
+    def _spawn(argv):
+        spawned["argv"] = argv
+        return True
+
+    monkeypatch.setattr(m, "_spawn_detached", _spawn)
+
+    ok = status_monitor_reap_stale.schedule_delayed_daemon_health_reap(delay_seconds=42.5)
+
+    assert ok is True
+    assert spawned["argv"][-3:] == ["status-monitor-reap-stale", "--delay-seconds", "42.5"]
+
+
+def test_schedule_delayed_daemon_health_reap_uses_default_delay(monkeypatch):
+    spawned = {"argv": None}
+    monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.update(argv=argv) or True)
+
+    status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
+
+    assert spawned["argv"][-2] == "--delay-seconds"
+    assert float(spawned["argv"][-1]) == status_monitor_reap_stale.DEFAULT_DELAY_SECONDS
+
+
+def test_schedule_delayed_daemon_health_reap_never_raises(monkeypatch):
+    def _boom(argv):
+        raise OSError("no fork slots")
+
+    monkeypatch.setattr(m, "_spawn_detached", _boom)
+
+    assert status_monitor_reap_stale.schedule_delayed_daemon_health_reap() is False
+
+
+def test_cmd_reap_stale_sleeps_then_applies_daemon_health(monkeypatch, capsys):
+    slept = {"seconds": None}
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: slept.update(seconds=s))
+
+    applied = {"calls": 0}
+
+    def _fake_doctor_report(*, apply):
+        applied["calls"] += 1
+        assert apply is True
+        return {"findings": [{"kind": "duplicate_resident"}]}
+
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", _fake_doctor_report)
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=7.0)
+    )
+
+    assert rc == 0
+    assert slept["seconds"] == 7.0
+    assert applied["calls"] == 1
+    assert "1 finding(s)" in capsys.readouterr().out
+
+
+def test_cmd_reap_stale_is_a_clean_no_op_when_nothing_to_repair(monkeypatch, capsys):
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert "0 finding(s)" in capsys.readouterr().out
+
+
+def test_cmd_reap_stale_never_raises_on_repair_failure(monkeypatch, capsys):
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+
+    def _boom(*, apply):
+        raise RuntimeError("routing dir unreadable")
+
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", _boom)
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0  # advisory, best-effort -- never fails the caller
+    assert "non-fatal" in capsys.readouterr().out
+
+
+def test_reap_stale_registered_and_exposes_delay_flag():
+    assert m.COMMAND_MAP["status-monitor-reap-stale"] is m.cmd_status_monitor_reap_stale
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    status_monitor_reap_stale.add_parsers(sub)
+    args = parser.parse_args(["status-monitor-reap-stale", "--delay-seconds", "5"])
+    assert args.delay_seconds == 5.0
+
+
+def test_installer_after_update_schedules_async_reap_regardless_of_outcome(monkeypatch):
+    """The installer seam (status_monitor_cutover.activate_after_update) must
+    schedule the async backstop whenever it actually attempts a restart or
+    cutover -- never only on success, since an ambiguous rollback is exactly
+    the case this backstop exists for -- and must never block on it."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: False)
+    monkeypatch.setattr(
+        status_monitor_runtime, "_restart_status_monitor", lambda: {"spawned": True}
+    )
+
+    summary = smc.activate_after_update(monitor_was_live=True)
+
+    assert summary["action"] == "restart"
+    assert scheduled["n"] == 1
+
+
+def test_installer_after_update_does_not_schedule_when_disabled(monkeypatch):
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+
+    summary = smc.activate_after_update(monitor_was_live=True)
+
+    assert summary["enabled"] is False
+    assert scheduled["n"] == 0
+
+
+def test_installer_after_update_does_not_schedule_when_nothing_was_live(monkeypatch):
+    """No prior monitor and no routed monitor: a genuine cold start with
+    nothing to reconcile -- scheduling the backstop here would just be a
+    wasted detached process for every ordinary first-ever activation."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: False)
+
+    summary = smc.activate_after_update(monitor_was_live=False)
+
+    assert summary["action"] == "noop"
+    assert scheduled["n"] == 0
 
 
 def test_installers_invoke_monitor_cutover_after_activation():
