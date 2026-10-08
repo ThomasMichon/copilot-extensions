@@ -1,13 +1,14 @@
 # agent-index — Vision
 
-- **Subject:** The portable **indexing & semantic-search engine** — a plugin that
+- **Subject:** The portable **indexing & semantic-search engine** — a standalone
+  hosted service with an optional lightweight plugin/client integration that
   gives a harness repo and its immediate ecosystem a self-hosted, meaning-based
   retrieval layer over its *own* corpus (code, docs, issues, pull requests,
   commits), ingested as a **good citizen** of the source systems it reads.
 - **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
   the [plugin-services](../../plugin-services/README.md) service model)
 - **Status:** Draft
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's future `plugins/agent-index/docs/`
 
@@ -260,16 +261,42 @@ routing and configuration resolution carry no host store or model dependencies.
 Without effective configuration the plugin is inert; without a reachable or
 locally supervised host runtime the search capability is honestly unavailable.
 
-The hosted service uses the suite's
-[plugin-services](../../plugin-services/README.md)
-`delegated-heavy-companion-runtime` boundary. agent-index contributes attributed
-declarative runtime inputs and lifecycle adapters, while the already-running
-dispatch supervisor alone installs, updates, rolls back, and retires the
-versioned service dependencies. Agent-facing commands and ordinary direct CLI
-calls never provision the host runtime. **Which role a machine takes** — hosting
+The hosted indexer is an independently installable service program, not a
+plugin-owned runtime. The lightweight integration contributes configuration,
+client routing and optional lifecycle adapters; an explicitly selected host
+lifecycle authority installs, supervises, updates, rolls back and retires the
+service. That authority may be a local host supervisor or an external deployment
+controller; no particular agent framework is required. Agent-facing commands
+and ordinary read CLI calls never provision the host runtime.
+**Which role a machine takes** — hosting
 the engine versus only consuming search — is resolved from **configuration**
 (machine-local, or a source repo's own `.agent-index` config), never a machine
 list baked into the plugin.
+
+### independently-packaged-indexer-service
+The indexing service has its own distribution and release identity independent
+of plugin enablement. Its hosted query surface, durable task queue, source
+ingestion and indexing workers form one coherent service boundary. The
+embedding engine remains a separately managed heavy runtime rather than being
+reinstalled with every service update. Existing client, configuration and
+non-container host workflows retain a supported migration path.
+
+### released-version-controller-contract
+An optional operator-owned controller can discover released versions and
+periodically reconcile the explicitly selected service to one of them. Updates
+are serialized, verified and health-gated; an incomplete or unhealthy candidate
+cannot displace the last-known-good service. Configuration, corpus state and
+queued work survive activation and rollback. A successful deployment means a
+healthy successor remains available after the deploying process exits, not
+merely that a version marker or endpoint was written.
+
+### deployment-backend-parity
+Native host and container installations express the same service, configuration
+and lifecycle contracts. Container packaging is optional; it must not impose a
+fleet product, container controller or private topology on the portable service.
+Platform-appropriate supervision repairs failed service instances and stale
+routing without relying on an interactive agent session. Deployment-specific
+credentials, storage, update schedules and placement belong to the operator.
 
 ### reusable-engine-extension-seam
 The connector interface and query API are a **stable extension surface**: a

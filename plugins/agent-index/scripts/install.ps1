@@ -1682,10 +1682,6 @@ function Get-ActivationRole {
         }
     }
     if (-not $repoRoot) { return Get-MachineRole }
-    $repoConfig = Join-Path $repoRoot '.agent-index\config.yaml'
-    if (-not (Test-Path -LiteralPath $repoConfig -PathType Leaf)) {
-        return 'unconfigured'
-    }
     $me = if ($env:AGENT_INDEX_MACHINE) {
         $env:AGENT_INDEX_MACHINE.Trim().ToLower()
     } else {
@@ -1695,8 +1691,19 @@ function Get-ActivationRole {
     if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
     if (-not $python) { return 'unconfigured' }
     $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
-    $role = (& $python.Source $resolver --config $repoConfig --machine $me 2>$null |
-        Select-Object -Last 1)
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $role = (& $python.Source -E -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
+            Select-Object -Last 1)
+        $resolverExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($resolverExitCode -ne 0) {
+        Write-Warn 'Activation role resolver failed -- leaving this repository unconfigured'
+        return 'unconfigured'
+    }
     $role = ("$role").Trim().ToLower()
     return $(if ($role -in @('host', 'client')) { $role } else { 'unconfigured' })
 }
