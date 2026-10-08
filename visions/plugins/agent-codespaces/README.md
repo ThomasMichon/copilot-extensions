@@ -9,7 +9,7 @@
   contract** as a local one.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) (install
   topology, the credential-relay path, the `codespace:` resolver) · the plugin's
   [`README`](../../../plugins/agent-codespaces/README.md) and its skills
@@ -168,7 +168,7 @@ with no multi-account policy configured it collapses to a single ambient identit
 ### Session survival — rescue before teardown
 Because a CodeSpace is **ephemeral**, closing one out (finalize) or pausing one
 (stop) **rescues its session state first**, handing the raw material to the
-fabric's **memory layer** so a later agent can digest what happened. The provider
+fabric's **session-memory capability** so a later agent can digest what happened. The provider
 *triggers and gates* recovery on teardown; it does not own the recovery/
 compilation engine.
 
@@ -506,7 +506,7 @@ into a repo, and you only adopt a repo you own. (The parent's
 
 ### recover-not-lose
 A torn-down, paused, **or recycled** CodeSpace **does not silently lose its
-work**: session state is rescued and handed to the memory layer **before** the
+work**: session state is rescued and handed to the session-memory capability **before** the
 machine is deleted, stopped, or reclaimed, and a teardown/recycle that *cannot*
 rescue is surfaced rather than proceeding blindly. (The parent fabric's
 *recover-not-lose*, for the CodeSpace venue.)
@@ -551,7 +551,7 @@ persist a competing copy of it. (The fabric's *derive-don't-duplicate*, applied
 to the venue pool.)
 
 ### degrade-not-fail-without-peers
-Absent the coordination or memory layer, the provider still performs its **own**
+Absent coordination or the session-memory capability, the provider still performs its **own**
 venue function (provision, reach, relay); the cross-layer features (fabric
 addressing, session rescue on teardown) simply **stay dark** until the peer is
 present. A missing sibling degrades a feature, never the core venue.
@@ -568,10 +568,10 @@ tooling.)
 - **Not the coordination layer.** The provider **presents** CodeSpace agents to
   the fabric's one contract, but driving/messaging a running agent turn-by-turn
   is the coordination layer (agent-bridge), not this vision.
-- **Not the memory layer.** The provider **triggers, gates, and makes
+- **Not the session-memory engine.** The provider **triggers, gates, and makes
   comprehensive** the capture/rescue of session data on teardown or recycle, but
   **recovering, compiling, segmenting, and mining** that data into logs and usage
-  telemetry is the memory layer's job (agent-logger). This vision owns *that
+  telemetry is the session-memory capability's job (agent-logger). This vision owns *that
   capture happens and loses nothing*, not *how the record is analyzed*.
 - **Not a general compute scheduler or quota system.** The pool this provider
   stewards is the **account's GitHub Codespaces budget** — it accounts for and
@@ -611,7 +611,7 @@ tooling.)
 - Presenter: [picker](../../picker/README.md) — the Worktree Picker's **CodeSpaces**
   pivot *renders* this venue's pool membership, per-venue state, allocation, and
   budget headroom (owned here; the Picker never redefines or re-stores them).
-- Consumer: [agent-logger](../agent-logger/README.md) — the fabric's **memory layer**
+- Consumer: [agent-logger](../agent-logger/README.md) — the **session-memory capability**
   that compiles and mines the rescued CodeSpace session data into logs and usage
   telemetry (this vision guarantees the *capture*; agent-logger owns the analysis).
 - Related vision: [remote-interactive-sessions](../../remote-interactive-sessions/README.md) —
@@ -625,6 +625,11 @@ tooling.)
   `borrowing-codespaces`, `recovering-codespaces`, `cleaning-codespaces`).
 
 ## Provenance
+
+- **2026-10-08** — Aligned session-memory references with agent-logger's
+  consumer role, preserving the provider's capture/rescue responsibility and
+  the independent analysis capability rather than implying another
+  coordination layer.
 
 - **2026-07-30** — Initial authoring as a **backport** (per the `backporting-visions`
   skill): the intent was reverse-engineered from agent-codespaces' current reality
@@ -664,7 +669,7 @@ tooling.)
   reclaim budget, always rescue-then-reclaim, never touching a live holder); and
   *telemetry-grade-session-capture* + *capture-is-comprehensive* (all CodeSpace
   session data captured — even from an abruptly-recycled venue — for later
-  logging/usage-telemetry mining by the memory layer). All additions are
+  logging/usage-telemetry mining by the session-memory capability). All additions are
   north-star-ahead of reality (which today has only a per-machine advisory lease,
   startup tolerance, and graceful-teardown session rescue), so the deltas are
   additive build-out; no Non-Goal reality violates was introduced.

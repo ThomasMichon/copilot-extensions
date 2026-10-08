@@ -258,12 +258,16 @@ cursor and rejects (422) `after`,
 `controlled`, or `transient`. Gate on the protocol version: an older daemon
 ignores `before` and opens the SSE stream instead.
 
-**Sub-agent attribution.** On `initialize` / `session/new` / `session/load` the
-bridge asks the Copilot ACP agent to mirror a short list of its raw session
-events (`_meta["github.com/copilot"].events`, delivered as
+**Sub-agent attribution.** The bridge asks the Copilot ACP agent to mirror a
+short list of its raw session events (delivered as
 `github.com/copilot/sessionEvent` notifications) and uses them to attribute
-work done by sub-agents (Copilot's `task` tool). Clients rendering a session
-timeline can use the resulting events:
+work done by sub-agents (Copilot's `task` tool). The subscription is
+`_meta["github.com/copilot"].events`, sent in `initialize`'s
+`clientCapabilities._meta` -- the placement current Copilot CLI honors -- and,
+for older agents, also as top-level request `_meta` on `initialize` /
+`session/new` / `session/load`. An agent that rejects it as invalid params is
+re-initialized without either; one that ignores it simply sends no raw events.
+Clients rendering a session timeline can use the resulting events:
 
 - `subagent_started` / `subagent_completed` / `subagent_failed` --
   `agent_id`, `parent_tool_call_id` (the launching `task` tool call),
