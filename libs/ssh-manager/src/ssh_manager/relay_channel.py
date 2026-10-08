@@ -336,7 +336,11 @@ class SupervisedRelayForward:
         process's inherited environment, re-checked after pinning the process
         with a pidfd so a reused PID is never signalled. Returns the count.
         """
-        if not sys.platform.startswith("linux") or not hasattr(os, "pidfd_open"):
+        if not (
+            sys.platform.startswith("linux")
+            and hasattr(os, "pidfd_open")
+            and hasattr(signal, "pidfd_send_signal")
+        ):
             return 0
         marker = f"{_OWNER_ENV}={self._owner_token}".encode()
 
@@ -375,12 +379,18 @@ class SupervisedRelayForward:
                 proc.kill()
             except (ProcessLookupError, OSError):
                 pass
-        self._kill_owned_descendants()
+        try:
+            self._kill_owned_descendants()
+        except Exception as exc:  # noqa: BLE001 - best-effort sync teardown
+            log.warning("Credential relay descendant sweep failed: %s", exc)
 
     async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
         """Kill ``proc`` and any owned descendants that outlived the root."""
         await self._kill(proc)
-        self._kill_owned_descendants()
+        try:
+            self._kill_owned_descendants()
+        except Exception as exc:  # noqa: BLE001 - never skip the owner release
+            log.warning("Credential relay descendant sweep failed: %s", exc)
         # Releases a Windows ProxyCommand owner even when the root had already
         # exited (``terminate_ssh_process_tree`` only runs for a live root).
         await run_process_cleanup(proc)

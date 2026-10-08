@@ -191,7 +191,9 @@ async def test_spawned_ssh_carries_the_supervisor_owner_token(monkeypatch):
 
 
 @pytest.mark.skipif(
-    not sys.platform.startswith("linux") or not hasattr(os, "pidfd_open"),
+    not sys.platform.startswith("linux")
+    or not hasattr(os, "pidfd_open")
+    or not hasattr(relay_mod.signal, "pidfd_send_signal"),
     reason="owner-token sweep is Linux-only",
 )
 def test_owner_sweep_kills_only_processes_carrying_its_token():
@@ -246,3 +248,33 @@ async def test_gated_reconnect_rechecks_gate_before_each_retry(monkeypatch):
 
     assert len(spawned) == 1, "a stopped venue must not get a second attempt"
     assert relay.retired is True
+
+
+def test_owner_sweep_is_a_noop_without_pidfd_send_signal(monkeypatch):
+    relay = SupervisedRelayForward(SSHConfig(host_alias="box"), 41000)
+    monkeypatch.delattr(relay_mod.signal, "pidfd_send_signal", raising=False)
+    monkeypatch.setattr(
+        relay_mod.os, "scandir",
+        lambda *_a: (_ for _ in ()).throw(AssertionError("must not scan")),
+    )
+
+    assert relay._kill_owned_descendants() == 0
+
+
+async def test_terminate_releases_owner_even_if_sweep_fails(monkeypatch):
+    relay, spawned = _supervised(monkeypatch)
+    await relay.establish()
+    released = []
+
+    def broken_sweep(self):
+        raise RuntimeError("boom")
+
+    async def fake_cleanup(proc, **_kw):
+        released.append(proc)
+
+    monkeypatch.setattr(SupervisedRelayForward, "_kill_owned_descendants", broken_sweep)
+    monkeypatch.setattr(relay_mod, "run_process_cleanup", fake_cleanup)
+
+    await relay.stop()
+
+    assert released == [spawned[0]]
