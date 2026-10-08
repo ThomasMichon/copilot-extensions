@@ -59,12 +59,10 @@ _STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_DEFAULT = 180.0
 
 
 def _status_monitor_enabled() -> bool:
-    """Whether the resident coalescing monitor is active.
+    """Enable mandatory resident monitoring outside the test harness.
 
-    Always True in normal operation -- mandatory infrastructure, not an
-    operator-facing opt-out. ``AGENT_WORKTREES_STATUS_MONITOR`` is
-    TEST/DEBUG-ONLY: honored only when ``PYTEST_CURRENT_TEST`` is set
-    (pytest sets this for every test); a real session never has it set.
+    ``AGENT_WORKTREES_STATUS_MONITOR`` is a test/debug-only override,
+    honored only when ``PYTEST_CURRENT_TEST`` is set.
     """
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         return True

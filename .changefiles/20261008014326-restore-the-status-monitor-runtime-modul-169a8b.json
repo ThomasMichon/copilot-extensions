@@ -1,0 +1,9 @@
+{
+  "comment": "Restore the status-monitor runtime module cap without changing executable behavior",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

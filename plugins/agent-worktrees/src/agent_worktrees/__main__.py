@@ -85,6 +85,7 @@ from pathlib import Path
 sys.modules.setdefault(f"{__package__}.__main__", sys.modules[__name__])
 from agent_procutil import (
     detached_kwargs,
+    no_window_kwargs,
     windowless_daemon_kwargs as _windowless_daemon_kwargs_impl,
     windowless_python_env,
 )
@@ -727,11 +728,7 @@ def _classify_records(
 
             raw = classify_daemon.classify_with_boot(
                 read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
-                # Mandatory-monitor check (see status_monitor_runtime.
-                # _status_monitor_enabled's own docstring -- a TEST/DEBUG-ONLY
-                # override, never a production opt-out). A dial-only attempt
-                # (no boot) still runs regardless, so an already-live monitor
-                # is still used if reachable.
+                # Test-only disabling suppresses boot, not use of a live monitor.
                 ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
                 key=key,
                 payload=payload,
@@ -3002,15 +2999,10 @@ def _monitor_pending_handoff_predecessor_retire(
     *,
     require_monitor_enabled: bool = True,
 ) -> dict[str, object] | None:
-    """Return one consumed/associated handoff whose predecessor still needs retirement.
+    """Return the oldest associated handoff awaiting predecessor retirement.
 
-    ``require_monitor_enabled`` gates this to the resident daemon's own
-    automatic sweep (default). An explicit, on-demand caller (``handoffs-check``)
-    passes ``False`` -- a manual diagnostic must work even under the test
-    harness's disabled-for-this-test override (see
-    ``status_monitor_runtime._status_monitor_enabled``'s own docstring --
-    never true in a real operator session), not just out of an agent's
-    ability to explicitly ask "is this worktree's cutover actually finished?".
+    Explicit diagnostics pass ``require_monitor_enabled=False`` to bypass
+    the automatic sweep's test-only monitor-disable gate.
     """
     # Stage D: status_monitor_runtime is cluster-free.
     from . import status_monitor_runtime as _smr
@@ -3672,6 +3664,7 @@ def _registration_nudge_context(cwd: str) -> str:
             capture_output=True,
             text=True,
             timeout=2,
+            **no_window_kwargs(),
         )
         if result.returncode != 0 or not result.stdout.strip():
             return ""
@@ -5195,6 +5188,7 @@ def _enumerate_launcher_shells_windows() -> list[dict] | None:
             capture_output=True,
             text=True,
             timeout=30,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
