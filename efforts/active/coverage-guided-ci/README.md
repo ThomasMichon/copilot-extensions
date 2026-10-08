@@ -573,6 +573,58 @@ gate), designed against this vision's portable concepts, not a copy of this
 effort's
 copilot-extensions-specific Phase 1.
 
+### Phase 6 — Windows CI coverage gap (follow-up from Phase 3.5's CI-history review)
+Direct consequence of reviewing CI build history after Phase 3.5: **every
+"full suite" CI job in this repo runs on `ubuntu-latest` only.** The per-PR
+`smoke` matrix (`ci.yml`) and the `dev`→`main` promotion's `full` matrix
+(`validate-and-promote.yml`, itself a fixed 9-plugin list that doesn't even
+include `agent-machines`/`agent-index`) both run exclusively on Linux.
+Narrow `windows-latest` jobs exist (`windows-hooks`,
+`windows-python-artifact-builder`, `test-runner-windows`,
+`bootstrap-killswitch-powershell-5-1`), but none run a whole plugin's test
+suite on Windows. Confirmed empirically: every Windows-specific bug found
+in Phase 3.5's local full-matrix validation (`agent-machines`' `os.kill`
+process-killing crash; `agent-ssh`/`agent-vault`'s `MAX_PATH` instances;
+the WSL-`bash`-shim and `python3`-alias-stub PATH-resolution findings)
+would never have been caught by any existing CI gate, on any branch,
+regardless of this effort's local fixes.
+
+- [ ] Add a **detection-only, daily-rotating Windows coverage job**
+      (`.github/workflows/windows-coverage-rotation.yml` + a new
+      `tools/select_windows_rotation.py`) rather than duplicating every
+      plugin's full suite on both OSes every run (true 2x wall-clock cost
+      for near-zero marginal benefit on OS-agnostic plugins — and moot as
+      a dollar-cost concern anyway, since this repo is public and
+      GitHub-hosted runners, including `windows-latest`, are free
+      regardless of OS on public repos). Weighted rotation: a "Tier A" of
+      plugins with real OS-divergent code (dual `.ps1`/`.sh` installers,
+      subprocess/signal handling, path manipulation — `agent-machines`,
+      `agent-ssh`, `agent-vault`, `agent-dispatch`, `agent-index`,
+      `agent-worktrees`, `agent-logger`, `agent-mcp`, `agent-bridge`,
+      `agent-codespaces`, `agent-containers`) rotates through quickly (2
+      picks/day); a "Tier B" of lower-OS-risk, pure-Python-logic plugins
+      rotates more slowly (1 pick/day). Deterministic and stateless (keyed
+      off the date's ordinal day number, not a persisted cursor), so a
+      missed scheduled run never permanently skips a plugin — it just
+      reselects next time that date recurs in the cycle. A failure files/
+      updates a tracking issue (same shape as `module-health-watchdog.yml`)
+      rather than blocking promotion — this is new, exploratory coverage,
+      not a replacement for the existing Linux-side gate.
+- [ ] **Known landing constraint:** `workflow-lockdown-guard` blocks any
+      `.github/workflows/*` change from a PR not authored by the exact
+      repo-owner account — this change cannot self-merge through the usual
+      contributor flow (same constraint already hit once this effort,
+      routing the CI-fix PR #5507/#5535 through the operator directly).
+      Drafted in the worktree for the operator's own review/application
+      rather than attempted as a normal contributor PR.
+- [ ] Once landed and the rotation has run for a few cycles, revisit
+      whether any plugin's `windows_only`-marked test set (the existing,
+      narrower pattern already proven by
+      `windows-python-artifact-builder`) should grow to cover a finding
+      this rotation surfaces — the two mechanisms are complementary: the
+      marker pattern is cheap and catches *known* OS-sensitive spots on
+      every run; the rotation is the only way to catch an *unknown* one.
+
 ## Validation Plan
 
 - [ ] Phase 3.5: `python tools/run-plugin-tests.py --all` completes a full
@@ -724,7 +776,7 @@ handled before the operator explicitly chose a fix.
 **Separately, same plugin, different root cause:**
 `test_shared_installer_engine_manifest_kind.py`'s 2 tests failed with
 `[Errno 127]`/`returncode 127`, tracing to a garbled path
-(`C:UserstmichonAppDataLocalTemp...` -- every backslash silently
+(`C:Usersyour_userAppDataLocalTemp...` -- every backslash silently
 vanished) passed to `C:\Windows\system32\bash.exe`. This host's `PATH`
 resolves `bash` to Windows' own WSL interop launcher first (confirmed via
 `where.exe bash`: only the WSL shim and a WindowsApps alias resolve, no
