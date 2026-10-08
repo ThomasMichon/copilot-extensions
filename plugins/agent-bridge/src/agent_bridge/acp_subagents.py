@@ -18,6 +18,13 @@ from collections.abc import Callable
 from typing import Any
 
 from acp.exceptions import RequestError
+from acp.schema import (
+    ClientCapabilities,
+    ClientSessionCapabilities,
+    ElicitationCapabilities,
+    ElicitationFormCapabilities,
+    SessionConfigOptionsCapabilities,
+)
 
 log = logging.getLogger("agent-bridge")
 
@@ -63,7 +70,9 @@ BG_TASK_INACTIVE_STATUSES = frozenset(
 # Copilot's ACP agent can mirror a requested subset of its internal session
 # events as ``github.com/copilot/sessionEvent`` JSON-RPC notifications
 # (``params: {sessionId, type, timestamp, agentId?, data}``). The subscription
-# is requested through ``_meta["github.com/copilot"].events`` on
+# is requested through ``_meta["github.com/copilot"].events`` in
+# ``initialize``'s ``clientCapabilities`` -- the placement current Copilot CLI
+# honors -- and, for older agents, also as top-level request ``_meta`` on
 # ``initialize`` / ``session/new`` / ``session/load``. Events produced by a
 # sub-agent carry ``agentId``; main-agent events do not.
 #
@@ -108,6 +117,31 @@ def subagent_event_meta() -> dict[str, Any]:
     if not subagent_events_enabled():
         return {}
     return {COPILOT_META_KEY: {"events": list(SUBAGENT_EVENT_TYPES)}}
+
+
+def client_capabilities(meta: dict[str, Any]) -> ClientCapabilities:
+    """Capabilities advertised on ``initialize``; ``meta`` becomes ``_meta``.
+
+    Copilot CLI honors the raw session-event subscription only here (not as
+    top-level request ``_meta``), so ``meta`` is ``subagent_event_meta()``.
+    """
+    return ClientCapabilities(
+        # Advertise form elicitation so the agent's ``ask_user`` calls are
+        # delivered (as ``elicitation/create``) instead of being self-cancelled
+        # for want of a capable client. The bridge parks each request and
+        # surfaces it as an ``ask_user_request`` event for a human to answer
+        # -- it does NOT auto-answer.
+        elicitation=ElicitationCapabilities(form=ElicitationFormCapabilities()),
+        # Advertise session config-option support so we may drive the agent's
+        # ``model`` / ``reasoning_effort`` select options via
+        # ``session/set_config_option`` (dotfiles#790). Select options need no
+        # capability flag, but advertising is the spec-correct signal that
+        # this client sets config options.
+        session=ClientSessionCapabilities(
+            config_options=SessionConfigOptionsCapabilities(),
+        ),
+        field_meta=meta or None,
+    )
 
 
 def copilot_agent_id_from_meta(meta: Any) -> str | None:
@@ -190,11 +224,18 @@ class SubagentAttribution:
             log.debug("Could not register raw session-event route", exc_info=True)
 
     @staticmethod
-    async def call_with_meta(method: Callable[..., Any], **kwargs: Any) -> Any:
+    async def call_with_meta(
+        method: Callable[..., Any],
+        *,
+        retry_overrides: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Invoke an ACP RPC requesting the raw event feed, failing open.
 
         If the agent rejects the request's ``_meta`` as invalid params, retry
-        once exactly as the bridge always has (no ``_meta``).
+        once exactly as the bridge always has (no ``_meta``), with
+        ``retry_overrides`` replacing any kwargs that also carried the request
+        (e.g. ``initialize``'s ``client_capabilities``).
         """
         meta = subagent_event_meta()
         if not meta:
@@ -205,7 +246,7 @@ class SubagentAttribution:
             if getattr(exc, "code", None) != _INVALID_PARAMS:
                 raise
             log.info("Agent rejected the raw session-event request; retrying without it")
-            return await method(**kwargs)
+            return await method(**{**kwargs, **(retry_overrides or {})})
 
     def reset(self) -> None:
         self.subagents.clear()
