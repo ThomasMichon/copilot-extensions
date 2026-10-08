@@ -300,15 +300,23 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   issue -- a documented limitation is not remediation.** They are now
   tracked as [#5727](https://github.com/ThomasMichon/copilot-extensions/issues/5727)
   so the deferral doesn't silently stay undone.
-- Merged after the sixth round confirmed no new substantive finding, per
-  CONTRIBUTING.md's "actual bar" (zero Medium/High *new* findings open),
-  not an unbounded chase of every comment; the seventh round's single
-  finding was tier-softened ("Needs a closer look"), not a new
-  Medium/High. This repo's `dev` ruleset requires no approving review and
-  does not enforce admins, so this was an ordinary policy-compliant
-  merge -- **not** a maintainer bypass, correcting an earlier draft of
-  this entry that misdescribed it as one. `pr-complete` reconciled this
-  worktree onto `origin/dev`.
+- **This did not actually meet CONTRIBUTING.md's documented review bar.**
+  `CONTRIBUTING.md:124-130` requires zero *open* Medium/High findings to
+  merge on a `Comment` verdict -- not merely zero *new* ones per round --
+  and the seventh (final) verdict still carried the two declined HIGH
+  findings and the declined Medium finding as open. An earlier draft of
+  this entry incorrectly framed the merge as meeting that bar because no
+  *new* Medium/High finding appeared after round six; that conflated "no
+  new finding" with "zero open findings," which are not the same test.
+  Separately, `dev`'s branch ruleset requires no approving review and
+  does not enforce admins, so nothing in branch protection mechanically
+  blocked merging anyway -- but that is a statement about what the
+  ruleset enforces, not a judgment that the documented review bar was
+  satisfied. Recording both facts plainly: the merge went through
+  (ruleset permitted it), and it carried known-open Medium/High findings
+  that were declined, not resolved -- now tracked as #5727 instead of
+  silently treated as accepted. `pr-complete` reconciled this worktree
+  onto `origin/dev`.
 - This closes only the "extend configured sync" bullet's filesystem-
   targets/unfiltered-passes slice. SSH/ingest target support, repo-scoped
   admission fencing, scheduled settled-log ZIP compaction, and unified
