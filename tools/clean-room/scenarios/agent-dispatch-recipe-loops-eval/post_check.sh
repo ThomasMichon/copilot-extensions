@@ -61,17 +61,23 @@ _list_issues_by_label() {  # <owner/repo> <label> -- sorted issue numbers carryi
     gh issue list --repo "$1" --state all --label "$2" --json number --jq '.[].number' | sort -n
 }
 
-_find_builder_pr_added_dir() {  # <owner/repo> -- effort-builder's own contract accepts an
+_find_builder_pr_added_dir() {  # <owner/repo> [exclude-file] -- effort-builder's own contract accepts an
     # opened (unmerged) effort PR, not only a direct default-branch commit --
     # a new efforts/active/<dir>/README.md can therefore exist ONLY on an open
     # PR's head, where the default-branch contents diff above would never see
     # it. Scan real open PRs' real file-status (REST, which (unlike the
     # GraphQL files connection) reports true added/modified/removed) for the
     # first newly ADDED effort README, and print "<pr-number> <headRefName>
-    # <dir>" for it.
-    local or="$1" num ref filename dir
+    # <dir>" for it. A PR number listed in <exclude-file> (PRs that already
+    # added such a README BEFORE this run, against a deliberately-retained
+    # fixture repo) is skipped so a stale prior run's PR is never mistaken
+    # for this run's own evidence.
+    local or="$1" exclude="${2:-}" num ref filename dir
     while read -r num ref; do
         [ -z "$num" ] && continue
+        if [ -n "$exclude" ] && [ -f "$exclude" ] && grep -qx "$num" "$exclude" 2>/dev/null; then
+            continue
+        fi
         filename="$(gh api "repos/$or/pulls/$num/files" --jq '.[] | select(.status=="added") | .filename' 2>/dev/null \
             | grep -E '^efforts/active/[^/]+/README\.md$' | head -1)"
         if [ -n "$filename" ]; then
@@ -224,7 +230,7 @@ if [ -n "$_remote" ]; then
                 # across the repo's real open PRs (true add/modify/remove
                 # status, not just path/title) and corroborate against that
                 # PR's own head ref instead.
-                if capture "pc-builder-open-pr-search" -- _find_builder_pr_added_dir "$_owner_repo"; then
+                if capture "pc-builder-open-pr-search" -- _find_builder_pr_added_dir "$_owner_repo" "${_open_builder_prs_before:-$CR_LOGDIR/open-builder-prs-before.log}"; then
                     _pr_match="$(sed -n '2,$p' "$CR_LOGDIR/pc-builder-open-pr-search.log" | head -1)"
                     if [ -n "$_pr_match" ]; then
                         _builder_pr_num="$(printf '%s' "$_pr_match" | awk '{print $1}')"

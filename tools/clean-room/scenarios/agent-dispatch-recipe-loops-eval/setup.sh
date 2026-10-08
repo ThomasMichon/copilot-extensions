@@ -250,6 +250,28 @@ _efforts_active_before="$CR_LOGDIR/efforts-active-before.log"
 ( cd "$FIXTURE_DIR" && find efforts/active -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort ) > "$_efforts_active_before" || true
 cr_meta "efforts_active_before" "$(tr '\n' ',' < "$_efforts_active_before" 2>/dev/null)"
 
+# effort-builder's own contract accepts an opened (unmerged) effort PR, not
+# only a direct default-branch commit -- post_check.sh falls back to
+# scanning real OPEN PRs for a newly-added efforts/active/<dir>/README.md
+# when the default branch shows nothing new. Since this fixture repo is
+# deliberately retained across reruns, snapshot which open PRs ALREADY add
+# such a README BEFORE this run, so that fallback can exclude them and
+# never mistake a stale, pre-existing PR for this run's own evidence.
+_owner_repo="$(cd "$FIXTURE_DIR" && git remote get-url origin 2>/dev/null | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
+_open_builder_prs_before="$CR_LOGDIR/open-builder-prs-before.log"
+: > "$_open_builder_prs_before"
+if [ -n "$_owner_repo" ]; then
+    while read -r _pr_num; do
+        [ -z "$_pr_num" ] && continue
+        if gh api "repos/$_owner_repo/pulls/$_pr_num/files" --jq '.[] | select(.status=="added") | .filename' 2>/dev/null \
+            | grep -qE '^efforts/active/[^/]+/README\.md$'; then
+            printf '%s\n' "$_pr_num" >> "$_open_builder_prs_before"
+        fi
+    done < <(gh pr list --repo "$_owner_repo" --state open --json number --jq '.[].number' 2>/dev/null)
+fi
+sort -n -o "$_open_builder_prs_before" "$_open_builder_prs_before" 2>/dev/null || true
+cr_meta "open_builder_prs_before" "$(tr '\n' ',' < "$_open_builder_prs_before" 2>/dev/null)"
+
 # =========================================================================
 phase 5 "register the fixture repo with agent-worktrees (headless embody's documented spawn prerequisite)"
 # embody.py's create_worktree() always shells out to `agent-worktrees create`
