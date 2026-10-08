@@ -61,6 +61,42 @@ _list_issues_by_label() {  # <owner/repo> <label> -- sorted issue numbers carryi
     gh issue list --repo "$1" --state all --label "$2" --json number --jq '.[].number' | sort -n
 }
 
+_yaml_list_field() {  # <yaml-file> <top-level-key> -- first scalar in a
+    # top-level YAML list declared EITHER inline ("key: [a, b]") or in block
+    # style ("key:\n  - a\n  - b"). A declaration author may legitimately use
+    # either serialization, so a single-shape grep/sed would silently miss
+    # the other and skip real corroboration -- parse structurally instead.
+    python3 - "$1" "$2" <<'PY' 2>/dev/null
+import sys
+path, key = sys.argv[1], sys.argv[2]
+lines = open(path, encoding="utf-8").read().splitlines()
+for i, line in enumerate(lines):
+    k, sep, v = line.partition(":")
+    if not sep or k.strip() != key:
+        continue
+    val = v.split("#", 1)[0].strip()
+    if val.startswith("["):
+        inner = val.strip("[]")
+        items = [x.strip().strip("\"'") for x in inner.split(",") if x.strip()]
+        if items:
+            print(items[0])
+        break
+    if val:
+        print(val.strip("\"'"))
+        break
+    for nxt in lines[i + 1:]:
+        if nxt.strip() == "":
+            continue
+        if not nxt.startswith((" ", "\t")):
+            break
+        s = nxt.strip()
+        if s.startswith("- "):
+            print(s[2:].strip().strip("\"'"))
+        break
+    break
+PY
+}
+
 _find_builder_pr_added_dir() {  # <owner/repo> [exclude-file] -- effort-builder's own contract accepts an
     # opened (unmerged) effort PR, not only a direct default-branch commit --
     # a new efforts/active/<dir>/README.md can therefore exist ONLY on an open
@@ -253,7 +289,7 @@ if [ -n "$_remote" ]; then
                 # ref: default branch or the open PR's own head) actually
                 # references them.
                 _builder_decl="$REGISTRAR_DIR/effort-builder.yaml"
-                _builder_label="$([ -f "$_builder_decl" ] && grep -E '^include_labels:' "$_builder_decl" | head -1 | sed -E 's/^include_labels:\s*\[?\s*//; s/\s*\]?\s*$//' | cut -d',' -f1 | tr -d '"'"'"'\r' | sed -E 's/^\s+|\s+$//g')"
+                _builder_label="$([ -f "$_builder_decl" ] && _yaml_list_field "$_builder_decl" "include_labels")"
                 if [ -n "$_builder_label" ]; then
                     if capture "pc-builder-expected-issues" -- _list_issues_by_label "$_owner_repo" "$_builder_label"; then
                         _expected_issues_log="$CR_LOGDIR/pc-builder-expected-issues.log"
@@ -304,7 +340,7 @@ if [ -n "$_remote" ]; then
     # of the actual archive move, not just the slug's disappearance.
     _driver_decl="$REGISTRAR_DIR/effort-driver.yaml"
     if [ -f "$_driver_decl" ]; then
-        _driver_slug="$(grep -A5 -E '^effort_slugs:' "$_driver_decl" | grep -E '^\s*-\s' | head -1 | sed -E 's/^\s*-\s*//' | tr -d '"'"'"'\r')"
+        _driver_slug="$(_yaml_list_field "$_driver_decl" "effort_slugs")"
         if [ -n "$_driver_slug" ] && [ "$_efforts_fetch_ok" = 1 ]; then
             cr_meta "effort_driver_declared_slug" "$_driver_slug"
             _driver_slug_was_active_before=0

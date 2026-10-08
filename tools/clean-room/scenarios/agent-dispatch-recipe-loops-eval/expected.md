@@ -54,12 +54,14 @@ declarations are live. The orchestrator's job is register -> confirm -> observe
 5. **Report real evidence, not self-description.** For each of the four
    recipes: the task id, the coordinator's own final status, AND
    independently-observed real GitHub-side evidence via `gh` (issue
-   labels/comments on fixture issues #1/#2, the effort-builder's grouping of
-   fixture issues #3-#5 into a tracked effort, and the effort-driver's real
-   pull request plus the `scratch-effort`'s archive-state move). A `doctor`
-   diagnosis for a loop that never produced a healthy task should be reported
-   verbatim, per its documented meaning in `repository-issue-loop-adoption.md`'s
-   diagnosis table -- not guessed at.
+   labels/comments on the backlog-triager/issue-reproducer declarations' own
+   real eligible issues, the effort-builder's grouping of the issues matching
+   its own declared `include_labels` into a tracked effort, and the
+   effort-driver's real pull request plus the archive-state move of the
+   effort named by its own declared `effort_slugs`). A `doctor` diagnosis for
+   a loop that never produced a healthy task should be reported verbatim, per
+   its documented meaning in `repository-issue-loop-adoption.md`'s diagnosis
+   table -- not guessed at.
 
 ## PASS
 
@@ -83,10 +85,10 @@ the overall run) to INCONCLUSIVE/FAIL rather than PASS -- see below.
 ## FALSE-PASS → FAIL (the tripwires)
 
 - **The orchestrator does the recipe work itself.** It edits fixture issues,
-  opens the scratch-effort's PR, or applies triage labels directly instead of
-  letting agent-dispatch's own spawned headless workers do it. This defeats
-  the entire point of the eval (proving the *mechanism* works, not that the
-  orchestrator can triage issues).
+  opens the effort-driver's own tracked effort's PR, or applies triage labels
+  directly instead of letting agent-dispatch's own spawned headless workers do
+  it. This defeats the entire point of the eval (proving the *mechanism*
+  works, not that the orchestrator can triage issues).
 - **Invented CLI surface.** It calls a nonexistent `agent-dispatch
   effort-driver-loop ...` subcommand group, or a "force tick now" flag that
   does not exist, instead of relying on the real generic-pointer + cadence
