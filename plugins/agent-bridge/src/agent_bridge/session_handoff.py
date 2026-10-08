@@ -439,12 +439,6 @@ class _SessionHandoffMixin:
         #    transcript + succession link (end_session would delete both).
         with contextlib.suppress(Exception):
             await self.stop_session(session_id, force=True)
-        if stop_arrived():
-            # A stop's notice arrived while the predecessor was being retired: the
-            # stop reaches only the predecessor, so end the successor it can't see.
-            with contextlib.suppress(Exception):
-                await self.end_session(successor.session_id, force=True)
-            raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
 
         log.info(
             "Handoff: session %s -> %s (worktree %s)",
