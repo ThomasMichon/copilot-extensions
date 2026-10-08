@@ -105,7 +105,7 @@ for the `script` provider's full subprocess JSON request/response contract.
 |---|---|---|---|
 | `label` | string | yes | The forge label/tag applied while an issue is reserved or claimed. |
 | `comment` | boolean | no (default `true`) | Must be `true` -- ownership must stay visible. |
-| `orphan_after_seconds` | number ≥ 60 | no (default `max(cadence_seconds, 3600)`) | Crash-recovery TTL for an unbound reservation. |
+| `orphan_after_seconds` | number ≥ 60 | no (default `max(cadence_seconds, 3600)`) | Crash-recovery TTL for an unbound reservation. For a fast-iterating test/clean-room fixture (short `cadence_seconds`), set this explicitly to its documented minimum (`60`) -- the default's `3600`-second floor otherwise blocks a quick manual retry against the same reservation for a full hour regardless of how fast the declared cadence itself ticks. |
 
 ### `pool`
 
