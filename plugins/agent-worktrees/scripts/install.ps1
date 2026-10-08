@@ -2034,6 +2034,24 @@ function Deploy-Package {
         }
     }
 
+    # Vendored machine-transport lib (agent-machine-transport / module
+    # machine_transport). Same dev/release-layout fallback as
+    # remote-login-shell above -- installed after it since machine-transport
+    # itself depends on remote-login-shell.
+    $machineTransportDir = Join-Path $PluginDir 'libs\machine-transport'
+    if (-not (Test-Path (Join-Path $machineTransportDir 'pyproject.toml'))) {
+        $machineTransportDir = Join-Path $PluginDir '..\..\libs\machine-transport'
+    }
+    if (Test-Path (Join-Path $machineTransportDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-machine-transport' -PkgDir $machineTransportDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "machine-transport library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
     $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
     $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP

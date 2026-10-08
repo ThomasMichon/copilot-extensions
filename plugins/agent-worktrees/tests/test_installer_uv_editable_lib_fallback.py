@@ -37,9 +37,14 @@ _BLOCKS = {
     ),
     "remote-login-shell": (
         "# Vendored remote-login-shell lib (agent-remote-login-shell / module",
+        "# Vendored machine-transport lib",
+    ),
+    "machine-transport": (
+        "# Vendored machine-transport lib (agent-machine-transport / module",
         "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees'",
     ),
 }
+_LIBS = ("plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell", "machine-transport")
 
 
 def _extract_block(lib: str) -> str:
@@ -73,9 +78,7 @@ $prevEAP = $ErrorActionPreference
     )
 
 
-@pytest.mark.parametrize(
-    "lib", ["plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell"]
-)
+@pytest.mark.parametrize("lib", _LIBS)
 def test_lib_resolves_plugin_local_copy_when_present(lib: str, tmp_path: Path):
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -91,9 +94,7 @@ def test_lib_resolves_plugin_local_copy_when_present(lib: str, tmp_path: Path):
     assert proc.stdout == str(local_lib)
 
 
-@pytest.mark.parametrize(
-    "lib", ["plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell"]
-)
+@pytest.mark.parametrize("lib", _LIBS)
 def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: Path):
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -112,9 +113,7 @@ def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: P
     assert os.path.realpath(proc.stdout) == os.path.realpath(canonical_lib)
 
 
-@pytest.mark.parametrize(
-    "lib", ["plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell"]
-)
+@pytest.mark.parametrize("lib", _LIBS)
 def test_lib_is_a_noop_when_neither_copy_exists(lib: str, tmp_path: Path):
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -160,3 +159,17 @@ def test_remote_login_shell_preinstall_block_exists_before_main_package_install(
     assert marker in installer
     assert "-PkgName 'agent-remote-login-shell'" in installer
     assert installer.index(marker) < installer.index(main_install)
+
+
+def test_machine_transport_preinstall_block_exists_after_remote_login_shell():
+    """machine-transport itself depends on remote-login-shell (see its own
+    pyproject.toml), so its preinstall block must come after
+    remote-login-shell's -- same reasoning as
+    ``test_plugin_activation_block_runs_after_its_own_transitive_deps``."""
+    installer = INSTALLER.read_text(encoding="utf-8")
+    rls_marker = "# Vendored remote-login-shell lib (agent-remote-login-shell / module"
+    mt_marker = "# Vendored machine-transport lib (agent-machine-transport / module"
+    main_install = "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir"
+    assert mt_marker in installer
+    assert "-PkgName 'agent-machine-transport'" in installer
+    assert installer.index(rls_marker) < installer.index(mt_marker) < installer.index(main_install)
