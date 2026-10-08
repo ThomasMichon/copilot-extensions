@@ -451,7 +451,9 @@ def describe(users: list[LiveUser], indent: str = "    ") -> str:
 def busy_report(name: str, busy: object) -> str:
     """A BUSY message that names what is actually holding ``name``."""
     lines = [f"[BUSY] {busy}"]
-    users = live_users(name)
+    users = getattr(busy, "users", None)
+    if users is None:
+        users = live_users(name)
     if users:
         lines.append(f"  Live local users of '{name}':")
         lines.append(describe(users))
@@ -487,6 +489,10 @@ def cmd_in_use(args) -> int:
     return 75 if users else (0 if in_use is False else 3)
 
 
+# Lifecycle commands that accept --force to override the live-user check.
+_FORCEABLE_OPS = frozenset({"stop", "finalize", "delete"})
+
+
 class CodespaceInUseError(TargetBusyError):
     """A lifecycle operation refused because live local users still ride the box.
 
@@ -499,10 +505,16 @@ class CodespaceInUseError(TargetBusyError):
         super().__init__(name, LockHolder(pid=first.pid, op=first.role, target=name,
                                           started_at=time.time()))
         self.users = users
-        why = (f"is still in use by {len(users)} live local process(es)" if users else
-               "could not be confirmed idle (local process table unreadable)")
-        self.args = (f"CodeSpace '{name}' {why}; refusing {op}. Close them, or re-run "
-                     f"with --force to proceed anyway.",)
+        if users:
+            why = f"is still in use by {len(users)} live local process(es)"
+            fix = "close them (see below)"
+        else:
+            why = "could not be confirmed idle (local process table unreadable)"
+            fix = "restore local process listing (ps / /proc / PowerShell CIM)"
+        retry = (f"or re-run {op} with --force to proceed anyway" if op in _FORCEABLE_OPS
+                 else f"{op} will retry on a later pass")
+        self.args = (f"CodeSpace '{name}' {why}; refusing {op}. To proceed, {fix}; "
+                     f"{retry}.",)
 
 
 def refuse_if_in_use(name: str, op: str) -> None:

@@ -271,6 +271,10 @@ def test_lifecycle_lock_refuses_live_users_unless_forced(monkeypatch, tmp_path):
             raise AssertionError("must not enter")
     assert isinstance(exc.value, lu.CodespaceInUseError)
     assert "refusing delete" in str(exc.value) and "--force" in str(exc.value)
+    reclaim = lu.CodespaceInUseError(NAME, [lu.LiveUser(1, lu.ROLE_SSH, "ssh")], "reclaim")
+    assert "--force" not in str(reclaim) and "later pass" in str(reclaim)
+    unknown = lu.CodespaceInUseError(NAME, [], "prune")
+    assert "restore local process listing" in str(unknown) and "--force" not in str(unknown)
     assert not (tmp_path / f"{NAME}.lock").exists()  # lock released on refusal
 
     with lifecycle_lock(NAME, refuse_live_users="delete", force=True):
