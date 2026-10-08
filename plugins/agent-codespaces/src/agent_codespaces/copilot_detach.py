@@ -542,7 +542,13 @@ def cmd_detach(
                 file=sys.stderr,
             )
 
-    claim_rc = claim_or_exit_code(args)
+    # A rejoin of a running worker launches nothing, so it isn't the launch
+    # policy's to refuse; should the "rejoin" create a session after all, the
+    # policy is asked then (below) and a refused one is stopped.
+    import venue_copilot as _vc
+
+    rejoining = (_vc.live_session_for(plan["scope_id"]) or {}).get("status") == "live"
+    claim_rc = claim_or_exit_code(args, launch_policy=not rejoining)
     if claim_rc is not None:
         return claim_rc
     daemon_port = resolve_daemon_port()
@@ -702,6 +708,13 @@ def cmd_detach(
                 plan,
             )
         created = bool(embodied.get("created"))
+        if created and rejoining:  # the worker stopped meanwhile: this was a launch after all
+            from .launch_policy import refused_exit_code
+
+            refused = refused_exit_code(args.name)
+            if refused is not None:  # ok stays False: the session just started is stopped
+                print(json.dumps({"ok": False, "error": "launch refused by the host launch policy", **plan}, indent=2))
+                return refused
         actual_mux = embodied.get("session")
         if actual_mux and actual_mux != plan["mux_session"]:
             # The venue named its session differently than predicted; the

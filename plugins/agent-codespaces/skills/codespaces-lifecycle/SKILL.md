@@ -162,7 +162,10 @@ A host that keeps its own reasons to hold a worker back (an operator pause, a
 stop marker, a budget) registers one command on this machine; every CodeSpace
 worker launch asks it first -- attached and detached `copilot`, and
 agent-bridge's Session Host spawn on start or resume (including the implicit
-resume a later `send` triggers):
+resume a later `send` triggers). A detached `copilot` that rejoins a worker
+the host bridge shows running launches nothing and isn't asked; should it start
+a session after all (the worker stopped meanwhile), the policy is asked then and
+a refused session is stopped:
 
 ```bash
 <agent-codespaces catalog argv[0]> launch-policy set [--timeout 20] -- <argv...>
@@ -183,7 +186,7 @@ absolute path, and the policy always runs from the registration's directory (so
 pass file arguments as absolute paths). The registration is machine-wide:
 `~/.agent-codespaces/launch-policy.json` (under `AGENT_HOME` when set), never a
 per-installation runtime directory, so one registration gates every installed
-agent-codespaces runtime and the bridge alike. On Windows, where file modes don't
+runtime of this plugin and the bridge alike. On Windows, where file modes don't
 express the ACL, a registration is trusted only inside the user's profile (the
 default location is inside it); `set`/`show` name only the
 command and its argument count -- but a policy's arguments are visible in the

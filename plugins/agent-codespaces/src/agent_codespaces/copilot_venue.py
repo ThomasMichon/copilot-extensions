@@ -327,20 +327,22 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
         )
 
 
-def claim_or_exit_code(args: argparse.Namespace) -> int | None:
+def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) -> int | None:
     """Enforce the exclusive, worktree-keyed CodeSpace claim for a connect.
 
     Returns ``None`` to proceed, or the exit code to return. Shared by the
     attached and detached ``copilot`` paths (the same ``claim_for_connect``
     choke point ``agent-codespaces ssh`` uses) so a venue is never touched
-    while a different, still-live worktree holds it.
+    while a different, still-live worktree holds it. ``launch_policy=False``
+    is for a rejoin of a running worker, which launches nothing; its caller
+    asks the policy itself should the rejoin create a session after all.
     """
     from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
     from .launch_policy import refused_exit_code
     from .worktrees import ContextRefused
 
     # The host's launch policy first, before any claim is taken or touched.
-    refused = refused_exit_code(args.name)
+    refused = refused_exit_code(args.name) if launch_policy else None
     if refused is not None:
         return refused
     try:
