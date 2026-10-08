@@ -19,7 +19,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import httpx
+
 from . import attention_contract as ac
+from .client import DispatchError
 
 BUILTIN_SOURCES = ("dispatch",)
 DEFAULT_TIMEOUT = 20.0
@@ -85,9 +88,14 @@ DISPATCH_READ_LIMIT = 5000
 QUEUED_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_QUEUED_AFTER_SECS"
 HELD_LIVE_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS"
 DEFAULT_STALLED_AFTER = 1800.0
-#: Seconds the per-lane backlog reads may take, well inside the source's own
-#: deadline (lanes not read by then are ``uncertain``, never a failed source).
-BACKLOG_BUDGET = 8.0
+#: Seconds, from the start of a dispatch read (its task list included), within
+#: which every per-lane backlog read must *finish*, inside the source's own
+#: deadline. A lane that can't, or whose read fails, counts toward
+#: ``uncertain``: backlog probing never fails the task items already read.
+BACKLOG_BUDGET = 19.0
+#: The dispatch client's per-request timeout: a lane read starts only when it
+#: can still finish inside the budget.
+_LANE_REQUEST_TIMEOUT = 10.0
 
 
 def _threshold(env: str) -> float:
@@ -123,18 +131,20 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
                   cli: tuple[str, ...] = ("agent-dispatch",),
                   backlog_budget: float = BACKLOG_BUDGET) -> dict[str, Any]:
+    started = time.monotonic()
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
         lanes = sorted({t["repo"] for t in tasks
                         if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
-        # One /health read per lane, within a budget: lanes it doesn't reach count
-        # toward ``uncertain``, so many lanes never fail the task items already read.
-        deadline, backlogs, unread = time.monotonic() + backlog_budget, {}, 0
+        backlogs, unread = {}, 0
         for repo in lanes:
-            if time.monotonic() >= deadline:
+            if time.monotonic() + _LANE_REQUEST_TIMEOUT > started + backlog_budget:
                 unread += 1
                 continue
-            backlogs[repo] = (client.health(repo=repo) or {}).get("backlog") or {}
+            try:
+                backlogs[repo] = (client.health(repo=repo) or {}).get("backlog") or {}
+            except (DispatchError, httpx.HTTPError, OSError, ValueError):
+                unread += 1
     items = [i for i in (_task_item(t, read_at, cli) for t in tasks) if i]
     items += [i for i in (_queue_item(r, b, read_at, cli) for r, b in backlogs.items()) if i]
     uncertain = unread + (1 if len(tasks) >= limit else 0)

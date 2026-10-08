@@ -552,7 +552,7 @@ def test_a_stored_time_that_is_not_canonical_is_dropped(tmp_path):
     path = tmp_path / "observed.json"
     path.write_text(json.dumps({"version": 1, "entries": {"a": "bad", "b": T0, "c": "2026-10-07T10:00:00Z"}}),
                     encoding="utf-8")
-    assert attention_store._read(path) == {"b": T0}
+    assert attention_store._read(path) == ({"b": T0}, {})
 
 
 def test_lanes_past_the_backlog_budget_are_uncertain_not_a_failed_source():
@@ -561,3 +561,31 @@ def test_lanes_past_the_backlog_budget_are_uncertain_not_a_failed_source():
     result = srcs.read_dispatch(lambda: _Client(tasks), T1, backlog_budget=0)
     assert result["status"] == "uncertain" and result["uncertain"] == 3
     assert {i["entity_ref"] for i in result["items"]} == {"q0", "q1", "q2"}  # the task items survive
+
+
+@pytest.mark.parametrize("also", [{}, None, "", ["x"]])
+def test_any_present_also_other_than_an_empty_list_is_malformed(also):
+    with pytest.raises(ac.ContractError):
+        ac.stamp_command_item({"schema": 1, "entity": "task", "entity_ref": "t1", "lifecycle_state": "x",
+                               "display_state": "review", "reason": "r", "confidence": "reported",
+                               "actions": [], "also": also}, name="ext")
+
+
+def test_an_older_snapshot_never_re_adds_a_time_a_newer_ok_read_cleared(tmp_path):
+    store = FirstObserved(tmp_path / "o.json")
+    _collect({"s": _ok({**_item(), "created_at": None})}, store, read_at=T0)
+    _collect({"s": _ok()}, store, read_at=T2)  # newer proof: the condition ended
+    _collect({"s": _ok({**_item(), "created_at": None})}, store, read_at=T1)  # a slow, older read lands last
+    env = _collect({"s": _ok({**_item(), "created_at": None})}, store, read_at=T2)
+    assert env["items"][0]["created_at"] == T2  # first seen again after the clear, not T0/T1
+
+
+def test_a_failed_lane_read_is_uncertain_and_keeps_the_task_items():
+    class Flaky(_Client):
+        def health(self, repo=None):
+            raise srcs.DispatchError(500, "backlog query failed")
+
+    tasks = [{"id": "q0", "title": "x", "status": "started", "awaiting_steer": True, "repo": "o/r"}]
+    result = srcs.read_dispatch(lambda: Flaky(tasks), T1)
+    assert result["status"] == "uncertain" and result["uncertain"] == 1
+    assert [i["entity_ref"] for i in result["items"]] == ["q0"]

@@ -30,7 +30,7 @@ didn't issue, or a registration that isn't valid.
   `AGENT_DISPATCH_ATTENTION_QUEUED_AFTER_SECS`, or a **live** owner made no
   progress for longer than `AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS`
   (both strictly greater, default 1800; `0` turns that half off). Held tasks
-  whose owner is `unknown` or `gone` never count. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`. Each active lane's backlog is one coordinator read within an 8-second budget; lanes it doesn't reach count toward `uncertain` too, so many lanes never fail the source's task items.
+  whose owner is `unknown` or `gone` never count. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`. Each active lane's backlog is one coordinator read, started only while it can still finish inside the source's deadline; a lane it doesn't reach, or whose read fails, counts toward `uncertain` too, so backlog probing never fails the source's task items.
 - **Command sources**: a command registered on this machine
   (`attention source add`, stored beside the coordinator's install as
   `attention-sources.json`) under a name that is its identity: unique,

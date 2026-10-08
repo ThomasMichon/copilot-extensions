@@ -294,7 +294,7 @@ def stamp_command_item(item: Any, *, name: str) -> dict[str, Any]:
     derived = make_id(name, item["entity"], ref)
     if "id" in item and item["id"] != derived:
         raise ContractError(f"item id {item['id']!r} is not {derived!r}")
-    if item.get("also"):
+    if "also" in item and item["also"] != []:  # {}, null and "" are malformed too, not "empty"
         raise ContractError("also[] is aggregator-owned; a source must not fill it")
     item.update(source=name, id=derived, also=[])
     for key in ("created_at", "updated_at"):  # a command may send any ISO-8601 spelling
