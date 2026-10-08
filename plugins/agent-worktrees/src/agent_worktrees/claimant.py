@@ -30,6 +30,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import machine_identity
 from . import tracking
@@ -157,9 +159,10 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         this_machine = cfg.load_config().machine
     except Exception:
         this_machine = None
-    # Cross-machine (or an unknown local machine) -> not resolvable here.
+    # Cross-machine -> unresolvable, unless a record-scoped legacy WSL ref.
     if parsed.machine and this_machine and parsed.machine != this_machine:
-        return None
+        if not tracking.legacy_wsl_owner_ref_is_local(parsed):
+            return None
     project = parsed.project
     if not project:
         # A bare (legacy same-repo) ref -> assume the active project.
@@ -242,6 +245,10 @@ def resolve_claimant_alive(
             same_machine = True
         else:
             same_machine = machine_identity.is_local_machine(parsed.machine, config)
+            if not same_machine and (
+                tracking.resolve_legacy_wsl_owner_ref(parsed, config) is not None
+            ):
+                same_machine = True  # trusted legacy WSL record; never probed remotely
     if same_machine:
         return local_claimant_alive(owner_ref)
     if not allow_remote or os.environ.get(_NO_REMOTE_ENV):
@@ -353,6 +360,7 @@ def _remote_claimant_alive(
              "-o", f"ConnectTimeout={max(1, int(timeout))}",
              alias, remote_cmd],
             capture_output=True, text=True, timeout=timeout + 4,
+            **no_window_kwargs(),
         )
     except (subprocess.SubprocessError, OSError):
         return None

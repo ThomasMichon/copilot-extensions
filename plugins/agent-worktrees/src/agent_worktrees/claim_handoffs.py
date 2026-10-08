@@ -204,7 +204,7 @@ def _record_path(ref: tracking.ClaimRef) -> Path:
 def _load_actor_record(
     ref: tracking.ClaimRef, *, role: str, machine: str
 ) -> tuple[Path, tracking.WorktreeRecord]:
-    if ref.machine != machine:
+    if ref.machine != machine and not tracking.legacy_wsl_owner_ref_is_local(ref):
         raise ClaimHandoffError(
             f"{role} {ref.canonical()} is cross-machine; Phase 1 supports "
             "same-machine handoff only"

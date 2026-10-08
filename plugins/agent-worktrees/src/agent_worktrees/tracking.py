@@ -24,6 +24,10 @@ import yaml
 from . import config as cfg
 from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
+from .legacy_wsl_record_locality import (  # noqa: F401
+    legacy_wsl_owner_ref_is_local,
+    resolve_legacy_wsl_owner_ref,
+)
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
 #: status bar (120-col default) and the Worktree Picker's table rows; longer prose
