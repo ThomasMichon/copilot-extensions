@@ -232,6 +232,19 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                 }))
                 return 0
             try:
+                # Under the lock: never reclaim a box a live local process
+                # (detached ControlMaster, forward, gh ssh) still rides, nor
+                # one whose users cannot be ruled out -- fail closed.
+                from .live_users import refuse_if_in_use
+
+                try:
+                    refuse_if_in_use(args.name, "reclaim")
+                except TargetBusyError as busy:
+                    print(json.dumps({
+                        "reclaimed": False,
+                        "detail": f"CodeSpace in use, deferring reclaim: {busy}",
+                    }))
+                    return 0
                 try:
                     recovery = sync_codespace_sessions(
                         args.name, account=resolved_account, token=resolved_token,
