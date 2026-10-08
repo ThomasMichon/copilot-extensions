@@ -19,10 +19,17 @@ REFUSAL = (f"unable to confirm: codespace {NAME} has unsaved changes "
 
 # --- parsing ----------------------------------------------------------------
 
-def test_refusal_detection():
+def test_refusal_detection_is_exact():
     assert unsaved_guard.is_unsaved_changes_refusal(REFUSAL)
+    assert unsaved_guard.is_unsaved_changes_refusal(f"\n{REFUSAL}\n", NAME)
+    assert not unsaved_guard.is_unsaved_changes_refusal(REFUSAL, "another-space")
     assert not unsaved_guard.is_unsaved_changes_refusal("HTTP 404: Not Found")
     assert not unsaved_guard.is_unsaved_changes_refusal("")
+    # an incidental mention inside some other failure never counts
+    assert not unsaved_guard.is_unsaved_changes_refusal(
+        f"{REFUSAL}\nerror deleting codespace: HTTP 500")
+    assert not unsaved_guard.is_unsaved_changes_refusal(
+        f"HTTP 502: codespace {NAME} has unsaved changes")
 
 
 def test_parse_audit_requires_completion_marker():
@@ -72,7 +79,10 @@ def _git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
-def _repo(path, remote):
+def _repo(path, remotes):
+    remote = remotes / f"{path.name}.git"
+    remote.mkdir(parents=True)
+    _git("init", "-q", "--bare", str(remote), cwd=remotes)
     _git("init", "-q", "-b", "main", str(path), cwd=path.parent)
     _git("config", "user.email", "t@example.com", cwd=path)
     _git("config", "user.name", "t", cwd=path)
@@ -92,8 +102,7 @@ def _run_audit(root, extra=()):
 @pytest.mark.skipif(not (shutil.which("git") and shutil.which("bash")),
                     reason="needs git + bash")
 def test_audit_script_covers_nested_repos_and_linked_worktrees(tmp_path):
-    remote = tmp_path / "remote.git"
-    _git("init", "-q", "--bare", str(remote), cwd=tmp_path)
+    remote = tmp_path / "remotes"
     root = tmp_path / "workspaces"
     (root / "group").mkdir(parents=True)
     main_repo, nested = root / "main", root / "group" / "nested"
@@ -121,6 +130,31 @@ def test_audit_script_covers_nested_repos_and_linked_worktrees(tmp_path):
     assert not any(c.path == str(main_repo) for c in audit.dirty_checkouts)
 
 
+@pytest.mark.skipif(not (shutil.which("git") and shutil.which("bash")),
+                    reason="needs git + bash")
+def test_audit_script_fails_closed_on_git_errors_and_odd_paths(tmp_path):
+    remote = tmp_path / "remotes"
+    root = tmp_path / "work space"
+    root.mkdir()
+    odd = root / "back\\slash"
+    odd.mkdir()
+    _repo(odd, remote)
+    broken = root / "broken"
+    broken.mkdir()
+    _repo(broken, remote)
+    # corrupt the object store so rev-list / status fail -> must not read clean
+    for obj in (broken / ".git" / "objects").rglob("*"):
+        if obj.is_file():
+            obj.chmod(0o600)
+            obj.write_bytes(b"garbage")
+    audit = _run_audit(root)
+    assert audit.known
+    by_name = {c.path.rsplit("/", 1)[-1]: c for c in audit.checkouts}
+    assert by_name["back\\slash"].clean  # backslash path emitted verbatim
+    assert not by_name["broken"].clean
+    assert not audit.all_clean
+
+
 # --- delete_codespace integration -------------------------------------------
 
 @pytest.fixture
@@ -144,7 +178,7 @@ def _r(rc, err=""):
 
 def test_stale_flag_with_all_checkouts_clean_forces_delete(gh, monkeypatch):
     audited = []
-    monkeypatch.setattr(unsaved_guard, "audit_checkouts", lambda name, account=None: (
+    monkeypatch.setattr(unsaved_guard, "audit_checkouts", lambda name, account=None, token=None: (
         audited.append(name) or CheckoutAudit(True, [CheckoutState("/w/a")])))
     gh.results[:] = [_r(1, REFUSAL), _r(0)]
 
@@ -156,7 +190,7 @@ def test_stale_flag_with_all_checkouts_clean_forces_delete(gh, monkeypatch):
 
 
 def test_dirty_checkout_refuses_and_names_it(gh, monkeypatch):
-    monkeypatch.setattr(unsaved_guard, "audit_checkouts", lambda name, account=None: (
+    monkeypatch.setattr(unsaved_guard, "audit_checkouts", lambda name, account=None, token=None: (
         CheckoutAudit(True, [CheckoutState("/w/a"), CheckoutState("/w/b", dirty=True)])))
     gh.results[:] = [_r(1, REFUSAL)]
 
@@ -168,7 +202,7 @@ def test_dirty_checkout_refuses_and_names_it(gh, monkeypatch):
 
 def test_unauditable_box_refuses(gh, monkeypatch):
     monkeypatch.setattr(unsaved_guard, "audit_checkouts",
-                        lambda name, account=None: CheckoutAudit(False, error="ssh down"))
+                        lambda name, account=None, token=None: CheckoutAudit(False, error="ssh down"))
     gh.results[:] = [_r(1, REFUSAL)]
     with pytest.raises(UnsavedWorkError, match="could not audit"):
         lifecycle.delete_codespace(NAME)
@@ -190,8 +224,51 @@ def test_other_failures_and_explicit_force_skip_the_audit(gh, monkeypatch):
     assert gh.calls[-1][-1] == "--force"
 
 
+def test_exact_token_is_reused_for_the_audit(gh, monkeypatch):
+    seen = {}
+
+    def audit(name, account=None, token=None):
+        seen.update(account=account, token=token)
+        return CheckoutAudit(True, [CheckoutState("/w/a")])
+
+    monkeypatch.setattr(unsaved_guard, "audit_checkouts", audit)
+    monkeypatch.setattr(lifecycle, "account_for_codespace",
+                        lambda name: (_ for _ in ()).throw(AssertionError("no re-derive")))
+    gh.results[:] = [_r(1, REFUSAL), _r(0)]
+    lifecycle.delete_codespace(NAME, token="tok-123")
+    assert seen == {"account": None, "token": "tok-123"}
+
+
+def test_probe_builds_source_with_exact_token(monkeypatch):
+    import asyncio
+
+    import agent_codespaces.codespace_config as cc
+
+    built = {}
+
+    class FakeSource:
+        def __init__(self, name, *, account=None, token=None):
+            built.update(name=name, account=account, token=token)
+
+    class FakeManager:
+        async def ensure_connected(self, *a):
+            return None
+
+        async def exec_command(self, name, cmd, timeout=None):
+            return SimpleNamespace(exit_code=0, stdout="CHECKOUT_AUDIT=1\n", stderr="")
+
+        async def disconnect(self, name):
+            return None
+
+    import ssh_manager
+    monkeypatch.setattr(cc, "CodespaceSource", FakeSource)
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", FakeManager)
+    asyncio.run(unsaved_guard._probe(NAME, None, 5, "tok-123"))
+    assert built == {"name": NAME, "account": None, "token": "tok-123"}
+
+
 def test_audit_checkouts_degrades_to_unknown(monkeypatch):
-    async def fail(name, account, timeout):
+    async def fail(name, account, timeout, token=None):
         raise OSError("no route")
     monkeypatch.setattr(unsaved_guard, "_probe", fail)
     audit = unsaved_guard.audit_checkouts(NAME, timeout=1)

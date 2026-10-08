@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shlex
 import threading
 from dataclasses import dataclass, field
 
@@ -25,14 +26,30 @@ from remote_login_shell import wrap_login_shell
 
 from . import config
 
-_UNSAVED_RE = re.compile(r"has unsaved changes", re.IGNORECASE)
+# gh's exact non-interactive refusal (pkg/cmd/codespace/delete.go confirmDeletion):
+#   unable to confirm: codespace <name> has unsaved changes (use --force to override)
+# Matched as the whole (last non-empty) stderr line, so an incidental mention
+# inside some other failure never triggers the audit-then-force path.
+_UNSAVED_RE = re.compile(
+    r"^(?:(?:error|x)\s*:?\s*)?unable to confirm: codespace (\S+) has unsaved changes "
+    r"\(use --force to override\)\s*$",
+    re.IGNORECASE,
+)
 _MARK_DONE = "CHECKOUT_AUDIT=1"
 _SAMPLE_LINES = 5
 
 
-def is_unsaved_changes_refusal(stderr: str | None) -> bool:
-    """True when gh refused the delete only because of the unsaved-changes flag."""
-    return bool(stderr and _UNSAVED_RE.search(stderr))
+def is_unsaved_changes_refusal(stderr: str | None, name: str | None = None) -> bool:
+    """True when gh refused the delete only because of the unsaved-changes flag.
+
+    The refusal must be gh's exact message and the only (non-empty) stderr
+    line; with ``name`` it must also name that codespace.
+    """
+    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip()]
+    if len(lines) != 1:
+        return False
+    m = _UNSAVED_RE.match(lines[0])
+    return bool(m) and (name is None or m.group(1) == name)
 
 
 @dataclass
@@ -102,6 +119,59 @@ class UnsavedWorkError(RuntimeError):
             "  Push/commit or discard that work, or re-run with --force to delete anyway.")
 
 
+# Bash audit script (see audit_command). printf, never echo -e, so backslashes
+# in paths/porcelain lines are emitted verbatim; tab/newline paths are refused.
+_AUDIT_SCRIPT = r"""
+shopt -s nullglob dotglob 2>/dev/null
+declare -A seen common
+list=()
+err() { printf 'CHECKOUT_ERR\t%s\n' "$1"; }
+add() {
+  case "$1" in *$'\n'*|*$'\t'*) err unsafe-path; return 0;; esac
+  [ -d "$1" ] || return 0
+  [ -n "${seen[$1]}" ] && return 0
+  seen[$1]=1; list+=("$1")
+}
+for g in @ROOT@/*/.git @ROOT@/*/*/.git @ROOT@/*/*/*/.git @EXTRAS@; do
+  [ -e "$g" ] || continue
+  top=$(git -C "$(dirname "$g")" rev-parse --show-toplevel 2>/dev/null) \
+    || { err "$(dirname "$g")"; continue; }
+  add "$top"
+  while IFS= read -r w; do add "$w"; done < <(git -C "$top" worktree list \
+    --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+done
+for p in "${list[@]}"; do
+  st=$(git -C "$p" status --porcelain 2>/dev/null) || { err "$p"; continue; }
+  d=0; [ -n "$st" ] && d=1
+  a=0
+  if git -C "$p" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+    a=$(git -C "$p" rev-list --count HEAD --not --remotes 2>/dev/null) \
+      || { err "$p"; continue; }
+  fi
+  cd_=$(cd "$p" && cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
+  cd_=${cd_:-$p}; nb=0; berr=0
+  if [ -z "${common[$cd_]}" ]; then
+    common[$cd_]=1
+    refs=$(git -C "$p" for-each-ref --format='%(refname)' refs/heads 2>/dev/null) \
+      || berr=1
+    for b in $refs; do
+      c=$(git -C "$p" rev-list --count "$b" --not --remotes 2>/dev/null) \
+        || { berr=1; break; }
+      [ "${c:-0}" -gt 0 ] && nb=$((nb+1))
+    done
+  fi
+  [ "$berr" = 1 ] && { err "$p"; continue; }
+  printf 'CHECKOUT\t%s\t%s\t%s\t%s\n' "$d" "${a:-0}" "$nb" "$p"
+  if [ "$d" = 1 ]; then
+    printf '%s\n' "$st" | head -n @SAMPLES@ | while IFS= read -r l; do
+      printf 'SAMPLE\t%s\t%s\n' "$p" "$l"
+    done
+  fi
+done
+echo @DONE@
+"""
+
+
 def audit_command(
     *,
     workspace_root: str = "/workspaces",
@@ -113,37 +183,12 @@ def audit_command(
     ``CHECKOUT_ERR path``, or ``SAMPLE path porcelain-line``; ends with
     ``CHECKOUT_AUDIT=1`` once the scan completed. Read-only.
     """
-    extras = " ".join(f'"{d}/.git"' for d in extra_dirs)
-    root = workspace_root
+    extras = " ".join(shlex.quote(f"{d}/.git") for d in extra_dirs)
     inner = (
-        "shopt -s nullglob dotglob 2>/dev/null; declare -A seen; declare -A common; "
-        "list=(); "
-        "add() { [ -d \"$1\" ] || return 0; [ -n \"${seen[$1]}\" ] && return 0; "
-        "seen[$1]=1; list+=(\"$1\"); }; "
-        f"for g in {root}/*/.git {root}/*/*/.git {root}/*/*/*/.git {extras}; do "
-        "[ -e \"$g\" ] || continue; "
-        "top=$(git -C \"$(dirname \"$g\")\" rev-parse --show-toplevel 2>/dev/null) "
-        "|| { echo -e \"CHECKOUT_ERR\\t$(dirname \"$g\")\"; continue; }; "
-        "add \"$top\"; "
-        "while IFS= read -r w; do add \"$w\"; done < <(git -C \"$top\" worktree list "
-        "--porcelain 2>/dev/null | sed -n 's/^worktree //p'); "
-        "done; "
-        "for p in \"${list[@]}\"; do "
-        "st=$(git -C \"$p\" status --porcelain 2>/dev/null) "
-        "|| { echo -e \"CHECKOUT_ERR\\t$p\"; continue; }; "
-        "d=0; [ -n \"$st\" ] && d=1; "
-        "a=$(git -C \"$p\" rev-list --count HEAD --not --remotes 2>/dev/null || echo 0); "
-        "cd_=$(cd \"$p\" && cd \"$(git rev-parse --git-common-dir)\" 2>/dev/null && pwd -P); "
-        "nb=0; if [ -z \"${common[$cd_]}\" ]; then common[$cd_]=1; "
-        "for b in $(git -C \"$p\" for-each-ref --format='%(refname:short)' refs/heads "
-        "2>/dev/null); do "
-        "c=$(git -C \"$p\" rev-list --count \"$b\" --not --remotes 2>/dev/null || echo 0); "
-        "[ \"${c:-0}\" -gt 0 ] && nb=$((nb+1)); done; fi; "
-        "echo -e \"CHECKOUT\\t$d\\t${a:-0}\\t$nb\\t$p\"; "
-        f"[ \"$d\" = 1 ] && printf '%s\\n' \"$st\" | head -n {_SAMPLE_LINES} "
-        "| while IFS= read -r l; do echo -e \"SAMPLE\\t$p\\t$l\"; done; "
-        "done; "
-        f"echo {_MARK_DONE}"
+        _AUDIT_SCRIPT.replace("@ROOT@", shlex.quote(workspace_root))
+        .replace("@EXTRAS@", extras)
+        .replace("@SAMPLES@", str(_SAMPLE_LINES))
+        .replace("@DONE@", _MARK_DONE)
     )
     return wrap_login_shell(inner)
 
@@ -175,7 +220,9 @@ def parse_audit(output: str | None) -> CheckoutAudit:
     return CheckoutAudit(known=True, checkouts=list(checkouts.values()))
 
 
-async def _probe(name: str, account: str | None, timeout: float) -> CheckoutAudit:
+async def _probe(
+    name: str, account: str | None, timeout: float, token: str | None = None,
+) -> CheckoutAudit:
     from ssh_manager import ConnectionManager
 
     from ._ssh_retry import exec_with_retry
@@ -183,7 +230,8 @@ async def _probe(name: str, account: str | None, timeout: float) -> CheckoutAudi
 
     manager = ConnectionManager()
     try:
-        await manager.ensure_connected(name, CodespaceSource(name, account=account), [])
+        source = CodespaceSource(name, account=account, token=token)
+        await manager.ensure_connected(name, source, [])
         result = await exec_with_retry(manager, name, audit_command(), timeout=timeout)
     finally:
         await manager.disconnect(name)
@@ -192,7 +240,9 @@ async def _probe(name: str, account: str | None, timeout: float) -> CheckoutAudi
     return parse_audit(result.stdout)
 
 
-def audit_checkouts(name: str, account: str | None = None, timeout: float = 90.0) -> CheckoutAudit:
+def audit_checkouts(
+    name: str, account: str | None = None, timeout: float = 90.0, *, token: str | None = None,
+) -> CheckoutAudit:
     """Audit every checkout on ``name`` over SSH. Never raises (unknown on error).
 
     Runs on a private thread/event loop so it is safe to call from sync code
@@ -202,7 +252,7 @@ def audit_checkouts(name: str, account: str | None = None, timeout: float = 90.0
 
     def _run() -> None:
         try:
-            box["audit"] = asyncio.run(_probe(name, account, timeout))
+            box["audit"] = asyncio.run(_probe(name, account, timeout, token))
         except Exception as exc:  # noqa: BLE001 -- degrade to "unknown"
             box["audit"] = CheckoutAudit(known=False, error=str(exc) or type(exc).__name__)
 
@@ -213,22 +263,24 @@ def audit_checkouts(name: str, account: str | None = None, timeout: float = 90.0
 
 
 def force_args_if_checkouts_clean(
-    name: str, args: list[str], stderr: str | None, *, account: str | None = None,
+    name: str, args: list[str], stderr: str | None, *,
+    account: str | None = None, token: str | None = None,
 ) -> list[str] | None:
     """Decide how to proceed after a failed non-forced ``gh codespace delete``.
 
     Returns ``None`` when the refusal was NOT the unsaved-changes flag (the
     caller reports the original error). Returns ``args + ["--force"]`` when every
     checkout on the box is verified clean. Raises :class:`UnsavedWorkError`
-    listing the dirty checkouts (or the audit failure) otherwise.
+    listing the dirty checkouts (or the audit failure) otherwise. ``token``
+    (the caller's exact pre-minted token) is reused for the SSH audit.
     """
-    if not is_unsaved_changes_refusal(stderr):
+    if not is_unsaved_changes_refusal(stderr, name):
         return None
-    if account is None:
+    if account is None and token is None:
         from .lifecycle import account_for_codespace
 
         account = account_for_codespace(name)
-    audit = audit_checkouts(name, account)
+    audit = audit_checkouts(name, account, token=token)
     if not audit.all_clean:
         raise UnsavedWorkError(name, audit)
     return [*args, "--force"]

@@ -825,7 +825,8 @@ def delete_codespace(
         # checkout on the box and force only that refusal when all are clean.
         from .unsaved_guard import force_args_if_checkouts_clean
 
-        forced = force_args_if_checkouts_clean(name, args, result.stderr, account=account)
+        forced = force_args_if_checkouts_clean(
+            name, args, result.stderr, account=account, token=token)
         if forced is not None:
             log.info("All checkouts on %s verified clean; overriding stale "
                      "unsaved-changes flag", name)
