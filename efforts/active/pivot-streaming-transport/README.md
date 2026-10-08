@@ -33,7 +33,9 @@
   See the corrected 2026-10-07 addendum on that issue's cross-link comment —
   not its original paragraph — for the precise Worktrees-pivot mechanism:
   two independently-computed compute paths, not two confirmed tracking-record
-  writers.)
+  writers. **Formal follow-on (2026-10-06):** the Worktrees-pivot half of
+  #5555 is now Phase 6 of `agent-worktrees-authoritative-daemon` — see this
+  effort's own Phase 3 note for the explicit hand-off instruction.)
 
 ## Guiding Intent
 
@@ -358,6 +360,19 @@ insufficient.)_
       measured insufficient") is **still not met**: this fix makes cheap
       polling actually cheap again regardless of push vs. poll, so the
       push-specific case for 3c remains unproven. Stays deferred.
+
+**Formal follow-on (added 2026-10-06, operator-directed):** once 3a/3b are
+landed and measured (3c may remain deferred per its own gate), the agent
+closing out this phase should **continue directly into
+`agent-worktrees-authoritative-daemon`'s Phase 6** (its own
+`efforts/active/agent-worktrees-authoritative-daemon/README.md`) rather than
+stopping here — that phase is the Worktrees-pivot-specific instance of this
+same "one authoritative compute path per pivot" problem
+([`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555)),
+and this effort's own Context already names agent-worktrees' resident daemon
+(`#918`) as prior art it built on rather than duplicated. Don't treat landing
+3a/3b as this effort's own stopping point if Phase 6 is still open — hand off
+by picking it up, not by ending the turn.
 
 ### Phase 4 — Segment-level React-esque diffing in the Picker's own render path
 - [x] Profile `_refresh_nf_segments()` (`engine_rendering.py`) against a
