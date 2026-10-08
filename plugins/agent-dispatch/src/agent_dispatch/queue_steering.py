@@ -175,15 +175,46 @@ class QueueSteeringMixin:
         wake_requested: bool = False,
         wake_message: str | None = None,
         expected_status: str | None = None,
+        idempotency_key: str | None = None,
         now: float | None = None,
     ) -> Task:
-        """Submit an operator's answer (a **steer**) to a task's card."""
+        """Submit an operator's answer (a **steer**) to a task's card.
+
+        ``idempotency_key`` makes a retry of this exact submission safe: the
+        coordinator's own write here is a single fast local transaction, but
+        the *full HTTP round trip* can still exceed a client's request
+        timeout under load (confirmed live: a client-reported failure whose
+        task nonetheless showed the answer already recorded) -- without a
+        key, blindly retrying on that ambiguous timeout would append a
+        second, duplicate answer. With one, a retry carrying the same key
+        is recognized here and returns the already-committed result
+        unchanged, re-running none of the status transition or wake-enqueue
+        side effects a second time.
+        """
         ts = self._now(now)
         payload = json.dumps(fields, separators=(",", ":"))
         wake_enqueued = False
         notify_owned_transition = False
+        # Normalize an empty-string key to "no key" -- the partial unique
+        # index is on ``idempotency_key IS NOT NULL``, so a blank string is
+        # still indexed; without this, the truthiness check below would
+        # silently skip the dedup lookup for a blank key while the INSERT
+        # still collided with it on retry, raising a raw SQLite uniqueness
+        # error instead of returning the committed result.
+        idempotency_key = idempotency_key or None
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if idempotency_key is not None:
+                duplicate = conn.execute(
+                    "SELECT 1 FROM task_steer WHERE task_id = ? AND idempotency_key = ?",
+                    (task_id, idempotency_key),
+                ).fetchone()
+                if duplicate is not None:
+                    task = self._fetch(conn, task_id)
+                    conn.execute("COMMIT")
+                    if task is None:
+                        raise TaskError(f"no such task {task_id!r}")
+                    return task
             task = self._fetch(conn, task_id)
             if task is None:
                 conn.execute("COMMIT")
@@ -204,8 +235,9 @@ class QueueSteeringMixin:
                     )
                 )
             conn.execute(
-                "INSERT INTO task_steer (task_id, ts, fields, sender) VALUES (?, ?, ?, ?)",
-                (task_id, ts, payload, sender),
+                "INSERT INTO task_steer (task_id, ts, fields, sender, idempotency_key)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (task_id, ts, payload, sender, idempotency_key),
             )
             resumed = task.status == Status.SUSPENDED
             cold_headless = bool(resumed and self._has_headless_reservation(conn, task_id))
