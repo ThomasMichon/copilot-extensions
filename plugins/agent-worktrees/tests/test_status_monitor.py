@@ -3271,6 +3271,7 @@ def test_cmd_reap_stale_ensures_a_monitor_when_zero_candidates_survive(monkeypat
     from agent_worktrees import daemon_health
     monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
     monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
     released = _patch_cutover_lock(monkeypatch, acquirable=True)
 
     ensured = {"calls": 0}
@@ -3299,6 +3300,7 @@ def test_cmd_reap_stale_does_not_ensure_when_a_candidate_already_survives(monkey
         lambda *, apply: {"findings": [{"kind": "duplicate_resident"}]},
     )
     monkeypatch.setattr(daemon_health, "_candidates", lambda: [object()])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
     _patch_cutover_lock(monkeypatch, acquirable=True)
 
     ensured = {"calls": 0}
@@ -3324,6 +3326,7 @@ def test_cmd_reap_stale_does_not_ensure_while_a_cutover_is_in_progress(monkeypat
     from agent_worktrees import daemon_health
     monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
     monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
     candidates_called = {"n": 0}
     monkeypatch.setattr(
         daemon_health, "_candidates",
@@ -3351,6 +3354,7 @@ def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):
     from agent_worktrees import daemon_health
     monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
     monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
     _patch_cutover_lock(monkeypatch, acquirable=True)
 
     def _boom():
@@ -3366,6 +3370,34 @@ def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):
     assert "non-fatal" in capsys.readouterr().out
 
 
+def test_ensure_monitor_helper_skips_entirely_when_status_monitor_disabled(monkeypatch):
+    """``_ensure_status_monitor()`` assumes its callers already checked
+    ``_status_monitor_enabled()`` -- it does not re-check itself, so an
+    operator who opted the resident monitor out
+    (``AGENT_WORKTREES_STATUS_MONITOR=0``) must never have one spawned on
+    their behalf by this backstop. Skip entirely, before even attempting
+    the cutover lock."""
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+
+    lock_attempted = {"n": 0}
+
+    def _boom(lock_root, *, timeout_s=0.0, poll_s=0.2):
+        lock_attempted["n"] += 1
+        raise AssertionError("must not attempt the cutover lock when disabled")
+
+    from agent_worktrees import status_monitor_cutover as smc
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", _boom)
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: (_ for _ in ()).throw(AssertionError("must not spawn while disabled")),
+    )
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "skipped-disabled"
+    assert lock_attempted["n"] == 0
+
+
 def test_ensure_monitor_helper_reports_an_ordinary_spawn_failure(monkeypatch):
     """``_ensure_status_monitor()`` reports an ORDINARY spawn failure (e.g.
     ``Popen`` failing) by returning ``False``, not by raising -- the helper
@@ -3373,6 +3405,7 @@ def test_ensure_monitor_helper_reports_an_ordinary_spawn_failure(monkeypatch):
     would leave the host with zero monitors while logging "ensured"."""
     from agent_worktrees import daemon_health
     monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
     _patch_cutover_lock(monkeypatch, acquirable=True)
     monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: False)
 
@@ -3393,6 +3426,7 @@ def test_ensure_monitor_helper_never_calls_doctor_report_while_holding_the_lock(
     helper exists to provide."""
     from agent_worktrees import daemon_health
     monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
 
     def _boom(*, apply):
         raise AssertionError(
@@ -3406,6 +3440,37 @@ def test_ensure_monitor_helper_never_calls_doctor_report_while_holding_the_lock(
     outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
 
     assert outcome == "ensured"
+
+
+def test_delay_seconds_rejects_huge_finite_values():
+    """A huge-but-finite float such as ``1e308`` is neither inf/nan nor
+    negative, but ``time.sleep()`` still raises ``OverflowError`` for it on
+    supported platforms -- argparse must reject it too, not just the
+    non-finite/negative cases."""
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    status_monitor_reap_stale.add_parsers(sub)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["status-monitor-reap-stale", "--delay-seconds", "1e308"])
+
+
+def test_cmd_reap_stale_falls_back_to_default_for_a_hand_built_huge_delay(monkeypatch):
+    """Defense-in-depth for a direct, non-argparse call (e.g. a hand-built
+    Namespace) carrying a huge-but-finite delay that would otherwise raise
+    OverflowError in time.sleep()."""
+    slept = {"seconds": None}
+    monkeypatch.setattr(
+        status_monitor_reap_stale.time, "sleep", lambda s: slept.update(seconds=s)
+    )
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=1e308)
+    )
+
+    assert rc == 0
+    assert slept["seconds"] == status_monitor_reap_stale.DEFAULT_DELAY_SECONDS
 
 
 def test_delay_seconds_rejects_non_finite_and_negative_values():

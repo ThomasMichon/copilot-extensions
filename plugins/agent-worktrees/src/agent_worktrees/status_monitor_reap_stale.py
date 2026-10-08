@@ -35,17 +35,32 @@ import time
 # `doctor --apply-daemon-health` by hand.
 DEFAULT_DELAY_SECONDS = 120.0
 
+# An upper bound on an otherwise-finite, otherwise-valid --delay-seconds:
+# time.sleep() raises OverflowError for a huge-but-finite float (e.g.
+# 1e308) on supported platforms, which the finite/non-negative check alone
+# does not catch. This command exists to apply a repair shortly after a
+# cutover/restart attempt, never to wait indefinitely -- an hour is already
+# far beyond any legitimate use.
+MAX_DELAY_SECONDS = 3600.0
+
 
 def _finite_non_negative_seconds(value: str) -> float:
     """``argparse`` ``type=`` validator for ``--delay-seconds``: rejects
-    non-finite (``inf``/``nan``) and negative values at parse time, rather
-    than reaching ``time.sleep()`` with one -- ``time.sleep(float("inf"))``
-    raises ``OverflowError`` before this command's own try/except, breaking
-    its "always exits 0" contract."""
+    non-finite (``inf``/``nan``), negative, and unreasonably large values at
+    parse time, rather than reaching ``time.sleep()`` with one --
+    ``time.sleep(float("inf"))`` (and some huge-but-finite floats, e.g.
+    ``1e308``) raises ``OverflowError`` before this command's own
+    try/except, breaking its "always exits 0" contract."""
     parsed = float(value)
-    if parsed != parsed or parsed in (float("inf"), float("-inf")) or parsed < 0:
+    if (
+        parsed != parsed
+        or parsed in (float("inf"), float("-inf"))
+        or parsed < 0
+        or parsed > MAX_DELAY_SECONDS
+    ):
         raise argparse.ArgumentTypeError(
-            f"must be a finite, non-negative number of seconds: {value!r}"
+            f"must be a finite number of seconds between 0 and {MAX_DELAY_SECONDS:g}: "
+            f"{value!r}"
         )
     return parsed
 
@@ -107,6 +122,8 @@ def _ensure_monitor_if_zero_candidates_under_cutover_guard() -> str:
 
     Returns one of: ``"ensured"`` (spawned or confirmed live),
     ``"skipped-live"`` (a candidate already existed once re-checked),
+    ``"skipped-disabled"`` (``AGENT_WORKTREES_STATUS_MONITOR=0`` -- the
+    resident monitor is opted out; never spawn one on its behalf),
     ``"skipped-cutover-busy"`` (another cutover holds the lock), or
     ``"error:<detail>"`` (best-effort, never raises -- including a
     non-fatal spawn failure reported by ``_ensure_status_monitor()``
@@ -116,6 +133,12 @@ def _ensure_monitor_if_zero_candidates_under_cutover_guard() -> str:
     from . import status_monitor_runtime as smr
     from single_instance_lease import AlreadyRunningError
 
+    if not smr._status_monitor_enabled():
+        # _ensure_status_monitor() assumes its own callers already checked
+        # this (status_monitor_runtime.py / worktree_status_audit.py both
+        # do) -- it does not re-check itself, so skip the call entirely
+        # rather than spawn a monitor the operator explicitly opted out of.
+        return "skipped-disabled"
     try:
         lease = smc._acquire_cutover_lock(smc.routing_dir(), timeout_s=0.0)
     except AlreadyRunningError:
@@ -150,16 +173,27 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     :func:`schedule_delayed_daemon_health_reap`; not meant to be run
     interactively. Always exits 0 (advisory, best-effort).
 
-    ``--delay-seconds`` is already validated finite/non-negative by argparse
+    ``--delay-seconds`` is already validated finite/bounded by argparse
     (:func:`_finite_non_negative_seconds`); the fallback here only guards a
     direct, non-argparse call (e.g. a test constructing ``Namespace`` by
-    hand) against the same ``OverflowError``/hang a raw ``inf``/``nan``
-    would otherwise cause in ``time.sleep()`` below.
+    hand) against the same ``OverflowError``/hang a raw ``inf``/``nan``/huge
+    value would otherwise cause in ``time.sleep()`` below. The ``sleep()``
+    call itself is additionally wrapped, since a finite float that still
+    exceeds the platform's own sleep range is possible in principle even
+    after this clamping.
     """
     delay = float(getattr(args, "delay_seconds", DEFAULT_DELAY_SECONDS))
-    if delay != delay or delay in (float("inf"), float("-inf")) or delay < 0:
+    if (
+        delay != delay
+        or delay in (float("inf"), float("-inf"))
+        or delay < 0
+        or delay > MAX_DELAY_SECONDS
+    ):
         delay = DEFAULT_DELAY_SECONDS
-    time.sleep(delay)
+    try:
+        time.sleep(delay)
+    except (OverflowError, ValueError):
+        time.sleep(DEFAULT_DELAY_SECONDS)
     try:
         from . import daemon_health
         report = daemon_health.doctor_report(apply=True)
