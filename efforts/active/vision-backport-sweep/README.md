@@ -86,8 +86,10 @@ one is still undecided (see Phase 4 and Proposal below).
   through its own PR rather than a shared long-lived feature branch.
 - **Host (owns PRs):** whichever session/worktree is actively working a
   slice; no standing owner beyond that.
-- **Delegates:** none yet — single-repo, single-agent effort so far (see
-  Guiding Intent: no cross-machine dispatch needed for a docs-only sweep).
+- **Delegates:** no standing execution delegates. Bounded read-only evidence
+  agents support independent source comparisons; the coordinator retains
+  integration, issue decisions, edits, validation, and PR ownership. No
+  cross-machine dispatch is needed for this documentation sweep.
 - **Handoff:** a session that can't finish a slice hands off via the normal
   `context-handoff` mechanism, naming which Plan items are done and which
   vision files/issues are mid-flight, per this effort's own Journal.
@@ -300,6 +302,14 @@ Operator, end of a long multi-repo session:
             design tracker `#3761` provide context). This scoped
             comparison does not complete the branch's machine convergence,
             trust, telemetry, or every accountability path.
+      - [ ] `visions/native-convergence/README.md` — standards/native proof
+            boundary reconciled: concrete AHP interoperability is not proof of
+            a released native Copilot host; command or metadata presence is not
+            enough to transfer primitive ownership. Existing `#985`/`#986`/
+            `#988`, `#1266`, and `#1460` retain their respective convergence
+            work. Phase B `#987` is closed with an unrelated closing artifact;
+            its mapping scope remains under open umbrella `#985`, not inferred
+            complete from that issue state.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -1084,3 +1094,49 @@ then rather than assuming either answer.
   forced stop preserves resumable state, whereas end/retirement is a separate
   state-removal operation. Kept that lifecycle distinction explicit rather
   than broadening the stop contract accidentally.
+
+### 2026-10-08 — Phase 2 native-convergence standards/proof boundary slice
+- Read the full branch vision and used three bounded, read-only evidence
+  tracks for creation/roots, native identity/boundary, and host steering.
+  Current CLI help confirms worktree, session, directory-boundary, and remote
+  commands, but its README was unavailable. Help presence does not establish
+  a headless creation API, stable root/catalog schema, or native AHP endpoint.
+- Fold-back: the concrete Worktree Manager AHP provider participates in
+  standards-based hosting without proving that a particular native Copilot
+  product exposes that protocol. Preserved plural hosting, feature detection,
+  reversible fallback, and the native-owner/durable-agency split. Added no
+  endpoints, URI schemes, field names, native flags, or root paths to the vision.
+- Rejected an over-generous delegate gap claim: a harness-authored session
+  relation sidecar is not itself a second session-identity owner.
+  `session_metadata_cli.py:278,303` uses the native
+  `COPILOT_AGENT_SESSION_ID` by default, while `session_projection.py` is
+  explicitly reciprocal, rebuildable worktree metadata. This proves native
+  ID use in those entry points, not complete workspace/catalog/boundary mapping.
+  Absence in the inspected sidecar path does not prove native boundary
+  enforcement is absent at the host edge. The attempted same-task delegate
+  follow-up was unsupported for a synchronous agent, so the coordinator
+  verified only that concrete contradiction rather than rereading the scope.
+- Verified tracker states instead of trusting the report: `#985` and layout
+  `#986` remain open; deferred creation `#988` remains open. Phase B `#987` is
+  CLOSED, but its closing event names `c994ce9be777408525aac575c3b60c8b05c9e2fe`,
+  a bridge/SSH process-isolation change with no native mapping implementation
+  in its diff. Commented on `#987` and open `#985`; did not reopen the issue or
+  assert complete non-realization from that mismatch alone. Native creation
+  still uses the harness path in the inspected source; root/catalog/native
+  working-boundary convergence remains unproven, not a new duplicate tracker.
+- Existing bridge native-host and negotiated-contract work remains under
+  `#1266`/`#1460`; neither ordinary `/remote` help nor a standards-facing
+  provider is counted as a fresh native-host round-trip test. No new runtime
+  gap is carved solely from missing public schema evidence.
+- Superset check: retained all original constructs, positive features, and
+  negative boundaries. Requiring proof before adoption strengthens the
+  existing stable-surface guard without removing a fallback or a supported
+  standards-based host. This is a scoped convergence audit, not completion
+  of every native root/catalog/working-boundary implementation.
+- Validation: both touched READMEs pass the structure guard and whitespace
+  check. Existing contained Windows session-metadata/projection contracts
+  report **100 passed, 1 skipped, 7448 deselected**. These validate the
+  inspected native-ID-linked agency projection and compatibility handling,
+  not native layout/catalog convergence or a Copilot AHP round trip. No
+  clean-room or native-host launch was run: the diff changes intent and audit
+  evidence, not runtime adoption or installation.
