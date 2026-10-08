@@ -220,7 +220,12 @@ an empty queue.
   that appears in both registries, or a successor that replaced one after a
   restart, takeover or handoff, is one entity whose first-observed time and
   cursor position carry over; its actions name the *current* session handle,
-  resolved at read time. Every candidate is classified from its
+  resolved at read time. A candidate that has no durable reference yet -- a
+  bridge-owned session before its ACP identity is reported (its
+  `durable_session_id` still the escrow id), or an interactive session with no
+  worktree whose Copilot session id the registration doesn't expose -- is never
+  an item under a provisional key that could change later: it counts toward
+  `uncertain` until the reference exists. Every candidate is classified from its
   **attention state** and its presence, as listed above. The attention state is
   the reason agent-bridge's own attention evaluator would settle a `wait
   --attention` on -- the only place `policy_required` (and, for bridge-managed
@@ -291,7 +296,12 @@ an empty queue.
   aggregate response), and a name a rejected registration claimed still counts
   as known to `--source`. The aggregator **stamps** identity at the
   boundary rather than trusting the command. A command item is the item schema
-  with `source`, `id`, `created_at` and `updated_at` **optional**; validation runs in this order: (1) a
+  with `source`, `id`, `created_at` and `updated_at` **optional**; validation runs in this order: (0)
+  `entity` is canonicalized first: a shared kind (`task | session | pr | queue`)
+  stays as-is, a bare custom kind `<kind>` becomes `x.<source>.<kind>`, an
+  already-namespaced `x.<source>.<kind>` under the command's own name is kept
+  (never double-prefixed), and another source's `x.` prefix rejects the item;
+  every later step uses the canonical `entity`; (1) a
   present `source` or `id` that differs from the registered name or the derived
   id rejects the item; (2) the aggregator sets `source` to the registered name
   and derives `id` from `(source, entity, entity_ref)`, and fills an omitted
@@ -309,7 +319,7 @@ an empty queue.
   fields are translated, never guessed: no `status` means `ok` when `uncertain`
   is absent or 0 and `uncertain` otherwise; no `read_at` means the aggregator's
   receipt time. `disabled` is the aggregator's to set, never a command's. Its own
-  kinds are namespaced `x.<source>.<kind>` by the aggregator (it may also use the
+  kinds are namespaced `x.<source>.<kind>` in step (0) (it may also use the
   shared kinds). Its own signals (sign-in
   expiry, coordination asks) then join the same queue with no code in this repo,
   under the same timeout and degraded rules. Failure contract: a non-zero exit, a
@@ -389,12 +399,17 @@ an empty queue.
   worktree session replaced by a successor (a CLI restart, a takeover, a bridge
   handoff) keeps its `entity_ref`, `id` and `created_at`, while its actions
   name the successor; a bridge-owned lineage with no worktree keeps its root
-  reference across two handoffs; two worktrees never share one; and no item's
-  `id` contains a bridge escrow `session_id`.
+  reference across two handoffs; two worktrees never share one; no item's
+  `id` contains a bridge escrow `session_id`; and a pre-ACP bridge session and
+  a worktree-less interactive session without an exposed Copilot session id
+  each count as `uncertain`, not as an item.
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
   a duplicate name) is rejected into `config_errors[]` -- never a second
   `sources[]` entry under that name -- and the aggregate is `degraded`; an item stating another `source` or a foreign
-  `id` is invalid; an item omitting both is stamped and then validated; an item
+  `id` is invalid; an item omitting both is stamped and then validated; a
+  custom `entity: "login"` and `entity: "x.<own>.login"` both canonicalize to
+  `x.<own>.login` with the same `id` (`<own>:x.<own>.login:<ref>`), while
+  `x.<other>.login` is invalid; an item
   omitting `created_at` gets the same first-observed time on two separate reads
   (two CLI invocations), and a new one after an `ok` read that dropped it; a
   stamped item's `id` and first-observed key are its own; an item arriving with a
