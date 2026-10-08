@@ -48,7 +48,9 @@
   failed succession-promotion outcomes) ·
   `ThomasMichon/copilot-extensions#5750` (failed new-version cutover falls back
   to stop/start) · `ThomasMichon/copilot-extensions#5754` (recovery runs before
-  acquiring lifecycle-transition authority)
+  acquiring lifecycle-transition authority) ·
+  `ThomasMichon/copilot-extensions#5791` (explicit scoped gh identity degrades
+  to ambient execution after token minting fails)
 
 ## Guiding Intent
 
@@ -315,6 +317,14 @@ Operator, end of a long multi-repo session:
             Verify actual mapping/interop and existing tracker disposition;
             do not substitute help presence, issue closure, or projection-only
             tests for that audit.
+      - [x] `visions/plugins/agent-worktrees/README.md` — account-boundary slice:
+            account-catalog/routing separation, scoped credentials,
+            inspectable choice, and explicit authentication failure versus
+            ambient consent. Filed `#5791` for the concrete CLI fallback;
+            retained the separate Copilot inference-identity safety boundary.
+      - [ ] `visions/plugins/agent-worktrees/README.md` — remaining parent
+            reconciliation beyond the account slice, including head/claims,
+            contribution roles, daemon authority, and lifecycle coverage.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -1149,3 +1159,49 @@ then rather than assuming either answer.
   proof-boundary slice done and split remaining root/catalog/working-boundary
   source coverage into its own open item. The completed slice does not
   silently complete the remaining native audit or its implementation phases.
+
+### 2026-10-08 — Phase 2 agent-worktrees account-boundary slice
+- Read the full worktree-parent vision, then scoped source comparison to
+  repository-account resolution and operation credentials, not a full
+  head/claims/daemon rewrite. Reality evidence: `accounts.py`'s descriptive
+  catalog, `repos.resolve_account`'s routing precedence, token lookup in
+  `git_ops.py`, `_gh_env_for_repo`, the `repos gh` execution branch, and
+  repository-local Git credential pinning.
+- Fold-back: the account catalog describes identity/authentication expectations
+  separately from which repositories choose those identities; the credential
+  store remains owned by the authentication provider. Scoped invocation and
+  local pinning avoid a machine-global account switch. The code's Git pinning
+  is a selective, best-effort capability with provider/scope limits; no
+  universal bare-Git pin was claimed from that implementation.
+- Carved `#5791` after dedup: for an explicitly intended account whose token
+  minting fails, `_gh_env_for_repo` returns an unchanged ambient environment;
+  `repos_cli.py:666-669` warns and still launches arbitrary `gh` arguments.
+  The warning is real, so this is not described as a silent failure. The gap
+  is execution under replacement identity after explicit intent resolved.
+  The vision requirement and issue's fix direction distinguish an explicit
+  override/map from the derived-owner heuristic so an unconfigured organization
+  is not accidentally treated as a mandatory authenticated user. No runtime
+  guard was implemented here and no live wrong-account mutation was attempted.
+- Existing `#2755` concerns short-name resolution and `#330` stale minted
+  tokens; neither is this subsequent missing-token execution fallback.
+  The issue names no-subprocess regression obligations for failed explicit
+  choices and preserves ordinary unconfigured ambient behavior.
+- Superset check: retained all existing positives and negatives, especially
+  independent Copilot inference identity and its shared-machine idle/explicit
+  correction boundary. No OAuth scopes, helper grammar, environment variables,
+  file layouts, or credential data enter the vision. Refusing an unavailable
+  explicit account implements the already-stated intended-identity contract;
+  it does not remove unconfigured ambient operation.
+- Scoped conformance: successful token injection and target account mapping
+  embody per-operation identity isolation; token-unavailable explicit choices
+  remain partial (`#5791`). This is not a claim that all Git helpers, SSH
+  identities, Copilot identity correction, or role-derived contribution
+  operations were freshly audited. The remaining parent vision stays open.
+- Validation: both touched READMEs pass the structure guard and whitespace
+  check. Existing contained Windows account-catalog/routing/token-environment
+  contracts report **25 passed, 7524 deselected**. They preserve current
+  behavior, including the token-unavailable environment result; they do not
+  implement or prove the new no-ambient-execution requirement. Selective Git
+  pinning is source-inspection evidence only in this slice. The new issue owns
+  the missing no-subprocess regression. No live auth switch, public mutation
+  probe, clean-room install, or provider credential experiment was performed.

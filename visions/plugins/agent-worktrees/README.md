@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-02
+- **Last revised:** 2026-10-08
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -71,6 +71,14 @@ can still need a specific Copilot identity pinned for it — falling back to a
 machine-level default when a repo declares no explicit preference. This is
 an **opt-in personal-accountability capability**: an operator who never
 declares a Copilot-identity preference sees no change in behavior.
+
+Account identity and repository routing are separate concerns. The identity
+catalog describes which accounts exist and their authentication expectations;
+repository policy decides where each identity is intended. Neither becomes a
+second credential store. Git/gh operations use the selected account through a
+scoped credential boundary rather than switching machine-global gh authentication.
+Repository-local credential pinning can also align ordinary Git clients with
+that intent without changing other repositories' identity choices.
 
 Correcting a resolved Copilot-identity mismatch is inherently constrained by
 one hazard: the identity file it corrects is shared machine-wide, not scoped
@@ -427,6 +435,14 @@ work — through the same ambient guidance channel that already carries other
 session-scoped context — rather than requiring an explicit lookup before the
 operator or agent can act correctly.
 
+### inspectable-repository-account-choice
+
+A caller can resolve the account intended for a repository independently of
+the machine's active account and distinguish explicit policy from a derived
+hint or an unconfigured ambient choice. Authentication availability and
+provider-specific scope limitations remain distinguishable from the identity
+the repository selected.
+
 ### provider-observation-ingestion
 
 Execution hosts may publish bounded, attributable lifecycle and activity
@@ -677,6 +693,15 @@ agent-worktrees says so rather than guessing a posture or silently omitting
 guidance. A gap in discovered fact is never quietly papered over with an
 invented default.
 
+### explicit-account-failure-is-not-ambient-consent
+
+When an explicitly selected repository Git/gh account cannot authenticate an
+operation, the operation refuses with a clear reason rather than acting under
+another ambient identity. A warning does not authorize that substitution.
+Ambient authentication remains valid where policy actually leaves the choice
+unconfigured; a derived repository-owner hint is not automatically an explicit
+account requirement.
+
 ### finalization-joins-durable-obligations
 
 A worktree may complete only when its source-control content is safe and every
@@ -778,6 +803,11 @@ manager, or session-host implementation.
   generalizes)
 
 ## Provenance
+
+- **2026-10-08** — Reconciled account-catalog versus repository-routing
+  ownership, scoped operation credentials, and explicit identity failure
+  distinct from ambient consent. Preserved independent Copilot inference
+  identity and the existing shared-auth correction boundary.
 
 - **2026-09-26** — Refined *The resident daemon as the authoritative
   live-state database* and *no-writer-bypasses-the-daemon* to resolve three
