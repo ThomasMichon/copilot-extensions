@@ -198,20 +198,45 @@ follow-ons.
 - [ ] A best-effort migration pass that reads the existing global
       `activity.jsonl` once and copies each record's history into the
       correct per-worktree file it describes.
-- [ ] **Idempotent across retries and dual writes.** A naive append-then-
-      stamp is not safe: a crash after some destination appends but before
-      the stamp duplicates those entries on restart, and Phase 3's dual-write
-      transition period means a given event may already exist in both the
-      source and destination before migration ever runs. Give every
-      migrated record a stable identity (e.g. a content hash of its
-      original fields, or an existing unique field if one already
-      qualifies) and de-duplicate against the destination file's existing
-      entries before appending -- never a blind append. Validate both an
-      interrupted/retried run and a run that overlaps with
-      already-dual-written events.
-- [ ] Mark the migration done (a stamp file) only after a full pass
-      completes with no unresolved work, so a retry after an interruption
-      naturally resumes rather than restarting blind.
+- [ ] **Multiplicity-preserving deduplication, not set-membership.** A
+      content hash alone is not a stable per-record identity: `log_event()`
+      timestamps only to whole seconds, so two *legitimate, independently
+      occurring* events can share identical fields; naive set-style
+      dedup (hash already seen -> skip) would silently collapse real,
+      distinct history. Match and de-duplicate by **multiset** comparison
+      instead: for a given identity (hash of content, or an existing
+      unique field if one qualifies), count how many copies already exist
+      in the destination and how many appear in the source segment being
+      migrated, and append only the excess -- never collapse to a single
+      copy. Migration tests must include a case with genuinely repeated,
+      identical-content events.
+- [ ] **A completed read pass is not itself a safe cutover boundary.** A
+      writer (including a Phase 3 dual-writer) can append to the global
+      file after this pass's read reaches EOF but before the stamp is
+      written; if that writer's corresponding per-worktree append then
+      fails or the process crashes mid-dual-write, the stamp would
+      permanently prevent that global-only straggler from ever migrating.
+      Make the migration resumable by position, not one-shot-then-stamp:
+      record the exact byte offset actually processed only *after* that
+      segment's writes are confirmed durable in the destination, and treat
+      a later run as picking up from the last confirmed offset rather than
+      a full rescan or a hard "never again" stamp. Validate a writer
+      appending concurrently with (and after) a migration pass's own read.
+- [ ] **A current unique project match does not prove historical
+      provenance.** Resolving a worktree id to exactly one *currently
+      known* project does not establish that the id meant that project
+      *at the time the old event was logged* -- a project can be
+      reaped/deleted and its worktree id later reused by a different,
+      unrelated project, in which case "currently unique" would silently
+      misattribute the deleted project's history into the new one despite
+      the never-guess intent. Require positive era-matched provenance:
+      accept a match only when the event's own timestamp falls within that
+      specific project+worktree's actual tracked lifetime window (its
+      recorded start/completion bounds), not merely "resolves to one
+      project today." An id that is unique today but fails the era check
+      is treated the same as an ambiguous one -- unmigrated, reported, never
+      guessed. Add a temporal-id-reuse test (same id, two different
+      projects, non-overlapping eras) alongside the ambiguity test below.
 - [ ] **Safe handling of project-ambiguous/orphaned records.**
       `activity.log_event()` does not persist its `project` argument, and a
       worktree id is only unique *within* one project (two different
@@ -219,16 +244,18 @@ follow-ons.
       migrated-by-id-alone record can land in the WRONG project's file,
       corrupting that worktree's history. The migration must resolve each
       record's project unambiguously before writing: look it up against
-      every currently-known project's tracking directory; migrate only
-      when the worktree id resolves to **exactly one** live (or
-      archived-but-identifiable) project+worktree. An id that matches zero
-      or multiple projects is never guessed -- it is retained in a
-      clearly-labeled `activity.jsonl.unmigrated` sidecar (or equivalent)
-      and reported in the migration's own summary output, never silently
-      dropped or silently misfiled.
+      every currently-known project's tracking directory (subject to the
+      era check above); migrate only when the worktree id resolves to
+      **exactly one** live (or archived-but-identifiable) project+worktree
+      for that event's own era. An id that matches zero or multiple
+      projects -- or fails the era check against its one current match --
+      is never guessed: it is retained in a clearly-labeled
+      `activity.jsonl.unmigrated` sidecar (or equivalent) and reported in
+      the migration's own summary output, never silently dropped or
+      silently misfiled.
 - [ ] Wire it into `agent-worktrees update`/install so every existing
-      machine picks it up once, automatically (safe to re-run given the
-      idempotency requirement above).
+      machine picks it up, automatically, safe to re-run given the
+      multiplicity-preserving and resumable-offset requirements above.
 
 ### Phase 5 — Retire the global log
 - [ ] Once Phases 1-4 are live and proven (no remaining reader of the global
@@ -277,11 +304,36 @@ follow-ons.
       per-worktree sidecar) -- reusing the already-proven
       `sessions.archive_session` / `verify_archive` / reclaim pattern from
       `agent_logger.sync.compact` -- into the fixed path convention above,
-      grouped under `<repo>/<worktree-id>`.
+      **keyed `<project>/<repo>/<worktree-id>`, not `<repo>/<worktree-id>`**
+      -- a worktree id is only unique *within* one project (the same
+      rationale as `handoff_trace.py`'s own existing namespacing), and
+      multiple projects can legitimately target the same repo, so omitting
+      the project segment risks two unrelated worktrees' archives
+      colliding/overwriting each other at the same path. Add a collision
+      test: two different projects, each with a worktree of the same id
+      against the same repo, archived without interference.
 - [ ] Verify-before-reclaim, exactly like session compaction: never delete
       the live per-worktree state until the archive is confirmed intact.
       A failed/absent archive step never blocks or reverses
       `agent-worktrees`' own cleanup decision (fail-open).
+- [ ] **A standalone install (no `agent-logger`) must not regress into
+      unbounded disk growth.** Today's global log has a 7-day rolling
+      retention regardless of any plugin; if archival is the *only* path
+      that ever reclaims a cleaned-up worktree's per-worktree journal, an
+      install without `agent-logger` would keep every such journal forever
+      once Phase 5 removes the bounded global file -- a real regression,
+      not merely a missed optimization. `agent-worktrees` itself (the
+      lower tier, always present) owns a baseline, bounded-retention
+      fallback independent of the optional archiver: when its own
+      cleanup/finalize path finds no archival callback registered (or the
+      callback fails), it still applies a simple local bound on a cleaned-up
+      worktree's own journal (e.g. the same age-based rolling window the
+      global log used, truncating/pruning rather than deleting outright so
+      the "recent history survives a while" promise holds) -- never
+      "keep forever" as the silent default. Archival (when present) is
+      strictly additive longevity on top of this floor, never the sole
+      reclaim mechanism. Add a cleanup test with `agent-logger` absent that
+      confirms the journal is still eventually bounded.
 
 ## Validation Plan
 
@@ -310,6 +362,21 @@ follow-ons.
       the destination with events a Phase-3 dual-write already delivered
       before migration runs, and confirm migration recognizes and skips
       them rather than duplicating (Phase 4).
+- [ ] A repeated-identical-event test: seed the source with two or more
+      genuinely distinct events that happen to share identical content
+      (same second-resolution timestamp, same fields), confirm migration
+      preserves the full count in the destination rather than collapsing
+      to one via set-style dedup (Phase 4).
+- [ ] A concurrent-tail-write test: start a migration pass, append a new
+      event to the source after its read reaches EOF but before the stamp,
+      confirm a subsequent migration run still picks up and migrates that
+      straggler rather than treating the earlier stamp as final (Phase 4).
+- [ ] A temporal-id-reuse test: seed a historical event for a worktree id
+      that belonged to project A (now reaped) at one time period, with that
+      same id now uniquely resolving to an unrelated project B at the
+      current time; confirm migration does NOT attribute the old event to
+      B (fails the era check) and routes it to the unmigrated
+      sidecar/report instead (Phase 4).
 - [ ] A migration-ambiguity test: seed the synthetic global log with a
       worktree id that exists in two different projects' tracking
       directories (and one that exists in none), confirm both are routed to
@@ -323,6 +390,14 @@ follow-ons.
       normally and identically whether or not `agent-logger` is installed
       (fail-open), and that the archival callback firing/failing never
       changes `agent-worktrees`' own tombstone decision (Phase 6).
+- [ ] An archive-key-collision test: two different projects each with a
+      worktree of the same id targeting the same repo; confirm their
+      archives land at distinct, non-interfering paths (Phase 6).
+- [ ] A standalone-install retention test: clean up a worktree with
+      `agent-logger` absent (or its callback failing), confirm
+      `agent-worktrees`' own bounded-retention fallback still eventually
+      prunes/bounds that worktree's journal rather than growing it forever
+      (Phase 6).
 - [ ] An archived-journal discovery test: clean up (archive + reclaim) a
       worktree with `agent-logger` installed, then confirm the unscoped
       `agent-worktrees activity` view still includes its recent history by
