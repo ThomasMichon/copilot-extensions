@@ -439,6 +439,14 @@ risk wedging everything").
       port-binding HTTP timeout in `test_installation_cells.py`) are
       real, reproducible-under-load findings **not yet fixed** -- logged
       as a new Plan item below rather than chased further this leg.
+      **Follow-up, 2026-10-07: every plugin in this list has now been
+      individually validated** (run one at a time, not as one giant
+      `--all` sweep, per the async-shell truncation workaround below) --
+      see the `agent-machines`, `agent-ssh`, `agent-vault`/`agent-mcp`,
+      and host-environment Plan items below for what each surfaced.
+      Every plugin reaches a definitive, understood outcome: either a
+      clean pass, a landed fix, or a documented non-code (host-specific)
+      finding -- none left unexamined.
 - [x] A newly-surfaced `agent-index` test-isolation issue from the
       `--all` run above. **Root-caused and resolved, 2026-10-07** --
       see Journal. Was never a real test-isolation/deadlock bug: bisection
@@ -484,6 +492,68 @@ risk wedging everything").
       live production hazard too (not just a test artifact) -- any real
       `bootstrap-killswitch on` invocation racing a genuinely in-flight
       reconcile on Windows would very likely hit the same crash.
+- [ ] `agent-ssh` surfaced a new instance of the already-tracked Windows
+      `MAX_PATH` family (see the `agent-logger` entries above):
+      `test_install_snapshot.py::test_stamp_supports_first_use_provision_from_snapshot_only_ps1`
+      fails deterministically, in isolation and under the real containment
+      wrapper alike, with `[WinError 206] The filename or extension is too
+      long` building `agent-procutil`'s wheel. Root cause confirmed, 2026-
+      10-07 -- see Journal: `agent-ssh`'s own `install.ps1` snapshot
+      directory naming (`$SrcVersion + '-' + yyyyMMddTHHmmssfff + "-$PID"`,
+      ~36 chars) combined with pytest's own deep `tmp_path` root and legacy
+      `setuptools bdist_wheel`'s two-phase `build\...` -> `build\bdist.
+      win-amd64\wheel\.\...-py3.12.egg-info` copy pushes the full path
+      past 260 chars. **Not fixed this leg** -- per the explicit precedent
+      set for `agent-logger`'s own instance of this family (see Journal,
+      2026-10-05), shortening a plugin's on-disk naming scheme is a real
+      design decision (compatibility/migration-sensitive, or not, depending
+      on whether the name is ever persisted/looked-up vs. recomputed
+      fresh) that isn't mine to make unilaterally for a plugin I haven't
+      already been asked to change. Logged here with full root cause so a
+      future leg can decide and implement directly rather than re-diagnose.
+- [ ] A host-environment-specific finding (not a code bug), confirmed
+      across multiple plugins during the never-tested-plugin sweep: this
+      dev machine's only resolvable `bash` on `PATH` is Windows' built-in
+      WSL interop launcher (`C:\Windows\system32\bash.exe`; confirmed via
+      `where.exe bash` -- only the WSL shim and a WindowsApps alias
+      resolve, no Git for Windows bash at all), not a native POSIX-capable
+      bash. That launcher cannot consume a raw Windows-style backslash
+      path as a script argument the way a genuine POSIX bash (e.g. Git
+      Bash) can -- observed failing two different ways: a mangled path
+      with every backslash silently dropped (`agent-ssh`'s
+      `test_shared_installer_engine_manifest_kind.py`, 2 tests), and a
+      bare `exit 127` "command not found" (`context-handoff`'s
+      `test_emit_guidance.py`, 3 tests; `budget-guidance`'s
+      `test_bootstrap_check_reconcile_always_on.py`, 2 tests -- the same
+      pattern as `agent-vault`'s own instance of this, found in the same
+      sweep). `shutil.which("bash")` (the common pattern across these
+      tests) only checks resolvability, not whether the resolved binary
+      can actually execute a native Windows path. Very unlikely to
+      reproduce on `windows-latest` CI runners (which bundle Git for
+      Windows, typically ahead of the WSL shim on `PATH`) or on any
+      workstation with Git Bash installed -- logged as a known
+      host-specific gap across every affected plugin, not chased as a
+      code fix this leg.
+- [ ] A second, similarly host-specific finding: `copilot-extensions-harness`'s
+      `test_copilot_mention_guard.py` (6 tests) invokes `python3` directly
+      via `subprocess.run(["python3", ...])`, which on this host resolves
+      to a non-functional Windows Store "app execution alias" stub
+      (`returncode 9009`, with the stub's own "open the Microsoft Store,
+      or disable this shortcut..." message as stderr) rather than a real
+      Python 3 interpreter -- this host's actual Python 3 install is
+      reachable only as `python`, not `python3`. Same class as the `bash`
+      finding above (a test assumes a specific interpreter name resolves
+      usably on `PATH`, which isn't true on every Windows dev machine) --
+      logged, not chased as a code fix this leg.
+- [x] `agent-vault` and `agent-mcp` each had the same `have_uv=False`
+      PATH-simulation test gap already found and fixed in `agent-index`
+      (see that Plan item above): only one PATH directory (the first
+      `shutil.which("uv")` hit) was stripped, insufficient on a machine
+      where a package manager installs `uv` via two separate PATH
+      entries. **Fixed, 2026-10-07**: applied the identical fix already
+      validated for `agent-index` -- strip every PATH directory carrying
+      a `uv`/`uv.exe` executable, not just the first. Confirmed both
+      previously-failing tests now pass in both plugins.
 
 ### Phase 5 — Generalize beyond `agent-worktrees`
 - [ ] Assess whether other plugins would benefit from diff-scoped selection
@@ -563,6 +633,110 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-07 — Phase 3.5: `agent-vault`/`agent-mcp` `uv`-PATH gap fixed; a systemic `bash`/`python3` resolution finding generalized across plugins
+Continuing the never-tested-plugin sweep: `agent-remote-driver` (no test
+suite, fine), `ai-attribution` (passed cleanly once given headroom past
+this host's now-familiar CPU-contention confound -- 118 passed, 6 skipped
+in 270s under `--timeout 600`), `budget-guidance`, `context-handoff`, and
+`copilot-extensions-harness` were run as further batches.
+
+**Fixed:** `agent-vault` and `agent-mcp` each hit the identical
+`have_uv=False` PATH-simulation gap already found and fixed in
+`agent-index` earlier this effort -- `uv_dir = os.path.dirname(shutil.which
+("uv") or "")` only strips the FIRST PATH directory resolving `uv`,
+insufficient on this machine where WinGet installs `uv` via two separate
+PATH entries (the real binary's own directory, and a separate `Links`
+shim directory). Applied the exact same fix already validated for
+`agent-index`: strip every PATH directory containing a `uv`/`uv.exe`
+executable file, not just the one `shutil.which` happens to report first.
+Confirmed both previously-failing parametrized tests
+(`test_preinstall_loop_resolves_plugin_local_copy[False]`,
+`test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent[False]`)
+now pass in both plugins.
+
+**Generalized, not fixed (host-environment-specific, same class as
+`agent-ssh`'s MAX_PATH finding above, not a code bug):** two further
+PATH-resolution gaps, now confirmed across *multiple* plugins rather than
+one:
+- **`bash` resolves to Windows' WSL interop shim, not a POSIX-capable
+  bash.** Already found in `agent-ssh`'s own suite (previous entry);
+  confirmed to be the identical root cause behind `budget-guidance`'s
+  `test_bootstrap_check_reconcile_always_on.py` (2 failures) and
+  `context-handoff`'s `test_emit_guidance.py` (3 failures) -- the latter
+  fails with a bare `exit 127` ("command not found") rather than a
+  mangled path, a second symptom of the same underlying cause (the WSL
+  shim's own argument-translation limits, not a single consistent error
+  shape). Consolidated all four plugins' instances into one Plan item
+  rather than four near-duplicate entries.
+- **`python3` resolves to a non-functional Windows Store "app execution
+  alias" stub**, not a real interpreter: `copilot-extensions-harness`'s
+  `test_copilot_mention_guard.py` (6 failures) invokes `subprocess.run(
+  ["python3", ...])` directly; on this host, only `python` (not `python3`)
+  resolves to the real installed interpreter. Same class of "test assumes
+  one specific interpreter name is usably resolvable on `PATH`, true on
+  many but not all Windows dev machines" gap as the `bash` finding.
+
+Neither is expected to reproduce on `windows-latest` CI (which bundles
+Git for Windows, typically ahead of the WSL shim, and whose Python
+toolchain setup typically provides both `python` and `python3`) -- logged
+with full root cause across every affected plugin rather than chased as
+a code fix this leg, consistent with the effort's established scope
+boundary for host-specific, non-reproducible-on-CI confounds.
+
+### 2026-10-07 — Phase 3.5: `agent-ssh` surfaced a new `MAX_PATH`-family instance (not fixed, same precedent as agent-logger's)
+Continuing the never-tested-plugin sweep (`agent-mcp`, `agent-pull-requests`,
+`agent-ssh` as one batch): `agent-mcp` and `agent-pull-requests` both passed
+cleanly first try. `agent-ssh` hit a timeout under full-matrix load, as
+expected given this host's now-familiar CPU-contention confound (`Get-
+CimInstance Win32_Processor` again showed ~99% sustained load) -- but
+isolating the exact hanging test
+(`test_install_snapshot.py::test_stamp_supports_first_use_provision_from_snapshot_only_ps1`)
+and giving it a genuinely generous timeout (500s) showed it isn't host-load
+flakiness at all: it fails **deterministically**, every time, with `[WinError
+206] The filename or extension is too long` while `uv`'s fallback-to-pip
+path tries to `bdist_wheel` build `agent-procutil`'s vendored copy.
+
+This is the exact same Windows `MAX_PATH` family already root-caused and
+partially fixed for `agent-logger` earlier in this effort (see the three
+2026-10-05 Journal entries above) -- legacy `setuptools bdist_wheel`'s own
+two-phase `build\lib\...` -> `build\bdist.win-amd64\wheel\.\...-py3.12.egg-
+info` relative copy, combined with a sufficiently deep absolute root,
+exceeds Windows' legacy 260-char path limit. `agent-ssh`'s own
+contribution to the depth is its `install.ps1`'s snapshot directory naming
+(`$SrcVersion + '-' + (Get-Date).ToString('yyyyMMddTHHmmssfff') + "-$PID"`,
+~36 characters for a typical dev version) stacked on top of pytest's own
+already-deep `tmp_path` root and `run-plugin-tests.py`'s containment
+sandbox nesting.
+
+**Deliberately not fixed this leg**, consistent with the explicit
+precedent already set for this exact family: the earlier `agent-logger`
+Journal entries record the operator's own reasoning for why shortening an
+on-disk naming scheme is a real design decision, not a quick fix --
+whether it's safe depends on whether the name is ever persisted and looked
+up again (needing a migration story) or always recomputed fresh (no
+migration concern), and that answer is plugin-specific. I haven't been
+asked to redesign `agent-ssh`'s own snapshot naming, so logging the full
+root cause here (so a future leg doesn't have to re-diagnose) is the
+right scope boundary, matching exactly how the `agent-logger` family was
+handled before the operator explicitly chose a fix.
+
+**Separately, same plugin, different root cause:**
+`test_shared_installer_engine_manifest_kind.py`'s 2 tests failed with
+`[Errno 127]`/`returncode 127`, tracing to a garbled path
+(`C:UserstmichonAppDataLocalTemp...` -- every backslash silently
+vanished) passed to `C:\Windows\system32\bash.exe`. This host's `PATH`
+resolves `bash` to Windows' own WSL interop launcher first (confirmed via
+`where.exe bash`: only the WSL shim and a WindowsApps alias resolve, no
+Git for Windows bash at all) -- that launcher cannot consume a raw
+Windows-style backslash path as a script argument the way a genuine
+POSIX-capable bash (e.g. Git Bash) can. `shutil.which("bash")` only
+checks resolvability, not whether the resolved binary can actually run a
+native Windows path. This is a host-configuration artifact (no Git for
+Windows bash on this particular machine's `PATH`), not a product bug --
+very unlikely to reproduce on `windows-latest` CI (which bundles Git for
+Windows ahead of the WSL shim) or any workstation with Git Bash present.
+Logged, not chased as a code fix.
 
 ### 2026-10-07 — Phase 3.5: `agent-machines` Windows `os.kill(pid, 0)` process-killing crash root-caused and fixed
 Continuing the "never-before-tested plugins" sweep one at a time (per the
