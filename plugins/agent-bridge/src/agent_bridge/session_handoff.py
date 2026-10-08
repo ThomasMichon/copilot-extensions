@@ -322,6 +322,10 @@ class _SessionHandoffMixin:
         # 2. Spawn the successor in the SAME worktree. Local worktree agents are
         #    unguarded, so predecessor + successor briefly coexist; the
         #    predecessor is retired only after the successor is confirmed up.
+        #    A cooperative stop announced meanwhile wins: no successor it
+        #    wouldn't reach (re-checked once the successor is up, too).
+        if session._stop_requested:
+            raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
         successor = await self.start_session(
             session.target,
             agent_name=session.agent_name,
@@ -346,6 +350,10 @@ class _SessionHandoffMixin:
                 f"{successor.session_id} failed to start "
                 f"({successor.status.value}); predecessor retained"
             )
+        if session._stop_requested:
+            with contextlib.suppress(Exception):
+                await self.end_session(successor.session_id, force=True)
+            raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
 
         # 3. Persist the two-way succession link.
         now = time.time()

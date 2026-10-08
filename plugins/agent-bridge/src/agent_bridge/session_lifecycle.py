@@ -204,6 +204,7 @@ class _SessionLifecycleMixin:
             raise KeyError(f"Session {session_id} not found")
 
         if not force and session.has_active_background_tasks:
+            session._stop_requested = False  # the stop a notice announced isn't happening
             raise SessionBusyError(session_id, session.active_background_tasks)
 
         if allow_background_recovery is None:

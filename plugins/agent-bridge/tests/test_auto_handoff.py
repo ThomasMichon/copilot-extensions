@@ -344,3 +344,38 @@ class TestNoResume:
         assert not sm._auto_handoff_tasks and session._handoff_pending is False
         await sm.stop_session(session.session_id)
         assert session._stop_requested is False  # a later resume hands off normally again
+
+    @pytest.mark.asyncio
+    async def test_a_refused_stop_rolls_the_stop_marker_back(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_manager import SessionBusyError
+
+        sm = _sm(tmp_db, enabled=True)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert session._stop_requested is True
+        monkeypatched = type(session).has_active_background_tasks
+        try:
+            type(session).has_active_background_tasks = property(lambda self: True)
+            with pytest.raises(SessionBusyError):
+                await sm.stop_session(session.session_id)
+        finally:
+            type(session).has_active_background_tasks = monkeypatched
+        assert session._stop_requested is False  # later handoffs behave normally again
+
+    @pytest.mark.asyncio
+    async def test_an_in_flight_handoff_yields_to_a_stop_requested_meanwhile(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        """A handoff whose brief was being authored when the stop's notice
+        arrived must not spawn a successor the stop would never reach."""
+        mock_acp_client.send_prompt = AsyncMock(return_value={"response_text": "## Objective\nX",
+                                                               "stop_reason": "end_turn"})
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="wt-1")
+        pred._stop_requested = True  # the notice was admitted while the brief was being written
+        before = set(sm._sessions)
+        with pytest.raises(RuntimeError, match="stop was requested"):
+            await sm.handoff_session(pred.session_id, reason="context-pressure")
+        assert set(sm._sessions) == before and pred.status != SessionStatus.STOPPED
