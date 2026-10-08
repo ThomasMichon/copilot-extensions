@@ -328,3 +328,19 @@ class TestNoResume:
         with pytest.raises(SessionNotRunningError, match="^session_not_running"):
             await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
         assert resumed == [] and session.status == SessionStatus.IDLE
+
+    @pytest.mark.asyncio
+    async def test_a_stop_notice_suppresses_a_deferred_handoff_until_the_stop(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """Usage can cross critical during the notice's own turn: the settle must
+        not roll a successor the stop would then leave running."""
+        sm = _sm(tmp_db, enabled=True)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        session._handoff_pending = True  # owed when the notice's turn settles
+        session.status = SessionStatus.IDLE
+        sm._schedule_auto_handoff_if_pending(session)
+        assert not sm._auto_handoff_tasks and session._handoff_pending is False
+        await sm.stop_session(session.session_id)
+        assert session._stop_requested is False  # a later resume hands off normally again

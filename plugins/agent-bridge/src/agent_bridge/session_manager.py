@@ -832,6 +832,7 @@ class Session:
         # idle (usage crosses critical mid-turn). The turn-settle path fires the
         # deferred handoff once the session is idle. In-memory only.
         self._handoff_pending = False
+        self._stop_requested = False  # a stop's notice was admitted: no auto-handoff until stopped/resumed
 
     @property
     def pid(self) -> int | None:

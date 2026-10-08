@@ -368,6 +368,21 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         )
 
 
+def _handed_off_unnamed(client, session_id: str) -> bool:
+    """Whether a successful submit to an older daemon (one that doesn't name the
+    session that took the prompt) was taken by a successor: the target then
+    already reads stopped. A current daemon always names it, so it's not asked."""
+    from .client import BridgeClientError
+    from .protocol import COOPERATIVE_STOP_PROTOCOL_VERSION
+
+    if client.daemon_supports(COOPERATIVE_STOP_PROTOCOL_VERSION):
+        return False
+    try:
+        return (client.get_session(session_id) or {}).get("status") == "stopped"
+    except BridgeClientError:
+        return False
+
+
 def _submit_and_stream(
     client,
     args: argparse.Namespace,
@@ -406,7 +421,17 @@ def _submit_and_stream(
         sys.exit(core._SEND_BUSY_EXIT)
 
     # A prompt-triggered handoff delivers to a successor: report, and follow, the
-    # session that actually took the prompt (an older daemon omits the field).
+    # session that actually took the prompt. A daemon older than generation 25
+    # doesn't name it; if the target reads stopped right after a successful
+    # submit, a handoff took the prompt elsewhere, so say so rather than report
+    # (or stream) the retired predecessor as if it had run it.
+    if "session_id" not in result and _handed_off_unnamed(client, session_id):
+        print(f"[!] Session {session_id} handed this prompt to a successor this agent-bridge "
+              "daemon doesn't name (update the daemon to follow it)", file=sys.stderr)
+        if args.json:
+            emit({**result, "session_id": None, "handed_off_from": session_id, "connection": None,
+                  "outcome": prompt_outcome(result)})
+        return
     session_id = result.get("session_id") or session_id
     if result.get("queued"):
         ident = core._connection_identity(client, session_id)

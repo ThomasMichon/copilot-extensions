@@ -324,3 +324,31 @@ def test_a_usage_error_is_not_a_typed_refusal(monkeypatch, capsys):
         m._cmd_send(_send_args(prompt="   "))  # an empty live message is a usage error
     assert exc.value.code == 2
     assert capsys.readouterr().out == ""
+
+
+def test_an_older_daemons_unnamed_handoff_is_reported_not_misattributed(monkeypatch, capsys):
+    """A pre-generation-25 daemon omits session_id; when the target reads stopped
+    after a successful submit, the prompt went to a successor it didn't name."""
+    class OldDaemon(_PromptClient):
+        def daemon_supports(self, _version):
+            return False
+
+        def get_session(self, sid):
+            return {"session_id": sid, "status": "stopped"}
+
+    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
+    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
+    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
+    code, out, err = _run(monkeypatch, capsys, OldDaemon({"turn_index": 0}), no_wait=False)
+    assert code == 0 and out["session_id"] is None and out["handed_off_from"] == "s-1"
+    assert "doesn't name" in err
+
+
+def test_a_target_gone_while_resolving_is_refused_unavailable(monkeypatch, capsys):
+    def gone(_client, target, force=False):
+        raise BridgeClientError(404, f"Session {target} not found")  # e.g. during its resume
+
+    monkeypatch.setattr(m, "_resolve_target", gone)
+    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
+    code, out, _ = _run(monkeypatch, capsys, _PromptClient({}))
+    assert code == 69 and out["outcome"] == "refused_unavailable" and out["reason"] == "not_found"

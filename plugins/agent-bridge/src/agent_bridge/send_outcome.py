@@ -112,14 +112,23 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
     its typed payload). Under ``--json`` progress text goes to stderr, so stdout
     is exactly one JSON document."""
     global _json_stdout
+    from .client import BridgeClientError
+
     as_json = bool(getattr(args, "json", False))
     target = getattr(args, "target", None)
     previous = _json_stdout
     if as_json:
         _json_stdout = sys.stdout
     try:
-        with contextlib.redirect_stdout(sys.stderr) if as_json else contextlib.nullcontext():
-            send(args)
+        try:
+            with contextlib.redirect_stdout(sys.stderr) if as_json else contextlib.nullcontext():
+                send(args)
+        except BridgeClientError as exc:
+            if exc.status != 404:
+                raise
+            # The target vanished after it was resolved (e.g. while resuming it).
+            raise SendRefused("refused_unavailable", reason="not_found", retryable=False,
+                              target=target, error=str(exc.detail)) from exc
     except SendRefused as refused:
         refused.target = refused.target or target
         print(f"[FAIL] {refused.error}", file=sys.stderr)

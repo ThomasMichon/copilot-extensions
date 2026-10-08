@@ -95,7 +95,7 @@ ID, or a **live interactive session** (delivered as an attributed
 `<agent-message>` envelope). See
 [agent-messages.md](agent-messages.md) for the receive/reply convention.
 
-**Typed outcomes.** `agent-bridge --json send ...` prints exactly one JSON
+**Typed outcomes.** `<agent-bridge catalog argv[0]> --json send ...` prints exactly one JSON
 document on stdout for every classified outcome (progress text goes to
 stderr), always with an `outcome`.
 Accepted (exit 0, the path's existing keys kept): `delivered` (a prompt started

@@ -46,6 +46,9 @@ class _SessionHandoffMixin:
         the sender is explicitly asking for the next turn."""
         if not session._handoff_pending:
             return
+        if session._stop_requested:  # a cooperative stop's notice settled: the stop comes next
+            session._handoff_pending = False
+            return
         if session.status != SessionStatus.IDLE:
             return
         if not self._auto_handoff_eligible(session):
