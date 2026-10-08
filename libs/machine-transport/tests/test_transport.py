@@ -173,6 +173,24 @@ class TestGetMachineTransport:
         assert plan.local is False
         assert plan.ssh_alias is None  # caller must check before dispatching
 
+    def test_remote_entry_with_no_ssh_environments_exposes_neither_alias_nor_shell(self):
+        """``resolve_ssh_target``'s own "no SSH environments at all"
+        fallback returns ``(entry.key, "")`` -- ``entry.key`` is a
+        placeholder identity, never a real SSH alias. A caller that checks
+        only ``plan.ssh_alias`` (not also ``plan.shell``) before dispatching
+        must not be handed a nonempty-looking alias for an entry with no
+        actual remote transport."""
+        entries = {
+            "box-a": MachineEntry(key="box-a", display_name="A", environment="Windows 11"),
+        }
+        plan = get_machine_transport(
+            "box-a", config_machine="aurora-cloud2", load_entries=_loader(entries),
+        )
+        assert plan.resolved is True
+        assert plan.local is False
+        assert plan.ssh_alias is None
+        assert plan.shell is None
+
     def test_registry_load_failure_degrades_to_unresolved(self):
         def _boom():
             raise FileNotFoundError("no registry")

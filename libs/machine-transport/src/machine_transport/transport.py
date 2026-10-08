@@ -176,6 +176,14 @@ def get_machine_transport(
     if entry is None:
         return TransportPlan(local=False, resolved=False)
     alias, shell = resolve_ssh_target(entry)
+    if not shell:
+        # resolve_ssh_target's own "no SSH environments at all" fallback
+        # returns (entry.key, "") -- entry.key is not a usable SSH alias,
+        # just a placeholder identity from that function's documented
+        # behavior. Never expose it as ssh_alias: a caller that only checks
+        # `plan.ssh_alias` (not also `plan.shell`) before dispatching would
+        # otherwise try to SSH to the bare registry key itself.
+        alias = ""
     return TransportPlan(
         local=False,
         resolved=True,
