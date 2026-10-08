@@ -240,6 +240,18 @@ def test_prompt_path_outcomes_and_stdout_is_only_json(monkeypatch, capsys, resul
     assert "Resuming stopped session" in err
 
 
+@pytest.mark.parametrize("queued", [False, True])
+def test_a_prompt_that_handed_off_reports_the_successor_throughout(monkeypatch, capsys, queued):
+    result = {"queued": True, "queue_id": 4, "position": 1} if queued else {"turn_index": 0}
+    monkeypatch.setattr(m, "_resolve_target", lambda *a, **k: "s-1")
+    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
+    monkeypatch.setattr(m, "_connection_identity", lambda _c, sid: {"session_id": sid})
+    monkeypatch.setattr(stc, "_mark_resume_if_behind", lambda *a, **k: False)
+    code, out, _ = _run(monkeypatch, capsys, _PromptClient({**result, "session_id": "s-2"}), queue=queued,
+                        no_wait=True)
+    assert code == 0 and out["session_id"] == "s-2" and out["connection"] == {"session_id": "s-2"}
+
+
 def test_an_unknown_target_is_refused_unavailable_not_silent(monkeypatch, capsys):
     """A stale id that is neither a session nor an agent: one typed document."""
     def unknown(_client, target, force=False):

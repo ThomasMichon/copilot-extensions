@@ -253,17 +253,17 @@ class StartSessionRequest(BaseModel):
 class SubmitPromptRequest(BaseModel):
     """Request to submit a prompt to a session.
 
-    ``queue`` opts into durable send-or-queue (#4114): when the session is busy
-    the prompt is persisted to the bridge's ``pending_prompts`` table and
-    delivered FIFO on the next turn-settle -- surviving a caller remount, an NF
-    crash, and a bridge/host restart -- instead of being rejected with 409.
-    Default False preserves the legacy 409-on-busy contract. ``caller_id`` tags
-    the queued row with who submitted it (for display / attribution).
+    ``queue`` opts into durable send-or-queue (#4114): a busy session's prompt
+    is persisted (``pending_prompts``) and delivered FIFO on the next settle,
+    surviving remount, crash and restart, instead of a 409 (the default).
+    ``caller_id`` tags the queued row. With ``queue``, ``no_resume`` refuses a
+    stopped session (409 ``session_stopped``) instead of resuming it (gen 25).
     """
 
     prompt: str
     queue: bool = False
     caller_id: str | None = None
+    no_resume: bool = False
 
 
 class ResumeSessionRequest(BaseModel):

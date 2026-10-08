@@ -96,7 +96,8 @@ ID, or a **live interactive session** (delivered as an attributed
 [agent-messages.md](agent-messages.md) for the receive/reply convention.
 
 **Typed outcomes.** `agent-bridge --json send ...` prints exactly one JSON
-document on stdout (progress text goes to stderr), always with an `outcome`.
+document on stdout for every classified outcome (progress text goes to
+stderr), always with an `outcome`.
 Accepted (exit 0, the path's existing keys kept): `delivered` (a prompt started
 a turn), `queued` (a `--queue` prompt behind a busy turn, or a live message with
 `--delivery queue`), `steered`, `interrupted`, and `duplicate` (an identical
@@ -109,6 +110,9 @@ distinct exit code: `refused_busy` (75: the target is running a turn),
 `expected_mismatch`; `stale`/`superseded` are retryable after re-resolving),
 and `refused_conflict` (65: the idempotency key is bound to a different
 request). Without `--json` the same refusals keep their text and exit codes.
+Any other failure (an unexpected HTTP error, a daemon that can't be reached) is
+not a classified outcome: it prints its error to stderr, leaves stdout empty and
+exits 1, so a consumer reads stdout only after an exit of 0, 65, 69 or 75.
 
 When given an **agent name**, it never starts a *fresh* session on top of an
 existing one: it reuses this caller's session for that agent — keyed by
@@ -302,9 +306,11 @@ be discarded (or the cancel signature *persists* across sends). See the
 # surface on a later resume. --force skips the notice (and kills background
 # sub-agent tasks); repeating a stop on a stopped/gone session is a no-op.
 # --json prints {session_id, outcome: stopped|already_stopped|refused_busy|
-# unconfirmed, acknowledged, notice, phases: [{phase, at}]}, phases drawn from
-# requested -> acknowledged -> provider_stopped -> confirmed; refused_busy
-# (a background task, no --force) exits 75, unconfirmed exits 1.
+# refused_unsupported|unconfirmed, acknowledged, notice, phases: [{phase, at}]},
+# phases drawn from requested -> acknowledged -> provider_stopped -> confirmed;
+# refused_busy (a background task, no --force) exits 75, refused_unsupported
+# (--grace against a daemon older than HTTP protocol 25) exits 69, unconfirmed
+# exits 1. The notice never resumes a session a concurrent stop just stopped.
 <agent-bridge catalog argv[0]> --json stop <session-id> --grace 60
 
 # Resume a stopped session -- or load/take-over a worktree / singleton anchor.

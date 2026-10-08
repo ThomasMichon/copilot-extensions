@@ -238,3 +238,24 @@ class TestPromptTriggeredHandoff:
         assert pred.status != SessionStatus.STOPPED
         assert result["queued"] is False
         assert not _events(pred, "session_handoff")
+
+
+class TestNoResume:
+    """A ``no_resume`` prompt (a cooperative stop's notice) never revives a
+    session that a concurrent stop already stopped."""
+
+    @pytest.mark.asyncio
+    async def test_a_stopped_session_refuses_instead_of_resuming(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_prompts import SessionStoppedError
+
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.stop_session(session.session_id)
+        assert session.status == SessionStatus.STOPPED
+
+        with pytest.raises(SessionStoppedError, match="^session_stopped"):
+            await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert session.status == SessionStatus.STOPPED
+        assert sm._db.count_pending_prompts(session.session_id) == 0

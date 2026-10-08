@@ -46,6 +46,14 @@ class SessionStopClientMixin(_Base):
         """GET /api/v1/sessions/{id}/queue -- the durable pending prompts, FIFO."""
         return list((self._request("GET", f"/api/v1/sessions/{session_id}/queue") or {}).get("pending") or [])
 
+    def submit_stop_notice(self, session_id: str, prompt: str) -> dict[str, Any]:
+        """POST /api/v1/sessions/{id}/turns with ``queue`` and ``no_resume``: run or
+        queue the wind-down notice, but never resume a session that a concurrent
+        stop already stopped (409 ``session_stopped``). Needs the daemon's
+        ``COOPERATIVE_STOP_PROTOCOL_VERSION``; an older one ignores ``no_resume``."""
+        payload = {"prompt": prompt, "queue": True, "no_resume": True}
+        return self._request("POST", f"/api/v1/sessions/{session_id}/turns", payload) or {}
+
     def remove_pending_prompt(self, session_id: str, queue_id: int) -> None:
         """DELETE /api/v1/sessions/{id}/queue/{queue_id} -- drop one queued prompt."""
         self._request("DELETE", f"/api/v1/sessions/{session_id}/queue/{queue_id}")

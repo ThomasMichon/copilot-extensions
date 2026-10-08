@@ -11,7 +11,15 @@ from typing import Any
 
 from .models import SessionStatus
 from .session_manager import DaemonDrainingError, Session, log
+from .session_stop import SESSION_STOPPED
 from .transport import SpawnTarget
+
+
+class SessionStoppedError(ValueError):
+    """A ``no_resume`` prompt reached a STOPPED session. A ``ValueError``, so the
+    turns route answers 409 with this message, which starts with ``code``."""
+
+    code = SESSION_STOPPED
 
 
 class _SessionPromptMixin:
@@ -143,6 +151,7 @@ class _SessionPromptMixin:
         prompt: str,
         *,
         caller_id: str | None = None,
+        no_resume: bool = False,
     ) -> dict[str, Any]:
         """Send a prompt now, or durably queue it if the session is busy.
 
@@ -163,6 +172,8 @@ class _SessionPromptMixin:
         queue already exists (a new submit joins the back of the line -- never
         jumps ahead of already-queued follow-ups). Otherwise it runs immediately
         via ``submit_prompt`` (which auto-resumes a recoverable STOPPED session).
+        ``no_resume`` refuses a STOPPED session instead (:class:`SessionStoppedError`),
+        decided under the session's lock so a concurrent stop can't be undone.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -171,6 +182,8 @@ class _SessionPromptMixin:
         async with session._turn_start_lock:
             if self._sessions.get(session_id) is not session:
                 raise KeyError(f"Session {session_id} not found")
+            if no_resume and session.status == SessionStatus.STOPPED:
+                raise SessionStoppedError(f"{SessionStoppedError.code}: Session {session_id} is stopped")
             result, kick_session = await self._submit_or_queue_prompt_locked(
                 session,
                 prompt,

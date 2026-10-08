@@ -1098,7 +1098,7 @@ async def submit_prompt(
     try:
         if req.queue:
             result = await mgr.submit_or_queue_prompt(
-                session_id, req.prompt, caller_id=req.caller_id
+                session_id, req.prompt, caller_id=req.caller_id, no_resume=req.no_resume
             )
         else:
             turn_index = await mgr.submit_prompt(session_id, req.prompt)

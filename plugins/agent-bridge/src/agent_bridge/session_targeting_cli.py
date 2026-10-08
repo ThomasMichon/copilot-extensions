@@ -405,6 +405,9 @@ def _submit_and_stream(
               file=sys.stderr)
         sys.exit(core._SEND_BUSY_EXIT)
 
+    # A prompt-triggered handoff delivers to a successor: report, and follow, the
+    # session that actually took the prompt (an older daemon omits the field).
+    session_id = result.get("session_id") or session_id
     if result.get("queued"):
         ident = core._connection_identity(client, session_id)
         if args.json:

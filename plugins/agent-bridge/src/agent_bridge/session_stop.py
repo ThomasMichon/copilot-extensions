@@ -33,6 +33,10 @@ STOP_NOTICE = (
 #: non-forced stop); an unconfirmed stop is a plain failure.
 STOP_BUSY_EXIT = 75
 STOP_UNCONFIRMED_EXIT = 1
+#: The daemon is too old for a cooperative stop (``EX_UNAVAILABLE``, as ``send``).
+STOP_UNSUPPORTED_EXIT = 69
+#: The 409 detail prefix a ``no_resume`` notice gets from a stopped session.
+SESSION_STOPPED = "session_stopped"
 
 
 def _now_iso() -> str:
@@ -89,8 +93,21 @@ def run_stop(
 
     phase("requested")
     if grace is not None and not force and session.get("status") in ("idle", "running"):
+        from .protocol import COOPERATIVE_STOP_PROTOCOL_VERSION
+
+        if not client.daemon_supports(COOPERATIVE_STOP_PROTOCOL_VERSION):
+            # Without it the notice could resume a just-stopped session, or hand
+            # off to a successor this stop would never learn about: refuse.
+            result.update(outcome="refused_unsupported", error=(
+                f"the running agent-bridge daemon predates cooperative stop (HTTP protocol "
+                f"{COOPERATIVE_STOP_PROTOCOL_VERSION}); restart it, or stop without --grace"))
+            return result
         session_id = _cooperate(client, session_id, session, grace, result, phase,
                                 clock=clock, sleep=sleep, poll=poll)
+        if session_id is None:  # a concurrent stop got there first
+            phase("confirmed")
+            result["outcome"] = "already_stopped"
+            return result
 
     try:
         client.stop_session(session_id, force=force, reap_host=reap_host)
@@ -116,10 +133,12 @@ def run_stop(
         sleep(poll)
 
 
-def _cooperate(client, session_id, session, grace, result, phase, *, clock, sleep, poll) -> str:
+def _cooperate(client, session_id, session, grace, result, phase, *, clock, sleep, poll) -> str | None:
     """Submit the notice and wait up to ``grace`` for its turn to settle; returns
     the session id to stop (a successor, when submitting the notice handed the
-    session off -- the bridge may do that for a session at critical context).
+    session off -- the bridge may do that for a session at critical context), or
+    ``None`` when a concurrent stop already stopped it (the daemon refuses the
+    notice rather than resuming the session).
 
     A queued notice is popped before its turn is marked running, so a status
     read in between can show an idle session with the notice already gone. So
@@ -129,8 +148,10 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
 
     baseline = int(session.get("turn_count") or 0)
     try:
-        submitted = client.submit_prompt(session_id, STOP_NOTICE, queue=True)
+        submitted = client.submit_stop_notice(session_id, STOP_NOTICE)
     except BridgeClientError as exc:
+        if exc.status == 409 and str(exc.detail).startswith(SESSION_STOPPED):
+            return None
         if exc.status != 404:
             raise
         result["acknowledged"] = False  # gone before the notice: stop/confirm handle it

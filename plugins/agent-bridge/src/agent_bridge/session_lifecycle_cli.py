@@ -69,7 +69,7 @@ def _grace_seconds(value: str) -> float:
 
 def _cmd_stop_phased(client, args: argparse.Namespace) -> None:
     """``stop --grace``/``--json``: the cooperative, phased stop (session_stop)."""
-    from .session_stop import STOP_BUSY_EXIT, STOP_UNCONFIRMED_EXIT, run_stop
+    from .session_stop import STOP_BUSY_EXIT, STOP_UNCONFIRMED_EXIT, STOP_UNSUPPORTED_EXIT, run_stop
 
     as_json = getattr(args, "json", False)
     result = run_stop(
@@ -88,7 +88,8 @@ def _cmd_stop_phased(client, args: argparse.Namespace) -> None:
         return
     if not as_json:
         print(f"[FAIL] Could not stop session {args.session_id}: {result.get('error')}", file=sys.stderr)
-    sys.exit(STOP_BUSY_EXIT if outcome == "refused_busy" else STOP_UNCONFIRMED_EXIT)
+    sys.exit({"refused_busy": STOP_BUSY_EXIT, "refused_unsupported": STOP_UNSUPPORTED_EXIT}.get(
+        outcome, STOP_UNCONFIRMED_EXIT))
 
 
 def _cmd_end(args: argparse.Namespace) -> None:

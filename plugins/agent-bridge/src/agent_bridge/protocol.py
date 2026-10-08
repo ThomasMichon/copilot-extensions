@@ -146,9 +146,17 @@ EVENTS_BEFORE_PAGING_PROTOCOL_VERSION = 23
 # and warns once.
 CALLER_SESSION_ID_PROTOCOL_VERSION = 24
 
+# First version whose prompt submit (``POST /api/v1/sessions/{id}/turns``)
+# names the session that took the prompt (``session_id``: a successor after a
+# prompt-triggered handoff) and honors ``no_resume`` (a stopped session refuses
+# with 409 instead of being auto-resumed, checked under the session's lock). A
+# cooperative ``stop --grace`` depends on both, so against an older daemon it
+# refuses rather than possibly stopping the wrong session or resuming one.
+COOPERATIVE_STOP_PROTOCOL_VERSION = 25
+
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 24
+HTTP_PROTOCOL_VERSION = 25
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

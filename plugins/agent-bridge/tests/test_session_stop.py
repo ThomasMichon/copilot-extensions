@@ -51,6 +51,14 @@ class _Fake:
             return {"queued": True, "queue_id": 9, "position": 1}
         return {"turn_index": 0}
 
+    supports_cooperative_stop = True
+
+    def daemon_supports(self, _version):
+        return self.supports_cooperative_stop
+
+    def submit_stop_notice(self, sid, prompt):
+        return self.submit_prompt(sid, prompt, queue=True)
+
     def list_pending_queue(self, sid):
         return [p for p in self.pending if not self._dispatched()]
 
@@ -194,9 +202,12 @@ def test_a_notice_that_triggers_a_handoff_is_followed_to_the_successor():
             return {"session_id": "s2", "status": "stopped" if ("stop", "s2") in calls else "idle",
                     "turn_count": 1}
 
-        def submit_prompt(self, sid, prompt, **_kw):
+        def submit_stop_notice(self, sid, prompt):
             calls.append(("submit", sid))
             return {"turn_index": 0, "session_id": "s2"}  # the successor took it
+
+        def daemon_supports(self, _version):
+            return True
 
         def list_pending_queue(self, sid):
             return []
@@ -208,6 +219,43 @@ def test_a_notice_that_triggers_a_handoff_is_followed_to_the_successor():
     assert result["session_id"] == "s2" and result["handed_off_from"] == "s1"
     assert ("stop", "s2") in calls and ("stop", "s1") not in calls
     assert result["outcome"] == "stopped" and result["acknowledged"] is True
+
+
+def test_grace_against_a_daemon_without_cooperative_stop_refuses_before_any_notice():
+    """An older daemon may hand the notice to a successor without naming it, or
+    resume a just-stopped session: neither can be detected, so --grace refuses."""
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "idle", "turn_count": 1}})
+    fake.supports_cooperative_stop = False
+    result = _run(fake, clock, grace=30)
+    assert result["outcome"] == "refused_unsupported" and "restart it" in result["error"]
+    assert fake.calls == []  # neither a notice nor a stop
+
+
+def test_a_concurrent_stop_makes_the_notice_a_no_op_not_a_resume():
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "idle", "turn_count": 1}})
+
+    def refused(sid, prompt):
+        fake.calls.append(("submit", prompt, True))
+        raise BridgeClientError(409, f"{session_stop.SESSION_STOPPED}: Session {sid} is stopped")
+
+    fake.submit_stop_notice = refused
+    result = _run(fake, clock, grace=30)
+    assert result["outcome"] == "already_stopped" and [c[0] for c in fake.calls] == ["submit"]
+
+
+def test_the_cli_exits_69_when_cooperative_stop_is_unsupported(monkeypatch, capsys):
+    from agent_bridge import session_lifecycle_cli as lc
+
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "idle", "turn_count": 1}})
+    fake.supports_cooperative_stop = False
+    with pytest.raises(SystemExit) as exc:
+        lc._cmd_stop_phased(fake, argparse.Namespace(session_id="s1", grace=5.0, force=False,
+                                                      reap_host=False, json=True))
+    assert exc.value.code == session_stop.STOP_UNSUPPORTED_EXIT == 69
+    assert json.loads(capsys.readouterr().out)["outcome"] == "refused_unsupported"
 
 
 def test_force_skips_the_notice_and_the_grace():
