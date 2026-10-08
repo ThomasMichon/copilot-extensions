@@ -1026,7 +1026,7 @@ then rather than assuming either answer.
   grammar, credential-bootstrap wiring, or conformance table enters the vision.
   This is a scoped branch comparison, not a full audit of every machine,
   trust, telemetry, or resource-accountability implementation.
-- Validation: both touched READMEs pass the structure guard and the diff
+- Validation: all three touched READMEs pass the structure guard and the diff
   whitespace check. No new runtime tests, clean-room, or live-venue probes
   were run: the diff changes standing parent intent and journal attribution,
   not execution or installation. Prior provider/bridge implementation
