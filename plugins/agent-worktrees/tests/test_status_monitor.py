@@ -3374,6 +3374,12 @@ def test_cmd_reap_stale_is_a_clean_no_op_when_nothing_to_repair(monkeypatch, cap
 
 
 def test_cmd_reap_stale_never_raises_on_repair_failure(monkeypatch, capsys):
+    """A repair-pass failure only means the duplicate-termination half
+    didn't run -- it establishes nothing about whether a monitor is
+    actually live. The zero-candidate recheck-and-ensure must still run
+    afterward (it probes liveness independently and reports its own
+    failures safely), or a repair exception would skip healing the exact
+    zero-monitor state this command exists for."""
     monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
 
     def _boom(*, apply):
@@ -3381,6 +3387,14 @@ def test_cmd_reap_stale_never_raises_on_repair_failure(monkeypatch, capsys):
 
     from agent_worktrees import daemon_health
     monkeypatch.setattr(daemon_health, "doctor_report", _boom)
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
 
     rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
         argparse.Namespace(delay_seconds=0.0)
@@ -3388,6 +3402,7 @@ def test_cmd_reap_stale_never_raises_on_repair_failure(monkeypatch, capsys):
 
     assert rc == 0  # advisory, best-effort -- never fails the caller
     assert "non-fatal" in capsys.readouterr().out
+    assert ensured["calls"] == 1  # still continued to the ensure step
 
 
 def _patch_cutover_lock(monkeypatch, *, acquirable: bool):

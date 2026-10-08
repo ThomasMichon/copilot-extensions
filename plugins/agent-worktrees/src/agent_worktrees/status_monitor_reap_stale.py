@@ -277,11 +277,18 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
         from . import daemon_health
         report = daemon_health.doctor_report(apply=True)
     except Exception as exc:
+        # Non-fatal: a failure here only means the duplicate-termination
+        # half of the repair didn't run -- it establishes nothing about
+        # whether a monitor is actually live. Still fall through to the
+        # zero-candidate recheck-and-ensure below, which probes liveness
+        # independently and reports its own failures safely; returning
+        # here would skip healing the exact zero-monitor state this
+        # command exists for.
         print(f"status-monitor-reap-stale: repair attempt failed (non-fatal): {exc}")
-        return 0
-    findings = report.get("findings") if isinstance(report, dict) else None
-    count = len(findings) if isinstance(findings, list) else 0
-    print(f"status-monitor-reap-stale: applied daemon-health repair ({count} finding(s))")
+    else:
+        findings = report.get("findings") if isinstance(report, dict) else None
+        count = len(findings) if isinstance(findings, list) else 0
+        print(f"status-monitor-reap-stale: applied daemon-health repair ({count} finding(s))")
 
     # The repair above only audits/terminates EXISTING live candidates -- a
     # rollback that left ZERO live monitors (the other documented ambiguous
