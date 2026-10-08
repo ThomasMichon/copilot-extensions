@@ -27,7 +27,8 @@
   extension-independent recovery, objective authority, evidence-faithful
   continuation, safe background-work transfer, attributable exclusive pickup),
   `visions/plugins/agent-bridge` (observation/attribution and generation-handoff
-  slices), `visions/plugin-services` (shared transition authority)
+  and control slices), `visions/plugin-services` (shared transition authority),
+  `visions/agent-fabric` (venue/memory ownership seams)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -284,8 +285,10 @@ Operator, end of a long multi-repo session:
             custody, transition serialization/recovery, and deployment
             freshness. Installer fallback remains a violation (`#5750`);
             recovery before serialization is `#5754`; native supervisor
-            binding/coherence remains under `#4022`/`#5225`. The rest of
-            hosting, routing, and protocol contracts remain to be reconciled;
+            binding/coherence remains under `#4022`/`#5225`. The control
+            slice additionally covers delivery decisions and
+            cooperative stop/confirmation. The rest of hosting, routing, and
+            protocol contracts remain to be reconciled;
             this is not a completed full-leaf sweep.
       - [ ] `visions/agent-fabric/README.md` — layer/venue/memory seam slice
             reconciled: attended and unattended session peers, shared
@@ -1037,3 +1040,47 @@ then rather than assuming either answer.
   optional-peer degradation, and logger-owned analysis. Rechecked the full
   terminology family rather than only the flagged parent heading; the final
   diff therefore touches three READMEs, not two.
+
+### 2026-10-08 — Phase 2 agent-bridge delivery and cooperative-stop slice
+- Continued after merged `#5759`. Reconciled `#5645` against
+  `docs/delegation-contract.md`, `send_outcome.py`, `session_stop.py`,
+  `client_session_stop.py`, CLI integration, and the prompt/handoff guards.
+  Folded semantic delivery decisions, bounded cooperative wind-down,
+  independent acknowledgement/final-state confirmation, idempotent stop,
+  and protection against notice-triggered resurrection into the leaf.
+- Superset check: all earlier positives and boundaries remain. No change to
+  ordinary admission, queue, force, or stop policy is implied. A visible
+  semantic refusal is not a new permission to weaken delivery guarantees.
+  Admission is not task completion; notice acknowledgement is not proof all
+  agent-owned work was quiesced; session STOPPED is not proof every retained
+  Session Host was physically reaped. Exact outcome names, exit codes, grace
+  thresholds, protocol numbers, and queue API grammar stay in reality docs.
+- Evidence: `run_send` preserves semantic outcomes and distinct refusal
+  handling without swallowing unclassified errors; older duplicate/successor
+  evidence is not invented. `run_stop` distinguishes notice, acknowledgement,
+  provider action, and observed stopped/gone state. Its notice is queued with
+  no-resume intent, guards auto-handoff through prompt/stop state, and is
+  withdrawn on expiry; capability gating refuses unsupported cooperation
+  before sending. Plain stop and explicit force retain their existing paths.
+- Scoped service-invariant comparison: optional cooperation degrades with an
+  explicit unsupported result, while ordinary control remains available;
+  unknown compatibility does not become silent success. This conforms in the
+  inspected paths to `interoperate-across-version-skew` and failure honesty.
+  No resident process, installer, endpoint, or ownership tier is added by this
+  documentation slice. Full bridge contract evolution remains `#1460`, not
+  closed by this smaller current-generation gate.
+- No new implementation issue identified in this bounded control comparison;
+  existing `#5645` source/tests already exercise acknowledgement races,
+  expired notices, concurrent stop, and older-daemon refusals. This does not
+  close the remaining bridge hosting/routing/protocol sweep or Phase 3.
+- Validation: both touched READMEs pass the structure guard and the whitespace
+  check. Existing contained Windows send/stop/auto-handoff contracts report
+  **80 passed, 1 skipped, 3414 deselected**. These cover cooperative-stop
+  races and current compatibility gates, not every venue or negotiated
+  generation. No new clean-room or live-venue run: no runtime, hook, installer,
+  or payload behavior changes in this slice. No fresh process-reclamation
+  guarantee is inferred from session-state confirmation tests.
+- PR `#5770` review corrected "forced retirement" to "forced stopping": even
+  forced stop preserves resumable state, whereas end/retirement is a separate
+  state-removal operation. Kept that lifecycle distinction explicit rather
+  than broadening the stop contract accidentally.

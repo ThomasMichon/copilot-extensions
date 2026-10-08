@@ -967,14 +967,19 @@ worktree-manager.
         explicitly NOT the attribution slice: it cannot correlate a live
         wire connection to an identity or that connection's busy state,
         which still needs a wire-protocol change (a client_id encoding
-        caller identity) that doesn't exist today. It also surfaced a
-        real, pre-existing production gap: `attached_clients` is only
-        ever as accurate as what a `register()` caller supplies, and
-        neither shipped launch path (`bin/launch-session.sh`/`.ps1`) ever
-        passes `--attached-clients`, so it reads `0` for every real
-        mapping today -- populating/refreshing that field at its real
-        source is tracked separately as
-        [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564).
+        caller identity) that doesn't exist today. The preliminary listing
+        also surfaced the attached-client writer gap tracked by
+        [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564):
+        neither shipped launcher supplies `--attached-clients`.
+        The observation implementation in
+        [#5573](https://github.com/ThomasMichon/copilot-extensions/pull/5573)
+        refreshes this field independently of status-option changes and
+        monitor publication, on a completion-based 20-second attempt
+        cadence. Two mappings per attempt share a two-second probe budget
+        with round-robin fairness; failures preserve the stored count.
+        This does not implement wire-level attribution. Reachability
+        history, last-known-live preservation, and batch restoration remain
+        separate scope on #4564.
   - [ ] Phases 2-4 (the actual retirement sweep): remain open. **Ordering
         note for whoever picks this up:** despite the numbering, Phase 2
         (retire-idle-daemon) cannot be implemented first in isolation —
@@ -1166,6 +1171,34 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-08** — Implemented the attached-client observation portion of
+  [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564) in
+  [#5573](https://github.com/ThomasMichon/copilot-extensions/pull/5573).
+  The resident daemon observes independently of changed status values,
+  monitor availability, and publication success, with a 20-second
+  completion-based cadence and a shared two-second/two-mapping probe budget.
+  A runtime-owned round-robin cursor prevents timeout-heavy mappings from
+  starving the rest of the fleet. Atomic live/revision/session/incarnation
+  guards update only the count, without overwriting replacements or
+  tombstones. Observation stays outside status-request deadlines and inside
+  the loop-mutation drain fence; admission is rechecked after fence entry
+  for both observation and publication. Probe output uses replacement
+  decoding because only line count is needed. Publication reads one
+  registry snapshot rather than re-reading the file per entry.
+
+  Validation: **137 targeted Manager tests passed**, including 31-mapping
+  budget/fairness, shortened remaining deadlines, failed probes,
+  stable-status attach/detach changes, absent-monitor operation, decoding,
+  replacement/tombstone guards, real-wire status deadline isolation, and
+  both drain-admission interleavings. A live Windows mux probe agreed with
+  direct `list-clients` output (one attached client); lint, module limits,
+  and push guards passed. The generic contained plugin runner does not
+  discover the standalone Manager suite, so targeted tests used its own
+  `uv` project; cross-platform PR CI supplies the full-suite lane.
+  No provisioning behavior changed, so a clean-room install lane was not
+  applicable. #4564 remains the parent tracker for reachability history and
+  batch restoration, and #5001's actual wire-level attribution remains open.
 
 - **2026-10-06** — Claimed and landed Phase 7's remaining #5006 site:
   `plugins/agent-bridge/src/agent_bridge/service_process_cli.py`'s

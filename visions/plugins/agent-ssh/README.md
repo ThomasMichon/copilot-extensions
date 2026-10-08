@@ -1,11 +1,11 @@
 # agent-ssh — Vision
 
 - **Subject:** The **connectivity layer** of the agent fabric — the plugin that
-  *provisions and keeps real* the SSH mesh that cross-machine reach rides on,
+  *provisions and keeps real* the SSH mesh that static/SSH-driver reach rides on,
   rather than merely borrowing whatever SSH profiles happen to already exist.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's [`README`](../../../plugins/agent-ssh/README.md),
   `docs/transport-provider-contract.md`, and its skills (`agent-ssh`,
@@ -14,7 +14,7 @@
 
 ## Purpose & Intent
 
-The fabric's higher layers all assume they can **reach** another machine over
+For SSH-backed targets, the fabric's higher layers assume they can **reach** another machine over
 SSH — the coordination layer sends to a remote agent, a venue provider fronts a
 remote host, the ground layer shells out for remote interop. But today that
 reach is only ever **borrowed**: the fabric *consumes* whatever SSH config,
@@ -51,6 +51,13 @@ provisioning *plugin* are two halves of one concept: one consumes the profiles,
 the other produces them.)
 
 ## Concepts & Components
+
+This vision owns the SSH mesh and the default static-machine fleet driver
+depends on that authority. The optional
+[machine-fleet](../../machine-fleet/README.md) Gateway and other selected
+substrate drivers do not make agent-ssh a universal owning registry for all
+cross-machine reach. Each target retains one selected provider authority;
+Gateway route observations are derived and do not duplicate that ownership.
 
 agent-ssh sits **beneath** the fabric's cross-machine capabilities as their
 transport floor. It is composed of a small set of concerns, each replaceable
@@ -382,7 +389,7 @@ layer's.)
 ## See Also
 
 - Parent vision: [agent-fabric](../../agent-fabric/README.md) — agent-ssh is the
-  **connectivity/transport layer** the fabric's cross-machine reach rides on.
+  **connectivity/transport authority** for static/SSH-driver reach.
 - Sibling layer visions: authored under `visions/plugins/<name>/` as they are
   written (e.g. a future `visions/plugins/agent-bridge/`).
 - Related vision: [plugin-services](../../plugin-services/README.md) — the

@@ -85,9 +85,11 @@ def cmd_daemons(rest: list[str]) -> int:
         print("   session can retain live: true until the next real probe. Shared")
         print("   across every resident daemon for this root, not attributable to")
         print("   one specific pid)")
-        print("  (attached_clients reflects only what a register() caller supplied --")
-        print("   today's shipped launch scripts never populate it, so it reads 0")
-        print("   even for a genuinely attached session; preliminary listing only)")
+        print("  (attached_clients refreshes are attempted every 20 seconds,")
+        print("   independently of status-option changes and monitor availability.")
+        print("   Two mappings per cycle share a two-second probe budget, round-robin.")
+        print("   Failed probes preserve the last count; a new mapping may read 0")
+        print("   until its first successful observation)")
         return 0
     print(f"error: unknown daemons action {action!r}")
     return 2
