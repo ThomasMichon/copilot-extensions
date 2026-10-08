@@ -59,12 +59,10 @@ _STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_DEFAULT = 180.0
 
 
 def _status_monitor_enabled() -> bool:
-    """Whether the resident coalescing monitor is active.
+    """Enable mandatory resident monitoring outside the test harness.
 
-    Always True in normal operation -- mandatory infrastructure, not an
-    operator-facing opt-out. ``AGENT_WORKTREES_STATUS_MONITOR`` is
-    TEST/DEBUG-ONLY: honored only when ``PYTEST_CURRENT_TEST`` is set
-    (pytest sets this for every test); a real session never has it set.
+    ``AGENT_WORKTREES_STATUS_MONITOR`` is a test/debug-only override,
+    honored only when ``PYTEST_CURRENT_TEST`` is set.
     """
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         return True
@@ -640,7 +638,8 @@ def _ensure_status_monitor() -> bool:
     live, or freshly spawned) -- the caller falls back to the per-session updater
     when it is not.  Idempotent + cheap: a live, non-superseded monitor is a
     no-op; a superseded (older-runtime) one is left to self-retire while a
-    current one is spawned to take over."""
+    current one is spawned to take over, with the resolved CURRENT runtime interpreter
+    (``status_monitor_reap_stale.current_runtime_python``), not a possibly stale ``sys.executable``."""
     try:
         from . import locks as _locks
 
@@ -656,7 +655,8 @@ def _ensure_status_monitor() -> bool:
                     return True
     except Exception:
         pass
-    return _spawn_detached([sys.executable, "-m", "agent_worktrees", "status-monitor"])
+    from . import status_monitor_reap_stale as _smrs
+    return _spawn_detached([_smrs.current_runtime_python(), "-m", "agent_worktrees", "status-monitor"])
 
 
 def _restart_status_monitor() -> dict:

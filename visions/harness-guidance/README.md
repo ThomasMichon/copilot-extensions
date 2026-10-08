@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-02
+- **Last revised:** 2026-10-08
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -104,6 +104,11 @@ without copying it into each repository or erasing repository-owned overrides.
 Always-on context should be measurable by source and category so repositories,
 plugins, and operators can make deliberate tradeoffs within a shared budget.
 Injected kernels should carry a stable plugin owner marker.
+
+Context-budget excess should remain attributable through periodic auditing,
+not prevent otherwise-safe local guidance from reaching a session. Size
+accounting must not silently omit sources or substitute missing guidance for a
+budget warning.
 
 ### resume-stable-context
 
@@ -234,6 +239,11 @@ hook-capable path). A fallback a stale leftover local artifact can
 silently outrank is not actually safe, so precedence between the two must
 be decided by stable content provenance (e.g. a declared version), never
 by the local artifact's mere existence or render recency.
+
+Applicable worktree and session-creation boundaries should establish that
+local guidance is available before the agent begins loading instructions. Session-start
+should repair missing or stale local guidance as a backup, not be the sole
+delivery opportunity on a path that can prepare it earlier.
 
 ### ambient-delivery-fails-open
 

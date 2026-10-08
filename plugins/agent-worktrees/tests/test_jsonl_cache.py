@@ -1,15 +1,12 @@
-"""Tests for :mod:`jsonl_cache` -- the per-process memoization layer for
-append-only JSONL log reads (``activity.read_events`` / ``handoff_trace.
-read_trace``).
-
-Mirrors ``test_record_cache.py``'s miss/hit and invalidation coverage, scoped
-to a plain parsed ``list[dict]`` rather than a ``WorktreeRecord``.
-"""
+"""Incremental lifecycle-log correctness and append-heavy work bounds."""
 
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,166 +20,273 @@ def _clear_cache():
     jsonl_cache.clear()
 
 
-def _write_lines(path: Path, lines: list[str]) -> None:
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def _append(path: Path, raw: bytes) -> None:
+    with path.open("ab") as handle:
+        handle.write(raw)
 
 
-def _line_count_parser(calls: list[Path]):
-    def _parser(path: Path) -> list[str]:
-        calls.append(path)
-        if not path.exists():
-            return []
-        return path.read_text(encoding="utf-8").splitlines()
-
-    return _parser
-
-
-def _dict_parser(calls: list[Path]):
-    def _parser(path: Path) -> list[dict]:
-        calls.append(path)
-        if not path.exists():
-            return []
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
-
-    return _parser
-
-
-def test_cached_parse_returns_the_cache_s_own_list_by_reference(tmp_path: Path):
-    """jsonl_cache's documented "Mutation isolation invariant": unlike
-    ``record_cache.cached_load``, this module does NOT deep-copy on every
-    hit (that would reintroduce an O(log size) cost on every cache hit for
-    a 90k-line log, defeating the point) -- it returns its cached list by
-    reference, and its own callers (``activity.read_events``,
-    ``handoff_trace.read_trace``) are responsible for copying only the
-    small, bounded subset they actually return. A caller of THIS function
-    directly must not mutate what it gets back in place."""
+def test_unchanged_snapshot_reuses_read_only_values(tmp_path, monkeypatch):
     path = tmp_path / "log.jsonl"
-    path.write_text('{"event": "a"}\n', encoding="utf-8")
-    calls: list[Path] = []
-    parser = _dict_parser(calls)
-
-    first = jsonl_cache.cached_parse(path, parser)
-    second = jsonl_cache.cached_parse(path, parser)
-    assert first is second, "a cache hit returns the identical cached list object"
+    path.write_bytes(b'{"event":"a"}\n')
+    first = jsonl_cache.read_jsonl(path)
+    monkeypatch.setattr(jsonl_cache, "_read_snapshot", lambda *args: pytest.fail("cache miss"))
+    assert jsonl_cache.read_jsonl(path) is first
 
 
-def test_miss_then_hit_does_not_reparse(tmp_path: Path):
+def test_append_work_is_linear_in_new_bytes_not_history(tmp_path, monkeypatch):
     path = tmp_path / "log.jsonl"
-    _write_lines(path, ["a", "b"])
-    calls: list[Path] = []
-    parser = _line_count_parser(calls)
+    line = b'{"event":"existing","nested":{"value":123}}\n'
+    path.write_bytes(line * 100_000)
+    original = jsonl_cache.read_jsonl(path)
+    history = jsonl_cache._cache[(str(path), "strict")].complete
+    reads = []
+    parses = []
+    read = jsonl_cache._read_snapshot
+    loads = json.loads
 
-    first = jsonl_cache.cached_parse(path, parser)
-    second = jsonl_cache.cached_parse(path, parser)
-    assert first == second == ["a", "b"]
-    assert len(calls) == 1, "second call must be a cache hit, not a re-parse"
+    def counted_read(handle, offset, size):
+        reads.append(size - offset)
+        return read(handle, offset, size)
+
+    def counted_loads(raw):
+        parses.append(raw)
+        return loads(raw)
+
+    monkeypatch.setattr(jsonl_cache, "_read_snapshot", counted_read)
+    monkeypatch.setattr(jsonl_cache.json, "loads", counted_loads)
+    for i in range(20):
+        _append(path, line)
+        snapshot = jsonl_cache.read_jsonl(path)
+        assert len(snapshot) == 100_001 + i
+        assert jsonl_cache._cache[(str(path), "strict")].complete is history
+        assert snapshot.records is history
+        assert len(original) == 100_000
+    assert reads == [len(line)] * 20
+    assert len(parses) == 20
 
 
-def test_file_growth_invalidates_the_cache(tmp_path: Path):
-    """The dominant real shape for these two logs: append-only growth."""
+@pytest.mark.parametrize("initial", [b'{"event":"part', b'{"event":"valid"}'])
+def test_unterminated_record_is_revisited_without_loss_or_duplicates(tmp_path, initial):
     path = tmp_path / "log.jsonl"
-    _write_lines(path, ["a"])
-    calls: list[Path] = []
-    parser = _line_count_parser(calls)
+    path.write_bytes(b'{"event":"first"}\n' + initial)
+    first = jsonl_cache.read_jsonl(path)
+    assert first[0]["event"] == "first"
+    ending = b'ial"}\n' if initial.endswith(b"part") else b'\n'
+    _append(path, ending + b'{"event":"last"}\n')
+    assert [e["event"] for e in jsonl_cache.read_jsonl(path)] == [
+        "first", "partial" if initial.endswith(b"part") else "valid", "last",
+    ]
+    assert first[0]["event"] == "first"
 
-    first = jsonl_cache.cached_parse(path, parser)
-    assert first == ["a"]
-    _write_lines(path, ["a", "b"])
-    second = jsonl_cache.cached_parse(path, parser)
-    assert second == ["a", "b"]
-    assert len(calls) == 2, "the append's size change must force a re-parse"
 
-
-def test_file_rewrite_same_size_is_not_guaranteed_to_invalidate(tmp_path: Path):
-    """Documents the (mtime_ns, size) invalidation key's one known gap (shared
-    with ``record_cache``): a same-second, same-size in-place rewrite can
-    alias the stamp on a filesystem with coarse mtime resolution. Neither
-    cache claims to cover that case; real callers only ever append."""
+def test_partial_utf8_at_eof_completes_on_append(tmp_path):
     path = tmp_path / "log.jsonl"
-    _write_lines(path, ["aa"])
-    calls: list[Path] = []
-    parser = _line_count_parser(calls)
-    jsonl_cache.cached_parse(path, parser)
+    path.write_bytes(b'{"event":"\xe2')
+    assert list(jsonl_cache.read_jsonl(path)) == []
+    _append(path, b'\x82\xac"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "\u20ac"}]
+
+
+def test_same_stamp_atomic_replacement_invalidates_without_reader_signal(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "old"}]
+    stamp = path.stat()
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_bytes(b'{"event":"new"}\n')
+    os.utime(replacement, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    replacement.replace(path)
+    assert path.stat().st_size == stamp.st_size
+    assert path.stat().st_mtime_ns == stamp.st_mtime_ns
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "new"}]
+
+
+def test_delete_then_recreate_does_not_inherit_events(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    jsonl_cache.read_jsonl(path)
+    path.unlink()
+    assert list(jsonl_cache.read_jsonl(path)) == []
+    path.write_bytes(b'{"event":"new"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "new"}]
+
+
+@pytest.mark.parametrize("new", [b'{}\n', b'{"event":"new"}\n'])
+def test_truncation_or_same_size_rewrite_resets_reader(tmp_path, new):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    jsonl_cache.read_jsonl(path)
+    old = path.stat()
+    path.write_bytes(new)
+    os.utime(path, ns=(old.st_atime_ns, old.st_mtime_ns + 1_000_000))
+    assert list(jsonl_cache.read_jsonl(path)) == [json.loads(new)]
+
+
+def test_concurrent_append_cannot_extend_this_read_past_opening_size(tmp_path, monkeypatch):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"first"}\n')
+    read = jsonl_cache._read_snapshot
+    calls = []
+
+    def append_before_read(handle, offset, size):
+        calls.append(size)
+        _append(path, b'{"event":"next"}\n')
+        return read(handle, offset, size)
+
+    monkeypatch.setattr(jsonl_cache, "_read_snapshot", append_before_read)
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "first"}]
+    monkeypatch.setattr(jsonl_cache, "_read_snapshot", read)
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "first"}, {"event": "next"}]
     assert len(calls) == 1
 
 
-def test_missing_file_is_not_cached_as_a_permanent_empty_result(tmp_path: Path):
-    path = tmp_path / "missing.jsonl"
-    calls: list[Path] = []
-    parser = _line_count_parser(calls)
-
-    first = jsonl_cache.cached_parse(path, parser)
-    assert first == []
-    _write_lines(path, ["a"])
-    second = jsonl_cache.cached_parse(path, parser)
-    assert second == ["a"]
-    assert len(calls) == 2, "a file created after a missing-file miss must be read"
-
-
-def test_clear_drops_every_entry(tmp_path: Path):
+def test_replacement_between_stat_and_open_uses_opened_identity(tmp_path, monkeypatch):
     path = tmp_path / "log.jsonl"
-    _write_lines(path, ["a"])
-    calls: list[Path] = []
-    parser = _line_count_parser(calls)
-    jsonl_cache.cached_parse(path, parser)
+    path.write_bytes(b'{"event":"first"}\n')
+    jsonl_cache.read_jsonl(path)
+    _append(path, b'{"event":"second"}\n')
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_bytes(b'{"event":"replacement"}\n')
+    original_open = Path.open
+    replaced = False
+
+    def racing_open(self, *args, **kwargs):
+        nonlocal replaced
+        if self == path and not replaced:
+            replaced = True
+            replacement.replace(path)
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", racing_open)
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "replacement"}]
+
+
+def test_decode_policy_isolated_and_malformed_lines_skipped(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'not json\n{"event":"ok","value":"a\xe2\x80\xa8b"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "ok", "value": "a\u2028b"}]
+    _append(path, b'{"event":"bad \xff"}\n')
+    with pytest.raises(UnicodeDecodeError):
+        jsonl_cache.read_jsonl(path)
+    assert jsonl_cache.read_jsonl(path, errors="replace")[-1]["event"] == "bad \ufffd"
+
+
+def test_cursors_are_bounded_and_explicitly_invalidated(tmp_path, monkeypatch):
+    monkeypatch.setattr(jsonl_cache, "_MAX_FILES", 2)
+    paths = [tmp_path / f"{i}.jsonl" for i in range(3)]
+    for path in paths:
+        path.write_bytes(b'{}\n')
+        jsonl_cache.read_jsonl(path)
+    assert len(jsonl_cache._cache) == 2
+    assert (str(paths[0]), "strict") not in jsonl_cache._cache
+    jsonl_cache.invalidate(paths[1])
+    assert len(jsonl_cache._cache) == 1
     jsonl_cache.clear()
-    jsonl_cache.cached_parse(path, parser)
-    assert len(calls) == 2, "clear() must force the next call to re-parse"
+    assert not jsonl_cache._cache
 
 
-def test_invalidate_drops_only_the_given_path(tmp_path: Path):
-    path_a = tmp_path / "a.jsonl"
-    path_b = tmp_path / "b.jsonl"
-    _write_lines(path_a, ["a"])
-    _write_lines(path_b, ["b"])
-    calls_a: list[Path] = []
-    calls_b: list[Path] = []
-    jsonl_cache.cached_parse(path_a, _line_count_parser(calls_a))
-    jsonl_cache.cached_parse(path_b, _line_count_parser(calls_b))
-
-    jsonl_cache.invalidate(path_a)
-    jsonl_cache.cached_parse(path_a, _line_count_parser(calls_a))
-    jsonl_cache.cached_parse(path_b, _line_count_parser(calls_b))
-    assert len(calls_a) == 2, "the invalidated path must re-parse"
-    assert len(calls_b) == 1, "an unrelated path's cache entry must be untouched"
-
-
-def test_invalidate_a_never_cached_path_is_a_noop(tmp_path: Path):
-    jsonl_cache.invalidate(tmp_path / "never-read.jsonl")  # must not raise
-
-
-def test_without_invalidate_an_aliased_stamp_would_return_stale_data(tmp_path: Path):
-    """The gap ``invalidate()`` exists to close: a cache entry whose
-    stamp happens to match the CURRENT file's real stamp is
-    indistinguishable from "unchanged" to ``cached_parse`` alone, even
-    when the file's actual content differs -- a real caller
-    (``activity._prune()`` rewriting ``activity.jsonl`` in place,
-    ``handoff_trace.remove_trace()`` + a reused worktree id recreating the
-    same path) must invalidate explicitly after a same-path replace/
-    recreate rather than rely on the stamp to always differ. The stamp's
-    own device+inode component makes a real occurrence of this vanishingly
-    rare (see jsonl_cache's "Cross-process safety" note), but a forced
-    collision still demonstrates why ``invalidate()`` exists as a backstop."""
+def test_provisional_eof_view_does_not_copy_or_extend_prior_snapshot(tmp_path):
     path = tmp_path / "log.jsonl"
-    _write_lines(path, ["aa"])
-    calls: list[Path] = []
-    parser = _line_count_parser(calls)
-    jsonl_cache.cached_parse(path, parser)
+    path.write_bytes(b'{"event":"first"}\n{"event":"provisional"}')
+    first = jsonl_cache.read_jsonl(path)
+    storage = jsonl_cache._cache[(str(path), "strict")].complete
+    assert first.records is storage
+    assert len(first.tail) == 1
+    _append(path, b'\n{"event":"last"}\n')
+    second = jsonl_cache.read_jsonl(path)
+    assert second.records is storage
+    assert list(first) == [{"event": "first"}, {"event": "provisional"}]
+    assert list(second) == [
+        {"event": "first"}, {"event": "provisional"}, {"event": "last"},
+    ]
+    assert second[-1] == {"event": "last"}
+    assert second[1:] == [{"event": "provisional"}, {"event": "last"}]
+    with pytest.raises(IndexError):
+        _ = first[2]
+    with pytest.raises(IndexError):
+        _ = first[-3]
 
-    _write_lines(path, ["bb"])
-    # Force a cache entry stamped against the file's CURRENT real identity
-    # but holding the OLD content -- simulating the collision a forced
-    # same-path replace could in principle produce, which ``cached_parse``
-    # alone cannot detect.
-    with jsonl_cache._cache_lock:
-        jsonl_cache._cache[str(path)] = (jsonl_cache._stamp(path), ["aa"])
 
-    aliased = jsonl_cache.cached_parse(path, parser)
-    assert aliased == ["aa"], "a stamp collision alone returns the stale cached content"
-    assert len(calls) == 1, "that was a false HIT -- the parser must not have been called again"
+def test_failed_tail_decode_never_changes_shared_history_or_cursor(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    first = jsonl_cache.read_jsonl(path)
+    key = str(path), "strict"
+    original = jsonl_cache._cache[key]
+    _append(path, b'{"event":"new"}\n{"event":"bad \xff"}')
+    for _ in range(3):
+        with pytest.raises(UnicodeDecodeError):
+            jsonl_cache.read_jsonl(path)
+        assert jsonl_cache._cache[key] is original
+        assert original.offset == len(b'{"event":"old"}\n')
+        assert original.complete == [{"event": "old"}]
+        assert list(first) == [{"event": "old"}]
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_bytes(b'{"event":"old"}\n{"event":"new"}\n{"event":"fixed"}\n')
+    replacement.replace(path)
+    assert list(jsonl_cache.read_jsonl(path)) == [
+        {"event": "old"}, {"event": "new"}, {"event": "fixed"},
+    ]
 
-    jsonl_cache.invalidate(path)
-    fixed = jsonl_cache.cached_parse(path, parser)
-    assert fixed == ["bb"], "invalidate() must force a real re-parse despite the aliased stamp"
-    assert len(calls) == 2
 
+def test_excessively_nested_json_does_not_hide_later_records(tmp_path, monkeypatch):
+    """Exercise decoder failure without assuming a CPython C recursion limit."""
+    path = tmp_path / "log.jsonl"
+    nested = b"[[0]]"
+    real_loads = json.loads
+    rejected = []
+
+    def loads(raw):
+        if raw == nested.decode("ascii"):
+            rejected.append(raw)
+            raise RecursionError("simulated JSON decoder recursion limit")
+        return real_loads(raw)
+
+    monkeypatch.setattr(jsonl_cache, "json", SimpleNamespace(loads=loads))
+    path.write_bytes(b'{"event":"before"}\n' + nested + b'\n{"event":"after"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [
+        {"event": "before"}, {"event": "after"},
+    ]
+    assert rejected == [nested.decode("ascii")]
+
+
+def test_oversized_integer_does_not_hide_later_records(tmp_path):
+    limit = getattr(sys, "get_int_max_str_digits", lambda: 0)()
+    if not limit:
+        pytest.skip("Integer-string conversion limit is not enabled")
+    path = tmp_path / "log.jsonl"
+    oversized = b'{"number":' + b"1" * (limit + 1) + b"}"
+    path.write_bytes(b'{"event":"before"}\n' + oversized + b'\n{"event":"after"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [
+        {"event": "before"}, {"event": "after"},
+    ]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows handle identity")
+def test_zero_fstat_identity_still_hits_and_detects_larger_replacement(tmp_path, monkeypatch):
+    real_fstat = os.fstat
+
+    def zero_identity(fd):
+        stat = real_fstat(fd)
+        return SimpleNamespace(
+            st_dev=0, st_ino=0, st_mtime_ns=stat.st_mtime_ns, st_size=stat.st_size,
+        )
+
+    monkeypatch.setattr(jsonl_cache, "os", SimpleNamespace(fstat=zero_identity))
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    first = jsonl_cache.read_jsonl(path)
+    assert jsonl_cache.read_jsonl(path) is first
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_bytes(b'{"event":"new-and-larger"}\n')
+    replacement.replace(path)
+    assert list(jsonl_cache.read_jsonl(path)) == [{"event": "new-and-larger"}]
+    assert list(first) == [{"event": "old"}]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ctypes lifetime")
+def test_windows_identity_binding_and_pointer_type_are_reused():
+    first = jsonl_cache._windows_identity_api()
+    for _ in range(100):
+        assert jsonl_cache._windows_identity_api() is first
+    assert jsonl_cache._windows_identity_api.cache_info().currsize == 1

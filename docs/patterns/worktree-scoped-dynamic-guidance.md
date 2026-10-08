@@ -231,6 +231,25 @@ tier when something fresher is actually available (see the precedence note
 above) -- a floor a stale local artifact can silently stand on top of is not
 a floor at all.
 
+### 6. Local delivery and context auditing are separate
+
+The local cache installs complete content from every safely resolved enabled
+source even when its template, rendered file, or aggregate exceeds the
+configured guidance budget. These excesses are warning findings with source
+and byte-count attribution, not admission failures or reasons to erase existing
+guidance. Invalid or unreadable budget configuration also warns and retains
+default size accounting; it does not prevent a safe local render.
+
+The renderer retains separate safety limits for bounded input/provenance reads,
+safe paths, source identity, tracked destinations and foreign files. Oversized
+local guidance remains refreshable and reconcilable within those safety bounds.
+Those protections are not context-budget enforcement.
+
+The checked-in `scan`/`sync` path keeps its independent budget findings and
+reviewed transaction policy. Existing periodic audits can report budget debt
+without making a worktree's immediate guidance delivery depend on that audit
+or on a projection-sync PR.
+
 ## Rationale
 
 This does not compete with

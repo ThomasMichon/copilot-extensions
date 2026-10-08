@@ -80,7 +80,9 @@ COPILOT_EXTENSIONS_GUARD_BASE=origin/dev "${PY[@]}" "$ROOT/tools/check-no-intern
 # (or its shrink-only grandfathered ceiling, for pre-existing offenders) --
 # a componentization failure (queue.py's ~7,200 lines) had no automated guard
 # before this. See tools/check-module-size.py and CONTRIBUTING.md § Code Style.
-"${PY[@]}" "$ROOT/tools/check-module-size.py"
+# Attribute growth to this contribution; the scheduled full-tree guard owns
+# unrelated trunk drift, just as the PR-time CI guard does.
+"${PY[@]}" "$ROOT/tools/check-module-size.py" --changed-since origin/dev
 # Block check-in of oversized files (a generous cap for images, a tight cap
 # for everything else, and an outright ban on source maps/raw diffs) -- the
 # guard the main-history-rewrite effort's ~300MB of accumulated

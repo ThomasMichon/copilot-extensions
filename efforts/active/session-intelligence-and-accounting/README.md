@@ -248,3 +248,59 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   compression, all-session derivation/catalog/accounting (#5677), fleet daily
   aggregation, consumer vendoring, and release-backed adoption (#5678) remain
   fully outstanding. The umbrella #5665 stays open.
+
+### 2026-10-08 - Process-log sync publication (filesystem targets) merged
+- Wired `iter_process_log_refs`'s sibling root-pinning primitives into
+  `session-sync`: `sync.process_logs.enabled` (opt-in) now publishes
+  `<sync_source>/logs/` alongside session-state, for `local`/`onedrive`
+  targets only, and only on an unfiltered sync pass (a process log isn't
+  scoped per-repo the way session-state is, so a repo-scoped pass skips
+  publication entirely rather than attempting to filter it -- admission
+  fencing for that case is an explicit, named follow-up, not silently
+  approximated).
+- Opened PR #5710. Copilot review ran six rounds, COMMENTED throughout
+  (verdict tier softened from "Changes recommended" to "Needs a closer
+  look" by the final round), closing a real progression of findings:
+  POSIX root-pinning for the process-log directory walk (reusing
+  `process_logs.py`'s own primitives, now promoted to public:
+  `supports_dir_fd`/`open_root_dir`/`open_regular_at`); rotation/deletion
+  tolerance (a vanished or rotated file is a skipped candidate, never a
+  push failure); a fd-based metadata capture to stop a truncate-in-place
+  rotation from landing stale bytes under the replacement's fresh mtime;
+  rename-based rotation detection (the fd-only check above can't see a
+  rename, since the descriptor still refers to the original inode); a
+  genuine data-loss bug the rename-detection fix itself introduced --
+  caught by the *same* review process one round later and fixed before
+  merge (revalidation now runs before the atomic commit, never after, so
+  a rejection can never destroy a previously-synced, still-good
+  destination copy); a containment-escape hardening of the now-public
+  `open_regular_at` (reject any non-bare-filename argument itself, not
+  relying on callers to prefilter); and persisted `sync-meta.json` health
+  reconciliation (a process-log failure or deferral now downgrades the
+  session-state leg's already-written `ok` status to `partial`, preserving
+  its other recorded fields rather than resetting them).
+- Two HIGH findings were explicitly declined, with reasoning recorded in
+  both the PR description and the affected functions' own docstrings:
+  neither `open_root_dir` (source-read side) nor the destination-write
+  side pins every *ancestor* path component via dir_fd -- both protect
+  only the directly named, configured path itself, matching this
+  already-merged module's existing, pre-PR posture everywhere else
+  (`_existing_real_directory`'s own validation has the identical
+  property). Fully closing either needs a broader dir_fd-anchored rework
+  of this module's whole directory-validation approach, shared by code
+  this PR doesn't otherwise touch -- out of scope for this bounded slice,
+  and would also reject a legitimate system with an intentionally
+  symlinked ancestor (e.g. a relocated `$HOME`). A related Medium
+  (composing one clearable status across both transfer legs, rather than
+  requiring explicit operator investigation to clear a `partial`) was
+  also declined as a bounded follow-up.
+- Self-merged via maintainer bypass after the sixth round confirmed no
+  new substantive finding, per CONTRIBUTING.md's "actual bar" (zero
+  Medium/High *new* findings), not an unbounded chase of every comment.
+  `pr-complete` reconciled this worktree onto `origin/dev`.
+- This closes only the "extend configured sync" bullet's filesystem-
+  targets/unfiltered-passes slice. SSH/ingest target support, repo-scoped
+  admission fencing, scheduled settled-log ZIP compaction, and unified
+  source-root/CodeSpace/rescue discovery (explicitly owned by a
+  coordinating peer per the private effort's journal) all remain
+  outstanding. The umbrella #5665 stays open.

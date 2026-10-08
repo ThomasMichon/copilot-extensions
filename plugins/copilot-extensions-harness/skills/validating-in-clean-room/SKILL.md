@@ -111,6 +111,16 @@ Notes:
 - **Never write run artifacts into the repo tree.** Results land in a machine-local
   dir outside the repo (the run prints its exact path). The rig may run from an
   anchor checkout; per-run state in a repo is a hazard.
+- **`gh` auth needs an explicit persisted login for any scenario spanning
+  multiple separate `docker exec` calls** (a Tier-E orchestrator session's own
+  tool calls, a multi-phase `setup.sh`/`post_check.sh` pair, etc.). The
+  injected `COPILOT_GITHUB_TOKEN` env var is only visible to the single
+  process it's set for -- it does NOT survive into a later, separate `docker
+  exec` invocation. Run `gh auth login --with-token <<<"$COPILOT_GITHUB_TOKEN"`
+  (or equivalent) once early in `setup.sh`, check its real exit status, and
+  rely on the persisted `~/.config/gh/hosts.yml` credential for every later
+  phase -- never assume a bare env-var export alone is enough once more than
+  one `docker exec` is involved.
 
 Parameterize the reference scenario for a quick single-plugin check via
 PowerShell params (`-MarketplaceRepo`, `-MarketplaceName`, `-PrimaryPlugin`,
@@ -211,6 +221,7 @@ Under `tools/clean-room/scenarios/` today:
 | `agent-vault-eval` | **E**/F2 | **The reference agent-driven doc-audit:** install agent-vault solo, then drive Copilot under literal mode with "set it up and list my vault, per its docs" — judged (via `clean-room-judge`) on whether the docs carry a fresh agent to an affirmative ready state **or** an honest STOP at the documented `.kdbx`/`KPDB` prerequisite, with no self-heal. |
 | `agent-dispatch-worker-lifecycle-eval` | **E**/F2 | **CLI-capable worker lifecycle (happy path):** agent-dispatch solo, one real task QUEUED via the CLI in a git-init'd worker worktree, then drive Copilot with the Phase 2-style event-descriptor seed (discovery-first `claim`, since the box has no worktree identity) — judged on whether the worker charters carry a fresh agent through claim → evaluate → start → progress → complete using ONLY structured `agent-dispatch` calls, with an accurate result-ref. Paired with `agent-dispatch-worker-lifecycle-eval-cpfail` for the injected-failure variant. |
 | `agent-dispatch-worker-lifecycle-eval-cpfail` | **E**/F2 | **Injected control-plane failure companion** to `agent-dispatch-worker-lifecycle-eval`: identical starting state, except the coordinator is deliberately made unreachable before the agent's turn — judged on whether the agent follows the operating-procedures charter's fail-fast-on-control-plane-failure contract (stop immediately, report plainly, no self-repair) rather than hammering or fabricating progress. |
+| `agent-dispatch-recipe-loops-eval` | **E**/F2 | **Live-forge recipe-library validation (name-free; fixture repo injected via required `CR_FIXTURE_REPO`/`CR_FIXTURE_PRODUCER_LOGIN` env):** installs agent-dispatch plus its two genuine documented headless-embody dependencies (agent-bridge, agent-worktrees), clones a real operator-supplied scratch repo that already carries all four named global recipes' declarations (`backlog-triager`, `issue-reproducer`, `effort-builder`, `effort-driver`) and real fixture issues/efforts, then drives an ORCHESTRATOR session that registers the repo, confirms the declared profile set, and supervises/reports -- never performing any recipe's own work itself (that is agent-dispatch's own spawned headless workers' job). Surfaced three real infra gaps the repository-issue-loop adoption docs leave implicit: `gh` auth must be persisted via `gh auth login --with-token` (a bare env-var export does not survive the orchestrator's separate `docker exec` tool calls); a headless lane's default `--headless-agent` ("task-worker") must be pre-registered with agent-bridge; and `agent-worktrees` itself (not just agent-bridge) is a genuine spawn-path dependency (`embody.py`'s `create_worktree()` always shells out to it) whose registered project name must match `embody.project_for_task()`'s own fallback (the task's `repo` field's trailing path segment) when the forge-bare `owner/name` form never matches agent-worktrees' own host-qualified canonical remote. |
 | `suite-assembly-eval` | **E**/F1 | **Suite self-assembly from bare (the public "extreme"):** install the harness core (agent-worktrees base + agent-bridge), then drive "get the suite working per its docs, then register this repo and create a worktree" — judged on whether the suite's own docs carry a fresh agent through the real `setup → register → create` assembly via documented commands (no hand-edited `projects.yaml` / raw `git worktree`). Surfaced #691 (agent-worktrees doesn't self-provision). |
 
 **The matrix to build toward** (per the vision): each plugin **solo** *(now

@@ -26,6 +26,26 @@ def _is_log_name(name: str) -> bool:
     )
 
 
+def is_process_log_candidate(name: str) -> bool:
+    """Whether *name* (a bare filename, not a path) is worth transferring as
+    process-log evidence: a live or gzip ``process-*.log`` file, or a
+    ``.zip`` archive that may contain flat ``process-*.log`` members.
+
+    A transfer-time predicate, not a validity check: unlike
+    :func:`iter_process_log_refs`, this never opens the file, so a ``.zip``
+    with no supported members (or none at all) still passes here -- the
+    reader's own enumeration is what yields zero refs for it, not this.
+
+    Rejects any ``name`` containing a path separator (POSIX ``/`` or
+    Windows ``\\``) outright -- a bare filename is the documented contract,
+    and without this check a path-like value such as ``../outside.zip``
+    would still satisfy the ``.zip`` branch's plain ``str.endswith`` test.
+    """
+    if "/" in name or "\\" in name:
+        return False
+    return _is_log_name(name.removesuffix(".gz")) or name.endswith(".zip")
+
+
 @contextmanager
 def _open_regular(path: Path) -> Iterator[BinaryIO]:
     before = path.lstat()
@@ -95,10 +115,10 @@ class ProcessLogRef:
             raise ValueError("max_line_bytes must be a positive integer")
         if max_line_bytes <= 0:
             raise ValueError("max_line_bytes must be a positive integer")
-        if self.verified_root is not None and _supports_dir_fd():
+        if self.verified_root is not None and supports_dir_fd():
             with (
-                _open_root_dir(self.verified_root) as root_fd,
-                _open_regular_at(root_fd, self.path.name) as raw,
+                open_root_dir(self.verified_root) as root_fd,
+                open_regular_at(root_fd, self.path.name) as raw,
             ):
                 yield from self._read_opened(raw, max_line_bytes)
         else:
@@ -133,21 +153,44 @@ def _lines(stream: BinaryIO, max_line_bytes: int) -> Iterator[str]:
         yield line.decode("utf-8")
 
 
-def _supports_dir_fd() -> bool:
-    # POSIX only -- mirrors the directory-fd gate `_fsync_directory` already
-    # uses elsewhere in this plugin's sync targets. Windows has no equivalent
-    # "openat" primitive, so the root here is re-resolved by path instead; see
-    # `iter_process_log_refs`'s docstring for the resulting platform gap.
+def supports_dir_fd() -> bool:
+    """Whether directory-fd-pinned traversal (``open_root_dir``/
+    ``open_regular_at``) is available on this platform.
+
+    POSIX only -- mirrors the directory-fd gate `_fsync_directory` already
+    uses elsewhere in this plugin's sync targets. Windows has no equivalent
+    "openat" primitive, so the root here is re-resolved by path instead; see
+    `iter_process_log_refs`'s docstring for the resulting platform gap.
+    """
     return os.name != "nt"
 
 
 @contextmanager
-def _open_root_dir(log_root: Path) -> Iterator[int]:
+def open_root_dir(log_root: Path) -> Iterator[int]:
     """Open ``log_root`` once and verify its identity, so later per-entry
     traversal is bound to this directory handle rather than re-resolving the
     root path -- a swap of the final root component (e.g. onto a symlink)
     between the initial check and later entry opens would otherwise let an
-    attacker redirect enumeration/reads outside the configured root."""
+    attacker redirect enumeration/reads outside the configured root.
+
+    Scope, stated explicitly rather than left implicit: ``O_NOFOLLOW``
+    rejects only a symlinked *final* component of ``log_root`` itself. Like
+    every other path-based open in this plugin (e.g.
+    ``filesystem._existing_real_directory``), the kernel's ordinary path
+    resolution still silently follows a symlink at any *ancestor* component
+    (e.g. replacing ``~/.copilot`` itself, several components above the
+    configured ``logs`` root). Closing that would need a full dir_fd-pinned
+    walk from a trusted anchor down to ``log_root`` -- and would also then
+    reject a legitimate system where an ancestor is itself an intentional
+    symlink (e.g. a relocated ``$HOME``), trading one failure mode for
+    another. The threat this function defends against is specifically a
+    swap of the *named, configured* root -- the component under direct
+    attacker or race control here -- not a compromised ancestor directory,
+    which is out of scope for this primitive.
+
+    Public (not module-private) because this root-pinning primitive is
+    shared with ``agent_logger.sync.targets.filesystem``'s process-log
+    publication path, not only ``iter_process_log_refs`` below."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
     try:
         fd = os.open(log_root, flags)
@@ -173,9 +216,21 @@ def _open_root_dir(log_root: Path) -> Iterator[int]:
 
 
 @contextmanager
-def _open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
+def open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
     """Open a regular file by name within a pinned, already-verified directory
-    handle, refusing to follow a symlinked entry."""
+    handle, refusing to follow a symlinked entry.
+
+    *name* must be a bare filename -- no path separator, and never
+    absolute. This is enforced here, not only documented: ``os.stat``/
+    ``os.open`` with ``dir_fd`` silently ignore ``dir_fd`` entirely when
+    *name* is itself absolute (POSIX semantics), and a ``../``-containing
+    value can still traverse outside the pinned directory even when
+    relative -- either would let a public caller escape the pinned root
+    this function exists to enforce, rather than relying on every caller
+    to prefilter the value correctly.
+    """
+    if "/" in name or "\\" in name or Path(name).is_absolute():
+        raise ValueError(f"process-log evidence name must be a bare filename: {name!r}")
     before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
         raise ValueError(f"process-log evidence is not a regular file: {name}")
@@ -218,15 +273,15 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
     unaffected by an intervening ``chdir()``.
     """
     log_root = log_root.absolute()
-    if _supports_dir_fd():
-        with _open_root_dir(log_root) as root_fd:
+    if supports_dir_fd():
+        with open_root_dir(log_root) as root_fd:
             entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)
             for entry in entries:
                 name = entry.name
                 if _is_log_name(name.removesuffix(".gz")):
                     yield ProcessLogRef(log_root / name, verified_root=log_root)
                 elif name.endswith(".zip"):
-                    with _open_regular_at(root_fd, name) as raw, zipfile.ZipFile(raw) as archive:
+                    with open_regular_at(root_fd, name) as raw, zipfile.ZipFile(raw) as archive:
                         # Resolve member names while the archive is still
                         # open, then close both the ZIP and its file
                         # descriptor before yielding -- yielding mid-`with`

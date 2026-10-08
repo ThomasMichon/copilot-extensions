@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.9-dev1","renderedBytes":1451,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":654,"templateSha256":"e5b6cc8bdf06330916e726021e615d6f2a533df5f2b89d4ce9103f4ed0c6ca3d","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.10-dev1","renderedBytes":1452,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":654,"templateSha256":"e5b6cc8bdf06330916e726021e615d6f2a533df5f2b89d4ce9103f4ed0c6ca3d","version":1} -->
 
 > If `local-cache-catchall.local.instructions.md` exists here, compare
 > `pluginVersion` and prefer whichever is newer. On a tie,

@@ -535,7 +535,7 @@ def test_render_local_cache_is_idempotent_and_reports_unchanged(
     assert local_path.stat().st_mtime_ns == mtime_after_first
 
 
-def test_render_local_cache_enforces_per_file_and_aggregate_budget(
+def test_render_local_cache_warns_without_omitting_per_file_and_aggregate_content(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
@@ -549,9 +549,16 @@ def test_render_local_cache_enforces_per_file_and_aggregate_budget(
     file_result = projections.render_local_cache(repo, lambda: [oversized])
     assert any(
         finding.check == "projection-local-cache-budget"
+        and finding.severity == projections.WARNING
+        and str(projections.MAX_PROJECTION_BYTES) in finding.message
         for finding in file_result.findings
     )
-    assert file_result.changed == []
+    assert file_result.blocking == 0
+    specs, _ = projections._load_specs(repo, [oversized], projections.Result("test"))
+    expected = projections.render_projection(specs[0], include_prefer_local=False)
+    local_path = repo / projections.local_sibling_destination(specs[0].destination)
+    assert local_path.read_bytes() == expected.content
+    assert str(expected.byte_count) in file_result.findings[0].message
 
     aggregate_repo = tmp_path / "aggregate-repo"
     aggregate_repo.mkdir()
@@ -570,15 +577,28 @@ def test_render_local_cache_enforces_per_file_and_aggregate_budget(
         and "aggregate" in finding.message
         for finding in aggregate_result.findings
     )
-    assert aggregate_result.changed == []
+    assert aggregate_result.blocking == 0
+    assert len(aggregate_result.changed) == len(sources)
+    specs, _ = projections._load_specs(
+        aggregate_repo, sources, projections.Result("test")
+    )
+    total = 0
+    for spec in specs:
+        expected = projections.render_projection(spec, include_prefer_local=False)
+        local_path = aggregate_repo / projections.local_sibling_destination(
+            spec.destination
+        )
+        assert local_path.read_bytes() == expected.content
+        total += expected.byte_count
+    assert any(str(total) in f.message for f in aggregate_result.findings)
 
 
-def test_render_local_cache_stops_publishing_when_budget_config_is_malformed(
+def test_render_local_cache_refreshes_when_budget_config_is_malformed(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    plugin, source = _write_plugin(tmp_path, "market", "policy")
 
     # A cache from an earlier, healthy call already exists.
     first = projections.render_local_cache(repo, lambda: [source])
@@ -593,17 +613,138 @@ def test_render_local_cache_stops_publishing_when_budget_config_is_malformed(
     assert local_path.exists()
 
     _write_budget_config(repo, {"aggregateBytes": "not-a-number"})
+    template = plugin / "instructions" / "fallback.instructions.md"
+    template.write_text(
+        template.read_text(encoding="utf-8") + "Updated useful guidance.\n",
+        encoding="utf-8",
+    )
     result = projections.render_local_cache(repo, lambda: [source])
 
-    assert any(finding.check == "projection-config" for finding in result.findings)
-    # Refuses to *publish* (refresh) anything new under a broken config --
-    # but a source that goes away entirely under this same broken config
-    # must still be reconciled, not left to override the checked-in
-    # fallback forever just because the budget couldn't be validated.
-    assert not any(
-        finding.check.startswith("projection-local-cache-budget")
-        for finding in result.findings
+    assert result.blocking == 0
+    assert any(
+        f.check == "projection-config" and f.severity == projections.WARNING
+        and "default budget" in f.message for f in result.findings
     )
+    assert result.changed == [local_path.relative_to(repo).as_posix()]
+    assert b"Updated useful guidance.\n" in local_path.read_bytes()
+
+
+def test_render_local_cache_oversized_template_refresh_and_cleanup(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin, source = _write_plugin(
+        tmp_path, "market", "policy", body="x" * (70 * 1024) + "\n"
+    )
+    first = projections.render_local_cache(repo, lambda: [source])
+    assert first.blocking == 0
+    assert first.warnings == 3  # template, rendered file, aggregate
+    local_path = repo / first.changed[0]
+    specs, _ = projections._load_specs(
+        repo, [source], projections.Result("test"),
+        template_limit=projections.MAX_LOCAL_TEMPLATE_BYTES,
+    )
+    expected = projections.render_projection(specs[0], include_prefer_local=False)
+    assert local_path.read_bytes() == expected.content
+    before_mtime = local_path.stat().st_mtime_ns
+
+    second = projections.render_local_cache(repo, lambda: [source])
+    assert second.blocking == 0
+    assert second.changed == []
+    assert second.unchanged == first.changed
+    assert second.findings == first.findings
+    assert local_path.stat().st_mtime_ns == before_mtime
+
+    template = plugin / "instructions" / "fallback.instructions.md"
+    template.write_bytes(template.read_bytes() + b"Refreshed oversized guidance.\n")
+    third = projections.render_local_cache(repo, lambda: [source])
+    assert third.blocking == 0
+    assert third.changed == first.changed
+    assert local_path.read_bytes().endswith(b"Refreshed oversized guidance.\n")
+    assert not any("foreign" in f.check for f in third.findings)
+
+    stale = projections.render_local_cache(repo, lambda: [])
+    assert stale.blocking == 0
+    assert stale.changed == first.changed
+    assert not local_path.exists()
+
+
+@pytest.mark.parametrize("config_kind", ["syntax", "shape", "oversized", "directory"])
+def test_render_local_cache_invalid_budget_still_installs_and_accounts(
+    tmp_path: Path, config_kind: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(
+        tmp_path, "market", "policy", body="x" * (13 * 1024) + "\n"
+    )
+    config_path = repo.joinpath(*projections.CONFIG_RELATIVE.parts)
+    config_path.parent.mkdir(parents=True)
+    if config_kind == "directory":
+        config_path.mkdir()
+    else:
+        content = {"syntax": b"{", "shape": b'{"maxAggregateBytes": true}',
+                   "oversized": b" " * 4097}[config_kind]
+        config_path.write_bytes(content)
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert result.blocking == 0
+    assert len(result.changed) == 1
+    assert any(
+        f.check == "projection-config" and f.severity == projections.WARNING
+        and "default budget" in f.message for f in result.findings
+    )
+    total = (repo / result.changed[0]).stat().st_size
+    assert any(
+        f.path == "<local-cache-aggregate>"
+        and str(total) in f.message
+        and str(projections.MAX_AGGREGATE_BYTES) in f.message
+        for f in result.findings
+    )
+    assert projections.scan_repository(repo).blocking > 0
+    assert projections.sync_repository(repo, [source]).blocking > 0
+
+
+def test_render_local_cache_safety_source_bound_keeps_other_safe_guidance(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _large, oversized = _write_plugin(
+        tmp_path, "market", "large",
+        body="x" * projections.MAX_LOCAL_TEMPLATE_BYTES,
+    )
+    _small, safe = _write_plugin(tmp_path, "market", "safe")
+    result = projections.render_local_cache(repo, lambda: [oversized, safe])
+    assert result.blocking == 1
+    assert any(
+        f.check == "projection-declaration" and "bounded regular" in f.message
+        for f in result.findings
+    )
+    assert result.changed == [
+        ".github/instructions/safe/fallback.local.instructions.md"
+    ]
+
+
+def test_render_local_cache_independent_of_checked_in_marker_and_sync_lock(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    checked_in = _projection(repo)
+    checked_in.write_bytes(b"Foreign checked-in guidance, without a marker.\n")
+    lock_path = repo.joinpath(*projections.LOCK_RELATIVE.parts)
+    before = checked_in.read_bytes(), lock_path.read_bytes()
+    assert projections.scan_repository(repo, [source]).blocking > 0
+    assert projections.sync_repository(repo, [source]).blocking > 0
+    with projections.repository_sync_lock(repo):
+        assert projections.sync_repository(repo, [source]).blocking > 0
+        result = projections.render_local_cache(repo, lambda: [source])
+    assert result.blocking == 0
+    assert len(result.changed) == 1
+    assert (checked_in.read_bytes(), lock_path.read_bytes()) == before
 
 
 def test_render_local_cache_reconciles_stale_siblings_even_when_budget_config_fails(
@@ -647,7 +788,7 @@ def test_render_local_cache_never_writes_the_wrong_destination_or_loads_it_unbou
         / "fallback.local.instructions.md"
     )
     local_path.parent.mkdir(parents=True)
-    oversized = b"x" * (projections.MAX_PROJECTION_BYTES + 1)
+    oversized = b"x" * (projections.MAX_LOCAL_CACHE_BYTES + 1)
     local_path.write_bytes(oversized)
 
     result = projections.render_local_cache(repo, lambda: [source])
@@ -883,7 +1024,8 @@ def test_render_local_cache_refuses_to_overwrite_a_foreign_file(
         / "fallback.local.instructions.md"
     )
     local_path.parent.mkdir(parents=True)
-    local_path.write_text("A human wrote this, not the renderer.\n", encoding="utf-8")
+    foreign = "A human wrote this, not the renderer.\n" * 200
+    local_path.write_text(foreign, encoding="utf-8")
 
     result = projections.render_local_cache(repo, lambda: [source])
 
@@ -891,10 +1033,7 @@ def test_render_local_cache_refuses_to_overwrite_a_foreign_file(
         finding.check == "projection-local-cache-foreign" for finding in result.findings
     )
     assert result.changed == []
-    assert (
-        local_path.read_text(encoding="utf-8")
-        == "A human wrote this, not the renderer.\n"
-    )
+    assert local_path.read_text(encoding="utf-8") == foreign
 
 
 def test_render_local_cache_stale_cleanup_ignores_a_marker_at_the_wrong_path(
@@ -1032,7 +1171,8 @@ def test_render_local_cache_refuses_to_write_a_git_tracked_destination(
     # Simulate the exact hazard: the *.local.instructions.md ignore rule
     # was never adopted, so this file got committed like any other.
     local_path.parent.mkdir(parents=True)
-    local_path.write_text("Accidentally committed before .gitignore existed.\n", encoding="utf-8")
+    tracked = "Accidentally committed before .gitignore existed.\n" * 200
+    local_path.write_text(tracked, encoding="utf-8")
     _git_commit_all(repo, "accidentally commit a local cache file")
 
     result = projections.render_local_cache(repo, lambda: [source])
@@ -1041,10 +1181,7 @@ def test_render_local_cache_refuses_to_write_a_git_tracked_destination(
         finding.check == "projection-local-cache-tracked" for finding in result.findings
     )
     assert result.changed == []
-    assert (
-        local_path.read_text(encoding="utf-8")
-        == "Accidentally committed before .gitignore existed.\n"
-    )
+    assert local_path.read_text(encoding="utf-8") == tracked
 
 
 def test_render_local_cache_never_deletes_a_git_tracked_stale_sibling(
@@ -1986,6 +2123,53 @@ def test_file_and_aggregate_budgets_are_blocking(tmp_path: Path) -> None:
         and "aggregate" in finding.message
         for finding in aggregate_result.findings
     )
+
+
+def test_local_cache_advisory_budgets_leave_checked_in_scan_strict(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sources = [
+        _write_plugin(
+            tmp_path, "market", f"policy-{index}", body="x" * 3700 + "\n"
+        )[1]
+        for index in range(4)
+    ]
+    specs, _ = projections._load_specs(repo, sources, projections.Result("test"))
+    rendered = [projections.render_projection(spec) for spec in specs]
+    # A checked-in oversized stack must still be audited even if a prior
+    # writer bypassed sync's admission gate.
+    for projection in rendered:
+        path = repo / projection.spec.destination
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(projection.content)
+    lock_path = repo.joinpath(*projections.LOCK_RELATIVE.parts)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_bytes(projections._canonical_json(
+        {
+            "schema": projections.LOCK_SCHEMA,
+            "version": projections.LOCK_VERSION,
+            "projections": [p.lock_entry() for p in rendered],
+        },
+        pretty=True,
+    ))
+    checked_in = [_projection(repo, f"policy-{i}") for i in range(4)]
+    before = lock_path.read_bytes(), [p.read_bytes() for p in checked_in]
+    audit = projections.scan_repository(repo, sources)
+    assert sum(f.check == "projection-budget" for f in audit.findings) == 5
+    assert audit.blocking >= 5
+    sync = projections.sync_repository(repo, sources)
+    assert sync.blocking > 0
+    assert sync.changed == []
+    local = projections.render_local_cache(repo, lambda: sources)
+    assert local.blocking == 0
+    assert len(local.changed) == 4
+    assert sum(
+        f.check == "projection-local-cache-budget"
+        and f.severity == projections.WARNING for f in local.findings
+    ) == 5
+    assert (lock_path.read_bytes(), [p.read_bytes() for p in checked_in]) == before
 
 
 def _write_budget_config(repo: Path, payload: object) -> None:

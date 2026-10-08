@@ -958,6 +958,23 @@ tracking record
 is removed, so a reused worktree id never inherits a stale predecessor's
 trace.
 
+**Bounded incremental log reads.** Activity and handoff-trace readers keep
+process-local cursors for up to 64 recently read files. A read consumes only
+the file size observed at open, so a continuously appending writer cannot keep
+that read running indefinitely. Subsequent appends decode only new bytes;
+incomplete trailing records are revisited when more bytes arrive. Fixed-length
+snapshot views share appendable history without copying earlier record references
+or changing a snapshot already being consumed. File identity comes from the open
+handle, using the native Windows file ID rather than zero-valued legacy `fstat`
+identity fields. Atomic
+replacement, truncation, and same-size modifications reset the cursor.
+Writers append or replace atomically rather than editing earlier bytes and
+then growing the same file. Public readers independently copy their final
+selected events, so caller mutations never alter cached history.
+Trace writers initialize their lock-file sentinel only after acquiring the
+advisory lock, avoiding a first-write Windows byte-lock conflict; failed trace
+appends remain best-effort but emit a diagnostic warning.
+
 **Diagnosing a stuck cutover today.** `agent-worktrees handoff-trace
 <worktree-id|session-id> [--project <name>] [--token <handoff-token>]`
 now renders the ordered 13-stage sequence from the durable

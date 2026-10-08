@@ -193,6 +193,35 @@ def test_source_symlinks_are_not_followed(tmp_path: Path) -> None:
         list(iter_process_log_refs(root))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
+def test_open_regular_at_rejects_path_like_names(tmp_path: Path) -> None:
+    """``open_regular_at`` is public -- shared with the sync path's
+    process-log publication -- so it must enforce its own documented
+    bare-filename contract itself, not merely rely on every caller to
+    prefilter: an absolute name or a `../`-containing one would otherwise
+    let `os.stat`/`os.open`'s `dir_fd` argument be silently ignored or
+    bypassed, escaping the pinned directory."""
+    from agent_logger.process_logs import open_regular_at, open_root_dir
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.log").write_bytes(b"private")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / LOG_NAME).write_bytes(b"evidence")
+
+    with open_root_dir(root) as root_fd:
+        for bad_name in (
+            str(outside / "secret.log"),  # absolute
+            "../outside/secret.log",
+            "sub/../../outside/secret.log",
+            "sub\\..\\..\\outside\\secret.log",
+        ):
+            with pytest.raises(ValueError, match="bare filename"):
+                with open_regular_at(root_fd, bad_name):
+                    pass
+
+
 @pytest.mark.parametrize("limit", [0, -1, True, 1.5])
 def test_invalid_line_limits_are_errors(tmp_path: Path, limit: int) -> None:
     ref = _write_log(tmp_path, "raw", b"data")

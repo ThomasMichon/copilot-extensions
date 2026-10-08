@@ -85,6 +85,7 @@ from pathlib import Path
 sys.modules.setdefault(f"{__package__}.__main__", sys.modules[__name__])
 from agent_procutil import (
     detached_kwargs,
+    no_window_kwargs,
     windowless_daemon_kwargs as _windowless_daemon_kwargs_impl,
     windowless_python_env,
 )
@@ -727,11 +728,7 @@ def _classify_records(
 
             raw = classify_daemon.classify_with_boot(
                 read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
-                # Mandatory-monitor check (see status_monitor_runtime.
-                # _status_monitor_enabled's own docstring -- a TEST/DEBUG-ONLY
-                # override, never a production opt-out). A dial-only attempt
-                # (no boot) still runs regardless, so an already-live monitor
-                # is still used if reachable.
+                # Test-only disabling suppresses boot, not use of a live monitor.
                 ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
                 key=key,
                 payload=payload,
@@ -3002,15 +2999,10 @@ def _monitor_pending_handoff_predecessor_retire(
     *,
     require_monitor_enabled: bool = True,
 ) -> dict[str, object] | None:
-    """Return one consumed/associated handoff whose predecessor still needs retirement.
+    """Return the oldest associated handoff awaiting predecessor retirement.
 
-    ``require_monitor_enabled`` gates this to the resident daemon's own
-    automatic sweep (default). An explicit, on-demand caller (``handoffs-check``)
-    passes ``False`` -- a manual diagnostic must work even under the test
-    harness's disabled-for-this-test override (see
-    ``status_monitor_runtime._status_monitor_enabled``'s own docstring --
-    never true in a real operator session), not just out of an agent's
-    ability to explicitly ask "is this worktree's cutover actually finished?".
+    Explicit diagnostics pass ``require_monitor_enabled=False`` to bypass
+    the automatic sweep's test-only monitor-disable gate.
     """
     # Stage D: status_monitor_runtime is cluster-free.
     from . import status_monitor_runtime as _smr
@@ -3672,6 +3664,7 @@ def _registration_nudge_context(cwd: str) -> str:
             capture_output=True,
             text=True,
             timeout=2,
+            **no_window_kwargs(),
         )
         if result.returncode != 0 or not result.stdout.strip():
             return ""
@@ -5195,6 +5188,7 @@ def _enumerate_launcher_shells_windows() -> list[dict] | None:
             capture_output=True,
             text=True,
             timeout=30,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -5394,11 +5388,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--worktree-id", required=True)
     p.add_argument("--provider")
-    p.add_argument(
-        "--state",
-        choices=["active", "disposed", "unknown"],
-        default="active",
-    )
+    p.add_argument("--state", choices=["active", "disposed", "unknown"], default="active")
     p.add_argument("--binding-revision", type=int)
     p.add_argument("--blob-file")
     p.add_argument("--if-match-revision", type=int)
@@ -5407,11 +5397,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reservation-owner")
     p.add_argument("--reservation-owner-pid", type=int)
     p.add_argument("--reservation-owner-start-time")
-    p.add_argument(
-        "--lease-seconds",
-        type=int,
-        default=_EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS,
-    )
+    p.add_argument("--lease-seconds", type=int, default=_EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS)
     p.add_argument("--json", action="store_true")
 
     finalize_cli.add_parsers(sub)
@@ -5423,6 +5409,7 @@ def build_parser() -> argparse.ArgumentParser:
     status_updater_cli.add_parsers(sub)
     status_monitor_cli.add_parsers(sub)
     status_monitor_runtime.add_parsers(sub)
+    status_monitor_reap_stale.add_parsers(sub)
     pane_lifecycle.register_cli(sub)
     handoff_cli.add_parsers(sub)
 
@@ -5674,6 +5661,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'status-context': ('status_bar_cli', 'cmd_status_context'),
     'status-monitor': ('status_monitor_cli', 'cmd_status_monitor'),
     'status-monitor-restart': ('status_monitor_runtime', 'cmd_status_monitor_restart'),
+    'status-monitor-reap-stale': ('status_monitor_reap_stale', 'cmd_status_monitor_reap_stale'),
     'status-segment': ('status_bar_cli', 'cmd_status_segment'),
     'status-updater': ('status_updater_cli', 'cmd_status_updater'),
     'sync': ('worktree_ops_cli', 'cmd_sync'),
@@ -5748,6 +5736,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "status_bar_cli",
     "status_cli",
     "status_monitor_cli",
+    "status_monitor_reap_stale",
     "status_monitor_runtime",
     "status_updater_cli",
     "update_cli",
@@ -5880,14 +5869,14 @@ def _load_full_command_surface() -> None:
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
     global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role
     global cmd_session_tail
-    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
+    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_monitor_reap_stale, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
     global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global identifier_blocklist_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
-    global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
+    global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_reap_stale, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
     global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor, handoff_cancel_cli
     from . import (
@@ -5930,6 +5919,7 @@ def _load_full_command_surface() -> None:
         status_bar_cli,
         status_cli,
         status_monitor_cli,
+        status_monitor_reap_stale,
         status_monitor_runtime,
         status_updater_cli,
         update_cli,
@@ -6105,6 +6095,7 @@ def _load_full_command_surface() -> None:
     _ensure_status_monitor = status_monitor_runtime._ensure_status_monitor
     _restart_status_monitor = status_monitor_runtime._restart_status_monitor
     cmd_status_monitor_restart = status_monitor_runtime.cmd_status_monitor_restart
+    cmd_status_monitor_reap_stale = status_monitor_reap_stale.cmd_status_monitor_reap_stale
     cmd_reconcile_sessions = status_monitor_runtime.cmd_reconcile_sessions
     _monitor_mux_set = status_monitor_runtime._monitor_mux_set
     _monitor_list_sessions = status_monitor_runtime._monitor_list_sessions
@@ -6314,6 +6305,7 @@ def _load_full_command_surface() -> None:
         "status-monitor": cmd_status_monitor,
         "reconcile-sessions": cmd_reconcile_sessions,
         "status-monitor-restart": cmd_status_monitor_restart,
+        "status-monitor-reap-stale": cmd_status_monitor_reap_stale,
         "pane-create": pane_lifecycle.cmd_pane_create,
         "pane-terminate": pane_lifecycle.cmd_pane_terminate,
         "handoff-cutover": cmd_handoff_cutover,

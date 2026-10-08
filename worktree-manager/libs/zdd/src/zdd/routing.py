@@ -34,6 +34,8 @@ File layout (``<config_dir>/active.json``)::
 Writes are atomic (tmp file + ``os.replace``) so a concurrent reader sees either
 the whole old table or the whole new one, never a torn file. ``generation`` is a
 monotonically increasing counter giving readers a total order across flips.
+Recognized Windows sharing conflicts retry for at most 0.95 seconds before
+propagating; a failed replacement leaves the previous route intact.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ import os
 import socket
 import sys
 import threading
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -263,7 +266,16 @@ def _atomic_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=False), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            # Windows readers and scanners can temporarily deny replacement.
+            # Never retry unrelated errors or suppress a permanent failure.
+            if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def _next_generation(data: dict | None) -> int:
