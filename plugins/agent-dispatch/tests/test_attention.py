@@ -733,3 +733,33 @@ def test_every_steering_field_form_is_accepted():
     form = steering.parse_request_input(
         "feedback,notes:textarea,decision:choice[revise,approve],tags:multichoice[a,b],why:textarea?decision=revise")
     ac.check_input(form)
+
+
+@pytest.mark.parametrize("form", [
+    [{"name": "a", "type": "text"}, {"name": "a", "type": "text"}],                      # duplicate name
+    [{"name": "1a", "type": "text"}],                                                    # invalid name
+    [{"name": "a", "type": "choice", "options": [""]}],                                  # an empty option
+    [{"name": "a", "type": "text", "show_when": {"field": "nope", "equals": "x"}}],      # unknown reference
+    [{"name": "c", "type": "choice", "options": ["x"]},
+     {"name": "a", "type": "text", "show_when": {"field": "c", "equals": "y"}}],         # not an option
+])
+def test_input_uses_the_parsers_own_field_rules(form):
+    from agent_dispatch import steering_fields
+
+    assert steering_fields.field_list_problem(form)
+    with pytest.raises(ac.ContractError):
+        ac.check_input(form)
+
+
+def test_a_disabled_source_stays_neutral_through_collect(tmp_path):
+    env = _collect({"opt": lambda _r: {"status": "disabled", "items": []}, "t": _ok()},
+                   FirstObserved(tmp_path / "o.json"))
+    assert {s["name"]: s["status"] for s in env["sources"]} == {"opt": "disabled", "t": "ok"}
+    assert env["status"] == "clear"
+
+
+@pytest.mark.parametrize("status", ["failed", "disabled"])
+def test_items_of_a_failed_or_disabled_source_never_reach_the_queue(tmp_path, status):
+    env = _collect({"s": lambda _r: {"status": status, "error": "down", "items": [{}, _item()]}},
+                   FirstObserved(tmp_path / "o.json"))
+    assert env["items"] == [] and env["sources"][0]["items"] == 0

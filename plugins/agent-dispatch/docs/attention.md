@@ -36,7 +36,7 @@ didn't issue, or a registration that isn't valid.
   whose owner is `unknown` or `gone` never count. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`. Each active lane's backlog is one coordinator read, started only while it can still finish inside the source's deadline; a lane it doesn't reach, or whose read fails, counts toward `uncertain` too, so backlog probing never fails the source's task items.
 - **Command sources**: a command registered on this machine
   (`attention source add`, stored beside the coordinator's install as
-  `attention-sources.json`) under a name that is its identity: unique,
+  `attention-sources.json`) under a name that is its identity (adding a name that is already registered replaces it):
   `[a-z0-9-]+`, and not a built-in name (`dispatch`, `bridge`, `pr`). A rejected
   registration is not a source: it is listed in `config_errors[]`, and it makes
   a read that includes it `degraded`. `source add` pins a bare command to its

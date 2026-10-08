@@ -112,30 +112,17 @@ def _check_action(action: Any, source: str) -> None:
 
 
 def check_input(fields: Any) -> None:
-    """``input`` is exactly the steering card's ``request_input`` field list (what
-    ``steering.parse_request_input`` produces and ``steer submit`` answers), so
-    every client renders and answers it the same way."""
-    from .steering import FIELD_CHOICE_TYPES, FIELD_TYPES
+    """``input`` is exactly the steering card's ``request_input`` field list,
+    validated by the owner-neutral ``steering_fields`` schema the
+    ``--request-input`` parser also uses, so every client renders and answers
+    it the same way (an item's ``input`` is never empty)."""
+    from .steering_fields import field_list_problem
 
     if not isinstance(fields, list) or not fields:
         raise ContractError("input must be a non-empty list of steering fields")
-    for field in fields:
-        if not isinstance(field, dict) or set(field) - {"name", "type", "options", "allow_other", "show_when"}:
-            raise ContractError("an input field has keys name, type, options?, allow_other?, show_when? only")
-        if not isinstance(field.get("name"), str) or not field["name"] or field.get("type") not in FIELD_TYPES:
-            raise ContractError(f"input field {field.get('name')!r} needs a name and a type in {sorted(FIELD_TYPES)}")
-        choice = field["type"] in FIELD_CHOICE_TYPES
-        options = field.get("options")
-        if choice != (options is not None) or (choice and not (
-                isinstance(options, list) and options and all(isinstance(o, str) for o in options))):
-            raise ContractError(f"input field {field['name']!r}: options are a non-empty string list, "
-                                "for a choice or multichoice only")
-        if "allow_other" in field and (not choice or not isinstance(field["allow_other"], bool)):
-            raise ContractError(f"input field {field['name']!r}: allow_other is a boolean on a choice only")
-        when = field.get("show_when")
-        if when is not None and not (isinstance(when, dict) and set(when) == {"field", "equals"}
-                                     and all(isinstance(v, str) for v in when.values())):
-            raise ContractError(f"input field {field['name']!r}: show_when is {{field, equals}} strings")
+    problem = field_list_problem(fields)
+    if problem:
+        raise ContractError(f"input: {problem}")
 
 
 def validate_item(item: Any) -> None:

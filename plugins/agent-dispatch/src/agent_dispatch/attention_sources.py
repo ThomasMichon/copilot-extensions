@@ -270,7 +270,9 @@ def _finish(name: str, result: dict[str, Any]) -> dict[str, Any]:
     one-item-per-entity rule; any violation makes the source ``failed``. Runs
     before the first-observed store, so an invalid read never moves its times."""
     if result["status"] in ("failed", "disabled"):
-        return result
+        # A failed or disabled source reports nothing: its items (valid or not)
+        # never reach the queue or the deduplication.
+        return {**result, "items": []}
     keys = set()
     for item in result["items"]:
         item.setdefault("updated_at", result["read_at"])
@@ -290,7 +292,7 @@ def _result_problem(raw: Any) -> str | None:
     contract violation is that source's ``failed``, never a crash of the read."""
     if not isinstance(raw, dict):
         return f"a {type(raw).__name__}, not an object"
-    if raw.get("status") not in ("ok", "failed", "uncertain"):
+    if raw.get("status") not in ac.SOURCE_STATUSES:
         return f"status {raw.get('status')!r}"
     if not isinstance(raw.get("items"), list):
         return "no items list"
