@@ -262,15 +262,35 @@ successor already running in my own tree?*
    is already open before the predecessor's own handle closes, so the
    self-update handoff is never itself the "last handle" closing.
 5. **The manager updates itself in place, without ever leaving the service
-   manager untracking a live process.** "Version-agnostic" does not make a
-   stale manager binary safe on its own — it still needs an update path,
-   just like the daemon it watches. On Linux, the manager periodically
-   re-checks the `current-version` marker and, on a change, calls
-   `os.execve` to replace its own process image with the newer version's
-   entry point: `execve` preserves the pid, open file descriptors, and (per
-   the Linux `prctl(2)` manual page) subreaper status, so the service
-   manager's own tracked identity never changes and no handoff is needed at
-   all — genuinely clean, no second process, no race with anything.
+   manager untracking a live process — or losing track of the daemon it was
+   already watching.** "Version-agnostic" does not make a stale manager
+   binary safe on its own — it still needs an update path, just like the
+   daemon it watches. On Linux, the manager periodically re-checks the
+   `current-version` marker and, on a change, calls `os.execve` to replace
+   its own process image with the newer version's entry point: `execve`
+   preserves the pid, open file descriptors, and (per the Linux `prctl(2)`
+   manual page) subreaper status, so the service manager's own tracked
+   identity never changes and no handoff is needed at all — genuinely
+   clean, no second process, no race with anything. `execve` does **not**,
+   however, preserve any in-memory state — the new image starts from a
+   blank slate, with no record of which pid it was already watching. The
+   new image must not treat this as a fresh launch and call `spawn` again,
+   which would create a second, redundant daemon contender racing the one
+   already live. Instead, the identity of the currently watched daemon is
+   **persisted**, not carried in memory: the manager writes the watched
+   pid and its `process_start_time` token into the manager-scoped
+   `active.json` continuously (it already writes this record for the
+   bridge-handoff case above, and reuses the exact same record here), and
+   on every entry to `run()` — a fresh launch, a crash restart, *and* an
+   `execve` self-update alike — the manager's first action is to check that
+   record before ever considering a call to `spawn`: if it names a pid that
+   passes the same read-check-read ancestry/token bracket item 2 already
+   defines, the manager re-adopts that pid as the watched child and resumes
+   supervising it; only an empty or failed-bracket record means there is
+   truly nothing to adopt, and `spawn` is the right call. This is one
+   single adoption path, not a special case for `execve` — item 2's bracket
+   check is what both a routine child-exit poll and a just-exec'd fresh
+   image call into.
    Windows has no pid-preserving exec equivalent, so a real process
    boundary is unavoidable there — but unlike the daemon's own cutover, the
    **manager** has no in-flight request to protect across that boundary; it
@@ -324,7 +344,13 @@ successor already running in my own tree?*
       opens its *own* handle to the same named Job (now three handles
       briefly overlap: the exiting bridge waits on this), confirms via the
       Job's own membership list that the daemon is still present, and
-      publishes its own liveness record over the bridge's.
+      publishes its own liveness record over the bridge's. This is the
+      **same** persisted-identity re-adoption path item 5's Linux
+      discussion above defines, not a Windows-specific special case: the
+      new manager re-adopts the already-recorded watched daemon and never
+      calls `spawn` here — calling `spawn` on this path would create a
+      second, redundant daemon racing the one the bridge has been holding
+      alive the whole time.
    4. Only once the new manager's handle is confirmed open does it signal
       the bridge to exit (e.g. a named event). The bridge closing its
       handle is now safe — the new manager already holds its own.
