@@ -145,7 +145,7 @@ def test_refresh_attached_clients_returns_stale_snapshot_when_registry_rejects(m
 def test_refresh_attached_clients_does_not_clobber_a_concurrent_session_replacement(
     tmp_path, monkeypatch
 ):
-    """Copilot review finding (#5573): a stale snapshot taken before a slow
+    """A stale snapshot taken before a slow
     ``list-clients`` probe must not silently overwrite a concurrent
     equal-revision session replacement (register()'s own guard permits
     such a replacement, so it will not catch this on its own)."""
@@ -236,3 +236,14 @@ def test_update_attached_clients_rejects_when_mapping_absent(tmp_path):
         "proj", "missing", 2, mapping_revision=1, mux_session="wt-1"
     )
     assert result == {"applied": False, "reason": "superseded"}
+
+
+def test_update_attached_clients_rejects_equal_revision_tombstone(tmp_path):
+    registry = MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=2))
+    registry.remove("proj", "wt-1", mapping_revision=1)
+    result = registry.update_attached_clients(
+        "proj", "wt-1", 0, mapping_revision=1, mux_session="wt-1", session_incarnation="sess:1"
+    )
+    assert result == {"applied": False, "reason": "superseded"}
+    assert registry.get("proj", "wt-1")["attached_clients"] == 2

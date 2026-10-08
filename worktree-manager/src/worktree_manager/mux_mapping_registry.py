@@ -430,8 +430,8 @@ class MuxMappingRegistry:
         """Atomically update just the ``attached_clients`` field on an
         existing mapping entry, under this registry's own interprocess lock
         -- guarded by identity (``mapping_revision`` + ``mux_session`` +
-        ``session_incarnation``) the same way :meth:`remove` is guarded
-        (Copilot review finding on #5573/#4564): a caller that read a
+        ``session_incarnation``) the same way :meth:`remove` is guarded:
+        a caller that read a
         mapping snapshot before a slow probe (``list-clients`` can block up
         to several seconds) must not then write that stale whole-entry
         snapshot back and silently clobber a concurrent ``register()``'s
@@ -452,6 +452,7 @@ class MuxMappingRegistry:
             current = entries.get(key)
             if (
                 current is None
+                or not current["live"]
                 or current["mapping_revision"] != mapping_revision
                 or current["mux_session"] != mux_session
                 or current.get("session_incarnation") != (session_incarnation or "")

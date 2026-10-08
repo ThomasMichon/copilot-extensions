@@ -563,10 +563,10 @@ def build_compute(
             ):
                 return {"applied": False, "reason": "not-live"}
 
-            refresh_attached_clients(registry, current)  # #4564 freshness
             if handler_tracker is not None:
                 handler_tracker.enter()
             try:
+                refresh_attached_clients(registry, current)
                 ok = apply_status_options(entry, values)
             finally:
                 if handler_tracker is not None:

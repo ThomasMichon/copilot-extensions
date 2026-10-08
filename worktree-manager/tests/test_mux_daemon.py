@@ -1057,9 +1057,10 @@ def test_compute_rechecks_revision_immediately_before_applying(tmp_path, monkeyp
     assert call_count["n"] == 2
 
 
-def test_shutdown_waits_for_an_in_flight_handler_before_closing(tmp_path, monkeypatch):
-    """Copilot review finding: CoalescingServer.close() does not join
-    already-running handler threads -- a handler mid-apply must be fenced
+@pytest.mark.parametrize("slow_verb", ["set-option", "list-clients"])
+def test_shutdown_waits_for_an_in_flight_handler_before_closing(tmp_path, monkeypatch, slow_verb):
+    """CoalescingServer.close() does not join
+    already-running handler threads -- a handler mid-refresh or mid-apply must be fenced
     (waited for) before shutdown proceeds, so run_daemon_foreground never
     releases its single-instance lease while a stale handler could still
     be writing."""
@@ -1069,10 +1070,10 @@ def test_shutdown_waits_for_an_in_flight_handler_before_closing(tmp_path, monkey
     entered = threading.Event()
 
     def _slow_run(argv, **kw):
-        if "set-option" in argv:
+        if slow_verb in argv:
             entered.set()
             release.wait(timeout=3)
-        return subprocess.CompletedProcess(argv, 0)
+        return subprocess.CompletedProcess(argv, 0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", _slow_run)
 

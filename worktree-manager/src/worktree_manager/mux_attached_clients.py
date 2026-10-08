@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import subprocess
 
+from agent_procutil import no_window_flags
+
 
 def mux_attached_clients(mux_bin: str, session: str) -> int | None:
     """Bounded, best-effort count of clients currently attached to
@@ -28,6 +30,7 @@ def mux_attached_clients(mux_bin: str, session: str) -> int | None:
             capture_output=True,
             text=True,
             timeout=5,
+            creationflags=no_window_flags(),
         )
     except Exception:
         return None
@@ -47,7 +50,7 @@ def refresh_attached_clients(registry, current: dict) -> dict:
     The actual persist goes through
     :meth:`~worktree_manager.mux_mapping_registry.MuxMappingRegistry.
     update_attached_clients`, an atomic identity-guarded single-field update
-    (Copilot review finding) -- ``list-clients`` can block for up to several
+    -- ``list-clients`` can block for up to several
     seconds, long enough for a concurrent ``register()`` to replace this
     mapping's ``mux_session`` at the SAME revision (a case ``register()``'s
     own monotonic-revision guard deliberately permits, so it does not
