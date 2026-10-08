@@ -7,7 +7,7 @@
 - **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
   the [plugin-services](../../plugin-services/README.md) service model)
 - **Status:** Draft
-- **Last revised:** 2026-09-18
+- **Last revised:** 2026-10-07
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's future `plugins/agent-index/docs/`
 
@@ -81,7 +81,26 @@ trusted transport.
 The pluggable adapters that pull a repo's corpus into the index:
 
 - **First-class, built-in:** the repo's own **files** (code + docs), **commit
-  history**, **issues**, and **pull requests** from its hosting forge.
+  history**, **issues**, and **pull requests** from its hosting forge. A
+  `git:` source's default — the remote's canonical default branch, freshly
+  fetched — is **per-source overridable**: an explicit `ref:` (any branch,
+  tag, or SHA) for a repo whose integration branch isn't its default branch,
+  and an `auth.account` that **attempts to** authenticate that source's own
+  fetch step (resolved the same way a `github:` source's token is) instead
+  of relying on the ambient git credential helper's active account — but
+  token resolution failing is **non-fatal**: the fetch still proceeds, now
+  falling back to that ambient credential helper, rather than failing the
+  source outright. Absent either override the connector keeps tracking the
+  canonical default branch, as before.
+- **Corpus composition is a grafted, multi-project config**, not a single
+  manually-authored list: the effective `corpus.sources` is dynamically
+  unioned from every project the operator has locally adopted (resolved via
+  the sibling worktree-registry's own project set), each contributing its
+  own layered repo config, deduped by source name (first contributor wins),
+  plus a machine-local supplement. This is the concrete mechanism that
+  realizes "a harness repo and its **close ecosystem**" (see Scope) — the
+  corpus grows with what the operator actually works on locally, never a
+  whole-organization or facility-wide scope the operator never opted into.
 - **Optional, first-class connector class:** **hosted work-tracking and
   code-review feeds** — an enterprise backlog of work items and its associated
   pull-request/review stream — for teams whose real backlog lives in a managed
@@ -95,11 +114,14 @@ The pluggable adapters that pull a repo's corpus into the index:
   the in-process connector interface (a Python object registered inside the
   engine's own process), a source domain may also be contributed by an
   **external, unvendored provider**: a self-contained CLI the provider ships,
-  discovered by dropping a manifest into a standard `providers.d/` directory —
-  the same shape the ecosystem's other drop-in provider seams already use
-  (agent-bridge's namespace resolvers). The engine drives the provider's CLI
-  over a process boundary for each connector operation, never links or imports
-  the provider's code. This lets a downstream deployment (or a facility-scale
+  discovered by dropping a manifest into a standard `providers.d/` directory,
+  on the shared `dropin-registry` primitives (scan authority, per-entry
+  active/inactive/indeterminate state, fingerprinted findings) that the
+  ecosystem's other drop-in contribution seams also consume — agent-bridge's
+  own namespace resolvers run on the same library, not merely a parallel
+  pattern. The engine drives the provider's CLI over a process boundary for
+  each connector operation, never links or imports the provider's code. This
+  lets a downstream deployment (or a facility-scale
   consumer with source domains the engine will never carry as built-ins)
   extend indexed breadth **without becoming a build-time dependency** of the
   engine, and without the engine vendoring anything provider-specific.
@@ -178,7 +200,12 @@ feed** connector — so a deployment adds a source domain without changing the
 index or query core. Connectors are added, not forked in. A connector over a
 managed backlog is **driven by operator-supplied query specifications** (curated
 work-item queries and pull-request filters), so the operator indexes exactly the
-subsets they care about and nothing more.
+subsets they care about and nothing more. A `git:` source additionally accepts a
+**per-source `ref:` override and authenticated fetch** (`auth.account`) instead
+of always tracking the remote's default branch — for a repo whose integration
+branch isn't its default branch, or a private source that needs its own
+credential. The effective source list itself is **grafted dynamically from
+every locally-adopted project** (see Concepts) rather than hand-authored once.
 
 ### external-content-domain-providers
 A source domain may also join as an **external, cross-process provider** —
@@ -208,13 +235,21 @@ duplicated or a bug is filed twice.
 The index tracks the repo closely through **change-driven, incremental** updates
 — new commits, edited issues, merged PRs — rather than periodic full re-crawls,
 so hits stay current without repeatedly re-reading unchanged history. What it
-tracks is the repo's **canonical default branch as fetched from its remote** (the
-pushed/merged state the team shares) — not a local working tree that may sit on a
-feature branch, carry uncommitted edits, or lag `origin`. Freshness means the
-index reflects what has actually landed on the mainline, fetched fresh before it
-reindexes. (A configured local-only repo that has opted into hosting still
-indexes cleanly from its local history — the remote is the *default* source of
-truth, not a requirement.)
+tracks is, **by default**, the repo's **canonical default branch as fetched from
+its remote** (the pushed/merged state the team shares) — not a local working tree
+that may sit on a feature branch, carry uncommitted edits, or lag `origin` — with
+an explicit **per-source `ref:` override** available for the deliberate
+exception (a repo whose integration branch isn't its default branch) — though
+that freshness guarantee is strongest for a **remote-tracking ref** (e.g.
+`origin/dev`), which the fetch step does advance; an override naming a local
+branch/tag or a fixed SHA is not itself fetched, so it can go stale, and a
+fetch failure deliberately falls back to that stale state or local `HEAD`
+rather than failing the source. Freshness means the index reflects what has
+actually landed on the tracked ref **as of the last successful fetch**, not an
+unconditional live guarantee for every accepted override. (A configured
+local-only repo that has opted into hosting still indexes cleanly from its
+local history — the remote is the *default* source of truth, not a
+requirement.)
 
 ### lightweight-client-and-declared-host-service
 Formerly `self-contained-service`.
@@ -507,3 +542,29 @@ generic is what lets many different products reuse it.
   parity with a richer, in-process consumer's content breadth without a
   build-time or data-migration coupling (vision-extending, preceding
   execution).
+
+- **2026-10-07** — Reconciled against 70 commits of drift since this file's
+  own last revision. Folded back three realized-but-undocumented
+  capabilities: (1) a `git:` source's **per-source `ref:` override and
+  `auth.account` authenticated fetch**, which sharpens
+  `continuous-delta-freshness`'s "canonical default branch" framing from an
+  absolute rule into a default with a deliberate, explicit per-source
+  exception; (2) **corpus composition as a dynamically grafted, multi-project
+  config** — the effective `corpus.sources` is unioned from every
+  locally-adopted project's own layered repo config (via the sibling
+  worktree registry), deduped by name, plus a machine-local supplement —
+  named as the concrete mechanism realizing "a harness repo and its close
+  ecosystem" (Scope/Non-Goals already bounded this; it just wasn't described
+  how); and (3) the `providers.d/` external-content-domain-provider
+  discovery mechanism is now built on the shared `dropin-registry` library
+  (scan authority, per-entry active state, fingerprinted findings) that
+  agent-bridge's own namespace resolvers also consume — sharpened from "the
+  same shape" to "the same library." No conformance gap found requiring a
+  new issue; the rest of the drift (CPU-priority throttling, FTS
+  rebuild/recovery refinements, server-venv packaging split, dependency and
+  CI fixes, peer-launch/CWD-compliance cross-cutting infra shared with
+  other plugins) is already-described behavior being bug-fixed into
+  working order or generic infra out of this vision's own scope; the
+  mutable-dev-slot-pattern same-version-rebuild conformance gap, which does
+  apply to agent-index specifically, is already tracked by `#5472`/Phase 3
+  (not re-tracked here).
