@@ -72,12 +72,23 @@ of the exact hazard the migration's own ambiguity handling guards against.
       unresolved (a small, clearly-labeled holding location) rather than
       guessing via "the only project with a matching worktree id right
       now" -- the same never-guess discipline as the migration.
+- [ ] **This holding location needs a bounded retention policy of its own,
+      not an implicit "keep forever."** Unlike a per-worktree journal (one
+      file per worktree, naturally small), repeated neutral-context writes
+      accumulating in one shared holding location would, left unbounded,
+      silently recreate exactly the unbounded-machine-global-diagnostic-sink
+      problem this whole effort exists to eliminate. Apply the same
+      age-based rolling-retention discipline the global log used (or an
+      equivalent bound) directly to this location.
 - [ ] Test: two different projects each with a worktree of the same id;
       confirm a live write from each lands only in its own project's file,
       never cross-contaminating the other.
 - [ ] Test: a "neutral" daemon-level caller (one with no naturally
       resolvable project context) -- confirm its event is held unresolved
       rather than misfiled.
+- [ ] Test: repeated neutral-context writes over time; confirm the holding
+      location's retention bound actually prunes/ages out old entries
+      rather than growing without limit.
 
 ### Worktree-less events -- a full audit, not just `boot_trace`
 

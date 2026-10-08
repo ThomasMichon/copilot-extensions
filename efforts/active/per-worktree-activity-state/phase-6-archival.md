@@ -63,14 +63,28 @@ worktree's recent history.
       per-worktree sidecar) -- reusing the already-proven
       `sessions.archive_session` / `verify_archive` / reclaim pattern from
       `agent_logger.sync.compact` -- into the fixed path convention above.
-- [ ] **Key the archive `<project>/<repo>/<worktree-id>`, not
-      `<repo>/<worktree-id>`** -- a worktree id is only unique *within* one
-      project (the same rationale as `handoff_trace.py`'s own existing
-      namespacing), and multiple projects can legitimately target the same
-      repo, so omitting the project segment risks two unrelated worktrees'
-      archives colliding/overwriting each other at the same path.
+- [ ] **Key the archive `<project>/<repo>/<worktree-id>-<incarnation>`, not
+      `<repo>/<worktree-id>` or even `<project>/<repo>/<worktree-id>` alone.**
+      A worktree id is only unique *within* one project (the same rationale
+      as `handoff_trace.py`'s own existing namespacing), and multiple
+      projects can legitimately target the same repo, so omitting the
+      project segment risks two unrelated worktrees' archives
+      colliding/overwriting each other at the same path. Project+repo
+      alone is still not enough, though: this repository explicitly
+      supports reap-and-recreate of a worktree id *within the same
+      project*, distinguished by a fresh `WorktreeRecord.creation_nonce`
+      (`tracking.py`) -- the exact same temporal-incarnation-reuse hazard
+      Phase 4's migration already guards against for historical events.
+      Include that incarnation identifier (the existing `creation_nonce`,
+      or equivalent) in the archive key so a later incarnation's archive
+      can never silently overwrite an earlier one's at the same nominal
+      worktree id.
 - [ ] Add a collision test: two different projects, each with a worktree of
       the same id against the same repo, archived without interference.
+- [ ] Add an incarnation-reuse collision test: the *same* project reaps a
+      worktree, then later recreates a different worktree reusing the same
+      id (a new `creation_nonce`); confirm both incarnations' archives
+      coexist without one overwriting the other.
 
 ### Verify-before-reclaim
 

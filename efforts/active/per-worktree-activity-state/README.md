@@ -263,8 +263,9 @@ archived-journal discovery, standalone-install retention floor):
       block on a hung callback -- a bounded timeout, same pattern as
       `claim_providers.py`'s existing provider-process calls) that
       archives a cleaned-up worktree's accumulated per-worktree state,
-      verify-before-reclaim, correctly namespaced by project (not just
-      repo).
+      verify-before-reclaim, correctly namespaced by project and
+      incarnation (`creation_nonce`), not just repo -- a worktree id can be
+      reused across projects *and* reap-and-recreated within the same one.
 - [ ] `agent-worktrees`' own baseline bounded-retention fallback for a
       standalone install with no archiver, so disk use never regresses to
       unbounded growth.
