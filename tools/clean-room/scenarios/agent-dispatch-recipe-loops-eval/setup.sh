@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # agent-dispatch-recipe-loops-eval/setup.sh -- establish the STARTING STATE for
-# the Tier-E live-forge recipe-loops eval (agent-dispatch-recipe-library effort,
-# ThomasMichon/copilot-extensions#4691 Validation Plan's live-fixture item).
+# the Tier-E live-forge recipe-loops eval (agent-dispatch-recipe-library
+# effort's own Validation Plan live-fixture item --
+# efforts/active/agent-dispatch-recipe-library/README.md).
 #
 # This is SETUP, not the thing under test: it installs agent-dispatch plus its
 # two genuine documented headless-embody runtime dependencies (agent-bridge,
@@ -239,6 +240,15 @@ else
     cr_finalize
 fi
 info "deliberately NOT registering the repo with agent-dispatch's registrar here -- that registration is itself part of what this eval audits"
+
+# Snapshot efforts/active/ BEFORE any orchestrator/worker mutation, so
+# post_check.sh can diff it afterward: a new directory here is real
+# effort-builder evidence; a directory that DISAPPEARS is real
+# effort-driver archive evidence. Generic -- names no fixture-specific
+# effort slug.
+_efforts_active_before="$CR_LOGDIR/efforts-active-before.log"
+( cd "$FIXTURE_DIR" && find efforts/active -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort ) > "$_efforts_active_before" || true
+cr_meta "efforts_active_before" "$(tr '\n' ',' < "$_efforts_active_before" 2>/dev/null)"
 
 # =========================================================================
 phase 5 "register the fixture repo with agent-worktrees (headless embody's documented spawn prerequisite)"

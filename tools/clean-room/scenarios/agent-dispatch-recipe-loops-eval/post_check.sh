@@ -62,11 +62,18 @@ for _decl in "$REGISTRAR_DIR"/*.yaml; do
     cr_meta "${_recipe}_task_label" "$_label"
 
     _list_out="$CR_LOGDIR/pc-list-${_recipe}.log"
-    capture "pc-list-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch list --label '$_label' --status queued,proposed,claimed,started,suspended,submitted,completed,abandoned,dead_letter" || true
+    if ! capture "pc-list-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch list --label '$_label' --status queued,proposed,claimed,started,suspended,submitted,completed,abandoned,dead_letter"; then
+        jam "dispatch-config" "agent-dispatch list failed for $_recipe (see $_list_out)" "coordinator/CLI may be unreachable -- do not conflate this with a genuine empty list"
+        continue
+    fi
     _count="$(_json_field "$_list_out" "")"
-    cr_meta "${_recipe}_task_count" "${_count:-0}"
+    if [ -z "$_count" ]; then
+        jam "dispatch-config" "could not parse agent-dispatch list output for $_recipe (see $_list_out)" "coordinator/CLI output was not valid JSON -- do not conflate this with a genuine empty list"
+        continue
+    fi
+    cr_meta "${_recipe}_task_count" "$_count"
 
-    if [ -n "${_count:-}" ] && [ "${_count:-0}" != "0" ]; then
+    if [ "$_count" != "0" ]; then
         # Task lists are newest-first, and a loop's fast cadence can create
         # extra queued/abandoned occurrences after an earlier one already
         # reached a terminal state -- always picking items[0] would then
@@ -90,7 +97,10 @@ print(chosen.get("id", ""))
 ' "$_list_out" 2>/dev/null)"
         if [ -n "$_selected_id" ]; then
             _show_out="$CR_LOGDIR/pc-show-${_recipe}.log"
-            capture "pc-show-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch show '$_selected_id'" || true
+            if ! capture "pc-show-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch show '$_selected_id'"; then
+                jam "dispatch-config" "agent-dispatch show failed for $_recipe task $_selected_id (see $_show_out)" "coordinator/CLI may be unreachable"
+                continue
+            fi
             _status="$(_json_field "$_show_out" status)"
             _result_ref="$(_json_field "$_show_out" result_ref)"
             cr_meta "${_recipe}_task_id" "$_selected_id"
@@ -123,16 +133,64 @@ print(chosen.get("id", ""))
     fi
 done
 
-# Independent real-forge evidence, repo-derived (no hardcoded issue/PR numbers).
+# Independent real-forge evidence, repo-derived (no hardcoded issue/PR
+# numbers or fixture-specific names). Plain PR number/title/state cannot by
+# itself corroborate effort-builder's grouping or effort-driver's file
+# change + archive move -- capture actual changed files/content and a
+# before/after efforts/active/ diff too.
 if [ -n "$_remote" ]; then
     _gh_issues_ok=0
     _gh_prs_ok=0
     capture "pc-gh-issues" -- bash -lc "cd '$FIXTURE_DIR' && gh issue list --state all --limit 50 --json number,title,labels,state,comments" && _gh_issues_ok=1
-    capture "pc-gh-prs" -- bash -lc "cd '$FIXTURE_DIR' && gh pr list --state all --limit 50 --json number,title,state,headRefName" && _gh_prs_ok=1
+    capture "pc-gh-prs" -- bash -lc "cd '$FIXTURE_DIR' && gh pr list --state all --limit 50 --json number,title,state,headRefName,files,body" && _gh_prs_ok=1
     if [ "$_gh_issues_ok" = 1 ] && [ "$_gh_prs_ok" = 1 ]; then
-        pass "captured independent gh issue/PR evidence for the fixture repo (cr-logs/pc-gh-issues.log, pc-gh-prs.log)"
+        pass "captured independent gh issue/PR evidence (incl. changed files) for the fixture repo (cr-logs/pc-gh-issues.log, pc-gh-prs.log)"
     else
         jam "dispatch-config" "independent gh issue/PR evidence capture failed (see cr-logs/pc-gh-issues.log, cr-logs/pc-gh-prs.log)" "a failed capture must not be reported as captured evidence -- check gh auth/rate limits"
+    fi
+
+    # Owner/repo derived from the same resolved remote (no hardcoded name).
+    _owner_repo="$(printf '%s' "$_remote" | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
+    _efforts_active_after="$CR_LOGDIR/pc-efforts-active-after.log"
+    if capture "pc-efforts-active-after" -- bash -lc "set -o pipefail; gh api 'repos/$_owner_repo/contents/efforts/active' --jq '.[] | select(.type==\"dir\") | .name' | sort"; then
+        _before_list="${_efforts_active_before:-$CR_LOGDIR/efforts-active-before.log}"
+        if [ -f "$_before_list" ]; then
+            _added="$(comm -13 "$_before_list" "$_efforts_active_after" 2>/dev/null | tr '\n' ',' )"
+            _removed="$(comm -23 "$_before_list" "$_efforts_active_after" 2>/dev/null | tr '\n' ',' )"
+            cr_meta "efforts_active_added" "$_added"
+            cr_meta "efforts_active_removed" "$_removed"
+            if [ -n "$_added" ]; then
+                pass "efforts/active/ gained new effort dir(s) since setup: $_added (real effort-builder evidence)"
+            else
+                info "efforts/active/ gained no new directory since setup -- effort-builder may not have created one (or used an existing effort instead)"
+            fi
+            if [ -n "$_removed" ]; then
+                pass "efforts/active/ lost dir(s) since setup: $_removed (real effort-driver archive evidence, corroborate against efforts/<year>/<month>/<slug> below)"
+            else
+                info "efforts/active/ lost no directory since setup -- effort-driver may not have archived its effort yet"
+            fi
+        else
+            info "no before-snapshot found (cr-logs/efforts-active-before.log) -- cannot diff efforts/active/"
+        fi
+    else
+        jam "dispatch-config" "could not list efforts/active/ via the GitHub contents API (see cr-logs/pc-efforts-active-after.log)" "check gh auth/rate limits"
+    fi
+
+    # effort-driver's own declared effort_slugs (read straight from its
+    # declaration, not hardcoded) -- confirm that exact slug is now ABSENT
+    # from efforts/active/ (archived) rather than merely inferring it from
+    # the generic added/removed diff above.
+    _driver_decl="$REGISTRAR_DIR/effort-driver.yaml"
+    if [ -f "$_driver_decl" ]; then
+        _driver_slug="$(grep -A5 -E '^effort_slugs:' "$_driver_decl" | grep -E '^\s*-\s' | head -1 | sed -E 's/^\s*-\s*//' | tr -d '"'"'"'\r')"
+        if [ -n "$_driver_slug" ]; then
+            cr_meta "effort_driver_declared_slug" "$_driver_slug"
+            if grep -qx "$_driver_slug" "$_efforts_active_after" 2>/dev/null; then
+                info "effort-driver's declared slug '$_driver_slug' is STILL under efforts/active/ -- not yet archived"
+            else
+                pass "effort-driver's declared slug '$_driver_slug' is no longer under efforts/active/ (archived, per the real contents API read)"
+            fi
+        fi
     fi
 else
     jam "dispatch-config" "could not resolve the fixture repo's own git remote for independent gh evidence" "verify $FIXTURE_DIR is a real git checkout"
