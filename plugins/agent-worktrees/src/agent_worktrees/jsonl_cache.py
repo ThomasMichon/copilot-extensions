@@ -4,8 +4,7 @@ Mirrors :mod:`record_cache`'s ``(mtime_ns, size)``-keyed invalidation --
 unchanged since the last read -> reuse the cached parse instead of
 re-reading + re-parsing the whole file -- but scoped to a plain parsed
 ``list[dict]`` (an activity/trace log line-stream) rather than a
-``WorktreeRecord``, so it carries no dataclass-specific copy/attribute
-handling.
+``WorktreeRecord``.
 
 copilot-extensions#3751 added this pattern for ``tracking.list_records()``'s
 fleet-wide YAML reparse; the resident status-monitor's handoff-retire sweep
@@ -26,6 +25,7 @@ assumption -- any content change invalidates it the same way.
 
 from __future__ import annotations
 
+import copy
 import threading
 from pathlib import Path
 from typing import Callable, TypeVar
@@ -36,17 +36,18 @@ _cache_lock = threading.Lock()
 _cache: dict[str, tuple[int, int, object]] = {}
 
 
-def cached_parse(path: Path, parser: Callable[[Path], T]) -> T:
+def cached_parse(path: Path, parser: Callable[[Path], list[dict]]) -> list[dict]:
     """``parser(path)``, memoized on the file's own ``(mtime_ns, size)``.
 
-    Returns the cache's own object directly, not a copy: every current
-    caller (``activity.read_events``, ``handoff_trace.read_trace``) only
-    reads/filters the parsed list and its dicts, builds a NEW output list,
-    and never mutates an individual parsed record in place -- unlike
-    ``record_cache.cached_load``'s ``WorktreeRecord`` callers, which
-    routinely do. If a future caller needs to mutate what it gets back,
-    it must copy first; this function does not guess at that cost on every
-    hit for callers that don't need it.
+    Returns an independent ``copy.deepcopy`` on every call -- a cache HIT
+    must look exactly like a fresh parse to its caller. Mirrors
+    ``record_cache.cached_load``'s own default: a caller that mutates one
+    returned dict in place (``read_trace()`` previously handed back the
+    cache's own list directly; a caller mutating an event would leak that
+    mutation into every later reader, never written to disk) must never be
+    able to corrupt what a later cache hit hands back to a different
+    caller. The copy cost is paid on every hit, not just a miss -- cheap
+    here (a plain list of small dicts), unlike a full ``WorktreeRecord``.
 
     A missing file parses (and caches) as whatever ``parser`` returns for a
     nonexistent path (typically an empty list) -- callers are expected to
@@ -63,11 +64,11 @@ def cached_parse(path: Path, parser: Callable[[Path], T]) -> T:
     with _cache_lock:
         cached = _cache.get(key)
         if cached is not None and (cached[0], cached[1]) == stamp:
-            return cached[2]  # type: ignore[return-value]
+            return copy.deepcopy(cached[2])
     parsed = parser(path)
     with _cache_lock:
         _cache[key] = (stamp[0], stamp[1], parsed)
-    return parsed
+    return copy.deepcopy(parsed)
 
 
 def clear() -> None:

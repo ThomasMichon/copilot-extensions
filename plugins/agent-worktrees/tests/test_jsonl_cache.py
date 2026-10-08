@@ -8,6 +8,7 @@ to a plain parsed ``list[dict]`` rather than a ``WorktreeRecord``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,35 @@ def _line_count_parser(calls: list[Path]):
         return path.read_text(encoding="utf-8").splitlines()
 
     return _parser
+
+
+def _dict_parser(calls: list[Path]):
+    def _parser(path: Path) -> list[dict]:
+        calls.append(path)
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+    return _parser
+
+
+def test_a_caller_mutating_a_returned_event_does_not_leak_into_later_reads(tmp_path: Path):
+    """High-severity review finding: a caller that mutates one event dict
+    from a cache HIT must never corrupt what a later, unrelated caller gets
+    back -- the real shape here is ``handoff_trace.read_trace()`` returning
+    the cache's own list directly, and ``activity.read_events()`` reusing
+    the cache's own dicts inside a fresh list. Every call must be
+    independent, exactly like a fresh (uncached) parse always was."""
+    path = tmp_path / "log.jsonl"
+    path.write_text('{"event": "a"}\n', encoding="utf-8")
+    calls: list[Path] = []
+    parser = _dict_parser(calls)
+
+    first = jsonl_cache.cached_parse(path, parser)
+    first[0]["event"] = "mutated"
+    second = jsonl_cache.cached_parse(path, parser)
+    assert second[0]["event"] == "a", "a caller's in-place mutation must never leak into a later read"
+    assert len(calls) == 1, "the mutation must not itself have forced a re-parse"
 
 
 def test_miss_then_hit_does_not_reparse(tmp_path: Path):
