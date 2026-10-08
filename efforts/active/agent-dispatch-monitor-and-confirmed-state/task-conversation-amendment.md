@@ -63,7 +63,13 @@ requests use it beside, not in place of, their existing `request_input` form.
 Submissions use it without implying any request for more instructions.
 
 An optional task-owned JSON Schema is the runtime authority. Validate structured
-data at all write boundaries; prose such as `{ answer: number }` remains guidance,
+data at all write boundaries for its declared output kind: submission schemas
+govern every submission revision; steering-output schemas govern every
+input-request output revision, separately from the form's answer fields. The
+default task answer schema applies to submissions only, never implicitly to
+intermediate steering. A declared schema requires data for its output kind;
+missing data is a validation error. Kinds with no schema permit Markdown-only
+output and optional data. Prose such as `{ answer: number }` remains guidance,
 not executable validation. Pin a declared schema version to the task. Derived
 TypeScript types are optional consumers, not a second source of truth.
 
@@ -142,6 +148,9 @@ reconciliation, and redaction-safe correlation across process boundaries.
       absent evaluator, and migration of pending existing tasks.
 - [ ] Invalid data fails before card publication/submission; valid-but-wrong
       data reaches review without being mistaken for substantive verification.
+- [ ] Schema-bearing outputs reject missing data on every governed revision;
+      submission schemas do not constrain intermediate steering outputs, and
+      Markdown-only output works for kinds without a declared schema.
 - [ ] CLI/HTTP/MCP/library parity; schema dialect/version, local reference,
       remote-reference denial, size limits, and explicit validation diagnostics.
 - [ ] Restart-safe card/output/answer/review history; stale review rejection,

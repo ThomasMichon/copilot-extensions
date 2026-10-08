@@ -44,7 +44,11 @@ the agent's output; output data and requested input are not confused.
 
 A caller can declare a JSON Schema output contract before the task is worked.
 The coordinator enforces it at runtime across every write surface. A schema
-version remains fixed for the work it governs; changing it is explicit and
+declares which output kind it governs: a final-answer contract does not
+implicitly constrain an intermediate input request. For a governed output,
+structured data is required, and absent data is invalid just like wrong-shaped
+data. Without a schema for that output kind, structured data remains optional.
+A schema version remains fixed for the work it governs; changing it is explicit and
 cannot retroactively invalidate or reinterpret earlier output. Static client
 types may derive from the same authority but cannot replace runtime validation.
 
