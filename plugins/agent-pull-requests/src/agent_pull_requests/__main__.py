@@ -35,6 +35,8 @@ _WATCH_QUERY = (
 _PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
+_WATCH_HANDLER_DRAIN_TIMEOUT_S = 5.0
+_WATCH_RESTART_STOP_TIMEOUT_S = 20.0
 
 
 def _parse_repo_slug(value: str) -> tuple[str, str]:
@@ -575,7 +577,14 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        server.close_admission(reason="shutdown")
         server.close()
+        deadline = time.monotonic() + _WATCH_HANDLER_DRAIN_TIMEOUT_S
+        while server.active_handler_count():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("PR watch request handlers did not drain")
+            time.sleep(0.02)
+        daemon.close()
         lease.release()
     return 0
 
@@ -620,9 +629,18 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
     interpreter -- the update/reattach path: every durable subscription
     survives (see ``_cmd_serve``'s own docstring), so 'restart to pick up
     an update' never orphans a caller that's suspended waiting on a PR."""
-    from .watch_daemon import read_lock_data
+    from single_instance_lease import AlreadyRunningError, SingleInstance
 
-    was_running = read_lock_data() is not None
+    from .watch_daemon import state_dir
+
+    lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
+    try:
+        lease.acquire()
+    except AlreadyRunningError:
+        was_running = True
+    else:
+        lease.release()
+        was_running = False
     if was_running:
         stop_result = _watch_request(
             "shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False
@@ -630,19 +648,26 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
         if not stop_result.get("shutting_down"):
             print("agent-pull-requests: could not reach the running daemon to stop it")
             return 1
-        # Wait for the old process to actually release its single-instance
-        # lease (closing the socket + exiting) before spawning the
-        # successor -- otherwise the new 'serve' would just lose the lease
-        # race and exit immediately as "already running" (the OLD one).
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and _watch_dial() is not None:
-            time.sleep(0.2)
+        # A persistent rendezvous file is not proof of lease availability.
+        deadline = time.monotonic() + _WATCH_RESTART_STOP_TIMEOUT_S
+        while time.monotonic() < deadline:
+            try:
+                lease.acquire()
+            except AlreadyRunningError:
+                time.sleep(0.2)
+            else:
+                lease.release()
+                break
+        else:
+            message = "watch daemon did not release its lease; successor not started"
+            print(json.dumps({"error": message}) if args.json else f"agent-pull-requests: {message}")
+            return 1
     _watch_boot()
-    # Boot-wait for the successor's own rendezvous, mirroring
-    # call_with_fallback's own dial/boot-wait sequence.
+    # Confirm a live response, not merely the predecessor's leftover metadata.
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
-        if _watch_dial() is not None:
+        health = _watch_request("health", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
+        if "pid" in health:
             if args.json:
                 print(json.dumps({"restarted": True, "was_running": was_running}))
             else:
