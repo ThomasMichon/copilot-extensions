@@ -80,16 +80,16 @@ an empty queue.
   | Field | Meaning |
   |---|---|
   | `schema` | the item's own version, `1`; carried on every item, separately from the envelope's |
-  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:wt:<machine>/<worktree-id>`, `pr:pr:<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
+  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:wt:<machine>/<worktree-id>`, `pr:pr:<authority>/<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
   | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
-  | `entity_ref` | the canonical, **durable** reference within its kind: a task id; a PR as `<owner/name>#<n>` (never a URL, so two spellings of one PR are one key); a queue as its canonical repo; a session as its logical delegate reference (agent-bridge's identity model), never a bridge escrow `session_id` or a live registration, which a restart, takeover or handoff replaces: `wt:<machine>/<worktree-id>` when a managed worktree hosts it, else `lineage:<durable id of its lineage root>` for a bridge-owned line of work (the root's `durable_session_id`, reached through its predecessor links), else `copilot:<Copilot session id>` for an interactive session with no worktree |
+  | `entity_ref` | the canonical, **durable** reference within its kind: a task id; a PR as `<authority>/<owner/name>#<n>`, where `<authority>` is the provider host agent-worktrees resolves for its repository, lowercased, with no scheme or port default (e.g. `github.com`, a GHES or Gitea host) -- never a URL, so two spellings of one PR are one key, while the same `owner/name#<n>` on two providers stays two; a queue as its canonical repo; a session as its logical delegate reference (agent-bridge's identity model), never a bridge escrow `session_id` or a live registration, which a restart, takeover or handoff replaces: `wt:<machine>/<worktree-id>` when a managed worktree hosts it, else `lineage:<durable id of its lineage root>` for a bridge-owned line of work (the root's `durable_session_id`, reached through its predecessor links), else `copilot:<Copilot session id>` for an interactive session with no worktree |
   | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...); `null` for an entity with no owner lifecycle (a `queue`) |
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
   | `severity` | derived from `display_state`: `failed` > `stalled` > `awaiting_input` > `blocked` > `review` |
   | `reason` | one line, ≤ 200 chars |
   | `created_at`, `updated_at` | when the condition began / was last observed. A source that only knows when it observed something (e.g. a `pr bar` read) gets `created_at` from the aggregator's persisted first-observed time, kept **per source** for `(source, entity, entity_ref, display_state)`, so repeated reads keep the same order. Each source's time is cleared only by proof from that same source that the condition ended: a read of it with `status: ok` that no longer contains the item. An item missing from a `failed` or `uncertain` read, or from a source that is now `disabled`, keeps its time -- an outage proves nothing, so recovery doesn't reorder an unchanged queue -- and one source's `ok` omission never clears another source's evidence for the same entity. A deduplicated item's `created_at` is the earliest of its contributing sources' times |
   | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
-  | `actions[]` | `{verb, argv}`, in order (the first is the item's default): sanctioned commands that run **as-is**, with no placeholder to fill. `argv` is a non-empty string array. `verb` is the machine-readable operation, never a display label (a client derives its own label from it), from a closed set: `show` (read-only: prints the entity's detail, safe to run without confirmation), `resume` (continues or re-attaches the entity's owner -- mutating, so operator-initiated), `open` (opens the entity in an external viewer, e.g. a browser). A source extends it only under its own prefix, `x.<source>.<verb>`; a client treats a verb it doesn't know as operator-initiated. Any other `verb` makes the item invalid (and its source `failed`). E.g. `{"verb": "show", "argv": ["agent-dispatch", "card", "show", "<task-id>"]}`, `{"verb": "resume", "argv": ["agent-bridge", "resume", "<session-id>"]}`, `{"verb": "open", "argv": ["gh", "pr", "view", "<n>", "--repo", "<owner/name>", "--web"]}`. An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
+  | `actions[]` | `{verb, argv}`, in order (the first is the item's default): sanctioned commands that run **as-is**, with no placeholder to fill. `argv` is a non-empty string array. `verb` is the machine-readable operation, never a display label (a client derives its own label from it), from a closed set: `show` (read-only: prints the entity's detail, safe to run without confirmation), `resume` (continues or re-attaches the entity's owner -- mutating, so operator-initiated), `open` (opens the entity in an external viewer, e.g. a browser). A source extends it only under its own prefix, `x.<source>.<verb>`; a client treats a verb it doesn't know as operator-initiated. Any other `verb` makes the item invalid (and its source `failed`). E.g. `{"verb": "show", "argv": ["agent-dispatch", "card", "show", "<task-id>"]}`, `{"verb": "resume", "argv": ["agent-bridge", "resume", "<session-id>"]}`, `{"verb": "open", "argv": ["gh", "pr", "view", "<n>", "--repo", "<authority>/<owner/name>", "--web"]}`. An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
   | `source` | the adapter that produced it |
   | `input` | optional: the card's `request_input` form spec when resolving it needs an operator's answer (submitted with `agent-dispatch steer submit`) |
   | `also[]` | **aggregator-owned**: the lower-ranked items deduplicated into this one (each a full item, in queue order); empty when none. A source never fills it -- an adapter or command item with a non-empty `also[]` is malformed, and that source is `failed` -- so a nested item can't slip past the identity stamping and the one-item-per-entity check |
@@ -228,7 +228,14 @@ an empty queue.
   miss them. This slice therefore adds a bounded, non-blocking read of that
   evaluator to agent-bridge for both registry types (`agent-bridge --json
   attention <session>`: the current reason or `null`, never a wait), and the
-  adapter reads it per candidate. A candidate whose attention can't be read
+  adapter reads it per candidate. Serving that evaluation for a registered
+  interactive session is new daemon behavior (today's attention endpoint
+  resolves owned sessions only), so it lands as an HTTP protocol capability:
+  `HTTP_PROTOCOL_VERSION` is bumped with a named capability constant, and the
+  command gates on `BridgeClient.daemon_supports()`. Against an older daemon it
+  reports represented sessions as `unsupported` rather than sending the request,
+  and the adapter counts those candidates toward `uncertain`, so a version skew
+  reads as `partial`, never as `clear` or as every session failing. A candidate whose attention can't be read
   counts toward `uncertain`. If either listing fails or
   times out, the bridge source is `failed`, never `ok` on the other alone: a
   parked session in the registry that wasn't read must not read as `clear`.
@@ -252,7 +259,7 @@ an empty queue.
   projects, and `claims find pr` needs a known repo), so this slice adds one to
   agent-worktrees: `agent-worktrees list --all-projects --tracked-prs --json`,
   returning `{"schema": 1, "projects": [{"project", "status": "ok" | "failed",
-  "error"?, "prs": [{"worktree_id", "repo", "number", "state"}]}]}` over every
+  "error"?, "prs": [{"worktree_id", "authority", "repo", "number", "state"}]}]}` (`authority` the canonical provider host above) over every
   adopted project on the machine. It exits non-zero only when the project
   registry itself can't be read. Tests cover two projects, one project failing
   while the other still lists, and an empty registry.
@@ -284,11 +291,16 @@ an empty queue.
   aggregate response), and a name a rejected registration claimed still counts
   as known to `--source`. The aggregator **stamps** identity at the
   boundary rather than trusting the command. A command item is the item schema
-  with `source` and `id` **optional**; validation runs in this order: (1) a
+  with `source`, `id`, `created_at` and `updated_at` **optional**; validation runs in this order: (1) a
   present `source` or `id` that differs from the registered name or the derived
   id rejects the item; (2) the aggregator sets `source` to the registered name
-  and derives `id` from `(source, entity, entity_ref)`; (3) the completed item
-  is validated against the item schema. So an external
+  and derives `id` from `(source, entity, entity_ref)`, and fills an omitted
+  `created_at` from that source's persisted first-observed time (the same
+  per-source store a built-in adapter that only knows when it observed
+  something uses) and an omitted `updated_at` from the read's `read_at`; (3)
+  the completed item is validated against the item schema. So a command that
+  doesn't know when a condition began keeps a stable position across reads, and
+  an external
   source can never alias a built-in producer, mint a duplicate `id`, or clear
   another source's first-observed time. The command prints the same source-result envelope a
   built-in adapter returns, `{"schema": 1, "items": [...], "status"?,
@@ -382,7 +394,9 @@ an empty queue.
 - [ ] Unit, external identity: a command source registered as `dispatch` (or as
   a duplicate name) is rejected into `config_errors[]` -- never a second
   `sources[]` entry under that name -- and the aggregate is `degraded`; an item stating another `source` or a foreign
-  `id` is invalid; an item omitting both is stamped and then validated; a
+  `id` is invalid; an item omitting both is stamped and then validated; an item
+  omitting `created_at` gets the same first-observed time on two separate reads
+  (two CLI invocations), and a new one after an `ok` read that dropped it; a
   stamped item's `id` and first-observed key are its own; an item arriving with a
   non-empty `also[]` fails its source. `--source bridgge` (an
   unknown name) exits 2 without reading anything, and `attention next --json
@@ -391,7 +405,10 @@ an empty queue.
   projects each tracking a PR with a failing bar give both items; a project
   whose tracked PRs can't be enumerated makes the source `failed`; a record
   still saying `open` for a PR the provider reports closed gives no item, and a
-  record saying `closed` for a reopened, failing PR gives one.
+  record saying `closed` for a reopened, failing PR gives one. Two projects
+  tracking `owner/name#42` on different providers (`github.com` and a GHES or
+  Gitea host) give two items that never dedupe, while one PR reached through
+  two spellings of the same host gives one.
 - [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded` with the others
