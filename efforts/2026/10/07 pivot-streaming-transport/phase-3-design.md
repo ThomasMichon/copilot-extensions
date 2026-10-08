@@ -1,5 +1,16 @@
 # Phase 3 — CLI-relayed daemon fast path (detailed design)
 
+> **Archived 2026-10-07, design fully realized.** Every requirement below
+> was implemented and shipped as part of `pivot-streaming-transport`
+> Phases 3a/3b (see the parent `README.md`'s own Journal for the landed
+> PRs and validation evidence — `#4994`, `#5166`, and `#5585`'s follow-up
+> fix). This file's own checkboxes are left exactly as originally
+> written, by design (per its own header below: "Review-round history for
+> this design lives in the README's own dated Journal, not here") — it is
+> the original design record, not a parallel completion tracker. Do not
+> read an unchecked box here as still-open work; the README's own Plan and
+> Validation Plan are the authoritative completion record.
+
 Extracted from [`README.md`](README.md)'s Plan per `efforts/README.md`'s
 "extract substantial phase designs into sibling documents" convention. The
 README keeps a concise checklist and links here; this file is the
