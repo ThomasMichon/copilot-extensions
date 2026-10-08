@@ -119,10 +119,16 @@ def test_compute_signature_stats_aggregates_occurrences_recovery_and_blocking(te
     assert stat.blocking_impact == 2
 
 
-def test_render_report_includes_known_noisy_nonblocking_checks(telemetry):
+def test_render_report_known_noisy_nonblocking_checks_section_is_empty(telemetry):
+    # The sole prior entry (identifier-leak-guard-unconfigured) was removed
+    # 2026-10-06 once efforts/active/ci-identifier-leak-guard/ (#3923)
+    # provisioned the denylist secrets and the check stopped firing red --
+    # see KNOWN_NOISY_NONBLOCKING_CHECKS's own docstring. The section still
+    # renders, just empty, so a future entry has somewhere to land.
     report = telemetry.render_report([])
-    assert "identifier-leak-guard-unconfigured" in report
-    assert "ci-identifier-leak-guard" in report
+    assert "Known noisy, non-blocking checks" in report
+    assert "none currently tracked" in report
+    assert "identifier-leak-guard-unconfigured" not in report
 
 
 def test_replace_source_snapshot_drops_stale_out_of_window_rows(telemetry, tmp_path):
