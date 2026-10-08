@@ -18,7 +18,9 @@
   `visions/plugins/agent-ssh` (local-process reach, fragment provenance,
   mesh self-healing, machine maintenance escalation, venue-contract-reach),
   `visions/plugins/agent-containers` (interactive-venue-reach-trusted,
-  restricted-venue-picker-discovery, host-backed persistence)
+  restricted-venue-picker-discovery, host-backed persistence),
+  `visions/plugins/agent-worktrees/pull-requests` (confirmed realized;
+  closed 2 stale issues, narrowed 1)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -204,6 +206,24 @@ Operator, end of a long multi-repo session:
             agent-codespaces/agent-ssh. No conformance gap found requiring
             a new issue — `init.ps1`'s nonconformance is already
             tracked by `#5472` (Phase 3).
+      - [x] `visions/plugins/agent-worktrees/pull-requests/README.md` —
+            reconciled against 372 commits of drift in the plugin's PR
+            surface since its 2026-09-20 last revision. Found in unusually
+            good shape: two of the three gaps its own 2026-09-14 authoring
+            named are now fully realized (`reviewer-capable-provider`,
+            `conformance-verified-mock-provider`); the third,
+            `foreign-repo-pr-operations`, is **partially** realized —
+            `pr-watch`/`pr-merge`/`create-pr`/`pr-ready`/`pr-abandon`
+            support it, but `pr-status`/`pr-diff`/`pr-comment`/`pr-review`
+            still lack a foreign-repo argument. Closed two now-stale
+            tracking issues with evidence (`#2699`, `#2691`) rather than
+            leaving them open against shipped capability; narrowed `#2700`
+            to those four remaining commands instead of closing it.
+            Updated the vision's own stale Purpose & Intent opening, which
+            still described reviewer-side operations as entirely missing.
+            Only the opening narrative, the reality-docs pointer, and the
+            tracked-issue state had drifted — the Feature/Behavior prose
+            itself needed no correction.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -638,9 +658,52 @@ then rather than assuming either answer.
   from detached (a separate host-side keeper, independent of the
   launcher's lifetime), verified against `copilot_venue.py`/
   `copilot_detach.py`.
-- Next: continue Phase 2 with the next vision in the index not yet swept
-  (the three stale-high-traffic candidates from the original ranking are
-  now all reconciled — `agent-codespaces`, `agent-ssh`,
-  `agent-containers` — so the next pick should re-rank the remainder of
-  `visions/README.md`'s ~29-vision index, prioritizing branch visions
-  (`agent-fabric`, `native-convergence`) per the effort's own Plan).
+
+### 2026-10-07 — Phase 2 slice: re-ranked remaining visions, confirmed `agent-worktrees/pull-requests`
+- Re-ranked the remainder of `visions/README.md`'s ~29-vision index by a
+  single consistent metric (`git log --since=<last-revised-date> --oneline
+  -- <plugin-path>` commit counts), since the three prior stale/high-traffic
+  candidates were all now reconciled. Top candidates:
+  `plugins/agent-worktrees/pull-requests` (372 commits since 2026-09-20,
+  though this counts the whole `agent-worktrees` plugin directory since
+  the sub-vision has no narrower path of its own), `plugins/agent-worktrees`
+  itself (102 commits since 2026-10-02 — very fresh but still hot),
+  `plugins/agent-index` (71 since 2026-09-18), `plugins/agent-bridge` (52
+  since 2026-09-28), `plugins/context-handoff` (41 since 2026-09-13).
+  Picked `pull-requests` as the most tractable, clearly-scoped leaf vision
+  among the top candidates (the parent `agent-worktrees` vision is a much
+  larger undertaking better left to its own dedicated slice).
+- Applying the verification discipline from the two prior corrections,
+  checked every candidate fold-back against the real `PRProvider` protocol
+  (`providers/base.py`), the real GitHub provider (`providers/github.py`),
+  and the actual CLI surface (`pr_state_cli.py`) — not just vision prose.
+  Found the vision already in excellent shape: two of the three gaps its
+  own 2026-09-14 authoring named (`reviewer-capable-provider`,
+  `conformance-verified-mock-provider`) are fully realized in code; the
+  third (`foreign-repo-pr-operations`) is partially realized — five
+  commands support it, four don't yet.
+- Found and closed **two stale GitHub issues** that were still open against
+  already-shipped capability — exactly the inverse of the `#5614` mistake
+  three slices ago (that time, a vision claimed a gap reality had already
+  closed; this time, tracked issues claimed gaps the vision's own realized
+  state had already closed). `#2699` (reviewer-side PRProvider operations)
+  and `#2691` (mock PRProvider) were both closed with direct code
+  citations. The third sibling issue, `#2700` (foreign-repo addressing),
+  was **narrowed, not closed** — `pr-watch`/`pr-merge`/`create-pr`/
+  `pr-ready`/`pr-abandon` all support it, but `pr-status`/`pr-diff`/
+  `pr-comment`/`pr-review` genuinely don't yet, a real remaining gap the
+  vision's own "symmetry" north star names.
+- No Feature/Behavior text needed changing — it was already accurate
+  should-be prose with no gap-list language. The vision's **Purpose &
+  Intent opening**, however, had genuinely gone stale (it still described
+  reviewer-side operations as entirely missing) — updated that narrative
+  to match reality, added the Reality-docs pointer (`pr-workflow.md`), and
+  recorded a Provenance entry that correctly states two gaps realized and
+  one partially realized (PR #5639 review caught an earlier overstatement
+  that called all three fully realized, contradicting this same entry's
+  own narrowed-`#2700` note two sentences later).
+- Next: continue Phase 2 with the next vision — `plugins/agent-worktrees`
+  itself (102 commits since 2026-10-02) or `plugins/agent-index` (71 since
+  2026-09-18) are the next candidates by the same ranking; `agent-worktrees`
+  is large enough to warrant scoping before diving in.
+
