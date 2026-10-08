@@ -182,14 +182,19 @@ find the noisiest and blocking issues, and fix them"
   it is already fully tracked in `efforts/active/ci-identifier-leak-guard/`
   (#3923), which owns the `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK`
   secret setup end-to-end; this effort only needs to confirm the telemetry
-  correctly stops flagging it once that effort lands. **Implemented:**
-  `KNOWN_NOISY_NONBLOCKING_CHECKS` (hand-tracked, not auto-mined — the PR
-  check-suite API is a genuinely separate surface from workflow-run history
-  and not worth a second live-fetch path for one entry); `render_report`
-  surfaces it in its own dedicated section. `fetch_failures_for_run` also
-  explicitly excludes the organically-observed `identifier leak guard` job
-  from PR-run mining (`PR_SKIP_JOB_NAMES`) so it can never double-count under
-  a second, differently-derived key.
+  correctly stops flagging it once that effort lands. **Current state
+  (updated 2026-10-07):** `#3923` provisioned the denylist secrets and the
+  check now reports real `pass`/`fail` instead of permanent noise, so the
+  dedicated `KNOWN_NOISY_NONBLOCKING_CHECKS` hand-tracked entry and its
+  `PR_SKIP_JOB_NAMES` exclusion have both been removed — there is no longer
+  a noisy-check entry to surface. Note this check still sits on a
+  genuinely separate API surface (a custom Check Run from a `workflow_run`
+  follow-up workflow, not an Actions job the `push`/`pull_request` event
+  mining this script performs ever enumerates) — a real future
+  `identifier leak guard` failure is **not** currently ingested by this
+  pipeline either way; adding that ingestion (the PR head's check-runs API,
+  with its own regression test) is a reasonable follow-up, not yet done.
+  See the Journal for the full implementation-then-removal history.
 - [x] Confirm the downstream tracker (`test_first_use_provision_is_serialized`)
   surfaces near the top given this session's direct, repeated observation of
   it; use it as a sanity check for the pipeline's own correctness.
@@ -353,6 +358,31 @@ _Pending — Phase 3 findings (which fixes land, and in what order) will
 determine whether this section needs anything beyond the Plan above._
 
 ## Journal
+
+### 2026-10-07 — PR #5571 review round 2: fixed a stale Phase 2 spec entry + an inaccurate code comment
+- Copilot review (round 2, on commit `1da4d344f`) raised four findings:
+  two were stale/already-addressed restatements of round 1's comments
+  (the `PR_SKIP_JOB_NAMES` inconsistency and the missing Documentation
+  impact section — both already fixed by the time this round's comments
+  posted, a known resurfacing-thread pattern this effort has hit before
+  with other PRs). Two were genuinely new and valid:
+  1. Removing `identifier leak guard` from `PR_SKIP_JOB_NAMES` doesn't
+     actually restore telemetry visibility into it — it's a custom Check
+     Run from a separate `workflow_run` follow-up workflow (Actions job
+     name `scan + report`), not a job inside the `ci.yml` runs this script
+     mines, so it was likely never reachable by job-name matching at all.
+     Corrected the code comment to say so plainly instead of implying
+     ordinary mining now covers it; noted check-runs-API ingestion as a
+     real, not-yet-done follow-up if ever wanted.
+  2. The Phase 2 Plan item describing the original `KNOWN_NOISY_
+     NONBLOCKING_CHECKS`/`PR_SKIP_JOB_NAMES` implementation still read as
+     current-state prose after both were removed — rewrote it to describe
+     today's actual state (both removed, why, and the same check-runs-API
+     caveat above), per the repository's own timeless-artifact convention
+     (Plan/Phase text describes current state; history belongs in the
+     Journal, not duplicated as a second, now-contradicting spec).
+- Re-validated after both fixes: lint clean, 12/12 `tools/test_ci_
+  telemetry.py` tests pass via `test-supervisor`.
 
 ### 2026-10-06 — Validation Plan closed out; identifier-leak-guard dependency confirmed resolved
 - Resumed via handoff recovery (the direct `consume_handoff` targets were

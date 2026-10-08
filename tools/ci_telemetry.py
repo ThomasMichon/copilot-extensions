@@ -344,9 +344,15 @@ def load_failures(conn: sqlite3.Connection) -> list[FailureRecord]:
 # the *already-known*, unconditionally red, non-blocking check tracked
 # once via `KNOWN_NOISY_NONBLOCKING_CHECKS` above -- that rationale is gone
 # now that entry has been removed (2026-10-06, #3923 provisioned the
-# denylist secrets and the check reports real pass/fail): a genuine future
-# leak-guard failure should surface through ordinary mining like any other
-# check, not be silently skipped.
+# denylist secrets and the check reports real pass/fail). Removing it from
+# this skip-list does NOT make a future leak-guard failure visible to this
+# miner, though: `identifier leak guard` is a custom Check Run created by a
+# separate `workflow_run` follow-up workflow (whose own Actions job is
+# named `scan + report`), not a job inside the `push`/`pull_request`-event
+# `ci.yml` runs `fetch_runs`/`fetch_failures_for_run` enumerate here -- it
+# was arguably never reachable by job-name matching in the first place.
+# Ingesting the PR head's check-runs API explicitly (with its own
+# regression test) would be needed to cover it; not yet done.
 PR_SKIP_JOB_NAMES = frozenset({"PR gate (required check)"})
 
 
