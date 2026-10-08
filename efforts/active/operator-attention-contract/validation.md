@@ -62,7 +62,7 @@ Part of the [Operator Attention Contract](README.md) effort: what each test tier
   omitting `created_at` gets the same first-observed time on two separate reads
   (two CLI invocations), and a new one after an `ok` read that dropped it; a
   stamped item's `id` and first-observed key are its own; an item arriving with a
-  non-empty `also[]` fails its source. `--source bridgge` (an unknown name) and `--source bridge` with agent-bridge absent (a `disabled` source) each exit 2 without reading anything; a command item carrying `input` fails its source; a read over an SSH failover carries no dispatch actions; and `attention next --json
+  non-empty `also[]` fails its source. `--source bridgge` (an unknown name) and `--source bridge` with agent-bridge absent (a `disabled` source) each exit 2 without reading anything; a command item carrying `input` fails its source; every `--request-input` field form (text, textarea, choice, multichoice, conditional `show_when`) is accepted as `input`, while an object, an empty list, an unknown type, `options` or `allow_other` on a text field, an incomplete `show_when` or an unknown key is rejected (the dispatch item then carries no `input`); a read over an SSH failover carries no dispatch actions; and `attention next --json
   --source dispatch` parses with the flags after `next`.
 - Unit, the pr adapter: from a CWD outside any project, two registered
   projects each tracking a PR with a failing bar give both items; a project
