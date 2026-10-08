@@ -22,6 +22,15 @@ writer agent.
 
 ## Components
 
+### Process-log evidence (`agent_logger.process_logs`)
+
+A library reader enumerates live, gzip, and flat ZIP process-log observations
+and streams bounded UTF-8 lines without extracting archives. It preserves
+logical log identity across representations and reports corrupt or ambiguous
+evidence explicitly. See [process-log evidence](process-log-evidence.md).
+This is an accounting-input primitive; process-log sync, scheduled compression,
+and accounting ingestion are not yet wired into the session-sync flow.
+
 ### Segmenter (`agent_logger.segmenter`)
 
 Collates a single Copilot session into context-ingestible Markdown digest
