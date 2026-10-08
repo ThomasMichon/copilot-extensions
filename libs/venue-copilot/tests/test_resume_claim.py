@@ -30,7 +30,7 @@ def bridge(monkeypatch):
     """A fake host bridge: one reservation row and the live registrations."""
     b = types.SimpleNamespace(
         row={"reservation_id": "r1", "claimed_by_session_id": "placeholder"},
-        live={}, released=[], reserved=[], reserve_error=False, renewal_claimant="sid-9",
+        live={}, released=[], reserved=[], reserve_error=False, renewal_claimant="sid-9", fail_reads=0,
     )
 
     def _reserve(scope, ttl_seconds, venue):
@@ -41,6 +41,9 @@ def bridge(monkeypatch):
         return {"reservation_id": "r2"}
 
     def _get(scope):
+        if b.fail_reads:
+            b.fail_reads -= 1
+            raise venue_copilot.VenueCopilotError("bridge timed out")
         if b.row.get("reservation_id") == "r2" and b.renewal_claimant:
             b.row["claimed_by_session_id"] = b.renewal_claimant  # its next heartbeat
         return dict(b.row)
@@ -117,3 +120,34 @@ def test_a_refused_renewal_still_reports_the_resumed_session(bridge):
     bridge.reserve_error = True
     assert _settle() == ("sid-9", {})
     assert bridge.released == ["r1"]
+
+
+def test_a_failed_bridge_read_is_not_known_yet_never_an_error(bridge):
+    """A transient status failure must not escape: the launcher would treat it
+    as a failed launch and stop a healthy session."""
+    bridge.live = {"sid-9": {"session_id": "sid-9"}}
+    bridge.fail_reads = 1
+    assert _settle() == ("sid-9", {"reservation_id": "r2"})
+
+
+def test_a_dead_placeholder_row_counts_as_gone(bridge):
+    """An unclean exit leaves the placeholder's row to expire rather than deleted."""
+    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "live"},
+                   "placeholder": {"session_id": "placeholder", "status": "expired"}}
+    assert _settle() == ("sid-9", {"reservation_id": "r2"})
+
+
+def test_an_expired_resumed_row_is_not_live(bridge):
+    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "expired"}}
+    assert _settle(timeout=5.0) == ("placeholder", {"reservation_id": "r1"})
+    assert bridge.reserved == []
+
+
+@pytest.mark.parametrize("claimant", [None, "someone-else"])
+def test_an_unconfirmed_renewal_is_left_for_the_next_heartbeat(bridge, monkeypatch, claimant):
+    """Not claimed in time (or by another id): the caller must not release the
+    renewal, or the resumed session's late heartbeat could never claim it."""
+    bridge.live = {"sid-9": {"session_id": "sid-9"}}
+    monkeypatch.setattr(venue_copilot, "await_claim", lambda *a, **k: claimant)
+    assert _settle() == ("sid-9", {})
+    assert bridge.released == ["r1"] and len(bridge.reserved) == 1

@@ -58,29 +58,39 @@ def settle_resumed_claim(
     When the bridge folds the placeholder *claimed* into *expected*, that is
     the session. When *expected* is live and *claimed* is gone, the
     reservation is renewed with *venue* so *expected* claims it; the returned
-    reservation is the one the caller must release. Bounded by *timeout*:
-    otherwise (a resume that started a new conversation instead) the
-    placeholder is the session, as before."""
+    reservation is the one the caller must release -- ``{}`` when a renewal's
+    claim isn't confirmed yet, so the caller leaves it for the resumed
+    session's next heartbeat (it expires on its own TTL). A failed bridge read
+    only means "not known yet". Bounded by *timeout*: otherwise (a resume that
+    started a new conversation instead) the placeholder is the session, as
+    before."""
     if not expected or claimed == expected:
         return claimed, reservation
     import venue_copilot as vc  # late: callers' test seams patch the package
 
     deadline = clock() + timeout
     while True:
-        row = vc.get_cli_mode_reservation(worktree_id) or {}
-        if (row.get("reservation_id") == reservation.get("reservation_id")
+        try:
+            row = vc.get_cli_mode_reservation(worktree_id) or {}
+        except vc.VenueCopilotError:
+            row = None
+        if (row is not None and row.get("reservation_id") == reservation.get("reservation_id")
                 and row.get("claimed_by_session_id") == expected):
             return expected, reservation  # the bridge folded the placeholder in
-        if (vc.live_session_for(expected).get("session_id") == expected
-                and not vc.live_session_for(claimed)):
+        resumed, placeholder = vc.live_session_for(expected), vc.live_session_for(claimed)
+        if (row is not None and resumed.get("session_id") == expected
+                and resumed.get("status", "live") == "live"
+                # Gone, or a dead row (an unclean exit leaves it to expire).
+                and (not placeholder or placeholder.get("status") in ("expired", "taken-over"))):
             vc.release_cli_mode(worktree_id, reservation_id=reservation.get("reservation_id"))
             try:
                 renewed = vc.reserve_cli_mode(worktree_id, ttl_seconds=ttl_seconds, venue=venue)
             except vc.VenueCopilotError:
                 return expected, {}  # live, just without CLI mode; nothing left to release
-            vc.await_claim(worktree_id, str(renewed.get("reservation_id") or ""),
-                           max(deadline - clock(), 2 * _POLL_SECONDS + 30.0))
-            return expected, renewed
+            # At least one heartbeat: the renewal can only be claimed by the next one.
+            claimant = vc.await_claim(worktree_id, str(renewed.get("reservation_id") or ""),
+                                      max(deadline - clock(), 2 * _POLL_SECONDS + 30.0))
+            return expected, (renewed if claimant == expected else {})
         if clock() >= deadline:
             return claimed, reservation
         sleep(_POLL_SECONDS)
