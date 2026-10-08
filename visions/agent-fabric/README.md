@@ -19,7 +19,8 @@ communicated with, and recovered** as one legible whole, without an account per
 agent and without agents clobbering each other's resources.
 
 The north star is a fabric built as **composable layers**. Each layer is an
-independently installable plugin that stands alone with a coherent capability;
+independently installable capability that stands alone, with standalone service
+runtimes where appropriate and plugins for the Copilot-facing connection surface;
 **adding a layer strictly augments what the layers below already provide**,
 never breaks their standalone contract. The lower a layer sits, the more
 foundational and **passive** it is (legible with no running service); the higher
@@ -36,7 +37,7 @@ first-class.
 
 ## Concepts & Components
 
-The fabric is a **layered stack of plugins**; each layer is its own subject (a
+The fabric is a **layered stack of capabilities**; each layer is its own subject (a
 per-plugin child vision refines it under `visions/plugins/<name>/`). Two
 load-bearing properties bind the layers:
 
@@ -103,6 +104,14 @@ is borrowed" into "SSH is provisioned, verified, and maintained." Per
 mesh reachability, which the layers above route **over** rather than copy. A
 per-plugin child vision refines it at
 [`visions/plugins/agent-ssh/`](../plugins/agent-ssh/README.md).
+
+### Machine fleet — optional driver-based Gateway coordination
+Adds a central rendezvous and authenticated service/control routing over declared
+machine connectors without replacing local service, worktree, task, session, or
+credential authorities. Drivers supply the substrate; the default adopts static
+machines through agent-ssh. Shell-independent control and recoverable observation
+augment existing direct/SSH paths rather than making the Gateway mandatory.
+The [machine-fleet](../machine-fleet/README.md) child vision refines this boundary.
 
 ### agent-dispatch — the delegation layer
 Adds **task management and role assignment**: a **shared, transactional store**
@@ -723,6 +732,8 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   unreleased construct.
 - Cross-cutting vision: [session-hosting](../session-hosting/README.md) —
   provider-neutral ownership of Copilot execution and live cutover mechanics.
+- Child vision: [machine-fleet](../machine-fleet/README.md) — optional
+  driver-based Gateway coordination with scoped service and credential reach.
 - Child visions: [agent-ssh](../plugins/agent-ssh/README.md) — the connectivity /
   transport layer the fabric's cross-machine reach rides on;
   [agent-dispatch](../plugins/agent-dispatch/README.md) — the delegation layer's
@@ -732,7 +743,7 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   vs. pulse) and lets each layer contribute a pivot;
   [venue-parity](../venue-parity/README.md) — the cross-cutting principle that the
   fabric's venue providers (agent-codespaces / agent-containers) are thin,
-  symmetric SSH transports over one agent-bridge dispatch core, so a dispatched
+  symmetric shared transports over one agent-bridge dispatch core, so a dispatched
   agent is the same in a CodeSpace or a local container;
   [remote-interactive-sessions](../remote-interactive-sessions/README.md) — how a
   human-attended, muxed session in a remote venue becomes a first-class peer of a

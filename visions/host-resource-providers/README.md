@@ -7,7 +7,7 @@
   relay's already-proven pluggable-source shape beyond credentials.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-19
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`libs/credential-relay/README.md`](../../libs/credential-relay/README.md)
 
 ## Purpose & Intent
@@ -49,11 +49,12 @@ credential sources are today.
 
 ### One relay-shaped back-channel, many capabilities
 
-A coordinated session requests a capability by name over the **same** SSH
-back-channel every venue already establishes for the credential relay — not a
-second, capability-specific transport. Adding a capability is adding a
-provider behind the existing channel, not standing up new plumbing per
-capability.
+A coordinated session requests a capability by name over the **same** authorized
+back-channel used for credential relay — not a second, capability-specific
+transport. SSH remains the standard back-channel for SSH-backed venues; an
+explicitly adopted [machine-fleet Gateway](../machine-fleet/README.md) can carry
+the equivalent scoped provider contract. Adding a capability is adding a provider
+behind the selected shared channel, not standing up plumbing per capability.
 
 ### Ensure/release ownership, generalized
 
@@ -82,8 +83,8 @@ package.
 
 ### one-shared-back-channel
 
-A capability request travels the same SSH back-channel every venue already
-carries for the credential relay; no capability invents its own transport.
+A capability request travels the selected shared credential-relay back-channel;
+no capability invents its own transport or expands authority by changing it.
 
 ### provider-owned-lifecycle
 
@@ -144,6 +145,8 @@ teaching agent-bridge's core about a new capability's internal shape.
 ## See Also
 
 - Parent vision: [agent-fabric](../agent-fabric/README.md)
+- Related vision: [machine-fleet](../machine-fleet/README.md) — optional
+  driver-based Gateway reach without changing provider ownership or scope.
 - Sibling vision: [plugin-services](../plugin-services/README.md) — the
   per-host service model a host-resource provider is deployed under.
 - Related vision: [remote-interactive-sessions](../remote-interactive-sessions/README.md) —
