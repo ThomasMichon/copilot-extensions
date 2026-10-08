@@ -642,7 +642,10 @@ an incomplete change, the same way an undocumented behavior change is.
   **consumer's** additive choice, never a prerequisite baked into the plugin.
 - **Not a multi-host clustering / orchestration system.** This model governs
   **per-host, machine-local** services. Cross-host reach between agents is a
-  separate transport concern owned by the mesh plugin, not this vision.
+  separate transport concern owned by the selected provider/driver: agent-ssh
+  for static/SSH reach, or an explicitly adopted
+  [machine-fleet](../machine-fleet/README.md) connector route. It is not this
+  per-host vision's authority.
 - **No mandatory central coordinator.** The suite does not require one always-on
   arbiter process that other plugins depend on; composition is peer-wise and
   optional.
