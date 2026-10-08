@@ -543,6 +543,13 @@ identity remains usable, with a diagnostic instead of a host fallback.
 caller's local guest. SSH environment aliases remain independently configured
 transport labels. Existing durable ownership references are not rewritten.
 
+`discover.current_machine()` is the execution identity used by package discovery,
+not physical hardware inventory. Default library discovery and the standalone
+discovery module use the same resolver and accepted topology labels as the main
+CLI; their platform path-key comes from that resolver too. A diagnostic
+`raw: ...` label names the OS hostname only and does not grant it guest package
+scope. Explicit discovery target selectors remain unchanged.
+
 The canonical root is `.copilot-extensions/agent-machines/`. Legacy
 `.agent-machines/` and `.github/machine-state/` remain bounded fallbacks only
 when the canonical root is absent. An explicit marketplace-specific overlay may

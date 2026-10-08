@@ -170,11 +170,9 @@ class RequirementPackage:
     ) -> bool:
         """True when this package targets ``machine`` (empty/``*`` gate = all).
 
-        The gate match is **case-insensitive**: ``current_machine()`` returns
-        ``platform.node()``, whose casing is the OS hostname's (e.g.
-        ``Anomalous-Potato``/``Emancipation-Cube`` on Windows), while manifests conventionally
-        list gates in lowercase. Hostnames are case-insensitive, so comparing
-        case-sensitively would silently exclude a machine from its own package.
+        Gate matching is **case-insensitive** across the execution identity and
+        its accepted topology labels. Discovery qualifies WSL guests separately;
+        the raw hardware hostname is not implicitly an accepted guest label.
         """
         if not self.gate or "*" in self.gate:
             return True

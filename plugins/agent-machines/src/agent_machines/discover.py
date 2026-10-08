@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import os
-import platform
+import platform  # noqa: F401 - preserve the public platform monkeypatch seam
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +33,7 @@ from typing import Any
 
 import yaml
 
+from . import identity as _identity
 from .manifest import ManifestError, RequirementPackage, load_package
 
 CANONICAL_MACHINE_STATE_ROOT = Path(".copilot-extensions") / "agent-machines"
@@ -52,18 +53,21 @@ def home() -> Path:
 
 
 def current_machine() -> str:
-    """The machine name used to gate packages (matches the harness convention)."""
-    return platform.node()
+    """Current execution identity used for package gates, not hardware inventory."""
+    return _current_identity().canonical
+
+
+def _current_identity(candidates: list[RepoCandidate] | None = None) -> _identity.MachineIdentity:
+    roots = candidate_repos() if candidates is None else candidates
+    identity = _identity.resolve_machine(topology_repos=(candidate.path for candidate in roots))
+    for warning in identity.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    return identity
 
 
 def current_platform() -> str:
     """Return the registry path-key for this platform: windows | wsl | linux."""
-    if os.name == "nt":
-        return "windows"
-    release = platform.release().lower()
-    if "microsoft" in release or "wsl" in release:
-        return "wsl"
-    return "linux"
+    return _identity.detect_platform()
 
 
 def registry_path(home_dir: Path | None = None) -> Path:
@@ -755,9 +759,14 @@ def discover(
     is absent. A home-relative :func:`user_package_root` (no adopted repo
     required) is always additionally scanned -- see its docstring.
     """
-    machine = machine or current_machine()
+    candidates = candidate_repos(registry, projects)
+    if not machine:
+        identity = _current_identity(candidates)
+        machine = identity.canonical
+        if accepted_machines is None:
+            accepted_machines = identity.accepted
     found: list[DiscoveredRepo] = []
-    for candidate in candidate_repos(registry, projects):
+    for candidate in candidates:
         name, path = candidate.name, candidate.path
         if not path.is_dir():
             if candidate.required:
@@ -801,7 +810,13 @@ def _main(
     accepted_machines: tuple[str, ...] | None = None,
     raw_machine: str | None = None,
 ) -> int:  # pragma: no cover - thin CLI glue
-    machine = machine or current_machine()
+    if not machine:
+        identity = _current_identity()
+        machine = identity.canonical
+        if accepted_machines is None:
+            accepted_machines = identity.accepted
+        if raw_machine is None:
+            raw_machine = identity.raw
     repos = discover(machine, accepted_machines=accepted_machines)
     label = machine
     if raw_machine and raw_machine.casefold() != machine.casefold():
