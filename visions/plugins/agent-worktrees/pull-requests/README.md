@@ -9,8 +9,11 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-09-20
-- **Reality docs:** the agent-worktrees plugin `docs/`; `providers/base.py`
+- **Last revised:** 2026-10-07
+- **Reality docs:** the agent-worktrees plugin `docs/`;
+  `skills/worktree/references/pr-workflow.md` (the "Addressing a foreign
+  repo" section is the authoritative, maintained description of
+  `foreign-repo-pr-operations`); `providers/base.py`
   (the `PRProvider` protocol and provider registry); `tests/test_pr_*.py`,
   `tests/test_providers.py` (the existing pr-command test suite)
 - **Supersedes / superseded by:** none
@@ -190,11 +193,35 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
   [agent-dispatch/reviewer](../../agent-dispatch/reviewer/README.md) — the
   cooperative reviewer loop this capability is meant to compose rather than
   have re-implemented beside it.
-- Reality docs: the agent-worktrees plugin `docs/`; `providers/base.py`;
+- Reality docs: the agent-worktrees plugin `docs/`;
+  `skills/worktree/references/pr-workflow.md`; `providers/base.py`;
   `tests/test_pr_*.py`, `tests/test_providers.py`
 
 ## Provenance
 
+- **2026-10-07** — Fold-back confirmation slice (`vision-backport-sweep`
+  Phase 2): reconciled against 372 commits of drift in the plugin's PR
+  surface since this vision's last revision. Found this vision in
+  unusually good shape — all three gaps the original 2026-09-14 authoring
+  named are now realized: `reviewer-capable-provider` (confirmed real in
+  `providers/base.py`'s protocol *and* `providers/github.py`'s
+  implementation, exposed as `pr-diff`/`pr-comment`/`pr-review`/`pr-status
+  --threads`), `conformance-verified-mock-provider` (`MockPRProvider`
+  registered as a fourth provider in `_PROVIDERS`, exercised by the same
+  test suite real providers are), and `foreign-repo-pr-operations`
+  (`pr-watch`/`pr-merge`/`create-pr`/`pr-ready`/`pr-abandon` all address a
+  registered repo with no local checkout per
+  `pr-workflow.md`'s "Addressing a foreign repo" section — which uses this
+  vision's own feature name verbatim). Closed two now-stale tracking
+  issues with evidence (`#2699` reviewer-side ops, `#2691` mock provider)
+  rather than leaving them open against already-shipped capability.
+  Narrowed `#2700` (foreign-repo addressing) rather than closing it: the
+  symmetry this vision's north star promises is not yet complete —
+  `pr-status`/`pr-diff`/`pr-comment`/`pr-review` still have no foreign-repo
+  argument, unlike the five commands that already do. No vision text
+  changed beyond the reality-docs pointer and this entry — the should-be
+  text was already accurate; only the tracked-issue state had drifted from
+  it.
 - **2026-09-20** — Round-23 review of the `codename-attribution-by-default`
   effort (#2977) found this vision silent on the `source_attribution`/
   codename PR-marker mechanism `pr-attribution-codenames` (Done) already
