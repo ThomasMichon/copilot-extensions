@@ -379,3 +379,14 @@ class TestNoResume:
         with pytest.raises(RuntimeError, match="stop was requested"):
             await sm.handoff_session(pred.session_id, reason="context-pressure")
         assert set(sm._sessions) == before and pred.status != SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_a_prompt_queued_behind_the_notice_keeps_the_stop_marker(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        sm = _sm(tmp_db, enabled=True)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        session.status = SessionStatus.RUNNING  # a turn is live: the notice queues
+        await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        result = await sm.submit_or_queue_prompt(session.session_id, "another ask")
+        assert result["queued"] is True and session._stop_requested is True

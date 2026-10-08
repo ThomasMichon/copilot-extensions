@@ -232,8 +232,6 @@ class _SessionPromptMixin:
         # successor is fresh, so this never recurses.
         if no_resume:  # a stop is under way: the notice must not leave a successor behind
             session._stop_requested, session._handoff_pending = True, False
-        else:  # an ordinary prompt: whatever stop a notice announced was abandoned
-            session._stop_requested = False
         if (not no_resume
                 and session.status in (SessionStatus.IDLE, SessionStatus.STOPPED)
                 and self._is_over_critical(session)
@@ -260,6 +258,11 @@ class _SessionPromptMixin:
         must_queue = turn_live or queue_nonempty or self._draining
 
         if not must_queue:
+            if not no_resume:
+                # An ordinary prompt starting a turn (nothing queued ahead of it,
+                # so the notice already ran) means the stop was abandoned. One
+                # merely queued behind the notice says nothing, so it's left set.
+                session._stop_requested = False
             turn_index = await self._submit_prompt_locked(session_id, prompt, no_resume=no_resume)
             return (
                 {
