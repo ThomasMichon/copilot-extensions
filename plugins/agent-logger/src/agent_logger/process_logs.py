@@ -35,7 +35,14 @@ def is_process_log_candidate(name: str) -> bool:
     :func:`iter_process_log_refs`, this never opens the file, so a ``.zip``
     with no supported members (or none at all) still passes here -- the
     reader's own enumeration is what yields zero refs for it, not this.
+
+    Rejects any ``name`` containing a path separator (POSIX ``/`` or
+    Windows ``\\``) outright -- a bare filename is the documented contract,
+    and without this check a path-like value such as ``../outside.zip``
+    would still satisfy the ``.zip`` branch's plain ``str.endswith`` test.
     """
+    if "/" in name or "\\" in name:
+        return False
     return _is_log_name(name.removesuffix(".gz")) or name.endswith(".zip")
 
 
@@ -165,6 +172,21 @@ def open_root_dir(log_root: Path) -> Iterator[int]:
     root path -- a swap of the final root component (e.g. onto a symlink)
     between the initial check and later entry opens would otherwise let an
     attacker redirect enumeration/reads outside the configured root.
+
+    Scope, stated explicitly rather than left implicit: ``O_NOFOLLOW``
+    rejects only a symlinked *final* component of ``log_root`` itself. Like
+    every other path-based open in this plugin (e.g.
+    ``filesystem._existing_real_directory``), the kernel's ordinary path
+    resolution still silently follows a symlink at any *ancestor* component
+    (e.g. replacing ``~/.copilot`` itself, several components above the
+    configured ``logs`` root). Closing that would need a full dir_fd-pinned
+    walk from a trusted anchor down to ``log_root`` -- and would also then
+    reject a legitimate system where an ancestor is itself an intentional
+    symlink (e.g. a relocated ``$HOME``), trading one failure mode for
+    another. The threat this function defends against is specifically a
+    swap of the *named, configured* root -- the component under direct
+    attacker or race control here -- not a compromised ancestor directory,
+    which is out of scope for this primitive.
 
     Public (not module-private) because this root-pinning primitive is
     shared with ``agent_logger.sync.targets.filesystem``'s process-log

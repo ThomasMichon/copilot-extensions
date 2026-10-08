@@ -3129,13 +3129,13 @@ def test_base_target_push_process_logs_reports_unsupported(tmp_path: Path) -> No
 
 @pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
 def test_copy_process_logs_rejects_symlinked_root(tmp_path: Path) -> None:
-    """A deterministic stand-in for the TOCTOU race flagged in review: once
-    the configured root names a symlink (whether swapped in after the
-    caller's own validation, or from the start), the copy must refuse it
-    rather than traversing through it -- enumeration and every per-entry
-    open are pinned to one directory handle opened with O_NOFOLLOW, not
-    re-resolved by path for each entry (mirroring
-    agent_logger.process_logs's own root-pinning guarantee)."""
+    """A deterministic stand-in for the TOCTOU race: once the configured
+    root names a symlink (whether swapped in after the caller's own
+    validation, or from the start), the copy must refuse it rather than
+    traversing through it -- enumeration and every per-entry open are
+    pinned to one directory handle opened with O_NOFOLLOW, not re-resolved
+    by path for each entry (mirroring agent_logger.process_logs's own
+    root-pinning guarantee)."""
     from agent_logger.sync.targets.filesystem import _copy_process_logs
 
     outside = tmp_path / "outside"
@@ -3296,6 +3296,35 @@ def test_engine_run_sync_process_logs_disabled_by_default(tmp_path: Path) -> Non
     machines = list(dest.iterdir())
     assert len(machines) == 1
     assert not (machines[0] / "logs").exists()
+
+
+def test_engine_run_sync_reports_unsupported_target_without_verbose(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+) -> None:
+    """An operator who explicitly enables sync.process_logs on a target that
+    doesn't support it (SSH/ingest) must see that it's a no-op on every
+    ordinary scheduled run -- not only when --verbose is passed."""
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.base import PushResult
+
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    data = dict(cfg.as_dict())
+    data["sync"]["process_logs"] = {"enabled": True}
+    cfg = Config(data, cfg.home)
+
+    monkeypatch.setattr(
+        filesystem.LocalTarget,
+        "push_process_logs",
+        lambda self, log_root, machine: PushResult(
+            ok=True, detail=f"{self.describe()} does not support process-log sync",
+        ),
+    )
+
+    assert engine.run_sync(cfg) == 0
+    assert "does not support process-log sync" in capsys.readouterr().out
 
 
 def test_process_logs_enabled_and_source_config() -> None:

@@ -400,9 +400,13 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     ones :func:`~agent_logger.process_logs.iter_process_log_refs` uses) --
     a swap of *source* onto a symlink after the caller's own initial
     validation (e.g. between :func:`_existing_real_directory` and this scan)
-    cannot redirect traversal outside the configured root. Windows has no
-    ``openat`` equivalent and keeps the previous path-based behavior, the
-    same documented platform gap ``process_logs.py`` already carries.
+    cannot redirect traversal outside the configured root. This protects the
+    *named, configured* root itself; it does not pin every ancestor
+    component of *source* (see :func:`~agent_logger.process_logs.open_root_dir`'s
+    own docstring for why that's an explicit, deliberate scope boundary
+    rather than an oversight). Windows has no ``openat`` equivalent and
+    keeps the previous path-based behavior, the same documented platform
+    gap ``process_logs.py`` already carries.
 
     A source file that disappears mid-pass (log rotation or deletion racing
     this copy) is treated as an ordinary skipped candidate, never a

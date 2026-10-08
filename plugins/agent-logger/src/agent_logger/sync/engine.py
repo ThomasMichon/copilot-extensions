@@ -388,7 +388,13 @@ def run_sync(
                         f"session-sync: process-log push failed: {plog_result.detail}",
                         file=sys.stderr,
                     )
-                elif plog_result.file_count or verbose:
+                else:
+                    # Always print, not only when files moved or --verbose:
+                    # the base Target class's "unsupported" response (SSH/
+                    # ingest targets) is itself ok=True with zero files, and
+                    # an operator who explicitly enabled sync.process_logs
+                    # on one of those targets must see that it's a no-op on
+                    # every ordinary scheduled run, not only a verbose one.
                     print(
                         f"session-sync: process-logs {plog_result.detail} "
                         f"({plog_result.file_count} files)"
