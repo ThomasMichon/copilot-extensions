@@ -497,6 +497,65 @@ class TestDeriveTurnState:
         ) == ("idle", False)
 
 
+# A background sub-agent's events, in the Copilot CLI's real shape: ``agentId``
+# on the event envelope (not in ``data``), and ``data.parentToolCallId`` on its
+# turn/tool events.
+_SUB_ENVELOPE = {"agentId": "df92a1", "parentId": "p0", "timestamp": "2026-10-08T00:00:00Z"}
+_SUB_EVENTS = [
+    {**_SUB_ENVELOPE, "type": "user.message", "id": "s1",
+     "data": {"content": "audit the files", "parentAgentTaskId": "t1"}},
+    {**_SUB_ENVELOPE, "type": "assistant.message", "id": "s2",
+     "data": {"content": "", "parentToolCallId": "tc-task", "toolRequests": []}},
+    {**_SUB_ENVELOPE, "type": "tool.execution_start", "id": "s3",
+     "data": {"toolCallId": "tc-sub", "toolName": "bash", "parentToolCallId": "tc-task",
+              "arguments": {"command": "sleep 600"}}},
+]
+
+
+class TestDeriveTurnStateIgnoresSubAgents:
+    def test_envelope_agent_id_never_marks_the_parent_running(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        assert derive_turn_state(_SUB_EVENTS, prior_state="idle") == ("idle", False)
+
+    def test_parent_tool_call_id_alone_marks_a_sub_agent_event(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        event = {"type": "tool.execution_complete", "data": {"parentToolCallId": "tc-task"}}
+        assert derive_turn_state([event], prior_state="idle") == ("idle", False)
+
+    def test_legacy_data_agent_id_still_skipped(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        event = {"type": "assistant.message", "data": {"agentId": "sub-1"}}
+        assert derive_turn_state([event], prior_state="idle") == ("idle", False)
+
+    def test_main_turn_end_wins_over_later_sub_agent_activity(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        main = [{"type": "assistant.message", "data": {"content": "dispatched"}},
+                {"type": "assistant.turn_end", "data": {"turnId": "1"}}]
+        assert derive_turn_state(main + _SUB_EVENTS) == ("idle", True)
+
+
+def test_route_background_sub_agent_never_makes_an_idle_parent_stalled(
+    client_with_store: TestClient,
+) -> None:
+    """The parent's turn ended; its background sub-agent keeps working (and then
+    sits in a long tool call). The parent stays idle -- never running, so never
+    stalled -- and the sub-agent's open tool is not read as the parent's."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/events", json={"events": [
+        {"type": "user.message", "id": "m1", "data": {"content": "go"}},
+        {"type": "assistant.turn_end", "id": "m2", "data": {"turnId": "1"}},
+    ]})
+    c.post("/api/v1/live-sessions/s1/events", json={"events": _SUB_EVENTS})
+    row = c.app.state.db.get_live_session("s1")
+    assert row["turn_state"] == "idle"
+    assert live_sessions._live_liveness(row, now=time.time() + 999) == "idle"
+
+
 def test_db_update_live_turn_state(tmp_db: Database) -> None:
     now = time.time()
     tmp_db.register_live_session(

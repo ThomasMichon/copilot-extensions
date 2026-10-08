@@ -592,6 +592,8 @@ class SdkEventIn(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     timestamp: float | None = None
     id: str | None = None
+    #: Sub-agent instance id from the event envelope; absent for the main agent.
+    agentId: str | None = None
 
 
 class IngestLiveEventsRequest(BaseModel):

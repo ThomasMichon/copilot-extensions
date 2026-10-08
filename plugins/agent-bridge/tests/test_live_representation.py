@@ -273,6 +273,20 @@ class TestLiveEventStore:
         assert [e.event for e in events] == ["user_message", "agent_message"]
         assert log.latest_id == 2
 
+    def test_ingest_attributes_an_envelope_agent_id(self) -> None:
+        """The CLI puts a sub-agent's ``agentId`` on the event envelope; ingest
+        carries it into the translated event, so its tool call reads as nested."""
+        store = LiveEventStore()
+        store.ingest("s", [{
+            "type": "tool.execution_start", "agentId": "sub-1", "id": "e1",
+            "data": {"toolCallId": "tc-1", "toolName": "bash", "parentToolCallId": "tc-0"},
+        }])
+        log = store.get("s")
+        assert log is not None
+        assert log.get_events()[0].data["agent_id"] == "sub-1"
+        assert log.active_tool_call(include_nested=False) is None
+        assert log.active_tool_call() is not None
+
     def test_ingest_skips_malformed_items(self) -> None:
         store = LiveEventStore()
         n = store.ingest(

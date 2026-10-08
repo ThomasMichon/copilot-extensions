@@ -128,18 +128,57 @@ export class InFlightMessages {
   }
 }
 
+// Whether an SDK session event belongs to a sub-agent rather than the main
+// agent: the event envelope's ``agentId`` (absent for the root agent and
+// session-level events), plus the legacy ``data.agentId`` /
+// ``data.parentToolCallId`` markers the runtime also recognizes.
+export function isSubAgentEvent(event) {
+  if (!event || typeof event !== "object") return false;
+  if (event.agentId) return true;
+  const d = event.data;
+  return !!(d && typeof d === "object" && (d.agentId || d.parentToolCallId));
+}
+
+const MAIN_TURN_START = new Set(["user.message", "assistant.turn_start"]);
+// ``assistant.idle`` fires when the main agent's loop goes idle even while
+// background sub-agents keep running; ``session.idle`` only once all of them
+// are done too. Either one means the main turn is over.
+const MAIN_TURN_END = new Set(["assistant.idle", "session.idle"]);
+
+// Tracks whether the session's MAIN turn is running, from the root agent's own
+// events only -- a background sub-agent's activity never counts. Starts idle:
+// the extension joins as the session starts, and a missed start only degrades
+// an interrupt to an immediate (steering) send.
+export class MainTurn {
+  constructor() {
+    this.running = false;
+  }
+
+  observe(event) {
+    if (isSubAgentEvent(event)) return;
+    const type = event?.type;
+    if (MAIN_TURN_START.has(type)) this.running = true;
+    else if (MAIN_TURN_END.has(type)) this.running = false;
+  }
+}
+
 // Translate the bridge's persisted per-message urgency into SDK actions.
 // Missing/unknown values intentionally degrade to "queue" so older bridge rows
 // and future additive values never drop a message on the floor.
-export function deliveryPlan(msg) {
+//
+// ``mainTurnRunning`` (default true: abort when unknown) decides whether an
+// interrupt aborts first. session.abort() also cancels every running
+// sub-agent, background ones included, so with no main turn to interrupt an
+// abort would only kill those -- the message is sent immediately instead.
+export function deliveryPlan(msg, { mainTurnRunning = true } = {}) {
   const options = buildDeliveredSendOptions(msg);
   if (msg?.delivery === "steer") {
     return { abortFirst: false, options: { ...options, mode: "immediate" } };
   }
   if (msg?.delivery === "interrupt") {
-    // Immediate after the abort, so it is not queued behind messages that
-    // were enqueued before it.
-    return { abortFirst: true, options: { ...options, mode: "immediate" } };
+    // Immediate (after the abort, when there is one), so it is not queued
+    // behind messages that were enqueued before it.
+    return { abortFirst: !!mainTurnRunning, options: { ...options, mode: "immediate" } };
   }
   return { abortFirst: false, options };
 }
@@ -267,21 +306,25 @@ export function serializedRegister(
 // would keep the message and deliver it twice. A rollover that does commit in
 // between is followed by the bridge's alias forwarding. Best-effort and
 // ordered: the batch stops at the first send failure (unacked redelivers).
-export async function drainInbox(sid, { getJson, post, session, inFlight, log = () => {} }) {
+//
+// ``mainTurn`` (a MainTurn) says whether an interrupt has a main turn to abort;
+// without one, every interrupt aborts first (the historical behavior).
+export async function drainInbox(sid, { getJson, post, session, inFlight, mainTurn, log = () => {} }) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const data = await getJson(`${base}/messages`);
   const messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return [];
   const delivered = [];
-  let aborted = false;
+  let interrupted = false;
   for (const msg of messages) {
     if (!msg || typeof msg.id !== "number") continue;
     try {
-      const plan = deliveryPlan(msg);
-      // One abort per batch: a second interrupt in the same batch must not
+      const plan = deliveryPlan(msg, { mainTurnRunning: mainTurn ? mainTurn.running : true });
+      // One interrupt per batch: a second interrupt in the same batch must not
       // cancel the turn the first one just started.
-      if (plan.abortFirst && !aborted) {
-        aborted = true;
+      const abort = plan.abortFirst && !interrupted;
+      if (msg.delivery === "interrupt") interrupted = true;
+      if (abort) {
         try {
           await session.abort();
         } catch (e) {

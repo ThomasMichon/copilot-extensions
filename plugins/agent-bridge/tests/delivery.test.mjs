@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   DELIVERY_SOURCE,
   InFlightMessages,
+  MainTurn,
+  isSubAgentEvent,
   buildDeliveredSendOptions,
   consumedMessageId,
   deliveryPlan,
@@ -263,6 +265,96 @@ test("deliveryPlan maps interrupt to abort, then an immediate send", () => {
   // enqueued messages the abort releases.
   assert.equal(plan.options.mode, "immediate");
   assert.equal(plan.options.source, DELIVERY_SOURCE);
+});
+
+test("deliveryPlan sends an interrupt immediately, without abort, when no main turn runs", () => {
+  const plan = deliveryPlan(
+    { id: 12, sender: "a", body: "x", delivery: "interrupt" }, { mainTurnRunning: false },
+  );
+  assert.equal(plan.abortFirst, false);
+  assert.equal(plan.options.mode, "immediate");
+  assert.equal(
+    deliveryPlan({ id: 13, delivery: "interrupt" }, { mainTurnRunning: true }).abortFirst, true,
+  );
+});
+
+// Sub-agent events in the CLI's real shape: ``agentId`` on the event envelope.
+const sub = (type, data = {}) => ({ type, agentId: "df92a1", id: `s-${type}`, data });
+
+test("isSubAgentEvent reads the envelope agentId and the legacy data markers", () => {
+  assert.equal(isSubAgentEvent(sub("assistant.turn_start", { parentToolCallId: "tc" })), true);
+  assert.equal(isSubAgentEvent({ type: "tool.execution_start", data: { parentToolCallId: "tc" } }), true);
+  assert.equal(isSubAgentEvent({ type: "assistant.message", data: { agentId: "a" } }), true);
+  assert.equal(isSubAgentEvent({ type: "assistant.turn_start", data: { turnId: "1" } }), false);
+  assert.equal(isSubAgentEvent(null), false);
+});
+
+test("MainTurn follows the main agent's turn and ignores background sub-agents", () => {
+  const turn = new MainTurn();
+  assert.equal(turn.running, false);
+  turn.observe({ type: "user.message", data: { content: "go" } });
+  assert.equal(turn.running, true);
+  // The main loop goes idle while its background sub-agent keeps working.
+  turn.observe({ type: "assistant.idle", ephemeral: true, data: {} });
+  assert.equal(turn.running, false);
+  turn.observe(sub("user.message", { content: "audit" }));
+  turn.observe(sub("assistant.turn_start", { parentToolCallId: "tc" }));
+  turn.observe(sub("tool.execution_start", { parentToolCallId: "tc" }));
+  assert.equal(turn.running, false);
+  turn.observe({ type: "assistant.turn_start", data: { turnId: "2" } });
+  assert.equal(turn.running, true);
+  turn.observe(sub("assistant.idle"));
+  assert.equal(turn.running, true);
+  turn.observe({ type: "session.idle", ephemeral: true, data: {} });
+  assert.equal(turn.running, false);
+});
+
+function interruptHarness(messages) {
+  const calls = [];
+  return {
+    calls,
+    deps: {
+      getJson: async () => ({ messages }),
+      post: async (method, path, body) => { calls.push(["ack", body.ids]); return true; },
+      session: {
+        abort: async () => { calls.push(["abort"]); },
+        send: async (options) => { calls.push(["send", options.mode]); },
+      },
+      inFlight: new InFlightMessages(),
+    },
+  };
+}
+
+test("an interrupt to a session whose main turn is idle never aborts (background sub-agents survive)", async () => {
+  const { calls, deps } = interruptHarness([{ id: 5, sender: "a", body: "x", delivery: "interrupt" }]);
+  deps.inFlight.sent({ id: 4, sender: "a", body: "earlier" });
+  const mainTurn = new MainTurn(); // idle: only background sub-agents run
+  assert.deepEqual(await drainInbox("s", { ...deps, mainTurn }), [5]);
+  assert.deepEqual(calls, [["send", "immediate"], ["ack", [5]]]);
+});
+
+test("an interrupt aborts a running main turn, then re-sends unrecorded messages", async () => {
+  const { calls, deps } = interruptHarness([{ id: 5, sender: "a", body: "x", delivery: "interrupt" }]);
+  deps.inFlight.sent({ id: 4, sender: "a", body: "earlier" });
+  const mainTurn = new MainTurn();
+  mainTurn.observe({ type: "assistant.turn_start", data: { turnId: "1" } });
+  assert.deepEqual(await drainInbox("s", { ...deps, mainTurn }), [5]);
+  assert.deepEqual(calls, [["abort"], ["send", "immediate"], ["send", "immediate"], ["ack", [5]]]);
+});
+
+test("a second interrupt in a batch never aborts the turn the first one started", async () => {
+  const { calls, deps } = interruptHarness([
+    { id: 5, sender: "a", body: "x", delivery: "interrupt" },
+    { id: 6, sender: "a", body: "y", delivery: "interrupt" },
+  ]);
+  const mainTurn = new MainTurn();
+  // The first interrupt's send starts a main turn before the second is planned.
+  deps.session.send = async (options) => {
+    calls.push(["send", options.mode]);
+    mainTurn.observe({ type: "user.message", data: {} });
+  };
+  assert.deepEqual(await drainInbox("s", { ...deps, mainTurn }), [5, 6]);
+  assert.deepEqual(calls, [["send", "immediate"], ["send", "immediate"], ["ack", [5, 6]]]);
 });
 
 test("renderDeliveredPrompt escapes attribute values", () => {
