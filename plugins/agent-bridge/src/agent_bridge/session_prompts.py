@@ -232,6 +232,7 @@ class _SessionPromptMixin:
         # successor is fresh, so this never recurses.
         if no_resume:  # a stop is under way: the notice must not leave a successor behind
             session._stop_requested, session._handoff_pending = True, False
+            session._stop_notices += 1
         if (not no_resume
                 and session.status in (SessionStatus.IDLE, SessionStatus.STOPPED)
                 and self._is_over_critical(session)

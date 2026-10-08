@@ -257,6 +257,12 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        # A cooperative stop announced before or at any point during this
+        # handoff wins: never leave a successor the stop can't reach.
+        notices_at_start = session._stop_notices
+
+        def stop_arrived() -> bool:
+            return session._stop_requested or session._stop_notices != notices_at_start
 
         # Single-checkout (CodeSpace/command) agents cannot host predecessor and
         # successor at once, so the spawn-then-retire ordering below does not
@@ -324,7 +330,7 @@ class _SessionHandoffMixin:
         #    predecessor is retired only after the successor is confirmed up.
         #    A cooperative stop announced meanwhile wins: no successor it
         #    wouldn't reach (re-checked once the successor is up, too).
-        if session._stop_requested:
+        if stop_arrived():
             raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
         successor = await self.start_session(
             session.target,
@@ -350,7 +356,7 @@ class _SessionHandoffMixin:
                 f"{successor.session_id} failed to start "
                 f"({successor.status.value}); predecessor retained"
             )
-        if session._stop_requested:
+        if stop_arrived():
             with contextlib.suppress(Exception):
                 await self.end_session(successor.session_id, force=True)
             raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
@@ -433,6 +439,12 @@ class _SessionHandoffMixin:
         #    transcript + succession link (end_session would delete both).
         with contextlib.suppress(Exception):
             await self.stop_session(session_id, force=True)
+        if stop_arrived():
+            # A stop's notice arrived while the predecessor was being retired: the
+            # stop reaches only the predecessor, so end the successor it can't see.
+            with contextlib.suppress(Exception):
+                await self.end_session(successor.session_id, force=True)
+            raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
 
         log.info(
             "Handoff: session %s -> %s (worktree %s)",

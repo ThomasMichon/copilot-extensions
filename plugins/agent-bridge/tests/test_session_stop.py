@@ -379,3 +379,22 @@ def test_a_session_whose_client_isnt_running_is_still_stopped():
     result = _run(fake, clock, grace=30)
     assert result["outcome"] == "stopped" and result["acknowledged"] is False
     assert ("stop", False, False) in fake.calls
+
+
+def test_a_re_enqueued_notice_copy_is_withdrawn_too():
+    """A drain that popped the notice, failed to submit it and re-enqueued it
+    under a new id leaves the original id 404: the copy must still go."""
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "running", "turn_count": 1}}, queued=True)
+    removed = []
+
+    def remove(sid, qid):
+        if qid == 9:
+            raise BridgeClientError(404, "gone")
+        removed.append(qid)
+
+    fake.remove_pending_prompt = remove
+    fake.list_pending_queue = lambda sid: [{"id": 12, "prompt": session_stop.STOP_NOTICE},
+                                           {"id": 13, "prompt": "an unrelated follow-up"}]
+    result = _run(fake, clock, grace=2)
+    assert removed == [12] and result["notice"]["withdrawn"] is True

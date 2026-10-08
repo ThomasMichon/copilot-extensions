@@ -390,3 +390,27 @@ class TestNoResume:
         await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
         result = await sm.submit_or_queue_prompt(session.session_id, "another ask")
         assert result["queued"] is True and session._stop_requested is True
+
+    @pytest.mark.asyncio
+    async def test_a_stop_notice_during_the_retirement_ends_the_successor(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        """A notice admitted while the predecessor is being retired (after the
+        spawn-time checks) must not leave the successor running."""
+        mock_acp_client.send_prompt = AsyncMock(return_value={"response_text": "## Objective\nX",
+                                                               "stop_reason": "end_turn"})
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="wt-1")
+        real_stop = sm.stop_session
+
+        async def stop_during_retirement(session_id, **kw):
+            if session_id == pred.session_id:
+                pred._stop_notices += 1  # the notice lands while the handoff retires it
+            return await real_stop(session_id, **kw)
+
+        sm.stop_session = stop_during_retirement
+        before = set(sm._sessions)
+        with pytest.raises(RuntimeError, match="stop was requested"):
+            await sm.handoff_session(pred.session_id, reason="context-pressure")
+        successors = set(sm._sessions) - before
+        assert all(sm._sessions[s].status != SessionStatus.IDLE for s in successors)

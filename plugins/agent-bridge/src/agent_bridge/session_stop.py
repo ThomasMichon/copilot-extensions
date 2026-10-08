@@ -191,6 +191,31 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
             client.remove_pending_prompt(session_id, queue_id)
             result["notice"]["withdrawn"] = True
         except BridgeClientError as exc:
-            if exc.status != 404:  # 404: it was dispatched meanwhile; the stop cancels its turn
+            if exc.status != 404:
                 raise
+            # 404: dispatched meanwhile (the stop cancels its turn) -- or popped,
+            # failed to submit and re-enqueued under a new id. The notice's text
+            # is its stable identity: withdraw any copy still queued.
+            result["notice"]["withdrawn"] = _withdraw_notice_copies(client, session_id)
     return session_id
+
+
+def _withdraw_notice_copies(client: Any, session_id: str) -> bool:
+    from .client import BridgeClientError
+
+    withdrawn = False
+    try:
+        rows = client.list_pending_queue(session_id)
+    except BridgeClientError as exc:
+        if exc.status != 404:
+            raise
+        return False
+    for row in rows:
+        if row.get("prompt") == STOP_NOTICE:
+            try:
+                client.remove_pending_prompt(session_id, row["id"])
+                withdrawn = True
+            except BridgeClientError as exc:
+                if exc.status != 404:
+                    raise
+    return withdrawn
