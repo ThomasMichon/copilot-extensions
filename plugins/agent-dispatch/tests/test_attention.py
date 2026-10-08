@@ -763,3 +763,12 @@ def test_items_of_a_failed_or_disabled_source_never_reach_the_queue(tmp_path, st
     env = _collect({"s": lambda _r: {"status": status, "error": "down", "items": [{}, _item()]}},
                    FirstObserved(tmp_path / "o.json"))
     assert env["items"] == [] and env["sources"][0]["items"] == 0
+
+
+@pytest.mark.parametrize("value", ["ext\n", "ok-one\n"])
+def test_names_with_a_trailing_newline_are_rejected(value):
+    from agent_dispatch import steering_fields
+
+    assert not ac.SOURCE_NAME.match(value) and not ac.CUSTOM_KIND.match(value)
+    assert steering_fields.field_list_problem([{"name": "answer\n", "type": "text"}])
+    assert srcs.registration_error(value, {"argv": [sys.executable]})

@@ -27,7 +27,7 @@ SHARED_ENTITIES = ("task", "session", "pr", "queue")
 VERBS = ("show", "resume", "open")
 SOURCE_STATUSES = ("ok", "failed", "uncertain", "disabled")
 COMMAND_STATUSES = ("ok", "failed", "uncertain")
-SOURCE_NAME = re.compile(r"^[a-z0-9-]+$")
+SOURCE_NAME = re.compile(r"^[a-z0-9-]+\Z")  # \Z: `$` would accept a trailing newline
 REASON_MAX = 200
 
 _REQUIRED = ("schema", "id", "entity", "entity_ref", "lifecycle_state", "display_state",
@@ -64,7 +64,7 @@ def make_id(source: str, entity: str, entity_ref: str) -> str:
     return f"{source}:{entity}:{entity_ref}"
 
 
-CUSTOM_KIND = re.compile(r"^[a-z0-9_-]+$")
+CUSTOM_KIND = re.compile(r"^[a-z0-9_-]+\Z")
 
 
 def canonical_time(value: Any) -> str:

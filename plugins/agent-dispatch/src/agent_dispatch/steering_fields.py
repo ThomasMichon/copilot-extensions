@@ -21,7 +21,7 @@ FIELD_MULTICHOICE = "multichoice"
 FIELD_TYPES = frozenset({FIELD_TEXT, FIELD_TEXTAREA, FIELD_CHOICE, FIELD_MULTICHOICE})
 #: The choice-family types (they carry ``options`` and may allow an ``other``).
 FIELD_CHOICE_TYPES = frozenset({FIELD_CHOICE, FIELD_MULTICHOICE})
-FIELD_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+FIELD_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*\Z")  # \Z: `$` would accept a trailing newline
 _FIELD_KEYS = frozenset({"name", "type", "options", "allow_other", "show_when"})
 
 
