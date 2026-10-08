@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from agent_index.engine import lifecycle
@@ -126,6 +128,38 @@ def test_subprocess_early_exit_raises(monkeypatch):
     monkeypatch.setattr(lifecycle.time, "sleep", lambda _s: None)
     with pytest.raises(EngineUnavailableError, match="exited early"):
         lifecycle.ensure_engine(_profile(engine_mode="subprocess"), FakeClient(False))
+
+
+@pytest.mark.skipif(not sys.platform.startswith("win"), reason="Windows priority-class spawn flag")
+def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch):
+    """A worker that spawns a missing engine may itself be niced down (e.g.
+    AGENT_INDEX_INDEXER_NICE) -- Windows child processes inherit the
+    spawning process's priority class by default, which would otherwise
+    leak that lowered priority onto the new engine and stall its one-time
+    model load (the exact bug this explicit flag prevents; see
+    agent_index_engine.app._get_pipeline's deferred-throttle sequencing,
+    which only helps if the engine starts at normal priority in the first
+    place)."""
+    captured: dict = {}
+
+    class _FakeProc:
+        pid = 4242
+
+    def fake_popen(cmd, **kwargs):
+        captured.update(kwargs)
+        return _FakeProc()
+
+    monkeypatch.setattr(lifecycle.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(lifecycle, "detached_kwargs", lambda: {"creationflags": 0x00000008})
+
+    lifecycle._spawn_engine(_profile())
+
+    _NORMAL_PRIORITY_CLASS = 0x00000020
+    _DETACHED_PROCESS = 0x00000008
+    assert captured["creationflags"] & _NORMAL_PRIORITY_CLASS
+    # Still ORed with whatever detached_kwargs() itself contributed, not
+    # overwritten.
+    assert captured["creationflags"] & _DETACHED_PROCESS
 
 
 def test_systemd_without_unit_raises():
