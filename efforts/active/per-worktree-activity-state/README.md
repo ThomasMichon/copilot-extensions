@@ -161,6 +161,29 @@ follow-ons.
       slot first, then the diagnostic log mirror). Cover these three
       fields explicitly in the Phase 2 test for this call site, including
       the custom-session-state-path and absent-pid cases.
+- [ ] **Also durably record spawn-identity metadata --
+      `_pending_handoff_retire_requests`'s successor-liveness path needs
+      more than `spawn_attempted_at`.** That function
+      (`__main__.py:2949-2997`) reconstructs each candidate retire request
+      from the originating `handoff_cutover_spawn` event (merged from both
+      `handoff_trace` and the global log today): it requires `old_pane` to
+      even emit a request at all, and separately consumes
+      `predecessor_copilot_pid`, `predecessor_copilot_start_time`, and
+      `expected_mux_session`. A boolean `spawn_attempted_at` timestamp
+      captures none of this -- without a durable replacement, a handoff
+      whose live mux binding can't be freshly resolved (`live_binding`
+      lookup failing or returning nothing) would have no fallback data and
+      become **permanently invisible** to this path, silently stalling its
+      predecessor retirement forever. Extend `SessionHandoff` with
+      `spawn_old_pane`, `spawn_predecessor_pid`,
+      `spawn_predecessor_start_time`, and `spawn_expected_mux_session`,
+      written once at spawn time (same slot-first commit ordering as
+      above); Phase 2 keeps the existing fresh `mux_binding_for_session()`
+      lookup as the preferred, stronger identity source when it resolves,
+      falling back to these slot fields -- never the journal -- when it
+      doesn't. Add a no-live-binding test: a handoff whose fresh mux
+      lookup returns nothing must still produce a retire request from the
+      slot fields, not silently drop out.
 - [ ] **Crash-safe commit ordering.** The slot and the diagnostic log are
       not one atomic commit -- a YAML write under `_RecordLock` and a
       best-effort JSONL append cannot both land atomically, and the
@@ -288,12 +311,13 @@ follow-ons.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
 - [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
-      directly; stop calling `activity.read_events`/`handoff_trace.read_trace`
-
-### Phase 2 — Rewire hot-path consumers onto slots
-- [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
-      directly; stop calling `activity.read_events`/`handoff_trace.read_trace`
-      for decision-making.
+      directly for both the retire-decision fields and the spawn-identity
+      fields (`spawn_old_pane`, `spawn_predecessor_pid`,
+      `spawn_predecessor_start_time`, `spawn_expected_mux_session`),
+      keeping the existing fresh `mux_binding_for_session()` lookup as the
+      preferred override when it resolves; stop calling
+      `activity.read_events`/`handoff_trace.read_trace` for
+      decision-making.
 - [ ] `status_monitor_runtime._monitor_pending_handoff_request` -- read
       `record.handoffs`'s spawn/retire fields **and** the new
       `request_predecessor_session_id` / `request_session_state_path` /
