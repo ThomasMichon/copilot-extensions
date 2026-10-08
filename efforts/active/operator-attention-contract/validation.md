@@ -16,6 +16,11 @@ Part of the [Operator Attention Contract](README.md) effort: what each test tier
   still reports it, keep the item, with the remaining source's own `created_at` — and
   each aggregate status (`clear`, `attention`, `degraded`, `partial`, and a
   mixed failed-plus-uncertain read resolving to `degraded`) from fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
+- Unit, concurrent reads are fenced: each read takes a persisted, strictly
+  increasing read number when it starts (two reads in the same second
+  included), and a read that finishes after a newer read of the same source was
+  applied only reads the store -- a slow, older snapshot never re-adds a
+  `created_at` that the newer `ok` read cleared.
 - Unit, the envelope: `attention --json` and `attention next --json` match
   the exact documented shape (keys, types, `sources[]` order) and round-trip,
   including an item with `lifecycle_state: null` (a queue), and every item
@@ -30,7 +35,8 @@ Part of the [Operator Attention Contract](README.md) effort: what each test tier
   prefix) is an invalid item, and so is an empty `argv`.
 - Unit, the dispatch adapter: a `submitted` task is a `review` item and a
   `completed` one isn't; `stalled` at exactly the threshold isn't an item and one
-  second over is; held tasks with an `unknown` or `gone` owner never count; a threshold of `0` turns its half off; a held task that also asks yields one `awaiting_input` item, then (once answered) a `blocked` item first seen at that read; a `submitted` task with a stale `awaiting_steer` flag is a `review` item, and one with an `evaluator_ref` is no item; a read authenticated only by `--token` carries no dispatch actions; a read through `--url <u>` or `--shared` yields actions carrying the same flag and never the token.
+  second over is; held tasks with an `unknown` or `gone` owner never count; a threshold of `0` turns its half off; a held task that also asks yields one `awaiting_input` item, then (once answered) a `blocked` item first seen at that read; a `submitted` task with a stale `awaiting_steer` flag is a `review` item, and one with an `evaluator_ref` is no item; a read authenticated only by `--token` carries no dispatch actions; a read through `--url <u>` or `--shared` yields actions carrying the same flag and never the token; a read that hits the open-task cap is `uncertain` and keeps its task items; a lane whose backlog read fails, or that can't finish within the backlog budget, adds to `uncertain` without failing the source.
+- Unit, timestamps: a `created_at` with a non-UTC offset or sub-second precision is normalized to UTC seconds and orders chronologically against another source's; an offsetless or unparseable one makes the item malformed and its source `failed`.
 - Unit, command sources: a partial read (`status: uncertain`, `uncertain:
   2`) makes the aggregate `partial`; `{"schema": 1, "items": [...]}` alone reads
   as `ok`; a missing `schema` and `schema: 2` are each `failed`; a self-reported

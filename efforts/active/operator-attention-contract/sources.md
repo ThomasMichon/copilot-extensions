@@ -17,6 +17,13 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
     `unknown` or `gone` never count: only a live owner that stopped progressing
     is buildup. `reason` carries both ages and the `queued`/`held_live` counts;
     the item clears on an `ok` read where neither age exceeds its threshold.
+  - **An incomplete read is never `ok`.** One read fetches at most a bounded
+    number of open tasks (5,000); a read that hits the cap may have missed
+    older tasks, so it counts toward `uncertain`. Per-lane backlog reads must
+    finish within a budget inside the source's deadline; a lane that can't, or
+    whose read fails, counts toward `uncertain` too. Either way the task items
+    already read are kept: backlog probing never fails the source, and an
+    `uncertain` read never clears a first-observed time.
 - **bridge** -- every reason in agent-bridge's `AttentionReason` vocabulary
   (`models.py`) is mapped, so no parked session can drop out of the queue
   unnoticed:
