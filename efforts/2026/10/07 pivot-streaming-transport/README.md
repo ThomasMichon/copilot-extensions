@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-09-30
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md) —
   §Behaviors/`live-not-snapshot`, `graceful-capability-scaling`;
   §Non-Goals/*Not in-process with the engine — it sits on top of the CLI*:
@@ -334,14 +334,15 @@ insufficient.)_
       last-known-good; a dynamic namespace set tracking
       `refresh_provider_resolvers()`'s own add/remove/replace; and
       single-flight-plus-generation-guarded concurrent refreshes.
-- [ ] **3c — agent-bridge roster-change SSE** (deferred; do not start
-      until 3b is shipped and measured insufficient): add a genuine
-      `GET /api/v1/agents/stream` daemon route pushing `delta`/`removed`
-      when the 3b cache detects a roster change, so the CLI can relay it
-      the same way 3a does for agent-dispatch — deferred because it
-      duplicates Phase 2's client-side diffing logic on the daemon side and
-      introduces the daemon-connection failure mode this phase's Validation
-      Plan gate is actually about.
+- [x] Deferred to `ThomasMichon/copilot-extensions#5640`: **3c — agent-bridge
+      roster-change SSE** (deferred; do not start until 3b is shipped and
+      measured insufficient): add a genuine `GET /api/v1/agents/stream`
+      daemon route pushing `delta`/`removed` when the 3b cache detects a
+      roster change, so the CLI can relay it the same way 3a does for
+      agent-dispatch — deferred because it duplicates Phase 2's
+      client-side diffing logic on the daemon side and introduces the
+      daemon-connection failure mode this phase's Validation Plan gate is
+      actually about.
       — **2026-10-06 re-evaluation**: live-measured on the operator's own
       machine to settle 3c's gate (see the same-day journal entry for the
       full investigation). Finding: 3b's cache-hit path genuinely is cheap
@@ -359,7 +360,9 @@ insufficient.)_
       caller past that short budget. 3c's own gate ("3b shipped and
       measured insufficient") is **still not met**: this fix makes cheap
       polling actually cheap again regardless of push vs. poll, so the
-      push-specific case for 3c remains unproven. Stays deferred.
+      push-specific case for 3c remains unproven. Stays deferred; tracked
+      at the linked issue for revisit if a concrete staleness complaint
+      ever surfaces.
 
 **Formal follow-on (added 2026-10-06, operator-directed):** once 3a/3b are
 landed and measured (3c may remain deferred per its own gate), the agent
@@ -379,7 +382,7 @@ by picking it up, not by ending the turn.
       representative session to confirm (per the 2026-09-30 investigation)
       that it correlates with Textual's compositor choosing a full
       (non-incremental) repaint.
-- [ ] Narrow `_refresh_nf_segments()` to refresh only the segment(s) whose
+- [x] Narrow `_refresh_nf_segments()` to refresh only the segment(s) whose
       backing state actually changed for a given refresh cause (a cosmetic
       pulse tick only needs chrome; a nav-only change only needs the sticky
       header + body-data; etc.) — verified against the existing "any state
@@ -409,11 +412,14 @@ by picking it up, not by ending the turn.
         narrowed away along with title/pivots/chrome/machine/buttons (all
         empirically confirmed unchanged in both the edge case and
         steady-state).
-  - [ ] **Remaining causes (reload/pivot-switch/etc.)** are NOT narrowed
-        yet — every other `refresh()` call site still refreshes all 7
-        segments. A full per-site audit (~34 call sites remaining) is
-        deferred as its own follow-up slice, not attempted in one unreviewed
-        pass.
+  - [x] Deferred to `ThomasMichon/copilot-extensions#5641`: **Remaining
+        causes (reload/pivot-switch/etc.)** are NOT narrowed yet — every
+        other `refresh()` call site still refreshes all 7 segments. A full
+        per-site audit (~34 call sites remaining) is deferred as its own
+        follow-up slice, not attempted in one unreviewed
+        pass — explicitly assessed as low-value (a pivot/machine switch
+        legitimately touches nearly every outer segment) and the operator
+        agreed with that assessment.
 
 ### Phase 5 — Group C: trust the resident monitor's fresh hint before rescanning
 ### Phase 5 — Group C: trust an affirmative fresh hint, never a negative one
@@ -589,10 +595,11 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         scan, or the retiring generation's cache state is transferred,
         whichever this design implements; prove the cutover itself never
         introduces a new `503` blip a pre-3b cutover wouldn't have had).
-- [ ] **Phase 4:** a regression test asserting only the expected segment(s)
-      refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
-      switch), plus confirmation (via the same real-timer profiling method
-      used 2026-09-30) that Textual's compositor now chooses incremental
+- [x] Deferred to `ThomasMichon/copilot-extensions#5641`: **Phase 4:** a
+      regression test asserting only the expected segment(s) refresh for a
+      given cause (cosmetic pulse vs. nav vs. reload vs. pivot switch),
+      plus confirmation (via the same real-timer profiling method used
+      2026-09-30) that Textual's compositor now chooses incremental
       updates for the common cosmetic-tick case.
       — **Partially satisfied, 2026-10-05:** pulse + nav both have dedicated
       regression tests (`test_tick_pure_cosmetic_pulse_narrows_segment_
@@ -604,8 +611,9 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       trigger no compositor pass at all (`render_full_update` 21->5 over the
       same window; `render_update` stays at 0 throughout, confirmed not to
       leave content stale). Reload and pivot-switch causes remain fully
-      un-audited and un-tested — this item stays open until they're covered
-      too.
+      un-audited and un-tested — deferred to the linked issue (explicitly
+      assessed as low-value, operator agreed) rather than left open
+      indefinitely.
 - [x] **Phase 5:** the same live-timed before/after methodology as the
       `cfg.load_config()` fix, run against a worktree with a genuinely fresh
       affirmative hint; a regression test proving (a) the scan is skipped only
@@ -2629,4 +2637,45 @@ more real issues, all fixed:
    the first (incomplete) pass's claims after the correction commit
    superseded them. Updated to describe the final, corrected validation
    evidence.
+
+### 2026-10-07 — Effort closed: every Plan and Validation Plan item resolved or transferred
+
+Operator confirmed closing this effort out. Final pass before archive:
+
+- Converted the two remaining intentionally-deferred items to the
+  machine-checked transferred form, filing a tracking issue for each
+  rather than leaving bare prose explanations: Phase 3c (agent-bridge
+  roster-change SSE) → `ThomasMichon/copilot-extensions#5640`; Phase 4's
+  remaining ~34 unaudited `refresh()` call sites →
+  `ThomasMichon/copilot-extensions#5641`. Both issues capture the
+  deferral rationale already established in this journal so a future
+  reader isn't sent back to the archived effort to find out why.
+- Confirmed every other Plan and Validation Plan checkbox in this file is
+  `[x]` — no bare `[ ]` remains.
+- Set **Status: Done**.
+
+**What shipped, in total** (all merged to `dev`, none open): Phase 0
+(subscribe EOF/reconnect contract), Phase 1 (agent-dispatch pivot
+stream/subscribe adoption), Phase 2 (agent-bridge pivot stream/subscribe
+adoption), Phase 3a (agent-dispatch CLI-relayed daemon event stream),
+Phase 3b (agent-bridge daemon-side roster cache) plus its own follow-up
+fix (the opportunistic-join-budget bound, `#5585`), Phase 4 (cosmetic-
+pulse and in-list-nav render-segment narrowing), and Phase 5 (trust a
+fresh affirmative bound-live hint before rescanning). PRs: `#4994`,
+`#5166`, `#5393`, `#5398`, `#5418`, `#5433`, `#5447`, `#5460`, `#5465`,
+`#5482` (an unrelated crash fix found along the way), `#5585`, `#5626`.
+
+**Durable truth promoted**: the two load-bearing invariants this effort
+established — the `stream`/`subscribe` NDJSON contract's EOF/reconnect
+behavior (Phase 0) and the roster cache's per-request opportunistic-join
+budget, independent of the background-supervision watchdog timeout
+(Phase 3b's follow-up) — are documented as code-level invariants in
+their own modules (`tasks.py`'s `_handle_subscribe_drop` docstring;
+`agent_registry_cache.py`'s `DEFAULT_OPPORTUNISTIC_JOIN_BUDGET` and
+`get_snapshot()` docstrings), not only in this now-archived journal, so
+they remain discoverable without this file.
+
+**Handed forward, not carried further here**: Phase 3c and Phase 4's
+remaining causes, both tracked at the issues linked above; no other
+loose end. Archiving to `efforts/2026/10/07 pivot-streaming-transport/`.
 

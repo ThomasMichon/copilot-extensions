@@ -711,7 +711,29 @@ line ~344) and stamps the result — not
 `agent-dispatch/worktree_status_relay.py`. Whether/how these two consumers'
 answers can actually diverge against the same worktree — and whether that
 is the row-oscillation issue #5555 describes, or a distinct risk — is not
-yet traced; 6a establishes that before any consolidation work starts.)_
+yet traced; 6a establishes that before any consolidation work starts.
+
+**Additional concrete findings for 6a's own trace (2026-10-07, operator
+report of the live oscillation symptom — `MERGED` → `WIP`/`ACTIVE` →
+`MERGED`)**, not yet incorporated into 6a's design, found while confirming
+the symptom was real rather than hypothetical:
+- `worktree_manager.engine_client.current_worktree_status()`'s own
+  docstring self-reports as **"the status bar's own non-daemon classify
+  pass"** — a third, separate compute path beyond the two 6a already names,
+  worth tracing alongside them for whether any Worktrees-pivot row render
+  (not only the status bar this docstring names) ever reaches it while the
+  daemon is reachable.
+- `worktree_manager.production_picker.picker_tui.data_local._overlay_cached_state()`
+  trusts `rec.git_state` (the daemon-stamped value) and then
+  **unconditionally overrides it** — `if live: raw["state"] = "active"` —
+  whenever a *different* fact (`session_bound_live`/`session_lock_live`)
+  is true, independent of whether git state actually changed. This is a
+  plausible direct mechanism for the oscillation itself (a transient
+  session-liveness flip stomping a correct, freshly-daemon-computed
+  disposition) and may be a faster, narrower fix than full 6a-6c
+  consolidation if it turns out to be the dominant cause — worth
+  confirming/ruling out early in 6a's own trace, before committing to the
+  full consolidation shape.)_
 - [ ] **6a — Design sub-pass (do this first, in its own PR per this effort's
       own Phase 1 precedent):** first, trace both consumers' actual
       dataflow — the **production** Worktrees-pivot path
@@ -721,7 +743,12 @@ yet traced; 6a establishes that before any consolidation work starts.)_
       `plugins/agent-worktrees/picker_support/data_local.py` caller; and
       `agent-dispatch/worktree_status_relay.py`'s status-bundle consumer —
       to establish concretely whether/when they can disagree for the same
-      worktree, rather than assuming it. Then enumerate every fact
+      worktree, rather than assuming it. **Also trace the two additional
+      findings above** (`current_worktree_status()`'s non-daemon pass, and
+      `_overlay_cached_state()`'s unconditional `live` override) as
+      candidate direct mechanisms for the reported oscillation — confirm
+      or rule out before assuming the full classify/compute consolidation
+      is the only fix needed. Then enumerate every fact
       `classify_daemon` computes (`git_ops.WorktreeStateInfo`: `state`,
       `dirty`, `behind`, `ahead`, etc.) against every fact
       `worktree_status_compute.compute()` assembles, and classify each as
