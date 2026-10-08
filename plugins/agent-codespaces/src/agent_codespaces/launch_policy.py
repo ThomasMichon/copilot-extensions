@@ -61,7 +61,7 @@ MAX_OUTPUT = 64 * 1024
 _CLEANUP_GRACE = 5.0
 #: ``agent_bridge.protocol.CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION``: the first
 #: daemon that asks this policy before a Session Host spawn on a CodeSpace.
-BRIDGE_POLICY_PROTOCOL = 25
+BRIDGE_POLICY_PROTOCOL = 26
 
 
 def bridge_enforcement() -> bool | None:

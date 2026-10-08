@@ -765,7 +765,7 @@ session and is logged. When no check is possible (no provider, or one that preda
 gate is a spawner subclass built in `codespace_transport.build_codespace_spawner`,
 and `transport.spawn` asks the same policy before any raw-transport CodeSpace
 spawn (a resync, or a resume without a Session Host),
-advertised as HTTP generation 25 (`codespace_launch_policy`).
+advertised as HTTP generation 26 (`codespace_launch_policy`).
 
 ## Persistence
 

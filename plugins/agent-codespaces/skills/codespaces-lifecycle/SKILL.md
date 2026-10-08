@@ -193,7 +193,7 @@ command and its argument count -- but a policy's arguments are visible in the
 process list while it runs, so never pass a secret as one: have the policy read
 it from an owner-only file or a secret store.
 
-The bridge side is a daemon behavior (HTTP protocol 25): an already-running
+The bridge side is a daemon behavior (HTTP protocol 26): an already-running
 older daemon launches without asking until agent-bridge is updated and its
 daemon restarted, so `launch-policy set` warns and `show --json` reports
 `bridge_enforces` from the running daemon's advertised protocol.

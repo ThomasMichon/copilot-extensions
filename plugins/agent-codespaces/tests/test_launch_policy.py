@@ -281,7 +281,7 @@ def test_cli_reports_a_resident_bridge_that_would_skip_the_policy(monkeypatch, c
 
 
 @pytest.mark.parametrize("health,expected", [
-    ({"protocol_version": 25}, True), ({"protocol_version": 24}, False), ({}, False)])
+    ({"protocol_version": 26}, True), ({"protocol_version": 25}, False), ({}, False)])
 def test_bridge_enforcement_reads_the_daemon_protocol(monkeypatch, health, expected):
     import venue_copilot
 
