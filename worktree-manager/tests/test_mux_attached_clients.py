@@ -247,3 +247,46 @@ def test_update_attached_clients_rejects_equal_revision_tombstone(tmp_path):
     )
     assert result == {"applied": False, "reason": "superseded"}
     assert registry.get("proj", "wt-1")["attached_clients"] == 2
+
+
+def test_observer_bounds_each_cycle_and_eventually_probes_all_31_mappings(tmp_path, monkeypatch):
+    registry = MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    for i in range(31):
+        registry.register(_entry(worktree_id=f"wt-{i:02}", mux_session=f"session-{i:02}"))
+    now = [0.0]
+    calls = []
+
+    def probe(binary, session, timeout_s):
+        calls.append((session, timeout_s))
+        now[0] += timeout_s
+        return None
+
+    monkeypatch.setattr(mux_attached_clients.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
+    observer = mux_attached_clients.AttachedClientObserver()
+    for _ in range(16):
+        before = len(calls)
+        started = now[0]
+        observer.observe(registry)
+        assert len(calls) - before <= 2
+        assert now[0] - started <= 2.0
+    assert {session for session, _ in calls} == {f"session-{i:02}" for i in range(31)}
+    assert all(0 < timeout <= 1.0 for _, timeout in calls)
+
+
+def test_observer_reserves_only_the_remaining_shared_budget(tmp_path, monkeypatch):
+    registry = MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(worktree_id="a"))
+    registry.register(_entry(worktree_id="b"))
+    now = [0.0]
+    timeouts = []
+
+    def probe(binary, session, timeout_s):
+        timeouts.append(timeout_s)
+        now[0] += 1.75 if len(timeouts) == 1 else timeout_s
+        return None
+
+    monkeypatch.setattr(mux_attached_clients.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
+    mux_attached_clients.AttachedClientObserver().observe(registry)
+    assert timeouts == [1.0, 0.25]

@@ -1,19 +1,21 @@
-"""Attached-client count probe for a managed mux session (#4564).
+"""Bounded, round-robin attachment observations for managed mux sessions.
 
-Split out of :mod:`worktree_manager.mux_daemon` purely to stay under this
-repo's per-module line cap -- this module owns exactly one small, pure
-subprocess probe, with no dependency on the rest of the mux-companion
-daemon.
+Probe failures preserve stored counts; identity-guarded updates cannot
+overwrite concurrent session replacements or tombstones.
 """
 
 from __future__ import annotations
 
+import logging
 import subprocess
+import time
 
 from agent_procutil import no_window_flags
 
+from .mux_mapping_registry import MuxMappingRegistry
 
-def mux_attached_clients(mux_bin: str, session: str) -> int | None:
+
+def mux_attached_clients(mux_bin: str, session: str, timeout_s: float = 1.0) -> int | None:
     """Bounded, best-effort count of clients currently attached to
     ``session`` (``list-clients``, supported by both tmux and psmux).
 
@@ -29,18 +31,24 @@ def mux_attached_clients(mux_bin: str, session: str) -> int | None:
             [mux_bin, "list-clients", "-t", session],
             capture_output=True,
             text=True,
-            timeout=1,
+            timeout=timeout_s,
             creationflags=no_window_flags(),
         )
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logging.getLogger(__name__).warning("Mux attachment probe failed for %s: %s", session, exc)
         return None
     if result.returncode != 0:
+        logging.getLogger(__name__).warning(
+            "Mux attachment probe failed for %s with exit code %s", session, result.returncode
+        )
         return None
     stdout = result.stdout or ""
     return len([line for line in stdout.splitlines() if line.strip()])
 
 
-def refresh_attached_clients(registry, current: dict) -> dict:
+def refresh_attached_clients(
+    registry: MuxMappingRegistry, current: dict, timeout_s: float = 1.0
+) -> dict:
     """Opportunistically refresh ``current``'s registry-tracked
     ``attached_clients`` via a real :func:`mux_attached_clients` probe.
     Returns the (possibly updated) mapping dict; a probe failure (``None``)
@@ -59,7 +67,7 @@ def refresh_attached_clients(registry, current: dict) -> dict:
     ``update_attached_clients`` re-verifies identity and persists only the
     one field, atomically, so a superseded refresh is correctly abandoned
     instead."""
-    observed = mux_attached_clients(current["mux_bin"], current["mux_session"])
+    observed = mux_attached_clients(current["mux_bin"], current["mux_session"], timeout_s)
     if observed is None or observed == current.get("attached_clients"):
         return current
     result = registry.update_attached_clients(
@@ -75,3 +83,34 @@ def refresh_attached_clients(registry, current: dict) -> dict:
     updated = dict(current)
     updated["attached_clients"] = observed
     return updated
+
+
+class AttachedClientObserver:
+    """Round-robin observation with at most two probes and a shared
+    two-second budget per republish cycle. Keep the cursor on the resident
+    runtime so large fleets converge over successive cycles without
+    increasing the added drain latency with the number of mappings."""
+
+    def __init__(self) -> None:
+        self._last_key: tuple[str, str] | None = None
+
+    def observe(self, registry: MuxMappingRegistry) -> None:
+        entries = [
+            (key, entry)
+            for key, entry in sorted(registry.snapshot().items())
+            if entry["live"]
+        ]
+        if not entries:
+            return
+        start = next(
+            (i for i, (key, _) in enumerate(entries) if self._last_key is None or key > self._last_key),
+            0,
+        )
+        deadline = time.monotonic() + 2.0
+        for offset in range(min(2, len(entries))):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            key, entry = entries[(start + offset) % len(entries)]
+            refresh_attached_clients(registry, entry, timeout_s=min(1.0, remaining))
+            self._last_key = key

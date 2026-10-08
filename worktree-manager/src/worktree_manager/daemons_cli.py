@@ -87,6 +87,7 @@ def cmd_daemons(rest: list[str]) -> int:
         print("   one specific pid)")
         print("  (attached_clients is refreshed by the daemon's live-mapping cycle")
         print("   (20-second backstop), independently of status-option changes.")
+        print("   Two mappings per cycle share a two-second probe budget, round-robin.")
         print("   Failed probes preserve the last count; a new mapping may read 0")
         print("   until its first successful observation)")
         return 0

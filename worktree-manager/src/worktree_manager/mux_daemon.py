@@ -46,6 +46,7 @@ from work_coalescing_singleton import CoalescingServer
 from zdd.diagnostics import process_start_time
 
 from . import mux_daemon_cutover, mux_daemon_live, mux_daemon_process
+from .mux_attached_clients import AttachedClientObserver
 from .mux_mapping_registry import (
     MuxMappingRegistry,
     LIVE_MAPPING_BACKSTOP_INTERVAL_S,
@@ -251,9 +252,10 @@ def _republish_live_mappings(
     registry: MuxMappingRegistry,
     *,
     ensure_monitor: bool,
+    observer: AttachedClientObserver | None = None,
 ) -> bool:
     return mux_daemon_live.republish_live_mappings(
-        registry, ensure_monitor=ensure_monitor, publish=publish_live_observation,
+        registry, ensure_monitor=ensure_monitor, publish=publish_live_observation, observer=observer,
     )
 
 
@@ -658,6 +660,7 @@ class MuxDaemonRuntime:
         self.shutdown_requested = False
         self.retire_requested = False
         self._loop_mutation_active = False
+        self.attachment_observer = AttachedClientObserver()
         self._self_retire_generation: int | None = None
         self._self_retire_confirms = 0
         self._self_retire_confirmations = 2
@@ -924,6 +927,7 @@ def run_daemon_foreground(
                         republished = _republish_live_mappings(
                             runtime.registry,
                             ensure_monitor=False,
+                            observer=runtime.attachment_observer,
                         )
                     if republished:
                         last_live_republish_at = now

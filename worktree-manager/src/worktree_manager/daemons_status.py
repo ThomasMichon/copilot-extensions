@@ -349,8 +349,9 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     (``_normalize_mapping_entry``) defaults a brand-new mapping to ``0``.
     The resident daemon refreshes the field (``list-clients``) during its
     existing live-mapping republish cycle (20-second backstop), independently
-    of whether status option values changed. A successful probe converges
-    the count within one completed republish cycle. This function still
+    of whether status option values changed. At most two mappings are probed
+    per cycle, round-robin, within a shared two-second budget; large fleets
+    converge over multiple cycles. This function still
     reports whatever is currently stored exactly as-is (it never invents
     or estimates); a brand-new mapping that hasn't yet seen its first
     republish cycle, a stopped daemon, or a failed probe can leave the stored
