@@ -9,7 +9,7 @@
 - **Scope:** branch (a cross-cutting capability that spans the fabric, the
   installer/control-plane, and the picker)
 - **Status:** Active
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -119,6 +119,15 @@ handoff when that provider is selected, instead of shadowing them with a second
 identity or channel. Other execution providers participate through the same
 host-neutral agency model.
 
+### standards-interoperability-without-premature-native-adoption
+
+The harness can interoperate with a host through a released, standards-based
+contract while native-primitive adoption remains independently gated.
+Compatibility with a hosting protocol is not evidence that a particular
+Copilot product exposes the corresponding native surface. Such interoperability
+preserves the selected provider's execution identity and the fabric's durable
+agency relationships without making either a substitute owner for the other.
+
 ## Behaviors
 
 ### no-capability-regression
@@ -137,6 +146,17 @@ harness falls back to its own implementation with no loss of function.
 Convergence advances **construct by construct**, each stage adopted only once
 the corresponding native surface is released and stable, so the harness's
 correctness never rides on a moving or private target.
+
+### presence-is-not-contract-proof
+
+A native command, metadata file, or advertised protocol is a discovery
+candidate, not proof of the semantics a convergence step requires. Adoption
+establishes the specific operation, identity, working-boundary, recovery, and
+compatibility guarantees it relies on before transferring primitive ownership.
+Where that evidence is absent, adoption does not proceed and the supported
+fallback remains available for harness-owned work. Missing evidence never
+authorizes takeover or reinterpretation of a native-owned object; the harness
+does not invent native semantics from a familiar name or shape.
 
 ### one-owner-per-primitive
 Once a primitive is converged, the **CLI owns** it and the harness **derives**
@@ -184,6 +204,12 @@ change in the native surface can be backed out without stranding users.
   plugin's `docs/`.
 
 ## Provenance
+
+- **2026-10-08** — Distinguished standards-based host interoperability from
+  adoption of a particular native product surface, and made contract proof
+  explicit beyond command or metadata presence. Mined from the concrete AHP
+  hosting provider and the separation between native session identity,
+  rebuildable agency projections, and durable worktree responsibility.
 
 - **2026-08-23** — Initial authoring. Intent mined from the observation that
   Copilot CLI is natively absorbing the spatial model the harness pioneered
