@@ -10,7 +10,7 @@ import pytest
 
 from agent_logger.process_logs import ProcessLogRef, iter_process_log_refs
 
-pytestmark = pytest.mark.contract("agent_logger.process_logs.evidence")
+pytestmark = [pytest.mark.guard, pytest.mark.contract("agent_logger.process_logs.evidence")]
 
 LOG_NAME = "process-1000-123.log"
 PAYLOAD = 'header\r\n{"total_nano_aiu":123,"model":"example-model"}\nlast line'
@@ -93,6 +93,24 @@ def test_zip_rejects_ambiguous_or_symlink_members(tmp_path: Path) -> None:
         archive.writestr(link, b"target")
     with pytest.raises(ValueError, match="symlink"):
         list(iter_process_log_refs(tmp_path))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
+def test_root_swapped_to_symlink_after_configuration_is_rejected(tmp_path: Path) -> None:
+    """A deterministic stand-in for the race: once `log_root` names a symlink
+    (whether swapped in after initial configuration or from the start), it
+    must never be traversed -- enumeration is pinned to a directory handle
+    opened with O_NOFOLLOW, not re-resolved by path for each entry."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = _write_log(outside, "raw", b"outside evidence")
+    configured_root = tmp_path / "configured"
+    configured_root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="not a directory"):
+        list(iter_process_log_refs(configured_root))
+    # The underlying evidence is reachable directly, proving the rejection is
+    # about traversal through the swapped root, not a missing/corrupt file.
+    assert "".join(secret.iter_lines()) == "outside evidence"
 
 
 def test_corrupt_and_missing_members_fail_loudly(tmp_path: Path) -> None:

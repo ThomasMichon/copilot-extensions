@@ -115,8 +115,91 @@ def _lines(stream: BinaryIO, max_line_bytes: int) -> Iterator[str]:
         yield line.decode("utf-8")
 
 
+def _supports_dir_fd() -> bool:
+    # POSIX only -- mirrors the directory-fd gate `_fsync_directory` already
+    # uses elsewhere in this plugin's sync targets. Windows has no equivalent
+    # "openat" primitive, so the root here is re-resolved by path instead; see
+    # `iter_process_log_refs`'s docstring for the resulting platform gap.
+    return os.name != "nt"
+
+
+@contextmanager
+def _open_root_dir(log_root: Path) -> Iterator[int]:
+    """Open ``log_root`` once and verify its identity, so later per-entry
+    traversal is bound to this directory handle rather than re-resolving the
+    root path -- a swap of the final root component (e.g. onto a symlink)
+    between the initial check and later entry opens would otherwise let an
+    attacker redirect enumeration/reads outside the configured root."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
+    try:
+        fd = os.open(log_root, flags)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        # Covers both a non-directory (NotADirectoryError) and a symlinked
+        # root rejected by O_NOFOLLOW (a bare OSError/ELOOP on POSIX, which
+        # has no dedicated subclass).
+        raise ValueError(f"process-log source is not a directory: {log_root}") from exc
+    try:
+        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise ValueError(f"process-log source is not a directory: {log_root}")
+        yield fd
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def _open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
+    """Open a regular file by name within a pinned, already-verified directory
+    handle, refusing to follow a symlinked entry."""
+    before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError(f"process-log evidence is not a regular file: {name}")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(name, flags, dir_fd=dir_fd)
+    try:
+        with os.fdopen(fd, "rb") as stream:
+            fd = -1
+            opened = os.fstat(stream.fileno())
+            if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                raise ValueError(f"process-log evidence changed while opening: {name}")
+            yield stream
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
 def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
-    """Enumerate live, gzip, and flat ZIP observations without silently deduplicating."""
+    """Enumerate live, gzip, and flat ZIP observations without silently
+    deduplicating.
+
+    On POSIX, both the directory listing and the per-ZIP header reads it
+    performs are bound to one directory handle opened and verified up front,
+    so a swap of ``log_root`` itself onto a symlink after that check cannot
+    redirect traversal outside the configured root. Windows has no "openat"
+    equivalent, so there the root is re-resolved by path for each access;
+    this is a known, platform-specific gap rather than an equivalent
+    guarantee.
+    """
+    if _supports_dir_fd():
+        with _open_root_dir(log_root) as root_fd:
+            entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)
+            for entry in entries:
+                name = entry.name
+                if _is_log_name(name.removesuffix(".gz")):
+                    yield ProcessLogRef(log_root / name)
+                elif name.endswith(".zip"):
+                    with _open_regular_at(root_fd, name) as raw, zipfile.ZipFile(raw) as archive:
+                        # Resolve member names while the archive is still
+                        # open, then close both the ZIP and its file
+                        # descriptor before yielding -- yielding mid-`with`
+                        # would otherwise pin the archive open for as long as
+                        # the caller takes to consume (or abandon) the
+                        # generator, which can block rotation/compaction.
+                        names = [info.filename for info in _zip_logs(archive)]
+                    for member in names:
+                        yield ProcessLogRef(log_root / name, member)
+        return
     root_stat = log_root.lstat()
     if not stat.S_ISDIR(root_stat.st_mode):
         raise ValueError(f"process-log source is not a directory: {log_root}")
@@ -125,11 +208,6 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
             yield ProcessLogRef(path)
         elif path.suffix == ".zip":
             with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
-                # Resolve member names while the archive is still open, then
-                # close both the ZIP and its file descriptor before yielding
-                # -- yielding mid-`with` would otherwise pin the archive open
-                # for as long as the caller takes to consume (or abandon) the
-                # generator, which can block rotation/compaction on Windows.
                 names = [info.filename for info in _zip_logs(archive)]
             for name in names:
                 yield ProcessLogRef(path, name)
