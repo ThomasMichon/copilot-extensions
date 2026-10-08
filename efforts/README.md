@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Draft | #5707 |
 | [Session Intelligence and Accounting](active/session-intelligence-and-accounting/README.md) | Active | #5665 |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
 | [Resume Prompt: Durable `--interactive` Seed Delivery, No-Mux Parity](active/resume-prompt-durable-seed-and-mux-fix/README.md) | Active (Phase 1 done) | #5415 |
@@ -76,6 +77,7 @@ that pattern to this repository.
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Vision Backport Sweep](active/vision-backport-sweep/README.md) | Active | #5456 |
+| [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
 
 
 ## Local conventions

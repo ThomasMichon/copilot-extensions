@@ -19,6 +19,17 @@ import pytest
 SCRIPT = Path(__file__).resolve().parent / "check-module-size.py"
 
 
+def test_pre_push_scopes_module_size_to_contribution_trunk():
+    hook = (SCRIPT.parent / "hooks" / "pre-push").read_text(encoding="utf-8")
+    calls = [
+        line for line in hook.splitlines()
+        if line.startswith('"${PY[@]}"') and "check-module-size.py" in line
+    ]
+    assert calls == [
+        '"${PY[@]}" "$ROOT/tools/check-module-size.py" --changed-since origin/dev'
+    ]
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
 
@@ -476,4 +487,3 @@ def test_changed_since_with_baseline_touch_still_catches_this_diffs_own_growth(
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "src/mine.py" in result.stdout
-

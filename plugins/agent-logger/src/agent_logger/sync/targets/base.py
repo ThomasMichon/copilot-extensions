@@ -460,6 +460,22 @@ class Target(ABC):
         """
         return None
 
+    def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
+        """Publish process-log evidence under the target's ``{machine}/logs/``
+        subpath, separately from :meth:`push`'s session-state transfer.
+
+        Optional capability: the base implementation reports the target as
+        unsupported rather than raising, so adding this here never forces
+        every existing :class:`Target` subclass to implement it in the same
+        change. Only called when ``sync.process_logs.enabled`` is set *and*
+        the sync pass is unfiltered (no repo allowlist/denylist narrowing) --
+        a process log is not scoped per-repo the way session-state is (one
+        CLI process's log can span several repos/worktrees across its
+        lifetime), so admission fencing for a repo-scoped sync is a known,
+        explicit follow-up, never silently applied by a target here.
+        """
+        return PushResult(ok=True, detail=f"{self.describe()} does not support process-log sync")
+
     def prune(self, machine: str, retention_days: int | None) -> int:
         """Remove session data older than *retention_days*.
 

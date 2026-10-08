@@ -8,6 +8,46 @@ internal behavior (reservation protocol, forge adapters, host migration),
 see [`repository-issue-loop.md`](repository-issue-loop.md); this doc is the
 adoption path, that one is the reference.
 
+## 0. Runtime prerequisites for headless embody
+
+A `repository-issue-loop` spawns each occurrence's worker as a **headless**
+Copilot process -- that spawn path has two genuine runtime dependencies
+beyond `agent-dispatch` itself, neither of which this schema reference
+enforces at declare time (a `doctor`/`status` check sees a healthy
+*declaration*, not a broken spawn path):
+
+1. **A real, addressable agent-bridge venue.** `--headless-agent AGENT`
+   (default `task-worker`) names the venue a spawned body targets --
+   [`spawn-supervisor.md`](spawn-supervisor.md) documents that this name
+   must already be registered with `agent-bridge` on the host *before* any
+   occurrence ticks. The spawn degrades cleanly rather than deadlocking: if
+   `agent-bridge` rejects or cannot reach that venue, the spawn reports
+   failure and the supervisor fails the reservation, leaving the task
+   queued (`spawn_factories.py`'s `make_headless_spawn()`) -- so a missing
+   venue surfaces as a task stuck at `queued`/repeatedly failing to spawn,
+   not a silent hang. Diagnose it the same way as any other failed spawn
+   (`doctor`/`status`, the coordinator's own event log), not by assuming
+   the occurrence itself is unhealthy.
+2. **The declaring repo registered with `agent-worktrees`.** Every headless
+   spawn's `create_worktree()` unconditionally shells out to
+   `agent-worktrees create` -- so the repo needs an `agent-worktrees`
+   project registration, not just a plain git clone, before the first
+   occurrence ticks. The registered project **name** matters too:
+   `embody.project_for_task()` resolves a task's `--project` by first
+   reversing its `repo` field (this declaration's own bare `owner/name`
+   string) through `agent-worktrees`' canonical-remote registry -- which
+   always carries a host prefix (e.g. `github.com/owner/name`), so a bare
+   `owner/name` never matches it directly -- then falling back to that
+   `repo` string's own trailing path segment (`owner/name` -> `name`).
+   Register the project under exactly that trailing segment for the
+   fallback to resolve it.
+
+Neither dependency is specific to this recipe -- any headless-embody
+consumer needs both -- but a colleague following only this adoption path,
+with no other agent-dispatch headless deployment to crib from, can easily
+miss both and watch a declaration sit healthy-but-silent forever. Set up
+both *before* `setup`, not after diagnosing a stuck occurrence.
+
 ## 1. Declaration schema reference
 
 A declaration is one YAML (or JSON) document under
@@ -65,7 +105,7 @@ for the `script` provider's full subprocess JSON request/response contract.
 |---|---|---|---|
 | `label` | string | yes | The forge label/tag applied while an issue is reserved or claimed. |
 | `comment` | boolean | no (default `true`) | Must be `true` -- ownership must stay visible. |
-| `orphan_after_seconds` | number ≥ 60 | no (default `max(cadence_seconds, 3600)`) | Crash-recovery TTL for an unbound reservation. |
+| `orphan_after_seconds` | number ≥ 60 | no (default `max(cadence_seconds, 3600)`) | Crash-recovery TTL for an unbound reservation. For a fast-iterating test/clean-room fixture (short `cadence_seconds`), set this explicitly to its documented minimum (`60`) -- the default's `3600`-second floor otherwise blocks a quick manual retry against the same reservation for a full hour regardless of how fast the declared cadence itself ticks. |
 
 ### `pool`
 

@@ -341,6 +341,34 @@ installed runtime.
 Both `compact` and `compact-hub` are idempotent and take the sync lock, so they
 never race the scheduled push. Add `--dry-run` to preview.
 
+## Process-log evidence publication
+
+Opt-in publication of process-log evidence (`process-*.log[.gz]`/`.zip`,
+under `<sync.source>/logs/`) alongside session-state, for the accounting
+pipeline downstream of `agent_logger.process_logs`. Opt in under
+`sync.process_logs` (see [`references/config.yaml`](references/config.yaml)):
+
+```yaml
+sync:
+  process_logs:
+    enabled: true
+```
+
+Two deliberate scope limits:
+
+- **Filesystem targets only** (`local`/`onedrive`). SSH and ingest targets
+  do not yet support this -- `session-sync` logs that the capability is
+  unsupported for those and continues the rest of the pass normally.
+- **Unfiltered passes only.** A process log can span several repos/
+  worktrees across one CLI process's lifetime, so it is not scoped per-repo
+  the way session-state is -- a narrowed pass (`repo_allowlist`/
+  `repo_denylist`/`require_repo_opt_in` above) **skips** process-log
+  publication entirely rather than attempting to filter it.
+
+See [`process-log-evidence.md`](../../docs/process-log-evidence.md#sync-publication-session-sync)
+for the full design and current gaps (scheduled compaction and SSH/ingest
+target support remain outstanding).
+
 ## Change tracking (incremental sync)
 
 A large corpus (thousands of sessions) makes every scheduled push expensive if

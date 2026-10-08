@@ -366,6 +366,43 @@ def run_sync(
                 f"file(s) in {len(result.excluded_roots)} root(s) ({mib:.1f} MiB)"
             )
 
+        # Process-log evidence alongside session-state: opt-in, and only for
+        # an unfiltered pass. `include` narrows session-state per-repo; a
+        # process log is not scoped per-repo the same way (one CLI process's
+        # log can span several repos/worktrees across its lifetime), so
+        # admission fencing for a repo-scoped sync is a known, explicit
+        # follow-up -- never silently applied by skipping the filter here.
+        process_logs_failed = False
+        if cfg.process_logs_enabled:
+            if include is not None:
+                # Always print, not only when --verbose: an explicitly
+                # enabled process-log sync going silently unpublished on a
+                # repo-scoped pass is the same "visible no-op" contract as
+                # the unsupported-target case below.
+                print(
+                    "session-sync: process-log sync skipped "
+                    "(repo-scoped sync is not yet supported)"
+                )
+            else:
+                plog_result = target.push_process_logs(cfg.process_logs_source, machine)
+                if not plog_result.ok:
+                    process_logs_failed = True
+                    print(
+                        f"session-sync: process-log push failed: {plog_result.detail}",
+                        file=sys.stderr,
+                    )
+                else:
+                    # Always print, not only when files moved or --verbose:
+                    # the base Target class's "unsupported" response (SSH/
+                    # ingest targets) is itself ok=True with zero files, and
+                    # an operator who explicitly enabled sync.process_logs
+                    # on one of those targets must see that it's a no-op on
+                    # every ordinary scheduled run, not only a verbose one.
+                    print(
+                        f"session-sync: process-logs {plog_result.detail} "
+                        f"({plog_result.file_count} files)"
+                    )
+
         if prune:
             removed = target.prune(machine, cfg.sync_retention_days)
             if removed:
@@ -416,6 +453,8 @@ def run_sync(
             )
             if verbose:
                 print(f"session-sync: notify {'sent' if sent else 'failed (ignored)'}")
+        if process_logs_failed:
+            return 1
     return 0
 
 
