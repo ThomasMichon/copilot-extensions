@@ -259,15 +259,31 @@ cr_meta "efforts_active_before" "$(tr '\n' ',' < "$_efforts_active_before" 2>/de
 # never mistake a stale, pre-existing PR for this run's own evidence.
 _owner_repo="$(cd "$FIXTURE_DIR" && git remote get-url origin 2>/dev/null | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
 _open_builder_prs_before="$CR_LOGDIR/open-builder-prs-before.log"
+_open_prs_before_list="$CR_LOGDIR/open-prs-before-list.log"
 : > "$_open_builder_prs_before"
-if [ -n "$_owner_repo" ]; then
-    while read -r _pr_num; do
-        [ -z "$_pr_num" ] && continue
-        if gh api "repos/$_owner_repo/pulls/$_pr_num/files" --jq '.[] | select(.status=="added") | .filename' 2>/dev/null \
-            | grep -qE '^efforts/active/[^/]+/README\.md$'; then
-            printf '%s\n' "$_pr_num" >> "$_open_builder_prs_before"
-        fi
-    done < <(gh pr list --repo "$_owner_repo" --state open --json number --jq '.[].number' 2>/dev/null)
+if [ -z "$_owner_repo" ]; then
+    jam "dispatch-config" "could not resolve the fixture repo's own git remote for the open-builder-PR baseline" "verify $FIXTURE_DIR is a real git checkout"
+    cr_finalize
+fi
+if ! gh pr list --repo "$_owner_repo" --state open --json number --jq '.[].number' > "$_open_prs_before_list" 2>&1; then
+    jam "dispatch-config" "could not list open PRs for the pre-run open-builder-PR baseline (see cr-logs/open-prs-before-list.log)" "a failed baseline must not silently admit stale PR evidence later -- check gh auth/rate limits"
+    cr_finalize
+fi
+_baseline_api_failed=0
+while read -r _pr_num; do
+    [ -z "$_pr_num" ] && continue
+    _pr_files_log="$CR_LOGDIR/open-builder-pr-files-${_pr_num}.log"
+    if ! gh api "repos/$_owner_repo/pulls/$_pr_num/files" --jq '.[] | select(.status=="added") | .filename' > "$_pr_files_log" 2>&1; then
+        _baseline_api_failed=1
+        continue
+    fi
+    if grep -qE '^efforts/active/[^/]+/README\.md$' "$_pr_files_log"; then
+        printf '%s\n' "$_pr_num" >> "$_open_builder_prs_before"
+    fi
+done < "$_open_prs_before_list"
+if [ "$_baseline_api_failed" = 1 ]; then
+    jam "dispatch-config" "could not validate file status for one or more open PRs during the pre-run open-builder-PR baseline (see cr-logs/open-builder-pr-files-*.log)" "a failed baseline must not silently admit stale PR evidence later -- check gh auth/rate limits"
+    cr_finalize
 fi
 sort -n -o "$_open_builder_prs_before" "$_open_builder_prs_before" 2>/dev/null || true
 cr_meta "open_builder_prs_before" "$(tr '\n' ',' < "$_open_builder_prs_before" 2>/dev/null)"
