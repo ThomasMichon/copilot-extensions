@@ -1,0 +1,9 @@
+{
+  "comment": "Make the JSON decoder RecursionError regression independent of CPython C stack limits",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
