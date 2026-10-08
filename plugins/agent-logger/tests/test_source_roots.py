@@ -423,6 +423,38 @@ def test_chronicle_rejects_unsafe_archived_sidecars_before_reading(
         source.scan()
 
 
+@pytest.mark.parametrize("representation", ["session", "events"])
+def test_chronicle_rejects_linked_live_ref_before_it_can_shadow_archive(
+    tmp_path: Path, representation: str
+) -> None:
+    from agent_logger.chronicle.source import ReservationStore, SyncedSessionSource
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    events = outside / "events.jsonl"
+    events.write_bytes(b'{"type":"session.start"}\n')
+    corpus = tmp_path / "corpus"
+    root = corpus / "host.containers/worker"
+    state = root / "session-state"
+    state.mkdir(parents=True)
+    archived = root / "archived"
+    archived.mkdir()
+    with tarfile.open(archived / "session-1.tar.gz", "w:gz") as archive:
+        archive.add(events, arcname="events.jsonl")
+    try:
+        if representation == "session":
+            (state / "session-1").symlink_to(outside, target_is_directory=True)
+        else:
+            directory = state / "session-1"
+            directory.mkdir()
+            (directory / "events.jsonl").symlink_to(events)
+    except OSError as exc:
+        pytest.skip(f"native symlink creation unavailable: {exc}")
+    source = SyncedSessionSource(corpus, ReservationStore(tmp_path / "state.db"))
+    with pytest.raises(SourceLayoutError):
+        source.scan()
+
+
 def test_missing_and_permission_denied_roots_remain_explicit(tmp_path, monkeypatch):
     with pytest.raises(SourceLayoutError, match="missing"):
         list(iter_archive_sources(tmp_path / "absent"))

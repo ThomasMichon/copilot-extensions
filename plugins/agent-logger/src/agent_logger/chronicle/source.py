@@ -392,36 +392,15 @@ class SyncedSessionSource(SessionSource):
             if generation is None or _has_active_replacement(machine_dir):
                 continue
             machine_out: list[DiscoveredSession] = []
-            ss = existing_real_directory(machine_dir / "session-state")
-            if ss is not None:
-                for raw_session_dir in sorted(ss.iterdir()):
-                    session_dir = existing_real_directory(raw_session_dir)
-                    if session_dir is None:
-                        continue
-                    discovered = self._discover(machine_dir, session_dir, now=now)
-                    if discovered is not None:
-                        machine_out.append(discovered)
-            # Cold sessions compacted into the sibling ``archived/`` tree. A live
-            # dir of the same id shadows an archive (a compaction/reconcile
-            # race), so ``iter_session_refs`` yields only the un-shadowed
-            # archives here.
-            archived_store = existing_real_directory(machine_dir / "archived")
-            if archived_store is not None:
-                live_store = ss or machine_dir / ".absent-session-state"
-                for ref in sessions.iter_session_refs(live_store, archived_store):
-                    if ref.kind != "archive":
-                        continue
-                    try:
-                        mode = ref.path.lstat().st_mode
-                    except OSError:
-                        continue
-                    if is_link_or_reparse(ref.path, mode):
-                        continue
-                    discovered = self._discover_archived(
-                        machine_dir, ref, now=now
-                    )
-                    if discovered is not None:
-                        machine_out.append(discovered)
+            for ref in sorted(
+                source.iter_sessions(), key=lambda ref: (ref.kind != "live", ref.id)
+            ):
+                if ref.kind == "live":
+                    discovered = self._discover(machine_dir, ref.path, now=now)
+                else:
+                    discovered = self._discover_archived(machine_dir, ref, now=now)
+                if discovered is not None:
+                    machine_out.append(discovered)
             snapshots_root = existing_real_directory(
                 machine_dir / ".session-sync-rescue-captures"
             )

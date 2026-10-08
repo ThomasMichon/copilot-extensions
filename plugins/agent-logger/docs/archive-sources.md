@@ -31,7 +31,9 @@ The iterator yields `ArchiveSource` records:
 - `legacy_aliases` retains explicit producer alias declarations. Discovery
   neither moves aliases nor merges their contents.
 - `iter_sessions()` delegates to the existing live-preferred session/archive
-  reader. It preserves the existing registered session codecs.
+  reader. It validates live refs before they can shadow archived evidence and
+  rejects linked or non-regular events, archives, and optional filesystem
+  sidecars. It preserves the existing registered session codecs.
 - `iter_process_logs()` delegates to `iter_process_log_refs`, retaining raw,
   gzip, and ZIP observations without silently merging representations.
 
@@ -47,7 +49,9 @@ does not implement accounting or catalog migration.
 The chronicler uses this enumerator and retains full relative source keys,
 including both the host group and container leaf. Its settle, journaled,
 replacement-generation, and rescue-snapshot gates remain in the existing
-session-source seam.
+session-source seam. Unsafe live or archived observations now raise explicitly
+rather than disappearing from the scan; in particular, a linked live session
+cannot silently hide an archived session with the same ID.
 
 ## Optional identity metadata
 
