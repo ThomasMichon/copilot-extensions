@@ -83,6 +83,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "live_session_alias": "LIVE_SESSION_ALIAS_PROTOCOL_VERSION",
     "agent_roster_cache": "AGENT_ROSTER_CACHE_PROTOCOL_VERSION",
     "events_before_paging": "EVENTS_BEFORE_PAGING_PROTOCOL_VERSION",
+    "caller_session_id": "CALLER_SESSION_ID_PROTOCOL_VERSION",
 }
 
 # Git-evidence resolution (commit/blob lookups, opportunistic across a

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -41,6 +42,9 @@ _POLLER_IDLE_EXIT_S = 5.0
 #: and reporting it as unresponsive (the caller decides what to do next --
 #: this module never force-kills on the caller's behalf).
 _SHUTDOWN_REQUEST_DEADLINE_S = 5.0
+# Windows can reject simultaneous replacements of the same destination,
+# even when each writer has its own closed temporary file.
+_ATOMIC_REPLACE_LOCK = threading.Lock()
 
 
 def state_dir() -> Path:
@@ -64,9 +68,18 @@ def subscriptions_path() -> Path:
 
 def _atomic_write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    tmp.replace(path)
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.",
+        suffix=".tmp", delete=False,
+    )
+    tmp = Path(handle.name)
+    try:
+        with handle:
+            json.dump(data, handle)
+        with _ATOMIC_REPLACE_LOCK:
+            tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def read_subscriptions_state() -> list[dict]:
@@ -282,10 +295,24 @@ class WatchDaemon:
         while not self._shutdown_event.is_set():
             self._shutdown_event.wait(timeout=poll_interval)
 
+    def close(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
+        """Stop polling and join in-flight ticks without discarding subscriptions."""
+        self._shutdown_event.set()
+        deadline = time.monotonic() + timeout
+        with self._pollers_lock:
+            pollers = list(self._pollers.values())
+        for thread in pollers:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        live = [thread.name for thread in pollers if thread.is_alive()]
+        if live:
+            raise TimeoutError(f"PR watch pollers did not stop: {', '.join(live)}")
+
     # -- poller lifecycle ---------------------------------------------
 
     def _ensure_poller(self, key: WatchKey) -> None:
         with self._pollers_lock:
+            if self._shutdown_event.is_set():
+                return
             existing = self._pollers.get(key)
             if existing is not None and existing.is_alive():
                 return
@@ -297,18 +324,18 @@ class WatchDaemon:
 
     def _poll_loop(self, key: WatchKey) -> None:
         idle_since: float | None = None
-        while True:
+        while not self._shutdown_event.is_set():
             if self._registry.subscriber_count(key) == 0:
                 idle_since = idle_since or time.monotonic()
                 if time.monotonic() - idle_since >= self._idle_exit:
                     break
-                time.sleep(0.5)
+                self._shutdown_event.wait(timeout=0.5)
                 continue
             idle_since = None
             try:
                 snap = self._fetch(key.repo, key.number)
             except Exception:
-                time.sleep(self._poll_interval)
+                self._shutdown_event.wait(timeout=self._poll_interval)
                 continue
             fired = self._registry.apply_snapshot(key, snap)
             if fired:
@@ -319,7 +346,7 @@ class WatchDaemon:
                 except Exception:  # noqa: S110 -- one bad subscriber's notify
                     # must never stop this poller from serving the rest.
                     pass
-            time.sleep(self._poll_interval)
+            self._shutdown_event.wait(timeout=self._poll_interval)
         with self._pollers_lock:
             # Another register() may have raced in right as we decided to
             # exit -- only remove our own thread object, and only if it's

@@ -85,6 +85,25 @@ never work against a stale tree or runtime:
   unpaired repos are unchanged. If settings cannot be sanitized exactly, launch
   stops before Copilot can discover stale plugins.
 
+## Cache-first paint and stamp contention
+
+The Worktrees list can first render cached session state, then populate a
+classified result. The background session-state stamp worker waits up to
+0.5 seconds for each record-lock layer (in-process, then cross-process) before
+updating that cache. It never writes without exclusive access on timeout.
+Successful writes merge only supplied fields into the current record,
+preserving concurrent lifecycle updates.
+
+`stamp_session_state()` still returns immediately after enqueueing; that is not
+a persistence acknowledgement. Queue drainage at interpreter exit waits for
+the bounded attempts. A timeout or write failure emits a warning and preserves
+the last cached value; a later populate can retry. Synchronous stamp callers
+retain their immediate, nonblocking best-effort behavior.
+
+This reduces stale first paint after short-lived writer contention. It does
+not make cache-first paint a daemon-authoritative snapshot or replace the
+separate work to unify computation and stream updates.
+
 ## The Picker screen
 
 The default (Textual TUI) picker is organized into **regions** you move between

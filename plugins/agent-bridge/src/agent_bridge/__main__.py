@@ -216,6 +216,12 @@ def _get_caller_id() -> str | None:
     return _worktrees_get("worktree-dir")
 
 
+def _get_caller_session_id() -> str | None:
+    from .caller_session import caller_session_id_from_env
+
+    return caller_session_id_from_env()
+
+
 def _sender_repo() -> str | None:
     if _PROJECT_OVERRIDE:
         return _PROJECT_OVERRIDE

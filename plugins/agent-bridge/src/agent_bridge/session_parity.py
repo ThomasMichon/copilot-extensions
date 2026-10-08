@@ -229,6 +229,7 @@ class _SessionParityMixin:
             replacement_target,
             agent_name=session.agent_name,
             caller_id=session.caller_id,
+            caller_session_id=session.caller_session_id,
             mcp_servers=[
                 dict(server) for server in session.mcp_servers
             ],

@@ -1423,6 +1423,7 @@ async def test_container_recreate_retires_old_session_and_transfers_lock(
         target,
         agent_name="container:example-1",
         caller_id="venue-parity:test",
+        caller_session_id="caller-session-1",
     )
     old.status = SessionStatus.IDLE
     old.acp_session_id = "acp-1"
@@ -1486,12 +1487,14 @@ async def test_container_recreate_retires_old_session_and_transfers_lock(
         assert kwargs["mcp_servers"] == [
             {"name": "example", "command": "example-mcp"}
         ]
+        assert kwargs["caller_session_id"] == "caller-session-1"
         new = Session(
             "session-2",
             "new",
             replacement_target,
             agent_name=agent_name,
             caller_id=caller_id,
+            caller_session_id=kwargs["caller_session_id"],
         )
         new.status = SessionStatus.IDLE
         new.acp_session_id = "acp-2"

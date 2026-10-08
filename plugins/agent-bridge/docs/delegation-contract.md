@@ -78,6 +78,7 @@ Several identifiers coexist today:
 | ACP `session_id` | Downstream runtime's persisted conversation identity | Internal to the bridge session; may be recreated only through explicit recovery behavior |
 | `worktree_id` | Ground-layer working-body identity, ownership boundary, and session-head scope | May host a succession of bridge-owned or interactive sessions |
 | `caller_id` | Caller-affinity and delivery-cursor key | Stable only when the caller supplies or resolves it consistently |
+| `caller_session_id` | Informational id of the Copilot session that created the bridge session (`COPILOT_AGENT_SESSION_ID`); never used for reuse or cursors | Fixed at creation; carried to handoff successors; echoed in the create response; sent only to HTTP protocol v24+ daemons; `null` when absent or invalid |
 | live interactive `session_id` | Extension registration for one running CLI process | Lease-bound and invalidated by expiry/takeover |
 | worktree handle | Resolves the current ground-layer head for owned resume/handoff and the current registration for represented messaging | Stable cross-handoff address when the managed worktree is authoritative |
 
