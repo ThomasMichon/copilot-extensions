@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
+from machine_transport import find_machine_entry as _mt_find_machine_entry
+from machine_transport import machine_name as _mt_machine_name
+from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
+from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
 from . import config_migrations, inrepo_config_source, project_state, registry_paths
 from .codename_config import CodenameConfig, parse_codename
@@ -571,35 +576,13 @@ class Config:
         )
 
 # --- Machine registry ---
-
-@dataclass(frozen=True)
-class SSHEnvironment:
-    """An SSH environment for a machine (windows, wsl, linux)."""
-
-    name: str
-    alias: str
-    shell: str = ""
-
-
-@dataclass(frozen=True)
-class MachineEntry:
-    """A registered machine from machines.yaml."""
-
-    key: str
-    display_name: str
-    environment: str
-    alias: str = ""
-    # Raw OS hostname (COMPUTERNAME) when it differs from ``key``. Lets a machine
-    # be keyed by a stable friendly name (e.g. ``host-box1``) while the box
-    # reports a different, unrenameable COMPUTERNAME (e.g. ``cpc-tmich-oixui``).
-    # Empty means ``key`` is the hostname (the common case).
-    hostname: str = ""
-    role: str = ""
-    description: str = ""
-    capabilities: list[str] = field(default_factory=list)
-    ssh_environments: list[SSHEnvironment] = field(default_factory=list)
-    ssh_ready: bool = False
-    copilot: bool = True
+#
+# The dataclasses and parsing/matching logic are the shared
+# ``machine_transport`` library (vendored, not duplicated -- see its own
+# README's "Why this exists"). ``SSHEnvironment``/``MachineEntry`` are
+# re-exported (imported at module top) under their historical names so every
+# existing ``cfg.MachineEntry``/``cfg.SSHEnvironment`` reference keeps
+# working unchanged -- they ARE the shared library's classes, not a copy.
 
 
 def machines_yaml_path(repo_dir: str | Path) -> Path:
@@ -670,66 +653,16 @@ def _overlay_machines_yaml_path(repo_dir: str | Path) -> Path | None:
 
 
 def _parse_machines_yaml_file(path: Path) -> dict[str, MachineEntry]:
-    """Parse one ``machines.yaml`` file's ``machines:`` block into entries."""
-    with open(path, encoding="utf-8") as f:
-        raw: dict[str, Any] = yaml.safe_load(f)
+    """Parse one ``machines.yaml`` file's ``machines:`` block into entries.
 
-    if not raw or "machines" not in raw:
-        raise ValueError(f"machines.yaml at {path} is missing 'machines' key")
-
-    entries: dict[str, MachineEntry] = {}
-    for key, data in raw["machines"].items():
-        if not isinstance(data, dict):
-            continue
-        description_raw = data.get("description", "")
-        if description_raw is None:
-            description_raw = ""
-        if not isinstance(description_raw, str):
-            raise ValueError(
-                f"machine '{key}' description must be a string"
-            )
-        capabilities_raw = data.get("capabilities", [])
-        if capabilities_raw is None:
-            capabilities_raw = []
-        if not isinstance(capabilities_raw, list):
-            raise ValueError(
-                f"machine '{key}' capabilities must be a list"
-            )
-        capabilities: list[str] = []
-        for capability_raw in capabilities_raw:
-            if not isinstance(capability_raw, str):
-                raise ValueError(
-                    f"machine '{key}' capabilities must contain only strings"
-                )
-            capability = capability_raw.strip()
-            if capability and capability not in capabilities:
-                capabilities.append(capability)
-        ssh_envs: list[SSHEnvironment] = []
-        ssh_block = data.get("ssh", {})
-        if ssh_block is None:
-            ssh_block = {}
-        if not isinstance(ssh_block, dict):
-            raise ValueError(f"machine '{key}' ssh must be a mapping")
-        for env in ssh_block.get("environments", []):
-            if isinstance(env, dict) and "name" in env and "alias" in env:
-                ssh_envs.append(SSHEnvironment(
-                    name=env["name"], alias=env["alias"],
-                    shell=env.get("shell", ""),
-                ))
-        entries[key] = MachineEntry(
-            key=key,
-            display_name=data.get("display_name", key),
-            environment=data.get("environment", ""),
-            alias=data.get("alias", ""),
-            hostname=data.get("hostname", ""),
-            role=data.get("role", ""),
-            description=description_raw.strip(),
-            capabilities=capabilities,
-            ssh_environments=ssh_envs,
-            ssh_ready=bool(ssh_block.get("ready", False)),
-            copilot=bool(data.get("copilot", True)),
-        )
-    return entries
+    Delegates to the shared ``machine_transport`` parser with
+    ``require_alias=True``: agent-worktrees' CLI dispatch paths always treat
+    "present in ``ssh_environments``" as "has a usable alias" -- an
+    environment entry naming an environment but carrying no ``alias:`` is
+    dropped entirely here (not kept with ``alias=""``), preserving this
+    module's own historical behavior exactly.
+    """
+    return _mt_parse_machines_yaml_file(path, require_alias=True)
 
 
 def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
@@ -747,12 +680,10 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
         if not path.exists():
             raise FileNotFoundError(f"Machine registry not found at {path}")
         return _parse_machines_yaml_file(path)
-    entries: dict[str, MachineEntry] = {}
-    if have_legacy:
-        entries.update(_parse_machines_yaml_file(legacy))
-    if have_canonical:
-        entries.update(_parse_machines_yaml_file(canonical))
-    return entries
+    return _mt_merge_machines_yaml(
+        _parse_machines_yaml_file(legacy) if have_legacy else None,
+        _parse_machines_yaml_file(canonical) if have_canonical else None,
+    )
 
 
 def machine_name(entry: MachineEntry) -> str:
@@ -761,7 +692,7 @@ def machine_name(entry: MachineEntry) -> str:
     Returns the alias if one is defined (the colloquial multi-machine system name),
     otherwise the key (which is the real hostname).
     """
-    return entry.alias or entry.key
+    return _mt_machine_name(entry)
 
 
 def find_machine_entry(
@@ -775,19 +706,7 @@ def find_machine_entry(
     the explicit ``hostname`` field lets a machine keyed by a friendly name still
     be found by its raw COMPUTERNAME. Returns None if no entry matches.
     """
-    if name in entries:
-        return entries[name]
-    name_lower = name.lower()
-    for key, entry in entries.items():
-        if key.lower() == name_lower:
-            return entry
-        if entry.alias and entry.alias.lower() == name_lower:
-            return entry
-        if entry.hostname and entry.hostname.lower() == name_lower:
-            return entry
-        if entry.display_name and entry.display_name.lower() == name_lower:
-            return entry
-    return None
+    return _mt_find_machine_entry(entries, name)
 
 
 def detect_machine(repo_dir: str | Path | None = None) -> str:

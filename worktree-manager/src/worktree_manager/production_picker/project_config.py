@@ -9,33 +9,21 @@ instead of importing the engine in-process.
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
+from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
+from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
 from .. import engine_client, harness_state, terminal_fragment
 from . import context, engine_group_a
 
-
-@dataclass(frozen=True)
-class SSHEnvironment:
-    name: str
-    alias: str
-    shell: str = ""
-
-
-@dataclass(frozen=True)
-class MachineEntry:
-    key: str
-    display_name: str
-    environment: str = ""
-    alias: str = ""
-    hostname: str = ""
-    ssh_environments: list[SSHEnvironment] = field(default_factory=list)
-    ssh_ready: bool = False
-    copilot: bool = True
+# ``SSHEnvironment``/``MachineEntry`` are the shared ``machine_transport``
+# library's own classes (vendored, not duplicated -- see its README's "Why
+# this exists"), re-exported here under their historical names so every
+# existing reference in this package keeps working unchanged.
 
 
 @dataclass(frozen=True)
@@ -175,43 +163,23 @@ def _load_repo_yaml(project: str) -> dict:
 
 
 def _parse_machines_yaml_file(path: Path) -> dict[str, MachineEntry]:
-    """Parse one ``machines.yaml`` file's ``machines:`` block into entries."""
-    raw = _read_yaml(path)
-    machines = raw.get("machines")
-    if not isinstance(machines, dict):
-        raise ValueError(f"machines.yaml at {path} is missing 'machines' key")
-    entries: dict[str, MachineEntry] = {}
-    for key, value in machines.items():
-        if not isinstance(value, dict):
-            continue
-        ssh = value.get("ssh") if isinstance(value.get("ssh"), dict) else {}
-        envs = []
-        for env in ssh.get("environments") or []:
-            if not isinstance(env, dict):
-                continue
-            name = str(env.get("name") or "").strip()
-            alias = str(env.get("alias") or "").strip()
-            if not name:
-                continue
-            envs.append(
-                SSHEnvironment(
-                    name=name,
-                    alias=alias,
-                    shell=str(env.get("shell") or "").strip(),
-                )
-            )
-        entry = MachineEntry(
-            key=str(key),
-            display_name=str(value.get("display_name") or key),
-            environment=str(value.get("environment") or ""),
-            alias=str(value.get("alias") or ""),
-            hostname=str(value.get("hostname") or ""),
-            ssh_environments=envs,
-            ssh_ready=bool(ssh.get("ready")),
-            copilot=bool(value.get("copilot", True)),
-        )
-        entries[entry.key] = entry
-    return entries
+    """Parse one ``machines.yaml`` file's ``machines:`` block into entries.
+
+    Delegates to the shared ``machine_transport`` parser with
+    ``require_alias=False`` (this package's historical behavior: keep an
+    alias-less SSH environment entry, with ``alias=""``, so the Picker can
+    render it as a disabled tab rather than silently omitting it). A
+    read/parse failure (missing file, OS error, malformed YAML) is folded
+    into the same ``ValueError`` this function has always raised for an
+    unusable file -- preserving every existing
+    ``except (FileNotFoundError, ValueError)`` call site's behavior exactly,
+    rather than letting a new exception type (``yaml.YAMLError``) escape
+    uncaught.
+    """
+    try:
+        return _mt_parse_machines_yaml_file(path, require_alias=False)
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"machines.yaml at {path} is missing 'machines' key") from exc
 
 
 @lru_cache(maxsize=None)
