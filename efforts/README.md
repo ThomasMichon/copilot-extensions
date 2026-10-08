@@ -12,8 +12,6 @@ that pattern to this repository.
 |--------|--------|--------------|
 | [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Draft | #5707 |
 | [Session Intelligence and Accounting](active/session-intelligence-and-accounting/README.md) | Active | #5665 |
-| [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Draft | per-slice PRs |
-| [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Draft | one PR for Phases 1-3; clients separately |
 | [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Draft | #5668 (core + `dispatch`), then `bridge` + `pr`; clients separately |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
 | [Resume Prompt: Durable `--interactive` Seed Delivery, No-Mux Parity](active/resume-prompt-durable-seed-and-mux-fix/README.md) | Active (Phase 1 done) | #5415 |

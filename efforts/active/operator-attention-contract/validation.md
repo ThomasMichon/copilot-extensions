@@ -53,7 +53,7 @@ Part of the [Operator Attention Contract](README.md) effort: what each test tier
   handoff) keeps its `entity_ref`, `id` and `created_at`, while its actions
   name the successor; two worktrees never share one, including one worktree id in two projects; no item's `id` contains a bridge escrow or ACP session id; and a session no managed worktree hosts (bridge-owned or interactive) counts as `uncertain`, not as an item.
 - Unit, external identity: a command source registered as `dispatch` (or as
-  a duplicate name) is rejected into `config_errors[]` -- never a second
+  a malformed name) is rejected into `config_errors[]` -- never a second
   `sources[]` entry under that name -- and the aggregate is `degraded`; an item stating another `source` or a foreign
   `id` is invalid; an item omitting both is stamped and then validated; a
   custom `entity: "login"` and `entity: "x.<own>.login"` both canonicalize to
@@ -75,7 +75,7 @@ Part of the [Operator Attention Contract](README.md) effort: what each test tier
   reached through two spellings of the same authority gives one. A worktree
   tracking two PRs, an active passing one and an older reopened failing one,
   gives exactly one item, for the failing PR; one PR tracked by two worktrees is
-  read once and gives one item.
+  read once and gives one item; a tracked record with an empty repo, or no number and no parseable URL, counts toward `uncertain` (the read is `partial`, never `clear`). `source add` with an already-registered name replaces it.
 - Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded` with the others

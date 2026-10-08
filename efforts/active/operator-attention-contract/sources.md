@@ -90,7 +90,7 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
   result is the same from any CWD. A worktree can track several PRs (serial or
   parallel), so a worktree id never stands in for the PR: reading by worktree
   would re-read its active PR for every record and miss a failing older or
-  reopened one. A PR tracked by more than one worktree is read once. A project whose
+  reopened one. A PR tracked by more than one worktree is read once. A tracked record that doesn't resolve to a concrete `authority`, `repo` and `number` (an empty repo, or no number and no parseable PR URL) is never dropped: it counts toward the source's `uncertain`, so an incomplete inventory reads `partial`, never `clear`. A project whose
   tracked PRs can't be enumerated makes the source `failed`: a partial list
   can't claim to be complete. **Dependency:** `agent-worktrees claims find pr`
   already scans every adopted project's tracked PRs, but only for one known
@@ -121,8 +121,7 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
 - **External adapters:** the operator registers a source as a command (an
   `argv`) on this machine, through the CLI only (`agent-dispatch attention
   source add <name> -- <argv>`), in a machine-local file outside any repository. `source add` pins the command to an absolute path, a registration whose command isn't absolute is rejected, and the command runs from the registry's own directory, so neither its executable nor a relative argument resolves against the checkout a read runs in (a test reads from an untrusted CWD). Repository-owned content never registers or activates a command, so reading
-  attention in an untrusted checkout runs nothing it brought. It is registered under a **name** that is the source's identity: it must be
-  unique, match `[a-z0-9-]+`, and not be a built-in source's name (`dispatch`,
+  attention in an untrusted checkout runs nothing it brought. It is registered under a **name** that is the source's identity (the registry is keyed by name, so `source add` with a name that is already registered replaces that registration); the name must match `[a-z0-9-]+` and not be a built-in source's name (`dispatch`,
   `bridge`, `pr`), or the registration is rejected. A rejected registration is
   **not** a source -- listing it under its colliding name would give two
   `sources[]` entries one identity. It is reported in the envelope's
