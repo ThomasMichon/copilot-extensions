@@ -57,8 +57,13 @@ _fetch_readme() {  # <owner/repo> <dir-path> [ref] -- raw README.md content via 
     gh api -H "Accept: application/vnd.github.raw" "repos/$1/contents/$2/README.md?ref=${3:-HEAD}"
 }
 
-_list_issues_by_label() {  # <owner/repo> <label> -- sorted issue numbers carrying that label
-    gh issue list --repo "$1" --state all --label "$2" --json number --jq '.[].number' | sort -n
+_list_issues_by_label() {  # <owner/repo> <label> -- sorted issue numbers carrying
+    # that label, scoped to OPEN issues only -- the recipe itself only
+    # discovers open issues (repository_issue_loops.py's discovery), so a
+    # closed historical issue retaining the label from an earlier run
+    # against this deliberately-retained fixture repo must not be treated
+    # as part of the current run's expected set.
+    gh issue list --repo "$1" --state open --label "$2" --json number --jq '.[].number' | sort -n
 }
 
 _yaml_list_field() {  # <yaml-file> <top-level-key> -- first scalar in a

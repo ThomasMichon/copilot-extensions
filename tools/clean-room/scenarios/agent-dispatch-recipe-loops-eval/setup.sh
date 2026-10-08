@@ -239,6 +239,43 @@ else
     jam "dispatch-config" "fixture repo is missing declaration(s): ${_missing[*]}" "seed the fixture repo with all four .yaml declarations before running this scenario"
     cr_finalize
 fi
+
+# Registrar discovery (registrar_discovery.py's _DECL_SUFFIXES) treats EVERY
+# .yaml/.yml/.json file in this directory as a candidate declaration, and
+# `repository-issue-loop setup` below registers the WHOLE directory -- an
+# extra, unexpected declaration file here (beyond the four this scenario
+# audits) would also go live under the supervisor and could mutate real
+# forge state outside this four-recipe evaluation. Fail closed unless the
+# directory's complete declaration-file set is EXACTLY the four expected
+# recipes, and that each one's own "repo:" value actually targets the
+# operator-supplied fixture repo.
+_expected_decls=(backlog-triager.yaml issue-reproducer.yaml effort-builder.yaml effort-driver.yaml)
+_actual_decls=()
+while IFS= read -r -d '' _f; do
+    _actual_decls+=("$(basename "$_f")")
+done < <(find "$_registrar_dir" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) -print0 | sort -z)
+_unexpected=()
+for _f in "${_actual_decls[@]}"; do
+    _found=0
+    for _e in "${_expected_decls[@]}"; do
+        [ "$_f" = "$_e" ] && _found=1 && break
+    done
+    [ "$_found" = 0 ] && _unexpected+=("$_f")
+done
+if [ "${#_unexpected[@]}" -ne 0 ]; then
+    jam "dispatch-config" "fixture repo's registrar/ directory contains unexpected declaration file(s) beyond the four this scenario audits: ${_unexpected[*]}" "registrar discovery treats every .yaml/.yml/.json file here as a live candidate declaration -- remove the unexpected file(s), since registering the directory would otherwise mutate forge state outside this scenario's four-recipe scope"
+    cr_finalize
+fi
+_repo_mismatches=()
+for _name in backlog-triager issue-reproducer effort-builder effort-driver; do
+    _decl_repo="$(grep -E '^repo:' "$_registrar_dir/$_name.yaml" | head -1 | sed -E 's/^repo:[[:space:]]*//' | tr -d '"'"'"'\r')"
+    [ "$_decl_repo" = "$FIXTURE_REPO" ] || _repo_mismatches+=("$_name.yaml (repo: '$_decl_repo', expected '$FIXTURE_REPO')")
+done
+if [ "${#_repo_mismatches[@]}" -ne 0 ]; then
+    jam "dispatch-config" "declaration(s) do not target the operator-supplied fixture repo: ${_repo_mismatches[*]}" "every declaration's own repo: value must equal \$CR_FIXTURE_REPO ('$FIXTURE_REPO')"
+    cr_finalize
+fi
+pass "registrar/ directory's declaration-file set is exactly the four expected recipes, each correctly targeting \$CR_FIXTURE_REPO ('$FIXTURE_REPO')"
 info "deliberately NOT registering the repo with agent-dispatch's registrar here -- that registration is itself part of what this eval audits"
 
 # Snapshot efforts/active/ BEFORE any orchestrator/worker mutation, so
