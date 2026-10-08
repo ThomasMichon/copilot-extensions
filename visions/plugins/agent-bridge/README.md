@@ -419,6 +419,14 @@ before it lets go of anything, and each session-host's ownership moves from one
 generation to the next individually and durably recorded — never inferred from
 "the new daemon is reachable" alone.
 
+### observable-deployment-freshness
+
+An operator can distinguish the installed payload, selected runtime, and
+generation actually serving sessions. Reconciliation evidence distinguishes
+an attempt that started from one that completed successfully, failed, or has
+not reported its outcome. Installing files is not proof that the serving
+generation changed, and a candidate's readiness is not proof of promotion.
+
 ### version-skew-safe-contract-evolution
 
 The bridge can add and adopt new protocol generations, optional capabilities,
@@ -532,6 +540,23 @@ recoverable) every session-host claim it held, and let any single in-flight
 event finish crossing the wire. It never waits on a Copilot turn, a client, or
 anything the *next* generation is now responsible for — that dependency is
 exactly what turns an update into an outage.
+
+### readiness-does-not-grant-session-custody
+
+A candidate generation can become ready without displacing the frontend
+currently driving a Session Host. It adopts that host only after promotion
+and a valid ownership transfer or verified stale-owner recovery. Readiness,
+location updates, and metadata refreshes do not themselves change custody,
+and a stale snapshot cannot overwrite a newer owner's durable claim.
+
+### deployment-and-recovery-share-transition-authority
+
+Concurrent deployment, maintenance, and interrupted-transition recovery
+coordinate under the service model's
+[*zero-downtime-cutover*](../../plugin-services/README.md#zero-downtime-cutover)
+contract. A second caller waits or reports bounded contention instead of
+undoing a live transition. Recovery distinguishes a genuinely abandoned
+generation change from one whose owner is still carrying it out.
 
 ### one-owner-many-callers
 
@@ -812,6 +837,12 @@ machine may deliberately gate outbound reach until policy allows it.
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
 
 ## Provenance
+
+- **2026-10-08** — Sharpened generation-handoff custody, shared deployment and
+  recovery authority, and observable deployment freshness. Mined from the
+  archived unified-cutover effort, current installer/Session Host paths, and
+  running-generation and reconciliation evidence. Folded the cross-cutting
+  transition-authority contract up into the service-model vision.
 
 - **2026-10-08** — Folded back evidence-backed presence, reported consumption,
   conservative sub-agent attribution, creator provenance distinct from caller

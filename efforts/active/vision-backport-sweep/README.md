@@ -25,7 +25,9 @@
   grafting, shared dropin-registry library),
   `visions/plugins/context-handoff` (durable baton/pickup separation,
   extension-independent recovery, objective authority, evidence-faithful
-  continuation, safe background-work transfer, attributable exclusive pickup)
+  continuation, safe background-work transfer, attributable exclusive pickup),
+  `visions/plugins/agent-bridge` (observation/attribution and generation-handoff
+  slices), `visions/plugin-services` (shared transition authority)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -42,7 +44,10 @@
   reinstall; filed and expanded this slice) ·
   `ThomasMichon/copilot-extensions#5683` (automatic force-tier background-work
   transfer safety) · `ThomasMichon/copilot-extensions#5684` (consume drops
-  failed succession-promotion outcomes)
+  failed succession-promotion outcomes) ·
+  `ThomasMichon/copilot-extensions#5750` (failed new-version cutover falls back
+  to stop/start) · `ThomasMichon/copilot-extensions#5754` (recovery runs before
+  acquiring lifecycle-transition authority)
 
 ## Guiding Intent
 
@@ -275,9 +280,13 @@ Operator, end of a long multi-repo session:
             consumption with per-figure provenance and rollup coverage,
             conservative sub-agent attribution, creator identity distinct
             from caller affinity, and continuity-aware backward history
-            browsing. The rest of the leaf's deployment, hosting, routing,
-            and protocol contracts remain to be reconciled; this is not a
-            completed full-leaf sweep.
+            browsing; deployment slice additionally reconciled candidate
+            custody, transition serialization/recovery, and deployment
+            freshness. Installer fallback remains a violation (`#5750`);
+            recovery before serialization is `#5754`; native supervisor
+            binding/coherence remains under `#4022`/`#5225`. The rest of
+            hosting, routing, and protocol contracts remain to be reconciled;
+            this is not a completed full-leaf sweep.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -900,3 +909,61 @@ then rather than assuming either answer.
   not a new live agent run. Clean-room and external-venue tiers were not run:
   no provisioning, runtime, hook, or payload behavior changes in this slice.
   The Windows-inapplicable remote-shell scenario remains skipped.
+
+### 2026-10-08 — Phase 2/3 agent-bridge generation-handoff slice
+- Continued directly after the observation slice (`#5734`) at the operator's
+  request. Read the archived `agent-bridge-unified-zdd-cutover` effort, current
+  architecture, both installer update paths, CLI deploy/restart, passive
+  startup gating, HostIndex custody, running-generation evidence, shared
+  cutover locking, and stale-breadcrumb recovery.
+- Fold-back: observable deployment freshness distinguishes installed files,
+  selected runtime, serving generation, and attempt versus completed reconcile.
+  Candidate readiness does not grant Session Host custody; durable metadata
+  refreshes preserve ownership. Deployment and recovery share transition
+  authority. Folded that last guarantee UP into `plugin-services`'s existing
+  `zero-downtime-cutover` item, rather than making it bridge-only. This is pure
+  intent; no APIs, marker formats, lock grammar, or platform commands were added.
+- Superset check: retained every existing positive and Non-Goal in both visions.
+  The existing single-deploy/no-outage intent is not weakened to bless a
+  fallback. Explicit transition ownership extends the existing shared
+  serialization purpose; it does not withdraw an intended recovery capability.
+- Historical delivery is not full conformance: `service restart` really calls
+  `_cmd_deploy`, and the archived effort records completed phased work and
+  real live-turn/abrupt-termination drills. However, both installer failure
+  branches still call drain/stop/start after a failed new-version cutover.
+  Filed `#5750` after dedup, distinct from `#5472`'s same-version mutation.
+  Left `#4477` open with a comment separating completed historical phases from
+  residual canonical-deployment conformance, rather than closing it on a Done
+  effort marker.
+- Found a second concrete gap at the real CLI boundary: `_cmd_deploy` calls
+  stale-cutover recovery and abandoned-passive reaping before
+  `CutoverOrchestrator.run()` acquires its lock. `breadcrumb.is_stale()` checks
+  nonterminal state, not abandoned ownership, so a concurrent caller can undo
+  a live transition before waiting. Filed `#5754` after dedup; the existing
+  lock and identity safeguards must remain. No observed host timeout is
+  attributed to this race without a direct reproduction.
+- Scoped service-invariant audit:
+
+  | Invariant | Status | Evidence / delta |
+  |---|---|---|
+  | `zero-downtime-cutover` | Partial | Shared orchestrator health-gates and serializes its main sequence, and restart uses it; both installer failed-deploy branches still fall back to stop/start (`install.ps1:3098-3106`, `install.sh:2169-2181`, `#5750`). Recovery prelude is outside that authority (`venue_cli.py:265-267`, `#5754`). |
+  | `register-once-cutover-on-update` | Windows conforms in inspected path; POSIX violates | `Ensure-ScheduledTask` leaves an existing task untouched. POSIX assigns `VENV_DIR=versions/$SRC_VERSION`, then emits that concrete slot into `ExecStart` and rewrites/reloads/enables the unit during every update (`install.sh:250,311,1054-1101,2161`). Added evidence to existing native-supervisor tracker `#4022`, not a duplicate issue. |
+  | `cutover-coherent-service-tracking` | Partial, existing tracked gap | Detached successor versus tracked predecessor is already `#4022`/`#5225`; do not weaken the invariant by telling consumers to ignore an inactive native supervisor. No new live systemd census here. |
+  | Generation-scoped Session Host custody | Conforms in inspected primitives; full provider recovery remains separate | `app.py` skips passive reattach; `HostIndex` locks/reloads, preserves ownership on metadata writes, and releases only its generation. Full provider reattach remains `#2041`; these narrow primitives do not close that issue. |
+  | `immutable-versioned-runtime` | Prior violation remains | Same-version content-changed rebuild remains `#5472`; this slice adds no installer change. |
+
+- The rest of Phase 3 remains open across the plugin set; this is not an
+  all-services audit. The runtime-publication symptom initially filed as
+  `#5749` was consolidated into earlier `#4547`: preserved the missing-new-slot
+  entrypoint / automatic recovery-to-prior variant in a comment, closed only
+  the duplicate tracker, and asserted no root-cause equivalence or repair.
+- Validation: three touched READMEs pass the structure guard and the diff
+  whitespace check. The contained Windows agent-bridge runner reports
+  **54 passed, 1 skipped, 3436 deselected** for existing cutover, custody,
+  running-generation, reconcile-outcome, and restart-delegation tests.
+  These validate the inspected primitives, not either newly filed failing
+  installer/CLI-prelude contract. The new issues name the corresponding
+  implementation regression-test obligations. No fresh clean-room, live
+  cutover, or POSIX native-supervisor run was performed: this is a vision and
+  tracker reconciliation with no runtime, installer, or payload changes;
+  archived live-drill evidence is historical evidence, not a new run.
