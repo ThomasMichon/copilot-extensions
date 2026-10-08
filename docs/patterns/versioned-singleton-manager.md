@@ -400,26 +400,34 @@ successor already running in my own tree?*
       different lifetimes, different purposes, and (now) different
       writers: conflating them would let the bridge's own identity
       silently clobber the daemon's.
-   2. Only now does the old manager exit — and it exits with a
-      **documented, non-zero self-update exit status** (distinct from a
-      real crash's own exit codes, and distinct from Linux's
-      `SELF_UPDATE_EXIT_CODE`, which this path does not reuse): Task
-      Scheduler's restart action is a *restart-on-failure* policy
-      (`RestartCount`/`RestartInterval`), so an ordinary success exit is not
-      guaranteed to trigger step 3 at all — a graceful-looking exit could
-      leave only the bridge and daemon alive, with no Task-tracked process
-      and no pending restart. The manager deliberately does **not** attempt
-      to suppress the restart here (unlike Linux, which needs no restart at
-      all thanks to `execve`): a real restart is wanted every time, so the
-      non-zero status is chosen specifically to satisfy the Task's own
-      failure condition, and the stable launcher (below) preserves that
-      exact exit code unchanged on every path it wraps, rather than
-      translating or swallowing it.
-   3. Task Scheduler's restart policy fires and launches the stable
-      launcher fresh. **This new process is the permanently Task-tracked
-      successor from this point on** — never a check-and-exit shim, and
-      never a second, independent, permanently-running instance the Task
-      stays blind to. Before entering its own `run()` loop, it reads the
+   2. Only now does the old manager exit — and it exits with its **normal
+      success status**, not a special sentinel: `cutover-coherent-service-
+      tracking` (the vision behavior this whole pattern serves) requires a
+      planned handoff to be reflected to the service manager as
+      intentional, never as a crash to retry — a *non-zero* "self-update"
+      exit code would have Task Scheduler's own native restart-on-failure
+      accounting (`RestartCount`/`RestartInterval`) classify this exit as a
+      failure and consume a retry slot, directly contradicting that
+      guarantee. The re-launch is therefore **not** driven by Task
+      Scheduler's restart-on-failure policy at all: the **bridge** itself
+      — already confirmed self-sufficient, already holding the one
+      durable record of what needs adopting — explicitly re-invokes the
+      registered task (`schtasks /run /tn <task name>`, or the equivalent
+      `ITaskService` COM call) once it has confirmed the old manager's
+      exit — a condition the bridge can observe directly, since it was
+      spawned as the old manager's own child and already holds (or can
+      trivially acquire at spawn time) an inheritable handle to it,
+      satisfied by a single `WaitForSingleObject` — rather than waiting on a restart-on-failure heuristic that was
+      never the right trigger for an intentional handoff. This sidesteps
+      the retry-exhaustion failure mode entirely too — a bridge-driven
+      re-run has no `RestartCount` to run out of — leaving that policy free
+      to mean exactly what it already means elsewhere: a genuine,
+      unplanned crash.
+   3. This explicit re-run launches the stable launcher fresh. **This new
+      process is the permanently Task-tracked successor from this point
+      on** — never a check-and-exit shim, and never a second, independent,
+      permanently-running instance the Task stays blind to. Before
+      entering its own `run()` loop, it reads the
       transient `handoff` record, finds the bridge's recorded pid/token,
       opens its *own* handle to the same named Job via `OpenJobObject`
       (now three handles briefly overlap: the exiting bridge waits on
@@ -461,19 +469,41 @@ successor already running in my own tree?*
       Job handle are all confirmed does it signal the bridge to exit (e.g.
       a named event). The bridge closing its handles is now safe — the new
       manager already holds its own, independent copies of both.
-   The bridge does not simply wait on its named pipe forever: it carries a
-   **bounded adoption deadline** (started the moment it finishes step 1's
-   handoff) and a **fail-closed cleanup path** for when that deadline
-   expires without a new manager ever connecting — Task Scheduler
-   exhausting its own configured restart retries, or a new manager crashing
-   before it reaches step 3, are real failure modes this pattern must not
-   leave unhandled. On expiry, the bridge **itself** initiates the
-   real-crash path: it closes its own Job handle (now genuinely the last
-   one, correctly triggering `KILL_ON_JOB_CLOSE` — the daemon dying here is
-   the *correct* outcome, since no Task-tracked manager ever reclaimed it)
-   and deletes the `handoff` record so no later process mistakes a dead
-   rendezvous for a still-pending one. Left unhandled, a hung bridge would
-   otherwise hold the Job open indefinitely, silently preventing
+   **Adoption never depends solely on the `handoff` record being present or
+   absent** — this is what makes the bridge's own cleanup ordering safe
+   regardless of exactly how it unwinds. A new manager's startup always
+   independently checks the persisted `daemon` record's baseline first
+   (item 2's own check, via `OpenProcess` + token comparison), *before*
+   ever deciding whether to treat a `handoff` record as meaningful: a
+   confirmed-alive daemon is re-adopted directly the same way the bridge
+   itself establishes its handle in step 1(b), with or without a bridge
+   still around to help; only a confirmed-dead daemon makes `spawn` the
+   right call. The `handoff` record and the bridge's pipe are a **faster**
+   adoption path when available (an already-open Job handle, an
+   already-verified daemon handle ready to relay) — never the *only* path,
+   and never something a new manager treats as authoritative on its own.
+   This is what resolves the bridge's own fail-closed cleanup: the bridge
+   does not simply wait on its named pipe forever. It carries a **bounded
+   adoption deadline** (started the moment it finishes step 1's handoff)
+   for when no new manager ever connects — the bridge-triggered re-run
+   itself failing, or a new manager crashing before it reaches step 3, are
+   real failure modes this pattern must not leave unhandled. On expiry, the
+   bridge marks the `handoff` record **abandoned** (a fast, atomic
+   rename/flag flip, while the bridge is still fully alive) and only *then*
+   closes its own Job handle — triggering `KILL_ON_JOB_CLOSE` for itself,
+   the daemon, and every other Job member in one step, since the bridge is
+   itself a Job member (inherited from the old manager that spawned it) and
+   cannot survive past that point to do anything further; nothing beyond
+   this one `CloseHandle` call is needed or possible once it runs. Because
+   the preceding paragraph already makes a new manager's adoption decision
+   depend on the *daemon's own* baseline, not on this record's exact
+   timing, the brief window between the record being marked abandoned and
+   the handle actually closing is **not** a correctness hazard the way a
+   bare "record absent ⇒ assume dead" rule would have made it: a new
+   manager arriving in that narrow window still finds the daemon's own
+   baseline genuinely alive and re-adopts it directly, exactly as it would
+   with a healthy bridge still relaying. Left unhandled, a hung bridge
+   would otherwise hold the Job open indefinitely, silently preventing
    `KILL_ON_JOB_CLOSE` from ever protecting against exactly the stray-
    survivor class item 3/4 exist to close — recreating, via a different
    path, the same untracked-daemon failure this entire pattern is for.
