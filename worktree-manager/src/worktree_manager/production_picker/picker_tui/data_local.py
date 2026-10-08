@@ -86,6 +86,14 @@ def is_local(machine: str, env: str) -> bool:
         machine,
         config_machine=config.machine,
         load_entries=lambda: cfg.load_machines_yaml(config.default_repo.anchor),
+        # Explicitly the SAME short (domain-suffix-stripped) hostname
+        # ``LOCAL`` itself uses -- the shared helper's own default
+        # (``socket.gethostname()``, unstripped) would otherwise disagree
+        # with this picker's roster construction (``data_ssh._build_sources``
+        # also keys off the short hostname) on a domain-qualified host,
+        # e.g. ``host.example.test`` vs. a registry entry's short
+        # ``hostname: host``.
+        real_hostname=LOCAL[0],
     )
 
 

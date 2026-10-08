@@ -57,9 +57,48 @@ class TestParseMachinesYamlFile:
         with pytest.raises(ValueError, match="missing 'machines' key"):
             parse_machines_yaml_file(path)
 
+    def test_null_machines_value_raises_value_error_not_attribute_error(self, tmp_path):
+        """``machines: null`` previously passed the presence check and then
+        crashed with ``AttributeError`` at ``.items()`` -- a consumer like
+        ``data_ssh._build_sources()`` that catches ``(FileNotFoundError,
+        ValueError)`` to fall back to a local-only source list would not
+        have caught that, losing its fallback entirely."""
+        path = _write(tmp_path, "machines: null\n")
+        with pytest.raises(ValueError, match="missing 'machines' key"):
+            parse_machines_yaml_file(path)
+
+    def test_list_machines_value_raises_value_error(self, tmp_path):
+        path = _write(tmp_path, "machines: []\n")
+        with pytest.raises(ValueError, match="missing 'machines' key"):
+            parse_machines_yaml_file(path)
+
     def test_non_dict_machine_value_is_skipped(self, tmp_path):
         path = _write(tmp_path, "machines:\n  box-a: null\n")
         assert parse_machines_yaml_file(path) == {}
+
+    def test_integer_machine_key_is_coerced_to_string(self, tmp_path):
+        """A bare ``123:`` machine key parses as an ``int`` in YAML; every
+        downstream consumer does string-only matching (``key.lower()`` in
+        ``data_ssh._build_sources()``) -- an uncoerced int key crashes it."""
+        path = _write(tmp_path, "machines:\n  123: {}\n")
+        entries = parse_machines_yaml_file(path)
+        assert set(entries) == {"123"}
+        assert entries["123"].key == "123"
+
+    def test_non_string_identity_fields_are_coerced_to_string(self, tmp_path):
+        path = _write(tmp_path, (
+            "machines:\n"
+            "  box-a:\n"
+            "    display_name: 42\n"
+            "    environment: 7\n"
+            "    alias: 123\n"
+            "    hostname: 456\n"
+        ))
+        entry = parse_machines_yaml_file(path)["box-a"]
+        assert entry.display_name == "42"
+        assert entry.environment == "7"
+        assert entry.alias == "123"
+        assert entry.hostname == "456"
 
     def test_description_must_be_a_string(self, tmp_path):
         path = _write(tmp_path, "machines:\n  box-a:\n    description: [1, 2]\n")

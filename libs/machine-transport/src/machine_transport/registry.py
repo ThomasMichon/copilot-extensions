@@ -95,7 +95,7 @@ def parse_machines_yaml_file(
     with open(path, encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f)
 
-    if not raw or "machines" not in raw:
+    if not raw or not isinstance(raw.get("machines"), dict):
         raise ValueError(f"machines.yaml at {path} is missing 'machines' key")
 
     entries: dict[str, MachineEntry] = {}
@@ -146,12 +146,20 @@ def parse_machines_yaml_file(
                     alias=str(env.get("alias") or "").strip(),
                     shell=str(env.get("shell") or "").strip(),
                 ))
+        # Coerce the entry's own identity fields to ``str`` unconditionally
+        # (not just in the permissive branch above): a YAML key/value that
+        # parses as a non-string (e.g. a bare ``123:`` machine key, or
+        # ``alias: 123``) previously crashed downstream string-only matching
+        # (``key.lower()``, alias comparisons) in both historical
+        # implementations -- worktree-manager's own parser already coerced
+        # defensively; this generalizes that same safety to every consumer.
+        key = str(key)
         entries[key] = MachineEntry(
             key=key,
-            display_name=data.get("display_name", key),
-            environment=data.get("environment", ""),
-            alias=data.get("alias", ""),
-            hostname=data.get("hostname", ""),
+            display_name=str(data.get("display_name") or key),
+            environment=str(data.get("environment") or ""),
+            alias=str(data.get("alias") or ""),
+            hostname=str(data.get("hostname") or ""),
             role=data.get("role", ""),
             description=description_raw.strip(),
             capabilities=capabilities,

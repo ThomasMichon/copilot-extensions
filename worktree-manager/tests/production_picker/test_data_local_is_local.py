@@ -16,6 +16,7 @@ from __future__ import annotations
 import types
 
 from agent_worktrees import config as agent_cfg
+from machine_transport import identity as mt_identity
 from worktree_manager.production_picker.picker_tui import data_local
 
 
@@ -130,6 +131,31 @@ def test_is_local_does_not_blanket_match_on_an_empty_config_machine(monkeypatch)
     entries = {"remote-box": _entry("remote-box")}  # alias="" by default
     _install_roster(monkeypatch, entries, machine="")
     assert data_local.is_local("remote-box", data_local.LOCAL[1]) is False
+
+
+def test_is_local_uses_the_short_local_hostname_not_the_full_one(monkeypatch):
+    """Regression: ``is_local`` must pass ``LOCAL[0]`` (the short,
+    domain-suffix-stripped hostname ``data_ssh._build_sources`` also keys
+    off) as the shared helper's ``real_hostname`` -- never let it fall back
+    to its own default (the ambient, possibly domain-qualified
+    ``socket.gethostname()``). On a domain-qualified host (e.g.
+    ``host.example.test``), an entry keyed by the registry's own short
+    ``hostname:`` field would otherwise silently stop matching, even though
+    the roster's source-construction side (which already keys off the short
+    hostname) still treats it as local -- splitting local-vs-remote
+    between the two."""
+    short = data_local.LOCAL[0]
+    entries = {"friendly": _entry("friendly", hostname=short)}
+    _install_roster(monkeypatch, entries, machine="")
+    # The shared helper's own default falls back to the AMBIENT
+    # socket.gethostname() -- simulate a domain-qualified ambient hostname
+    # that differs from the short LOCAL[0] this wrapper must use instead.
+    monkeypatch.setattr(
+        mt_identity.socket,
+        "gethostname",
+        lambda: f"{short}.example.test",
+    )
+    assert data_local.is_local("friendly", data_local.LOCAL[1]) is True
 
 
 def test_data_ssh_is_local_delegates_to_data_local():
