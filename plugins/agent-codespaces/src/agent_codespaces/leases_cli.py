@@ -82,7 +82,8 @@ def cmd_leases(args: argparse.Namespace | None = None) -> int:
     (target-lock holder, ControlMasters, forwards, ``gh codespace ssh``) still
     using the box. The lease's ``pid`` is only the process that WROTE the lease,
     so a dead ``pid`` never means the box is free -- ``in_use`` does. It is
-    ``None`` (unknown) for a lease recorded on a different host.
+    ``None`` (unknown) for a lease recorded on a different host, or when the
+    process table cannot be read and no lock holder is live.
     """
     from .lease import _this_host, list_leases
 
@@ -149,13 +150,15 @@ def _live_usage(leases: list, this_host: str) -> dict[str, tuple[bool | None, li
             usage[lease.codespace] = (None, [])
             continue
         users = live_users.live_users(lease.codespace, table=table)
-        usage[lease.codespace] = (bool(users), users)
+        # No process table -> only the lock is known: unknown, never "idle".
+        usage[lease.codespace] = (True if users else (False if table is not None else None),
+                                  users)
     return usage
 
 
 def _in_use_label(in_use: bool | None, users: list) -> str:
     if in_use is None:
-        return "unknown (other host)"
+        return "unknown"
     if not in_use:
         return "no"
     return "yes (" + ", ".join(sorted({u.role for u in users})) + ")"

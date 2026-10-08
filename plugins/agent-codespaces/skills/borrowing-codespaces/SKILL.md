@@ -67,11 +67,13 @@ fleet, there is no "pick a free one").
 - **Is it actually in use? Never infer it from the lease `pid`.** That pid is
   the short-lived process that *wrote* the lease, so it is usually dead. Use
   `<agent-codespaces catalog argv[0]> in-use <codespace> [--json]` (exit 0 idle,
-  75 in use): it lists every live local user -- the SSH target-lock holder,
-  detached SSH ControlMasters (with their `ControlPath`), port-forward carriers,
-  mux clients, and `gh codespace ssh` sessions. `leases --json` carries the same
-  `in_use` / `live_users` per row, and `stop` / `finalize` / `delete` name these
-  users when they report `[BUSY]`.
+  75 in use, 3 unknown -- process table unreadable): it lists every live local
+  user -- the SSH target-lock holder, detached SSH ControlMasters (with their
+  `ControlPath`), port-forward carriers, mux clients, and `gh codespace ssh`
+  sessions. `leases --json` carries the same `in_use` (`null` = unknown) /
+  `live_users` per row. `stop` / `finalize` / `delete` / `prune` refuse a box
+  with live users (`[BUSY]`, naming each one) unless `--force`; close a leftover
+  ControlMaster with `ssh -O exit -o ControlPath=<path> _` rather than forcing.
 
 ### Check-out / check-in wiring (automatic)
 

@@ -273,8 +273,11 @@ def test_leases_json_reports_live_users_not_dead_writer_pid(monkeypatch, capsys)
     lease.pid = 999999
     monkeypatch.setattr(lease_mod, "list_leases", lambda: [lease])
     monkeypatch.setattr(live_users, "lock_holder", lambda name, table=None: None)
+    from pathlib import Path
+
+    cfg = str(Path.home() / ".ssh-manager" / "codespace-config" / "cs-a.config")
     master = live_users.ProcInfo(4242, 1, (
-        "ssh", "-F", "/x/cs-a.config", "-o", "ControlMaster=yes", "-N", "h"))
+        "ssh", "-F", cfg, "-o", "ControlMaster=yes", "-N", "h"))
     monkeypatch.setattr(live_users, "process_table", lambda: [master])
 
     assert main(["leases", "--json"]) == 0

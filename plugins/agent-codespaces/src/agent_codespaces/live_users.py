@@ -10,15 +10,18 @@ ssh --stdio`` session, a port-forward carrier, a mux client, or an interactive
 This module derives the set of **live local users** of a CodeSpace from:
 
 * the ``ssh_manager`` per-target lock holder (when its pid is alive), and
-* the local process table: every ``ssh`` whose ``-F`` config is this
-  CodeSpace's ``ssh-manager`` config file (classified as control master,
+* the local process table: every ``ssh`` whose ``-F`` config is one of this
+  CodeSpace's generated config files (the ``ssh-manager`` default directory or
+  agent-codespaces' own), classified as control master,
   port-forward carrier, mux client, or plain session), and every
   ``gh codespace|cs ssh|ports|cp -c <name>`` process that is not merely the
   ProxyCommand child of an ``ssh`` already counted.
 
-It owns no state and never mutates anything. Degrade-safe: when the process
-table cannot be read (e.g. native Windows, where ssh-manager uses direct mode
-with no persistent masters) only the lock holder is considered.
+It owns no state and never mutates anything. When the process table cannot be
+read, only the lock holder is known and "no users" is reported as **unknown**
+(never as idle). The lifecycle commands (``stop`` / ``finalize`` / ``delete`` /
+``prune``) refuse a box with live users unless ``--force`` (see
+:class:`CodespaceInUseError`).
 """
 
 from __future__ import annotations
@@ -26,9 +29,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from ssh_manager import TargetBusyError
+from ssh_manager.locks import LockHolder
 
 ROLE_LOCK = "ssh-target-lock"
 ROLE_CONTROL_MASTER = "ssh-control-master"
@@ -72,6 +81,19 @@ def config_file_name(name: str) -> str:
     Mirrors ``ssh_manager.codespace_source.CodespaceConfigSource``.
     """
     return re.sub(r"[^\w\-.]", "_", name) + ".config"
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+def config_paths(name: str) -> frozenset[str]:
+    """Normalized paths of every generated ``-F`` config for ``name``: the
+    ssh-manager default directory (agent-bridge) and agent-codespaces' own."""
+    from .codespace_config import SSH_CONFIG_DIR
+
+    dirs = (Path.home() / ".ssh-manager" / "codespace-config", SSH_CONFIG_DIR)
+    return frozenset(_norm(str(d / config_file_name(name))) for d in dirs)
 
 
 def _read_proc_linux() -> list[ProcInfo] | None:
@@ -123,10 +145,48 @@ def _read_proc_ps() -> list[ProcInfo] | None:
     return procs
 
 
+def _split_windows_cmdline(cmdline: str) -> tuple[str, ...]:
+    try:
+        parts = shlex.split(cmdline, posix=False)
+    except ValueError:
+        parts = cmdline.split()
+    return tuple(p[1:-1] if len(p) >= 2 and p[0] == p[-1] == '"' else p for p in parts)
+
+
+def _read_proc_windows() -> list[ProcInfo] | None:
+    from agent_procutil import no_window_flags
+
+    script = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,"
+              "CommandLine | ConvertTo-Json -Compress")
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=30, check=False,
+            stdin=subprocess.DEVNULL, creationflags=no_window_flags(),
+        )
+        rows = json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not isinstance(rows, list):
+        return None
+    procs: list[ProcInfo] = []
+    for row in rows:
+        cmdline = (row or {}).get("CommandLine") or ""
+        try:
+            pid, ppid = int(row["ProcessId"]), int(row.get("ParentProcessId") or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if cmdline:
+            procs.append(ProcInfo(pid, ppid, _split_windows_cmdline(cmdline)))
+    return procs
+
+
 def process_table() -> list[ProcInfo] | None:
     """Snapshot the local process table, or ``None`` when unavailable."""
     if sys.platform == "win32":
-        return None
+        return _read_proc_windows()
     if os.path.isdir("/proc/self"):
         return _read_proc_linux()
     return _read_proc_ps()
@@ -197,7 +257,7 @@ def users_from_table(
     name: str, table: list[ProcInfo], *, exclude_pids: frozenset[int] = frozenset(),
 ) -> list[LiveUser]:
     """Live users of ``name`` found in a process-table snapshot."""
-    cfg = config_file_name(name)
+    cfgs = config_paths(name)
     by_pid = {p.pid: p for p in table}
     users: list[LiveUser] = []
     ssh_pids: set[int] = set()
@@ -205,7 +265,7 @@ def users_from_table(
         if proc.pid in exclude_pids or not _is_ssh(proc.argv):
             continue
         config = _option_value(proc.argv, "-F", attached=True)
-        if not config or _basename(config) != cfg.lower():
+        if not config or _norm(config) not in cfgs:
             continue
         classified = _ssh_role(proc.argv)
         if classified is None:
@@ -329,20 +389,47 @@ def busy_report(name: str, busy: object) -> str:
 
 
 def cmd_in_use(args) -> int:
-    """``agent-codespaces in-use <name>``: exit 0 when idle, 75 when in use."""
+    """``agent-codespaces in-use <name>``: exit 0 idle, 75 in use, 3 unknown."""
     table = process_table()
     users = live_users(args.name, table=table)
+    in_use = True if users else (False if table is not None else None)
     if getattr(args, "json_output", False):
         print(json.dumps({
             "codespace": args.name,
-            "in_use": bool(users),
+            "in_use": in_use,
             "process_scan": table is not None,
             "live_users": [u.to_dict() for u in users],
         }))
     elif users:
         print(f"{args.name}: IN USE by {len(users)} live local process(es):")
         print(describe(users))
+    elif in_use is None:
+        print(f"{args.name}: UNKNOWN -- no live lock holder, but the process table "
+              "could not be read to rule out SSH sessions")
     else:
-        scope = "" if table is not None else " (process table unavailable; lock only)"
-        print(f"{args.name}: not in use by any local process{scope}")
-    return 75 if users else 0
+        print(f"{args.name}: not in use by any local process")
+    return 75 if users else (0 if in_use is False else 3)
+
+
+class CodespaceInUseError(TargetBusyError):
+    """A lifecycle operation refused because live local users still ride the box.
+
+    A :class:`ssh_manager.TargetBusyError` so every existing ``[BUSY]`` handler
+    reports it unchanged (``busy_report`` lists the users).
+    """
+
+    def __init__(self, name: str, users: list[LiveUser], op: str = "this operation") -> None:
+        first = users[0]
+        super().__init__(name, LockHolder(pid=first.pid, op=first.role, target=name,
+                                          started_at=time.time()))
+        self.users = users
+        self.args = (f"CodeSpace '{name}' is still in use by {len(users)} live local "
+                     f"process(es); refusing {op}. Close them, or re-run with --force "
+                     f"to proceed anyway.",)
+
+
+def refuse_if_in_use(name: str, op: str) -> None:
+    """Raise :class:`CodespaceInUseError` when ``name`` has live local users."""
+    users = live_users(name)
+    if users:
+        raise CodespaceInUseError(name, users, op)

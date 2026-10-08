@@ -360,7 +360,8 @@ def main(argv: list[str] | None = None) -> int:
     delete_parser = sub.add_parser("delete", help="Delete a CodeSpace")
     delete_parser.add_argument("name", help="CodeSpace name")
     delete_parser.add_argument(
-        "--force", action="store_true", help="Force deletion",
+        "--force", action="store_true",
+        help="Force deletion (also skips the live-local-user check)",
     )
     delete_parser.add_argument(
         "--no-sync", action="store_true",
@@ -385,7 +386,7 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="With --delete: delete even if recovery failed -- diagnose the "
              "failure first, do not use for routine hiccups (destroys "
-             "unrecovered sessions)",
+             "unrecovered sessions). Also skips the live-local-user check",
     )
     finalize_parser.add_argument(
         "--timeout", type=float, default=300.0,
@@ -426,6 +427,11 @@ def main(argv: list[str] | None = None) -> int:
     stop_parser.add_argument(
         "--no-sync", action="store_true",
         help="Skip the pre-stop Copilot session recovery",
+    )
+    stop_parser.add_argument(
+        "--force", action="store_true",
+        help="Stop even while live local processes (SSH ControlMaster, forwards, "
+             "gh codespace ssh) still use the CodeSpace",
     )
     stop_parser.add_argument(
         "--timeout", type=float, default=300.0,
@@ -3311,7 +3317,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     from .lifecycle_lock import lifecycle_lock
 
     try:
-        with lifecycle_lock(args.name) as lock:
+        with lifecycle_lock(args.name, refuse_live_users="delete", force=args.force) as lock:
             if not getattr(args, "no_sync", False):
                 res = sync_codespace_sessions(args.name, verbose=args.verbose, lock=lock)
                 if res.get("ok"):
@@ -3406,7 +3412,8 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
             return 2
 
     try:
-        with lifecycle_lock(args.name) as lock:
+        with lifecycle_lock(args.name, refuse_live_users="finalize",
+                            force=args.force) as lock:
             # Preserving path may skip booting a Shutdown box; the destructive --delete
             # path must recover first (booting if needed) before the box is gone.
             res = sync_codespace_sessions(
@@ -3505,7 +3512,8 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
         from .lifecycle_lock import lifecycle_lock
 
         try:
-            with lifecycle_lock(name) as lock:
+            with lifecycle_lock(name, refuse_live_users="finalize",
+                                force=args.force) as lock:
                 emit({"type": "progress", "pct": 5.0,
                       "msg": f"Recovering Copilot sessions from {name}\u2026"})
                 res = sync_codespace_sessions(
@@ -3644,7 +3652,8 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     from .lifecycle_lock import lifecycle_lock
 
     try:
-        with lifecycle_lock(args.name) as lock:
+        with lifecycle_lock(args.name, refuse_live_users="stop",
+                            force=getattr(args, "force", False)) as lock:
             if not getattr(args, "no_sync", False):
                 res = sync_codespace_sessions(
                     args.name, timeout=args.timeout, verbose=args.verbose,
@@ -3774,7 +3783,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
         from .lifecycle_lock import lifecycle_lock
 
         try:
-            with lifecycle_lock(name) as lock:
+            with lifecycle_lock(name, refuse_live_users="prune") as lock:
                 # Destructive path: recover even a Shutdown box (boot if needed) first.
                 res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
                 if not (res.get("ok") or res.get("skipped")):
@@ -3835,7 +3844,7 @@ def _reclaim_for_quota(err: str) -> str | None:
             from .lifecycle_lock import lifecycle_lock
 
             try:
-                with lifecycle_lock(name) as lock:
+                with lifecycle_lock(name, refuse_live_users="prune") as lock:
                     res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
                     if not (res.get("ok") or res.get("skipped")):
                         continue

@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +17,7 @@ from agent_codespaces import live_users as lu
 from agent_codespaces.live_users import ProcInfo
 
 NAME = "probable-space-x1y2z3"
-CFG = f"/home/u/.ssh-manager/codespace-config/{NAME}.config"
+CFG = str(Path.home() / ".ssh-manager" / "codespace-config" / f"{NAME}.config")
 SOCK = "/home/u/.ssh-manager/sockets/cs.probable-abc123"
 
 
@@ -25,6 +26,12 @@ def _master(pid=101, ppid=1, cfg=CFG):
         "ssh", "-F", cfg, "-o", f"ControlPath={SOCK}", "-o", "ControlMaster=yes",
         "-o", "ControlPersist=yes", "-N", "cs.host",
     ))
+
+
+def _own_cfg():
+    from agent_codespaces.codespace_config import SSH_CONFIG_DIR
+
+    return str(SSH_CONFIG_DIR / f"{NAME}.config")
 
 
 def _table(*procs):
@@ -50,6 +57,7 @@ def test_roles_classified_and_transient_control_commands_ignored():
                            "-L", "1:localhost:1", "cs.host")),
         ProcInfo(103, 50, ("ssh", "-F", CFG, "-o", f"ControlPath={SOCK}", "cs.host", "ls")),
         ProcInfo(104, 50, ("ssh", f"-F{CFG}", "cs.host", "ls")),
+        ProcInfo(106, 50, ("ssh", "-F", _own_cfg(), "cs.host", "ls")),
         ProcInfo(105, 50, ("ssh", "-F", CFG, "-o", f"ControlPath={SOCK}", "-O", "check", "x")),
         ProcInfo(50, 1, ("python",)),
     )
@@ -59,13 +67,15 @@ def test_roles_classified_and_transient_control_commands_ignored():
         102: lu.ROLE_FORWARD,
         103: lu.ROLE_MUX,
         104: lu.ROLE_SSH,
+        106: lu.ROLE_SSH,
     }
 
 
 def test_other_codespaces_and_unrelated_processes_do_not_count():
-    other_cfg = "/home/u/.ssh-manager/codespace-config/other-space.config"
+    other_cfg = CFG.replace(NAME, "other-space")
     table = _table(
         _master(cfg=other_cfg),
+        _master(pid=199, cfg=f"/somewhere/else/{NAME}.config"),
         ProcInfo(200, 1, ("gh", "codespace", "ssh", "-c", "other-space")),
         ProcInfo(201, 1, ("gh", "codespace", "list")),
         ProcInfo(202, 1, ("vim", CFG)),
@@ -101,10 +111,19 @@ def test_lock_holder_listed_first_and_not_duplicated(monkeypatch):
     ]
 
 
-def test_unreadable_process_table_degrades_to_lock_only(monkeypatch):
+def test_unreadable_process_table_is_unknown_not_idle(monkeypatch, capsys):
     monkeypatch.setattr(lu, "process_table", lambda: None)
     assert lu.live_users(NAME) == []
     assert lu.codespaces_in_use([NAME]) == {}
+    assert lu.cmd_in_use(SimpleNamespace(name=NAME, json_output=True)) == 3
+    assert json.loads(capsys.readouterr().out)["in_use"] is None
+
+
+def test_windows_cmdline_split():
+    argv = lu._split_windows_cmdline(
+        '"C:\\Program Files\\OpenSSH\\ssh.exe" -F "C:\\Users\\u\\x.config" -N host')
+    assert argv[0].endswith("ssh.exe") and argv[1:3] == ("-F", "C:\\Users\\u\\x.config")
+    assert lu._basename(argv[0]) == "ssh"
 
 
 def test_codespaces_in_use_never_raises(monkeypatch):
@@ -189,3 +208,46 @@ def test_pool_box_with_live_user_is_in_use_and_claim_not_orphaned(tmp_path):
     assert m.orphaned is True
     (m,), _ = pool.build_pool(leases=[], live={NAME: [user]}, **common)
     assert m.disposition == pool.IN_USE
+
+
+# --- enforcement: lifecycle commands refuse a box with live users -----------
+
+def test_lifecycle_lock_refuses_live_users_unless_forced(monkeypatch, tmp_path):
+    import ssh_manager.locks as locks
+    from ssh_manager import TargetBusyError
+
+    from agent_codespaces.lifecycle_lock import lifecycle_lock
+
+    monkeypatch.setattr(locks, "locks_dir", lambda: tmp_path)
+    monkeypatch.setattr(lu, "process_table", lambda: _table(_master()))
+
+    with pytest.raises(TargetBusyError) as exc:
+        with lifecycle_lock(NAME, refuse_live_users="delete"):
+            raise AssertionError("must not enter")
+    assert isinstance(exc.value, lu.CodespaceInUseError)
+    assert "refusing delete" in str(exc.value) and "--force" in str(exc.value)
+    assert not (tmp_path / f"{NAME}.lock").exists()  # lock released on refusal
+
+    with lifecycle_lock(NAME, refuse_live_users="delete", force=True):
+        pass
+    with lifecycle_lock(NAME):  # callers that do not opt in are unchanged
+        pass
+
+
+def test_stop_cli_refuses_detached_master_and_force_overrides(monkeypatch, tmp_path, capsys):
+    import ssh_manager.locks as locks
+
+    from agent_codespaces import __main__ as cli
+
+    monkeypatch.setattr(locks, "locks_dir", lambda: tmp_path)
+    monkeypatch.setattr(lu, "process_table", lambda: _table(_master()))
+    stopped = []
+    monkeypatch.setattr(cli, "stop_codespace", lambda name: stopped.append(name) or True)
+
+    assert cli.main(["stop", NAME, "--no-sync"]) == 1
+    err = capsys.readouterr().err
+    assert "[BUSY]" in err and "pid 101 [ssh-control-master]" in err and SOCK in err
+    assert stopped == []
+
+    assert cli.main(["stop", NAME, "--no-sync", "--force"]) == 0
+    assert stopped == [NAME]
