@@ -1682,10 +1682,6 @@ function Get-ActivationRole {
         }
     }
     if (-not $repoRoot) { return Get-MachineRole }
-    $repoConfig = Join-Path $repoRoot '.agent-index\config.yaml'
-    if (-not (Test-Path -LiteralPath $repoConfig -PathType Leaf)) {
-        return 'unconfigured'
-    }
     $me = if ($env:AGENT_INDEX_MACHINE) {
         $env:AGENT_INDEX_MACHINE.Trim().ToLower()
     } else {
@@ -1695,7 +1691,7 @@ function Get-ActivationRole {
     if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
     if (-not $python) { return 'unconfigured' }
     $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
-    $role = (& $python.Source $resolver --config $repoConfig --machine $me 2>$null |
+    $role = (& $python.Source $resolver --repo $repoRoot --machine $me |
         Select-Object -Last 1)
     $role = ("$role").Trim().ToLower()
     return $(if ($role -in @('host', 'client')) { $role } else { 'unconfigured' })

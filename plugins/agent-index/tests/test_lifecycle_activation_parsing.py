@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -63,6 +64,46 @@ def test_empty_or_missing_designation_is_unconfigured(tmp_path):
     assert MODULE.resolve(empty, "host") == "unconfigured"
     assert MODULE.resolve(unrelated, "host") == "unconfigured"
     assert MODULE.resolve(tmp_path / "missing.yaml", "host") == "unconfigured"
+
+
+def _repository(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    return repo
+
+
+def test_repository_role_uses_machine_local_overlay(tmp_path):
+    repo = _repository(tmp_path)
+    overlay = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    _write(overlay, {"indexer": {"machine": "host"}})
+
+    assert MODULE.resolve_repository(str(repo), "host") == "host"
+    assert MODULE.resolve_repository(str(repo), "client") == "client"
+
+
+def test_repository_role_uses_bound_knowledge_overlay(tmp_path, monkeypatch):
+    repo = _repository(tmp_path)
+    policy = repo / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    _write(policy, {"stateless": True, "requires_external_state_root": True})
+    knowledge = tmp_path / "knowledge"
+    config = knowledge / ".agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    _write(config, {"indexer": {"machine": "host"}})
+    effective = sys.modules[MODULE.resolve_effective_config.__module__]
+    monkeypatch.setattr(effective, "_external_state_root", lambda _root: ("ready", knowledge))
+
+    assert MODULE.resolve_repository(str(repo), "host") == "host"
+    assert MODULE.resolve_repository(str(repo), "client") == "client"
+
+
+def test_repository_role_fails_closed_without_designation(tmp_path, monkeypatch):
+    repo = _repository(tmp_path)
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+
+    assert MODULE.resolve_repository(str(repo), "host") == "unconfigured"
 
 
 def test_fallback_parser_handles_canonical_and_inline_forms():

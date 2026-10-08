@@ -1426,21 +1426,16 @@ _machine_role() {
 _activation_role() {
     # A repository activates agent-index only by explicitly designating its
     # indexer(s). Bare management calls may use the machine-level role.
-    local repo_root repo_cfg me hosts
+    local repo_root me
     repo_root="${AGENT_INDEX_REPO:-}"
     [[ -n "$repo_root" ]] || repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
     if [[ -z "$repo_root" ]]; then _machine_role; return 0; fi
-    repo_cfg="$repo_root/.agent-index/config.yaml"
-    if [[ ! -f "$repo_cfg" ]]; then
-        repo_cfg="$repo_root/.copilot-extensions/agent-index/config.yaml"
-    fi
-    [[ -f "$repo_cfg" ]] || { printf 'unconfigured'; return 0; }
     me="$(printf '%s' "${AGENT_INDEX_MACHINE:-$(hostname -s)}" |
         tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
     local py role
     py="$(command -v python3 || command -v python || true)"
     [[ -n "$py" ]] || { printf 'unconfigured'; return 0; }
-    role="$("$py" "$SCRIPT_DIR/resolve-activation-role.py" --config "$repo_cfg" --machine "$me" 2>/dev/null || true)"
+    role="$("$py" "$SCRIPT_DIR/resolve-activation-role.py" --repo "$repo_root" --machine "$me")"
     case "$role" in host|client) printf '%s' "$role" ;; *) printf 'unconfigured' ;; esac
 }
 
