@@ -9,37 +9,32 @@
 - **Sub-issues:** #5557 (mux-daemon stale-retirement bug, found while auditing
   for this effort) · #5558 (agent-dispatch worker-pool version-skew bug, same)
 
-**Documentation impact:** This effort extends, and must stay reconciled with,
-[`visions/process-telemetry`](../../../visions/process-telemetry/README.md).
-Landed work updates that vision's own reality-doc links (currently
-`agent-dispatch`/`agent-bridge` `telemetry.py` only) as new plugins adopt the
-seam, and `docs/patterns/graceful-daemon-cutover.md` if a new per-OS liveness
-primitive is added.
+**Documentation impact:** This plan defines operational process registration,
+not a telemetry consumer. The boundary in
+[`visions/process-telemetry`](../../../visions/process-telemetry/README.md)
+distinguishes these subjects explicitly. Implementation will document the
+registry's lifecycle, query interface, coverage, and bounded snapshot journal.
 
 ## Guiding Intent
 
-Make "what `agent-*` daemons are *currently* running, what are they, and is
-anything orphaned or version-skewed" answerable from one inventory/liveness
-query instead of manual ps-based archaeology — **without inventing a second
-instrumentation mechanism**. `visions/process-telemetry` already defines the
-standing emission seam (`agent-dispatch`/`agent-bridge`'s existing
-fail-open `telemetry.py`, generalized) for a runtime plugin to say "this
-process is mine" — but that vision is explicitly **emit-only**: no live
-registry, no query surface, no aggregation (its own Non-Goals say so). This
-effort is the **consumer** half that vision names and defers downstream: a
-small, honest **inventory + liveness** query built by registering a sink
-against the *existing* seam — scoped narrowly to current-state snapshotting,
-not the broader "health" or APM-style monitoring that seam was never meant to
-carry. Completion requires coverage of every daemon kind the Guiding Intent
-names (not just a pilot subset) — see Plan.
+Provide a stateful process register, analogous to a port-reservation ledger:
+processes announce themselves on startup and remove their registration on
+exit. An operator can ask for the current state at any time, grouped by role,
+owning plugin, installation, session, and worktree. The register journals a
+couple of snapshots an hour into a folder for on-demand historical reporting.
+
+This is an operational state service, **not telemetry**. It does not install
+a telemetry sink, consume `process_spawn` telemetry events, or export to a
+formal telemetry-reporting system. The precedent is a local state/log tool
+such as agent-logger: retain inspectable records and answer questions on demand.
+A small daemon is the operator's preferred direction, not yet a mandated
+implementation; a folder or database remains a valid storage choice.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Driving agent | Reconcile with `visions/process-telemetry`, close plugin-adoption gaps, build the inventory consumer, roll it out, pilot it | `copilot-extensions` worktree |
-| [`libs/agent-procutil`](../../../libs/agent-procutil/README.md) | Not the implementation site — the repo's canonical source for headless-spawn kwargs, a different concern from process self-report; referenced only to avoid misdirecting future work there | reference only |
-| `visions/process-telemetry`'s existing seam (`agent_dispatch.telemetry` / `agent_bridge.telemetry`) | The instrumentation this effort builds on, not replaces | shared seam, already shipped |
+| Driving agent | Design the registration contract, state service, snapshot journal, and adopter rollout | `copilot-extensions` worktree |
 
 ## Coordination
 
@@ -47,9 +42,8 @@ names (not just a pilot subset) — see Plan.
 - **Host (owns PRs):** the driving agent for each slice; no shared feature
   branch — each phase below is small enough to land as its own independent
   PR against `dev`, so no cross-slice branch coordination is needed.
-- **Slice ownership:** one slice per Plan phase (Phase 1 design, Phase 2
-  sink+query implementation, Phase 3 pilot wiring + rollout, Phase 4 further
-  adoption). A slice's own PR is the handoff point — the next slice starts
+- **Slice ownership:** one slice per Plan phase (contract, implementation,
+  adopter rollout). A slice's own PR is the handoff point — the next slice starts
   once the prior one merges and this README's Plan/Journal are updated.
 - **Handoff:** whoever starts the next unclaimed Plan phase reads this
   README's current Plan/Journal state first; no other coordination channel
@@ -77,19 +71,16 @@ this effort tracks as motivating evidence, found exactly that way:
   apart, invisible without manually cross-referencing each process's own
   venv path segment.
 
-**This effort is the downstream consumer `visions/process-telemetry`
-explicitly names and defers, not a second instrumentation mechanism.** That
-vision (Active) already ships the emission seam this needs: a fail-open
-`set_telemetry_sink`/`emit` hook, a built-in spool sink, env/config-file
-wiring, and a `process_spawn` event kind (plugin, command/verb, a stable
-low-cardinality source tag, parent lineage, best-effort resource figures),
-generalized from `agent_dispatch.telemetry` and `agent_bridge.telemetry`.
-Its own Non-Goals are explicit — "not a second telemetry mechanism," "not an
-aggregation, storage, alerting, or dashboarding system" — emission stops at
-the sink boundary, and a consuming control-plane (named, but out of that
-vision's own scope) is what drains, stores, and queries. This effort builds
-that consumer: an inventory sink plus a query command, registered against
-the existing seam, never a parallel hook.
+**Operational registration and telemetry have different contracts.**
+[`visions/process-telemetry`](../../../visions/process-telemetry/README.md)
+governs optional provenance/resource events sent through its emission seam.
+This effort governs current membership: register, unregister, reconcile,
+query, and journal state snapshots. It neither implements that vision's
+proposed `process_spawn` event nor consumes its sink. Existing telemetry can
+continue independently; registry adoption must not require or configure it.
+
+_(Agent-recommended design safeguards below implement the operator's intent;
+they are not additional operator requirements.)_
 
 **`libs/agent-procutil` is not the right implementation site.** It's the
 canonical source (not `plugins/agent-worktrees/libs/agent-procutil/`, which
@@ -121,118 +112,98 @@ health judgment.
 
 ## Request
 
-Operator (verbatim, from the diagnosis conversation): "We really need a way
-to have our processes self-report: role, [h]ost plugin, Pid, owner
-sessionid, cwd, worktree, etc. I wonder if there is a way or place do track
-this reliably and with consistency" — followed by "All three" when offered
+Operator (verbatim, from the diagnosis conversation): "Determine how many of
+each agent-* singleton we havew, determine how many agent-mcp shims we have,
+etc. We really need a way to have our processes self-report: role, phost
+plugin, Pid, owner sessionid, cwd, worktree, etc. I wonder if there is a way
+or place do track this reliably and with consistency" — followed by "All three" when offered
 the choice to (a) investigate/fix the stale processes found, (b) file both
 findings as tracked issues, and (c) scope this registry idea as a real
 effort (this document is (c); (a) and (b) are already done — see Journal).
 
+Operator clarification (verbatim, 2026-10-07):
+
+> Ah, let's try to differentiate this from proper "telemetry" and treat this
+> more like a "stateful log", more akin to the port-reservation system. We want
+> a folder, DB, or little daemon (most likely) where as processes start and
+> exit, they announce and remove themselves from registration. This daemon
+> can be *asked* at any time for a state snapshot, and it can journal a couple
+> snapshots an hour into a folder. But what it *won't* do is hook up to any
+> formal telemetry sink. Kind of like how agent-logger accumulates and provides
+> on-demand reporting of copilot logs/ and session-state, but absolutely does
+> not hook up to a formal telemetry-reporting sink system.
+
+The earlier request's "(a) done" means the stale instance was cleaned up,
+not that the retirement root cause was fixed. #5557 and #5558 remain separate
+defect trackers until their own repairs are verified.
+
 ## Plan
 
-### Phase 1 — Design the inventory-consumer contract (on the existing seam)
-- [ ] **Implement the `process_spawn` event kind** — it does not exist yet.
-      `agent_dispatch.telemetry`/`agent_bridge.telemetry` today only ship the
-      generic sink/`emit` seam plus their own `task_lifecycle_event`/
-      `producer_fence_event` builders; `visions/process-telemetry` states the
-      *intent* to add a `process_spawn` kind but the producer-side helper
-      (a `process_spawn_event(...)` builder, shaped like those two existing
-      ones) has not been built in either plugin. Build it as a prerequisite
-      before Phase 3 can wire any launch site to it — carrying plugin,
-      command/verb, source tag, parent lineage, resource figures, and
-      everything the operator asked for: role, **owning plugin +
-      installation-cell/marketplace provenance** (not name+version alone —
-      see Context), pid (+ start-time token to guard against PID reuse),
-      owner session id (when known), cwd, worktree id (when known),
-      started_at. Land this through the vision's own stated process (it's
-      already named in `visions/process-telemetry`'s own Concepts &
-      Components section), not as a parallel schema.
-- [ ] Design the **inventory sink**: a consumer-side sink (registered via the
-      seam's existing `set_telemetry_sink`/config-file wiring, nothing new
-      on the producer side) that maintains a live "currently running" table
-      from the start/end `process_spawn` pairs it observes, rather than a
-      spool a human tails by hand.
-- [ ] **Design installation-cell ownership isolation for the writable live
-      table.** Per the installation-cell invariant
-      (`visions/plugin-services/installation-cells/README.md`,
-      `docs/patterns/README.md`): a writable installation-owned registry must
-      stay cell-local, and two same-named installations must never share
-      writable state — qualifying each record with marketplace provenance (as
-      Phase 1's record-identity item already does) is not by itself an
-      isolation guarantee for a *shared* table. Choose one explicitly: (a) a
-      cell-local table per installation, with a separate host-level
-      enumeration step that reads across cells read-only to produce the
-      fleet-wide query, or (b) a deliberate, documented cross-cell
-      federation contract if a single shared writable table is chosen
-      instead. Do not default to a shared table without picking one of these
-      and stating why.
-- [ ] Name Windows, Linux, and macOS explicitly for the liveness check (pid
-      still alive + start-time token match) this sink needs to reconcile a
-      crashed/uncleanly-killed process's record — state what's implemented
-      vs. justifiably exempted on each, per
-      `docs/patterns/graceful-daemon-cutover.md`'s own established bar.
-- [ ] Design observability for a **failed or dropped registration itself**:
-      the query must be able to report "N processes observed, M
-      registration failures seen" (or equivalent), never silently present a
-      dropped record as "nothing running."
-- [ ] State the goal as **inventory + liveness + version visibility** in the
-      design doc and everywhere this effort is referenced — explicitly not a
-      "health" verdict (which would need an external current-version oracle
-      this effort does not build).
+### Phase 1 — Design the stateful registration contract
+- [ ] Survey the existing port-reservation/lease and local-log systems; reuse
+      identity, storage, rendezvous, and lifecycle primitives where suitable.
+- [ ] Specify register, unregister, and snapshot operations with role, plugin,
+      version, PID, owner session ID, cwd, and worktree. Unknown ownership is
+      explicit; do not fabricate it for host-owned services.
+- [ ] Choose the folder/database/service arrangement. Prefer a small daemon
+      for coordination and periodic snapshots, while retaining the operator's
+      latitude on storage. Name its source owner and lifecycle before coding.
+- [ ] Define a snapshot journal of roughly two snapshots per hour in a folder,
+      plus on-demand snapshots. _(Agent-recommended)_ Bound retention/disk
+      use, write snapshots atomically, and record timestamps and coverage.
+- [ ] _(Agent-recommended)_ Resolve installation-cell isolation: cell-local
+      writable state with read-only enumeration, or an explicitly reviewed
+      host-owned federation service that validates each caller's cell identity.
+      Qualified record keys alone are not a writable-state isolation policy.
+- [ ] _(Agent-recommended)_ Define PID+start-time identity, conditional removal,
+      crash reconciliation, Windows/Linux/macOS support, restart recovery,
+      and retry/re-registration when the registry was unavailable at startup.
+- [ ] _(Agent-recommended)_ Distinguish confirmed live, stale, unknown, and
+      unregistered/uncovered processes. A failed query or partial adopter
+      coverage must never be reported as a complete empty process inventory.
+- [ ] Require no telemetry-sink integration, telemetry configuration, or
+      dependency on `process_spawn` events. This is a state protocol.
 
-### Phase 2 — Build the inventory sink + query command
-- [ ] Implement the sink against the existing seam (no new per-plugin hook).
-- [ ] A query/list command that reads the live table and renders it — the
-      direct fix for "how many of each agent-* singleton do we have" without
-      hand ps-archaeology.
+### Phase 2 — Implement registration, queries, and the snapshot journal
+- [ ] Implement the reviewed state service/storage and a small registration
+      client; startup/exit announce membership without blocking useful work.
+      _(Agent-recommended)_ Registration failure emits a bounded local
+      diagnostic and permits later retry rather than silently disappearing.
+- [ ] Implement an on-demand state query and counts by role/plugin/session/
+      worktree, distinguishing logical registrations from OS launcher processes.
+- [ ] Implement periodic snapshot files, on-demand historical reporting,
+      bounded retention, and crash/restart reconciliation. No telemetry export.
 
-### Phase 3 — Wire every daemon kind this effort's own evidence names
-- [ ] `agent-dispatch` and `agent-bridge` already carry the telemetry seam —
-      add `process_spawn` emission at their actual daemon launch sites
-      (`serve`, `supervise`, `emitter serve`, `start`), since neither
-      currently emits spawn events for these (the reality-doc links in
-      `visions/process-telemetry` cover the seam's existence, not that every
-      launch site calls it yet).
-- [ ] `worktree-manager`'s mux-daemon is not yet on the seam at all, and it
-      is the process that motivated #5557 — adopt `process_spawn` emission
-      there as part of this phase, not deferred rollout. Completion requires
-      this (per the Guiding Intent's "each agent-* singleton" promise), not
-      just the two plugins that happened to also trigger #5558.
-- [ ] Run the inventory sink against these three; confirm it surfaces
-      equivalent findings to #5557 (an orphaned daemon) and #5558 (version
-      skew across a coordinator vs. its own worker pools) without manual
-      cross-referencing.
-- [ ] Journal what wiring these three surfaced.
-
-### Phase 4 — Further plugin adoption _(agent-recommended; not yet operator-requested)_
-- [ ] Beyond the three daemon kinds Phase 3 already covers (which satisfy
-      this effort's own completion criteria), adopt `process_spawn` emission
-      in plugins not yet on the seam at all and not named by this effort's
-      own motivating evidence — `agent-mcp`, `agent-containers`, and others
-      as found. Update `visions/process-telemetry`'s own reality-doc links
-      as each lands, per that vision's own maintenance expectation.
+### Phase 3 — Adopt and verify the required process roles
+- [ ] Register `agent-dispatch` serve, supervise, and emitter processes,
+      `agent-bridge` services, and `worktree-manager` mux-daemons.
+- [ ] Register `agent-mcp` shims, explicitly included in the operator's
+      original census request; report their owning session and config identity
+      without exposing credentials or full command-line payloads.
+- [ ] Verify counts and identity against an independent OS census; mark
+      uncovered roles honestly. Registration/liveness is not a health verdict
+      or permission to terminate a process.
+- [ ] Update runtime documentation and journal results. Further adopters such
+      as `agent-containers` are deferred to a named follow-up, not an unchecked
+      optional phase that prevents this effort's own completion.
 
 ## Validation Plan
 
-- [ ] Confirm the inventory query correctly reports every live daemon
-      `agent-dispatch`, `agent-bridge`, and `worktree-manager`'s mux-daemon
-      spawn, with the fields the operator asked for (role, plugin +
-      installation-cell provenance, pid, owner session id, cwd, worktree),
-      cross-checked against a manual OS-process-table sweep like the one
-      that found #5557/#5558.
-- [ ] Confirm a killed-uncleanly process's stale record is detected and
-      reconciled (not left as a permanent false "running" entry) within one
-      reconciliation cycle, on every OS named in Phase 1's liveness design.
-- [ ] Confirm a dropped/failed registration is itself surfaced by the query
-      (distinguishable from "nothing running") — exercise this directly
-      (e.g. a sink write forced to fail) rather than only reasoning about it.
-- [ ] Confirm emission is fail-open per the seam's own existing guarantee:
-      a sink failure never blocks, delays, or fails the daemon's own startup.
-- [ ] Re-run the same kind of fleet-wide process sweep that originally found
-      #5557/#5558 against the three Phase-3 plugins and confirm the
-      inventory query alone (no manual command-line archaeology) surfaces an
-      equivalent orphan/skew finding, if one exists at the time.
+- [ ] Register/unregister real test processes; queries show exactly the live
+      membership with required fields and distinguish launcher/interpreter pairs.
+- [ ] Exercise hard exit, PID reuse, delayed unregister, unavailable registry,
+      restart, and denied OS inspection; no stale record removes a new process.
+- [ ] Verify installation-cell isolation and concurrent registration/query
+      behavior on the explicitly supported Windows/Linux/macOS paths.
+- [ ] Verify periodic snapshots at the chosen approximately twice-hourly cadence,
+      folder output, retention bounds, atomic writes, and on-demand reports.
+- [ ] Disable/remove all telemetry configuration: registration, query, and
+      snapshot journaling still work. No call reaches a formal telemetry sink.
+- [ ] Force registration/storage/enumeration failures and partial adopter
+      coverage: queries show uncertainty, and consumer startup remains bounded.
+- [ ] Cross-check all Phase 3 roles, including MCP shims, against an independent
+      OS census. Use controlled stale/version-skew examples rather than depending
+      on a production fault happening during validation.
 
 ## Proposal
 
@@ -285,3 +256,16 @@ _Pending — Phase 1 design decisions above need to land here once settled._
   either a cell-local table per installation with read-only host-level
   enumeration, or a deliberate documented cross-cell federation contract —
   never default to an unexamined shared table.
+
+### 2026-10-07 — Operator separates operational registration from telemetry
+- The operator explicitly rejected the telemetry-consumer design: this is a
+  stateful log/registration service like a port-reservation ledger, with
+  startup/exit membership, on-demand state, and a couple of folder snapshots
+  per hour; no formal telemetry sink. Replaced the superseded Plan and
+  Validation Plan accordingly, keeping prior review history here only.
+- A daemon is preferred, not mandated; folder/database choices remain open.
+  Agent-recommended identity, crash recovery, cell isolation, coverage, and
+  retention safeguards are labeled separately from the literal request.
+- Restored MCP shim adoption to required scope because the original operator
+  request expressly asked to count them. Root-cause repairs for #5557/#5558
+  remain separate from earlier one-time process cleanup.
