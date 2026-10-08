@@ -129,15 +129,22 @@ without Copilot or marketplace hooks. Their lifecycle includes immutable runtime
 slots, attributable readiness, safe updates/rollback, and owned uninstall.
 Copilot plugins provide the agent-facing skills/tools and connection surface;
 they are not the service host's required process supervisor.
+Resident controller/connector updates follow the shared graceful-cutover
+contract: validate the replacement before activation, transfer connection and
+registration ownership explicitly, drain accepted operations, then retire the
+predecessor. Failed promotion preserves the last healthy runtime and its work.
 
 ## Behaviors
 
 ### one-owner-per-kind-of-state
 
-The controller owns fleet registration, desired reconciliation intent, and
+The controller owns enrollment/connection registration within its fleet scope,
+desired reconciliation intent, and
 delivery/observation receipts. It derives worktree/task/session/service state
 from its existing authority. A Gateway acknowledgement does not replace the
 owning service's acceptance or completion record.
+Enrollment does not transfer the selected driver's target identity, substrate
+reachability, capacity, or lease authority to the controller.
 
 ### recoverable-not-connection-owned
 
@@ -201,5 +208,6 @@ cannot silently restore a retired feeder role on a client.
 - Related: [host-resource-providers](../host-resource-providers/README.md),
   [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md)
 - Lifecycle: [plugin-services](../plugin-services/README.md), [installer](../installer/README.md)
+- Cutover: [graceful daemon cutover](../../docs/patterns/graceful-daemon-cutover.md)
 - Auth-relay reality: [credential-relay](../../libs/credential-relay/README.md)
 - Reality: [architecture](../../docs/architecture.md), [configuration](../../docs/configuration.md)
