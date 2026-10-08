@@ -1,0 +1,9 @@
+{
+  "comment": "Delegate machine registry/identity logic to the new shared agent-machine-transport library",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
