@@ -252,10 +252,9 @@ def _republish_live_mappings(
     registry: MuxMappingRegistry,
     *,
     ensure_monitor: bool,
-    observer: AttachedClientObserver | None = None,
 ) -> bool:
     return mux_daemon_live.republish_live_mappings(
-        registry, ensure_monitor=ensure_monitor, publish=publish_live_observation, observer=observer,
+        registry, ensure_monitor=ensure_monitor, publish=publish_live_observation,
     )
 
 
@@ -906,6 +905,9 @@ def run_daemon_foreground(
                 if lease is not None:
                     write_lock_data(lock, runtime.lock_extra())
                 runtime.sync_self_retire()
+                if runtime.republish_enabled:
+                    with runtime.loop_mutation():
+                        runtime.attachment_observer.observe(runtime.registry)
                 status_monitor_lock = _status_monitor_lock_path()
                 status_monitor_data = (
                     mux_daemon_live.read_lock_data(status_monitor_lock)
@@ -927,7 +929,6 @@ def run_daemon_foreground(
                         republished = _republish_live_mappings(
                             runtime.registry,
                             ensure_monitor=False,
-                            observer=runtime.attachment_observer,
                         )
                     if republished:
                         last_live_republish_at = now

@@ -270,6 +270,7 @@ def test_observer_bounds_each_cycle_and_eventually_probes_all_31_mappings(tmp_pa
         observer.observe(registry)
         assert len(calls) - before <= 2
         assert now[0] - started <= 2.0
+        now[0] += 20.0
     assert {session for session, _ in calls} == {f"session-{i:02}" for i in range(31)}
     assert all(0 < timeout <= 1.0 for _, timeout in calls)
 
@@ -290,3 +291,31 @@ def test_observer_reserves_only_the_remaining_shared_budget(tmp_path, monkeypatc
     monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
     mux_attached_clients.AttachedClientObserver().observe(registry)
     assert timeouts == [1.0, 0.25]
+
+
+def test_observer_attempt_cadence_does_not_depend_on_publication_success(tmp_path, monkeypatch):
+    registry = MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    now = [0.0]
+    calls = []
+    monkeypatch.setattr(mux_attached_clients.time, "monotonic", lambda: now[0])
+
+    def probe(*args):
+        calls.append(now[0])
+        return None
+
+    monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
+    observer = mux_attached_clients.AttachedClientObserver()
+    for second in (0, 1, 19, 20, 21, 39, 40):
+        now[0] = float(second)
+        observer.observe(registry)
+    assert calls == [0.0, 20.0, 40.0]
+
+
+def test_probe_replaces_undecodable_output_when_counting_lines(monkeypatch):
+    def run(argv, **kwargs):
+        text = b"client-\xff\nclient-two\n".decode(kwargs["encoding"], errors=kwargs["errors"])
+        return subprocess.CompletedProcess(argv, 0, stdout=text)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") == 2

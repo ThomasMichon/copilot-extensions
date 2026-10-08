@@ -1,5 +1,5 @@
 {
-  "comment": "Advance #4564's attached-client observation portion: refresh attached_clients from bounded list-clients probes during the daemon's existing live-mapping republish cycle, independently of changed status options and outside status-request deadlines. Failed probes preserve the last count; atomic identity guards protect concurrent session replacements and tombstones. Reachability history and batch restoration remain separate work.",
+  "comment": "Advance #4564's attached-client observation portion: refresh attached_clients from bounded list-clients probes on an independent 20-second attempt cadence, even without a status monitor and outside status-request deadlines. Two mappings per cycle share a two-second budget with round-robin fairness. Failed probes preserve the last count; atomic identity guards protect concurrent replacements and tombstones. Reachability history and batch restoration remain separate work.",
   "changes": [
     {
       "plugin": "worktree-manager",

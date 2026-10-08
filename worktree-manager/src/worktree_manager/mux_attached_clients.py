@@ -31,6 +31,8 @@ def mux_attached_clients(mux_bin: str, session: str, timeout_s: float = 1.0) -> 
             [mux_bin, "list-clients", "-t", session],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_s,
             creationflags=no_window_flags(),
         )
@@ -87,14 +89,25 @@ def refresh_attached_clients(
 
 class AttachedClientObserver:
     """Round-robin observation with at most two probes and a shared
-    two-second budget per republish cycle. Keep the cursor on the resident
+    two-second budget per observation cycle. Keep the cursor on the resident
     runtime so large fleets converge over successive cycles without
-    increasing the added drain latency with the number of mappings."""
+    increasing the added drain latency with the number of mappings.
+    Attempt cadence is independent of monitor availability or publication
+    success and begins 20 seconds after the previous attempt completes."""
 
     def __init__(self) -> None:
         self._last_key: tuple[str, str] | None = None
+        self._next_attempt_at = 0.0
 
     def observe(self, registry: MuxMappingRegistry) -> None:
+        if time.monotonic() < self._next_attempt_at:
+            return
+        try:
+            self._observe_cycle(registry)
+        finally:
+            self._next_attempt_at = time.monotonic() + 20.0
+
+    def _observe_cycle(self, registry: MuxMappingRegistry) -> None:
         entries = [
             (key, entry)
             for key, entry in sorted(registry.snapshot().items())

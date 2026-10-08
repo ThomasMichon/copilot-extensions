@@ -785,10 +785,12 @@ def test_republish_refreshes_clients_without_changed_status_options(tmp_path, mo
         return {"applied": True}
 
     monkeypatch.setattr(mux_daemon, "publish_live_observation", publish)
+    mux_daemon.AttachedClientObserver().observe(registry)
     assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
     assert registry.get("proj", "wt-1")["attached_clients"] == 2
     monkeypatch.setattr(subprocess, "run", _fake_run_factory(list_clients_lines=[]))
     # No further status push: rendered values have not changed.
+    mux_daemon.AttachedClientObserver().observe(registry)
     assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
     assert registry.get("proj", "wt-1")["attached_clients"] == 0
     assert observations == [2, 0]
@@ -805,6 +807,7 @@ def test_republish_leaves_attached_clients_unchanged_on_probe_failure(tmp_path, 
     monkeypatch.setattr(
         mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True}
     )
+    mux_daemon.AttachedClientObserver().observe(registry)
     assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
     refreshed = registry.get("proj", "wt-1")
     assert refreshed["attached_clients"] == 3
@@ -832,7 +835,7 @@ def test_slow_attachment_probe_does_not_block_status_and_is_drained(tmp_path, mo
 
     def observe():
         with runtime.loop_mutation():
-            mux_daemon._republish_live_mappings(runtime.registry, ensure_monitor=False)
+            runtime.attachment_observer.observe(runtime.registry)
 
     observer = threading.Thread(target=observe)
     observer.start()
@@ -885,11 +888,48 @@ def test_republish_skips_registry_write_when_attached_clients_already_matches(tm
     monkeypatch.setattr(
         mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True}
     )
+    mux_daemon.AttachedClientObserver().observe(registry)
     assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
     assert calls == []
     refreshed = registry.get("proj", "wt-1")
     assert refreshed["attached_clients"] == 1
     assert refreshed["observed_at"] == "2026-09-25T00:00:00Z"
+
+
+def test_daemon_observes_attachments_without_status_monitor(tmp_path, monkeypatch):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=0))
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: tmp_path / "absent.lock")
+    monkeypatch.setattr(
+        subprocess, "run", _fake_run_factory(list_clients_lines=["client-one"])
+    )
+    assert mux_daemon.run_daemon_foreground(
+        tmp_path, poll_interval_s=0, max_iterations=2
+    ) == 0
+    assert registry.get("proj", "wt-1")["attached_clients"] == 1
+
+
+def test_republish_reads_one_registry_snapshot_not_one_per_mapping(tmp_path, monkeypatch):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    for i in range(31):
+        registry.register(_entry(worktree_id=f"wt-{i}"))
+    snapshots = []
+    original_snapshot = registry.snapshot
+
+    def snapshot():
+        snapshots.append(True)
+        return original_snapshot()
+
+    def get(*args):
+        raise AssertionError("per-entry registry read")
+
+    monkeypatch.setattr(registry, "snapshot", snapshot)
+    monkeypatch.setattr(registry, "get", get)
+    monkeypatch.setattr(
+        mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True}
+    )
+    assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
+    assert snapshots == [True]
 
 
 def test_status_push_key_requires_project_worktree_id_and_rendered_at():

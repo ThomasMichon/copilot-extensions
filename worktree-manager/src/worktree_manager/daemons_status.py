@@ -347,9 +347,10 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     only):** neither shipped launch path (``bin/launch-session.sh``/``.ps1``)
     ever passes ``--attached-clients`` at register() time, so normalization
     (``_normalize_mapping_entry``) defaults a brand-new mapping to ``0``.
-    The resident daemon refreshes the field (``list-clients``) during its
-    existing live-mapping republish cycle (20-second backstop), independently
-    of whether status option values changed. At most two mappings are probed
+    The resident daemon attempts refreshes (``list-clients``) on an independent
+    20-second cadence, even when the status monitor is absent or publications
+    fail, and independently of changes to status option values.
+    At most two mappings are probed
     per cycle, round-robin, within a shared two-second budget; large fleets
     converge over multiple cycles. This function still
     reports whatever is currently stored exactly as-is (it never invents
