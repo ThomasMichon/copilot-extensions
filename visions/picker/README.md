@@ -425,8 +425,9 @@ regression is something a test can catch before an operator does.
 - Performance budgets tracked by:
   `efforts/active/picker-performance-and-responsiveness` (the numeric budgets
   in `§responsive-by-budget` above) and
-  `efforts/active/pivot-streaming-transport` (the live-channel work
-  `§live-not-snapshot` and `§responsive-by-budget` both depend on).
+  `efforts/2026/10/07 pivot-streaming-transport` (archived; Done) — the
+  live-channel work `§live-not-snapshot` and `§responsive-by-budget` both
+  depend on.
 - CodeSpaces-pivot data owner: [agent-codespaces](../plugins/agent-codespaces/README.md)
   — the Picker's **CodeSpaces** pivot renders that venue's pool membership,
   per-venue state (in-use / idle / clean / stale), allocation, and budget

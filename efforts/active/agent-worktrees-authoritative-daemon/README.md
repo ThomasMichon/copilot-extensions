@@ -725,13 +725,25 @@ than hypothetical:
   (not only the status bar this docstring names) ever reaches it while the
   daemon is reachable.
 - `worktree_manager.production_picker.picker_tui.data_local._overlay_cached_state()`
-  trusts `rec.git_state` (the daemon-stamped value) and then
+  has the shape below, but repository usage shows it is called **only by
+  tests** — the actual production cache-only path is
+  `engine_client.list_worktree_rows(..., cache_only=True)` →
+  `agent_worktrees.list_cli` →
+  **`agent_worktrees.picker_support.data_local._overlay_cached_state()`**
+  (a second, separate function of the same name in a different module —
+  trace this one, not the unused `worktree_manager` copy, or 6a could
+  incorrectly rule out a live override that's actually running). It trusts
+  `rec.git_state` (the daemon-stamped value) and then
   **unconditionally overrides it** — `if live: raw["state"] = "active"` —
-  whenever a *different* fact (`session_bound_live`/`session_lock_live`)
-  is true, independent of whether git state actually changed. This is a
-  plausible direct mechanism for the oscillation itself (a transient
-  session-liveness flip stomping a correct, freshly-daemon-computed
-  disposition), worth confirming/ruling out early in 6a's own trace. **This
+  whenever a *different* fact (`session_bound_live`/a live
+  `inuse.<pid>.lock`) is true, independent of whether git state actually
+  changed. Its own docstring documents this as intentional design for the
+  cache-only **fast pass** specifically ("a live bound Copilot -> ACTIVE,
+  authoritative in the fast pass -- wins over a cached terminal/unknown
+  state") — i.e. a deliberate precedence rule for one render phase, not an
+  oversight; whether that rule itself is what produces the *visible*
+  oscillation (reconciling against the subsequent `classify=True` pass's
+  own value) is exactly what 6a's trace needs to confirm or rule out. This
   does not substitute for 6a-6c's own consolidation outcome even if it
   turns out to be the dominant visible cause** — #5555 and this phase
   require one authoritative compute path, not merely a quieter symptom; a

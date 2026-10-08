@@ -6,7 +6,7 @@ from the plain one-shot path or the delegated/cross-machine path), so that
 invocation is unchanged -- this module is the only place in the package that
 needs ``httpx`` (via :class:`DispatchClient`).
 
-See ``efforts/active/pivot-streaming-transport/phase-3-design.md`` for the
+See ``efforts/2026/10/07 pivot-streaming-transport/phase-3-design.md`` (archived) for the
 full design this implements. Summary of the architecture actually used here,
 which intentionally differs from that document's own multi-writer framing
 (every requirement it lists is still satisfied, just by a simpler

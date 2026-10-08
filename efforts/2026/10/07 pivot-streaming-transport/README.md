@@ -5,7 +5,7 @@
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-09-30
 - **Status:** Done <!-- Draft | Active | Blocked | Done -->
-- **Vision:** [`visions/picker`](../../../visions/picker/README.md) —
+- **Vision:** [`visions/picker`](../../../../visions/picker/README.md) —
   §Behaviors/`live-not-snapshot`, `graceful-capability-scaling`;
   §Non-Goals/*Not in-process with the engine — it sits on top of the CLI*:
   the Picker reaches each engine **only by invoking its machine-readable CLI
