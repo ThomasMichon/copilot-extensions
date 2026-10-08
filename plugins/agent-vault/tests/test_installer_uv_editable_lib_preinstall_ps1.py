@@ -64,8 +64,18 @@ $ErrorActionPreference = 'Continue'
 """
     path_entries = os.environ.get("PATH", "").split(os.pathsep)
     if not have_uv:
-        uv_dir = os.path.dirname(shutil.which("uv") or "")
-        path_entries = [p for p in path_entries if p != uv_dir]
+        # A single `shutil.which("uv")` hit only finds the FIRST PATH
+        # directory carrying a `uv` executable -- insufficient on a
+        # machine where a package manager (e.g. WinGet) installs both the
+        # real binary AND a separate shim/Links directory, each its own
+        # PATH entry, both resolving `uv` (coverage-guided-ci effort,
+        # Phase 3.5, 2026-10-07: this duplication is real on at least one
+        # dev machine). Strip every PATH directory carrying a `uv`/`uv.exe`
+        # executable, not just the first one `which` would report.
+        uv_exe = "uv.exe" if os.name == "nt" else "uv"
+        path_entries = [
+            p for p in path_entries if not (Path(p) / uv_exe).is_file()
+        ]
     environment = {**os.environ, "PATH": os.pathsep.join(path_entries)}
     return subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
