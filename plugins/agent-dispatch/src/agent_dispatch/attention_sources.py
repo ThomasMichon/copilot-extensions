@@ -48,6 +48,17 @@ def iso(value: Any, fallback: str) -> str:
 # -- the dispatch source ---------------------------------------------------------
 
 
+def _valid_form(form: Any) -> bool:
+    """A card's form becomes ``input`` only in the exact steering field-list
+    shape; any other stays reachable through the item's ``card show`` action
+    rather than failing the whole dispatch read."""
+    try:
+        ac.check_input(form)
+    except ac.ContractError:
+        return False
+    return True
+
+
 def _task_item(task: dict[str, Any], read_at: str,
                cli: tuple[str, ...] | None = ("agent-dispatch",)) -> dict[str, Any] | None:
     """One task's item, coalescing its conditions to the worst: an operator ask
@@ -72,7 +83,7 @@ def _task_item(task: dict[str, Any], read_at: str,
     elif task.get("awaiting_steer"):
         state, reason = "awaiting_input", f"awaiting your answer: {title}"
         form = card.get("request_input")
-        extra = {"input": form} if isinstance(form, (dict, list)) and form else {}
+        extra = {"input": form} if _valid_form(form) else {}
     elif task.get("hold_reason"):
         state, reason = "blocked", f"held ({ac.one_line(task['hold_reason'], 60)}): {title}"
     else:

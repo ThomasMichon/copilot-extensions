@@ -192,7 +192,7 @@ def test_two_items_for_one_entity_fail_their_source(tmp_path):
 
 
 @pytest.mark.parametrize("task,state", [
-    ({"awaiting_steer": True, "status": "started", "card": {"request_input": {"answer": "text"}}}, "awaiting_input"),
+    ({"awaiting_steer": True, "status": "started", "card": {"request_input": [{"name": "answer", "type": "text"}]}}, "awaiting_input"),
     ({"hold_reason": "operator pause", "status": "queued"}, "blocked"),
     ({"status": "submitted"}, "review"),
     ({"status": "submitted", "evaluator_ref": "ev-1"}, None),  # its evaluator confirms it, not the operator
@@ -206,7 +206,7 @@ def test_dispatch_task_mapping(task, state):
     item = srcs._task_item({"id": "t1", "title": "Fix it", **task}, T1)
     assert (item and item["display_state"]) == state
     if state == "awaiting_input" and task.get("card"):
-        assert item["input"] == {"answer": "text"}
+        assert item["input"] == [{"name": "answer", "type": "text"}]
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "card", "show", "t1"]}
     elif state in ("review", "blocked"):  # no card to show: the task itself
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "show", "t1"]}
@@ -661,7 +661,7 @@ def test_a_command_source_cannot_set_input():
     with pytest.raises(ac.ContractError, match="input"):
         ac.stamp_command_item({"schema": 1, "entity": "task", "entity_ref": "t1", "lifecycle_state": "x",
                                "display_state": "awaiting_input", "reason": "r", "confidence": "reported",
-                               "actions": [], "input": {"answer": "text"}}, name="ext")
+                               "actions": [], "input": [{"name": "answer", "type": "text"}]}, name="ext")
 
 
 def test_an_ssh_failover_read_offers_no_actions(monkeypatch, capsys):
@@ -706,3 +706,30 @@ def test_no_next_hint_when_no_invocation_reaches_the_coordinator(monkeypatch, ca
     args = m.build_parser().parse_args([*prefix, "attention", "next"])
     assert args.func(args) == 0
     assert "next:" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("form", [
+    {"answer": "text"},                                                     # an object, not a field list
+    [],                                                                     # empty
+    [{"name": "a", "type": "slider"}],                                      # unknown type
+    [{"name": "a", "type": "choice"}],                                      # a choice without options
+    [{"name": "a", "type": "text", "options": ["x"]}],                      # options on a text field
+    [{"name": "a", "type": "text", "allow_other": True}],                   # allow_other on a text field
+    [{"name": "a", "type": "text", "show_when": {"field": "b"}}],           # incomplete show_when
+    [{"name": "a", "type": "text", "colour": "red"}],                       # an unknown key
+])
+def test_input_is_exactly_the_steering_field_list(form):
+    with pytest.raises(ac.ContractError):
+        ac.check_input(form)
+    # A card whose form isn't that shape stays an item, reachable by `card show`, without input.
+    item = srcs._task_item({"id": "t1", "title": "x", "status": "started", "awaiting_steer": True,
+                            "card": {"request_input": form}}, T1)
+    assert item["display_state"] == "awaiting_input" and "input" not in item
+
+
+def test_every_steering_field_form_is_accepted():
+    from agent_dispatch import steering
+
+    form = steering.parse_request_input(
+        "feedback,notes:textarea,decision:choice[revise,approve],tags:multichoice[a,b],why:textarea?decision=revise")
+    ac.check_input(form)

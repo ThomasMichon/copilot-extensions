@@ -111,6 +111,33 @@ def _check_action(action: Any, source: str) -> None:
         raise ContractError("action argv must be a non-empty list of strings")
 
 
+def check_input(fields: Any) -> None:
+    """``input`` is exactly the steering card's ``request_input`` field list (what
+    ``steering.parse_request_input`` produces and ``steer submit`` answers), so
+    every client renders and answers it the same way."""
+    from .steering import FIELD_CHOICE_TYPES, FIELD_TYPES
+
+    if not isinstance(fields, list) or not fields:
+        raise ContractError("input must be a non-empty list of steering fields")
+    for field in fields:
+        if not isinstance(field, dict) or set(field) - {"name", "type", "options", "allow_other", "show_when"}:
+            raise ContractError("an input field has keys name, type, options?, allow_other?, show_when? only")
+        if not isinstance(field.get("name"), str) or not field["name"] or field.get("type") not in FIELD_TYPES:
+            raise ContractError(f"input field {field.get('name')!r} needs a name and a type in {sorted(FIELD_TYPES)}")
+        choice = field["type"] in FIELD_CHOICE_TYPES
+        options = field.get("options")
+        if choice != (options is not None) or (choice and not (
+                isinstance(options, list) and options and all(isinstance(o, str) for o in options))):
+            raise ContractError(f"input field {field['name']!r}: options are a non-empty string list, "
+                                "for a choice or multichoice only")
+        if "allow_other" in field and (not choice or not isinstance(field["allow_other"], bool)):
+            raise ContractError(f"input field {field['name']!r}: allow_other is a boolean on a choice only")
+        when = field.get("show_when")
+        if when is not None and not (isinstance(when, dict) and set(when) == {"field", "equals"}
+                                     and all(isinstance(v, str) for v in when.values())):
+            raise ContractError(f"input field {field['name']!r}: show_when is {{field, equals}} strings")
+
+
 def validate_item(item: Any) -> None:
     """Raise :class:`ContractError` unless ``item`` is a complete, valid item."""
     if not isinstance(item, dict):
@@ -147,8 +174,8 @@ def validate_item(item: Any) -> None:
         raise ContractError("actions must be a list")
     for action in item["actions"]:
         _check_action(action, source)
-    if "input" in item and item["input"] is not None and not isinstance(item["input"], (dict, list)):
-        raise ContractError("input must be the form spec (an object or a list of fields)")
+    if "input" in item and item["input"] is not None:
+        check_input(item["input"])
     if not isinstance(item["also"], list):
         raise ContractError("also must be a list")
 
@@ -156,7 +183,7 @@ def validate_item(item: Any) -> None:
 def new_item(*, source: str, entity: str, entity_ref: str, lifecycle_state: str | None,
              display_state: str, reason: str, created_at: str, updated_at: str,
              confidence: str = "reported", actions: Iterable[dict] = (),
-             input: dict | list | None = None) -> dict[str, Any]:
+             input: list | None = None) -> dict[str, Any]:
     """Build a valid item for a built-in source."""
     entity = canonical_entity(entity, source)
     item: dict[str, Any] = {
