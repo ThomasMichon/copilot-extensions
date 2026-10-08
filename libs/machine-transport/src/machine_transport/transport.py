@@ -129,22 +129,50 @@ def get_machine_transport(
 ) -> TransportPlan:
     """Resolve the transport plan for reaching ``name``.
 
-    First checks :func:`is_local_machine` (direct ``config_machine`` match
-    before ever calling ``load_entries``, same degrade-safe ordering). If not
-    local, loads the registry (degrading to an empty registry, not raising,
-    on ``FileNotFoundError``/``ValueError``/``KeyError``) and resolves the
-    best SSH alias/shell via :func:`resolve_ssh_target`.
+    A direct ``config_machine`` match (the common, fast path) never touches
+    the registry at all -- same degrade-safe ordering as
+    :func:`is_local_machine`. Otherwise, the registry is loaded AT MOST ONCE
+    (a lazily-cached snapshot, including a cached load failure) and reused
+    for both the identity check and the subsequent alias/shell resolution:
+    calling ``load_entries`` twice could otherwise observe two different
+    snapshots (e.g. a live file that changed between reads), letting the
+    identity check and the entry resolution disagree. A local result's
+    ``machine_key`` is the matched registry entry's own canonical ``key``
+    when one was found (not the raw, possibly differently-spelled ``name``/
+    ``config_machine`` string) -- falling back to ``config_machine or name``
+    only for a genuinely registry-free direct match.
     """
-    if is_local_machine(
-        name, config_machine=config_machine, load_entries=load_entries,
+    config_machine = config_machine or ""
+    if name and config_machine and name.lower() == config_machine.lower():
+        return TransportPlan(local=True, resolved=True, machine_key=config_machine)
+
+    snapshot: dict[str, dict[str, MachineEntry]] = {}
+    failure: list[Exception] = []
+
+    def _cached_entries() -> dict[str, MachineEntry]:
+        if "value" not in snapshot and not failure:
+            try:
+                snapshot["value"] = load_entries()
+            except (FileNotFoundError, ValueError, KeyError) as exc:
+                failure.append(exc)
+                raise
+        if failure:
+            raise failure[0]
+        return snapshot["value"]
+
+    local = is_local_machine(
+        name, config_machine=config_machine, load_entries=_cached_entries,
         real_hostname=real_hostname,
-    ):
-        return TransportPlan(local=True, resolved=True, machine_key=config_machine or name)
+    )
     try:
-        entries = load_entries()
+        entries = _cached_entries()
     except (FileNotFoundError, ValueError, KeyError):
         entries = {}
     entry = find_machine_entry(entries, name)
+
+    if local:
+        key = entry.key if entry is not None else (config_machine or name)
+        return TransportPlan(local=True, resolved=True, machine_key=key)
     if entry is None:
         return TransportPlan(local=False, resolved=False)
     alias, shell = resolve_ssh_target(entry)

@@ -93,9 +93,14 @@ def parse_machines_yaml_file(
       required before switching to this shared parser.
     """
     with open(path, encoding="utf-8") as f:
-        raw: dict[str, Any] = yaml.safe_load(f)
+        raw: Any = yaml.safe_load(f)
 
-    if not raw or not isinstance(raw.get("machines"), dict):
+    # Validate the document root itself is a mapping BEFORE calling
+    # ``.get()`` on it -- a non-empty YAML sequence or scalar root (e.g. a
+    # bare ``- a`` list, or a plain string) has no ``.get`` method and would
+    # otherwise raise ``AttributeError`` instead of this function's own
+    # documented ``ValueError`` for an unusable file.
+    if not isinstance(raw, dict) or not isinstance(raw.get("machines"), dict):
         raise ValueError(f"machines.yaml at {path} is missing 'machines' key")
 
     entries: dict[str, MachineEntry] = {}

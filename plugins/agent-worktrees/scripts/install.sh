@@ -1510,6 +1510,19 @@ deploy_package() {
         fi
     fi
 
+    # Vendored machine-transport lib (agent-machine-transport / module
+    # machine_transport). Same materialized-release guard as
+    # remote-login-shell above -- installed after it since machine-transport
+    # itself depends on remote-login-shell.
+    local machine_transport_dir="$PLUGIN_DIR/libs/machine-transport"
+    if [[ -f "$machine_transport_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-machine-transport \
+                "$machine_transport_dir" --quiet; then
+            err "machine-transport library install failed"
+            return 1
+        fi
+    fi
+
     if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1

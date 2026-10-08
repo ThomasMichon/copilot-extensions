@@ -57,6 +57,22 @@ class TestParseMachinesYamlFile:
         with pytest.raises(ValueError, match="missing 'machines' key"):
             parse_machines_yaml_file(path)
 
+    def test_sequence_root_raises_value_error_not_attribute_error(self, tmp_path):
+        """A non-empty YAML sequence root (e.g. a bare ``- a`` list) has no
+        ``.get`` method -- it previously reached ``raw.get("machines")``
+        directly and raised ``AttributeError`` instead of this function's
+        own documented ``ValueError``, which a consumer like
+        ``data_ssh._build_sources()`` catches to retain its local-only
+        fallback."""
+        path = _write(tmp_path, "- a\n- b\n")
+        with pytest.raises(ValueError, match="missing 'machines' key"):
+            parse_machines_yaml_file(path)
+
+    def test_scalar_root_raises_value_error_not_attribute_error(self, tmp_path):
+        path = _write(tmp_path, "just a plain string\n")
+        with pytest.raises(ValueError, match="missing 'machines' key"):
+            parse_machines_yaml_file(path)
+
     def test_null_machines_value_raises_value_error_not_attribute_error(self, tmp_path):
         """``machines: null`` previously passed the presence check and then
         crashed with ``AttributeError`` at ``.items()`` -- a consumer like

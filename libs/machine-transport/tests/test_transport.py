@@ -181,3 +181,72 @@ class TestGetMachineTransport:
             "some-box", config_machine="aurora-cloud2", load_entries=_boom,
         )
         assert plan == TransportPlan(local=False, resolved=False)
+
+    def test_direct_match_never_calls_load_entries(self):
+        """The fast, common path (``name`` spelled exactly like
+        ``config_machine``) must stay registry-free, matching
+        ``is_local_machine``'s own degrade-safe ordering."""
+        def _boom():
+            raise AssertionError("load_entries must not be called")
+
+        plan = get_machine_transport(
+            "aurora-cloud2", config_machine="aurora-cloud2", load_entries=_boom,
+        )
+        assert plan == TransportPlan(local=True, resolved=True, machine_key="aurora-cloud2")
+
+    def test_load_entries_is_called_at_most_once_per_resolution(self):
+        """Regression: a naive implementation called ``load_entries`` once
+        inside the identity check and again for the entry/alias resolution
+        -- two separate snapshots that could disagree (e.g. a live registry
+        that changed between reads). Both the identity check and the entry
+        resolution must observe the exact same single snapshot."""
+        calls = []
+
+        def _counting_loader():
+            calls.append(1)
+            return {
+                "box-a": MachineEntry(
+                    key="box-a", display_name="A", alias="configured-alias",
+                ),
+            }
+
+        # "box-a" (the registry key) vs. "configured-alias" (the configured
+        # alias) is NOT a direct string match -- resolving it local requires
+        # an actual registry lookup (the alias-vs-key same-entry case).
+        plan = get_machine_transport(
+            "box-a", config_machine="configured-alias",
+            load_entries=_counting_loader,
+        )
+        assert plan.local is True
+        assert len(calls) == 1
+
+    def test_registry_backed_local_match_uses_the_resolved_entry_key(self):
+        """A caller passing the registry ALIAS while ``config_machine`` is
+        the KEY (or vice versa) must report the matched entry's own
+        canonical ``key`` as ``machine_key`` -- not the raw, possibly
+        differently-spelled input string."""
+        entries = {
+            "box-a": MachineEntry(key="box-a", display_name="A", alias="aurora-cloud2"),
+        }
+        plan = get_machine_transport(
+            "box-a", config_machine="aurora-cloud2", load_entries=_loader(entries),
+        )
+        assert plan.local is True
+        assert plan.machine_key == "box-a"
+
+    def test_cached_load_failure_is_observed_consistently_and_only_once(self):
+        """A registry load failure must also be cached -- not re-attempted a
+        second time for the entry-resolution step -- and both the identity
+        check and the entry lookup must observe the same "unavailable"
+        outcome."""
+        calls = []
+
+        def _boom():
+            calls.append(1)
+            raise ValueError("malformed machines.yaml")
+
+        plan = get_machine_transport(
+            "some-box", config_machine="aurora-cloud2", load_entries=_boom,
+        )
+        assert plan == TransportPlan(local=False, resolved=False)
+        assert len(calls) == 1
