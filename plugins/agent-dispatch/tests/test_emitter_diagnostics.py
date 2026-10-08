@@ -125,3 +125,33 @@ def test_inspection_uses_source_eligibility_not_stale_election_health(tmp_path):
     )
     assert native["eligible"] is False
     assert native["recovery_candidate"] is False
+
+
+def test_custom_scope_is_used_for_inspection_and_recovery(tmp_path):
+    queue = TaskQueue(tmp_path / "queue.db")
+    custom = {**SPEC, "lease_scope": "repository-issue-loop:issues"}
+    queue.acquire_schedule_lease(custom["lease_scope"], "example-host", now=10)
+    queue.acquire_schedule_lease("emitter:readiness", "unrelated-host", now=10)
+    seen = []
+
+    def get_lease(scope):
+        from dataclasses import asdict
+
+        seen.append(scope)
+        lease = queue.get_schedule_lease(scope)
+        return asdict(lease) if lease else None
+
+    client = SimpleNamespace(
+        get_schedule_lease=get_lease,
+        release_schedule_lease=lambda scope, holder, **kw: {
+            "released": queue.release_schedule_lease(scope, holder, **kw),
+        },
+    )
+    result = diagnostics.inspect(
+        client, str(tmp_path / "emitter.json"), custom, holder="example-host-wsl",
+    )
+    assert seen == [custom["lease_scope"]]
+    assert result["scope"] == custom["lease_scope"]
+    diagnostics.recover(client, result, expected_holder="example-host")
+    assert queue.get_schedule_lease(custom["lease_scope"]) is None
+    assert queue.get_schedule_lease("emitter:readiness").holder == "unrelated-host"

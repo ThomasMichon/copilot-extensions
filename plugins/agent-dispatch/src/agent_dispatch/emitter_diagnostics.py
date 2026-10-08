@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .client import DispatchError
+from .producers.emitter import lease_scope
 
 
 def _timestamp(value: object) -> float | None:
@@ -65,7 +66,7 @@ def diagnose(
     else:
         state = "tick-succeeded"
     return {
-        "scope": f"emitter:{spec['id']}",
+        "scope": lease_scope(dict(spec)),
         "local_holder": holder,
         "eligible": eligible,
         "lease_holder_eligible": lease_holder_eligible,
@@ -90,7 +91,7 @@ def inspect(client: Any, spec_path: str, spec: dict, *, holder: str,
             declaration_path: str | None = None) -> dict:
     eligible = True
     pinned_eligible = None
-    lease = client.get_schedule_lease(f"emitter:{spec['id']}")
+    lease = client.get_schedule_lease(lease_scope(spec))
     if declaration_path is not None:
         from .registrar_discovery import read_declaration_file_set
         from .registrar_reconcile import runs_on_machine

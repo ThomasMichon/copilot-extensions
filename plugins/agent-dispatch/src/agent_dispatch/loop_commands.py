@@ -270,7 +270,9 @@ def _repository_issue_loop_status(
     failed_spawn_counts: dict[str, int] = {}
     try:
         with _client(args, ensure=False) as client:
-            emitter_lease = client.get_schedule_lease(f"emitter:{source['spec']['id']}")
+            from .producers.emitter import lease_scope
+
+            emitter_lease = client.get_schedule_lease(lease_scope(source["spec"]))
             tasks = [
                 task
                 for task in client.list(
