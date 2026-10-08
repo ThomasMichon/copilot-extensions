@@ -39,6 +39,12 @@ the only thing each provider's own `copilot` command has to own.
   orchestration. `connect` is the one provider-supplied callback: given the
   remote command string, it opens the actual interactive channel and returns
   its exit code.
+- `venue_copilot.resume_claim.settle_resumed_claim` -- after a detached launch
+  that resumes a conversation by id (`--resume=<id>`) sees the claim come from
+  a placeholder id: once that id is live and the placeholder is gone (Copilot
+  reloaded the conversation in a new extension process, which the bridge can't
+  link to the placeholder), reserves again with the same venue so the resumed
+  session claims it -- keeping its CLI mode, venue and `supervisor_ref`.
 
 ## Vendoring
 
