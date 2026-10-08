@@ -465,6 +465,25 @@ risk wedging everything").
       own signal-handling code, not a deeper devcontainer/WSL problem (the
       devcontainer CLI itself works fine natively from Windows against
       Docker Desktop's WSL2 backend).
+- [x] `agent-machines` surfaced a serious, deterministic, Windows-only
+      crash: `test_killswitch_cli.py::test_on_detects_live_in_flight_reconcile`
+      silently killed the **entire pytest process** with zero traceback
+      (even running bare pytest directly, bypassing the containment
+      wrapper). **Root-caused and fixed, 2026-10-07** -- see Journal.
+      `killswitch_cli.py`'s `_live_reconciling_plugins()` used
+      `os.kill(pid, 0)` as a liveness probe, following the POSIX
+      convention that signal 0 is a pure no-op check. On Windows,
+      `os.kill()` maps any non-special signal through
+      `GenerateConsoleCtrlEvent`, which can broadcast to the whole console
+      process group -- including the calling process itself -- producing
+      a spurious `KeyboardInterrupt` that kills the test run with no
+      traceback at all. Fixed by reusing this same plugin's own existing,
+      already-correct cross-platform `_pid_alive()` helper (from
+      `fleet_update_lock.py`, which uses `ctypes`/`OpenProcess` on Windows)
+      instead of reinventing an unsafe probe. This is plausibly a real,
+      live production hazard too (not just a test artifact) -- any real
+      `bootstrap-killswitch on` invocation racing a genuinely in-flight
+      reconcile on Windows would very likely hit the same crash.
 
 ### Phase 5 — Generalize beyond `agent-worktrees`
 - [ ] Assess whether other plugins would benefit from diff-scoped selection
@@ -544,6 +563,66 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-07 — Phase 3.5: `agent-machines` Windows `os.kill(pid, 0)` process-killing crash root-caused and fixed
+Continuing the "never-before-tested plugins" sweep one at a time (per the
+async-shell truncation workaround from the previous entry), hit a serious,
+deterministic crash validating `agent-machines`: the **entire pytest
+process died with zero output, not even a traceback**, every single time,
+even bypassing the containment wrapper and invoking bare pytest directly.
+`--collect-only` plus narrowing `-k` filters isolated it to one exact test:
+`test_killswitch_cli.py::test_on_detects_live_in_flight_reconcile`.
+
+**Root cause:** `killswitch_cli.py`'s `_live_reconciling_plugins()` reads a
+PID out of a `reconcile.lock` file and probes liveness with the POSIX
+idiom `os.kill(pid, 0)` (signal 0 = pure no-op liveness check, wrapped in
+`try/except OSError`). This convention is **not safe on Windows**: Python's
+`os.kill()` there maps any non-special signal value through
+`GenerateConsoleCtrlEvent`, which can broadcast a console control event to
+the *entire process group sharing that console* -- including the calling
+process itself. Verified empirically with a standalone repro: calling
+`os.kill(<own or child pid>, 0)` on Windows raised a `KeyboardInterrupt` in
+the very process making the call, not an `OSError` as the POSIX-oriented
+`except` clause expected -- explaining the total, traceback-less death
+(pytest's own process gets `KeyboardInterrupt`'d out from under itself,
+with no handler positioned to catch or report it).
+
+**Fix:** this exact plugin already ships a correct, cross-platform PID
+liveness helper for precisely this purpose --
+`fleet_update_lock.py`'s `_pid_alive()`, which uses
+`ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, ...)`
+on Windows (checking for a non-null handle, no signal delivery at all) and
+falls back to the POSIX `os.kill(pid, 0)` idiom only on non-Windows
+platforms. Rather than reinvent the same logic a second, unsafe way,
+`killswitch_cli.py` now imports and reuses it directly, deleting its own
+bespoke (and now provably broken) probe. `os` was consequently dropped
+from and re-added to the import list once (it's still needed elsewhere in
+the file for `os.environ` reads).
+
+**Why this matters beyond the test suite:** this is very plausibly a real
+production hazard too, not merely a test artifact -- any real
+`agent-machines bootstrap-killswitch on` invocation racing a genuinely
+in-flight reconcile on a Windows host would very likely hit the identical
+crash, silently aborting the CLI with no diagnostic output at all. Fixing
+it closes a real operator-facing bug, not just a flaky test.
+
+**Validated:** the previously-crashing test now passes cleanly in
+isolation (`1 passed, 719 deselected`). The full `agent-machines` suite
+(two sub-suites of 25 files each) could not be confirmed with a single
+clean run this session -- the same host-level CPU-contention confound
+documented for `agent-index` above (`Get-CimInstance Win32_Processor`
+showed sustained 100% load throughout) caused a *different* unrelated test
+to individually exceed its per-test timeout on each of two consecutive
+attempts (`test_cell_lifecycle.py`'s `test_adapters_repair_uninstall_preserve_isolate_replay`
+at ~42% progress, then `test_stamp_binstub_two_stage.py`'s
+`test_windows_bootstrap_check_hook_publishes_binstub_before_return` at
+~85% progress) -- each passes individually in well under its budget
+(confirmed: the `test_cell_lifecycle.py` test alone completed in 26s
+against a 120s budget) when run outside the full sub-suite's resource
+pressure. This is the same class of finding as `agent-index`'s, not a new
+code bug -- raised `agent-machines`' own sub-suite/plugin timeout budgets
+in `tools/run-plugin-tests.py` as headroom against exactly this host
+confound, consistent with the precedent set for `agent-index`.
 
 ### 2026-10-07 — Phase 3.5: the "test-isolation deadlock" wasn't one -- a live competing production daemon was the real cause
 Picked back up the two remaining `agent-index` findings from the previous

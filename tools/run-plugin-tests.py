@@ -95,10 +95,19 @@ _SUBSUITE_TIMEOUT_OVERRIDES: dict[str, float] = {
     # alongside the per-test bump below, so a sub-suite with several
     # individually-slow tests near the new 180s test ceiling still fits.
     "agent-index": 900.0,
+    # agent-machines' two 25/3-file sub-suites carry many real PowerShell/
+    # subprocess-heavy installer and lifecycle-adapter tests (Phase 3.5,
+    # 2026-10-07) -- under real full-matrix host contention (the same
+    # competing-daemon confound documented for agent-index above) an
+    # individual test can exceed the global 300s default even though the
+    # whole plugin passes cleanly (649 + 50 tests, 0 failures) once given
+    # headroom; raised proportionately to agent-index's own budget.
+    "agent-machines": 900.0,
 }
 _PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {
     "agent-dispatch": 1800.0,
     "agent-index": 2700.0,
+    "agent-machines": 2700.0,
 }
 # Several agent-index installer tests genuinely need real PowerShell/venv
 # subprocess work that can exceed the global blanket 30s-per-test

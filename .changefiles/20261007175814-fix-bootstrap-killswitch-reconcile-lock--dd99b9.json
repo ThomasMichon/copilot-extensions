@@ -1,0 +1,9 @@
+{
+  "comment": "Fix bootstrap-killswitch reconcile-lock liveness probe crashing the whole process on Windows (os.kill(pid, 0) triggers GenerateConsoleCtrlEvent, which can send KeyboardInterrupt to the caller); reuse the existing cross-platform _pid_alive() helper from fleet_update_lock.py instead.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
