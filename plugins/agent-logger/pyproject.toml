@@ -78,4 +78,6 @@ dev = [
 testpaths = ["tests"]
 markers = [
     "no_autotrust: opt out of the autouse repo-config trust-gate bypass (see conftest.py)",
+    "guard: fast structural/contract guard tests run automatically in the pre-push hook; the full suite runs in CI",
+    "contract(name): names the behavioral contract a test enforces, for traceability",
 ]

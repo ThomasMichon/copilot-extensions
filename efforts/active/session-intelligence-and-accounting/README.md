@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase worktrees and serial PRs targeting dev
 - **Created:** 2026-10-07
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [agent-logger session intelligence](../../../visions/plugins/agent-logger/session-intelligence/README.md)
 - **Umbrella issue:** #5665
-- **Sub-issues:** Carve bounded implementation issues after proposal review.
+- **Sub-issues:** #5676 (evidence preservation) · #5677 (catalog and accounting) · #5678 (aggregation and adoption)
 
 ## Guiding Intent
 
@@ -107,7 +107,7 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
 ## Plan
 
 ### Phase 0 - Reviewed intent and contracts
-- [ ] Merge the vision revision and effort proposal before implementation.
+- [x] Merge the vision revision and effort proposal before implementation.
 - [ ] Carve phase issues and finalize versioned public-safe source, digest,
   accounting, catalog, daily-output, and consumer compatibility contracts.
 
@@ -186,7 +186,7 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
 
 ## Proposal
 
-Pending review. No implementation is authorized by this draft alone.
+Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
@@ -197,3 +197,29 @@ Pending review. No implementation is authorized by this draft alone.
   archive, compiler, and accounting building blocks.
 - Captured the follow-up requirement to preserve and zip-archive process logs.
 - Proposal remains behind the repository review gate.
+
+### 2026-10-07 - Proposal approved
+- Merged the vision and canonical proposal in #5671 after a clean approving
+  review and passing required checks.
+- Reconciled the execution worktree onto the merged proposal. The umbrella
+  remains open; no implementation or adoption completion is claimed.
+- Next slice: complete process-log evidence preservation and compressed-input
+  compatibility before extracting accounting consumers.
+- Carved implementation trackers #5676, #5677, and #5678; they preserve the full
+  parent completion gate rather than reducing the campaign to its first slice.
+- Started #5676 with an archive-transparent process-log reader, focused synthetic
+  tests, and an explicit library contract. This is local WIP only: it has not
+  run the bounded plugin tests or install/changed-plugin gates, and no
+  implementation PR is open. Validate and integrate it before publication.
+- The reader is an input primitive, not completed log sync or compression.
+  Scheduled preservation, all-session derivation/catalog/accounting, daily role
+  aggregation, consumer vendoring, and release-backed adoption remain outstanding.
+
+### 2026-10-07 - Evidence reader validated and published
+- Validated the process-log evidence reader: full `agent-logger` suite (752
+  passed, 25 skipped) and `ruff` pass inside the test-isolation devcontainer;
+  install-contract, docs-consistency, runbook-references, version-consistency,
+  module-size, and large-files guards all pass.
+- Rebased cleanly onto `origin/dev` and opened PR #5690 for review. This closes
+  only the reader slice of #5676; scheduled sync/compression and accounting
+  ingestion remain open next slices.
