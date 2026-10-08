@@ -746,6 +746,21 @@ frontend cannot speak a surviving host's protocol, version-mux leaves that host
 running until its child stops (or until an opt-in stale-host reap bound fires)
 rather than killing the child mid-turn.
 
+### CodeSpace launch gate
+
+Before a Session Host spawns on a CodeSpace (a fresh start, or a respawn on
+resume), the daemon asks the host's registered launch policy through
+`venue_launch_policy.py`: it runs `launch-check <codespace> --json` via the
+active `codespace` provider's absolute command from `providers.d` (the service
+`PATH` normally lacks sibling binstubs; that command also runs in the
+provider's own installation context), falling back to a `PATH` lookup. Only an
+exit 0 carrying `{"refuse": null}` allows the spawn; a refusal, a timeout, or
+malformed output refuses it, recorded as `launch_refused` (a refused resume is
+terminal). When no check is possible (no provider, or one that predates
+`launch-check`), the spawn is allowed only if no registration file exists. The
+gate is a spawner subclass built in `codespace_transport.build_codespace_spawner`,
+advertised as HTTP generation 25 (`codespace_launch_policy`).
+
 ## Persistence
 
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)

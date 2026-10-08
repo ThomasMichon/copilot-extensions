@@ -122,9 +122,11 @@ def registered() -> dict[str, Any] | None:
 
 
 def valid_argv(argv: Any) -> bool:
-    """A non-empty command, then any arguments (empty ones are valid argv), no NULs."""
+    """An absolute command, then any arguments (empty ones are valid argv), no
+    NULs. ``set`` pins a bare command to its absolute path, so the launcher and
+    the resident bridge -- each in its own working directory -- run the same one."""
     return (isinstance(argv, list) and bool(argv) and all(isinstance(a, str) for a in argv)
-            and bool(argv[0]) and not any("\x00" in a for a in argv))
+            and bool(argv[0]) and not any("\x00" in a for a in argv) and os.path.isabs(argv[0]))
 
 
 def describe(policy: dict[str, Any]) -> dict[str, Any]:
@@ -138,7 +140,7 @@ def register(argv: list[str], *, timeout: float = DEFAULT_TIMEOUT) -> None:
     """Write the registration owner-only (0600 from creation): its argv may carry
     secrets, which a umask-default 0644 file would expose to other local users."""
     if not valid_argv(argv):
-        raise ValueError("the policy command must be non-empty and contain no NUL bytes")
+        raise ValueError("the policy command must be an absolute path and contain no NUL bytes")
     if not 0 < timeout <= MAX_TIMEOUT:
         raise ValueError(f"timeout must be in (0, {MAX_TIMEOUT:g}] seconds")
     ensure_runtime_dir()
@@ -189,7 +191,8 @@ def _run_contained(argv: list[str], request: str, timeout: float) -> tuple[int, 
     waiting for EOF. Its output is drained into a fixed cap, so a runaway policy
     can't grow the caller's memory. Raises ``subprocess.TimeoutExpired`` or
     ``PolicyOutputTooLarge`` after the cleanup."""
-    kwargs: dict[str, Any] = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    kwargs: dict[str, Any] = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+                              "cwd": str(POLICY_FILE.parent)}  # one directory, whichever path launches
     if os.name == "nt":
         kwargs["creationflags"] = no_window_flags()
         # Popen doesn't apply PATHEXT: resolve a bare name to its .exe/.cmd shim.
@@ -329,9 +332,13 @@ def cmd_launch_policy(args) -> int:
         argv = list(args.policy_argv or [])
         if argv[:1] == ["--"]:
             argv = argv[1:]
+        if argv and argv[0] and not os.path.isabs(argv[0]):  # pin it now, not per working directory
+            resolved = shutil.which(argv[0])
+            if resolved:
+                argv[0] = os.path.abspath(resolved)
         if not valid_argv(argv) or not 0 < args.timeout <= MAX_TIMEOUT:
             print(f"[FAIL] usage: launch-policy set [--timeout S] -- <argv...> (0 < S <= {MAX_TIMEOUT:g}; "
-                  "a non-empty command, no NUL bytes)", file=sys.stderr)
+                  "a command found on PATH or given by absolute path, no NUL bytes)", file=sys.stderr)
             return 2
         try:
             register(argv, timeout=args.timeout)

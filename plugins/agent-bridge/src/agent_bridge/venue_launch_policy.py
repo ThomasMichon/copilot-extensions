@@ -73,14 +73,31 @@ def _registration_present() -> bool:
     return True
 
 
+def _check_command() -> list[str] | None:
+    """How to reach agent-codespaces: the active ``codespace`` provider's absolute
+    command from ``providers.d`` (the daemon's service ``PATH`` normally lacks
+    sibling binstubs; that command also runs inside the provider's own
+    installation context), with a ``PATH`` lookup only as a legacy fallback."""
+    try:
+        from .provider_sources import discover_provider_manifests
+
+        manifest = discover_provider_manifests().get("codespace")
+    except Exception:  # noqa: BLE001 -- discovery trouble falls back to PATH, never crashes a launch
+        manifest = None
+    if manifest is not None and manifest.command:
+        return list(manifest.command)
+    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
+    return [binstub] if binstub else None
+
+
 def codespace_launch_refusal(codespace: str) -> str | None:
     """Why the host refuses a worker launch on ``codespace`` now, or ``None``."""
-    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
-    if not binstub:
+    command = _check_command()
+    if not command:
         return _unchecked_refusal("agent-codespaces is not installed")
     try:
         result = subprocess.run(
-            [binstub, "launch-check", codespace, "--json"],
+            [*command, "launch-check", codespace, "--json"],
             capture_output=True, text=True, timeout=_CHECK_TIMEOUT,
             creationflags=no_window_flags(),
         )

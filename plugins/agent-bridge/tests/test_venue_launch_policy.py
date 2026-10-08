@@ -19,8 +19,10 @@ from agent_bridge.transport import SpawnTarget
 
 @pytest.fixture(autouse=True)
 def _no_host_registration(tmp_path, monkeypatch):
-    """Point the registration probe at an empty directory (never the real home)."""
+    """Point the registration probe at an empty directory (never the real home),
+    and the provider registry at an empty one (the PATH stub decides)."""
     monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path / "agent-codespaces"))
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(tmp_path / "providers.d"))
     return tmp_path / "agent-codespaces"
 
 
@@ -42,6 +44,18 @@ def test_allowed(monkeypatch):
     calls = _check(monkeypatch, rc=0, stdout=json.dumps({"codespace": "cs", "refuse": None}))
     assert vlp.codespace_launch_refusal("cs") is None
     assert calls == [["agent-codespaces", "launch-check", "cs", "--json"]]
+
+
+def test_the_active_provider_manifest_command_is_used_before_path(monkeypatch):
+    """The daemon's service PATH normally lacks sibling binstubs: providers.d
+    carries the active provider's absolute command (in its own install context)."""
+    from types import SimpleNamespace as NS
+
+    calls = _check(monkeypatch, rc=0, stdout=json.dumps({"codespace": "cs", "refuse": None}), binstub=None)
+    monkeypatch.setattr("agent_bridge.provider_sources.discover_provider_manifests",
+                        lambda *a, **k: {"codespace": NS(command=("/opt/cell/bin/agent-codespaces", "--cell"))})
+    assert vlp.codespace_launch_refusal("cs") is None
+    assert calls == [["/opt/cell/bin/agent-codespaces", "--cell", "launch-check", "cs", "--json"]]
 
 
 def test_refused_carries_the_policy_reason(monkeypatch):

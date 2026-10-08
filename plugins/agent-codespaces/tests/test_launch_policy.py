@@ -48,8 +48,11 @@ def test_a_policy_that_cannot_answer_fails_closed(code, needle):
     assert reason and needle in reason
 
 
-@pytest.mark.parametrize("content", ["{", '{"argv": []}', '{"argv": ["x"], "timeout": 0}',
-                                     '{"argv": ["x"], "timeout": 90}', '{"argv": ["x\\u0000y"]}'])
+_ABS = json.dumps(sys.executable)  # an absolute command, so only the field under test is invalid
+
+
+@pytest.mark.parametrize("content", ["{", '{"argv": []}', '{"argv": [%s], "timeout": 0}' % _ABS,
+                                     '{"argv": [%s], "timeout": 90}' % _ABS, '{"argv": ["x\\u0000y"]}', '{"argv": ["relative"]}'])
 def test_an_unreadable_registration_fails_closed(content):
     lp.POLICY_FILE.write_text(content, encoding="utf-8")
     assert "unreadable" in lp.refusal("cs")
@@ -93,7 +96,7 @@ def test_a_symlinked_registration_fails_closed_even_when_dangling(tmp_path):
 
 
 def test_a_spawn_value_error_is_a_refusal_not_a_crash(monkeypatch):
-    lp.register(["x"])
+    lp.register([sys.executable])
 
     def bad(*_a, **_k):
         raise ValueError("embedded null byte")
@@ -218,11 +221,11 @@ def test_set_and_show_never_echo_the_arguments(capsys):
 def test_a_registration_in_a_directory_others_can_write_is_refused():
     import os
 
-    lp.register(["x"])
+    lp.register([sys.executable])
     os.chmod(lp.POLICY_FILE.parent, 0o777)
     try:
         assert "only this user controls" in lp.refusal("cs")
-        lp.register(["x"])  # a write tightens it again
+        lp.register([sys.executable])  # a write tightens it again
         assert os.stat(lp.POLICY_FILE.parent).st_mode & 0o077 == 0
     finally:
         os.chmod(lp.POLICY_FILE.parent, 0o700)
@@ -234,7 +237,7 @@ def test_a_bare_command_resolves_to_its_windows_shim(tmp_path, monkeypatch):
     bin_dir.mkdir()
     (bin_dir / "my-policy.cmd").write_text('@echo {"refuse": "held by shim"}\r\n', encoding="ascii")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-    lp.register(["my-policy"])
+    assert _cli(["launch-policy", "set", "--", "my-policy"]) == 0  # set pins the shim's absolute path
     assert lp.refusal("cs") == "held by shim"
 
 
@@ -245,22 +248,22 @@ def test_the_registration_is_owner_only():
 
     old = os.umask(0o022)
     try:
-        lp.register(["x", "--token", "secret"])
+        lp.register([sys.executable, "--token", "secret"])
     finally:
         os.umask(old)
     assert stat.S_IMODE(lp.POLICY_FILE.stat().st_mode) == 0o600
 
 
 def test_cli_set_caps_the_timeout_below_the_bridge_budget(capsys):
-    assert _cli(["launch-policy", "set", "--timeout", "90", "--", "x"]) == 2
+    assert _cli(["launch-policy", "set", "--timeout", "90", "--", sys.executable]) == 2
     assert lp.registered() is None
     with pytest.raises(ValueError):
-        lp.register(["x"], timeout=lp.MAX_TIMEOUT + 1)
+        lp.register([sys.executable], timeout=lp.MAX_TIMEOUT + 1)
 
 
 def test_cli_reports_a_resident_bridge_that_would_skip_the_policy(monkeypatch, capsys):
     monkeypatch.setattr(lp, "bridge_enforcement", lambda: False)
-    assert _cli(["launch-policy", "set", "--", "x"]) == 0
+    assert _cli(["launch-policy", "set", "--", sys.executable]) == 0
     assert "predates launch-policy enforcement" in capsys.readouterr().err
     assert _cli(["launch-policy", "show", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["bridge_enforces"] is False
@@ -281,3 +284,23 @@ def test_bridge_enforcement_is_unknown_without_a_daemon(monkeypatch):
 
     monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda *a, **k: None)
     assert _REAL_BRIDGE_ENFORCEMENT() is None
+
+
+def test_a_relative_command_is_never_registered_or_run():
+    with pytest.raises(ValueError):
+        lp.register(["./policy"])
+    lp.POLICY_FILE.write_text('{"argv": ["policy"]}', encoding="utf-8")  # a hand-edited registration
+    assert "unreadable" in lp.refusal("cs")
+
+
+def test_the_policy_runs_from_the_registration_directory():
+    """The launcher and the resident bridge run in different directories: both
+    run the policy from one place, so a relative argument means the same file."""
+    _policy("import os, json; print(json.dumps({'refuse': os.getcwd()}))")
+    assert os.path.normcase(lp.refusal("cs")) == os.path.normcase(str(lp.POLICY_FILE.parent))
+
+
+def test_cli_set_pins_a_bare_command_to_its_absolute_path(capsys):
+    name = os.path.basename(sys.executable)
+    assert _cli(["launch-policy", "set", "--", os.path.splitext(name)[0], "-c", "pass"]) == 0
+    assert os.path.isabs(lp.registered()["argv"][0])
