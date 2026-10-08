@@ -37,7 +37,10 @@ resolved -- network call to reach a host that is actually the caller itself.
   that qualifies WSL guests as `<host>-wsl`, treats `display_name` as
   metadata rather than identity authority, and warns when a guest falls back
   to a qualified explicit identity because topology has no dedicated guest
-  entry.
+  entry. Its platform detector also treats marked Docker/Podman roots
+  (`/.dockerenv` or `/run/.containerenv`) as plain `linux` even when the
+  shared kernel string mentions Microsoft/WSL, so containerized work on a
+  WSL host never acquires a spurious guest identity.
 - **`transport`** -- `resolve_ssh_target()` (pick the best SSH alias/shell
   for an entry), `wrap_remote_command()` (POSIX login-shell wrapping via
   `remote_login_shell`, non-POSIX shells passed through untouched), and

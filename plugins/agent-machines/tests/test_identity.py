@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -123,9 +125,71 @@ def test_execution_platform_ignores_inherited_environment(monkeypatch, system, r
 
     monkeypatch.setattr("platform.system", lambda: system)
     monkeypatch.setattr("platform.release", lambda: release)
+    real_is_file = Path.is_file
+    monkeypatch.setattr(
+        Path, "is_file",
+        lambda path: False if str(path) in ("/.dockerenv", "/run/.containerenv")
+        else real_is_file(path),
+    )
     monkeypatch.setattr("builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux generic"))
     monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-transport-environment")
     assert detect_platform() == expected
+
+
+@pytest.mark.parametrize("marker", ["/.dockerenv", "/run/.containerenv", None])
+@pytest.mark.parametrize("inherited_wsl_tags", [False, True])
+def test_container_marker_distinguishes_shared_wsl_kernel(monkeypatch, marker, inherited_wsl_tags):
+    import io
+    from machine_identity import detect_platform
+
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("platform.release", lambda: "6.6-microsoft-standard-WSL2")
+    real_is_file = Path.is_file
+    monkeypatch.setattr(
+        Path, "is_file",
+        lambda path: str(path) == marker
+        if str(path) in ("/.dockerenv", "/run/.containerenv") else real_is_file(path),
+    )
+    monkeypatch.setattr(
+        "builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux microsoft-standard-WSL2"),
+    )
+    for name in ("WSL_DISTRO_NAME", "WSL_INTEROP"):
+        if inherited_wsl_tags:
+            monkeypatch.setenv(name, "inherited-example-value")
+        else:
+            monkeypatch.delenv(name, raising=False)
+    assert detect_platform() == ("linux" if marker else "wsl")
+
+
+def test_actual_container_is_linux_execution():
+    import platform
+    from machine_identity import detect_platform
+
+    if platform.system() != "Linux" or not any(
+        Path(marker).is_file() for marker in ("/.dockerenv", "/run/.containerenv")
+    ):
+        pytest.skip("requires an actual container root")
+    assert detect_platform() == "linux"
+
+
+def test_headless_wsl_proc_fallback_without_container_marker(monkeypatch):
+    import io
+    from machine_identity import detect_platform
+
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("platform.release", lambda: "generic-kernel")
+    real_is_file = Path.is_file
+    monkeypatch.setattr(
+        Path, "is_file",
+        lambda path: False if str(path) in ("/.dockerenv", "/run/.containerenv")
+        else real_is_file(path),
+    )
+    monkeypatch.setattr(
+        "builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux microsoft-standard"),
+    )
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    monkeypatch.delenv("WSL_INTEROP", raising=False)
+    assert detect_platform() == "wsl"
 
 
 def test_explicit_selector_is_not_reinterpreted_as_local_guest(tmp_path, monkeypatch):

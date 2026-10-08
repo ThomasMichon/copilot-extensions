@@ -52,6 +52,12 @@ class TestDetectPlatform:
 
         monkeypatch.setattr("builtins.open", fake_open)
         monkeypatch.setattr("platform.system", lambda: "Linux")
+        real_is_file = Path.is_file
+        monkeypatch.setattr(
+            Path, "is_file",
+            lambda path: False if str(path) in ("/.dockerenv", "/run/.containerenv")
+            else real_is_file(path),
+        )
         assert cfg.detect_platform() == "wsl"
 
 

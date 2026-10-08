@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -325,3 +326,27 @@ def test_related_native_topology_availability(
         expected = "local_repo_unregistered" if local else "crossmachine_unverifiable"
         assert [finding["kind"] for finding in report["findings"]] == [expected]
         assert report["current_machine"] == config.machine
+
+
+@pytest.mark.parametrize("marker", ["/.dockerenv", "/run/.containerenv"])
+def test_registered_container_identity_survives_shared_wsl_kernel(tmp_path, monkeypatch, marker):
+    local = tmp_path / "local.yaml"
+    local.write_text(yaml.safe_dump({
+        "machine": "example-container", "platform": "linux", "repo_name": "example",
+        "repos": {"example": {"anchor": str(tmp_path)}},
+    }), encoding="utf-8")
+    before = local.read_bytes()
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("platform.release", lambda: "6.6-microsoft-standard-WSL2")
+    monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-example-value")
+    real_is_file = Path.is_file
+    monkeypatch.setattr(
+        Path, "is_file",
+        lambda path: str(path) == marker
+        if str(path) in ("/.dockerenv", "/run/.containerenv") else real_is_file(path),
+    )
+    config = cfg.load_config(local, include_control_plane_related_pr=False)
+    assert config.platform == "linux"
+    assert config.machine == "example-container"
+    assert local.read_bytes() == before
