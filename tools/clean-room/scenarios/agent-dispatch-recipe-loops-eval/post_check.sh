@@ -69,10 +69,12 @@ for _decl in "$REGISTRAR_DIR"/*.yaml; do
     if [ -n "${_count:-}" ] && [ "${_count:-0}" != "0" ]; then
         # Task lists are newest-first, and a loop's fast cadence can create
         # extra queued/abandoned occurrences after an earlier one already
-        # completed -- always picking items[0] would then report the LATER,
-        # less-interesting task and hide the real completion evidence.
-        # Prefer a completed/submitted entry; fall back to the newest only
-        # when none reached a terminal-with-evidence state.
+        # reached a terminal state -- always picking items[0] would then
+        # report the LATER, less-interesting task and hide the real
+        # evidence. Prefer completed/submitted; fall back to a terminal
+        # failure (abandoned/dead_letter, also real evidence worth
+        # surfacing) before finally falling back to the newest non-terminal
+        # task.
         _selected_id="$(python3 -c '
 import json, sys
 content = open(sys.argv[1], encoding="utf-8").read()
@@ -81,8 +83,9 @@ items = json.loads(content[idx:]) if idx >= 0 else []
 if not items:
     print("")
     raise SystemExit
-preferred = next((t for t in items if t.get("status") in ("completed", "submitted")), None)
-chosen = preferred or items[0]
+def pick(statuses):
+    return next((t for t in items if t.get("status") in statuses), None)
+chosen = pick(("completed", "submitted")) or pick(("abandoned", "dead_letter")) or items[0]
 print(chosen.get("id", ""))
 ' "$_list_out" 2>/dev/null)"
         if [ -n "$_selected_id" ]; then

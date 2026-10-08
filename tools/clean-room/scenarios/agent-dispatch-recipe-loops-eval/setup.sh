@@ -176,8 +176,17 @@ if [ -n "${COPILOT_GITHUB_TOKEN:-}" ]; then
     # auth login --with-token` persists the credential to
     # ~/.config/gh/hosts.yml, which every later `gh` invocation (including
     # agent-dispatch's own github_provider_adapter, which shells out to `gh`)
-    # resolves automatically regardless of env-var inheritance.
-    printf '%s' "$COPILOT_GITHUB_TOKEN" | gh auth login --hostname github.com --with-token >/dev/null 2>&1 || true
+    # resolves automatically regardless of env-var inheritance. This MUST
+    # succeed: the immediately-following `gh api user` check runs in THIS
+    # same process, where the exported GH_TOKEN would make it pass even if
+    # the persisted (env-independent) login silently failed -- masking a
+    # setup state where every later orchestrator `docker exec` call has no
+    # working `gh` auth at all.
+    _gh_login_out="$CR_LOGDIR/gh-login.log"
+    if ! ( printf '%s' "$COPILOT_GITHUB_TOKEN" | gh auth login --hostname github.com --with-token ) > "$_gh_login_out" 2>&1; then
+        jam "auth-gh" "gh auth login --with-token failed (see cr-logs/gh-login.log)" "the persisted, env-independent credential is required for every later docker-exec'd gh call"
+        cr_finalize
+    fi
     export GH_TOKEN="$COPILOT_GITHUB_TOKEN"
     export GITHUB_TOKEN="$COPILOT_GITHUB_TOKEN"
     # Best-effort defense in depth for any later shell that DOES happen to be a
