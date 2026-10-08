@@ -73,7 +73,10 @@ Part of the [Operator Attention Contract](README.md) effort: what each test tier
   tracking `owner/name#42` on different providers (`github.com` and a GHES or
   Gitea host), or under two organizations of one host (`dev.azure.com/<a>`
   and `dev.azure.com/<b>`), give two items that never dedupe, while one PR
-  reached through two spellings of the same authority gives one.
+  reached through two spellings of the same authority gives one. A worktree
+  tracking two PRs, an active passing one and an older reopened failing one,
+  gives exactly one item, for the failing PR; one PR tracked by two worktrees is
+  read once and gives one item.
 - Simple e2e: a local bridge session parked on `ask_user`, a task with
   `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
   expected order. Kill one source and the result is `degraded` with the others

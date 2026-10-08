@@ -85,9 +85,13 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
   counts toward the source's status, not as an item. **Candidates:** every
   PR tracked by agent-worktrees, whatever its local state, across **every project registered on this
   machine**, not just the one the caller's CWD belongs to. They're enumerated
-  through agent-worktrees' own CLI (never by reading its files), and each one is
-  read with explicit project context (`agent-worktrees -p <project> pr bar
-  <worktree-id> --json`), so the result is the same from any CWD. A project whose
+  through agent-worktrees' own CLI (never by reading its files), and each PR is
+  read by its own repository and number, with explicit project context
+  (`agent-worktrees -p <project> pr bar <owner/name> <number> --json`), so the
+  result is the same from any CWD. A worktree can track several PRs (serial or
+  parallel), so a worktree id never stands in for the PR: reading by worktree
+  would re-read its active PR for every record and miss a failing older or
+  reopened one. A PR tracked by more than one worktree is read once. A project whose
   tracked PRs can't be enumerated makes the source `failed`: a partial list
   can't claim to be complete. **Dependency:** `agent-worktrees claims find pr`
   already scans every adopted project's tracked PRs, but only for one known
