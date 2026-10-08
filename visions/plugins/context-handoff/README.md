@@ -4,9 +4,9 @@
   Copilot agent's work across a context-window boundary
 - **Scope:** leaf (child of [`agent-fabric`](../../agent-fabric/README.md))
 - **Status:** Active
-- **Last revised:** 2026-09-13
-- **Reality docs:** no dedicated architecture doc yet — see
-  `plugins/context-handoff/skills/context-handoff/`,
+- **Last revised:** 2026-10-07
+- **Reality docs:** [plugin README](../../../plugins/context-handoff/README.md),
+  [continuation skill](../../../plugins/context-handoff/skills/context-handoff/SKILL.md),
   `plugins/context-handoff/skills/diagnosing-handoff-cutover/`, and the active
   efforts `efforts/active/handoff-live-cutover/`,
   `efforts/active/handoff-cutover-lifecycle-journal/`,
@@ -59,6 +59,16 @@ no host at all — is driving the process underneath it.
   guarantee).
 - **Operator-facing policy** — the layered, overridable configuration that
   governs whether and how any of this happens automatically at all.
+- **Durable baton and recovery locator** — the continuation content survives
+  the predecessor independently of a live extension or reachable coordinator.
+  A short recovery locator identifies that content; it never substitutes for
+  loading the brief. Storing a baton preserves an option to continue, while
+  requesting pickup is a separate act.
+- **Objective and authority boundary** — the handoff preserves the original
+  completion gate and the authority of the session transferring it. An
+  objective owner continues the campaign; a bounded delegate continues only
+  its assigned scope. Neither a finished phase nor a successful pickup silently
+  expands that authority or declares the parent objective complete.
 
 ## Features
 
@@ -68,9 +78,10 @@ As a session's context utilization climbs, the agent receives a series of
 escalating signals rather than a single trigger: an early advisory that
 handoff preparation should begin, a firmer nudge to hand off at the next
 natural break, and — because an agent cannot be relied on to always act on a
-nudge in time — a final, non-negotiable point past which the system forces
-the handoff itself rather than continuing to ask. All three tiers are
-sensible defaults, never hard-coded assumptions the operator cannot move (see
+nudge in time — when automatic handoff is authorized, a final, non-negotiable
+point past which the system forces the handoff itself rather than continuing
+to ask. All three tiers are sensible defaults, never hard-coded assumptions
+the operator cannot move (see
 Operator-Configurable Policy).
 
 ### Continuity of work
@@ -86,6 +97,21 @@ held claims or leases, coordination with other worktrees or remote agents).
 Nothing the predecessor was responsible for is silently dropped at the
 boundary — where something genuinely cannot be mechanically resumed, it is
 carried forward as an explicit, visible open item instead.
+
+When a valid active effort already holds the objective, plan, and journal, the
+baton references that durable authority and carries only the immediate relay
+delta: the next slice, decisions, blockers, and in-flight obligations. Without
+such an effort, a standalone brief carries the full continuation contract.
+Compactness must remove duplication, never responsibility.
+
+### Extension-independent recovery
+
+An unavailable or disconnected session extension must not strand a saved
+baton. Storage, explicit pickup, lineage inspection, and cancellation remain
+reachable through a non-extension surface with the same ownership semantics.
+Recovery is scoped to the identified worktree and baton, not a global guess at
+which conversation to continue. Cancellation retires pending continuation
+without consuming it or falsely declaring the original work complete.
 
 ### Perpetuating mandate
 
@@ -115,6 +141,11 @@ move the escalation thresholds, or express them as absolute usage counts
 instead of proportions. Policy resolves in layers — a broad default that a
 more specific scope can override — so a single operator preference need not
 be repeated everywhere it applies.
+
+Manual storage, triggering, and consumption remain available even when
+automatic behavior is disabled. Recording a requested handoff for lineage
+does not itself authorize an automatic successor: live cutover needs explicit
+opt-in, while a deliberately manual continuation remains fully tracked.
 
 ### Always-visible operator communication
 
@@ -153,6 +184,45 @@ Whether an interactive host, an automated host, or no host at all is present,
 a triggered handoff either reaches a running successor or resolves into an
 unambiguous, actionable manual fallback. The absence of a host is a degraded
 mode with a clear guarantee, never an unhandled case.
+
+### Safe transfer of background work
+
+Background work has explicit ownership at the boundary. Agent-driven handoffs
+capture useful results and quiesce owned writers and schedules before preparing
+the successor's worktree and final brief; work requiring continuation is named
+for deliberate successor-side re-arming. Unrelated work is not stopped.
+
+Emergency capture must remain bounded so context loss cannot erase the baton.
+When a last-chance handoff cannot establish that work has quiesced, it preserves
+that uncertainty and the recovery obligation explicitly rather than claiming
+an empty inventory. The transfer must prevent unresolved predecessor work from
+silently racing a successor; meeting this guarantee requires cooperation with
+the owners of background execution, not moving process hosting into
+`context-handoff`.
+
+### Evidence-faithful continuation
+
+A brief is an evidence-bearing transfer, not an unquestioned completion claim.
+Preparation reconciles self-identified open threads with later resolutions and
+checks the session's owned obligations before saying nothing remains.
+Pickup checks the inherited objective and outstanding work against available
+predecessor and worktree evidence before accepting a claim of completion.
+An unavailable or bounded history view is disclosed as such, never treated as
+proof that no older responsibility exists.
+
+Worktree preparation preserves unrelated changes and in-progress source-control
+operations. A failed or unsafe refresh is carried as an explicit successor
+obligation, not a reason to lose the baton or imply that the worktree is current.
+
+### Exclusive pickup with attributable lineage
+
+Claiming a baton grants continuation responsibility to one successor, with
+retry-safe recovery for that same claimant. A competing pickup reports who
+already holds it rather than replaying the work or interpreting failure as
+completion. Where a durable worktree authority exists, pickup links the actual
+baton, predecessor, and successor through that authority; a diverged head is
+not overwritten by guessing. A failed lineage update remains visible with a
+recovery obligation, distinct from successful delivery of the brief.
 
 ### Clean exit, not a race with orphaned state
 
@@ -199,7 +269,13 @@ mechanism's internals.
   [`plugins/agent-bridge`](../agent-bridge/README.md),
   [`plugins/agent-worktrees`](../agent-worktrees/README.md),
   [`picker`](../../picker/README.md)
-- Reality docs: `plugins/context-handoff/skills/context-handoff/`,
+- Applicable service contracts:
+  [`plugin-services`](../../plugin-services/README.md) — graceful composition,
+  relationship diagnosability, and replaceable payloads. Service-runtime,
+  listener, and resident-daemon lifecycle contracts belong to the providers
+  supplying those capabilities, not to a second runtime in this policy plugin.
+- Reality docs: [plugin README](../../../plugins/context-handoff/README.md),
+  [continuation skill](../../../plugins/context-handoff/skills/context-handoff/SKILL.md),
   `plugins/context-handoff/skills/diagnosing-handoff-cutover/`,
   `efforts/active/handoff-live-cutover/`,
   `efforts/active/handoff-cutover-lifecycle-journal/`,
@@ -214,3 +290,11 @@ mechanism's internals.
   `session-hosting` / `plugins/agent-bridge` / `plugins/agent-worktrees`
   visions, and three in-flight efforts) to separate genuine should-be intent
   from spec-level mechanism and from gaps already tracked as pending work.
+
+- **2026-10-07** — Folded back durable storage distinct from pickup signaling,
+  explicit manual operation independent of automatic policy, extension-free
+  recovery, exclusive attributable pickup, and effort-backed compact
+  continuation. Sharpened continuity into preservation of objective authority,
+  evidence-faithful completeness checks, and safe transfer of background work.
+  These guarantees preserve the policy/hosting boundary: runtime owners supply
+  execution mechanics, while the baton carries responsibility and uncertainty.
