@@ -971,6 +971,9 @@ replacement, truncation, and same-size modifications reset the cursor.
 Writers append or replace atomically rather than editing earlier bytes and
 then growing the same file. Public readers independently copy their final
 selected events, so caller mutations never alter cached history.
+Trace writers initialize their lock-file sentinel only after acquiring the
+advisory lock, avoiding a first-write Windows byte-lock conflict; failed trace
+appends remain best-effort but emit a diagnostic warning.
 
 **Diagnosing a stuck cutover today.** `agent-worktrees handoff-trace
 <worktree-id|session-id> [--project <name>] [--token <handoff-token>]`

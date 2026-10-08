@@ -43,6 +43,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Sequence
 import json
+import logging
 import os
 import re
 from contextlib import contextmanager
@@ -51,6 +52,8 @@ from typing import Iterator
 
 from . import config as cfg
 from . import jsonl_cache
+
+log = logging.getLogger(__name__)
 
 # Reject path separators, NUL, and any "." / ".." segment -- both ``project``
 # and ``worktree_id`` are copied here without the ``_resolve_worktree_id``
@@ -98,9 +101,6 @@ def _append_lock(lock_path: Path) -> Iterator[None]:
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+b") as stream:
-        if stream.tell() == 0:
-            stream.write(b"\0")
-            stream.flush()
         if os.name == "nt":
             import msvcrt
 
@@ -111,6 +111,13 @@ def _append_lock(lock_path: Path) -> Iterator[None]:
 
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
         try:
+            # Windows permits locking past EOF. Initialize only after locking:
+            # writing byte zero before acquisition can conflict with a new
+            # holder's byte lock and silently lose the first concurrent append.
+            stream.seek(0)
+            if not stream.read(1):
+                stream.write(b"\0")
+                stream.flush()
             yield
         finally:
             if os.name == "nt":
@@ -145,6 +152,7 @@ def append_event(
                 handle.write(line + "\n")
         return True
     except Exception:
+        log.warning("Unable to append handoff trace for %s/%s", project, worktree_id, exc_info=True)
         return False
 
 

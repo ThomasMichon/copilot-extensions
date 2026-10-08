@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +16,21 @@ from agent_worktrees import __main__ as m
 from agent_worktrees import activity
 from agent_worktrees import handoff_trace
 from agent_worktrees import tracking
+
+
+def test_append_lock_initializes_sentinel_only_after_acquisition(tmp_path, monkeypatch):
+    path = tmp_path / "trace.lock"
+    observed = []
+
+    def locking(fd, mode, count):
+        observed.append((mode, os.fstat(fd).st_size, count))
+
+    fake = SimpleNamespace(LK_LOCK=1, LK_UNLCK=2, locking=locking)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    monkeypatch.setattr(handoff_trace, "os", SimpleNamespace(name="nt"))
+    with handoff_trace._append_lock(path):
+        assert path.read_bytes() == b"\0"
+    assert observed == [(1, 0, 1), (2, 1, 1)]
 
 
 @pytest.fixture
