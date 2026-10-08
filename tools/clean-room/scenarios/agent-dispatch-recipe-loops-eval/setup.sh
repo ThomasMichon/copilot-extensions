@@ -309,8 +309,28 @@ if [ "${#_repo_mismatches[@]}" -ne 0 ]; then
     jam "dispatch-config" "declaration(s) do not target the operator-supplied fixture repo: ${_repo_mismatches[*]}" "every declaration's own repo: value must equal \$CR_FIXTURE_REPO ('$FIXTURE_REPO')"
     cr_finalize
 fi
-pass "registrar/ directory's declaration-file set is exactly the four expected recipes, each correctly targeting \$CR_FIXTURE_REPO ('$FIXTURE_REPO')"
+# The eval's own PASS/FAIL rubric treats a task left at 'submitted' as a
+# real configuration/transition mismatch (not success) SOLELY because every
+# declaration is assumed to disable the submitted-verification gate. An
+# operator-supplied or retained fixture that left verification enabled on
+# even one declaration would then fail this evaluation for an invalid
+# starting-state reason that has nothing to do with the recipes
+# themselves. Fail setup closed instead, and name which declaration(s)
+# differ. Schema default is false when the key is absent entirely.
+_verification_mismatches=()
+for _name in backlog-triager issue-reproducer effort-builder effort-driver; do
+    _require_verification="$(grep -E '^require_verification:' "$_registrar_dir/$_name.yaml" | head -1 | sed -E 's/^require_verification:[[:space:]]*//' | tr -d '"'"'"'\r' | tr '[:upper:]' '[:lower:]')"
+    [ -z "$_require_verification" ] && _require_verification="false"
+    [ "$_require_verification" = "false" ] || _verification_mismatches+=("$_name.yaml (require_verification: '$_require_verification')")
+done
+if [ "${#_verification_mismatches[@]}" -ne 0 ]; then
+    jam "dispatch-config" "declaration(s) have verification enabled, which this scenario's own rubric assumes is off: ${_verification_mismatches[*]}" "set require_verification: false (or omit the key) on every declaration before running this scenario -- otherwise a healthy run would correctly stop at 'submitted' and this scenario would misreport that as recipe failure"
+    cr_finalize
+fi
+pass "registrar/ directory's declaration-file set is exactly the four expected recipes, each correctly targeting \$CR_FIXTURE_REPO ('$FIXTURE_REPO') with verification disabled"
 info "deliberately NOT registering the repo with agent-dispatch's registrar here -- that registration is itself part of what this eval audits"
+
+_owner_repo="$(cd "$FIXTURE_DIR" && git remote get-url origin 2>/dev/null | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
 
 # Snapshot efforts/active/ BEFORE any orchestrator/worker mutation, so
 # post_check.sh can diff it afterward: a new directory here is real
@@ -343,6 +363,31 @@ if [ -f "$_driver_decl_path" ]; then
         cr_finalize
     fi
     pass "effort-driver's declared effort_slugs entry(ies) are all present under efforts/active/ before this run (valid starting state)"
+
+    # Confirming the slug is ACTIVE (above) is necessary but not sufficient:
+    # post_check.sh's own archive-path discovery (_find_archive_path) locates
+    # ANY git-tree path matching "efforts/<year>/<month>/*<slug>", with no
+    # notion of "created during this run." If a stale archive from an OLDER,
+    # since-superseded archival of this same slug still exists (e.g. the
+    # fixture's efforts/active/ was re-seeded to satisfy the check above
+    # without first removing the slug's prior dated archive), post_check.sh
+    # could attribute that stale directory to THIS run's archive move. Fail
+    # setup closed if one is already present -- a genuinely fresh starting
+    # state has no archive for a still-active slug.
+    if [ -n "$_owner_repo" ]; then
+        _driver_stale_archives=""
+        while IFS= read -r _slug; do
+            [ -z "$_slug" ] && continue
+            _stale_path="$(gh api "repos/$_owner_repo/git/trees/HEAD?recursive=1" --jq '.tree[] | select(.type=="tree") | .path' 2>/dev/null \
+                | grep -E "^efforts/[0-9]{4}/[0-9]{2}/.*$_slug\$" | head -1)"
+            [ -n "$_stale_path" ] && _driver_stale_archives="$_driver_stale_archives,$_slug (stale archive at '$_stale_path')"
+        done <<<"$_driver_slugs"
+        if [ -n "$_driver_stale_archives" ]; then
+            jam "dispatch-config" "effort-driver's declared slug(s) are active under efforts/active/ but a STALE dated archive from an earlier run still exists: ${_driver_stale_archives#,}" "remove the stale archive path(s) before running this scenario again, so post_check.sh cannot attribute them to this run's archive move"
+            cr_finalize
+        fi
+        pass "no stale pre-existing dated archive found for effort-driver's declared slug(s) (valid starting state)"
+    fi
 fi
 
 # effort-builder's own contract accepts an opened (unmerged) effort PR, not
@@ -352,7 +397,6 @@ fi
 # deliberately retained across reruns, snapshot which open PRs ALREADY add
 # such a README BEFORE this run, so that fallback can exclude them and
 # never mistake a stale, pre-existing PR for this run's own evidence.
-_owner_repo="$(cd "$FIXTURE_DIR" && git remote get-url origin 2>/dev/null | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
 _open_builder_prs_before="$CR_LOGDIR/open-builder-prs-before.log"
 _open_prs_before_list="$CR_LOGDIR/open-prs-before-list.log"
 : > "$_open_builder_prs_before"

@@ -20,8 +20,14 @@ enforces at declare time (a `doctor`/`status` check sees a healthy
    (default `task-worker`) names the venue a spawned body targets --
    [`spawn-supervisor.md`](spawn-supervisor.md) documents that this name
    must already be registered with `agent-bridge` on the host *before* any
-   occurrence ticks, or the spawn silently deadlocks waiting on a venue
-   that was never there.
+   occurrence ticks. The spawn degrades cleanly rather than deadlocking: if
+   `agent-bridge` rejects or cannot reach that venue, the spawn reports
+   failure and the supervisor fails the reservation, leaving the task
+   queued (`spawn_factories.py`'s `make_headless_spawn()`) -- so a missing
+   venue surfaces as a task stuck at `queued`/repeatedly failing to spawn,
+   not a silent hang. Diagnose it the same way as any other failed spawn
+   (`doctor`/`status`, the coordinator's own event log), not by assuming
+   the occurrence itself is unhealthy.
 2. **The declaring repo registered with `agent-worktrees`.** Every headless
    spawn's `create_worktree()` unconditionally shells out to
    `agent-worktrees create` -- so the repo needs an `agent-worktrees`

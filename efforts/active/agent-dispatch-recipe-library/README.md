@@ -1881,10 +1881,13 @@ slice being explicitly spun off separately):
   3's single-emitter-primitive slice is already being carried the same
   way.
 - **Documentation impact:** this update touches this effort's own README
-  (its authoritative status/validation record) plus a new public,
-  name-free Tier-E clean-room scenario
-  (`tools/clean-room/scenarios/agent-dispatch-recipe-loops-eval/`) and one
+  (its authoritative status/validation record), a new public, name-free
+  Tier-E clean-room scenario
+  (`tools/clean-room/scenarios/agent-dispatch-recipe-loops-eval/`), one
   table-row addition to the `validating-in-clean-room` skill's scenario
-  catalog -- no `plugins/agent-dispatch` source or its own README/docs are
-  affected (the three infra gaps found are clean-room arrangement
-  findings, not agent-dispatch defects).
+  catalog, and -- surfaced during PR review -- a new "Runtime prerequisites
+  for headless embody" section in `plugins/agent-dispatch/docs/
+  repository-issue-loop-adoption.md` (documenting the agent-bridge venue
+  and agent-worktrees project-name-fallback prerequisites this scenario's
+  own `setup.sh` had to arrange, which the turnkey adoption path
+  previously left implicit) plus the required `agent-dispatch` changefile.
