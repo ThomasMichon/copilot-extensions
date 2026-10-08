@@ -9,9 +9,9 @@
   2026-10-06; Phase 3's own tracked single-emitter-primitive follow-on
   slice remains, explicitly out of this effort's own scope. Of this
   effort's own Validation Plan: each Phase's own tests independently, the
-  real consuming-repo migration, and the recipe README cross-check are all
-  done (2026-10-06); a clean full-suite run and the live fixture
-  exercising each of the 4 named recipes end-to-end both remain open)
+  real consuming-repo migration, the recipe README cross-check, and the
+  live fixture exercising each of the 4 named recipes end-to-end are all
+  done (2026-10-08); only a clean full-suite run remains open)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -523,14 +523,22 @@ below — read it before starting any Phase 3 work).
       `GLOBAL_RECIPES` dict. **Verified 2026-10-06**: the README's table and
       narrative match `GLOBAL_RECIPES`' actual fields exactly for all 8
       entries; no changes needed.
-- [ ] A live fixture repo/issue/PR set exercises each of the four newly
-      named recipes end-to-end per their own Phase's test item. **Still
-      open** -- each Phase's own test item used a local/mocked `tmp_path`
-      pytest fixture, not a genuinely live GitHub repo/issue/PR set; this
-      item asks for the latter specifically and remains the one substantive
-      piece of outstanding validation work (standing up a disposable scratch
-      repo, real issues, and driving each recipe's loop to real completion
-      against it).
+- [x] A live fixture repo/issue/PR set exercises each of the four newly
+      named recipes end-to-end per their own Phase's test item. **Done
+      2026-10-08** (see Journal): a real, personal-account scratch repo
+      (`tmichon_microsoft/agent-dispatch-recipe-fixture`) with real issues/
+      efforts was driven end-to-end against a real GitHub forge via a new
+      clean-room Tier-E scenario (`agent-dispatch-recipe-loops-eval`). All
+      four recipes reached real, independently-observed completion evidence:
+      backlog-triager classified a real issue and linked it to a tracked
+      effort via a merged PR; issue-reproducer posted a real reproduction-
+      evidence comment with actual command output; effort-builder grouped
+      three real issues into a new tracked effort via an opened PR;
+      effort-driver implemented a real one-line fix via a merged PR and
+      archived the effort to the repo's dated archive via a second merged
+      PR. See the Journal for the full account, including three real
+      documentation/infra gaps this surfaced and the deliberate
+      `require_verification: false` scope decision.
 
 ## Proposal
 
@@ -1742,23 +1750,146 @@ slice being explicitly spun off separately):
   `GLOBAL_RECIPES` dict entry-by-entry (kind, exclude_labels,
   worker_identity, require_verification, evaluator_ref for all 8 recipes).
   Already fully accurate -- no changes needed.
-- **Still open:** the live-fixture-repo/issue/PR validation. Each Phase's
-  own "Tests" item (Phases 5-8) used a local/mocked `tmp_path` pytest
-  fixture, not a genuinely live GitHub repo/issue/PR set -- confirmed by
-  reading the actual test bodies rather than assuming "fixture" meant
-  "live." This is a materially larger undertaking (standing up a disposable
-  scratch repo, creating real fixture issues, and driving each of the 4
-  named recipes' loops to real completion against it) and, together with
-  one genuinely clean full-suite run, is what remains of this effort's own
-  scope.
+- **Still open:** one genuinely clean full-suite run (retry once #5582/#5584
+  settle or the host machine is less loaded) -- the only item remaining in
+  this effort's own scope, since the live-fixture validation below is now
+  done.
+- **Live fixture validation -- done 2026-10-08:** stood up a real,
+  personal-account scratch repository
+  (`tmichon_microsoft/agent-dispatch-recipe-fixture`, private, created
+  fresh, never under an org) with real GitHub issues (#1 a trivial real
+  README typo for backlog-triager; #2 a genuinely reproducible inverted-
+  condition bug in a tiny `scripts/is_even.py` for issue-reproducer; #3-#5
+  three small related repo-scaffolding asks for effort-builder) and two
+  pre-seeded `efforts/active/*` READMEs (`fixture-tracking` for
+  backlog-triager to link against; `scratch-effort` with one trivial
+  remaining Plan item -- add a one-line LICENSE file -- for effort-driver
+  to drive to archive state). Each of the four fixture issues/the
+  scratch-effort carries its own `fixture-for-*` scoping label so the three
+  forge-backed loops don't race each other over the same open issues (an
+  early iteration without this raced and cross-contaminated reservations
+  across issues).
+  - **Scope decision (deliberate):** every fixture declaration sets
+    `require_verification: false`, overriding the shipped recipes'
+    `require_verification: true` default. Designing and registering a real
+    trusted evaluator per recipe is a genuine, separate, open-ended
+    sub-problem (`evaluator.py`'s `SpecEvaluatorRegistry`/
+    `load_registration_evaluator`) that is explicitly the *consumer's* job
+    per this package's own design (`evaluator_ref` is deliberately opaque),
+    not something this validation needs to solve to prove the mechanism
+    itself works live. This still genuinely exercises real registrar
+    discovery against a live forge, real reservation (label + comment on a
+    real GitHub issue), real headless worker embodiment running the
+    recipe's real built-in `worker_identity` charter, and the real task
+    reaching a real terminal state -- `completed` directly (confirmed
+    empirically: with no evaluator configured, `complete` advances straight
+    to `completed`, not the `submitted` self-tracked terminal the
+    `require_verification: true` default would gate on).
+  - **The harness:** a new Tier-E clean-room scenario,
+    `tools/clean-room/scenarios/agent-dispatch-recipe-loops-eval/`,
+    modeled on `agent-dispatch-worker-lifecycle-eval` but genuinely live
+    (real GitHub forge, not a fake local origin) and deliberately
+    name-free/public: the fixture repo identity and forge login are
+    supplied entirely via required env (`CR_FIXTURE_REPO`,
+    `CR_FIXTURE_PRODUCER_LOGIN`, forwarded via `run.ps1 -PassEnv`), never
+    hardcoded in the committed scenario. `setup.sh` only ARRANGES the box
+    (installs/provisions agent-dispatch + its two genuine headless-embody
+    runtime dependencies, authenticates `gh`, clones the real fixture repo
+    verbatim, registers host-level agent-bridge/agent-worktrees topology,
+    starts the singleton supervisor daemon as a stand-in for the systemd
+    service a real deployed host would already have) -- it deliberately
+    does NOT register the repo with agent-dispatch's own registrar; that
+    registration is itself what the driven ORCHESTRATOR session performs
+    and is audited. The orchestrator's own job is register -> confirm ->
+    supervise -> report, explicitly never performing any recipe's actual
+    work itself (that is agent-dispatch's own separately-spawned headless
+    workers' job, each running under its declaration's real
+    `worker_identity` charter).
+  - **Three real infra/doc gaps surfaced and fixed in `setup.sh`** (none of
+    these are fixes to `plugins/agent-dispatch` itself -- they are
+    clean-room scenario arrangement, documented here since they are useful
+    evidence for anyone else adopting a repository-issue-loop from a fresh
+    box):
+    1. `gh` authenticated via a bare env-var export does not survive into
+       the orchestrator's own later tool calls (each a separate `docker
+       exec`, which does not inherit a prior shell's exports) -- fixed by
+       persisting credentials on disk with `gh auth login --with-token`.
+    2. Headless embody has an undocumented-in-the-adoption-doc runtime
+       prerequisite: `spawn-supervisor.md` states a headless lane's
+       default `--headless-agent` ("task-worker") must already be
+       registered with **agent-bridge** on the host ("the classic trap
+       being the bogus `task-worker` default naming a charter nobody
+       registered") -- fixed by registering a local `task-worker` agent-
+       bridge venue and restarting the agent-bridge daemon (it caches
+       config at startup, does not live-reload).
+    3. Headless embody's actual spawn call
+       (`embody.py`'s `create_worktree()`) unconditionally shells out to
+       `agent-worktrees create` for EVERY headless lane, not just a
+       CLI-embodied one -- so **agent-worktrees** itself (not only
+       agent-bridge) is a genuine runtime dependency, undocumented as such
+       in `repository-issue-loop-adoption.md`. Registering the fixture
+       repo as an agent-worktrees project is not sufficient on its own:
+       `embody.project_for_task()` resolves a task's `--project` by
+       reversing the task's bare `owner/name` repo field through
+       `identity.name_for_repo()` against agent-worktrees' own
+       **host-qualified** canonical remote registry (e.g.
+       `github.com/owner/name`) -- which a bare `owner/name` string never
+       matches -- and FALLS BACK to the repo string's own trailing path
+       segment (`owner/name` -> `name`) only if that lookup misses. Fixed
+       by registering the agent-worktrees project under that exact
+       fallback name (the repo string's own basename) rather than an
+       arbitrary short name, confirmed empirically via direct
+       `project_for_task()` invocation before trusting it inside a full
+       run.
+  - **Real evidence produced** (fixture repo:
+    `tmichon_microsoft/agent-dispatch-recipe-fixture`):
+    - **backlog-triager:** issue #1 classified `bug`, a real triage
+      comment posted
+      ([#1](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/issues/1)),
+      linked to the pre-seeded `fixture-tracking` effort via a real,
+      merged PR
+      ([#9](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/9)).
+    - **issue-reproducer:** issue #2 got a real reproduction-evidence
+      comment with actual command output for the stated repro steps plus
+      nearby variants, confirmed 100% reproducible, `bug` label applied
+      ([#2](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/issues/2)).
+    - **effort-builder:** issues #3/#4/#5 grouped into a new tracked
+      effort (`efforts/active/repo-scaffolding-essentials/README.md`) via
+      a real, opened PR
+      ([#7](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/7))
+      -- planning-only, no scaffolding file implemented, per the
+      identity's own done-criteria ("open or merged").
+    - **effort-driver:** implemented the scratch-effort's one real
+      remaining Plan item (a one-line `LICENSE` file, content verified
+      verbatim) via a real, merged PR
+      ([#6](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/6)),
+      then archived the effort to the repo's own dated archive
+      (`efforts/2026/10/scratch-effort/`, confirmed via the real GitHub
+      contents API) via a second real, merged PR
+      ([#8](https://github.com/tmichon_microsoft/agent-dispatch-recipe-fixture/pull/8)).
+  - **Honest caveats:** the daemon's fast 5-second cadence + no
+    "already-triaged" exclude-label convention meant a couple of loops
+    re-selected an already-handled issue on a later occurrence before the
+    container was torn down (one extra `queued`/`abandoned` task per
+    affected loop, no duplicate real-world mutation observed beyond what's
+    listed above) -- a fixture-design artifact of this validation's own
+    bounded setup, not a mechanism defect; a real adopter repo's identity/
+    evaluator would apply its own "already handled" marker to prevent
+    this. The fixture repo and its real issues/PRs/efforts are left in
+    place as durable evidence, per instruction; the `agent-dispatch-
+    recipe-fixture` repo is not deleted or archived.
 - **Next:** get one complete, clean full-suite run (retry once #5582/#5584
-  settle or the host machine is less loaded), then stand up the live
-  fixture validation -- or make an explicit call with the operator on
-  whether this effort can be considered substantially complete and
-  archived with those two items tracked as named follow-ons, given Phase
+  settle or the host machine is less loaded) to close this effort's one
+  remaining Validation Plan item, or make an explicit call with the
+  operator on whether this effort can be considered substantially complete
+  and archived with that item tracked as a named follow-on, given Phase
   3's single-emitter-primitive slice is already being carried the same
   way.
-- **Documentation impact:** this update touches only this effort's own
-  README (its authoritative status/validation record) -- no plugin
-  source, `plugins/*/README.md`, skills, or other contributor/user-facing
-  documentation is affected.
+- **Documentation impact:** this update touches this effort's own README
+  (its authoritative status/validation record) plus a new public,
+  name-free Tier-E clean-room scenario
+  (`tools/clean-room/scenarios/agent-dispatch-recipe-loops-eval/`) and one
+  table-row addition to the `validating-in-clean-room` skill's scenario
+  catalog -- no `plugins/agent-dispatch` source or its own README/docs are
+  affected (the three infra gaps found are clean-room arrangement
+  findings, not agent-dispatch defects).
