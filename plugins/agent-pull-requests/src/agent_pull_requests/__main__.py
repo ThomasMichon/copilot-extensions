@@ -633,8 +633,14 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
 
     from .watch_daemon import state_dir
 
-    health = _watch_request("health", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
-    was_running = "pid" in health
+    lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
+    try:
+        lease.acquire()
+    except AlreadyRunningError:
+        was_running = True
+    else:
+        lease.release()
+        was_running = False
     if was_running:
         stop_result = _watch_request(
             "shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False
@@ -643,7 +649,6 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
             print("agent-pull-requests: could not reach the running daemon to stop it")
             return 1
         # A persistent rendezvous file is not proof of lease availability.
-        lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
         deadline = time.monotonic() + _WATCH_RESTART_STOP_TIMEOUT_S
         while time.monotonic() < deadline:
             try:

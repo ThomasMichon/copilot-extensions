@@ -355,8 +355,9 @@ def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
 
 @pytest.mark.parametrize("lease_stuck", [False, True])
 @pytest.mark.parametrize("was_running", [False, True])
+@pytest.mark.parametrize("shutdown_reachable", [False, True])
 def test_restart_waits_for_lease_and_live_health(
-    lease_stuck, was_running, tmp_path, monkeypatch, capsys
+    lease_stuck, was_running, shutdown_reachable, tmp_path, monkeypatch, capsys
 ):
     import single_instance_lease
     from agent_pull_requests import __main__ as cli, watch_daemon
@@ -364,7 +365,6 @@ def test_restart_waits_for_lease_and_live_health(
     now = [0.0]
     booted = []
     health_checks = []
-    initial_health_checked = []
     ready_at = 12 if was_running else 1
 
     def sleep(seconds):
@@ -375,20 +375,18 @@ def test_restart_waits_for_lease_and_live_health(
             pass
 
         def acquire(self):
-            if lease_stuck or now[0] < 11:
+            if was_running and (lease_stuck or now[0] < 11):
                 raise single_instance_lease.AlreadyRunningError(tmp_path / "lease", 123)
 
         def release(self):
-            assert now[0] >= 11
+            if was_running:
+                assert now[0] >= 11
 
     def request(kind, payload, **kwargs):
         assert kwargs == {"boot_wait_s": 0.0, "boot": False}
         if kind == "shutdown":
             assert was_running
-            return {"shutting_down": True}
-        if not initial_health_checked:
-            initial_health_checked.append(True)
-            return {"pid": 123} if was_running else {"error": "not reachable"}
+            return {"shutting_down": True} if shutdown_reachable else {"error": "not reachable"}
         health_checks.append(now[0])
         return {"pid": 456} if now[0] >= ready_at else {"error": "not reachable"}
 
@@ -401,7 +399,7 @@ def test_restart_waits_for_lease_and_live_health(
     monkeypatch.setattr(cli.time, "sleep", sleep)
 
     result = cli._cmd_serve_restart(SimpleNamespace(json=True))
-    if lease_stuck and was_running:
+    if was_running and (lease_stuck or not shutdown_reachable):
         assert result == 1
         assert not booted
         assert not health_checks
