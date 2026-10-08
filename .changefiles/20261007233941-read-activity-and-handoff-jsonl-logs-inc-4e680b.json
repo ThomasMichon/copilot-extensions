@@ -1,0 +1,9 @@
+{
+  "comment": "Read activity and handoff JSONL logs incrementally with bounded snapshots under continuous append",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

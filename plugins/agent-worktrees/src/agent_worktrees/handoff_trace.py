@@ -148,30 +148,8 @@ def append_event(
 
 
 def _parse_trace_file(path: Path) -> list[dict]:
-    """Every parseable line in *path* as a dict, oldest first, unfiltered.
-
-    The expensive, cacheable half of :func:`read_trace` -- see
-    :mod:`jsonl_cache`. Decoding uses ``errors="replace"`` so one damaged
-    byte downgrades to a `\ufffd`-bearing (and thus unparseable, skipped)
-    line instead of aborting the whole read via ``UnicodeDecodeError`` --
-    later valid lines in the same file remain readable.
-    """
-    out: list[dict] = []
-    if not path.exists():
-        return out
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            for raw in handle:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    out.append(json.loads(raw))
-                except Exception:
-                    continue
-    except OSError:
-        return out
-    return out
+    """Read a bounded incremental snapshot, tolerating damaged UTF-8."""
+    return jsonl_cache.read_jsonl(path, errors="replace")
 
 
 def read_trace(project: str, worktree_id: str) -> list[dict]:
@@ -182,29 +160,15 @@ def read_trace(project: str, worktree_id: str) -> list[dict]:
     matching ``activity.read_events``'s tolerance for a partially written or
     corrupted log.
 
-    The per-file parse is memoized via :mod:`jsonl_cache` on the file's own
-    ``(mtime_ns, size)`` -- the resident status-monitor's handoff-retire
-    sweep (``_pending_handoff_retire_requests``) calls this once per
-    worktree carrying a pending/linked handoff, every sweep tick, and this
-    trace file only changes when a stage-mapped event is actually appended
-    to THIS worktree, so an unchanged file is now a cache hit instead of a
-    full re-read + re-parse (copilot-extensions#3751's own diagnosis, same
-    shape, different call path).
-
-    Returns an independent ``copy.deepcopy`` of jsonl_cache's cached list
-    (jsonl_cache itself returns its cached list by reference -- see its own
-    "Mutation isolation invariant"): unlike ``activity.read_events``'s
-    machine-global, unfiltered-then-sliced log, this function always
-    returns the FULL per-worktree trace with no filtering of its own, so
-    there is no smaller "only what's actually returned" subset to copy
-    instead -- and a per-worktree trace file is orders of magnitude smaller
-    than the global activity log, so the full copy here stays cheap.
+    Appends decode only new bytes through :mod:`jsonl_cache`; replacements
+    and truncation reset the cursor. Reads stop at the opening file size.
+    The full returned trace is independently copied to isolate mutations.
     """
     try:
         path = trace_path(project, worktree_id)
     except ValueError:
         return []
-    return copy.deepcopy(jsonl_cache.cached_parse(path, _parse_trace_file))
+    return copy.deepcopy(_parse_trace_file(path))
 
 
 def remove_trace(project: str | None, worktree_id: str | None) -> None:
@@ -213,10 +177,8 @@ def remove_trace(project: str | None, worktree_id: str | None) -> None:
     Best-effort (never raises) -- called wherever a tracking ``<id>.yaml`` is
     unlinked, mirroring ``disposition_history.remove``, so the trace does not
     outlive the worktree it belongs to and a reused worktree id never reads a
-    stale predecessor's events. Also explicitly drops this path's
-    :mod:`jsonl_cache` entry -- a reused worktree id recreates a trace file at
-    this exact same path, and a passive ``(mtime_ns, size)`` check alone could
-    coincidentally alias the deleted predecessor's cached stamp.
+    stale predecessor's events. Also drops this process's read cursor;
+    other processes detect replacements through the file identity stamp.
     """
     if not project or not worktree_id:
         return

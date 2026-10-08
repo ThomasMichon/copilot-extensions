@@ -60,14 +60,15 @@ def test_read_trace_reuses_the_cached_parse_until_a_new_event_lands(
     full re-read + re-parse."""
     handoff_trace.append_event("proj-a", "wt-1", {"event": "handoff_cutover_spawn"})
 
-    calls: list[Path] = []
-    real_parse = handoff_trace._parse_trace_file
+    from agent_worktrees import jsonl_cache
+    calls = []
+    real_read = jsonl_cache._read_snapshot
 
-    def _spy(path: Path):
-        calls.append(path)
-        return real_parse(path)
+    def _spy(handle, offset, size):
+        calls.append(size - offset)
+        return real_read(handle, offset, size)
 
-    monkeypatch.setattr(handoff_trace, "_parse_trace_file", _spy)
+    monkeypatch.setattr(jsonl_cache, "_read_snapshot", _spy)
     handoff_trace.read_trace("proj-a", "wt-1")
     handoff_trace.read_trace("proj-a", "wt-1")
     assert len(calls) == 1, "second read_trace call must be a cache hit, not a re-parse"
