@@ -25,18 +25,26 @@ declarations are live. The orchestrator's job is register -> confirm -> observe
    doctor/status diagnosis reference table), and the agent-dispatch
    `README.md`'s global-recipe table -- which documents that
    `effort-driver-loop` has **no dedicated CLI subcommand group** of its own.
-2. **Register once.** `agent-dispatch repository-issue-loop setup
+2. **Dry-run before registering anything.** `discover` on each of the three
+   repository-issue-loop declarations FIRST -- it works directly against the
+   declaration file and needs no prior registration -- to confirm real
+   eligible issues are seen before anything can mutate forge state. The
+   adoption doc is explicit that `discover` is the side-effect-free check and
+   `setup` (which exposes a declaration to the already-ticking coordinator's
+   cadence) comes only after its output looks right; running `setup` first
+   risks a real reservation/task landing before the dry-run ever confirms
+   anything.
+3. **Register once, then confirm service.** Only after all three dry-runs
+   look right, `agent-dispatch repository-issue-loop setup
    <path-to-any-one-of-the-three-repository-issue-loop-declarations>`
    registers the **whole repo** as a `kind: repo` registrar pointer -- this
    single call is what makes all four declarations (including the
    effort-driver-loop one, which rides the same generic pointer) part of the
    declared profile set. The agent should confirm this with
    `agent-dispatch registrar list` / `agent-dispatch registrar discover`
-   rather than assuming it.
-3. **Dry-run before trusting.** `discover` on each of the three
-   repository-issue-loop declarations to confirm real eligible issues are
-   seen, then `status`/`doctor` to confirm each is actually being served (not
-   `missing-pointer`, not `overridden-off`).
+   rather than assuming it, then `status`/`doctor` each of the three
+   repository-issue-loop declarations to confirm each is actually being
+   served (not `missing-pointer`, not `overridden-off`).
 4. **No invented "run now."** There is no manual tick/force-run command. The
    already-running local coordinator ticks every declared unit on its own
    `cadence_seconds`/`tick_interval_seconds` (5 seconds in this fixture's

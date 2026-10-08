@@ -125,9 +125,15 @@ done
 
 # Independent real-forge evidence, repo-derived (no hardcoded issue/PR numbers).
 if [ -n "$_remote" ]; then
-    capture "pc-gh-issues" -- bash -lc "cd '$FIXTURE_DIR' && gh issue list --state all --limit 50 --json number,title,labels,state,comments" || true
-    capture "pc-gh-prs" -- bash -lc "cd '$FIXTURE_DIR' && gh pr list --state all --limit 50 --json number,title,state,headRefName" || true
-    pass "captured independent gh issue/PR evidence for the fixture repo (cr-logs/pc-gh-issues.log, pc-gh-prs.log)"
+    _gh_issues_ok=0
+    _gh_prs_ok=0
+    capture "pc-gh-issues" -- bash -lc "cd '$FIXTURE_DIR' && gh issue list --state all --limit 50 --json number,title,labels,state,comments" && _gh_issues_ok=1
+    capture "pc-gh-prs" -- bash -lc "cd '$FIXTURE_DIR' && gh pr list --state all --limit 50 --json number,title,state,headRefName" && _gh_prs_ok=1
+    if [ "$_gh_issues_ok" = 1 ] && [ "$_gh_prs_ok" = 1 ]; then
+        pass "captured independent gh issue/PR evidence for the fixture repo (cr-logs/pc-gh-issues.log, pc-gh-prs.log)"
+    else
+        jam "dispatch-config" "independent gh issue/PR evidence capture failed (see cr-logs/pc-gh-issues.log, cr-logs/pc-gh-prs.log)" "a failed capture must not be reported as captured evidence -- check gh auth/rate limits"
+    fi
 else
     jam "dispatch-config" "could not resolve the fixture repo's own git remote for independent gh evidence" "verify $FIXTURE_DIR is a real git checkout"
 fi
