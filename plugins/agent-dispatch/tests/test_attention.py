@@ -201,6 +201,15 @@ def test_dispatch_task_mapping(task, state):
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "card", "show", "t1"]}
 
 
+def test_the_coordinators_epoch_timestamps_become_iso(tmp_path):
+    """The coordinator reports updated_at as epoch seconds (a float)."""
+    tasks = [{"id": "t1", "title": "A", "status": "submitted", "updated_at": 1790922891.0485818}]
+    result = srcs.read_dispatch(lambda: _Client(tasks), T1)
+    env = _collect({"dispatch": lambda r: result}, FirstObserved(tmp_path / "o.json"))
+    assert env["sources"][0]["status"] == "ok"
+    assert env["items"][0]["updated_at"] == "2026-10-02T06:34:51+00:00"
+
+
 # -- command sources ---------------------------------------------------------------------
 
 

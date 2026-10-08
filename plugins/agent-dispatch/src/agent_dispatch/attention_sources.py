@@ -31,6 +31,13 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def iso(value: Any, fallback: str) -> str:
+    """A coordinator timestamp (epoch seconds, or already ISO-8601) as ISO-8601 UTC."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec="seconds")
+    return value if isinstance(value, str) and value else fallback
+
+
 # -- the dispatch source ---------------------------------------------------------
 
 
@@ -56,7 +63,7 @@ def _task_item(task: dict[str, Any], read_at: str) -> dict[str, Any] | None:
     item = {
         "schema": ac.SCHEMA, "entity": "task", "entity_ref": task_id, "lifecycle_state": status,
         "display_state": state, "severity": ac.SEVERITY[state], "reason": ac.one_line(reason),
-        "created_at": None, "updated_at": task.get("updated_at") or read_at,
+        "created_at": None, "updated_at": iso(task.get("updated_at"), read_at),
         "confidence": "reported", "actions": [show], "source": "dispatch",
         "id": ac.make_id("dispatch", "task", task_id), "also": [], **extra,
     }
