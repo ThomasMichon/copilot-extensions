@@ -157,7 +157,9 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
   another source's first-observed time. The command prints the same source-result envelope a
   built-in adapter returns, `{"schema": 1, "items": [...], "status"?,
   "uncertain"?, "error"?, "read_at"?}`, so a partial read can say so: it reports
-  `status: uncertain` with the count of entities it couldn't classify. Omitted
+  `status: uncertain` with the count of gaps it couldn't account for (entities it
+  couldn't classify, or parts it couldn't read; see `status` in
+  [contract.md](contract.md)). Omitted
   fields are translated, never guessed: no `status` means `ok` when `uncertain`
   is absent or 0 and `uncertain` otherwise; no `read_at` means the aggregator's
   receipt time. `disabled` is the aggregator's to set, never a command's. Its own
