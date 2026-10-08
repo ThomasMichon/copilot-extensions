@@ -2992,6 +2992,21 @@ def _boom(*a, **k):  # pragma: no cover - only fires on regression
 # ---------------------------------------------------------------------------
 
 
+def _write_valid_slot(tmp_path, version: str = "1.0.0-dev1", *, sub=("Scripts", "python.exe")):
+    """Create a realistic ``versions/<version>/<sub>`` interpreter plus its
+    matching ``.install-complete.json`` completion marker, so
+    ``current_runtime_python()``'s marker validation succeeds."""
+    import json
+    slot = tmp_path / "versions" / version
+    python_path = slot.joinpath(*sub)
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": version}), encoding="utf-8"
+    )
+    return python_path
+
+
 def test_ensure_status_monitor_spawns_with_the_current_runtime_interpreter_not_sys_executable(
     monkeypatch, tmp_path,
 ):
@@ -3007,9 +3022,7 @@ def test_ensure_status_monitor_spawns_with_the_current_runtime_interpreter_not_s
     monkeypatch.setattr(_locks, "read_lock", lambda p: None)  # no live monitor
     monkeypatch.setattr(_locks, "lock_is_live", lambda d: False)
 
-    current_python = tmp_path / "current" / "python.exe"
-    current_python.parent.mkdir(parents=True)
-    current_python.write_text("", encoding="utf-8")
+    current_python = _write_valid_slot(tmp_path)
     from agent_worktrees import config as _cfg
     monkeypatch.setattr(_cfg, "venv_python", lambda: current_python)
 
@@ -3215,9 +3228,7 @@ def test_cmd_restart_reports_stale_runtime_reap_count(monkeypatch, capsys):
 
 
 def test_current_runtime_python_prefers_the_resolved_current_slot(monkeypatch, tmp_path):
-    current_python = tmp_path / "current" / "python.exe"
-    current_python.parent.mkdir(parents=True)
-    current_python.write_text("", encoding="utf-8")
+    current_python = _write_valid_slot(tmp_path)
     from agent_worktrees import config as _cfg
     monkeypatch.setattr(_cfg, "venv_python", lambda: current_python)
 
@@ -3230,6 +3241,65 @@ def test_current_runtime_python_falls_back_to_sys_executable(monkeypatch):
     monkeypatch.setattr(_cfg, "venv_python", lambda: Path("/does/not/exist/python"))
 
     assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_slot_with_no_completion_marker(
+    monkeypatch, tmp_path,
+):
+    """venv_python() itself accepts any existing interpreter unconditionally
+    -- a stale/corrupt current-version pointer, or a slot directory
+    mid-install with no completion marker at all, must not be trusted as a
+    complete, startable runtime."""
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    # No .install-complete.json written -- an in-progress/incomplete install.
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_naming_a_different_version(
+    monkeypatch, tmp_path,
+):
+    """A completion marker that names a DIFFERENT version than its own slot
+    directory (a stale marker copied/left over from a prior slot) must not
+    validate that slot either."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": "0.9.0-dev1"}), encoding="utf-8"
+    )
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_falls_back_to_another_validated_slot(
+    monkeypatch, tmp_path,
+):
+    """When the resolved current-version slot's own marker doesn't
+    validate, scan for and use any OTHER validated slot under the same
+    ``versions/`` directory, rather than giving up straight to
+    sys.executable while a perfectly good, complete slot sits right next
+    to the broken one."""
+    bad_slot = tmp_path / "versions" / "2.0.0-dev1"
+    bad_python = bad_slot / "Scripts" / "python.exe"
+    bad_python.parent.mkdir(parents=True)
+    bad_python.write_text("", encoding="utf-8")  # no marker -- invalid
+
+    good_python = _write_valid_slot(tmp_path, version="1.0.0-dev1")
+
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: bad_python)
+
+    assert status_monitor_reap_stale.current_runtime_python() == str(good_python)
 
 
 def test_schedule_delayed_daemon_health_reap_spawns_reap_stale_with_delay(monkeypatch):

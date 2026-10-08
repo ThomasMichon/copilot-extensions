@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from pathlib import Path
 
 # Long enough to reliably outlast the predecessor's own self-retire debounce
 # (2 confirmations 15s apart -- 30s minimum, copilot-extensions#5453) with
@@ -55,21 +56,68 @@ DEFAULT_DELAY_SECONDS = 120.0
 MAX_DELAY_SECONDS = 3600.0
 
 
+def _slot_marker_valid(slot: Path, version: str) -> bool:
+    """Whether ``slot`` carries a well-formed ``.install-complete.json``
+    marker naming exactly ``version`` -- the cheap half of the canonical
+    binstub resolvers' own validation (``scripts/resolve-runtime.ps1``'s
+    ``_Aw-MarkerValid``, ``resolve-runtime.sh``'s equivalent): a stale or
+    hand-edited ``current-version``/``last-known-good`` pointer, or a slot
+    directory mid-install with no completion marker yet, must not be
+    trusted as a complete, startable runtime."""
+    try:
+        import json
+        marker = json.loads((slot / ".install-complete.json").read_text("utf-8"))
+        return isinstance(marker, dict) and marker.get("version") == version
+    except Exception:
+        return False
+
+
 def current_runtime_python() -> str:
-    """The CURRENT runtime slot's interpreter path (``config.venv_python()``
-    -- the same resolver the hooks/binstubs use), falling back to this
-    process's own ``sys.executable`` only if that resolved path doesn't
-    actually exist. A long-delayed caller (e.g. this module's own
-    ``status-monitor-reap-stale``, which can run up to its configured
-    delay after being spawned) may itself be running from a slot that is
-    no longer current by the time it spawns a monitor -- spawning with a
-    stale interpreter would start an already-superseded monitor that gets
-    immediately retired despite reporting success."""
+    """The CURRENT runtime slot's interpreter path, falling back to this
+    process's own ``sys.executable`` only if no validated slot resolves. A
+    long-delayed caller (e.g. this module's own ``status-monitor-reap-stale``,
+    which can run up to its configured delay after being spawned) may
+    itself be running from a slot that is no longer current by the time it
+    spawns a monitor -- spawning with a stale interpreter would start an
+    already-superseded (or, worse, incomplete/broken) monitor that
+    ``_ensure_status_monitor()`` would otherwise report as successfully
+    ensured despite an immediate exit.
+
+    Uses ``config.venv_python()`` (the same current-version ->
+    last-known-good -> newest-slot resolution ORDER the canonical
+    hooks/binstubs use) but additionally validates each candidate's
+    ``.install-complete.json`` completion marker before trusting it
+    (``_slot_marker_valid``) -- ``venv_python()`` itself accepts any
+    existing interpreter file unconditionally, which the canonical
+    resolvers do not. This does NOT replicate the canonical resolvers'
+    full semantic-version-ordering comparison for the final
+    newest-complete-slot fallback (a direct, lexicographic ``versions/``
+    directory-name sort is used instead, which is not a semver-exact
+    ordering for all possible version-string shapes): doing so exactly
+    would mean forking/duplicating that comparison logic a second time in
+    Python, a larger, separate hardening effort for ``config.venv_python()``
+    itself (already used elsewhere in this codebase), not scoped to this
+    interim mitigation."""
     try:
         from . import config as _cfg
         current = _cfg.venv_python()
         if current.exists():
-            return str(current)
+            root = current.parents[1] if current.parent.name in ("Scripts", "bin") else current.parent
+            version = root.name
+            if _slot_marker_valid(root, version):
+                return str(current)
+            # The resolved slot's own marker didn't validate (stale pointer
+            # or an in-progress install) -- scan for any OTHER validated
+            # slot rather than trusting an unvalidated interpreter.
+            versions_dir = root.parent
+            if versions_dir.is_dir():
+                for slot in sorted(versions_dir.iterdir(), reverse=True):
+                    if slot == root or not _slot_marker_valid(slot, slot.name):
+                        continue
+                    for sub in (("Scripts", "python.exe"), ("bin", "python")):
+                        candidate = slot.joinpath(*sub)
+                        if candidate.exists():
+                            return str(candidate)
     except Exception:
         pass
     return sys.executable
