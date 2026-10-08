@@ -295,14 +295,24 @@ not, per the Recommendation above.
 
 ## Status
 
+**6b/6c implementation update:** `worktree_git_facts.compute` now owns the
+full per-record wrapper and both call paths delegate to it. Lists remain
+no-fetch and use their targeted session-turn scan; bundles request a fetch,
+keep `active_paths=None`, and use durable turn counts for CONVO refinement.
+`status_monitor_cli` hosts both coalescing servers in the same resident
+process; the design's distinct request surfaces are not separate processes.
+Real isolated transport delegation and local-remote freshness-divergence
+tests passed with the affected contract suite. This does not close 6d.
+
 **Cache-stamp follow-on:** the background worker now waits boundedly for the
 exclusive record lock and warns on timeout/write failure; the synchronous
 best-effort surface is unchanged. Cross-process regression and real
 interpreter-exit tests prove recovery after short-lived contention and
 preservation of concurrent lifecycle fields. This addresses the dropped-write
 case described above, not the full live recurrence or daemon-authority gate.
-The original recommendations remain the design record; shared computation
-and snapshot/stream authority are still pending.
+The repair merged as #5700 and is present in the released source and deployed
+1.24.25-dev1 runtime. The original recommendations remain the design record;
+snapshot/stream authority and actual repeated-render stability remain pending.
 
 6a complete as scoped: all three consumer dataflows traced, the two
 additional findings from before this session (`current_worktree_status`'s
@@ -324,7 +334,9 @@ open and unaffected by anything in this trace. Not yet done: landing the
 primary (contended-write retry) and secondary (mux-visibility) oscillation
 fixes, confirming their real-world contribution via live reproduction,
 6b implementation, 6c's delegation test, and 6d's own snapshot/stream
-closing decision.
+closing decision. The implementation update above supersedes the design-era
+pending status for the primary stamp fix and 6b/6c only; it does not promote
+those completions into a Phase 6 or #5555 closure claim.
 
 ## Documentation impact
 
