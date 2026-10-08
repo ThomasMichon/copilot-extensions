@@ -33,10 +33,11 @@ supervision.
   such as pre-login start, missed-trigger recovery, or task-owned restart
   policy. Choosing that tier supersedes the matching HKCU Run entries rather
   than stacking both.
-- **Session start:** hooks publish guidance; the compatibility
-  `ensure-service` hook does not start a host or embedding engine. The explicit
-  installer `ensure` action can health-check and restore an already-installed
-  configured host without provisioning dependencies.
+- **Session start:** `hooks.json` publishes guidance and invokes the installer
+  `ensure` action as a bounded safety net. That action can health-check and
+  restore an already-installed configured host and its engine without
+  provisioning dependencies. The separate `ensure-service` compatibility
+  scripts are no-ops; they are not the active hook wiring.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
   remain self-contained and do not require `agent-dispatch`.

@@ -1691,7 +1691,7 @@ function Get-ActivationRole {
     if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
     if (-not $python) { return 'unconfigured' }
     $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
-    $role = (& $python.Source $resolver --repo $repoRoot --machine $me |
+    $role = (& $python.Source -E -X utf8 $resolver --repo $repoRoot --machine $me |
         Select-Object -Last 1)
     $role = ("$role").Trim().ToLower()
     return $(if ($role -in @('host', 'client')) { $role } else { 'unconfigured' })
