@@ -576,6 +576,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         pass
     finally:
         server.close()
+        daemon.close()
         lease.release()
     return 0
 
