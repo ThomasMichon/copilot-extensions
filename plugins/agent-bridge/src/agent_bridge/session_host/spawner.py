@@ -524,7 +524,7 @@ class CodeSpaceSpawner:
             reverse,
             serving_probe_for_port=self._serving_probe_for_port,
             host_port_resolver=get_live_relay_port,
-            reconnect_gate=self.can_inspect_without_wake if self.boundary == "codespace" else None,
+            reconnect_gate=getattr(self._transport, "reconnect_allowed", None),
         )
         relay_ports = relay_ports_from_reverse_forwards(reverse)
         started_relays = []

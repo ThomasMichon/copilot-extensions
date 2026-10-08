@@ -517,9 +517,27 @@ async def test_codespace_spawner_splits_relay_from_local_forward(monkeypatch):
     assert _FakeRelay.instances[0].started == 1
     assert spawned.relay == [_FakeRelay.instances[0]]
     assert spawned.endpoint["reverse_forwards"] == ["9857:127.0.0.1:9857"]
-    # A CodeSpace relay may only reconnect after a no-wake "is it running" check.
-    gate = _FakeRelay.instances[0].kw["reconnect_gate"]
-    assert gate.__func__ is sp.CodeSpaceSpawner.can_inspect_without_wake
+    # Relays reconnect only through the transport's no-wake gate, when it has one.
+    assert _FakeRelay.instances[0].kw["reconnect_gate"] is None
+
+
+@pytest.mark.asyncio
+async def test_codespace_spawner_gates_relay_reconnect_on_transport(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    t = _FakeTransport(
+        {"pid": 1, "child_pid": 2, "port": 51000},
+        reverse_forwards=["9857:127.0.0.1:9857"],
+    )
+
+    async def reconnect_allowed():
+        return True
+
+    t.reconnect_allowed = reconnect_allowed
+
+    await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(["copilot"], session_id="s")
+
+    assert _FakeRelay.instances[-1].kw["reconnect_gate"] is reconnect_allowed
 
 
 @pytest.mark.asyncio

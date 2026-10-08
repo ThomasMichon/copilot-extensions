@@ -156,7 +156,7 @@ def test_codespace_relay_gets_no_wake_reconnect_gate(monkeypatch):
     gate = captured[0]["reconnect_gate"]
     assert gate is not None
     assert gate.__self__.codespace_name == "example-cs"
-    assert gate.__name__ == "is_running"
+    assert gate.__name__ == "reconnect_allowed"
 
 
 def test_non_codespace_relay_has_no_reconnect_gate(monkeypatch):

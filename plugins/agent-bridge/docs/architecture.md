@@ -106,8 +106,10 @@ relay supervisors -- and their whole SSH process tree, including a
 is explicitly stopped (a redeploy detach keeps it for the surviving turn, and a
 later resume re-supervises it from the durable endpoint). A CodeSpace relay's
 supervisor also checks the CodeSpace's state through the GitHub API before any
-reconnect and retires instead of reconnecting when it is stopped, so a relay
-never re-wakes a CodeSpace that was stopped on purpose.
+reconnect: it retires instead of reconnecting when the CodeSpace is stopped,
+and backs off without connecting while it is in a transitional state (e.g.
+starting or shutting down), so a relay never re-wakes a CodeSpace that was
+stopped on purpose yet still recovers across a restart.
 
 The relay speaks the git credential protocol over TCP and supports the standard
 `get`/`fill`, `store`/`approve`, and `erase`/`reject` shapes plus token actions

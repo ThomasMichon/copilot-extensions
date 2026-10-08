@@ -183,10 +183,11 @@ def relay_forwards_from_ssh_config(
 def codespace_reconnect_gate(
     endpoint: dict[str, Any],
 ) -> Callable[[], Awaitable[bool]] | None:
-    """Return a no-wake "is the CodeSpace running" check for ``endpoint``.
+    """Return a no-wake relay reconnect gate for a CodeSpace ``endpoint``.
 
-    ``None`` for a non-CodeSpace endpoint. The check reads the CodeSpace state
-    from the GitHub API (never over SSH, which would start a stopped one).
+    ``None`` for a non-CodeSpace endpoint. The gate reads the CodeSpace state
+    from the GitHub API (never over SSH, which would start a stopped one); see
+    ``CodeSpaceTransport.reconnect_allowed``.
     """
     name = endpoint.get("codespace")
     if endpoint.get("kind") != "codespace" or not isinstance(name, str) or not name:
@@ -194,7 +195,7 @@ def codespace_reconnect_gate(
     from .codespace_transport import CodeSpaceTransport
 
     transport = CodeSpaceTransport(name, str(endpoint.get("repo") or ""))
-    return transport.is_running
+    return transport.reconnect_allowed
 
 
 def relay_forwards_from_endpoint(
