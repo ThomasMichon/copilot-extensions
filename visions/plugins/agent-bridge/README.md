@@ -826,8 +826,11 @@ machine may deliberately gate outbound reach until policy allows it.
 - Sibling leaf: [agent-dispatch](../agent-dispatch/README.md) — the delegation
   layer that records claimable work, may embody workers through this runtime,
   and can hibernate a genuinely asynchronous wait until work needs attention.
-- Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer the
-  bridge's cross-machine reach rides on.
+- Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity authority
+  for the bridge's static/SSH-backed reach.
+- Related: [machine-fleet](../../machine-fleet/README.md) — optional
+  driver-based Gateway routing over the same supported coordination contracts,
+  without replacing bridge/session authority.
 - Venue provider: [agent-codespaces](../agent-codespaces/README.md) — a remote
   venue presented through the bridge's coordination contract.
 - Cold-store provider: [agent-logger](../agent-logger/README.md) — registers

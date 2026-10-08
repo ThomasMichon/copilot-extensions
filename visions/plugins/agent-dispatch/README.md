@@ -1100,8 +1100,10 @@ parallel contract.
 - Child leaf: [task outputs and review](task-outputs-and-review/README.md) —
   formatted and contract-checked output, history, confirmation authority,
   asynchronous steering receipts, and completed-task follow-ups.
-- Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer this
-  layer's cross-machine reach rides on.
+- Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity authority
+  for this layer's static/SSH-backed reach.
+- Related: [machine-fleet](../../machine-fleet/README.md) — optional Gateway
+  routing and reconciliation receipts without replacing dispatch task/claim state.
 - Consumer: [agent-logger](../agent-logger/README.md) — the **chronicler**, a
   scheduled-production consumer whose per-session units are ordinary claimable
   tasks on this layer's mesh.

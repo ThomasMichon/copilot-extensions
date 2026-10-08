@@ -15,8 +15,9 @@
 The credential relay already proved a specific shape: agent-bridge hosts one
 server: a provider plugin (`agent-codespaces`, `agent-containers`) contributes
 a `CredentialSource` without agent-bridge's core ever importing that provider
-package, and a remote venue reaches it over the same SSH back-channel every
-venue already carries. It works because the contract is narrow, the source is
+package, and a remote SSH-backed venue reaches it over its shared SSH back-channel.
+An adopted Gateway fleet can carry the same scoped provider contract over its
+selected channel. It works because the contract is narrow, the source is
 pluggable, and ownership of what the source actually does stays with the
 plugin that registered it.
 
