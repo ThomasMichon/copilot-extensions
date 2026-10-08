@@ -296,3 +296,19 @@ def test_stop_cli_refuses_detached_master_and_force_overrides(monkeypatch, tmp_p
 
     assert cli.main(["stop", NAME, "--no-sync", "--force"]) == 0
     assert stopped == [NAME]
+
+
+def test_ps_fallback_matches_config_paths_containing_spaces(monkeypatch):
+    """The `ps` fallback cannot recover argv boundaries; a config path with a
+    space must still identify the live session (fail toward in-use)."""
+    spaced = "/Users/A B/.ssh-manager/codespace-config"
+    monkeypatch.setattr(lu, "_raw_config_paths", lambda name: (f"{spaced}/{NAME}.config",))
+    monkeypatch.setattr(lu, "config_paths",
+                        lambda name: frozenset({lu._norm(f"{spaced}/{NAME}.config")}))
+    out = f"  101     1 ssh -F {spaced}/{NAME}.config -o ControlMaster=yes -N cs.host\n"
+    monkeypatch.setattr(lu.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=out))
+    table = lu._read_proc_ps()
+    assert table[0].raw.startswith("ssh -F /Users/A B/")
+    users = lu.live_users(NAME, table=table)
+    assert [(u.pid, u.role) for u in users] == [(101, lu.ROLE_CONTROL_MASTER)]

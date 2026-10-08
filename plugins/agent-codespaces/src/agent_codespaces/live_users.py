@@ -51,11 +51,16 @@ _GH_SUBCOMMANDS = {"ssh", "ports", "cp", "code", "logs", "jupyter"}
 
 @dataclass(frozen=True)
 class ProcInfo:
-    """One local process: pid, parent pid, and argv."""
+    """One local process: pid, parent pid, and argv.
+
+    ``raw`` is the unsplit command line when argv boundaries could not be
+    recovered (the ``ps`` fallback), so paths containing spaces still match.
+    """
 
     pid: int
     ppid: int
     argv: tuple[str, ...]
+    raw: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,10 +95,14 @@ def _norm(path: str) -> str:
 def config_paths(name: str) -> frozenset[str]:
     """Normalized paths of every generated ``-F`` config for ``name``: the
     ssh-manager default directory (agent-bridge) and agent-codespaces' own."""
+    return frozenset(_norm(p) for p in _raw_config_paths(name))
+
+
+def _raw_config_paths(name: str) -> tuple[str, ...]:
     from .codespace_config import SSH_CONFIG_DIR
 
     dirs = (Path.home() / ".ssh-manager" / "codespace-config", SSH_CONFIG_DIR)
-    return frozenset(_norm(str(d / config_file_name(name))) for d in dirs)
+    return tuple(str(d / config_file_name(name)) for d in dirs)
 
 
 def _read_proc_linux() -> list[ProcInfo] | None:
@@ -126,7 +135,7 @@ def _read_proc_linux() -> list[ProcInfo] | None:
 def _read_proc_ps() -> list[ProcInfo] | None:
     try:
         result = subprocess.run(
-            ["ps", "-axo", "pid=,ppid=,command="],
+            ["ps", "-axww", "-o", "pid=,ppid=,command="],
             capture_output=True, text=True, timeout=10, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -135,11 +144,12 @@ def _read_proc_ps() -> list[ProcInfo] | None:
         return None
     procs: list[ProcInfo] = []
     for line in result.stdout.splitlines():
-        parts = line.split()
+        parts = line.split(None, 2)
         if len(parts) < 3:
             continue
         try:
-            procs.append(ProcInfo(int(parts[0]), int(parts[1]), tuple(parts[2:])))
+            procs.append(ProcInfo(int(parts[0]), int(parts[1]), tuple(parts[2].split()),
+                                  raw=parts[2].strip()))
         except ValueError:
             continue
     return procs
@@ -258,6 +268,7 @@ def users_from_table(
 ) -> list[LiveUser]:
     """Live users of ``name`` found in a process-table snapshot."""
     cfgs = config_paths(name)
+    raw_cfgs = _raw_config_paths(name)
     by_pid = {p.pid: p for p in table}
     users: list[LiveUser] = []
     ssh_pids: set[int] = set()
@@ -265,7 +276,8 @@ def users_from_table(
         if proc.pid in exclude_pids or not _is_ssh(proc.argv):
             continue
         config = _option_value(proc.argv, "-F", attached=True)
-        if not config or _norm(config) not in cfgs:
+        if not (config and _norm(config) in cfgs) and not (
+                proc.raw and any(c in proc.raw for c in raw_cfgs)):
             continue
         classified = _ssh_role(proc.argv)
         if classified is None:
