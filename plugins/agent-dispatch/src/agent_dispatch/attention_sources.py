@@ -274,6 +274,21 @@ def _finish(name: str, result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _result_problem(raw: Any) -> str | None:
+    """What makes a reader's return value not a source result, or ``None``: a
+    contract violation is that source's ``failed``, never a crash of the read."""
+    if not isinstance(raw, dict):
+        return f"a {type(raw).__name__}, not an object"
+    if raw.get("status") not in ("ok", "failed", "uncertain"):
+        return f"status {raw.get('status')!r}"
+    if not isinstance(raw.get("items"), list):
+        return "no items list"
+    uncertain = raw.get("uncertain", 0)
+    if type(uncertain) is not int or uncertain < 0:
+        return f"uncertain {uncertain!r}"
+    return None
+
+
 def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: dict[str, float],
             selected: list[str] | None, config_errors: list[dict[str, str]],
             store: Any, read_at: str | None = None, read_token: int | None = None) -> dict[str, Any]:
@@ -314,6 +329,8 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
         raw = done[0] if done and done[1] <= deadlines[name] else None
         if raw is None:
             raw = ac.command_failure(f"timed out after {timeouts.get(name, DEFAULT_TIMEOUT):g}s")
+        elif problem := _result_problem(raw):
+            raw = ac.command_failure(f"malformed source result: {problem}")
         raw.setdefault("read_at", read_at)
         results[name] = _finish(name, raw)
     store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at, read_token)

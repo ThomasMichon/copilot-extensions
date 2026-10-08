@@ -471,7 +471,7 @@ def test_a_read_authenticated_only_by_a_token_argument_offers_no_actions(monkeyp
 
 def test_the_next_hint_walks_the_same_coordinator_and_sources(monkeypatch, capsys):
     tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
-    rc, out = _cli(monkeypatch, capsys, ["--url", "http://peer:8787", "--token", "s3cret", "--shared",
+    rc, out = _cli(monkeypatch, capsys, ["--url", "http://peer:8787", "--shared",
                                          "attention", "next", "--source", "dispatch"], tasks)
     hint = next(line for line in out.out.splitlines() if "next:" in line).split("next: ", 1)[1].split()
     assert hint[:4] == ["agent-dispatch", "--url", "http://peer:8787", "--shared"]
@@ -686,3 +686,23 @@ def test_a_coordinator_usage_error_fails_the_source_at_once():
                        store=FirstObserved(attention_store.default_path()), read_at=T1)
     assert env["status"] == "degraded" and "coordinator" in env["sources"][0]["error"]
     assert time.monotonic() - started < 5
+
+
+@pytest.mark.parametrize("raw", [None, [], {"items": []}, {"status": "ok"}, {"status": "great", "items": []},
+                                 {"status": "ok", "items": [], "uncertain": -1}])
+def test_a_malformed_reader_result_fails_that_source_not_the_read(tmp_path, raw):
+    env = _collect({"s": lambda _r: raw, "t": _ok()}, FirstObserved(tmp_path / "o.json"))
+    status = {s["name"]: s["status"] for s in env["sources"]}
+    assert status == {"s": "failed", "t": "ok"} and env["status"] == "degraded"
+
+
+@pytest.mark.parametrize("prefix", [["--token", "s3cret"], []])
+def test_no_next_hint_when_no_invocation_reaches_the_coordinator(monkeypatch, capsys, prefix):
+    class ViaPeer(_Client):
+        _tunnel = object()
+
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    monkeypatch.setattr(m, "_client", lambda args: (_Client if prefix else ViaPeer)(tasks))
+    args = m.build_parser().parse_args([*prefix, "attention", "next"])
+    assert args.func(args) == 0
+    assert "next:" not in capsys.readouterr().out

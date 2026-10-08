@@ -159,13 +159,21 @@ def _cmd_next(args: argparse.Namespace) -> int:
         print("Nothing needs you." if envelope["status"] == "clear" else "No items read.")
     else:
         print("\n".join(_item_lines(item)))
-        print("    next: " + " ".join(_next_argv(args, envelope, result["cursor"])))
+        hint = _next_argv(args, envelope, result["cursor"])
+        if hint:
+            print("    next: " + " ".join(hint))
     return 0
 
 
-def _next_argv(args: argparse.Namespace, envelope: dict[str, Any], cursor: str) -> list[str]:
-    """The follow-up that walks the same queue: same coordinator, same sources."""
-    argv = [*(getattr(args, "attention_cli", None) or _target_cli(args)), "attention", "next", "--after", cursor]
+def _next_argv(args: argparse.Namespace, envelope: dict[str, Any], cursor: str) -> list[str] | None:
+    """The follow-up that walks the same queue: same coordinator, same sources.
+    ``None`` when no invocation reaches this read's coordinator as-is (a
+    ``--token`` argument or an SSH failover): a hint that silently walked
+    another queue would be worse than none."""
+    cli = getattr(args, "attention_cli", _target_cli(args))
+    if cli is None:
+        return None
+    argv = [*cli, "attention", "next", "--after", cursor]
     for name in envelope["selected"] or ():
         argv += ["--source", name]
     return argv
