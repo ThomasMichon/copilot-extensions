@@ -291,6 +291,8 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
     def run(name: str) -> None:
         try:
             result = readers[name](read_at)
+        except SystemExit as exc:  # a usage error raised while choosing the coordinator
+            result = ac.command_failure(f"could not reach its coordinator (exit {exc.code})")
         except Exception as exc:  # noqa: BLE001 -- a source failure is that source's, never the aggregate's
             result = ac.command_failure(f"{type(exc).__name__}: {exc}")
         outcomes[name] = (result, time.monotonic())

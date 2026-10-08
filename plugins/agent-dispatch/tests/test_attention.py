@@ -649,3 +649,40 @@ def test_a_silent_failover_to_the_shared_coordinator_is_pinned_in_actions(monkey
     out = capsys.readouterr().out
     assert "agent-dispatch --shared show t1" in out
     assert "next: agent-dispatch --shared attention next --after" in out
+
+
+@pytest.mark.parametrize("severity", [False, 1.0, True])
+def test_a_severity_that_only_compares_equal_is_rejected(severity):
+    with pytest.raises(ac.ContractError):
+        ac.validate_item({**_item(state="failed"), "severity": severity})
+
+
+def test_a_command_source_cannot_set_input():
+    with pytest.raises(ac.ContractError, match="input"):
+        ac.stamp_command_item({"schema": 1, "entity": "task", "entity_ref": "t1", "lifecycle_state": "x",
+                               "display_state": "awaiting_input", "reason": "r", "confidence": "reported",
+                               "actions": [], "input": {"answer": "text"}}, name="ext")
+
+
+def test_an_ssh_failover_read_offers_no_actions(monkeypatch, capsys):
+    class ViaPeer(_Client):
+        _tunnel = object()  # an SSH port-forward to a peer's coordinator
+
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    monkeypatch.setattr(m, "_client", lambda args: ViaPeer(tasks))
+    args = m.build_parser().parse_args(["attention", "--json"])
+    assert args.func(args) == 0
+    assert json.loads(capsys.readouterr().out)["items"][0]["actions"] == []
+
+
+def test_a_coordinator_usage_error_fails_the_source_at_once():
+    import time
+
+    def reader(_read_at):
+        raise SystemExit(2)  # e.g. --shared with no shared coordinator configured
+
+    started = time.monotonic()
+    env = srcs.collect({"dispatch": reader}, timeouts={"dispatch": 20.0}, selected=None, config_errors=[],
+                       store=FirstObserved(attention_store.default_path()), read_at=T1)
+    assert env["status"] == "degraded" and "coordinator" in env["sources"][0]["error"]
+    assert time.monotonic() - started < 5

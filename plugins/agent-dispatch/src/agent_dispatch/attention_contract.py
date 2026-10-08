@@ -133,8 +133,8 @@ def validate_item(item: Any) -> None:
         raise ContractError("lifecycle_state must be a string or null")
     if item["display_state"] not in SEVERITY:
         raise ContractError(f"display_state {item['display_state']!r} is unknown")
-    if item["severity"] != SEVERITY[item["display_state"]]:
-        raise ContractError("severity does not match display_state")
+    if type(item["severity"]) is not int or item["severity"] != SEVERITY[item["display_state"]]:
+        raise ContractError("severity must be the integer that matches display_state")
     if not isinstance(item["reason"], str) or not item["reason"] or len(item["reason"]) > REASON_MAX \
             or "\n" in item["reason"]:
         raise ContractError(f"reason must be one non-empty line of at most {REASON_MAX} characters")
@@ -296,6 +296,8 @@ def stamp_command_item(item: Any, *, name: str) -> dict[str, Any]:
         raise ContractError(f"item id {item['id']!r} is not {derived!r}")
     if "also" in item and item["also"] != []:  # {}, null and "" are malformed too, not "empty"
         raise ContractError("also[] is aggregator-owned; a source must not fill it")
+    if "input" in item:  # its only submission path is `steer submit`, for a dispatch card
+        raise ContractError("input is reserved for dispatch steering items; a command source can't set it")
     item.update(source=name, id=derived, also=[])
     for key in ("created_at", "updated_at"):  # a command may send any ISO-8601 spelling
         if item.get(key) is not None:
