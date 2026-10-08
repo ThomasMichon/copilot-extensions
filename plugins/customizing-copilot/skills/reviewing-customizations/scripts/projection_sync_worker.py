@@ -100,7 +100,8 @@ class SyncOutcome:
     A caller reads exactly these properties to decide its next action --
     never re-invoking this tool to learn more about the same run:
 
-    * ``needs_pr`` false: nothing to report; do not open a PR at all.
+    * ``needs_pr`` false: no change or conflict; do not open a PR. Retain
+      any ``audit_warnings`` for periodic budget balancing.
     * ``needs_pr`` true and ``bypass_eligible`` true: the sync's own diff is
       safe to land via a bypass-eligible, auto-mergeable PR.
     * ``needs_pr`` true, ``bypass_eligible`` false, and
@@ -129,11 +130,14 @@ class SyncOutcome:
 
     @property
     def needs_pr(self) -> bool:
-        # Matches the Plan's "only when there is truly nothing to report
-        # does the worker skip opening a PR": a scan finding with no file
-        # change at all still warrants a PR (or at least a report), even
-        # when sync itself did nothing.
-        return self.has_actionable_change or bool(self.findings)
+        classification = reflect.classify_findings(self.findings)
+        return self.has_actionable_change or bool(
+            classification.plain or classification.conflict
+        )
+
+    @property
+    def audit_warnings(self) -> tuple[object, ...]:
+        return reflect.classify_findings(self.findings).advisory
 
     @property
     def bypass_eligible(self) -> bool:
@@ -157,6 +161,15 @@ class SyncOutcome:
             "changed": list(self.changed),
             "lockUpdated": self.lock_updated,
             "findingCount": len(self.findings),
+            "auditWarnings": [
+                {
+                    "severity": getattr(finding, "severity"),
+                    "check": getattr(finding, "check"),
+                    "path": getattr(finding, "path"),
+                    "message": getattr(finding, "message"),
+                }
+                for finding in self.audit_warnings
+            ],
             "needsPr": self.needs_pr,
             "bypassEligible": self.bypass_eligible,
             "needsConflictDispatch": self.needs_conflict_dispatch,
@@ -286,7 +299,7 @@ def run_sync_pass(
     ]
 
     # `sync`'s own findings (e.g. a failed-to-acquire sync lock, a rejected
-    # ownership conflict, or a budget overrun) must feed the same decision
+    # ownership conflict, or a budget advisory) must feed the same decision
     # as `scan`'s: a sync failure followed by an otherwise-clean scan must
     # never look like a successful no-op just because scan itself found
     # nothing new to report.
@@ -415,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             for reason in outcome.bypass.reasons:
                 print(f"  - {reason}")
+        for finding in outcome.audit_warnings:
+            print(
+                f"[WARN] {getattr(finding, 'path')}: "
+                f"{getattr(finding, 'message')}"
+            )
     return 0
 
 

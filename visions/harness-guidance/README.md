@@ -105,8 +105,9 @@ Always-on context should be measurable by source and category so repositories,
 plugins, and operators can make deliberate tradeoffs within a shared budget.
 Injected kernels should carry a stable plugin owner marker.
 
-Context-budget excess should remain attributable through periodic auditing,
-not prevent otherwise-safe local guidance from reaching a session. Size
+Aggregate context-budget excess should remain attributable through periodic
+auditing and deliberate balancing, not prevent otherwise-safe guidance from
+being refreshed when a plugin changes or a new one is enabled. Size
 accounting must not silently omit sources or substitute missing guidance for a
 budget warning.
 

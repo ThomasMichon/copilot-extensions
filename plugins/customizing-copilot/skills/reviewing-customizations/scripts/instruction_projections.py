@@ -1961,11 +1961,11 @@ def scan_repository(
             total_bytes += len(raw)
     if total_bytes > aggregate_budget:
         result.add(
-            BLOCKING,
-            "projection-budget",
+            WARNING,
+            "projection-aggregate-budget",
             LOCK_RELATIVE.as_posix(),
             f"projection aggregate is {total_bytes} bytes; budget is "
-            f"{aggregate_budget} bytes",
+            f"{aggregate_budget} bytes (over by {total_bytes - aggregate_budget} bytes)",
         )
     _scan_orphan_files(root, lock, result)
 
@@ -2299,11 +2299,11 @@ def _sync_repository_locked(
     aggregate = sum(int(entry["renderedBytes"]) for entry in merged.values())
     if aggregate > aggregate_budget:
         result.add(
-            BLOCKING,
-            "projection-budget",
+            WARNING,
+            "projection-aggregate-budget",
             LOCK_RELATIVE.as_posix(),
             f"resulting projection aggregate is {aggregate} bytes; budget is "
-            f"{aggregate_budget} bytes",
+            f"{aggregate_budget} bytes (over by {aggregate - aggregate_budget} bytes)",
         )
     if result.blocking:
         return result
