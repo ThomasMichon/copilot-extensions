@@ -2985,6 +2985,70 @@ def _boom(*a, **k):  # pragma: no cover - only fires on regression
 
 
 # ---------------------------------------------------------------------------
+# _ensure_status_monitor -- version-skew regression: a long-delayed caller
+# (e.g. status-monitor-reap-stale, which can run up to its configured delay
+# after being spawned) must spawn with the CURRENT runtime slot's
+# interpreter, not its own process's possibly-stale sys.executable.
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_status_monitor_spawns_with_the_current_runtime_interpreter_not_sys_executable(
+    monkeypatch, tmp_path,
+):
+    """Regression: a caller running from an OLD slot's sys.executable (a
+    long-delayed status-monitor-reap-stale invocation whose own slot was
+    superseded mid-delay) must still spawn the monitor with the CURRENT
+    slot's interpreter (cfg.venv_python()), never its own stale
+    sys.executable -- or the spawned monitor is itself already-superseded,
+    gets immediately detected and retired by status_monitor_cli, despite
+    this function reporting success."""
+    from agent_worktrees import locks as _locks
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: "/tmp/mon.lock")
+    monkeypatch.setattr(_locks, "read_lock", lambda p: None)  # no live monitor
+    monkeypatch.setattr(_locks, "lock_is_live", lambda d: False)
+
+    current_python = tmp_path / "current" / "python.exe"
+    current_python.parent.mkdir(parents=True)
+    current_python.write_text("", encoding="utf-8")
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: current_python)
+
+    spawned = {"argv": None}
+    monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.update(argv=argv) or True)
+
+    ok = m._ensure_status_monitor()
+
+    assert ok is True
+    assert spawned["argv"][0] == str(current_python)
+    assert spawned["argv"][0] != m.sys.executable
+
+
+def test_ensure_status_monitor_falls_back_to_sys_executable_when_no_slot_resolves(
+    monkeypatch,
+):
+    """When cfg.venv_python() can't resolve any installed slot (an unusual
+    environment with nothing installed at all), fall back to this
+    process's own sys.executable rather than spawning a non-existent
+    path."""
+    from agent_worktrees import locks as _locks
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: "/tmp/mon.lock")
+    monkeypatch.setattr(_locks, "read_lock", lambda p: None)
+    monkeypatch.setattr(_locks, "lock_is_live", lambda d: False)
+
+    from agent_worktrees import config as _cfg
+    from pathlib import Path
+    monkeypatch.setattr(_cfg, "venv_python", lambda: Path("/does/not/exist/python"))
+
+    spawned = {"argv": None}
+    monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.update(argv=argv) or True)
+
+    ok = m._ensure_status_monitor()
+
+    assert ok is True
+    assert spawned["argv"][0] == m.sys.executable
+
+
+# ---------------------------------------------------------------------------
 # _restart_status_monitor -- the auto-update cutover seam (consolidated-status-
 # daemon Phase 1, dotfiles#1696): reap a superseded monitor + spawn the current
 # one so a deploy never leaves live sessions' bars frozen.
@@ -3150,6 +3214,24 @@ def test_cmd_restart_reports_stale_runtime_reap_count(monkeypatch, capsys):
 # ---------------------------------------------------------------------------
 
 
+def test_current_runtime_python_prefers_the_resolved_current_slot(monkeypatch, tmp_path):
+    current_python = tmp_path / "current" / "python.exe"
+    current_python.parent.mkdir(parents=True)
+    current_python.write_text("", encoding="utf-8")
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: current_python)
+
+    assert status_monitor_reap_stale.current_runtime_python() == str(current_python)
+
+
+def test_current_runtime_python_falls_back_to_sys_executable(monkeypatch):
+    from agent_worktrees import config as _cfg
+    from pathlib import Path
+    monkeypatch.setattr(_cfg, "venv_python", lambda: Path("/does/not/exist/python"))
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
 def test_schedule_delayed_daemon_health_reap_spawns_reap_stale_with_delay(monkeypatch):
     spawned = {"argv": None}
 
@@ -3245,6 +3327,7 @@ def _patch_cutover_lock(monkeypatch, *, acquirable: bool):
     cutover (``acquirable=False``, raises ``AlreadyRunningError`` exactly
     like the real ``SingleInstance.acquire()`` does)."""
     from agent_worktrees import status_monitor_cutover as smc
+    from pathlib import Path
     from single_instance_lease import AlreadyRunningError
 
     released = {"n": 0}
@@ -3256,7 +3339,7 @@ def _patch_cutover_lock(monkeypatch, *, acquirable: bool):
     def _acquire(lock_root, *, timeout_s=0.0, poll_s=0.2):
         if acquirable:
             return _FakeLease()
-        raise AlreadyRunningError(holder_pid=4242)
+        raise AlreadyRunningError(Path(lock_root) / "cutover.lock", 4242)
 
     monkeypatch.setattr(smc, "_acquire_cutover_lock", _acquire)
     return released
@@ -3347,6 +3430,12 @@ def test_cmd_reap_stale_does_not_ensure_while_a_cutover_is_in_progress(monkeypat
     assert rc == 0
     assert ensured["calls"] == 0
     assert candidates_called["n"] == 0  # never even re-checked while busy
+
+    # Directly confirm the helper genuinely observes AlreadyRunningError
+    # (not some other exception silently caught by the broad except and
+    # reported as "error:..." instead) -- the real regression this guards.
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+    assert outcome == "skipped-cutover-busy"
 
 
 def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):

@@ -55,6 +55,26 @@ DEFAULT_DELAY_SECONDS = 120.0
 MAX_DELAY_SECONDS = 3600.0
 
 
+def current_runtime_python() -> str:
+    """The CURRENT runtime slot's interpreter path (``config.venv_python()``
+    -- the same resolver the hooks/binstubs use), falling back to this
+    process's own ``sys.executable`` only if that resolved path doesn't
+    actually exist. A long-delayed caller (e.g. this module's own
+    ``status-monitor-reap-stale``, which can run up to its configured
+    delay after being spawned) may itself be running from a slot that is
+    no longer current by the time it spawns a monitor -- spawning with a
+    stale interpreter would start an already-superseded monitor that gets
+    immediately retired despite reporting success."""
+    try:
+        from . import config as _cfg
+        current = _cfg.venv_python()
+        if current.exists():
+            return str(current)
+    except Exception:
+        pass
+    return sys.executable
+
+
 def _finite_non_negative_seconds(value: str) -> float:
     """``argparse`` ``type=`` validator for ``--delay-seconds``: rejects
     non-finite (``inf``/``nan``), negative, and unreasonably large values at
