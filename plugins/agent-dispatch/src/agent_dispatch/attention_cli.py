@@ -67,15 +67,35 @@ def _effective_cli(args: argparse.Namespace, client: Any) -> tuple[str, ...] | N
     return cli
 
 
+def _coordinator_scope(args: argparse.Namespace, client: Any) -> str | None:
+    """Which coordinator's queue this read saw, so first-observed times from one
+    coordinator are never cleared by a read of another: the peer for an SSH
+    failover, the URL for ``--url``, ``--shared`` or a silent shared failover.
+    ``None`` for this machine's own coordinator, whose port can move across
+    restarts (its times must survive those)."""
+    tunnel = getattr(client, "_tunnel", None)
+    if tunnel is not None:
+        return f"ssh:{getattr(tunnel, '_machine', None) or 'peer'}"
+    base = (getattr(client, "base_url", None) or "").rstrip("/")
+    if getattr(args, "url", None) or getattr(args, "shared", False):
+        return base or None
+    from .config import shared_url
+
+    surl = (shared_url() or "").rstrip("/")
+    return base if surl and base == surl else None
+
+
 def _dispatch_reader(args: argparse.Namespace):
     """The ``dispatch`` reader; records the effective invocation on ``args`` for
-    the ``next`` hint."""
+    the ``next`` hint, and tags its result with the coordinator it read."""
     args.attention_cli = _target_cli(args)
 
     def read(read_at: str) -> dict[str, Any]:
         client = _core()._client(args)
         args.attention_cli = _effective_cli(args, client)
-        return srcs.read_dispatch(lambda: client, read_at, cli=args.attention_cli)
+        result = srcs.read_dispatch(lambda: client, read_at, cli=args.attention_cli)
+        scope = _coordinator_scope(args, client)
+        return {**result, "scope": scope} if scope else result
 
     return read
 

@@ -635,6 +635,54 @@ def test_reads_in_the_same_second_are_ordered_by_their_token(tmp_path):
     assert env["items"][0]["created_at"] == T2
 
 
+def _scoped(scope, *items):
+    return lambda read_at: {"items": [dict(i) for i in items], "status": "ok", "uncertain": 0,
+                            **({"scope": scope} if scope else {})}
+
+
+def test_a_read_of_another_coordinator_never_clears_this_ones_first_observed_times(tmp_path):
+    store = FirstObserved(tmp_path / "o.json")
+    shared = "https://shared.example"
+    x = {**_item(source="dispatch"), "created_at": None}
+    _collect({"dispatch": _scoped(None, x)}, store, read_at=T0, read_token=1)
+    _collect({"dispatch": _scoped(shared)}, store, read_at=T1, read_token=2)  # a failover read: ok, empty
+    env = _collect({"dispatch": _scoped(None, x)}, store, read_at=T2, read_token=3)
+    assert env["items"][0]["created_at"] == T0
+    # The other way round: the shared queue's own times survive a local ok read.
+    _collect({"dispatch": _scoped(shared, x)}, store, read_at=T1, read_token=4)
+    _collect({"dispatch": _scoped(None)}, store, read_at=T2, read_token=5)
+    env = _collect({"dispatch": _scoped(shared, x)}, store, read_at=T2, read_token=6)
+    assert env["items"][0]["created_at"] == T1
+    assert all("scope" not in s for s in env["sources"])
+
+
+def test_a_command_source_cannot_choose_its_coordinator_scope(tmp_path):
+    store = FirstObserved(tmp_path / "o.json")
+    y = {**_item(source="ext"), "created_at": None}
+    _collect({"ext": _scoped("https://elsewhere.example", y)}, store, read_at=T0, read_token=1)
+    env = _collect({"ext": _scoped(None, y)}, store, read_at=T2, read_token=2)
+    assert env["items"][0]["created_at"] == T0  # one key: the scope it claimed was ignored
+
+
+@pytest.mark.parametrize("flags, base, tunnel, configured, expected", [
+    ({}, "http://127.0.0.1:41000/", None, None, None),                          # this machine's own
+    ({}, "http://127.0.0.1:41000/", None, "https://shared.example", None),
+    ({}, "https://shared.example/", None, "https://shared.example", "https://shared.example"),  # silent failover
+    ({"shared": True}, "https://shared.example/", None, None, "https://shared.example"),
+    ({"url": "http://box:9000"}, "http://box:9000", None, None, "http://box:9000"),
+    ({}, "http://127.0.0.1:51999", "peer-a", None, "ssh:peer-a"),              # never the random local port
+])
+def test_the_dispatch_read_names_the_coordinator_it_reached(monkeypatch, flags, base, tunnel, configured, expected):
+    from types import SimpleNamespace
+
+    from agent_dispatch import attention_cli, config
+
+    monkeypatch.setattr(config, "shared_url", lambda: configured)
+    args = SimpleNamespace(**{"url": None, "shared": False, "token": None, **flags})
+    client = SimpleNamespace(base_url=base, _tunnel=SimpleNamespace(_machine=tunnel) if tunnel else None)
+    assert attention_cli._coordinator_scope(args, client) == expected
+
+
 def test_a_silent_failover_to_the_shared_coordinator_is_pinned_in_actions(monkeypatch, capsys):
     from agent_dispatch import config
 
@@ -649,6 +697,8 @@ def test_a_silent_failover_to_the_shared_coordinator_is_pinned_in_actions(monkey
     out = capsys.readouterr().out
     assert "agent-dispatch --shared show t1" in out
     assert "next: agent-dispatch --shared attention next --after" in out
+    stored = json.loads(attention_store.default_path().read_text(encoding="utf-8"))
+    assert stored["applied"] and set(stored["applied"]) == {"dispatch@https://shared.example"}
 
 
 @pytest.mark.parametrize("severity", [False, 1.0, True])

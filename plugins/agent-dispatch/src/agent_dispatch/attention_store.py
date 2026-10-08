@@ -6,7 +6,9 @@ CLI invocations included -- keep the same order. A source's time is cleared
 only by proof from that same source that the condition ended: an ``ok`` read
 that no longer contains the item. A ``failed``, ``uncertain`` or ``disabled``
 read proves nothing, so it keeps every time (an outage never reorders an
-unchanged queue), and one source never clears another's evidence.
+unchanged queue), and one source never clears another's evidence. Neither does
+one coordinator: a ``dispatch`` read that reached another queue (``--url``,
+``--shared``, or a failover) keeps its times apart from this machine's own.
 """
 
 from __future__ import annotations
@@ -104,22 +106,28 @@ class FirstObserved:
             _write(self.path, entries, applied, next_read + 1)
         return next_read
 
-    def apply(self, results: dict[str, dict[str, Any]], read_at: str, read_token: int | None = None) -> None:
+    def apply(self, results: dict[str, dict[str, Any]], read_at: str, read_token: int | None = None,
+              scopes: dict[str, str] | None = None) -> None:
         """Fill each item's missing ``created_at`` from the store (or ``read_at`` when
         first seen), and clear what an ``ok`` read of that same source dropped.
         ``results`` maps a source name to its result; items are updated in place.
+        ``scopes`` names the coordinator a source read when it isn't this
+        machine's own: times (and the watermark) are then kept per source *and*
+        coordinator, so a failover read of another queue never clears this one's.
         A read older than one already applied for a source only reads the store:
         concurrent CLI reads can finish out of order, and a slow, older snapshot
         must not re-add a time a newer ``ok`` read proved had ended. Reads are
         ordered by ``read_token``, the number :meth:`begin_read` gave the read
         when it started (allocated now when omitted)."""
         token = self.begin_read() if read_token is None else read_token
+        scopes = scopes or {}
         with locked(self.path):
             entries, applied, next_read = _read(self.path)
             before = (dict(entries), dict(applied))
-            for source, result in results.items():
+            for name, result in results.items():
                 if result["status"] not in ("ok", "uncertain"):
                     continue
+                source = f"{name}@{scopes[name]}" if scopes.get(name) else name
                 if applied.get(source, -1) > token:
                     for item in result["items"]:
                         if not item.get("created_at"):

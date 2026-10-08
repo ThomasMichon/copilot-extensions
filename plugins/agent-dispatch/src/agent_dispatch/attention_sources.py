@@ -315,6 +315,7 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
     read_at = read_at or now_iso()
     names = sorted(n for n in (selected if selected is not None else readers) if n in readers)
     results: dict[str, dict[str, Any]] = {}
+    scopes: dict[str, str] = {}
     outcomes: dict[str, Any] = {}
 
     def run(name: str) -> None:
@@ -345,9 +346,15 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
             raw = ac.command_failure(f"timed out after {timeouts.get(name, DEFAULT_TIMEOUT):g}s")
         elif problem := _result_problem(raw):
             raw = ac.command_failure(f"malformed source result: {problem}")
+        # Only a built-in reader names the coordinator it read; a command can't
+        # file its times under another source's evidence.
+        scope = raw.pop("scope", None)
+        if name in BUILTIN_SOURCES and isinstance(scope, str) and scope:
+            scopes[name] = scope
         raw.setdefault("read_at", read_at)
         results[name] = _finish(name, raw)
-    store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at, read_token)
+    store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at, read_token,
+                scopes=scopes)
     if selected is not None:
         config_errors = [e for e in config_errors if e["name"] in selected]
     sources = [{"name": n, "status": r["status"], "uncertain": r.get("uncertain", 0),
