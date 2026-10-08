@@ -22,15 +22,25 @@ stamp is reflected on its very next read, no staleness window is ever
 tolerated. A log is append-only in practice, but this cache makes no such
 assumption -- any content change invalidates it the same way.
 
-**Mutation isolation invariant.** This module returns its cached list (and
-the dicts inside it) by reference, not by copy -- deep-copying the full
-parsed log on every hit would reintroduce an O(log size) cost on every
-cache hit, defeating the point for a 90k-line log. A caller must never
-mutate a dict it receives from :func:`cached_parse` in place; the module's
-own callers (``activity.read_events``, ``handoff_trace.read_trace``) each
-copy only the small, bounded subset they actually return (the matched/
-filtered/tail-limited result), never the full cached list, to give their
-own callers an independent result without paying the full-log copy cost.
+**Cross-process safety.** This cache is per-process memory -- each process
+(the resident status-monitor, an ordinary CLI invocation, a detached
+background worker) holds its own independent ``_cache`` dict, with no
+shared memory or IPC between them. ``invalidate()`` therefore cannot, by
+itself, make a REPLACEMENT visible to a different process's cache: the
+real `activity._prune()` call runs inside a detached
+``activity-prune-worker`` subprocess, not the resident monitor's own
+process, so an ``invalidate()`` call there only clears that worker's own
+cache. The stamp itself closes this gap instead: it includes
+``(st_dev, st_ino)`` alongside ``(mtime_ns, size)``, and both
+``activity._prune()``'s atomic ``tmp.replace(path)`` and a worktree-id
+reuse recreating a deleted trace file allocate a NEW inode at that path --
+so ANY process's next ``cached_parse`` call naturally sees a stamp
+mismatch and re-parses, with no cross-process signal required.
+``invalidate()`` remains a same-process optimization (an immediate miss
+instead of waiting for that process's own next stat-based check) and a
+defense-in-depth backstop should two unrelated files ever coincidentally
+share one path's stamp, but the stamp's own device+inode component is the
+primary guarantee, not `invalidate()`.
 """
 
 from __future__ import annotations
@@ -40,36 +50,53 @@ from pathlib import Path
 from typing import Callable
 
 _cache_lock = threading.Lock()
-_cache: dict[str, tuple[int, int, list[dict]]] = {}
+_Stamp = tuple[int, int, int, int]  # (st_dev, st_ino, st_mtime_ns, st_size)
+_cache: dict[str, tuple[_Stamp, list[dict]]] = {}
+
+
+def _stamp(path: Path) -> _Stamp:
+    st = path.stat()
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
 def cached_parse(path: Path, parser: Callable[[Path], list[dict]]) -> list[dict]:
-    """``parser(path)``, memoized on the file's own ``(mtime_ns, size)``.
+    """``parser(path)``, memoized on the file's own ``(st_dev, st_ino,
+    mtime_ns, size)`` -- see this module's "Cross-process safety" note
+    above for why device+inode, not just mtime+size, is load-bearing here.
 
     Returns the cache's own list, by reference -- see this module's
-    "Mutation isolation invariant" above. The caller must copy whatever
+    "Mutation isolation invariant" below. The caller must copy whatever
     bounded subset it actually hands onward to ITS OWN caller, not this
     whole list.
 
     A missing file parses (and caches) as whatever ``parser`` returns for a
     nonexistent path (typically an empty list) -- callers are expected to
     handle that the same way they always have, cache or not.
+
+    **Mutation isolation invariant.** Deep-copying the full parsed log on
+    every hit would reintroduce an O(log size) cost on every cache hit,
+    defeating the point for a 90k-line log, so this function does not --
+    a caller must never mutate a dict it receives in place. This module's
+    own callers (``activity.read_events``, ``handoff_trace.read_trace``)
+    each copy only the small, bounded subset they actually return (the
+    matched/filtered/tail-limited result), never the full cached list, to
+    give their own callers an independent result without paying the
+    full-log copy cost.
     """
     key = str(path)
     try:
-        st = path.stat()
+        stamp = _stamp(path)
     except OSError:
         with _cache_lock:
             _cache.pop(key, None)
         return parser(path)
-    stamp = (st.st_mtime_ns, st.st_size)
     with _cache_lock:
         cached = _cache.get(key)
-        if cached is not None and (cached[0], cached[1]) == stamp:
-            return cached[2]
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
     parsed = parser(path)
     with _cache_lock:
-        _cache[key] = (stamp[0], stamp[1], parsed)
+        _cache[key] = (stamp, parsed)
     return parsed
 
 
@@ -80,20 +107,15 @@ def clear() -> None:
 
 
 def invalidate(path: Path) -> None:
-    """Drop one path's cached entry, if present.
+    """Drop one path's cached entry in THIS process, if present.
 
-    For a caller that just **replaced or recreated** the file out from
-    under the passive ``(mtime_ns, size)`` stamp -- ``activity._prune()``
-    rewrites ``activity.jsonl`` in place, and ``handoff_trace.
-    remove_trace()`` deletes a worktree's trace file specifically so a
-    later-reused worktree id can never inherit a predecessor's events.
-    Both can coincidentally reproduce the exact previous ``(mtime_ns,
-    size)`` pair on a filesystem with coarse mtime resolution, which the
-    passive stat-based check alone cannot distinguish from "unchanged" --
-    an explicit invalidation at the one call site that performed the
-    replace/delete closes that gap instead of relying on the stamp to
-    always differ. Best-effort / idempotent: no-ops if the path was never
-    cached.
+    A same-process optimization and defense-in-depth backstop, not the
+    primary safety guarantee against a same-path replace/recreate -- see
+    this module's "Cross-process safety" note above: the stamp's own
+    device+inode component is what makes a replacement visible to every
+    process's cache (including ones this call can never reach), not this
+    function. Best-effort / idempotent: no-ops if the path was never
+    cached in this process.
     """
     with _cache_lock:
         _cache.pop(str(path), None)

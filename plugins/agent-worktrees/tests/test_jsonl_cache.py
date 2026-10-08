@@ -152,14 +152,17 @@ def test_invalidate_a_never_cached_path_is_a_noop(tmp_path: Path):
 
 
 def test_without_invalidate_an_aliased_stamp_would_return_stale_data(tmp_path: Path):
-    """The gap ``invalidate()`` exists to close: a cache entry stamped
-    ``(mtime_ns, size)`` that happens to match the CURRENT file's real
-    stamp is indistinguishable from "unchanged" to ``cached_parse`` alone,
-    even when the file's actual content differs -- a real caller
+    """The gap ``invalidate()`` exists to close: a cache entry whose
+    stamp happens to match the CURRENT file's real stamp is
+    indistinguishable from "unchanged" to ``cached_parse`` alone, even
+    when the file's actual content differs -- a real caller
     (``activity._prune()`` rewriting ``activity.jsonl`` in place,
     ``handoff_trace.remove_trace()`` + a reused worktree id recreating the
     same path) must invalidate explicitly after a same-path replace/
-    recreate rather than rely on the stamp to always differ."""
+    recreate rather than rely on the stamp to always differ. The stamp's
+    own device+inode component makes a real occurrence of this vanishingly
+    rare (see jsonl_cache's "Cross-process safety" note), but a forced
+    collision still demonstrates why ``invalidate()`` exists as a backstop."""
     path = tmp_path / "log.jsonl"
     _write_lines(path, ["aa"])
     calls: list[Path] = []
@@ -167,13 +170,12 @@ def test_without_invalidate_an_aliased_stamp_would_return_stale_data(tmp_path: P
     jsonl_cache.cached_parse(path, parser)
 
     _write_lines(path, ["bb"])
-    # Force the CURRENT real stamp to be recorded against the OLD content --
-    # simulating the exact collision a coarse-mtime filesystem (or a rewrite
-    # that happens to reproduce the old byte size) can produce, which
-    # ``cached_parse`` alone cannot detect.
-    real_stat = path.stat()
+    # Force a cache entry stamped against the file's CURRENT real identity
+    # but holding the OLD content -- simulating the collision a forced
+    # same-path replace could in principle produce, which ``cached_parse``
+    # alone cannot detect.
     with jsonl_cache._cache_lock:
-        jsonl_cache._cache[str(path)] = (real_stat.st_mtime_ns, real_stat.st_size, ["aa"])
+        jsonl_cache._cache[str(path)] = (jsonl_cache._stamp(path), ["aa"])
 
     aliased = jsonl_cache.cached_parse(path, parser)
     assert aliased == ["aa"], "a stamp collision alone returns the stale cached content"

@@ -639,7 +639,7 @@ def read_events(
 ) -> list[dict]:
     """Return matching events, oldest first."""
     path = log_path()
-    out: list[dict] = []
+    matched: list[dict] = []
     for rec in jsonl_cache.cached_parse(path, _parse_all_events):
         if worktree_id and rec.get("worktree_id") != worktree_id:
             continue
@@ -651,16 +651,16 @@ def read_events(
             ts = _rec_ts(rec)
             if ts is not None and ts < since:
                 continue
-        # Copy only a MATCHED record, not jsonl_cache's full cached list --
-        # the cached list can be tens of thousands of entries long (the
-        # machine-global activity.jsonl), while a caller's actual matched/
-        # returned subset is normally small; copying only what is actually
-        # returned keeps a cache hit from paying an O(full log) copy cost
-        # merely to hand back an independent result (jsonl_cache's own
-        # "Mutation isolation invariant").
-        out.append(copy.deepcopy(rec))
+        matched.append(rec)  # a reference into jsonl_cache's cached list -- not copied yet
     if limit is not None and limit > 0:
-        out = out[-limit:]
+        matched = matched[-limit:]
+    # Copy only the FINAL (already tail-limited) subset, not jsonl_cache's
+    # full cached list and not even every matched record before limiting --
+    # the cached list can be tens of thousands of entries long (the
+    # machine-global activity.jsonl); a broad filter with a small `limit`
+    # must not still pay an O(every match) copy cost just to hand back an
+    # independent result (jsonl_cache's own "Mutation isolation invariant").
+    out = [copy.deepcopy(rec) for rec in matched]
     return out
 
 

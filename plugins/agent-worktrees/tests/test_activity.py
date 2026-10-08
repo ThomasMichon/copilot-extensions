@@ -264,6 +264,28 @@ def test_read_events_mutating_a_returned_event_does_not_leak_into_later_reads(
     )
 
 
+def test_read_events_copies_only_the_tail_limited_subset(patch_install_dir: Path, monkeypatch):
+    """A broad filter matching thousands of records with a small ``limit``
+    must copy only the final, already-tail-limited subset -- never every
+    matched record before limiting, which would still pay an O(every
+    match) cost on a machine-global log a status-monitor sweep calls with
+    ``limit=64`` against a far larger match set."""
+    for i in range(10):
+        activity.log_event("session_started", worktree_id=f"wt-{i}")
+
+    copy_calls = []
+    real_deepcopy = activity.copy.deepcopy
+
+    def _spy(obj):
+        copy_calls.append(obj)
+        return real_deepcopy(obj)
+
+    monkeypatch.setattr(activity.copy, "deepcopy", _spy)
+    result = activity.read_events(event="session_started", limit=2)
+    assert len(result) == 2
+    assert len(copy_calls) == 2, "only the 2 tail-limited records may be deep-copied, not all 10 matches"
+
+
 
 def test_read_events_limit_returns_most_recent(patch_install_dir: Path):
     for i in range(5):
@@ -354,6 +376,43 @@ def test_prune_invalidates_this_path_s_jsonl_cache_entry(patch_install_dir: Path
     monkeypatch.setattr(jsonl_cache, "invalidate", _spy)
     activity._prune(log, retention_days=7)
     assert calls == [log], "_prune must invalidate exactly this path's cache entry"
+
+
+def test_prune_is_visible_to_a_cache_entry_invalidate_can_never_reach(
+    patch_install_dir: Path,
+):
+    """The real ``_prune()`` call runs inside a detached
+    ``activity-prune-worker`` subprocess (``_dispatch_background_prune``),
+    not the resident status-monitor's own process -- its ``invalidate()``
+    call only clears ITS OWN process-local cache, never the monitor's. The
+    monitor must still see the rewrite via the stamp alone: ``tmp.replace
+    (path)`` allocates a new inode at this path, so a cache entry this
+    call's own ``invalidate()`` could never reach (simulated here by
+    reinserting it after ``_prune`` runs) still misses on its stamp."""
+    from agent_worktrees import jsonl_cache
+
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+    stale = activity.read_events()  # "the monitor process" primes its own cache
+    assert len(stale) == 2
+    with jsonl_cache._cache_lock:
+        other_process_entry = jsonl_cache._cache[str(log)]
+
+    activity._prune(log, retention_days=7)  # runs in "a different process"
+
+    # Reinsert the pre-prune entry -- standing in for the monitor's cache,
+    # which this call's invalidate() was never able to reach.
+    with jsonl_cache._cache_lock:
+        jsonl_cache._cache[str(log)] = other_process_entry
+    remaining = activity.read_events()
+    assert len(remaining) == 1, "the new inode at this path must still miss this stale entry"
+    assert remaining[0]["worktree_id"] == "new"
 
 
 def test_dispatch_background_prune_reaps_the_child_without_blocking(monkeypatch):
