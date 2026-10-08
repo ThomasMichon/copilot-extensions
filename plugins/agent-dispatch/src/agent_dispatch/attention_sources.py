@@ -29,6 +29,10 @@ DEFAULT_TIMEOUT = 20.0
 MAX_TIMEOUT = 120.0
 #: A command source's stdout and stderr together (characters); more fails that source.
 MAX_OUTPUT = 1024 * 1024
+#: How long past its own timeout a command source's reader is waited for: its
+#: runner's whole tree cleanup (a 5 s SIGTERM grace, a 2 s post-SIGKILL reap,
+#: a start-identity probe of up to 5 s) plus scheduling margin.
+COMMAND_CLEANUP_SECONDS = 15.0
 #: Lifecycle states that can carry an attention condition.
 _OPEN_STATES = "proposed,queued,claimed,started,suspended,submitted"
 

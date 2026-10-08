@@ -107,7 +107,9 @@ def _readers(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, float]
     timeouts = {"dispatch": srcs.DEFAULT_TIMEOUT}
     for name, spec in registrations.items():
         readers[name] = lambda read_at, n=name, s=spec: srcs.read_command(n, s, read_at)
-        timeouts[name] = spec["timeout"] + 5.0  # the command's own timeout fires first
+        # The command's own timeout fires first, and its runner then stops the
+        # tree (a SIGTERM grace, SIGKILL, a reap): never abandon it mid-cleanup.
+        timeouts[name] = spec["timeout"] + srcs.COMMAND_CLEANUP_SECONDS
     known = set(readers) | {e["name"] for e in config_errors if e["name"] != "*"}
     return readers, timeouts, config_errors, known
 

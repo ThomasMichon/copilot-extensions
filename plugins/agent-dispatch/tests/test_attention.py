@@ -421,6 +421,18 @@ def test_a_command_source_runs_from_the_registry_directory_not_the_callers(monke
     assert seen["cwd"] == str(srcs.registry_path().parent) != str(checkout)
 
 
+def test_a_command_readers_deadline_covers_its_runners_whole_cleanup():
+    """Past the command's own timeout, its runner still stops the tree: a 5 s
+    SIGTERM grace and a 2 s post-SIGKILL reap at least. The reader must not be
+    abandoned before that finishes, or a SIGTERM-ignoring command outlives the CLI."""
+    from agent_dispatch import attention_cli
+
+    srcs.save_registrations({"slow": {"argv": [sys.executable], "timeout": 10}})
+    args = m.build_parser().parse_args(["attention"])
+    _readers, timeouts, _errors, _known = attention_cli._readers(args)
+    assert timeouts["slow"] - 10 >= 5.0 + 2.0 + 5.0  # grace, reap, identity probe
+
+
 def test_a_command_source_that_floods_output_fails_alone(monkeypatch):
     monkeypatch.setattr(srcs, "MAX_OUTPUT", 10_000)
     flood = [sys.executable, "-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)"]
