@@ -613,7 +613,7 @@ def _resolve_target(
             sys.exit(1)
 
     print(f"[FAIL] '{target}' is not a known agent name or session ID", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(core._SEND_UNAVAILABLE_EXIT)
 
 
 def _match_agents(target: str, agents: list[dict]) -> list[str]:

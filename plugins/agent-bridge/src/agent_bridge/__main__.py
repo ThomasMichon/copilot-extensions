@@ -282,6 +282,7 @@ _PROGRESS_INTERVAL = 20.0
 _RECONNECT_BACKOFF = 1.0
 _STREAM_404_GRACE_S = 30.0
 from .send_outcome import SEND_BUSY_EXIT as _SEND_BUSY_EXIT  # noqa: E402, F401
+from .send_outcome import SEND_UNAVAILABLE_EXIT as _SEND_UNAVAILABLE_EXIT  # noqa: E402, F401
 _REUSABLE_SESSION_STATES = ("created", "starting", "running", "idle", "stopped")
 _COMING_UP_STATES = ("created", "starting")
 _COMING_UP_SETTLE_TIMEOUT = 180.0

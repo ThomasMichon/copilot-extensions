@@ -130,6 +130,9 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
         if as_json and exc.code == SEND_BUSY_EXIT:
             emit(SendRefused("refused_busy", reason="busy", retryable=True, target=target,
                              error=f"target {target!r} is running a turn").payload())
+        elif as_json and exc.code == SEND_UNAVAILABLE_EXIT:
+            emit(SendRefused("refused_unavailable", reason="not_found", retryable=False, target=target,
+                             error=f"{target!r} is not a known agent name or session").payload())
         raise
     finally:
         _json_stdout = previous

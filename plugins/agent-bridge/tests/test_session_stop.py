@@ -169,6 +169,13 @@ def test_force_skips_the_notice_and_the_grace():
     assert result["notice"] is None and result["acknowledged"] is None and clock.t == 0
 
 
+def test_a_fractional_grace_is_never_overslept():
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "running", "turn_count": 1}}, queued=True)
+    _run(fake, clock, grace=0.25)
+    assert clock.t <= 0.25 + 1e-9  # a 1-second poll is capped to what's left
+
+
 def test_a_zero_grace_still_sends_the_notice():
     clock = _Clock()
     fake = _Fake(clock, {0: {"status": "running", "turn_count": 1}}, queued=True)

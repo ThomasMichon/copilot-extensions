@@ -240,6 +240,36 @@ def test_prompt_path_outcomes_and_stdout_is_only_json(monkeypatch, capsys, resul
     assert "Resuming stopped session" in err
 
 
+def test_an_unknown_target_is_refused_unavailable_not_silent(monkeypatch, capsys):
+    """A stale id that is neither a session nor an agent: one typed document."""
+    def unknown(_client, target, force=False):
+        print(f"[FAIL] '{target}' is not a known agent name or session ID", file=__import__("sys").stderr)
+        raise SystemExit(m._SEND_UNAVAILABLE_EXIT)
+
+    monkeypatch.setattr(m, "_resolve_target", unknown)
+    monkeypatch.setattr(m, "_caller_id_for", lambda _a: "caller")
+    code, out, _ = _run(monkeypatch, capsys, _PromptClient({}))
+    assert code == 69 and out["outcome"] == "refused_unavailable" and out["reason"] == "not_found"
+
+
+def test_the_real_resolver_exits_unavailable_for_an_unknown_target(monkeypatch):
+    class Empty:
+        def get_session(self, _t):
+            raise BridgeClientError(404, "nope")
+
+        def list_agents(self):
+            return []
+
+    def no_agent(*_a, **_k):
+        raise BridgeClientError(404, "no agent")
+
+    monkeypatch.setattr(m, "_start_agent_session", no_agent)
+    monkeypatch.setattr(m, "_resolve_read_worktree_session", lambda *a, **k: None)
+    with pytest.raises(SystemExit) as exc:
+        stc._resolve_target(Empty(), "stale-id")
+    assert exc.value.code == 69
+
+
 def test_a_turn_that_starts_between_the_check_and_the_submit_is_refused_busy(monkeypatch, capsys):
     class Racing(_PromptClient):
         def submit_prompt(self, session_id, prompt, **_kw):

@@ -148,9 +148,10 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
             phase("acknowledged")
             return
         dequeued_before = dequeued_now
-        if clock() >= deadline:
+        remaining = deadline - clock()
+        if remaining <= 0:
             break
-        sleep(poll)
+        sleep(min(poll, remaining))  # never past the grace deadline
     result["acknowledged"] = False
     if queue_id is not None:
         try:
