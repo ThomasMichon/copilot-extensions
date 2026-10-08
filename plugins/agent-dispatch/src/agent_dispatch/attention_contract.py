@@ -132,8 +132,8 @@ def validate_item(item: Any) -> None:
         raise ContractError("actions must be a list")
     for action in item["actions"]:
         _check_action(action, source)
-    if "input" in item and item["input"] is not None and not isinstance(item["input"], dict):
-        raise ContractError("input must be an object")
+    if "input" in item and item["input"] is not None and not isinstance(item["input"], (dict, list)):
+        raise ContractError("input must be the form spec (an object or a list of fields)")
     if not isinstance(item["also"], list):
         raise ContractError("also must be a list")
 
@@ -141,7 +141,7 @@ def validate_item(item: Any) -> None:
 def new_item(*, source: str, entity: str, entity_ref: str, lifecycle_state: str | None,
              display_state: str, reason: str, created_at: str, updated_at: str,
              confidence: str = "reported", actions: Iterable[dict] = (),
-             input: dict | None = None) -> dict[str, Any]:
+             input: dict | list | None = None) -> dict[str, Any]:
     """Build a valid item for a built-in source."""
     entity = canonical_entity(entity, source)
     item: dict[str, Any] = {

@@ -22,7 +22,7 @@ from typing import Any
 
 from . import attention_contract as ac
 from . import attention_sources as srcs
-from .attention_store import FirstObserved
+from .attention_store import FirstObserved, locked
 
 
 def _core():
@@ -31,9 +31,22 @@ def _core():
     return core
 
 
+def _target_cli(args: argparse.Namespace) -> tuple[str, ...]:
+    """The invocation that reaches this read's coordinator: its ``--url`` and
+    ``--shared``, never a token (the operator's environment supplies that)."""
+    cli = ["agent-dispatch"]
+    if getattr(args, "url", None):
+        cli += ["--url", args.url]
+    if getattr(args, "shared", False):
+        cli.append("--shared")
+    return tuple(cli)
+
+
 def _readers(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, float], list[dict[str, str]], set[str]]:
     registrations, config_errors = srcs.load_registrations()
-    readers: dict[str, Any] = {"dispatch": lambda read_at: srcs.read_dispatch(lambda: _core()._client(args), read_at)}
+    cli = _target_cli(args)
+    readers: dict[str, Any] = {
+        "dispatch": lambda read_at: srcs.read_dispatch(lambda: _core()._client(args), read_at, cli=cli)}
     timeouts = {"dispatch": srcs.DEFAULT_TIMEOUT}
     for name, spec in registrations.items():
         readers[name] = lambda read_at, n=name, s=spec: srcs.read_command(n, s, read_at)
@@ -116,18 +129,11 @@ def _cmd_next(args: argparse.Namespace) -> int:
 
 def _cmd_source(args: argparse.Namespace) -> int:
     path = srcs.registry_path()
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-        raw = doc.get("sources", {}) if isinstance(doc, dict) else None
-        if not isinstance(raw, dict):
-            raise ValueError("its sources is not an object")
-    except FileNotFoundError:
-        raw = {}
-    except (OSError, ValueError) as exc:
-        if args.source_verb != "list":
-            print(f"agent-dispatch: {path} is unreadable ({exc}); fix or remove it first", file=sys.stderr)
-            return 1
-        raw = {}
+    if args.source_verb == "list":
+        valid, errors = srcs.load_registrations()
+        return _core()._emit({"builtin": list(srcs.BUILTIN_SOURCES), "registered": valid,
+                              "config_errors": errors, "file": str(path)})
+    spec = None
     if args.source_verb == "add":
         argv = list(args.argv or [])
         if argv[:1] == ["--"]:
@@ -137,17 +143,25 @@ def _cmd_source(args: argparse.Namespace) -> int:
         if error:
             print(f"agent-dispatch: cannot register {args.name!r}: {error}", file=sys.stderr)
             return 2
-        raw[args.name] = spec
-        srcs.save_registrations(raw)
-        return _core()._emit({"registered": args.name, **spec})
-    if args.source_verb == "remove":
+    with locked(path):  # one read-modify-write, so concurrent edits never lose each other
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            raw = doc.get("sources", {}) if isinstance(doc, dict) else None
+            if not isinstance(raw, dict):
+                raise ValueError("its sources is not an object")
+        except FileNotFoundError:
+            raw = {}
+        except (OSError, ValueError) as exc:
+            print(f"agent-dispatch: {path} is unreadable ({exc}); fix or remove it first", file=sys.stderr)
+            return 1
+        if spec is not None:
+            raw[args.name] = spec
+            srcs.save_registrations(raw)
+            return _core()._emit({"registered": args.name, **spec})
         removed = raw.pop(args.name, None) is not None
         if removed:
             srcs.save_registrations(raw)
         return _core()._emit({"removed": removed, "name": args.name})
-    valid, errors = srcs.load_registrations()
-    return _core()._emit({"builtin": list(srcs.BUILTIN_SOURCES), "registered": valid, "config_errors": errors,
-                          "file": str(path)})
 
 
 def _add_read_flags(p: argparse.ArgumentParser) -> None:

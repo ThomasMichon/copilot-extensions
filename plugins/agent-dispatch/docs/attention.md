@@ -77,9 +77,9 @@ after it even when that item was resolved meanwhile; it wraps to the top.
 | `reason` | one line, at most 200 characters |
 | `created_at`, `updated_at` | when the condition began / was last observed, as canonical UTC (`YYYY-MM-DDTHH:MM:SS+00:00`); a command source may send any ISO-8601 spelling with an offset, which is normalized |
 | `confidence` | `reported`, `scanned` or `heuristic` |
-| `actions[]` | `{verb, argv}` that run as-is; the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>` |
+| `actions[]` | `{verb, argv}` that run as-is (a dispatch action carries the read's own `--url`/`--shared`, never a token); the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>`. A client may run `show` without confirmation only for a built-in source's item; every action of a command source is operator-initiated |
 | `source` | the source that produced it |
-| `input` | optional: the form an answer needs |
+| `input` | optional: the form an answer needs (the steering card's `request_input` field list, or an object) |
 | `also[]` | lower-ranked items for the same entity from other sources (aggregator-owned) |
 
 **Order:** severity, then `created_at` (oldest first), then `id`.

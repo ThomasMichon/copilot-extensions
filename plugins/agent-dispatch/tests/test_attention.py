@@ -351,6 +351,58 @@ def test_cli_bad_cursor_is_a_usage_error(monkeypatch, capsys):
     assert rc == 2
 
 
+def test_a_real_steering_card_form_reaches_the_item():
+    """steering.build_card stores request_input as a list of fields."""
+    from agent_dispatch import steering
+
+    form = steering.parse_request_input("decision:choice[revise,approve],notes:textarea")
+    assert isinstance(form, list) and form
+    item = srcs._task_item({"id": "t1", "title": "A", "status": "started", "awaiting_steer": True,
+                            "card": {"request_input": form}}, T1)
+    assert item["input"] == form
+    ac.validate_item({**item, "created_at": T1})
+
+
+def test_the_action_reaches_the_coordinator_the_read_came_from(monkeypatch, capsys):
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    rc, out = _cli(monkeypatch, capsys, ["--url", "http://peer:8787", "--token", "s3cret", "attention", "--json"],
+                   tasks)
+    argv = json.loads(out.out)["items"][0]["actions"][0]["argv"]
+    assert argv == ["agent-dispatch", "--url", "http://peer:8787", "card", "show", "t1"]
+    assert "s3cret" not in out.out
+
+
+def test_concurrent_registrations_are_never_lost(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(m, "_emit", lambda payload: 0)
+    parser = m.build_parser()
+    names = [f"src-{i}" for i in range(8)]
+
+    def add(name):
+        args = parser.parse_args(["attention", "source", "add", name, "--", "x"])
+        args.func(args)
+
+    threads = [threading.Thread(target=add, args=(n,)) for n in names]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(srcs.load_registrations()[0]) == names
+
+
+def test_a_dead_lock_holder_never_wedges_the_next_read(tmp_path):
+    import subprocess as sp
+    import sys
+
+    path = tmp_path / "o.json"
+    holder = ("from agent_dispatch.attention_store import locked\nimport os, pathlib\n"
+              f"with locked(pathlib.Path(r'{path}')):\n    os._exit(0)\n")
+    sp.run([sys.executable, "-c", holder], check=True, timeout=30)
+    with attention_store.locked(path, timeout=2):
+        pass  # the OS released the dead holder's lock
+
+
 def test_a_read_that_hits_the_limit_says_it_may_be_incomplete():
     tasks = [{"id": f"t{i}", "title": "x", "status": "submitted"} for i in range(3)]
     result = srcs.read_dispatch(lambda: _Client(tasks), T1, limit=3)

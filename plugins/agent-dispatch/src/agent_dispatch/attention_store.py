@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Iterator
 
 _LOCK_TIMEOUT = 10.0
-_STALE_LOCK = 30.0
 _SEP = "\t"
 
 
@@ -34,30 +33,22 @@ def _key(source: str, item: dict[str, Any]) -> str:
 
 
 @contextlib.contextmanager
-def _locked(path: Path) -> Iterator[None]:
-    """An exclusive lock-file around a read-modify-write of ``path``."""
-    lock = path.with_name(path.name + ".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + _LOCK_TIMEOUT
-    while True:
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.close(fd)
-            break
-        except FileExistsError:
-            try:
-                if time.time() - lock.stat().st_mtime > _STALE_LOCK:
-                    lock.unlink(missing_ok=True)  # a crashed holder
-                    continue
-            except OSError:
-                continue
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"{lock} stayed locked for {_LOCK_TIMEOUT:g}s") from None
-            time.sleep(0.02)
+def locked(path: Path, timeout: float = _LOCK_TIMEOUT) -> Iterator[None]:
+    """Serialize a whole read-modify-write of ``path`` across processes with the
+    OS-released single-instance lock, so a holder that dies never wedges the next."""
+    from .single_instance import SingleInstance
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = SingleInstance(path.with_name(path.name + ".lock"))
+    deadline = time.monotonic() + timeout
+    while not lock.acquire():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"{path} stayed locked for {timeout:g}s")
+        time.sleep(0.02)
     try:
         yield
     finally:
-        lock.unlink(missing_ok=True)
+        lock.release()
 
 
 def _read(path: Path) -> dict[str, str]:
@@ -85,7 +76,7 @@ class FirstObserved:
         """Fill each item's missing ``created_at`` from the store (or ``read_at`` when
         first seen), and clear what an ``ok`` read of that same source dropped.
         ``results`` maps a source name to its result; items are updated in place."""
-        with _locked(self.path):
+        with locked(self.path):
             entries = _read(self.path)
             before = dict(entries)
             for source, result in results.items():

@@ -45,19 +45,23 @@ def iso(value: Any, fallback: str) -> str:
 # -- the dispatch source ---------------------------------------------------------
 
 
-def _task_item(task: dict[str, Any], read_at: str) -> dict[str, Any] | None:
+def _task_item(task: dict[str, Any], read_at: str,
+               cli: tuple[str, ...] = ("agent-dispatch",)) -> dict[str, Any] | None:
     """One task's item, coalescing its conditions to the worst: an operator ask
     (``awaiting_steer``), an operator hold (``hold_reason``), or a completion
-    claim awaiting confirmation (``submitted``). ``completed`` is never an item."""
+    claim awaiting confirmation (``submitted``). ``completed`` is never an item.
+    ``cli`` is the invocation that reaches the coordinator this read came from
+    (its ``--url``/``--shared``, never a token), so the action runs as-is."""
     task_id, title = str(task.get("id") or ""), ac.one_line(task.get("title"), 120)
     status = task.get("status")
     card = task.get("card") if isinstance(task.get("card"), dict) else {}
-    show = {"verb": "show", "argv": ["agent-dispatch", "card", "show", task_id]}
+    show = {"verb": "show", "argv": [*cli, "card", "show", task_id]}
     if not task_id:
         return None
     if task.get("awaiting_steer"):
         state, reason = "awaiting_input", f"awaiting your answer: {title}"
-        extra = {"input": card["request_input"]} if isinstance(card.get("request_input"), dict) else {}
+        form = card.get("request_input")
+        extra = {"input": form} if isinstance(form, (dict, list)) and form else {}
     elif task.get("hold_reason"):
         state, reason, extra = "blocked", f"held ({ac.one_line(task['hold_reason'], 60)}): {title}", {}
     elif status == "submitted":
@@ -80,10 +84,11 @@ DISPATCH_READ_LIMIT = 5000
 
 
 def read_dispatch(client_factory: Callable[[], Any], read_at: str,
-                  limit: int = DISPATCH_READ_LIMIT) -> dict[str, Any]:
+                  limit: int = DISPATCH_READ_LIMIT,
+                  cli: tuple[str, ...] = ("agent-dispatch",)) -> dict[str, Any]:
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
-    items = [i for i in (_task_item(t, read_at) for t in tasks) if i]
+    items = [i for i in (_task_item(t, read_at, cli) for t in tasks) if i]
     if len(tasks) >= limit:
         return {"items": items, "status": "uncertain", "uncertain": 1, "read_at": read_at}
     return {"items": items, "status": "ok", "uncertain": 0, "read_at": read_at}
