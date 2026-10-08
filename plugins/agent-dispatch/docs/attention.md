@@ -22,8 +22,11 @@ didn't issue, or a registration that isn't valid.
 - **`dispatch`** (built in): this coordinator's tasks. A task that awaits an
   operator answer (`awaiting_steer`) is `awaiting_input` and carries the card's
   `request_input` form as `input` (submit it with `agent-dispatch steer
-  submit`). An operator hold (`hold_reason`) is `blocked`; a completion claim
-  awaiting confirmation (`submitted`) is `review`. `completed` is never an item.
+  submit`; its action shows the card). An operator hold (`hold_reason`) is
+  `blocked`; a self-tracked completion claim awaiting confirmation
+  (`submitted`) is `review`, even under a stale steering flag (a concluded task
+  can't be steered), while one with an `evaluator_ref` waits on its evaluator
+  and is no item. Those actions show the task itself. `completed` is never an item.
   One item per task, the worst condition winning. A lane that isn't draining
   (the coordinator's `backlog`) is one `stalled` item per repo (`entity: queue`):
   its oldest queued task waited longer than
@@ -86,7 +89,7 @@ after it even when that item was resolved meanwhile; it wraps to the top.
 | `reason` | one line, at most 200 characters |
 | `created_at`, `updated_at` | when the condition began / was last observed, as canonical UTC (`YYYY-MM-DDTHH:MM:SS+00:00`); a command source may send any ISO-8601 spelling with an offset, which is normalized |
 | `confidence` | `reported`, `scanned` or `heuristic` |
-| `actions[]` | `{verb, argv}` that run as-is (a dispatch action carries the read's own `--url`/`--shared`, or `--shared` when the default path failed over to the shared coordinator; never a token); the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>`. A client may run `show` without confirmation only for a built-in source's item; every action of a command source is operator-initiated |
+| `actions[]` | `{verb, argv}` that run as-is (a dispatch action carries the read's own `--url`/`--shared`, or `--shared` when the default path failed over to the shared coordinator; never a token, so a read authenticated only by a `--token` argument offers no dispatch actions); the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>`. A client may run `show` without confirmation only for a built-in source's item; every action of a command source is operator-initiated |
 | `source` | the source that produced it |
 | `input` | optional: the form an answer needs (the steering card's `request_input` field list, or an object) |
 | `also[]` | lower-ranked items for the same entity from other sources (aggregator-owned) |

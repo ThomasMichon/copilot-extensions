@@ -49,33 +49,42 @@ def iso(value: Any, fallback: str) -> str:
 
 
 def _task_item(task: dict[str, Any], read_at: str,
-               cli: tuple[str, ...] = ("agent-dispatch",)) -> dict[str, Any] | None:
+               cli: tuple[str, ...] | None = ("agent-dispatch",)) -> dict[str, Any] | None:
     """One task's item, coalescing its conditions to the worst: an operator ask
-    (``awaiting_steer``), an operator hold (``hold_reason``), or a completion
-    claim awaiting confirmation (``submitted``). ``completed`` is never an item.
-    ``cli`` is the invocation that reaches the coordinator this read came from
-    (its ``--url``/``--shared``, never a token), so the action runs as-is."""
+    (``awaiting_steer``), an operator hold (``hold_reason``), or a self-tracked
+    completion claim awaiting confirmation (``submitted``). ``submitted`` is
+    concluded, so it wins over a stale steering flag (``steer submit`` refuses a
+    concluded task); one with an ``evaluator_ref`` waits on its evaluator, not
+    the operator, and ``completed`` is never an item. ``cli`` is the invocation
+    that reaches the coordinator this read came from (its ``--url``/``--shared``,
+    never a token), so the action runs as-is; ``None`` (a read authenticated only
+    by a ``--token`` argument) means no action could, so none is offered."""
     task_id, title = str(task.get("id") or ""), ac.one_line(task.get("title"), 120)
     status = task.get("status")
     card = task.get("card") if isinstance(task.get("card"), dict) else {}
-    show = {"verb": "show", "argv": [*cli, "card", "show", task_id]}
     if not task_id:
         return None
-    if task.get("awaiting_steer"):
+    extra: dict[str, Any] = {}
+    if status == "submitted":
+        if task.get("evaluator_ref"):
+            return None
+        state, reason = "review", f"completion awaiting confirmation: {title}"
+    elif task.get("awaiting_steer"):
         state, reason = "awaiting_input", f"awaiting your answer: {title}"
         form = card.get("request_input")
         extra = {"input": form} if isinstance(form, (dict, list)) and form else {}
     elif task.get("hold_reason"):
-        state, reason, extra = "blocked", f"held ({ac.one_line(task['hold_reason'], 60)}): {title}", {}
-    elif status == "submitted":
-        state, reason, extra = "review", f"completion awaiting confirmation: {title}", {}
+        state, reason = "blocked", f"held ({ac.one_line(task['hold_reason'], 60)}): {title}"
     else:
         return None
+    # The steering card for an ask; the task itself (its result, its hold) otherwise.
+    view = ["card", "show", task_id] if state == "awaiting_input" else ["show", task_id]
+    actions = [{"verb": "show", "argv": [*cli, *view]}] if cli else []
     item = {
         "schema": ac.SCHEMA, "entity": "task", "entity_ref": task_id, "lifecycle_state": status,
         "display_state": state, "severity": ac.SEVERITY[state], "reason": ac.one_line(reason),
         "created_at": None, "updated_at": iso(task.get("updated_at"), read_at),
-        "confidence": "reported", "actions": [show], "source": "dispatch",
+        "confidence": "reported", "actions": actions, "source": "dispatch",
         "id": ac.make_id("dispatch", "task", task_id), "also": [], **extra,
     }
     return item
@@ -106,7 +115,8 @@ def _threshold(env: str) -> float:
     return value if value >= 0 else DEFAULT_STALLED_AFTER
 
 
-def _queue_item(repo: str, backlog: dict[str, Any], read_at: str, cli: tuple[str, ...]) -> dict[str, Any] | None:
+def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
+                cli: tuple[str, ...] | None) -> dict[str, Any] | None:
     """An undraining lane (the vision's *buildup-is-a-health-signal*): the oldest
     queued task waited too long, or a **live** owner stopped progressing. Held
     tasks whose owner is ``unknown`` or ``gone`` never count."""
@@ -122,14 +132,15 @@ def _queue_item(repo: str, backlog: dict[str, Any], read_at: str, cli: tuple[str
         "schema": ac.SCHEMA, "entity": "queue", "entity_ref": repo, "lifecycle_state": None,
         "display_state": "stalled", "severity": ac.SEVERITY["stalled"], "reason": ac.one_line(reason),
         "created_at": None, "updated_at": read_at, "confidence": "reported",
-        "actions": [{"verb": "show", "argv": [*cli, "list", "--repo", repo, "--status", "queued,claimed,started"]}],
+        "actions": [{"verb": "show", "argv": [*cli, "list", "--repo", repo, "--status", "queued,claimed,started"]}]
+        if cli else [],
         "source": "dispatch", "id": ac.make_id("dispatch", "queue", repo), "also": [],
     }
 
 
 def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
-                  cli: tuple[str, ...] = ("agent-dispatch",),
+                  cli: tuple[str, ...] | None = ("agent-dispatch",),
                   backlog_budget: float = BACKLOG_BUDGET) -> dict[str, Any]:
     started = time.monotonic()
     with client_factory() as client:

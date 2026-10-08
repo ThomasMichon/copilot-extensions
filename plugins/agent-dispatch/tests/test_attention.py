@@ -195,9 +195,12 @@ def test_two_items_for_one_entity_fail_their_source(tmp_path):
     ({"awaiting_steer": True, "status": "started", "card": {"request_input": {"answer": "text"}}}, "awaiting_input"),
     ({"hold_reason": "operator pause", "status": "queued"}, "blocked"),
     ({"status": "submitted"}, "review"),
+    ({"status": "submitted", "evaluator_ref": "ev-1"}, None),  # its evaluator confirms it, not the operator
     ({"status": "completed"}, None),
     ({"status": "started"}, None),
-    ({"status": "submitted", "awaiting_steer": True, "hold_reason": "x"}, "awaiting_input"),  # worst wins
+    ({"status": "started", "awaiting_steer": True, "hold_reason": "x"}, "awaiting_input"),  # worst wins
+    # submitted is concluded: a stale steering flag can't be answered (steer submit refuses it)
+    ({"status": "submitted", "awaiting_steer": True, "hold_reason": "x"}, "review"),
 ])
 def test_dispatch_task_mapping(task, state):
     item = srcs._task_item({"id": "t1", "title": "Fix it", **task}, T1)
@@ -205,6 +208,8 @@ def test_dispatch_task_mapping(task, state):
     if state == "awaiting_input" and task.get("card"):
         assert item["input"] == {"answer": "text"}
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "card", "show", "t1"]}
+    elif state in ("review", "blocked"):  # no card to show: the task itself
+        assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "show", "t1"]}
 
 
 def test_the_coordinators_epoch_timestamps_become_iso(tmp_path):
@@ -451,11 +456,17 @@ def test_a_real_steering_card_form_reaches_the_item():
 
 def test_the_action_reaches_the_coordinator_the_read_came_from(monkeypatch, capsys):
     tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    rc, out = _cli(monkeypatch, capsys, ["--url", "http://peer:8787", "attention", "--json"], tasks)
+    argv = json.loads(out.out)["items"][0]["actions"][0]["argv"]
+    assert argv == ["agent-dispatch", "--url", "http://peer:8787", "show", "t1"]
+
+
+def test_a_read_authenticated_only_by_a_token_argument_offers_no_actions(monkeypatch, capsys):
+    """An action never carries a secret, so after `--token` none could run as-is."""
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
     rc, out = _cli(monkeypatch, capsys, ["--url", "http://peer:8787", "--token", "s3cret", "attention", "--json"],
                    tasks)
-    argv = json.loads(out.out)["items"][0]["actions"][0]["argv"]
-    assert argv == ["agent-dispatch", "--url", "http://peer:8787", "card", "show", "t1"]
-    assert "s3cret" not in out.out
+    assert json.loads(out.out)["items"][0]["actions"] == [] and "s3cret" not in out.out
 
 
 def test_the_next_hint_walks_the_same_coordinator_and_sources(monkeypatch, capsys):
@@ -636,5 +647,5 @@ def test_a_silent_failover_to_the_shared_coordinator_is_pinned_in_actions(monkey
     args = m.build_parser().parse_args(["attention", "next"])
     assert args.func(args) == 0
     out = capsys.readouterr().out
-    assert "agent-dispatch --shared card show t1" in out
+    assert "agent-dispatch --shared show t1" in out
     assert "next: agent-dispatch --shared attention next --after" in out

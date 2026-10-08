@@ -44,12 +44,16 @@ def _target_cli(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(cli)
 
 
-def _effective_cli(args: argparse.Namespace, client: Any) -> tuple[str, ...]:
+def _effective_cli(args: argparse.Namespace, client: Any) -> tuple[str, ...] | None:
     """:func:`_target_cli`, plus ``--shared`` when the default path silently failed
     over to the shared coordinator -- so an action keeps reaching the queue the
     read came from even once the local coordinator is back. (An SSH failover has
     no flag to pin it; its actions keep the default route, which fails over the
-    same way while the local coordinator stays down.)"""
+    same way while the local coordinator stays down.) ``None`` when the read was
+    authenticated by a ``--token`` argument: an action never carries a secret,
+    so none could reach that coordinator as-is."""
+    if getattr(args, "token", None):
+        return None
     cli = _target_cli(args)
     if len(cli) == 1:
         from .config import shared_url
