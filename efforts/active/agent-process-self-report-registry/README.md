@@ -148,6 +148,9 @@ defect trackers until their own repairs are verified.
 - [ ] Choose the folder/database/service arrangement. Prefer a small daemon
       for coordination and periodic snapshots, while retaining the operator's
       latitude on storage. Name its source owner and lifecycle before coding.
+      If resident, reconcile its update/activation design with
+      `docs/patterns/graceful-daemon-cutover.md` at design time; any exemption
+      needs an explicit justification, not merely a restart policy.
 - [ ] _(Agent-recommended)_ Define owner-scoped access to registration,
       unregister, query, and stored state/snapshots. Follow
       `docs/patterns/service-transport.md`: private UDS permissions or Windows
@@ -178,6 +181,8 @@ defect trackers until their own repairs are verified.
       client; startup/exit announce membership without blocking useful work.
       _(Agent-recommended)_ Registration failure emits a bounded local
       diagnostic and permits later retry rather than silently disappearing.
+      Adopting plugins remain independently usable when the optional registry
+      is absent; this must not become a mandatory global broker.
 - [ ] Implement an on-demand state query and counts by role/plugin/session/
       worktree, distinguishing logical registrations from OS launcher processes.
 - [ ] Implement periodic snapshot files, on-demand historical reporting,
@@ -204,6 +209,10 @@ defect trackers until their own repairs are verified.
       restart, and denied OS inspection; no stale record removes a new process.
 - [ ] Verify installation-cell isolation and concurrent registration/query
       behavior on the explicitly supported Windows/Linux/macOS paths.
+- [ ] If a resident daemon is selected, validate version activation/cutover:
+      preserve membership across handover, keep queries/registrations usable,
+      roll back a failed activation, and retire superseded instances without
+      deleting the current owner's records. Validate any reviewed exemption.
 - [ ] Attempt unauthorized register/unregister/query and state/snapshot-file
       access; all are denied under the reviewed owner scope. Test forged
       registration ownership and conditional removal without disclosing
@@ -285,3 +294,6 @@ _Pending — Phase 1 design decisions above need to land here once settled._
 - Review of the revised stateful design required explicit owner-scoped
   transport/storage access and anti-spoofing validation. Added these as
   agent-recommended safety requirements without introducing telemetry export.
+- Added the repo's conditional graceful-cutover design/validation obligation
+  if a resident daemon is chosen, and preserved independent plugin operation
+  when this optional registration service is absent.
