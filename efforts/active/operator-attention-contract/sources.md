@@ -7,8 +7,7 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
 - **dispatch**:
   - `awaiting_steer` → `awaiting_input`;
   - `hold_reason` → `blocked` (the operator's own hold: low severity, still listed);
-  - a self-tracked task in `submitted` (a completion claim awaiting
-    confirmation) → `review`. `completed` is the confirmed terminal and is never
+  - a self-tracked task in `submitted` (a completion claim awaiting confirmation) → `review`, even under a stale `awaiting_steer` flag: a submitted task is concluded and `steer submit` refuses it, so its ask can't be answered (the board applies the same precedence). A submission with an `evaluator_ref` waits on its evaluator, not the operator, and is no item. `completed` is the confirmed terminal and is never
     an item;
   - undraining buildup (vision *buildup-is-a-health-signal*) → `stalled`, one
     item per repo (`entity: queue`, `entity_ref`: the canonical repo), built on
