@@ -753,7 +753,10 @@ resume), the daemon asks the host's registered launch policy through
 `venue_launch_policy.py`: it runs `launch-check <codespace> --json` via the
 active `codespace` provider's absolute command from `providers.d` (the service
 `PATH` normally lacks sibling binstubs; that command also runs in the
-provider's own installation context), falling back to a `PATH` lookup. Only an
+provider's own installation context), falling back to a `PATH` lookup. It
+passes `--deadline` (its own 60 s timeout less a 5 s margin), so the policy's
+timeout shrinks to fit a slow start-up and the check's own tree-kill cleanup
+always runs before the daemon would kill the check. Only an
 exit 0 carrying `{"refuse": null}` allows the spawn; a refusal, a timeout, or
 malformed output refuses it, recorded as `launch_refused` (a refused resume is
 terminal). When no check is possible (no provider, or one that predates

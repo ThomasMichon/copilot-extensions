@@ -35,6 +35,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_flags, spawn_sync_in_kill_on_close_job
@@ -99,7 +100,7 @@ def registered() -> dict[str, Any] | None:
         raise PolicyUnreadable(f"{POLICY_FILE} is a symlink")
     if not stat.S_ISREG(info.st_mode):  # a FIFO or device could block the read
         raise PolicyUnreadable(f"{POLICY_FILE} is not a regular file")
-    if not _private_dir(POLICY_FILE.parent, create=False):
+    if not _exclusive_dir(create=False):
         raise PolicyUnreadable(f"{POLICY_FILE.parent} is not a directory only this user controls")
     try:
         raw = POLICY_FILE.read_text(encoding="utf-8")
@@ -144,7 +145,7 @@ def register(argv: list[str], *, timeout: float = DEFAULT_TIMEOUT) -> None:
     if not 0 < timeout <= MAX_TIMEOUT:
         raise ValueError(f"timeout must be in (0, {MAX_TIMEOUT:g}] seconds")
     ensure_runtime_dir()
-    if not _private_dir(POLICY_FILE.parent, create=True):
+    if not _exclusive_dir(create=True):
         raise PermissionError(f"{POLICY_FILE.parent} can't be made a directory only this user controls")
     tmp = POLICY_FILE.with_name(f".{POLICY_FILE.name}.{os.getpid()}.tmp")
     data = json.dumps({"argv": argv, "timeout": timeout}, indent=2).encode("utf-8")
@@ -156,6 +157,24 @@ def register(argv: list[str], *, timeout: float = DEFAULT_TIMEOUT) -> None:
     with os.fdopen(fd, "wb") as fh:
         fh.write(data)
     os.replace(tmp, POLICY_FILE)
+
+
+def _exclusive_dir(*, create: bool) -> bool:
+    """Whether the registration's directory is one only this user controls. On
+    POSIX that is its ownership and mode (``launch_memory._private``). On Windows
+    mode bits say nothing about the ACL, so a directory is trusted only inside
+    the user's profile, whose inherited ACL admits only the user (plus SYSTEM and
+    Administrators); elsewhere exclusive control can't be shown, so it fails
+    closed rather than run a command another account could have written."""
+    if not _private_dir(POLICY_FILE.parent, create=create):
+        return False
+    if os.name != "nt":
+        return True
+    try:
+        parent, home = POLICY_FILE.parent.resolve(), Path.home().resolve()
+    except OSError:
+        return False
+    return parent == home or home in parent.parents
 
 
 def clear() -> bool:
@@ -246,19 +265,28 @@ def _run_contained(argv: list[str], request: str, timeout: float) -> tuple[int, 
             job.close()
 
 
-def refusal(codespace: str) -> str | None:
-    """Why a worker may not be launched on ``codespace`` now, or ``None``."""
+def refusal(codespace: str, deadline: float | None = None) -> str | None:
+    """Why a worker may not be launched on ``codespace`` now, or ``None``.
+    ``deadline`` (Unix time) is the caller's own limit: the policy's timeout
+    shrinks so it, and its cleanup, finish first -- a caller's outer timeout
+    killing this process would otherwise leave the policy's separate process
+    group without its watchdog."""
     try:
         policy = registered()
     except PolicyUnreadable as exc:
         return f"launch policy registration unreadable: {_one_line(str(exc))}"
     if policy is None:
         return None
+    timeout = policy["timeout"]
+    if deadline is not None:
+        timeout = min(timeout, deadline - time.time() - _CLEANUP_GRACE)
+        if timeout <= 0:
+            return "launch policy check ran out of time before the policy could run"
     request = json.dumps({"schema": 1, "venue": "codespace", "codespace": codespace})
     try:
-        returncode, stdout, stderr = _run_contained(policy["argv"], request, policy["timeout"])
+        returncode, stdout, stderr = _run_contained(policy["argv"], request, timeout)
     except subprocess.TimeoutExpired:
-        return f"launch policy timed out after {policy['timeout']:g}s"
+        return f"launch policy timed out after {round(timeout, 1):g}s"
     except PolicyOutputTooLarge as exc:
         return str(exc)
     except (OSError, RuntimeError, ValueError) as exc:  # ValueError: e.g. an embedded NUL
@@ -299,6 +327,8 @@ def add_launch_policy_parsers(sub) -> None:
     )
     check.add_argument("codespace", help="CodeSpace name")
     check.add_argument("--json", action="store_true", help='Print {"codespace", "refuse"}')
+    check.add_argument("--deadline", type=float,
+                       help="Unix time by which the caller needs the answer; the policy's timeout shrinks to fit")
     check.set_defaults(func=cmd_launch_check)
 
     policy = sub.add_parser("launch-policy", help="Register, show or clear this machine's launch policy")
@@ -315,7 +345,7 @@ def add_launch_policy_parsers(sub) -> None:
 
 
 def cmd_launch_check(args) -> int:
-    reason = refusal(args.codespace)
+    reason = refusal(args.codespace, deadline=getattr(args, "deadline", None))
     if args.json:
         print(json.dumps({"codespace": args.codespace, "refuse": reason}))
     elif reason is None:

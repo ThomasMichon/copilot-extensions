@@ -43,7 +43,9 @@ def _check(monkeypatch, *, rc=0, stdout="", stderr="", raises=None, binstub="age
 def test_allowed(monkeypatch):
     calls = _check(monkeypatch, rc=0, stdout=json.dumps({"codespace": "cs", "refuse": None}))
     assert vlp.codespace_launch_refusal("cs") is None
-    assert calls == [["agent-codespaces", "launch-check", "cs", "--json"]]
+    assert [c[:4] for c in calls] == [["agent-codespaces", "launch-check", "cs", "--json"]]
+    deadline = float(calls[0][calls[0].index("--deadline") + 1])  # the check answers before the outer kill
+    assert 0 < deadline - __import__("time").time() <= vlp._CHECK_TIMEOUT - vlp._CHECK_DEADLINE_MARGIN
 
 
 def test_the_active_provider_manifest_command_is_used_before_path(monkeypatch):
@@ -55,7 +57,7 @@ def test_the_active_provider_manifest_command_is_used_before_path(monkeypatch):
     monkeypatch.setattr("agent_bridge.provider_sources.discover_provider_manifests",
                         lambda *a, **k: {"codespace": NS(command=("/opt/cell/bin/agent-codespaces", "--cell"))})
     assert vlp.codespace_launch_refusal("cs") is None
-    assert calls == [["/opt/cell/bin/agent-codespaces", "--cell", "launch-check", "cs", "--json"]]
+    assert calls[0][:5] == ["/opt/cell/bin/agent-codespaces", "--cell", "launch-check", "cs", "--json"]
 
 
 def test_refused_carries_the_policy_reason(monkeypatch):

@@ -304,3 +304,39 @@ def test_cli_set_pins_a_bare_command_to_its_absolute_path(capsys):
     name = os.path.basename(sys.executable)
     assert _cli(["launch-policy", "set", "--", os.path.splitext(name)[0], "-c", "pass"]) == 0
     assert os.path.isabs(lp.registered()["argv"][0])
+
+
+def test_a_caller_deadline_shrinks_the_policy_timeout():
+    """The bridge's outer timeout must never kill the check before the policy's
+    own cleanup has run: the policy gets only what fits before the deadline."""
+    import time
+
+    _policy("import time; time.sleep(30)", timeout=40.0)
+    started = time.monotonic()
+    reason = lp.refusal("cs", deadline=time.time() + lp._CLEANUP_GRACE + 1.0)
+    assert "timed out after 1s" in reason and time.monotonic() - started < 15
+
+
+def test_a_deadline_with_no_time_left_refuses_without_running_the_policy():
+    import time
+
+    _policy("raise SystemExit('must not run')")
+    assert "ran out of time" in lp.refusal("cs", deadline=time.time())
+
+
+def test_cli_launch_check_accepts_a_deadline(capsys):
+    import time
+
+    _policy("print('{\"refuse\": null}')")
+    assert _cli(["launch-check", "cs", "--json", "--deadline", str(time.time() + 30)]) == 0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the Windows ACL boundary")
+def test_on_windows_a_registration_outside_the_profile_fails_closed(monkeypatch, tmp_path):
+    """Mode bits don't express a Windows ACL: outside the user's profile,
+    exclusive control can't be shown, so the registration isn't trusted."""
+    _policy("print('{\"refuse\": null}')")
+    monkeypatch.setattr(lp.Path, "home", classmethod(lambda cls: tmp_path / "some-other-profile"))
+    assert "only this user controls" in lp.refusal("cs")
+    with pytest.raises(PermissionError):
+        lp.register([sys.executable])

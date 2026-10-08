@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from agent_procutil import no_window_flags
@@ -28,6 +29,10 @@ LAUNCH_REFUSED_EXIT = 79
 #: plus room for agent-codespaces' own start-up and tree-kill cleanup, so a slow
 #: policy times out inside the check, the same way for every launch path.
 _CHECK_TIMEOUT = 60.0
+#: The check is told to answer this long before ``_CHECK_TIMEOUT`` kills it, so
+#: the policy's timeout shrinks to fit a slow start-up and its own cleanup
+#: always runs (killing only the check would orphan the policy's process group).
+_CHECK_DEADLINE_MARGIN = 5.0
 
 
 class LaunchRefusedError(RuntimeError):
@@ -97,7 +102,8 @@ def codespace_launch_refusal(codespace: str) -> str | None:
         return _unchecked_refusal("agent-codespaces is not installed")
     try:
         result = subprocess.run(
-            [*command, "launch-check", codespace, "--json"],
+            [*command, "launch-check", codespace, "--json",
+             "--deadline", f"{time.time() + _CHECK_TIMEOUT - _CHECK_DEADLINE_MARGIN:.3f}"],
             capture_output=True, text=True, timeout=_CHECK_TIMEOUT,
             creationflags=no_window_flags(),
         )
