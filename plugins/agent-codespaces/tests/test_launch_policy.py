@@ -356,6 +356,7 @@ def test_clear_names_a_non_empty_directory_instead_of_crashing(capsys):
     assert "remove it by hand" in capsys.readouterr().err
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="the Windows Job Object path")
 def test_without_windows_containment_the_policy_is_refused_not_run(monkeypatch):
     """No Job Object means a timeout could orphan the policy's descendants."""
     killed = []
@@ -370,7 +371,6 @@ def test_without_windows_containment_the_policy_is_refused_not_run(monkeypatch):
             return -9
 
     _policy("print('{\"refuse\": null}')")
-    monkeypatch.setattr(lp.os, "name", "nt")
     monkeypatch.setattr(lp, "shutil", type("S", (), {"which": staticmethod(lambda c: None)}))
     monkeypatch.setattr(lp, "no_window_flags", lambda: 0)
     monkeypatch.setattr(lp, "spawn_sync_in_kill_on_close_job", lambda argv, **kw: (Proc(), None))

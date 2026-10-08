@@ -762,6 +762,8 @@ malformed output refuses it, recorded as `launch_refused` (a refused resume is
 terminal). When no check is possible (no provider, or one that predates
 `launch-check`), the spawn is allowed only if no registration file exists. The
 gate is a spawner subclass built in `codespace_transport.build_codespace_spawner`,
+and `transport.spawn` asks the same policy before any raw-transport CodeSpace
+spawn (a resync, or a resume without a Session Host),
 advertised as HTTP generation 25 (`codespace_launch_policy`).
 
 ## Persistence

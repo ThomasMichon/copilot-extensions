@@ -139,3 +139,14 @@ def ensure_codespace_launch_allowed(codespace: str) -> None:
     reason = codespace_launch_refusal(codespace)
     if reason is not None:
         raise LaunchRefusedError(codespace, reason)
+
+
+async def gate_raw_codespace_spawn(target: object) -> None:
+    """Ask the policy before a raw-transport spawn whose target is a CodeSpace (a
+    resync, or a resume without a Session Host), as the Session Host spawner does
+    for its own; any other target passes. Raises :class:`LaunchRefusedError`."""
+    import asyncio
+
+    name = (getattr(target, "codespace", None) or {}).get("name")
+    if name:
+        await asyncio.to_thread(ensure_codespace_launch_allowed, name)

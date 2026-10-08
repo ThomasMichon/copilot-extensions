@@ -239,3 +239,18 @@ def test_the_check_output_is_decoded_leniently(monkeypatch):
     monkeypatch.setattr(vlp.subprocess, "run", run)
     assert "without an explicit allow" in vlp.codespace_launch_refusal("cs")
     assert seen.get("encoding") == "utf-8" and seen.get("errors") == "replace"
+
+
+@pytest.mark.asyncio
+async def test_a_raw_codespace_spawn_asks_the_policy_too(monkeypatch):
+    """A resync (or a resume without a Session Host) spawns through the raw
+    transport: it must not launch a worker the host policy refuses."""
+    from agent_bridge import transport
+
+    monkeypatch.setattr(vlp, "codespace_launch_refusal", lambda name: f"{name} is paused")
+    monkeypatch.setattr(transport, "spawn_raw", AsyncMock(side_effect=AssertionError("must not launch")))
+    target = SpawnTarget(type="command", spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
+                         codespace={"name": "cs-one", "repo": "org/repo"})
+    with pytest.raises(vlp.LaunchRefusedError) as exc:
+        await transport.spawn(target)
+    assert exc.value.codespace == "cs-one"
