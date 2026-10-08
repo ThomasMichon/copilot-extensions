@@ -127,18 +127,16 @@ follow-ons.
       `predecessor_retire_state` (`pending|retired|abandoned`),
       `retire_attempts`, `retire_last_attempt_at`, `retire_last_outcome`,
       `retire_last_method`.
-- [ ] **Transactional ordering (review finding, PR #5669): the slot and the
-      diagnostic log are NOT one atomic commit** -- a YAML write under
-      `_RecordLock` and a best-effort JSONL append cannot both land
-      atomically, and the existing spawn marks bracket external process
-      creation with no lock held at all
-      (`handoff_cutover.py` spawn-started/spawn-result sites). Define an
-      explicit, crash-safe order rather than assuming simultaneity: commit
-      the slot update first, under its own `_RecordLock` transaction, and
-      only emit the corresponding `activity.log_event()`/trace write
-      *after* that commit succeeds. A crash between the two leaves the slot
-      (authoritative) correct and only the diagnostic trail short one
-      event -- never the reverse.
+- [ ] **Crash-safe commit ordering.** The slot and the diagnostic log are
+      not one atomic commit -- a YAML write under `_RecordLock` and a
+      best-effort JSONL append cannot both land atomically, and the
+      existing spawn marks bracket external process creation with no lock
+      held at all (`handoff_cutover.py` spawn-started/spawn-result sites).
+      Commit the slot update first, under its own `_RecordLock`
+      transaction, and only emit the corresponding
+      `activity.log_event()`/trace write after that commit succeeds. A
+      crash between the two leaves the slot (authoritative) correct and
+      only the diagnostic trail short one event -- never the reverse.
 - [ ] Preserve the existing abandon-after-N-unrecoverable-failures semantics
       (`_RETIRE_TERMINAL_FAILURE_METHODS`, `_RETIRE_ABANDON_GRACE_S`) exactly,
       now computed from the slot fields instead of log replay.
@@ -180,39 +178,55 @@ follow-ons.
 - [ ] Every remaining on-demand reader (the "Messages" menu action, CLI
       `activity`/`activity-log list` verbs) reads the per-worktree file
       directly -- no more global-file + `worktree_id` filtering.
-- [ ] **Define the unfiltered `agent-worktrees activity` contract (review
-      finding, PR #5669).** `activity.py` and `plugins/agent-worktrees/docs/
-      cli-reference.md` both currently document a deliberately *unscoped*
-      "full retained log" view (no `--worktree-id`/`--project` required) --
-      once there is no single global file, this needs an explicit, chosen
-      behavior rather than silently breaking. Decision: an unscoped call
-      discovers and merges every project's per-worktree journal files,
+- [ ] **Unfiltered `agent-worktrees activity` contract.** `activity.py` and
+      `plugins/agent-worktrees/docs/cli-reference.md` both currently
+      document a deliberately unscoped "full retained log" view (no
+      `--worktree-id`/`--project` required) -- once there is no single
+      global file, this needs an explicit, chosen behavior rather than
+      silently breaking. An unscoped call discovers and merges every
+      project's per-worktree journal files -- including the archived
+      location Phase 6 introduces (a pure filesystem read of a known
+      path convention, not a call into `agent-logger`; see Phase 6) --
       globally time-ordered, matching today's output shape (same fields,
       same sort) -- preserving existing UX/back-compat. This remains an
       on-demand diagnostic read only (the `activity` CLI verb, never a hot
       path), so the extra discovery I/O is acceptable there.
 
 ### Phase 4 — One-time migration
-- [ ] A best-effort, idempotent migration pass that reads the existing
-      global `activity.jsonl` once and appends each record's history into
-      the correct per-worktree file it describes, then marks itself done
-      (a stamp file) so it never re-runs.
-- [ ] **Safe handling of project-ambiguous/orphaned records (review
-      finding, PR #5669, High).** `activity.log_event()` does not persist
-      its `project` argument, and a worktree id is only unique *within* one
-      project (two different projects can legitimately share the same
-      worktree id) -- a migrated-by-id-alone record can land in the WRONG
-      project's file, corrupting that worktree's history. The migration
-      must resolve each record's project unambiguously before writing:
-      look it up against every currently-known project's tracking
-      directory; migrate only when the worktree id resolves to **exactly
-      one** live (or archived-but-identifiable) project+worktree. An id
-      that matches zero or multiple projects is never guessed -- it is
-      retained in a clearly-labeled `activity.jsonl.unmigrated` sidecar (or
-      equivalent) and reported in the migration's own summary output, never
-      silently dropped or silently misfiled.
+- [ ] A best-effort migration pass that reads the existing global
+      `activity.jsonl` once and copies each record's history into the
+      correct per-worktree file it describes.
+- [ ] **Idempotent across retries and dual writes.** A naive append-then-
+      stamp is not safe: a crash after some destination appends but before
+      the stamp duplicates those entries on restart, and Phase 3's dual-write
+      transition period means a given event may already exist in both the
+      source and destination before migration ever runs. Give every
+      migrated record a stable identity (e.g. a content hash of its
+      original fields, or an existing unique field if one already
+      qualifies) and de-duplicate against the destination file's existing
+      entries before appending -- never a blind append. Validate both an
+      interrupted/retried run and a run that overlaps with
+      already-dual-written events.
+- [ ] Mark the migration done (a stamp file) only after a full pass
+      completes with no unresolved work, so a retry after an interruption
+      naturally resumes rather than restarting blind.
+- [ ] **Safe handling of project-ambiguous/orphaned records.**
+      `activity.log_event()` does not persist its `project` argument, and a
+      worktree id is only unique *within* one project (two different
+      projects can legitimately share the same worktree id) -- a
+      migrated-by-id-alone record can land in the WRONG project's file,
+      corrupting that worktree's history. The migration must resolve each
+      record's project unambiguously before writing: look it up against
+      every currently-known project's tracking directory; migrate only
+      when the worktree id resolves to **exactly one** live (or
+      archived-but-identifiable) project+worktree. An id that matches zero
+      or multiple projects is never guessed -- it is retained in a
+      clearly-labeled `activity.jsonl.unmigrated` sidecar (or equivalent)
+      and reported in the migration's own summary output, never silently
+      dropped or silently misfiled.
 - [ ] Wire it into `agent-worktrees update`/install so every existing
-      machine picks it up once, automatically.
+      machine picks it up once, automatically (safe to re-run given the
+      idempotency requirement above).
 
 ### Phase 5 — Retire the global log
 - [ ] Once Phases 1-4 are live and proven (no remaining reader of the global
@@ -226,30 +240,42 @@ follow-ons.
       into/merging with the existing Tier C description) and
       `plugins/agent-worktrees/docs/cli-reference.md`'s `activity` section
       (its documented machine-global retention/behavior, reconciled with
-      Phase 3's unscoped-merge decision above) (review finding, PR #5669).
+      Phase 3's unscoped-merge decision above).
 
 ### Phase 6 — Worktree-state archival (agent-logger)
-- [ ] **Composition seam, not a direct call (review finding, PR #5669).**
-      `agent-logger` is an optional, higher-tier plugin; `agent-worktrees`
-      (the ground-layer owner of worktree lifecycle/identity) must not call
-      upward into it directly, and its absence must never block or slow
-      cleanup (`docs/patterns/a-la-carte-independence.md`). `agent-worktrees`
-      defines and owns a lower-tier, fail-open drop-in callback point in its
-      own cleanup/finalize path (e.g. a well-known, optionally-present
+- [ ] **Composition seam, not a direct call.** `agent-logger` is an
+      optional, higher-tier plugin; `agent-worktrees` (the ground-layer
+      owner of worktree lifecycle/identity) must not call upward into it
+      directly, and its absence must never block or slow cleanup
+      (`docs/patterns/a-la-carte-independence.md`). `agent-worktrees`
+      defines and owns a lower-tier, fail-open drop-in callback point in
+      its own cleanup/finalize path (e.g. a well-known, optionally-present
       hook directory or entry-point convention already used elsewhere in
       this repo for a-la-carte composition); `agent-logger`, if installed,
       registers into that seam to archive the diagnostic bundle. The
       authoritative "this worktree is gone" tombstone/identity decision
       stays entirely inside `agent-worktrees` regardless of whether the
       archival seam is present, fires, or fails.
-- [ ] New capability in `agent-logger`: when invoked through that seam,
-      archive the worktree's own accumulated per-worktree state (its
-      activity-log file, its `handoff_trace` file, any other per-worktree
-      sidecar) -- reusing the already-proven `sessions.archive_session` /
-      `verify_archive` / reclaim pattern from `agent_logger.sync.compact` --
-      into `agent-logger`'s existing local archive root
-      (`cfg.compact_archive_root` or a sibling root), grouped under
-      `<repo>/<worktree-id>`.
+- [ ] **Archived-journal discovery stays lower-tier-owned.** Phase 3
+      promises the unscoped `activity` view keeps matching today's full
+      retained history, but archiving (and reclaiming the live copy of) a
+      cleaned-up worktree's journal would otherwise make it vanish from
+      that view immediately -- a real regression against today's 7-day
+      rolling retention, which still shows a just-cleaned-up worktree's
+      recent history. Fix: the archive's on-disk location/layout is a
+      plain, fixed path convention `agent-worktrees` itself knows and can
+      read directly (a filesystem read, never a call into `agent-logger`)
+      -- so `agent-worktrees`' own unscoped-merge discovery (Phase 3) also
+      looks there as a fallback source. This works whether or not
+      `agent-logger` is installed: if it never ran, that location is simply
+      empty, and nothing is lost that wasn't already gone.
+- [ ] New capability in `agent-logger`: when invoked through the Phase 6
+      composition seam, archive the worktree's own accumulated per-worktree
+      state (its activity-log file, its `handoff_trace` file, any other
+      per-worktree sidecar) -- reusing the already-proven
+      `sessions.archive_session` / `verify_archive` / reclaim pattern from
+      `agent_logger.sync.compact` -- into the fixed path convention above,
+      grouped under `<repo>/<worktree-id>`.
 - [ ] Verify-before-reclaim, exactly like session compaction: never delete
       the live per-worktree state until the archive is confirmed intact.
       A failed/absent archive step never blocks or reverses
@@ -277,6 +303,11 @@ follow-ons.
 - [ ] A migration test: seed a synthetic global log with mixed-worktree
       entries, run the migration, assert each per-worktree file receives
       exactly its own entries, idempotent on a second run (Phase 4).
+- [ ] A migration-crash/dual-write test: interrupt a migration mid-run and
+      rerun it (assert no duplicated entries in the destination); also seed
+      the destination with events a Phase-3 dual-write already delivered
+      before migration runs, and confirm migration recognizes and skips
+      them rather than duplicating (Phase 4).
 - [ ] A migration-ambiguity test: seed the synthetic global log with a
       worktree id that exists in two different projects' tracking
       directories (and one that exists in none), confirm both are routed to
@@ -290,6 +321,11 @@ follow-ons.
       normally and identically whether or not `agent-logger` is installed
       (fail-open), and that the archival callback firing/failing never
       changes `agent-worktrees`' own tombstone decision (Phase 6).
+- [ ] An archived-journal discovery test: clean up (archive + reclaim) a
+      worktree with `agent-logger` installed, then confirm the unscoped
+      `agent-worktrees activity` view still includes its recent history by
+      reading the fixed archive location directly -- with no `agent-logger`
+      call involved (Phase 6).
 - [ ] Archival round-trip test: create a worktree, accumulate some
       per-worktree state, clean it up, confirm the archive exists, verifies,
       and the live per-worktree state is gone (Phase 6).
