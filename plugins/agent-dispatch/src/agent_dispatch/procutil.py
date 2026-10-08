@@ -24,9 +24,11 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from .install_paths import install_dir
 
@@ -294,14 +296,67 @@ def run_agent_worktrees_capture(
     )
 
 
+class OutputLimitExceeded(RuntimeError):
+    """A bounded capture's process wrote more than its limit (and was stopped)."""
+
+
+def _read_bounded(
+    proc: subprocess.Popen[str], timeout: float, limit: int
+) -> tuple[str, str] | str | None:
+    """Drain both pipes on threads, stopping at ``limit`` characters in all.
+    ``(stdout, stderr)``, ``"overflow"``, or ``None`` on timeout."""
+    chunks: dict[str, list[str]] = {"out": [], "err": []}
+    total = [0]
+    over = threading.Event()
+    lock = threading.Lock()
+
+    def drain(stream: Any, key: str) -> None:
+        while not over.is_set():
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            with lock:
+                total[0] += len(chunk)
+                if total[0] > limit:
+                    over.set()
+                    return
+                chunks[key].append(chunk)
+
+    readers = [threading.Thread(target=drain, args=(proc.stdout, "out"), daemon=True),
+               threading.Thread(target=drain, args=(proc.stderr, "err"), daemon=True)]
+    for reader in readers:
+        reader.start()
+    deadline = time.monotonic() + timeout
+    while any(reader.is_alive() for reader in readers):
+        if over.is_set():
+            return "overflow"
+        if time.monotonic() >= deadline:
+            return None
+        for reader in readers:
+            reader.join(0.05)
+    if over.is_set():
+        return "overflow"
+    try:
+        proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        return None
+    return "".join(chunks["out"]), "".join(chunks["err"])
+
+
 def run_background_capture(
     argv: Sequence[str | os.PathLike[str]],
     *,
     timeout: float,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
+    max_output: int | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a short-lived captured process tree without a headed Windows console.
+
+    ``max_output`` bounds what is kept from stdout and stderr together (in
+    characters): a process that writes more is stopped, tree and all, and
+    :class:`OutputLimitExceeded` is raised, so an untrusted command can't
+    exhaust this process's memory within its timeout.
 
     ``CREATE_NO_WINDOW`` is intentionally applied to the console-subsystem root,
     not to ``pythonw.exe`` and not combined with ``DETACHED_PROCESS``. This keeps
@@ -359,6 +414,14 @@ def run_background_capture(
     # times longer than it declared. Charge the probe's own elapsed time
     # against the same budget.
     remaining = max(0.0, timeout - (time.monotonic() - spawn_time))
+    if max_output is not None:
+        captured = _read_bounded(proc, remaining, max_output)
+        if not isinstance(captured, tuple):
+            terminate_process_tree(proc, expected_start_token=start_token)
+            if captured == "overflow":
+                raise OutputLimitExceeded(f"wrote more than {max_output} characters")
+            return None
+        return subprocess.CompletedProcess(args, proc.returncode, *captured)
     try:
         stdout, stderr = proc.communicate(timeout=remaining)
     except subprocess.TimeoutExpired:

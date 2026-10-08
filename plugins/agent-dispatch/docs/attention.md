@@ -127,7 +127,9 @@ schema with `source`, `id`, `created_at` and `updated_at` optional. The
 aggregator canonicalizes `entity` first (a bare custom kind `login` becomes
 `x.<name>.login`; another source's `x.` prefix is rejected), rejects a `source`
 or `id` that isn't its own, then sets `source`, derives `id`, and fills the
-times before validating the item. A non-zero exit, a timeout, non-JSON output,
+times before validating the item. A non-zero exit, a timeout, more than
+1,048,576 characters of output (stdout and stderr together; the command is
+stopped), non-JSON output,
 a `schema` other than `1`, a missing `items[]`, a status that contradicts
 `uncertain`, a non-empty `also[]`, two items for one entity, or any invalid item
 makes the source `failed`.

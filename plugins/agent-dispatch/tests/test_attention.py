@@ -225,7 +225,7 @@ def test_the_coordinators_epoch_timestamps_become_iso(tmp_path):
 
 
 def _run_returning(stdout="", returncode=0, stderr=""):
-    return lambda argv, timeout, cwd=None: subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+    return lambda argv, timeout, cwd=None, **_k: subprocess.CompletedProcess(argv, returncode, stdout, stderr)
 
 
 def _command(stdout, **kw):
@@ -258,7 +258,7 @@ def test_a_command_that_exits_non_zero_or_prints_non_json_fails(kw):
 
 
 def test_a_command_that_times_out_fails():
-    assert srcs.read_command("ext", {"argv": ["x"], "timeout": 5}, T1, run=lambda a, timeout, cwd=None: None)["status"] == "failed"
+    assert srcs.read_command("ext", {"argv": ["x"], "timeout": 5}, T1, run=lambda a, timeout, cwd=None, **_k: None)["status"] == "failed"
 
 
 def _cmd_item(**kw):
@@ -410,7 +410,7 @@ def test_cli_source_add_parses_options_before_the_command(monkeypatch, capsys):
 def test_a_command_source_runs_from_the_registry_directory_not_the_callers(monkeypatch, tmp_path):
     seen = {}
 
-    def run(argv, timeout, cwd=None):
+    def run(argv, timeout, cwd=None, **_k):
         seen["cwd"] = cwd
         return subprocess.CompletedProcess(argv, 0, json.dumps({"schema": 1, "items": []}), "")
 
@@ -419,6 +419,15 @@ def test_a_command_source_runs_from_the_registry_directory_not_the_callers(monke
     monkeypatch.chdir(checkout)
     srcs.read_command("ext", {"argv": [sys.executable], "timeout": 5}, T1, run=run)
     assert seen["cwd"] == str(srcs.registry_path().parent) != str(checkout)
+
+
+def test_a_command_source_that_floods_output_fails_alone(monkeypatch):
+    monkeypatch.setattr(srcs, "MAX_OUTPUT", 10_000)
+    flood = [sys.executable, "-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)"]
+    result = srcs.read_command("ext", {"argv": flood, "timeout": 20}, T1)
+    assert result["status"] == "failed" and "more than 10000 characters" in result["error"]
+    quiet = [sys.executable, "-c", "import json; print(json.dumps({'schema': 1, 'items': []}))"]
+    assert srcs.read_command("ext", {"argv": quiet, "timeout": 20}, T1)["status"] == "ok"
 
 
 def test_a_short_deadline_is_honored_even_when_checked_after_a_long_one(tmp_path):

@@ -27,6 +27,8 @@ from .client import DispatchError
 BUILTIN_SOURCES = ("dispatch",)
 DEFAULT_TIMEOUT = 20.0
 MAX_TIMEOUT = 120.0
+#: A command source's stdout and stderr together (characters); more fails that source.
+MAX_OUTPUT = 1024 * 1024
 #: Lifecycle states that can carry an attention condition.
 _OPEN_STATES = "proposed,queued,claimed,started,suspended,submitted"
 
@@ -242,7 +244,13 @@ def read_command(name: str, spec: dict[str, Any], read_at: str,
     argument can resolve against the checkout the read happens to run in."""
     if run is None:
         from .procutil import run_background_capture as run
-    done = run(spec["argv"], timeout=spec["timeout"], cwd=str(registry_path().parent))
+    from .procutil import OutputLimitExceeded
+
+    try:
+        done = run(spec["argv"], timeout=spec["timeout"], cwd=str(registry_path().parent),
+                   max_output=MAX_OUTPUT)
+    except OutputLimitExceeded:
+        return ac.command_failure(f"wrote more than {MAX_OUTPUT} characters of output; stopped")
     if done is None:
         return ac.command_failure(f"did not finish within {spec['timeout']:g}s (or could not start)")
     if done.returncode != 0:

@@ -167,7 +167,8 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
   shared kinds). Its own signals (sign-in
   expiry, coordination asks) then join the same queue with no code in this repo,
   under the same timeout and degraded rules. Failure contract: a non-zero exit, a
-  timeout, output that isn't JSON, a missing or unsupported `schema` (anything but
+  timeout, more than a fixed output cap (1,048,576 characters of stdout and stderr
+  together; the command is stopped there), output that isn't JSON, a missing or unsupported `schema` (anything but
   `1`), a response without `items[]`, a `status`
   outside `ok | failed | uncertain`, a status that contradicts `uncertain`
   (`ok` with a count above 0, `uncertain` with 0), or any item that
