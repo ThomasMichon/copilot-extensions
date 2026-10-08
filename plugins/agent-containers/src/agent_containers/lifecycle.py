@@ -255,14 +255,17 @@ def _resolve_member_info(config: ContainersConfig, name: str) -> DockerContainer
     filtering silently reclassify a restricted container as "no info,
     assume safe to destroy bare": fall back to a raw ``docker inspect``
     (bypassing the fleet-membership filter entirely) before giving up.
+
+    Returns ``None`` only when the container genuinely does not exist.
+    Any OTHER inspection failure (timeout, invalid JSON) propagates as a
+    ``RuntimeError`` -- it must never be swallowed into a silent "no info,
+    fall back to bare stop/remove", which would convert an inspection
+    outage into an unrescued destructive action.
     """
     info = get_container(config, name)
     if info is not None:
         return info
-    try:
-        doc = inspect_container(name)
-    except RuntimeError:
-        return None
+    doc = inspect_container(name)
     state = ((doc.get("State") or {}).get("Status") or "").lower()
     container_cfg = doc.get("Config") or {}
     labels = container_cfg.get("Labels") or {}
@@ -276,7 +279,12 @@ def _resolve_member_info(config: ContainersConfig, name: str) -> DockerContainer
         labels=labels,
         fleet=labels.get(FLEET_LABEL),
         local_folder=labels.get("devcontainer.local_folder"),
-        security_profile=labels.get(SECURITY_PROFILE_LABEL, TRUSTED_PROFILE),
+        # Match _row_to_info's own default for a missing/empty label --
+        # "unknown", never TRUSTED_PROFILE. Defaulting to trusted here
+        # would let a discovery-filtered container whose fleet has since
+        # relaxed to trusted skip the unsupported-migration-path
+        # deferral and fall through to a bare destructive call.
+        security_profile=labels.get(SECURITY_PROFILE_LABEL) or "unknown",
         security_policy=labels.get(SECURITY_POLICY_LABEL),
         security_image_id=labels.get(SECURITY_IMAGE_ID_LABEL),
     )
@@ -291,9 +299,16 @@ def _resolve_member_fleet(config: ContainersConfig, info: DockerContainerInfo) -
     the exact same membership a fleet-wide ``down``/``rm`` would, or an
     unlabeled/image-prefix-discovered member (``fleet=None``) can silently
     bypass its fleet's restricted-ness.
+
+    An EXPLICIT fleet label that doesn't resolve in the current config is
+    treated as "no match" -- it is never inferred by name prefix instead.
+    Fleet-wide operations treat a foreign/unresolved label as a conflict to
+    defer (``fleet.py`` ``c.fleet and c.fleet != fleet_name``), never as
+    "try a different fleet by prefix"; prefix inference only applies when
+    there is no explicit label to honor in the first place.
     """
-    if info.fleet and info.fleet in config.fleets:
-        return config.fleets[info.fleet]
+    if info.fleet:
+        return config.fleets.get(info.fleet)
     for fleet_name, fleet in config.fleets.items():
         prefix = fleet.prefix(fleet_name)
         if prefix and info.name.startswith(f"{prefix}-"):
@@ -721,8 +736,33 @@ def cmd_stop(config: ContainersConfig, name: str) -> int:
             print(f"Stopped: {name}")
             return 0
         if restricted and info.state in {"exited", "created"}:
-            # Already stopped -- nothing to protect, nothing to do.
-            print(f"Stopped: {name} (already stopped)")
+            # Already stopped -- mirror down_fleet's exact accounting: a
+            # verified capture must exist, or the loss is recorded, so
+            # rescue status is never left missing or stale for a container
+            # this command reports "stopped" without actually stopping.
+            from .rescue import (
+                RescueError,
+                container_generation,
+                record_telemetry_loss,
+                verified_capture_for_instance,
+            )
+
+            try:
+                generation = container_generation(inspect_container(info.container_id))
+                if verified_capture_for_instance(name, info.container_id, generation) is None:
+                    record_telemetry_loss(
+                        container=name,
+                        container_instance=info.container_id,
+                        container_generation=generation,
+                        reason="already_stopped",
+                    )
+            except (RescueError, RuntimeError) as exc:
+                print(str(exc), file=sys.stderr)
+                return _BUSY_EXIT
+            print(
+                f"Stopped: {name} (already stopped; tmpfs evidence "
+                "unavailable or previously rescued)"
+            )
             return 0
         if restricted:
             # Mirrors down_fleet's final catch-all: paused/restarting/dead/

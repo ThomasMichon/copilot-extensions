@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 
+import pytest
+
 from agent_containers import __main__ as cli
 from agent_containers import fleet as fleet_mod
 from agent_containers.config import ContainersConfig
@@ -78,12 +80,29 @@ def test_stop_refuses_a_leased_container(monkeypatch, capsys):
     assert "leased to 3bac" in capsys.readouterr().err
 
 
+def _untracked_inspect_doc(name: str = "box-1") -> dict:
+    """A successful docker inspect for a genuinely non-fleet, non-restricted
+    container -- no labels at all. Used so the untracked-container tests
+    exercise a real (mocked) successful inspection, per review feedback,
+    rather than conflating 'container not found by discovery' with
+    'inspection itself failed' (the latter must propagate, never fall
+    through to a bare destructive call -- see the dedicated
+    inspection-failure tests below)."""
+    return {
+        "Id": f"{name}-instance",
+        "Name": f"/{name}",
+        "State": {"Status": "running"},
+        "Config": {"Image": "img", "Labels": {}},
+    }
+
+
 def test_stop_calls_stop_container_when_unleased_and_untracked(monkeypatch, capsys):
     import agent_containers.lease as lease
     import agent_containers.lifecycle as lifecycle
 
     monkeypatch.setattr(lease, "get_lease", lambda name: None)
     monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda name: _untracked_inspect_doc(name))
     seen = []
     monkeypatch.setattr(lifecycle, "stop_container", lambda name: seen.append(name))
     rc = lifecycle.cmd_stop(ContainersConfig(), "box-1")
@@ -98,6 +117,7 @@ def test_stop_surfaces_lifecycle_errors(monkeypatch, capsys):
 
     monkeypatch.setattr(lease, "get_lease", lambda name: None)
     monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda name: _untracked_inspect_doc(name))
 
     def _boom(name):
         raise RuntimeError(f"docker stop {name} failed: boom")
@@ -106,6 +126,31 @@ def test_stop_surfaces_lifecycle_errors(monkeypatch, capsys):
     rc = lifecycle.cmd_stop(ContainersConfig(), "box-1")
     assert rc == 1
     assert "boom" in capsys.readouterr().err
+
+
+def test_stop_propagates_an_inspection_failure_instead_of_falling_back(monkeypatch):
+    """A genuine inspection failure (timeout, invalid JSON, docker
+    unreachable) must propagate -- main()'s top-level RuntimeError handler
+    reports it as a real failure -- never be swallowed into "no info,
+    assume safe" and fall through to an unrescued bare stop_container."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+
+    def _boom(name):
+        raise RuntimeError(f"docker inspect {name} failed: timed out")
+
+    monkeypatch.setattr(lifecycle, "inspect_container", _boom)
+
+    def _bare_stop_should_not_run(name):
+        raise AssertionError("bare stop_container must not run after an inspection failure")
+
+    monkeypatch.setattr(lifecycle, "stop_container", _bare_stop_should_not_run)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        lifecycle.cmd_stop(ContainersConfig(), "box-1")
 
 
 def test_stop_routes_a_restricted_running_member_through_rescue(monkeypatch, capsys):
@@ -174,6 +219,82 @@ def test_stop_defers_a_restricted_looking_member_with_no_matching_fleet(monkeypa
 
     assert rc == 75
     assert "no matching restricted fleet configuration" in capsys.readouterr().err
+
+
+def test_stop_reports_existing_capture_for_an_already_stopped_restricted_member(monkeypatch, capsys):
+    """Mirrors down_fleet's own accounting (#5667 review finding): an
+    already-stopped restricted member with a verified capture on record is
+    reported stopped without re-recording a telemetry loss."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    import agent_containers.rescue as rescue
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda cid: {"State": {}})
+    monkeypatch.setattr(rescue, "container_generation", lambda doc: "gen-1")
+    monkeypatch.setattr(
+        rescue, "verified_capture_for_instance",
+        lambda container, instance, generation: {"capture_id": "x"},
+    )
+
+    def _record_should_not_run(**kwargs):
+        raise AssertionError("record_telemetry_loss must not run when a verified capture exists")
+
+    monkeypatch.setattr(rescue, "record_telemetry_loss", _record_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 0
+    assert "already stopped" in capsys.readouterr().out
+
+
+def test_stop_records_telemetry_loss_when_no_capture_exists_for_an_already_stopped_member(monkeypatch, capsys):
+    """Same scenario with no verified capture on record -- the loss must be
+    explicitly recorded, not silently reported as a clean stop."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    import agent_containers.rescue as rescue
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda cid: {"State": {}})
+    monkeypatch.setattr(rescue, "container_generation", lambda doc: "gen-1")
+    monkeypatch.setattr(
+        rescue, "verified_capture_for_instance",
+        lambda container, instance, generation: None,
+    )
+    calls = []
+    monkeypatch.setattr(rescue, "record_telemetry_loss", lambda **kwargs: calls.append(kwargs))
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 0
+    assert calls == [{
+        "container": "box-1",
+        "container_instance": "abc123",
+        "container_generation": "gen-1",
+        "reason": "already_stopped",
+    }]
+    assert "already stopped" in capsys.readouterr().out
 
 
 def test_stop_defers_a_restricted_member_in_a_nonterminal_state(monkeypatch, capsys):
@@ -352,6 +473,7 @@ def test_remove_calls_remove_container_when_unleased_and_untracked(monkeypatch, 
 
     monkeypatch.setattr(lease, "get_lease", lambda name: None)
     monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda name: _untracked_inspect_doc(name))
     seen = []
     monkeypatch.setattr(
         lifecycle,
@@ -362,6 +484,28 @@ def test_remove_calls_remove_container_when_unleased_and_untracked(monkeypatch, 
     assert rc == 0
     assert seen == [("box-1", True)]
     assert "Removed: box-1" in capsys.readouterr().out
+
+
+def test_remove_propagates_an_inspection_failure_instead_of_falling_back(monkeypatch):
+    """Mirrors the stop-side inspection-failure test for remove."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+
+    def _boom(name):
+        raise RuntimeError(f"docker inspect {name} failed: timed out")
+
+    monkeypatch.setattr(lifecycle, "inspect_container", _boom)
+
+    def _bare_remove_should_not_run(name, force=False):
+        raise AssertionError("bare remove_container must not run after an inspection failure")
+
+    monkeypatch.setattr(lifecycle, "remove_container", _bare_remove_should_not_run)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        lifecycle.cmd_remove(ContainersConfig(), "box-1", force=True)
 
 
 def test_remove_routes_a_restricted_member_through_rescue(monkeypatch, capsys):
