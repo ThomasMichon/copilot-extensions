@@ -3050,3 +3050,138 @@ def test_main_honors_repo_local_sync_local_path(monkeypatch, tmp_path):
 
     assert engine.main(["run"]) == 0
     assert captured["sync_path"] == tmp_path / "declared-target"
+
+
+# -- process-log sync publication ------------------------------------------
+
+
+def _make_process_logs(root: Path) -> Path:
+    """Create a fake ``<sync_source>/logs`` directory with mixed evidence."""
+    logs = root / "copilot" / "logs"
+    logs.mkdir(parents=True)
+    (logs / "process-111-1.log").write_text("line one\n", encoding="utf-8")
+    (logs / "process-222-2.log.gz").write_bytes(b"\x1f\x8b\x08\x00fake-gzip")
+    (logs / "process-333-3.zip").write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+    (logs / "notes.log").write_text("not a process log\n", encoding="utf-8")
+    (logs / "process-444-4.log.tmp").write_text("in-flight\n", encoding="utf-8")
+    return logs
+
+
+def test_is_process_log_candidate() -> None:
+    from agent_logger.process_logs import is_process_log_candidate
+
+    assert is_process_log_candidate("process-111-1.log")
+    assert is_process_log_candidate("process-111-1.log.gz")
+    assert is_process_log_candidate("anything.zip")
+    assert not is_process_log_candidate("notes.log")
+    assert not is_process_log_candidate("process-111-1.log.tmp")
+    assert not is_process_log_candidate("process-.log")
+
+
+def test_local_target_push_process_logs_selects_candidates_only(
+    tmp_path: Path,
+) -> None:
+    logs = _make_process_logs(tmp_path)
+    dest_root = tmp_path / "dest"
+    target = LocalTarget({"path": str(dest_root)})
+
+    result = target.push_process_logs(logs, "m1")
+
+    assert result.ok
+    assert result.file_count == 3
+    machine_logs = dest_root / "m1" / "logs"
+    assert (machine_logs / "process-111-1.log").read_text(encoding="utf-8") == "line one\n"
+    assert (machine_logs / "process-222-2.log.gz").is_file()
+    assert (machine_logs / "process-333-3.zip").is_file()
+    assert not (machine_logs / "notes.log").exists()
+    assert not (machine_logs / "process-444-4.log.tmp").exists()
+
+
+def test_local_target_push_process_logs_is_incremental(tmp_path: Path) -> None:
+    logs = _make_process_logs(tmp_path)
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    target.push_process_logs(logs, "m1")
+
+    second = target.push_process_logs(logs, "m1")
+
+    assert second.ok
+    assert second.file_count == 0
+
+
+def test_local_target_push_process_logs_missing_source_is_ok(tmp_path: Path) -> None:
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+
+    result = target.push_process_logs(tmp_path / "copilot" / "logs", "m1")
+
+    assert result.ok
+    assert result.file_count == 0
+    assert not (tmp_path / "dest").exists()
+
+
+def test_base_target_push_process_logs_reports_unsupported(tmp_path: Path) -> None:
+    target = IngestTarget({})
+
+    result = target.push_process_logs(tmp_path, "m1")
+
+    assert result.ok
+    assert "does not support process-log sync" in result.detail
+
+
+def test_engine_run_sync_publishes_process_logs_when_enabled(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    data = dict(cfg.as_dict())
+    data["sync"]["process_logs"] = {"enabled": True}
+    cfg = Config(data, cfg.home)
+
+    assert engine.run_sync(cfg) == 0
+
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert (
+        machines[0] / "logs" / "process-999-9.log"
+    ).read_text(encoding="utf-8") == "evidence\n"
+
+
+def test_engine_run_sync_skips_process_logs_when_repo_scoped(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    data = dict(load_config(home=tmp_path / "home").as_dict())
+    data["sync"]["source"] = str(src)
+    data["sync"]["targets"]["local"]["path"] = str(dest)
+    data["sync"]["process_logs"] = {"enabled": True}
+    data["sync"]["repo_allowlist"] = ["some-other-repo"]
+    cfg = Config(data, tmp_path / "home")
+
+    assert engine.run_sync(cfg, verbose=True) == 0
+
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert not (machines[0] / "logs").exists()
+
+
+def test_engine_run_sync_process_logs_disabled_by_default(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert not (machines[0] / "logs").exists()
+
+
+def test_process_logs_enabled_and_source_config() -> None:
+    from agent_logger.config import load_config
+
+    cfg = load_config(home=Path("/tmp/does-not-exist-agent-logger-home"))
+    assert cfg.process_logs_enabled is False
+    assert cfg.process_logs_source == cfg.sync_source / "logs"

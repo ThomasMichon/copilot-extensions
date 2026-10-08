@@ -89,8 +89,17 @@ This yields, in every machine's OneDrive:
 ```
 OneDrive/(Copilot)/sessions/<machine>/
   ├─ session-state/<id>/  (events.jsonl, workspace.yaml, checkpoints, ...)
+  ├─ logs/                (process-*.log[.gz]/.zip, only with sync.process_logs.enabled)
   └─ sync-meta.json
 ```
+
+Set `sync.process_logs.enabled: true` to also publish `<sync_source>/logs/`
+(the configured machine's process-log evidence) under each machine's
+`logs/` subfolder, alongside session-state. This only runs on an unfiltered
+sync pass — it is skipped (not filtered) when `repo_allowlist`/
+`repo_denylist`/`require_repo_opt_in` narrow the pass, since a process log is
+not scoped per-repo the way session-state is. See
+[process-log evidence](process-log-evidence.md#sync-publication-session-sync).
 
 A hub machine that has the folder synced locally then reads
 `(Copilot)/sessions/<machine>/...` for every machine, persists validated render

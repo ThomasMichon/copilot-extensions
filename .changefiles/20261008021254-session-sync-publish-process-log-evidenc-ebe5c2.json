@@ -1,0 +1,9 @@
+{
+  "comment": "session-sync: publish process-log evidence alongside session-state for filesystem targets (opt-in, unfiltered syncs only)",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "minor"
+    }
+  ]
+}

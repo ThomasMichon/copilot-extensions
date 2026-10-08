@@ -770,6 +770,18 @@ class Config:
         return bool(self._data.get("sync", {}).get("require_repo_opt_in", False))
 
     @property
+    def process_logs_enabled(self) -> bool:
+        """Opt-in (default false) publication of process-log evidence
+        alongside session-state; see :func:`agent_logger.sync.engine.run_sync`
+        for the repo-scoped-sync exclusion this implies."""
+        return bool(self._data.get("sync", {}).get("process_logs", {}).get("enabled", False))
+
+    @property
+    def process_logs_source(self) -> Path:
+        """Configured machine's process-log directory (``<sync_source>/logs``)."""
+        return self.sync_source / "logs"
+
+    @property
     def sync_notify(self) -> dict[str, Any]:
         """Resolved target-independent post-push notify config.
 

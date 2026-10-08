@@ -366,6 +366,32 @@ def run_sync(
                 f"file(s) in {len(result.excluded_roots)} root(s) ({mib:.1f} MiB)"
             )
 
+        # Process-log evidence alongside session-state: opt-in, and only for
+        # an unfiltered pass. `include` narrows session-state per-repo; a
+        # process log is not scoped per-repo the same way (one CLI process's
+        # log can span several repos/worktrees across its lifetime), so
+        # admission fencing for a repo-scoped sync is a known, explicit
+        # follow-up -- never silently applied by skipping the filter here.
+        if cfg.process_logs_enabled:
+            if include is not None:
+                if verbose:
+                    print(
+                        "session-sync: process-log sync skipped "
+                        "(repo-scoped sync is not yet supported)"
+                    )
+            else:
+                plog_result = target.push_process_logs(cfg.process_logs_source, machine)
+                if not plog_result.ok:
+                    print(
+                        f"session-sync: process-log push failed: {plog_result.detail}",
+                        file=sys.stderr,
+                    )
+                elif plog_result.file_count or verbose:
+                    print(
+                        f"session-sync: process-logs {plog_result.detail} "
+                        f"({plog_result.file_count} files)"
+                    )
+
         if prune:
             removed = target.prune(machine, cfg.sync_retention_days)
             if removed:

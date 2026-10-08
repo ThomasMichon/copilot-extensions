@@ -28,8 +28,11 @@ A library reader enumerates live, gzip, and flat ZIP process-log observations
 and streams bounded UTF-8 lines without extracting archives. It preserves
 logical log identity across representations and reports corrupt or ambiguous
 evidence explicitly. See [process-log evidence](process-log-evidence.md).
-This is an accounting-input primitive; process-log sync, scheduled compression,
-and accounting ingestion are not yet wired into the session-sync flow.
+`session-sync` can publish this evidence alongside session-state for the
+ordinary local-machine sync path (opt-in, filesystem targets only; see the
+doc's "Sync publication" section) -- scheduled compression, SSH/ingest
+target support, repo-scoped admission fencing, and accounting ingestion
+remain outstanding.
 
 ### Segmenter (`agent_logger.segmenter`)
 

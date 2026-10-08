@@ -26,6 +26,19 @@ def _is_log_name(name: str) -> bool:
     )
 
 
+def is_process_log_candidate(name: str) -> bool:
+    """Whether *name* (a bare filename, not a path) is worth transferring as
+    process-log evidence: a live or gzip ``process-*.log`` file, or a
+    ``.zip`` archive that may contain flat ``process-*.log`` members.
+
+    A transfer-time predicate, not a validity check: unlike
+    :func:`iter_process_log_refs`, this never opens the file, so a ``.zip``
+    with no supported members (or none at all) still passes here -- the
+    reader's own enumeration is what yields zero refs for it, not this.
+    """
+    return _is_log_name(name.removesuffix(".gz")) or name.endswith(".zip")
+
+
 @contextmanager
 def _open_regular(path: Path) -> Iterator[BinaryIO]:
     before = path.lstat()

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from agent_logger import sessions
+from agent_logger.process_logs import is_process_log_candidate
 from agent_logger.sessions import SessionRef
 from agent_logger.sync.detritus import (
     DetritusSummary,
@@ -350,6 +351,46 @@ def _same_file_content(src: Path, dst: Path) -> bool:
         return digest(src) == digest(dst)
     except OSError:
         return False
+
+
+def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
+    """Flat, non-recursive incremental copy of process-log evidence.
+
+    Process logs sit directly under *source* (never a directory tree like a
+    session-state ``<id>/``), so this mirrors the incremental size/mtime copy
+    the session push loop performs, without that loop's recursive
+    directory-walk and detritus-discovery machinery -- neither applies to a
+    flat directory of log files. Returns ``(copied, bytes, locked_paths)``;
+    a locked source file (transient Windows sharing violation on a live
+    in-use log) is recorded in *locked_paths* and skipped, exactly like a
+    deferred session file -- never aborting the whole pass.
+    """
+    with os.scandir(_windows_extended_path(source)) as entries:
+        names = sorted(entry.name for entry in entries if is_process_log_candidate(entry.name))
+    copied = 0
+    nbytes = 0
+    locked: list[Path] = []
+    for name in names:
+        src_path = source / name
+        try:
+            mode = _lstat(src_path).st_mode
+        except FileNotFoundError:
+            continue
+        if is_link_or_reparse(src_path, mode) or not stat.S_ISREG(mode):
+            continue
+        dst_path = dest / name
+        if not _needs_copy(src_path, dst_path):
+            continue
+        try:
+            _copy_replace(src_path, dst_path)
+        except OSError as exc:
+            if isinstance(exc, _LockedSourceFile):
+                locked.append(src_path)
+                continue
+            raise
+        copied += 1
+        nbytes += os.stat(_windows_extended_path(src_path)).st_size
+    return copied, nbytes, locked
 
 
 def _read_json_regular(path: Path) -> dict | None:
@@ -1631,6 +1672,32 @@ class FilesystemTarget(Target):
             deferred_sessions=_deferred_session_ids(locked_paths),
             index_deferred=_index_deferred(locked_paths),
         )
+
+    def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
+        try:
+            safe_source = _existing_real_directory(log_root)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
+        if safe_source is None:
+            return PushResult(ok=True, detail="no process-log source")
+        log_root = safe_source
+        try:
+            root = self._root()
+            dest = _ensure_relative_directory(root, Path(machine) / "logs")
+        except OSError as exc:
+            return PushResult(
+                ok=False,
+                detail=f"cannot create safe destination for {machine}/logs: {exc}",
+            )
+        try:
+            copied, nbytes, locked_paths = _copy_process_logs(log_root, dest)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"process-log copy failed: {exc}")
+        detail = f"-> {dest}"
+        if locked_paths:
+            examples = ", ".join(path.name for path in locked_paths[:3])
+            detail += f" (skipped {len(locked_paths)} locked file(s), will retry: {examples})"
+        return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes)
 
     def sync_status(self, machine: str) -> SyncStatus:
         try:
