@@ -347,18 +347,15 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     only):** neither shipped launch path (``bin/launch-session.sh``/``.ps1``)
     ever passes ``--attached-clients`` at register() time, so normalization
     (``_normalize_mapping_entry``) defaults a brand-new mapping to ``0``.
-    ``mux_daemon.build_compute``'s ``mux-status-v1`` handler now
-    opportunistically refreshes the field (``list-clients``) at the same
-    periodic cadence routed status renders already arrive at, so a
-    genuinely live, attached session converges onto its real count within
-    one status-render cycle of the daemon observing it -- it is no longer
-    stuck at a stale launch-time value forever. This function still
+    The resident daemon refreshes the field (``list-clients``) during its
+    existing live-mapping republish cycle (20-second backstop), independently
+    of whether status option values changed. A successful probe converges
+    the count within one completed republish cycle. This function still
     reports whatever is currently stored exactly as-is (it never invents
     or estimates); a brand-new mapping that hasn't yet seen its first
-    status-render cycle, or one whose mux session accepts no routed status
-    (@aw_* writes are the only thing that currently drives this refresh),
-    can still read ``0``/stale momentarily. **This closes only #4564's
-    "Proposed fix" step 1** (the writer-side ``attached_clients`` gap).
+    republish cycle, a stopped daemon, or a failed probe can leave the stored
+    count stale. This implements only the attached-client observation portion
+    of #4564's proposed step 1.
     #4564 also proposes a distinct ``reachable`` field (preserving the
     last-known ``live``/``attached_clients`` values across an unreachable
     session rather than this registry's current tombstone-on-death

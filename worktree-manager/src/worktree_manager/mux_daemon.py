@@ -46,7 +46,6 @@ from work_coalescing_singleton import CoalescingServer
 from zdd.diagnostics import process_start_time
 
 from . import mux_daemon_cutover, mux_daemon_live, mux_daemon_process
-from .mux_attached_clients import refresh_attached_clients
 from .mux_mapping_registry import (
     MuxMappingRegistry,
     LIVE_MAPPING_BACKSTOP_INTERVAL_S,
@@ -253,16 +252,9 @@ def _republish_live_mappings(
     *,
     ensure_monitor: bool,
 ) -> bool:
-    published_any = False
-    for entry in registry.snapshot().values():
-        if not entry.get("live"):
-            continue
-        result = publish_live_observation(entry, ensure_monitor=ensure_monitor)
-        if result.get("applied"):
-            published_any = True
-        else:
-            return False
-    return published_any or not registry.has_any_live()
+    return mux_daemon_live.republish_live_mappings(
+        registry, ensure_monitor=ensure_monitor, publish=publish_live_observation,
+    )
 
 
 def rendezvous_fields(server: CoalescingServer) -> dict:
@@ -566,7 +558,6 @@ def build_compute(
             if handler_tracker is not None:
                 handler_tracker.enter()
             try:
-                refresh_attached_clients(registry, current)
                 ok = apply_status_options(entry, values)
             finally:
                 if handler_tracker is not None:

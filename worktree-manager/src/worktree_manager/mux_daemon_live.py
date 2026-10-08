@@ -19,6 +19,7 @@ from typing import Callable
 
 from work_coalescing_singleton import client as wcs_client
 
+from .mux_attached_clients import refresh_attached_clients
 from .mux_mapping_registry import (
     MuxMappingRegistry,
     get_mapping,
@@ -286,12 +287,18 @@ def republish_live_mappings(
     registry: MuxMappingRegistry,
     *,
     ensure_monitor: bool,
+    publish: Callable | None = None,
 ) -> bool:
+    publish = publish if publish is not None else publish_live_observation
     published_any = False
     for entry in registry.snapshot().values():
         if not entry.get("live"):
             continue
-        result = publish_live_observation(entry, ensure_monitor=ensure_monitor)
+        refresh_attached_clients(registry, entry)
+        current = registry.get(entry["project"], entry["worktree_id"])
+        if current is None or not current["live"]:
+            continue
+        result = publish(current, ensure_monitor=ensure_monitor)
         if result.get("applied"):
             published_any = True
         else:

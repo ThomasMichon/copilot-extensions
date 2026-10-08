@@ -85,10 +85,10 @@ def cmd_daemons(rest: list[str]) -> int:
         print("   session can retain live: true until the next real probe. Shared")
         print("   across every resident daemon for this root, not attributable to")
         print("   one specific pid)")
-        print("  (attached_clients converges onto the real list-clients count within")
-        print("   one status-render cycle of the daemon observing a live session --")
-        print("   see worktree_manager.mux_attached_clients (#4564); a brand-new")
-        print("   mapping that hasn't yet seen its first cycle may still read 0)")
+        print("  (attached_clients is refreshed by the daemon's live-mapping cycle")
+        print("   (20-second backstop), independently of status-option changes.")
+        print("   Failed probes preserve the last count; a new mapping may read 0")
+        print("   until its first successful observation)")
         return 0
     print(f"error: unknown daemons action {action!r}")
     return 2

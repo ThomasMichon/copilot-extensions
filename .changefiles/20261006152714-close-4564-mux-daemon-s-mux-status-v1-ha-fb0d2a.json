@@ -1,5 +1,5 @@
 {
-  "comment": "Close #4564: mux_daemon's mux-status-v1 handler now opportunistically refreshes a mapping's registry-tracked attached_clients (list-clients) at the same periodic cadence routed status renders already arrive at, instead of leaving it fixed at whatever (usually 0) a launch-time register() call supplied and never refreshed again. A probe failure (unknown count) is a deliberate no-op, never a reset to zero.",
+  "comment": "Advance #4564's attached-client observation portion: refresh attached_clients from bounded list-clients probes during the daemon's existing live-mapping republish cycle, independently of changed status options and outside status-request deadlines. Failed probes preserve the last count; atomic identity guards protect concurrent session replacements and tombstones. Reachability history and batch restoration remain separate work.",
   "changes": [
     {
       "plugin": "worktree-manager",

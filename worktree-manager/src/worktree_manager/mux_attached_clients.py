@@ -29,7 +29,7 @@ def mux_attached_clients(mux_bin: str, session: str) -> int | None:
             [mux_bin, "list-clients", "-t", session],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=1,
             creationflags=no_window_flags(),
         )
     except Exception:
