@@ -20,6 +20,21 @@ paths cannot visibly replace a row's state with a different answer. Shared
 wrapper #5743 and stamp repair #5700 are prerequisites/progress, not evidence
 that these requirements are already satisfied.
 
+### Advisory reads are not direct recomputation
+
+The vision's daemon-unreachable resilience path remains available: read
+last-known durable state/projection without fresh git or liveness reductions,
+and label it explicitly degraded/advisory, never daemon-current. A live but slow
+daemon may therefore leave last-good rows visible without licensing a competing
+computation. If no usable durable value exists, report that absence explicitly
+rather than fabricating state or an empty successful roster.
+
+Launch success means a usable daemon, not merely obtaining a PID. If a daemon
+crashes after a successful start, re-resolve and attempt bounded recovery.
+Confirmed inability to restore a usable daemon is a genuine launch/recovery
+failure; only then may the engine run the explicitly degraded direct-compute
+path. A live process with a timed-out or malformed response is not equivalent.
+
 ## Verified seams and gaps
 
 - `list_cli.cmd_list` resolves tracking records before daemon classification,
@@ -64,6 +79,10 @@ alone reproduces the operator's actual live oscillation cadence.
       documented direct-compute degrade. The latter preserves last-good rows
       with explicit stale/error provenance or reports an actionable error;
       never return a success-shaped fabricated empty roster.
+- [ ] Preserve the vision's advisory durable-read resilience when no daemon
+      is reachable, independently of fresh computation. Test post-start crash
+      and failed bounded recovery, stale advisory reads, and missing durable
+      data; none may silently become a coequal fresh result.
 - [ ] Route classified, cache-only, fresh, per-row refresh, and streaming
       Worktrees reads through the same authority when the daemon is alive.
       Retire the peer filesystem-cache/record-hint reductions on that path.
@@ -89,6 +108,11 @@ feed and real consumer stability checks below.
       during reconnect and atomically replace them on a complete reset.
       Subscription release, demand/linger accounting, and cancellation must
       drain cleanly without preventing normal monitor cutover.
+- [ ] Before planned supersession/update closes a held feed, send an explicit
+      going-away notice with the reason and generation. The relay/Manager must
+      distinguish that notice from an abrupt crash, re-resolve discovery, and
+      reconcile the replacement snapshot without independent recomputation.
+      Exercise notice-before-close and abrupt-disconnect paths separately.
 - [ ] Wire the actual local and SSH Worktrees loaders to that feed. Remove
       independent fast/classified/reconcile overwrites for authoritative rows;
       source labeling and presentation normalization may not re-derive domain
