@@ -59,13 +59,15 @@ _STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_DEFAULT = 180.0
 
 
 def _status_monitor_enabled() -> bool:
-    """Whether the resident coalescing monitor is active (default-ON / opt-out).
+    """Whether the resident coalescing monitor is active.
 
-    Enabled unless ``AGENT_WORKTREES_STATUS_MONITOR`` is explicitly falsy
-    (``0``/``false``/``no``/``off``), in which case each session runs its own
-    per-session ``status-updater`` (the a-la-carte inline fallback). Mirrors the
-    self-retire opt-out convention.
+    Always True in normal operation -- mandatory infrastructure, not an
+    operator-facing opt-out. ``AGENT_WORKTREES_STATUS_MONITOR`` is
+    TEST/DEBUG-ONLY: honored only when ``PYTEST_CURRENT_TEST`` is set
+    (pytest sets this for every test); a real session never has it set.
     """
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
     return os.environ.get(_STATUS_MONITOR_ENV, "").strip().lower() not in (
         "0",
         "false",
@@ -669,10 +671,9 @@ def _restart_status_monitor() -> dict:
     then re-serves every live registered ``wt-*`` session's bar with no session
     restart needed.
 
-    Best-effort; never raises. Returns a small status dict for logging. A no-op
-    (no spawn) when the resident monitor is opted out
-    (``AGENT_WORKTREES_STATUS_MONITOR=0``). Runs from the NEWLY-ACTIVATED slot's
-    interpreter, so ``sys.executable`` / ``sys.prefix`` are the current runtime.
+    Best-effort; never raises. Returns a small status dict for logging. A
+    no-op (no spawn) only under the test harness with the monitor disabled
+    for this test. Runs from the NEWLY-ACTIVATED slot's interpreter.
     """
     result: dict = {
         "enabled": _status_monitor_enabled(),
@@ -723,7 +724,7 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     one-line summary; always exits 0 (advisory, never fails a deploy)."""
     r = _restart_status_monitor()
     if not r.get("enabled"):
-        print("status-monitor: disabled (AGENT_WORKTREES_STATUS_MONITOR=0) -- skipped")
+        print("status-monitor: disabled for this test run -- skipped")
         return 0
     if r.get("already_current"):
         print("status-monitor: a current monitor already owns the host -- left as-is" + stale_runtime_reap.summary_suffix(r.get("stale_runtime_reaped")))

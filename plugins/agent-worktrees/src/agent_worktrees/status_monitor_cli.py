@@ -125,8 +125,8 @@ def add_parsers(sub) -> None:
     p = sub.add_parser(
         "status-monitor",
         help="Resident, coalescing status tracker for every wt-* session "
-        "(one process instead of one per session; default-on, opt out via "
-        "AGENT_WORKTREES_STATUS_MONITOR=0)",
+        "(one process instead of one per session; mandatory, always-on "
+        "infrastructure -- not operator-configurable)",
     )
     p.add_argument("--interval", type=int, default=15, help="Sweep cadence in seconds (min 2)")
     p.add_argument("--passive", action="store_true", help=argparse.SUPPRESS)
