@@ -263,6 +263,67 @@ def _is_ssh(argv: tuple[str, ...]) -> bool:
     return bool(argv) and _basename(argv[0]) == "ssh"
 
 
+# ssh options that take a value (``man ssh``); everything after the destination
+# is the remote command, which may carry secrets and is never rendered.
+_SSH_VALUE_OPTS = set("BbcDEeFIiJLlmOoPpQRSWw")
+_SECRET_RE = re.compile(
+    r"(?i)([A-Z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|BEARER|CREDENTIAL|API[_-]?KEY)"
+    r"[A-Z0-9_-]*\s*[=:]\s*)[^\s'\";,]+")
+_SECRET_FLAG_RE = re.compile(
+    r"(?i)^--?[A-Z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|BEARER|CREDENTIAL|API[_-]?KEY)"
+    r"[A-Z0-9_-]*$")
+_OTHER_MAX_TOKENS = 6
+
+
+def _ssh_head(argv: tuple[str, ...]) -> tuple[list[str], bool]:
+    """ssh argv up to and including the destination; (kept, truncated)."""
+    kept = [argv[0]]
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        kept.append(arg)
+        if arg == "--":
+            i += 1
+            break
+        if arg.startswith("-") and len(arg) > 1:
+            flag = arg[1:]
+            if flag[-1] in _SSH_VALUE_OPTS and i + 1 < len(argv):
+                kept.append(argv[i + 1])
+                i += 1
+            i += 1
+            continue
+        i += 1  # the destination
+        break
+    if kept and kept[-1] == "--" and i < len(argv):
+        kept.append(argv[i])
+        i += 1
+    return kept, i < len(argv)
+
+
+def render_command(argv: tuple[str, ...]) -> str:
+    """A display-safe command line: never the ssh remote command (it may carry
+    a relay token) nor anything after gh's ``--``, other programs truncated, and
+    every ``*TOKEN*=`` / ``*SECRET*=``-style assignment redacted."""
+    if not argv:
+        return ""
+    base = _basename(argv[0])
+    if base == "ssh":
+        kept, truncated = _ssh_head(argv)
+    elif base == "gh" and "--" in argv:
+        cut = argv.index("--")
+        kept, truncated = list(argv[:cut]), True
+    else:
+        kept = list(argv[:_OTHER_MAX_TOKENS])
+        truncated = len(argv) > _OTHER_MAX_TOKENS
+    shown = [
+        "<redacted>" if i and _SECRET_FLAG_RE.match(kept[i - 1]) else
+        _SECRET_RE.sub(r"\1<redacted>", tok)
+        for i, tok in enumerate(kept)
+    ]
+    text = " ".join(shown)
+    return text + (" ..." if truncated else "")
+
+
 def users_from_table(
     name: str, table: list[ProcInfo], *, exclude_pids: frozenset[int] = frozenset(),
 ) -> list[LiveUser]:
@@ -287,14 +348,14 @@ def users_from_table(
         if role == ROLE_CONTROL_MASTER and (proc.ppid <= 1 or parent is None):
             detail = (detail + "; " if detail else "") + "detached (spawning process exited)"
         ssh_pids.add(proc.pid)
-        users.append(LiveUser(proc.pid, role, " ".join(proc.argv), detail))
+        users.append(LiveUser(proc.pid, role, render_command(proc.argv), detail))
     for proc in table:
         if proc.pid in exclude_pids or proc.ppid in ssh_pids:
             continue  # the ProxyCommand child of an ssh already counted
         if ssh_pids and "--stdio" in proc.argv:
             continue  # a ProxyCommand carrier whose ssh parent detached
         if _gh_codespace_target(proc.argv) == name:
-            users.append(LiveUser(proc.pid, ROLE_GH, " ".join(proc.argv)))
+            users.append(LiveUser(proc.pid, ROLE_GH, render_command(proc.argv)))
     return users
 
 
@@ -312,7 +373,7 @@ def lock_holder(name: str, table: list[ProcInfo] | None = None) -> LiveUser | No
     command = ""
     for proc in table or ():
         if proc.pid == holder.pid:
-            command = " ".join(proc.argv)
+            command = render_command(proc.argv)
             break
     detail = f"op={holder.op}, held {holder.age_seconds:.0f}s"
     return LiveUser(holder.pid, ROLE_LOCK, command or "<unknown command>", detail)

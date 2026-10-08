@@ -312,3 +312,31 @@ def test_ps_fallback_matches_config_paths_containing_spaces(monkeypatch):
     assert table[0].raw.startswith("ssh -F /Users/A B/")
     users = lu.live_users(NAME, table=table)
     assert [(u.pid, u.role) for u in users] == [(101, lu.ROLE_CONTROL_MASTER)]
+
+
+@pytest.mark.parametrize("argv, must_not_contain, expect", [
+    (("ssh", "-F", CFG, "-o", f"ControlPath={SOCK}", "-T", "cs.host",
+      "LC_GIT_CREDENTIAL_RELAY_TOKEN=s3cr3t bash -lc 'copilot --acp'"),
+     "s3cr3t", f"ssh -F {CFG} -o ControlPath={SOCK} -T cs.host ..."),
+    (("ssh", "-F", CFG, "-o", "SetEnv=RELAY_TOKEN=s3cr3t", "-N", "cs.host"),
+     "s3cr3t", f"ssh -F {CFG} -o SetEnv=RELAY_TOKEN=<redacted> -N cs.host"),
+    (("gh", "cs", "ssh", "-c", NAME, "--stdio", "--", "-i", "key", "echo s3cr3t"),
+     "s3cr3t", f"gh cs ssh -c {NAME} --stdio ..."),
+    (("python", "-m", "tool", "--api-key=s3cr3t"), "s3cr3t",
+     "python -m tool --api-key=<redacted>"),
+    (("python", "-m", "tool", "run", "a", "b", "--password", "s3cr3t"), "s3cr3t",
+     "python -m tool run a b ..."),    (("tool", "--password", "s3cr3t", "go"), "s3cr3t", "tool --password <redacted> go"),
+])
+def test_rendered_commands_never_expose_secrets(argv, must_not_contain, expect):
+    rendered = lu.render_command(argv)
+    assert must_not_contain not in rendered
+    assert rendered == expect
+
+
+def test_live_users_and_busy_report_use_redacted_commands(monkeypatch):
+    mux = ProcInfo(150, 50, ("ssh", "-F", CFG, "-o", f"ControlPath={SOCK}", "cs.host",
+                             "LC_GIT_CREDENTIAL_RELAY_TOKEN=s3cr3t exec copilot"))
+    monkeypatch.setattr(lu, "process_table", lambda: _table(mux))
+    users = lu.live_users(NAME)
+    assert users and all("s3cr3t" not in u.command for u in users)
+    assert "s3cr3t" not in lu.busy_report(NAME, "busy")
