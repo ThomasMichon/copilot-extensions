@@ -2,7 +2,7 @@
 # agent-dispatch-recipe-loops-eval/setup.sh -- establish the STARTING STATE for
 # the Tier-E live-forge recipe-loops eval (agent-dispatch-recipe-library
 # effort's own Validation Plan live-fixture item --
-# efforts/active/agent-dispatch-recipe-library/README.md).
+# efforts/2026/10/08 agent-dispatch-recipe-library/README.md).
 #
 # This is SETUP, not the thing under test: it installs agent-dispatch plus its
 # two genuine documented headless-embody runtime dependencies (agent-bridge,
