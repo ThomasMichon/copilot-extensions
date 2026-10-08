@@ -3267,6 +3267,52 @@ def test_copy_stream_replace_rejects_source_changed_during_copy(
     assert not dst.exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
+def test_copy_process_logs_detects_rename_based_rotation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A rename-based rotation (the writer renames the old file aside and
+    creates a fresh one under the same name) never changes the already-open
+    descriptor's own identity -- the fd-only `_SourceChangedDuringCopy`
+    check in `_copy_stream_replace` cannot observe it. `_copy_process_logs`
+    must catch it anyway by revalidating the directory ENTRY's identity
+    (by name, via the pinned root_fd) after landing, so a same-name
+    replacement can't be permanently mistaken for "already synced"."""
+    import contextlib
+
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.filesystem import _copy_process_logs
+
+    logs = _make_process_logs(tmp_path)
+    target = logs / "process-111-1.log"
+    target.write_text("original\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    real_open_regular_at = filesystem._process_logs.open_regular_at
+
+    @contextlib.contextmanager
+    def rotating_open_regular_at(dir_fd, name):
+        with real_open_regular_at(dir_fd, name) as stream:
+            if name == target.name:
+                # The copy now holds an fd to the ORIGINAL inode (opened
+                # before this rename, same as a real rename-rotation race)
+                # -- reassign the name to a fresh inode while that fd is
+                # still in use, before any bytes are read from it.
+                target.rename(logs / "process-111-1.log.bak")
+                target.write_text("original\n", encoding="utf-8")
+            yield stream
+
+    monkeypatch.setattr(
+        filesystem._process_logs, "open_regular_at", rotating_open_regular_at,
+    )
+
+    _copied, _nbytes, locked = _copy_process_logs(logs, dest)
+
+    assert not (dest / "process-111-1.log").exists()
+    assert any(path.name == "process-111-1.log" for path in locked)
+
+
 def test_engine_run_sync_reports_failure_when_process_log_push_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
@@ -3380,6 +3426,41 @@ def test_engine_run_sync_reports_unsupported_target_without_verbose(
 
     assert engine.run_sync(cfg) == 0
     assert "does not support process-log sync" in capsys.readouterr().out
+
+
+def test_push_process_logs_failure_downgrades_sync_meta_to_partial(tmp_path: Path) -> None:
+    """A process-log leg failing after the session-state leg already wrote
+    `sync-meta.json` with status `ok` must not leave that status standing --
+    otherwise `session-sync status`/fleet health reports this machine as
+    fresh and healthy despite the requested evidence not landing."""
+    from agent_logger.sync import meta
+
+    src = _make_source(tmp_path)
+    dest_root = tmp_path / "dest"
+    target = LocalTarget({"path": str(dest_root)})
+
+    result = target.push(src, "m1")
+    assert result.ok
+    machine_root = dest_root / "m1"
+    original = meta.read_sync_meta(machine_root)
+    assert original["status"] == "ok"
+
+    # A root that exists but is unsafe (a symlink) fails push_process_logs
+    # via its own "unsafe process-log source" branch.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    bad_root = tmp_path / "bad-logs-root"
+    try:
+        bad_root.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    plog_result = target.push_process_logs(bad_root, "m1")
+
+    assert not plog_result.ok
+    downgraded = meta.read_sync_meta(machine_root)
+    assert downgraded["status"] == "partial"
+    assert downgraded["session_count"] == original["session_count"]
 
 
 def test_process_logs_enabled_and_source_config() -> None:

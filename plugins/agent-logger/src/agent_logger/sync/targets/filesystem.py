@@ -441,26 +441,39 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     counts are read from the just-written destination, never a re-stat of
     the source, which could itself have rotated away by the time of that
     re-stat.
+
+    On POSIX, a rename-based rotation (the writer renames the file aside
+    and creates a fresh one under the same name, rather than truncating
+    the existing inode in place) is detected separately from
+    :class:`_SourceChangedDuringCopy`: that check only compares the SAME
+    open descriptor's own identity before and after the byte copy, which a
+    rename can never change (the descriptor still refers to the original
+    inode throughout). After landing, the directory ENTRY's current
+    identity is re-stat'd by name (via the pinned ``root_fd``, never by
+    path) and compared against the identity observed before the copy
+    started; a mismatch means the name was reassigned mid-copy, so the
+    just-landed (now-stale) destination is removed and the entry is
+    treated as unlanded this pass, same as a locked file.
     """
     copied = 0
     nbytes = 0
     locked: list[Path] = []
 
-    def _land(stream: BinaryIO, stat_source: Path, dst_path: Path) -> None:
-        nonlocal copied, nbytes
+    def _land(stream: BinaryIO, dst_path: Path) -> int | None:
+        """Copy *stream* into *dst_path*; returns the landed byte count, or
+        ``None`` when this entry didn't land this pass (locked, or the
+        source changed identity/size mid-copy) -- callers handle
+        accounting and any further post-land revalidation themselves."""
         try:
             _copy_stream_replace(stream, dst_path)
         except OSError as exc:
             if _is_windows_sharing_violation(exc) or isinstance(exc, _SourceChangedDuringCopy):
-                locked.append(stat_source)
-                return
+                return None
             raise
         try:
-            size = os.stat(_windows_extended_path(dst_path)).st_size
+            return os.stat(_windows_extended_path(dst_path)).st_size
         except OSError:
-            return
-        copied += 1
-        nbytes += size
+            return None
 
     if _process_logs.supports_dir_fd():
         try:
@@ -481,12 +494,37 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
                         continue
                     try:
                         with _process_logs.open_regular_at(root_fd, name) as stream:
-                            _land(stream, source / name, dst_path)
+                            size = _land(stream, dst_path)
                     except (FileNotFoundError, ValueError):
                         # Vanished or changed identity between the stat above
                         # and this open (rotation/deletion racing the copy) --
                         # an ordinary skip, never a failure.
                         continue
+                    if size is None:
+                        locked.append(source / name)
+                        continue
+                    # Revalidate the DIRECTORY ENTRY's identity against
+                    # `before`, not just the open descriptor's own fstat
+                    # (which `_copy_stream_replace` already checked): a
+                    # rename-based rotation (writer renames the old file
+                    # aside and creates a fresh one under the same name)
+                    # never changes our already-open descriptor's identity
+                    # -- it still refers to the OLD inode throughout the
+                    # copy -- so the fd-only check in `_copy_stream_replace`
+                    # cannot observe it. Only re-stat`ing the NAME (via the
+                    # pinned `root_fd`, never by path) after landing can.
+                    try:
+                        after = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        after = None
+                    if after is None or (before.st_dev, before.st_ino) != (
+                        after.st_dev, after.st_ino,
+                    ):
+                        _unlink_replace_target(dst_path)
+                        locked.append(source / name)
+                        continue
+                    copied += 1
+                    nbytes += size
         except FileNotFoundError:
             return 0, 0, []
         return copied, nbytes, locked
@@ -517,7 +555,12 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
                 continue
             raise
         with stream:
-            _land(stream, src_path, dst_path)
+            size = _land(stream, dst_path)
+        if size is None:
+            locked.append(src_path)
+            continue
+        copied += 1
+        nbytes += size
     return copied, nbytes, locked
 
 
@@ -1801,10 +1844,58 @@ class FilesystemTarget(Target):
             index_deferred=_index_deferred(locked_paths),
         )
 
+    def _mark_sync_meta_partial(self, machine: str, reason: str) -> None:
+        """Best-effort: downgrade this machine's persisted ``sync-meta.json``
+        from ``ok`` to ``partial`` after a process-log leg fails following a
+        successfully-persisted session-state leg -- otherwise
+        ``session-sync status``/fleet health would report this machine as
+        fresh and healthy despite the requested evidence not landing.
+        Never raises: a failure here must not mask the original failure
+        this method exists to record."""
+        try:
+            machine_root = _existing_relative_directory(self._root(), Path(machine))
+        except OSError:
+            return
+        if machine_root is None:
+            return
+        try:
+            existing = read_sync_meta(machine_root)
+        except OSError:
+            existing = None
+        if existing is None or existing.get("status") != "ok":
+            return
+        session_count = existing.get("session_count", 0)
+        if not isinstance(session_count, int) or isinstance(session_count, bool):
+            session_count = 0
+        write_sync_meta(
+            machine_root, machine, self.name, "partial", session_count,
+            deferred_files=[reason],
+        )
+
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
+        """Publish process-log evidence; see :class:`Target`'s base method.
+
+        Scope note on the destination side, stated explicitly rather than
+        left implicit: ``dest`` is validated once via
+        :func:`_ensure_relative_directory` (path-component checks, same as
+        every other destination write in this module -- the session-state
+        push included), then every subsequent write under it
+        (``_copy_stream_replace``'s temp-create/fsync/unlink/replace) is
+        path-based, not re-pinned to a directory handle. A concurrent swap
+        of ``dest`` onto a symlink after that validation could in principle
+        redirect a write outside the configured target -- the same
+        TOCTOU class as the already-documented source-side ancestor gap
+        (see ``_copy_process_logs``'s docstring), but on the write path
+        instead of the read path, and shared by every destination write in
+        this file, not unique to process logs. Closing it needs a broader,
+        dir_fd-pinned rework of ``_copy_replace``/``_durable_replace``'s
+        whole write path -- out of scope for this bounded change; tracked
+        as a known limitation rather than silently assumed safe.
+        """
         try:
             safe_source = _existing_real_directory(log_root)
         except OSError as exc:
+            self._mark_sync_meta_partial(machine, "unsafe process-log source")
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
         if safe_source is None:
             return PushResult(ok=True, detail="no process-log source")
@@ -1813,6 +1904,7 @@ class FilesystemTarget(Target):
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine) / "logs")
         except OSError as exc:
+            self._mark_sync_meta_partial(machine, "unsafe process-log destination")
             return PushResult(
                 ok=False,
                 detail=f"cannot create safe destination for {machine}/logs: {exc}",
@@ -1825,6 +1917,7 @@ class FilesystemTarget(Target):
             # between this method's own validation above and the copy) --
             # a genuinely unsafe root, not the benign per-file skip
             # `_copy_process_logs` already handles internally.
+            self._mark_sync_meta_partial(machine, "process-log copy failed")
             return PushResult(ok=False, detail=f"process-log copy failed: {exc}")
         detail = f"-> {dest}"
         if locked_paths:
