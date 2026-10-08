@@ -88,6 +88,58 @@ def schedule_delayed_daemon_health_reap(
         return False
 
 
+def _ensure_monitor_if_zero_candidates_under_cutover_guard() -> str:
+    """Re-check live candidate state and ensure a monitor exists, ALL while
+    holding the cutover lock -- never from a stale report already released
+    by the time this runs (review finding: a prior design checked
+    ``apply_daemon_health()``'s returned report, but that call acquires and
+    releases its OWN cutover guard internally before returning, leaving a
+    real TOCTOU window in which a genuine concurrent cutover could start
+    between the check and the spawn, racing a successor being promoted).
+
+    Acquiring this SAME lock `activate_after_update()` itself acquires
+    before running `CutoverOrchestrator.run()` makes the two mutually
+    exclusive: while held here, no concurrent cutover attempt can be
+    in-flight, so re-checking liveness and ensuring a monitor exist as one
+    atomic unit is safe. A non-blocking acquire attempt (``timeout_s=0``)
+    means a genuinely in-progress cutover is simply left alone -- it already
+    owns ensuring a monitor exists once it finishes.
+
+    Returns one of: ``"ensured"`` (spawned or confirmed live),
+    ``"skipped-live"`` (a candidate already existed once re-checked),
+    ``"skipped-cutover-busy"`` (another cutover holds the lock), or
+    ``"error:<detail>"`` (best-effort, never raises).
+    """
+    from . import status_monitor_cutover as smc
+    from . import status_monitor_runtime as smr
+    from single_instance_lease import AlreadyRunningError
+
+    try:
+        lease = smc._acquire_cutover_lock(smc.routing_dir(), timeout_s=0.0)
+    except AlreadyRunningError:
+        return "skipped-cutover-busy"
+    except Exception as exc:
+        return f"error:{exc}"
+    try:
+        # NOT daemon_health.doctor_report()/apply_daemon_health() here: both
+        # try to acquire this SAME cutover guard themselves (non-blocking,
+        # per-call), which would self-block/no-op against the lease this
+        # function is already holding. _candidates() is the lower-level,
+        # lock-free liveness probe apply_daemon_health() itself audits with
+        # once it holds the guard -- safe to call directly while already
+        # holding it.
+        from . import daemon_health
+        candidates = daemon_health._candidates()
+        if not candidates:
+            smr._ensure_status_monitor()
+            return "ensured"
+        return "skipped-live"
+    except Exception as exc:
+        return f"error:{exc}"
+    finally:
+        lease.release()
+
+
 def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     """``status-monitor-reap-stale`` -- wait, then apply the identity-verified
     daemon-health repair, and ensure a monitor is actually running
@@ -118,24 +170,13 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     # The repair above only audits/terminates EXISTING live candidates -- a
     # rollback that left ZERO live monitors (the other documented ambiguous
     # outcome, copilot-extensions#5453) produces zero findings and stays
-    # down forever otherwise. `after` (falling back to `before`) reflects
-    # the post-repair candidate count; skip entirely while a genuine
-    # cutover is concurrently in progress elsewhere (`cutover_in_progress`)
-    # -- that attempt owns ensuring a monitor exists, and racing it here
-    # could start a duplicate right as it promotes its own successor.
-    after = report.get("after") if isinstance(report, dict) else None
-    if not isinstance(after, dict):
-        after = report.get("before") if isinstance(report, dict) else None
-    if (
-        isinstance(after, dict)
-        and not after.get("cutover_in_progress")
-        and after.get("candidate_count") == 0
-    ):
-        try:
-            from . import status_monitor_runtime as smr
-            ensured = smr._ensure_status_monitor()
-        except Exception as exc:
-            print(f"status-monitor-reap-stale: ensure-monitor attempt failed (non-fatal): {exc}")
-            return 0
-        print(f"status-monitor-reap-stale: no live monitor after repair -- ensured={ensured}")
+    # down forever otherwise. Re-check and ensure under the cutover lock
+    # (see the helper's own docstring for why this must be one atomic unit,
+    # not a check against this already-stale report).
+    outcome = _ensure_monitor_if_zero_candidates_under_cutover_guard()
+    if outcome == "ensured":
+        print("status-monitor-reap-stale: no live monitor after repair -- ensured")
+    elif outcome.startswith("error:"):
+        print(f"status-monitor-reap-stale: ensure-monitor attempt failed (non-fatal): {outcome[6:]}")
     return 0
+

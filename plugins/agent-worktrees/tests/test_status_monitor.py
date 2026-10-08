@@ -3238,6 +3238,30 @@ def test_cmd_reap_stale_never_raises_on_repair_failure(monkeypatch, capsys):
     assert "non-fatal" in capsys.readouterr().out
 
 
+def _patch_cutover_lock(monkeypatch, *, acquirable: bool):
+    """Stub ``status_monitor_cutover._acquire_cutover_lock`` so tests can
+    simulate the lock being free (``acquirable=True``, returns a fake lease
+    with a no-op ``release()``) or already held by a genuine concurrent
+    cutover (``acquirable=False``, raises ``AlreadyRunningError`` exactly
+    like the real ``SingleInstance.acquire()`` does)."""
+    from agent_worktrees import status_monitor_cutover as smc
+    from single_instance_lease import AlreadyRunningError
+
+    released = {"n": 0}
+
+    class _FakeLease:
+        def release(self):
+            released["n"] += 1
+
+    def _acquire(lock_root, *, timeout_s=0.0, poll_s=0.2):
+        if acquirable:
+            return _FakeLease()
+        raise AlreadyRunningError(holder_pid=4242)
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", _acquire)
+    return released
+
+
 def test_cmd_reap_stale_ensures_a_monitor_when_zero_candidates_survive(monkeypatch, capsys):
     """The repair pass only audits/terminates EXISTING live candidates -- a
     rollback that left ZERO live monitors (the other documented ambiguous
@@ -3245,14 +3269,10 @@ def test_cmd_reap_stale_ensures_a_monitor_when_zero_candidates_survive(monkeypat
     because there was nothing for the identity-bound repair to terminate."""
     monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
     from agent_worktrees import daemon_health
-    monkeypatch.setattr(
-        daemon_health, "doctor_report",
-        lambda *, apply: {
-            "findings": [],
-            "before": {"candidate_count": 0, "cutover_in_progress": False},
-            "after": {"candidate_count": 0, "cutover_in_progress": False},
-        },
-    )
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    released = _patch_cutover_lock(monkeypatch, acquirable=True)
+
     ensured = {"calls": 0}
     monkeypatch.setattr(
         status_monitor_runtime, "_ensure_status_monitor",
@@ -3265,22 +3285,22 @@ def test_cmd_reap_stale_ensures_a_monitor_when_zero_candidates_survive(monkeypat
 
     assert rc == 0
     assert ensured["calls"] == 1
-    assert "ensured=True" in capsys.readouterr().out
+    assert released["n"] == 1  # the acquired lease was always released
+    assert "ensured" in capsys.readouterr().out
 
 
 def test_cmd_reap_stale_does_not_ensure_when_a_candidate_already_survives(monkeypatch):
-    """A clean repair leaving exactly one live candidate must NOT trigger an
-    extra ensure-monitor spawn -- that would risk a duplicate."""
+    """A clean repair leaving a live candidate must NOT trigger an extra
+    ensure-monitor spawn -- that would risk a duplicate."""
     monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
     from agent_worktrees import daemon_health
     monkeypatch.setattr(
         daemon_health, "doctor_report",
-        lambda *, apply: {
-            "findings": [{"kind": "duplicate_resident"}],
-            "before": {"candidate_count": 2, "cutover_in_progress": False},
-            "after": {"candidate_count": 1, "cutover_in_progress": False},
-        },
+        lambda *, apply: {"findings": [{"kind": "duplicate_resident"}]},
     )
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [object()])
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+
     ensured = {"calls": 0}
     monkeypatch.setattr(
         status_monitor_runtime, "_ensure_status_monitor",
@@ -3296,20 +3316,21 @@ def test_cmd_reap_stale_does_not_ensure_when_a_candidate_already_survives(monkey
 
 
 def test_cmd_reap_stale_does_not_ensure_while_a_cutover_is_in_progress(monkeypatch):
-    """Zero candidates while a genuine cutover is concurrently in progress
-    elsewhere must be left alone -- that attempt owns ensuring a monitor
-    exists, and racing it here could start a duplicate right as it
-    promotes its own successor."""
-    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    """A genuinely concurrent cutover (lock already held elsewhere) must be
+    left entirely alone -- that attempt owns ensuring a monitor exists once
+    it finishes, and racing it here (even a re-check) could start a
+    duplicate right as it promotes its own successor. The non-blocking
+    acquire attempt is the whole point: never wait on it, just back off."""
     from agent_worktrees import daemon_health
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+    candidates_called = {"n": 0}
     monkeypatch.setattr(
-        daemon_health, "doctor_report",
-        lambda *, apply: {
-            "findings": [],
-            "before": {"candidate_count": 0, "cutover_in_progress": True},
-            "after": {"candidate_count": 0, "cutover_in_progress": True},
-        },
+        daemon_health, "_candidates",
+        lambda: (candidates_called.update(n=candidates_called["n"] + 1), [])[1],
     )
+    _patch_cutover_lock(monkeypatch, acquirable=False)
+
     ensured = {"calls": 0}
     monkeypatch.setattr(
         status_monitor_runtime, "_ensure_status_monitor",
@@ -3322,19 +3343,15 @@ def test_cmd_reap_stale_does_not_ensure_while_a_cutover_is_in_progress(monkeypat
 
     assert rc == 0
     assert ensured["calls"] == 0
+    assert candidates_called["n"] == 0  # never even re-checked while busy
 
 
 def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):
     monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
     from agent_worktrees import daemon_health
-    monkeypatch.setattr(
-        daemon_health, "doctor_report",
-        lambda *, apply: {
-            "findings": [],
-            "before": {"candidate_count": 0, "cutover_in_progress": False},
-            "after": {"candidate_count": 0, "cutover_in_progress": False},
-        },
-    )
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    _patch_cutover_lock(monkeypatch, acquirable=True)
 
     def _boom():
         raise OSError("no fork slots")
@@ -3347,6 +3364,33 @@ def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):
 
     assert rc == 0
     assert "non-fatal" in capsys.readouterr().out
+
+
+def test_ensure_monitor_helper_never_calls_doctor_report_while_holding_the_lock(
+    monkeypatch,
+):
+    """Regression for the TOCTOU race a review finding identified: the
+    recheck-and-ensure step must use the lock-free ``_candidates()`` probe,
+    never ``daemon_health.doctor_report()``/``apply_daemon_health()`` --
+    both try to acquire this SAME cutover guard themselves (non-blocking,
+    per-call), which would self-block/no-op against the lease this
+    function is already holding, silently defeating the atomicity this
+    helper exists to provide."""
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+
+    def _boom(*, apply):
+        raise AssertionError(
+            "must not call doctor_report() while already holding the cutover lock"
+        )
+
+    monkeypatch.setattr(daemon_health, "doctor_report", _boom)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: True)
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "ensured"
 
 
 def test_delay_seconds_rejects_non_finite_and_negative_values():
