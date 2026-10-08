@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-04
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -468,6 +468,14 @@ request, double-runs a scheduled job, or opens a window with no live service.
 *How* the routing record and drain are implemented (a shared cutover primitive) is
 spec-level, not fixed here.
 
+The whole lifecycle transition has **one mutation authority**, including
+interrupted-transition recovery and retirement of abandoned candidates.
+Concurrent installers, maintenance callers, and recovery paths coordinate
+through that same authority rather than repairing one another's live work.
+An unfinished transition is not automatically abandoned: recovery establishes
+that its owner is gone or has yielded before changing the serving generation,
+releasing its drain, or retiring its candidate.
+
 ### register-once-cutover-on-update
 A lifecycle supervisor is bound **once** to a stable launcher and remains
 unchanged across ordinary version updates. The launcher resolves the selected
@@ -657,6 +665,12 @@ an incomplete change, the same way an undocumented behavior change is.
   `docs/architecture.md`
 
 ## Provenance
+
+- **2026-10-08** — Made lifecycle-transition authority explicit within
+  *zero-downtime-cutover*: concurrent update and recovery callers share the same
+  ownership boundary, and unfinished work is distinguished from abandoned work.
+  Folded up from the shared cutover serialization and durable recovery model
+  while reconciling agent-bridge's generation handoff.
 
 - **2026-09-09** — Generalized *hooks-and-callbacks-are-transient* beyond
   Copilot-invoked hooks: any repeated, on-demand caller of a
