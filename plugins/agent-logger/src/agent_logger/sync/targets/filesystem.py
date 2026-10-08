@@ -81,6 +81,16 @@ class _LockedSourceFile(OSError):
     pass
 
 
+class _SourceChangedDuringCopy(OSError):
+    """The source file's identity or size changed between opening it and
+    finishing the byte copy (e.g. rotated/replaced under the same name
+    mid-transfer) -- the destination must not land with the old bytes under
+    the replacement's metadata, which would make a future incremental pass
+    believe the replacement is already synced. Handled the same way as
+    :class:`_LockedSourceFile`: this file didn't land this pass, retried
+    next pass, never a push failure."""
+
+
 class _FleetScanLimitError(OSError):
     pass
 
@@ -280,15 +290,26 @@ def _fsync_tree(root: Path) -> None:
         _fsync_directory(directory)
 
 
-def _copy_stream_replace(source: BinaryIO, stat_source: Path, dst: Path) -> None:
+def _copy_stream_replace(source: BinaryIO, dst: Path) -> None:
     """Atomically replace *dst* from an already-open *source* stream.
 
     Shared by :func:`_copy_replace` (opens by path) and the process-log copy
     path (opens via a pinned directory fd, see :func:`_copy_process_logs`),
     so both get the same atomic temp-file + fsync + durable-replace behavior
-    from one place. *stat_source* is used only for a best-effort
-    ``copystat`` (mtime/mode) -- never trusted for the copy's correctness.
+    from one place.
+
+    Metadata (mtime/mode) and the post-copy change check both come from
+    ``os.fstat`` on the already-open descriptor -- never a later path-based
+    restat. A path-based restat after the byte copy could observe an
+    entirely different file if *source* was rotated/replaced under the same
+    name during the copy: same size, different content, a newer mtime --
+    which would let a future incremental pass believe the destination
+    already matches the replacement, permanently masking the swap. If the
+    descriptor's identity or size differs between before and after the
+    copy, nothing is landed: :class:`_SourceChangedDuringCopy` signals the
+    caller to treat this entry as unlanded this pass, same as a locked file.
     """
+    before = os.fstat(source.fileno())
     temporary = dst.with_name(f".{dst.name}.{short_unique_id()}.tmp")
     temporary_io = _windows_extended_path(temporary)
     try:
@@ -296,12 +317,16 @@ def _copy_stream_replace(source: BinaryIO, stat_source: Path, dst: Path) -> None
             shutil.copyfileobj(source, target, length=1024 * 1024)
             target.flush()
             os.fsync(target.fileno())
-        try:
-            shutil.copystat(
-                _windows_extended_path(stat_source),
-                temporary_io,
-                follow_symlinks=False,
+        after = os.fstat(source.fileno())
+        if (before.st_dev, before.st_ino, before.st_size) != (
+            after.st_dev, after.st_ino, after.st_size,
+        ):
+            raise _SourceChangedDuringCopy(
+                "source changed identity or size during copy"
             )
+        try:
+            os.utime(temporary_io, ns=(before.st_atime_ns, before.st_mtime_ns))
+            os.chmod(temporary_io, stat.S_IMODE(before.st_mode))
         except OSError:
             pass
         _unlink_replace_target(dst)
@@ -319,7 +344,7 @@ def _copy_replace(src: Path, dst: Path) -> None:
             raise _LockedSourceFile(f"source file is locked: {src}") from exc
         raise
     with source:
-        _copy_stream_replace(source, src, dst)
+        _copy_stream_replace(source, dst)
 
 
 def _needs_copy(src: Path, dst: Path) -> bool:
@@ -391,8 +416,10 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     directory-walk and detritus-discovery machinery -- neither applies to a
     flat directory of log files. Returns ``(copied, bytes, locked_paths)``;
     a locked source file (transient Windows sharing violation on a live
-    in-use log) is recorded in *locked_paths* and skipped, exactly like a
-    deferred session file -- never aborting the whole pass.
+    in-use log) or one whose identity/size changed mid-copy (a rotation or
+    replacement racing this pass) is recorded in *locked_paths* and
+    skipped, exactly like a deferred session file -- never aborting the
+    whole pass.
 
     On POSIX, *source* is opened once with ``O_NOFOLLOW`` and every entry is
     scanned and opened relative to that single directory handle, reusing
@@ -422,9 +449,9 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     def _land(stream: BinaryIO, stat_source: Path, dst_path: Path) -> None:
         nonlocal copied, nbytes
         try:
-            _copy_stream_replace(stream, stat_source, dst_path)
+            _copy_stream_replace(stream, dst_path)
         except OSError as exc:
-            if _is_windows_sharing_violation(exc):
+            if _is_windows_sharing_violation(exc) or isinstance(exc, _SourceChangedDuringCopy):
                 locked.append(stat_source)
                 return
             raise
@@ -1704,7 +1731,7 @@ class FilesystemTarget(Target):
                         # so it succeeds regardless of the file's own mode.
                         _copy_replace(src_file, dst_file)
                     except OSError as exc:
-                        if isinstance(exc, _LockedSourceFile):
+                        if isinstance(exc, (_LockedSourceFile, _SourceChangedDuringCopy)):
                             locked_paths.append(rel)
                             continue
                         return PushResult(

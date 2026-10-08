@@ -375,11 +375,14 @@ def run_sync(
         process_logs_failed = False
         if cfg.process_logs_enabled:
             if include is not None:
-                if verbose:
-                    print(
-                        "session-sync: process-log sync skipped "
-                        "(repo-scoped sync is not yet supported)"
-                    )
+                # Always print, not only when --verbose: an explicitly
+                # enabled process-log sync going silently unpublished on a
+                # repo-scoped pass is the same "visible no-op" contract as
+                # the unsupported-target case below.
+                print(
+                    "session-sync: process-log sync skipped "
+                    "(repo-scoped sync is not yet supported)"
+                )
             else:
                 plog_result = target.push_process_logs(cfg.process_logs_source, machine)
                 if not plog_result.ok:

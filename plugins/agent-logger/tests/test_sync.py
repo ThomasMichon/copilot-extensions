@@ -3078,6 +3078,20 @@ def test_is_process_log_candidate() -> None:
     assert not is_process_log_candidate("process-.log")
 
 
+def test_is_process_log_candidate_rejects_path_separators() -> None:
+    """A bare filename is the documented contract; a path-like value must
+    never satisfy the .zip branch's plain `str.endswith` check, regardless
+    of which separator convention the host or the value itself uses."""
+    from agent_logger.process_logs import is_process_log_candidate
+
+    assert not is_process_log_candidate("../outside.zip")
+    assert not is_process_log_candidate("sub/outside.zip")
+    assert not is_process_log_candidate("sub\\outside.zip")
+    assert not is_process_log_candidate("..\\outside.zip")
+    assert not is_process_log_candidate("sub/process-111-1.log")
+    assert not is_process_log_candidate("sub\\process-111-1.log")
+
+
 def test_local_target_push_process_logs_selects_candidates_only(
     tmp_path: Path,
 ) -> None:
@@ -3210,6 +3224,47 @@ def test_copy_process_logs_skips_file_rotated_away_mid_pass(
     assert not (dest / victim.name).exists()
     assert (dest / survivor.name).read_text(encoding="utf-8") == "still here\n"
     assert copied >= 1
+
+
+def test_copy_stream_replace_rejects_source_changed_during_copy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """If the source file's identity/size changes between opening it and
+    finishing the byte copy (e.g. rotated/truncated-and-rewritten under the
+    same name), the destination must not land -- landing it anyway would
+    carry the OLD bytes under the replacement's NEW size/mtime, which would
+    make a future incremental size/mtime check believe the replacement is
+    already synced, permanently masking it. Metadata/identity must come
+    from the already-open descriptor (``os.fstat``), never a later
+    path-based restat that could observe the replacement instead."""
+    from agent_logger.sync.targets.filesystem import (
+        _copy_stream_replace,
+        _SourceChangedDuringCopy,
+    )
+
+    src = tmp_path / "process-111-1.log"
+    src.write_text("original\n", encoding="utf-8")
+    dst = tmp_path / "dest.log"
+
+    real_fsync = os.fsync
+    state = {"rotated": False}
+
+    def flaky_fsync(fd):
+        if not state["rotated"]:
+            # Fires right after the byte copy's own fsync, before this
+            # function's post-copy fstat -- simulates the source changing
+            # under the still-open descriptor mid-transfer.
+            state["rotated"] = True
+            src.write_text("replaced with different length\n", encoding="utf-8")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", flaky_fsync)
+
+    with open(src, "rb") as stream:
+        with pytest.raises(_SourceChangedDuringCopy):
+            _copy_stream_replace(stream, dst)
+
+    assert not dst.exists()
 
 
 def test_engine_run_sync_reports_failure_when_process_log_push_fails(
