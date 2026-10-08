@@ -1,0 +1,9 @@
+{
+  "comment": "Single-container stop/remove now rescue restricted members before destroying them, matching down/rm fleet-wide parity",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

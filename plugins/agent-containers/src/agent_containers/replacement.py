@@ -25,7 +25,7 @@ from .lease import (
 from .lifecycle import (
     DockerContainerInfo,
     _docker,
-    get_container,
+    _resolve_member_info,
     inspect_container,
     inspect_state,
     remove_container,
@@ -319,7 +319,7 @@ def _restricted_member_action(
                     "container has an active effort lease",
                 )
 
-            current = get_container(config, info.name)
+            current = _resolve_member_info(config, info.name)
             if current is None or current.container_id.lower() != info.container_id.lower():
                 return DestructiveResult(
                     info.name,
@@ -341,7 +341,7 @@ def _restricted_member_action(
                         "deferred",
                         f"paused container could not be inspected: {exc}",
                     )
-                current = get_container(config, info.name)
+                current = _resolve_member_info(config, info.name)
                 if (
                     current is None
                     or current.container_id.lower() != info.container_id.lower()
@@ -441,7 +441,7 @@ def _restricted_member_action(
                 ) as rescue_pin:
                     # Prove the loss marker still describes the held stopped instance.
                     verify_deploy_hold(info.name, hold.token)
-                    latest = get_container(config, info.name)
+                    latest = _resolve_member_info(config, info.name)
                     if (
                         latest is None
                         or latest.container_id.lower() != info.container_id.lower()
@@ -460,7 +460,7 @@ def _restricted_member_action(
                             reason="container_not_running",
                         )
                     verify_deploy_hold(info.name, hold.token)
-                    latest = get_container(config, info.name)
+                    latest = _resolve_member_info(config, info.name)
                     if (
                         latest is None
                         or latest.container_id.lower() != info.container_id.lower()
@@ -557,7 +557,7 @@ def _restricted_member_action(
                 # This proof and identity read anchor the final probe to the instance
                 # currently covered by our admission hold.
                 verify_deploy_hold(info.name, hold.token)
-                latest = get_container(config, info.name)
+                latest = _resolve_member_info(config, info.name)
                 if (
                     latest is None
                     or latest.container_id.lower() != info.container_id.lower()
@@ -592,7 +592,7 @@ def _restricted_member_action(
                 # Re-prove ownership and identity after the probe; the duplicate is
                 # deliberate because the probe itself creates a check/action window.
                 verify_deploy_hold(info.name, hold.token)
-                latest = get_container(config, info.name)
+                latest = _resolve_member_info(config, info.name)
                 if (
                     latest is None
                     or latest.container_id.lower() != info.container_id.lower()
