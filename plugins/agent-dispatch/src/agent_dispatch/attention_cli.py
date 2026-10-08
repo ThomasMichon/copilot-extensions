@@ -123,8 +123,16 @@ def _cmd_next(args: argparse.Namespace) -> int:
         print("Nothing needs you." if envelope["status"] == "clear" else "No items read.")
     else:
         print("\n".join(_item_lines(item)))
-        print(f"    next: agent-dispatch attention next --after {result['cursor']}")
+        print("    next: " + " ".join(_next_argv(args, envelope, result["cursor"])))
     return 0
+
+
+def _next_argv(args: argparse.Namespace, envelope: dict[str, Any], cursor: str) -> list[str]:
+    """The follow-up that walks the same queue: same coordinator, same sources."""
+    argv = [*_target_cli(args), "attention", "next", "--after", cursor]
+    for name in envelope["selected"] or ():
+        argv += ["--source", name]
+    return argv
 
 
 def _cmd_source(args: argparse.Namespace) -> int:

@@ -434,6 +434,16 @@ def test_the_action_reaches_the_coordinator_the_read_came_from(monkeypatch, caps
     assert "s3cret" not in out.out
 
 
+def test_the_next_hint_walks_the_same_coordinator_and_sources(monkeypatch, capsys):
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    rc, out = _cli(monkeypatch, capsys, ["--url", "http://peer:8787", "--token", "s3cret", "--shared",
+                                         "attention", "next", "--source", "dispatch"], tasks)
+    hint = next(line for line in out.out.splitlines() if "next:" in line).split("next: ", 1)[1].split()
+    assert hint[:4] == ["agent-dispatch", "--url", "http://peer:8787", "--shared"]
+    assert hint[4:7] == ["attention", "next", "--after"] and hint[8:] == ["--source", "dispatch"]
+    assert "s3cret" not in out.out
+
+
 def test_concurrent_registrations_are_never_lost(monkeypatch):
     import threading
 
