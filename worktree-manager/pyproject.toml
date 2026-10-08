@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.6.12-dev1"
+version = "0.6.13-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -59,10 +59,13 @@ dependencies = [
     # mux-daemon update path.
     "agent-zdd",
     # Shared POSIX login-shell command wrapping for remote SSH exec (module
-    # ``remote_login_shell``, copilot-extensions#5207). Used transitively via
-    # the vendored ``agent_worktrees.resolve_machine_cli`` module this product
-    # ships its own copy of.
+    # ``remote_login_shell``, copilot-extensions#5207).
     "agent-remote-login-shell",
+    # Shared machines.yaml registry parsing, canonicalized local-machine
+    # identity, and local-vs-SSH transport resolution (module
+    # ``machine_transport``). Used by the production Picker's
+    # local-vs-remote dispatch decisions (data_local.is_local/data_ssh.is_local).
+    "agent-machine-transport",
 ]
 
 [tool.uv.sources]
@@ -106,6 +109,15 @@ agent-zdd = { path = "libs/zdd" }
 # keep manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-remote-login-shell = { path = "libs/remote-login-shell" }
+# Shared machines.yaml registry parsing, canonicalized local-machine
+# identity, and local-vs-SSH transport resolution (module
+# ``machine_transport``). This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# project's own root and resolves live to `libs/machine-transport`, so this
+# `dev`-branch checkout has nothing to keep manually in sync -- only a real
+# `main`-branch release (tools/materialize_main.py) ever gets a real local
+# copy.
+agent-machine-transport = { path = "libs/machine-transport" }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"
