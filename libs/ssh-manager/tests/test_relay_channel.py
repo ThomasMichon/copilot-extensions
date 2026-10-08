@@ -278,3 +278,25 @@ async def test_terminate_releases_owner_even_if_sweep_fails(monkeypatch):
     await relay.stop()
 
     assert released == [spawned[0]]
+
+
+async def test_definitive_stop_seen_on_inner_retry_is_final(monkeypatch):
+    # True to start reconnecting, then a definitive "stopped" on the retry
+    # gate, then "running" again: the supervisor must stay retired.
+    answers = [True, False, True, True]
+
+    async def gate() -> bool:
+        return answers.pop(0)
+
+    relay, spawned = _supervised(monkeypatch, gate=gate)
+
+    async def bind_fails(self, proc):
+        return _SettleResult(False, "remote port forwarding failed", True)
+
+    monkeypatch.setattr(SupervisedRelayForward, "_wait_settled", bind_fails)
+
+    assert await relay._restart_with_backoff("process exited") is False
+
+    assert relay.retired is True
+    assert answers == [True, True], "no gate re-check after a definitive stop"
+    assert len(spawned) == 1

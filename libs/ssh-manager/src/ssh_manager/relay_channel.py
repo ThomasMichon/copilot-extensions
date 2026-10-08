@@ -45,6 +45,10 @@ _REMOTE_FORWARD_FAILURE_MARKERS = (
 )
 
 
+class _VenueStopped(ConnectionError):
+    """A reconnect gate definitively reported the remote venue as stopped."""
+
+
 @dataclass(frozen=True)
 class _SettleResult:
     ready: bool
@@ -193,12 +197,13 @@ class SupervisedRelayForward:
         for attempt in range(1, _ESTABLISH_ATTEMPTS + 1):
             # A monitor-driven reconnect re-checks the gate before every spawn:
             # the venue may have been stopped during the backoff below.
-            if self._gated_establish and attempt > 1 \
-                    and await self._reconnect_allowed() is not True:
-                raise ConnectionError(
-                    "credential relay reconnect to "
-                    f"{self._config.ssh_target} declined by its reconnect gate"
-                )
+            if self._gated_establish and attempt > 1:
+                allowed = await self._reconnect_allowed()
+                if allowed is not True:
+                    raise (_VenueStopped if allowed is False else ConnectionError)(
+                        "credential relay reconnect to "
+                        f"{self._config.ssh_target} declined by its reconnect gate"
+                    )
             args = build_forward_ssh_args(
                 self._config,
                 None,
@@ -416,6 +421,18 @@ class SupervisedRelayForward:
         except asyncio.CancelledError:
             raise
 
+    def _retire(self, reason: str) -> bool:
+        """End supervision because the venue is stopped; returns ``False``."""
+        if not self._stopped:
+            self._retired = True
+            log.info(
+                "Credential relay to %s retired (%s): the remote venue "
+                "is stopped, so reconnecting would restart it",
+                self._config.ssh_target,
+                reason,
+            )
+        return False
+
     async def _reconnect_allowed(self) -> bool | None:
         """Consult the reconnect gate: True=go, False=retire, None=unknown."""
         if self._stopped:
@@ -465,15 +482,7 @@ class SupervisedRelayForward:
             await self._cancel_process()
             allowed = await self._reconnect_allowed()
             if allowed is False:
-                if not self._stopped:
-                    self._retired = True
-                    log.info(
-                        "Credential relay to %s retired (%s): the remote venue "
-                        "is stopped, so reconnecting would restart it",
-                        self._config.ssh_target,
-                        reason,
-                    )
-                return False
+                return self._retire(reason)
             if allowed is None:
                 failures += 1
                 await self._sleep(min(
@@ -494,6 +503,10 @@ class SupervisedRelayForward:
                 return True
             except asyncio.CancelledError:
                 raise
+            except _VenueStopped:
+                # A definitive "stopped" from a retry's gate check is final.
+                await self._cancel_process()
+                return self._retire(reason)
             except Exception as exc:
                 failures += 1
                 delay = min(
