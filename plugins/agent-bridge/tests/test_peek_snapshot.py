@@ -274,6 +274,13 @@ def test_a_sub_agent_turn_end_with_an_envelope_agent_id_does_not_settle_the_sess
     assert (p["state"], p["last_event"]) == ("busy", "assistant.turn_end")
 
 
+def test_a_sub_agent_turn_end_with_only_a_parent_marker_does_not_settle_the_session(tmp_path):
+    nested = [_ev("tool.execution_start", 3, parentToolCallId="tc-0"),
+              _ev("assistant.turn_end", 4, turnId="s1", parentToolCallId="tc-0")]
+    p = _presence(tmp_path, _TURN + nested)
+    assert (p["state"], p["last_event"]) == ("busy", "assistant.turn_end")
+
+
 def test_the_top_level_json_flag_reaches_presence():
     """``agent-bridge --json presence <t>`` stays JSON: the subcommand's own ``--json``
     must not overwrite the top-level flag with its default."""

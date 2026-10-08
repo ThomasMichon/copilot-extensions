@@ -24,7 +24,8 @@ the transcript since its last ``session.start``/``session.resume`` -- never from
 self-reported activity. ``busy`` when the last presence-bearing event is
 ``user.message``, ``assistant.turn_start``, ``tool.execution_start``/``complete``
 or ``permission.completed`` (or is a sub-agent's ``assistant.turn_end``, carrying
-``agentId`` on the event (or legacy ``data.agentId``): the parent turn is still taking in its result); ``awaiting_input`` while a ``permission.requested``
+``agentId`` on the event (or legacy ``data.agentId`` / ``data.parentToolCallId``):
+the parent turn is still taking in its result); ``awaiting_input`` while a ``permission.requested``
 is unanswered (paired by ``requestId``), or when a turn ended
 (``assistant.turn_end``) in an interactive session; ``idle`` when a turn ended in
 an autopilot (or headless) session -- the mode is the latest of
@@ -322,10 +323,10 @@ def presence(evs, last_line_bad, complete=True):
             pending.pop(d.get("requestId"), None)
         if t in BUSY or t in SETTLED or t == "session.shutdown" or t == "permission.requested":
             last = e
-            # A sub-agent's turn end (envelope ``agentId``) doesn't settle the session: the
-            # parent turn is still taking in its result.
-            busy = t in BUSY or (t in SETTLED and bool(
-                e.get("agentId") or (isinstance(d, dict) and d.get("agentId"))))
+            # A sub-agent's turn end (envelope ``agentId``, or a parent marker) doesn't
+            # settle the session: the parent turn is still taking in its result.
+            busy = t in BUSY or (t in SETTLED and bool(e.get("agentId") or (
+                isinstance(d, dict) and (d.get("agentId") or d.get("parentToolCallId")))))
     if last is None:
         return out("unknown", "no presence-bearing event since the session started", mode=mode)
     kind = last.get("type")

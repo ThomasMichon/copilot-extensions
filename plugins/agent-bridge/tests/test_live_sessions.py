@@ -774,6 +774,20 @@ def test_a_delivered_message_retires_a_blocker(client_with_store: TestClient) ->
     assert lp["pr"] == "42" and lp["markers"] == {"pr": "42", "pr-build": "running"}
 
 
+def test_a_sub_agent_milestone_never_becomes_the_session_progress(
+    client_with_store: TestClient,
+) -> None:
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/progress", json={"summary": "explicit beat"})
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": [
+        {"type": "assistant.message", "agentId": "sub-1",
+         "data": {"content": "BLOCKED: waiting on review", "parentToolCallId": "tc-task"}},
+    ]})
+    assert r.status_code == 200, r.text
+    assert c.get("/api/v1/live-sessions/s1").json()["latest_progress"]["summary"] == "explicit beat"
+
+
 def test_blocking_again_after_a_message_stays_blocked(client_with_store: TestClient) -> None:
     c = client_with_store
     c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})

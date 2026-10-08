@@ -429,9 +429,11 @@ def progress_from_events(
     done = blocked = None
     answered = False
     for event in raw_events:
+        if is_subagent_event(event):  # a sub-agent's prompt or milestone isn't the session's
+            continue
         etype = event.get("type")
         data = event.get("data") or {}
-        if etype == "user.message" and not is_subagent_event(event):
+        if etype == "user.message":
             answered = True
             continue
         if etype != "assistant.message":
