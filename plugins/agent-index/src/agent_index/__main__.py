@@ -1415,7 +1415,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             "stderr": subprocess.DEVNULL,
         }
         kwargs["env"].update(windowless_python_env(python))
-        kwargs.update(detached_kwargs())
+        kwargs.update(detached_kwargs(breakaway=True))
         handle = subprocess.Popen(cmd, **kwargs)  # noqa: S603
         passive_instance.update({"port": port, "pid": handle.pid})
         return handle

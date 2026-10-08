@@ -14,10 +14,14 @@ supervision.
   durable engine home (`~/.agent-index/engine/.venv`). Routine service
   `install`/`update` never rebuild or restart it. The explicit `engine` /
   `engine-update` verbs remain the only provisioning/update path for that stack.
-- **Tier 1 default:** the default contract is user-mode self-supervision. The
+- **Tier 1 default:** the default contract is event-driven user-mode convergence. The
   installer verbs `install`, `update`, `start`, and `ensure` all converge on the
   same local start path instead of delegating to another daemon. `update`
   preserves in-flight work by using the existing `agent_index deploy` cutover.
+  Repository activation uses the same effective configuration layers as the
+  client, including its machine-local and bound-knowledge overlays. Detached
+  service successors request Windows Job breakaway so they survive a bounded
+  management process exiting; contained tests retain child ownership.
 - **Tier 2 default durable autostart:** the same stable launcher path is now
   registered automatically on install/update/ensure so the host comes back after
   the next login without any manual step. Windows uses HKCU Run entries
@@ -29,12 +33,11 @@ supervision.
   such as pre-login start, missed-trigger recovery, or task-owned restart
   policy. Choosing that tier supersedes the matching HKCU Run entries rather
   than stacking both.
-- **Session start:** session hooks still publish guidance, and now also run a
-  cheap `ensure` safety net. The hook never provisions a runtime; it only
-  health-checks the installed host runtime and starts it when absent -- and, on
-  a never-provisioned machine that has no binstub at all yet, stamps one first
-  (splats the payload marker + redirector shim; still no venv, no uv) so the
-  CLI resolves and there is something for the health-check to act on.
+- **Session start:** `hooks.json` publishes guidance and invokes the installer
+  `ensure` action as a bounded safety net. That action can health-check and
+  restore an already-installed configured host and its engine without
+  provisioning dependencies. The separate `ensure-service` compatibility
+  scripts are no-ops; they are not the active hook wiring.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
   remain self-contained and do not require `agent-dispatch`.
@@ -49,3 +52,8 @@ supervision.
   elevation, so a plain install/update survives the next interactive login.
 - The durable engine remains decoupled from ordinary service updates, so a
   routine service bump does not rebuild torch or reload the model.
+
+Logon startup and an explicit `ensure` action are not continuous crash
+supervision. A host that requires unattended restart needs a configured
+persistent lifecycle authority (for example the optional OS-supervised tier).
+Do not describe a logon entry or a successful cutover as that authority.
