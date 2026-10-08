@@ -3398,6 +3398,28 @@ def test_ensure_monitor_helper_skips_entirely_when_status_monitor_disabled(monke
     assert lock_attempted["n"] == 0
 
 
+def test_ensure_monitor_helper_works_on_darwin_despite_repair_support_being_off(
+    monkeypatch,
+):
+    """Identity-bound termination of a DUPLICATE daemon is unsupported on
+    macOS (``daemon_health._context()`` sets ``repair_supported=False``
+    there, a pre-existing, broader zdd.diagnostics/daemon_health
+    limitation this module does not lift). The ZERO-candidate
+    ensure-a-monitor path is a different code path entirely
+    (``_ensure_status_monitor()`` never depends on identity-bound
+    termination) and must still work there."""
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(status_monitor_reap_stale.sys, "platform", "darwin")
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: True)
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "ensured"
+
+
 def test_ensure_monitor_helper_reports_an_ordinary_spawn_failure(monkeypatch):
     """``_ensure_status_monitor()`` reports an ORDINARY spawn failure (e.g.
     ``Popen`` failing) by returning ``False``, not by raising -- the helper

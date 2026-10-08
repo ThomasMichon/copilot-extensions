@@ -19,6 +19,17 @@ exclusivity logic (PR #5412) or the promotion/drain sequencing itself
 (#5453's own tracked scope for the real fix): it schedules the EXISTING
 identity-verified ``daemon_health.doctor_report(apply=True)`` repair to run
 automatically, on a delay, after every cutover/restart attempt.
+
+Platform scope: identity-bound termination of a duplicate daemon is
+unsupported on macOS (``daemon_health._context()`` sets
+``repair_supported=False`` there, a PRE-EXISTING, broader
+``zdd.diagnostics``/``daemon_health`` limitation this module does not
+introduce and does not attempt to lift). On Darwin, the duplicate-monitor
+half of this backstop is consequently a no-op (the repair call reports a
+blocked finding rather than terminating anything); the zero-candidate
+ensure-a-monitor half of this module is unaffected, since
+``_ensure_status_monitor()`` never depends on identity-bound termination.
+Windows and Linux get the full mitigation described above.
 """
 
 from __future__ import annotations
