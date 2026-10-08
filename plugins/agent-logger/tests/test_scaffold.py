@@ -914,6 +914,7 @@ def test_repo_config_ignores_global_git_config_remote(
             "https://example.test/example-owner/demo.git",
         ],
         check=True,
+        cwd=repo,
         env=_git_test_env(),
         timeout=20,
     )

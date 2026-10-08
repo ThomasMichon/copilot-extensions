@@ -46,6 +46,7 @@ from pathlib import Path
 
 from agent_logger import sessions
 from agent_logger.segmenter.collate import read_workspace
+from agent_logger.source_roots import iter_archive_sources
 from agent_logger.sync.origin import read_origin_sidecar
 from agent_logger.sync.provenance import (
     RESCUE_SNAPSHOT_PROVENANCE,
@@ -378,17 +379,15 @@ class SyncedSessionSource(SessionSource):
         settle_seconds: int = DEFAULT_SETTLE_SECONDS,
     ) -> None:
         super().__init__(reservations, settle_seconds=settle_seconds)
-        self.corpus_root = corpus_root
+        self.corpus_root = corpus_root.expanduser().absolute()
 
     def scan(self, *, now: datetime | None = None) -> list[DiscoveredSession]:
         corpus_root = existing_real_directory(self.corpus_root)
         if corpus_root is None:
             return []
         out: list[DiscoveredSession] = []
-        for raw_machine_dir in sorted(corpus_root.iterdir()):
-            machine_dir = existing_real_directory(raw_machine_dir)
-            if machine_dir is None:
-                continue
+        for source in iter_archive_sources(corpus_root):
+            machine_dir = source.path
             generation = _machine_generation(machine_dir)
             if generation is None or _has_active_replacement(machine_dir):
                 continue
@@ -459,8 +458,12 @@ class SyncedSessionSource(SessionSource):
                 not _has_active_replacement(machine_dir)
                 and _machine_generation(machine_dir) == generation
             ):
+                source.validate()
                 out.extend(machine_out)
         return out
+
+    def _source_key(self, machine_dir: Path) -> str:
+        return machine_dir.relative_to(self.corpus_root).as_posix()
 
     def _discover_archived(
         self, machine_dir: Path, ref: sessions.SessionRef, *, now: datetime | None
@@ -468,7 +471,7 @@ class SyncedSessionSource(SessionSource):
         if not sessions.verify_archive(ref):
             return None
         provenance = read_provenance(machine_dir, ref.id)
-        seg = _segment_ref(machine_dir.name, ref.id, provenance)
+        seg = _segment_ref(self._source_key(machine_dir), ref.id, provenance)
         # I4: never re-file a journaled unit -- keyed on the same SegmentRef the
         # session had while live, so archiving never re-chronicles it.
         if self.is_journaled(seg):
@@ -500,7 +503,7 @@ class SyncedSessionSource(SessionSource):
         )
         return DiscoveredSession(
             session_id=ref.id,
-            machine=machine_dir.name,
+            machine=self._source_key(machine_dir),
             session_path=content_path,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),
@@ -539,7 +542,7 @@ class SyncedSessionSource(SessionSource):
         # routing (derive-the-origin-never-guess); the raw workspace repository
         # remains as display metadata and a pre-backfill routing fallback.
         origin = read_origin_sidecar(content_path)
-        ref = _segment_ref(machine_dir.name, session_dir.name, provenance)
+        ref = _segment_ref(self._source_key(machine_dir), session_dir.name, provenance)
         # I4: never re-file the same local session or rescued capture.
         if self.is_journaled(ref):
             return None
@@ -548,7 +551,7 @@ class SyncedSessionSource(SessionSource):
         )
         return DiscoveredSession(
             session_id=session_dir.name,
-            machine=machine_dir.name,
+            machine=self._source_key(machine_dir),
             session_path=content_path,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),
@@ -585,7 +588,7 @@ class SyncedSessionSource(SessionSource):
             or rescue_snapshot_path(machine_dir, session_id, capture_id) != snapshot
         ):
             return None
-        ref = _segment_ref(machine_dir.name, session_id, provenance)
+        ref = _segment_ref(self._source_key(machine_dir), session_id, provenance)
         if self.is_journaled(ref):
             return None
         ws = read_workspace(snapshot)
@@ -595,7 +598,7 @@ class SyncedSessionSource(SessionSource):
         )
         return DiscoveredSession(
             session_id=session_id,
-            machine=machine_dir.name,
+            machine=self._source_key(machine_dir),
             session_path=snapshot,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),
