@@ -35,6 +35,7 @@ _WATCH_QUERY = (
 _PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
+_WATCH_HANDLER_DRAIN_TIMEOUT_S = 5.0
 
 
 def _parse_repo_slug(value: str) -> tuple[str, str]:
@@ -575,7 +576,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        server.close_admission(reason="shutdown")
         server.close()
+        deadline = time.monotonic() + _WATCH_HANDLER_DRAIN_TIMEOUT_S
+        while server.active_handler_count():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("PR watch request handlers did not drain")
+            time.sleep(0.02)
         daemon.close()
         lease.release()
     return 0

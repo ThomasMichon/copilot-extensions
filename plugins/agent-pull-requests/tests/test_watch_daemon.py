@@ -279,7 +279,10 @@ def test_close_reports_inflight_fetch_timeout_and_can_be_retried(daemon_factory)
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
-def test_serve_joins_pollers_before_releasing_lease(interrupted, monkeypatch):
+@pytest.mark.parametrize("drain_timeout", [False, True])
+def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
+    interrupted, drain_timeout, monkeypatch
+):
     import single_instance_lease
     import work_coalescing_singleton
     from agent_pull_requests import __main__ as cli, watch_daemon
@@ -312,7 +315,7 @@ def test_serve_joins_pollers_before_releasing_lease(interrupted, monkeypatch):
 
     class Server:
         def __init__(self, *args, **kwargs):
-            pass
+            self.checks = 0
 
         def start(self):
             pass
@@ -323,11 +326,28 @@ def test_serve_joins_pollers_before_releasing_lease(interrupted, monkeypatch):
         def close(self):
             lifecycle.append("stop-listener")
 
+        def close_admission(self, reason):
+            assert reason == "shutdown"
+            lifecycle.append("close-admission")
+
+        def active_handler_count(self):
+            self.checks += 1
+            lifecycle.append("drain")
+            return 1 if drain_timeout or self.checks == 1 else 0
+
     monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
     monkeypatch.setattr(work_coalescing_singleton, "CoalescingServer", Server)
     monkeypatch.setattr(watch_daemon, "WatchDaemon", Daemon)
     monkeypatch.setattr(watch_daemon, "rendezvous_fields", lambda server: {})
     monkeypatch.setattr(watch_daemon, "write_lock_data", lambda data: None)
 
-    assert cli._cmd_serve(SimpleNamespace(poll_interval=30)) == 0
-    assert lifecycle == ["acquire", "stop-listener", "join", "release"]
+    if drain_timeout:
+        monkeypatch.setattr(cli, "_WATCH_HANDLER_DRAIN_TIMEOUT_S", 0)
+        with pytest.raises(TimeoutError, match="request handlers did not drain"):
+            cli._cmd_serve(SimpleNamespace(poll_interval=30))
+        assert lifecycle == ["acquire", "close-admission", "stop-listener", "drain"]
+    else:
+        assert cli._cmd_serve(SimpleNamespace(poll_interval=30)) == 0
+        assert lifecycle == [
+            "acquire", "close-admission", "stop-listener", "drain", "drain", "join", "release",
+        ]

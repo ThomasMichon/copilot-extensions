@@ -37,6 +37,21 @@ agent-pull-requests wait   --repo <owner/repo> --number <n> [--interval <s>] [--
 `wait` polls `status` until the pull request reaches `MERGED` or `CLOSED`, or
 the timeout elapses (exit code `3`).
 
+## Watch daemon shutdown
+
+The on-demand PR-watch daemon (`serve`) persists pending subscriptions so
+`serve restart` can restore them. Shutdown closes request admission and the
+listener, drains already-accepted handlers, then wakes and joins polling
+threads before releasing the single-instance lease. Handler draining and poller
+joining each have a five-second deadline; exceeding either raises an explicit
+error rather than reporting a completed graceful shutdown. Pending subscriptions
+are retained, not cleared by shutdown.
+
+This is the drain boundary for the existing on-demand stop/restart path, not a
+zero-downtime active/passive rollout. See the shared
+[graceful cutover pattern](../../docs/patterns/graceful-daemon-cutover.md)
+for resident-daemon rollout requirements.
+
 ## Current constraint
 
 The current GitHub implementation still shells out through:
