@@ -150,27 +150,49 @@ follow-ons.
       `activity.log_event()`/trace write after that commit succeeds. A
       crash between the two leaves the slot (authoritative) correct and
       only the diagnostic trail short one event -- never the reverse.
-- [ ] **Preserve the exact abandon-after-N-unrecoverable-failures semantics
-      (`_RETIRE_TERMINAL_FAILURE_METHODS`, `_RETIRE_ABANDON_GRACE_S`) --
-      verified against the real code, not a reinterpretation.** The
-      existing logic (`_pending_handoff_retire_requests`,
-      `__main__.py:2896-2919`) checks `all(...)` across **every retained
-      retire event for a token**: a single non-terminal attempt, anywhere
-      in the retained window, permanently disqualifies that token from
-      ever being abandoned -- there is no "streak" that resets and a new
-      one begins; disqualification is sticky, not resettable, and there is
-      no "N failures" threshold today, only "all of them, ever retained,
-      were terminal-class." Model this precisely: `retire_first_attempt_at`
-      is set once, on the first retire attempt ever recorded for the
-      token, and never changes again (when every attempt is terminal-class,
-      this IS the earliest-terminal-attempt timestamp the current logic
-      computes via `min(failure_times)`).
+- [ ] **Abandon-after-N-unrecoverable-failures: an explicit, justified
+      behavior change, not a false "exact preservation" claim.** An
+      earlier version of this plan claimed the new slot fields would
+      preserve today's semantics "exactly" -- that claim was wrong, caught
+      twice by review on this same piece of logic, and is corrected here
+      rather than restated a third time. The **real** current behavior
+      (`_pending_handoff_retire_requests`, `__main__.py:2896-2919`) is
+      **bounded, not permanent**: it checks `all(...)` only across
+      whichever retire events are still *visible* right now, and that
+      visible set is itself bounded two ways --
+      `activity.read_events(..., limit=64)` keeps only the newest 64
+      global-log entries per (worktree, event-type), and
+      `handoff_trace.append_event` for `handoff_predecessor_retire` is
+      gated to `outcome == "gone"` only (`activity.py`'s
+      `_HANDOFF_STAGE_GATE`), so a *failed* attempt reaches the durable
+      per-worktree trace store not at all and ages out of the global
+      log's own 64-event window over time. A sufficiently old
+      non-terminal attempt can therefore silently stop counting today --
+      the existing "disqualification" is bounded-window, self-healing,
+      not permanent.
+
+      A bounded field set cannot faithfully reproduce an *arbitrary
+      journal-scan window size* (`limit=64` is an implementation detail of
+      the old replay approach, not a deliberately chosen business rule) --
+      doing so would require tracking a ring buffer of recent outcomes,
+      reintroducing the journal-replay complexity this effort exists to
+      remove. Instead, **explicitly adopt permanent, non-expiring
+      disqualification as the new behavior**: once any non-terminal-class
+      attempt is ever recorded for a token, abandonment never fires for it
+      again, regardless of how long ago that attempt was or how many
+      terminal-class attempts have happened since. This is a deliberate
+      simplification, justified as strictly *safer* than the old bounded
+      window (a token that has ever shown instability is never later
+      silently treated as if it hadn't) -- not a bug-compatible port.
+      `retire_first_attempt_at` is set once, on the first retire attempt
+      ever recorded for the token, and never changes again.
       `retire_disqualified_by_nonterminal` starts `False` and is set `True`
-      permanently the first time any non-terminal-class attempt occurs for
-      that token -- never cleared back to `False`. Abandonment then checks
-      `not retire_disqualified_by_nonterminal and now -
-      retire_first_attempt_at >= _RETIRE_ABANDON_GRACE_S` directly off the
-      slot -- no journal replay, and no behavioral change from today.
+      permanently the first time any non-terminal-class attempt occurs --
+      never cleared. Abandonment then checks `not
+      retire_disqualified_by_nonterminal and now - retire_first_attempt_at
+      >= _RETIRE_ABANDON_GRACE_S` directly off the slot -- no journal
+      replay, and an intentional, documented behavior change from today's
+      bounded-window version, not a preservation of it.
 - [ ] **One-time backfill for already-existing handoffs, before Phase 2
       cuts the readers over.** A handoff that was spawned/retired *before*
       this upgrade has that state recorded only in the journal -- its
@@ -314,15 +336,18 @@ archived-journal discovery, standalone-install retention floor):
       the diagnostic-event emission; assert the slot remains correct and
       authoritative regardless, and that the diagnostic write never
       precedes the slot commit (Phase 1).
-- [ ] A permanent-disqualification test: a single non-terminal attempt,
-      anywhere in a token's history (even followed by many subsequent
-      terminal-class failures), must permanently prevent abandonment --
-      confirm `retire_disqualified_by_nonterminal` is set `True` on the
-      first non-terminal attempt and never clears, and that abandonment
-      never fires for that token regardless of how much later terminal-only
-      activity occurs. A separate token with every attempt terminal-class
-      from the start must still abandon at exactly `_RETIRE_ABANDON_GRACE_S`
-      past `retire_first_attempt_at` (Phase 1).
+- [ ] A permanent-disqualification test (documents the **new, intentional**
+      behavior -- not a preservation of the old bounded-window one): a
+      single non-terminal attempt, anywhere in a token's history (even
+      followed by many subsequent terminal-class failures, and even if it
+      would have aged out of today's `limit=64` window), must permanently
+      prevent abandonment -- confirm `retire_disqualified_by_nonterminal`
+      is set `True` on the first non-terminal attempt and never clears,
+      and that abandonment never fires for that token regardless of how
+      much later terminal-only activity occurs. A separate token with
+      every attempt terminal-class from the start must still abandon at
+      exactly `_RETIRE_ABANDON_GRACE_S` past `retire_first_attempt_at`
+      (Phase 1).
 - [ ] A pre-upgrade backfill test: a `SessionHandoff` whose spawn/retire
       history exists only in the journal (simulating a pre-upgrade
       handoff) must backfill to the correct slot state -- one case spawned
