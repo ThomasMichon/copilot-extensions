@@ -161,6 +161,56 @@ def test_a_notice_dispatched_just_before_withdrawal_is_tolerated():
     assert result["outcome"] == "stopped" and result["notice"]["withdrawn"] is False
 
 
+def test_an_archived_read_only_record_is_already_stopped():
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "ended", "read_only": True}})
+    result = _run(fake, clock, grace=30)
+    assert result["outcome"] == "already_stopped" and fake.calls == []
+
+
+def test_a_session_archived_after_the_stop_is_confirmed_promptly():
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "idle", "turn_count": 0}, 1: {"status": "ended", "read_only": True}})
+
+    def stop(sid, **_kw):
+        clock.t = 1  # the bridge archives the session as it stops
+        raise BridgeClientError(404, "gone")
+
+    fake.stop_session = stop
+    result = _run(fake, clock, confirm_timeout=30)
+    assert result["outcome"] == "stopped" and clock.t < 5
+
+
+def test_a_notice_that_triggers_a_handoff_is_followed_to_the_successor():
+    """Submitting the notice can hand a critical-context session off: the
+    successor is the live one, so it is the one waited on and stopped."""
+    clock = _Clock()
+    calls = []
+
+    class Handoff:
+        def get_session(self, sid):
+            if sid == "s1":
+                return {"session_id": "s1", "status": "idle", "turn_count": 9,
+                        **({"successor_id": "s2"} if calls else {})}
+            return {"session_id": "s2", "status": "stopped" if ("stop", "s2") in calls else "idle",
+                    "turn_count": 1}
+
+        def submit_prompt(self, sid, prompt, **_kw):
+            calls.append(("submit", sid))
+            return {"turn_index": 0}
+
+        def list_pending_queue(self, sid):
+            return []
+
+        def stop_session(self, sid, **_kw):
+            calls.append(("stop", sid))
+
+    result = _run(Handoff(), clock, grace=30)
+    assert result["session_id"] == "s2" and result["handed_off_from"] == "s1"
+    assert ("stop", "s2") in calls and ("stop", "s1") not in calls
+    assert result["outcome"] == "stopped" and result["acknowledged"] is True
+
+
 def test_force_skips_the_notice_and_the_grace():
     clock = _Clock()
     fake = _Fake(clock, {0: {"status": "running", "turn_count": 1}})

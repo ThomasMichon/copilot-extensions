@@ -40,15 +40,20 @@ def _now_iso() -> str:
 
 
 def _status(client: Any, session_id: str) -> dict[str, Any] | None:
-    """The session record, or ``None`` when the bridge no longer knows it."""
+    """The live session record, or ``None`` when the bridge no longer has one
+    running: unknown (404), or only an archived ``read_only`` cold-store record
+    of an ended session."""
     from .client import BridgeClientError
 
     try:
-        return client.get_session(session_id) or None
+        record = client.get_session(session_id) or None
     except BridgeClientError as exc:
         if exc.status == 404:
             return None
         raise
+    if record and record.get("read_only"):
+        return None
+    return record
 
 
 def run_stop(
@@ -84,7 +89,8 @@ def run_stop(
 
     phase("requested")
     if grace is not None and not force and session.get("status") in ("idle", "running"):
-        _cooperate(client, session_id, session, grace, result, phase, clock=clock, sleep=sleep, poll=poll)
+        session_id = _cooperate(client, session_id, session, grace, result, phase,
+                                clock=clock, sleep=sleep, poll=poll)
 
     try:
         client.stop_session(session_id, force=force, reap_host=reap_host)
@@ -110,8 +116,10 @@ def run_stop(
         sleep(poll)
 
 
-def _cooperate(client, session_id, session, grace, result, phase, *, clock, sleep, poll) -> None:
-    """Submit the notice and wait up to ``grace`` for its turn to settle.
+def _cooperate(client, session_id, session, grace, result, phase, *, clock, sleep, poll) -> str:
+    """Submit the notice and wait up to ``grace`` for its turn to settle; returns
+    the session id to stop (a successor, when submitting the notice handed the
+    session off -- the bridge may do that for a session at critical context).
 
     A queued notice is popped before its turn is marked running, so a status
     read in between can show an idle session with the notice already gone. So
@@ -126,7 +134,14 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
         if exc.status != 404:
             raise
         result["acknowledged"] = False  # gone before the notice: stop/confirm handle it
-        return
+        return session_id
+    after = _status(client, session_id) or {}
+    successor = after.get("successor_id")
+    if successor and successor != session_id:
+        # The notice went to the successor the submit handed off to; it is the
+        # live session now, so wait on, withdraw from, and stop that one.
+        result["handed_off_from"], session_id = session_id, successor
+        result["session_id"], baseline = successor, 0
     queue_id = submitted.get("queue_id") if submitted.get("queued") else None
     result["notice"] = {"queued": queue_id is not None, "queue_id": queue_id, "withdrawn": False}
     dequeued_before = queue_id is None  # an immediate notice is running on return
@@ -146,7 +161,7 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
                 and int(session.get("turn_count") or 0) > baseline):
             result["acknowledged"] = True
             phase("acknowledged")
-            return
+            return session_id
         dequeued_before = dequeued_now
         remaining = deadline - clock()
         if remaining <= 0:
@@ -160,3 +175,4 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
         except BridgeClientError as exc:
             if exc.status != 404:  # 404: it was dispatched meanwhile; the stop cancels its turn
                 raise
+    return session_id
