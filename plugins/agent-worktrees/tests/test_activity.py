@@ -216,6 +216,77 @@ def test_read_events_filters(patch_install_dir: Path):
     assert len(activity.read_events(worktree_id="wt-2", event="worktree_created")) == 1
 
 
+def test_read_events_reuses_the_cached_parse_across_distinct_filters(
+    patch_install_dir: Path, monkeypatch,
+):
+    """copilot-extensions#3751's own diagnosis, same shape, different call
+    path: the resident status-monitor's handoff-retire sweep
+    (``_pending_handoff_retire_requests``) calls ``read_events`` twice per
+    worktree, every sweep tick, with different ``event=`` filters -- both
+    calls must hit the SAME cached parse of this machine-global log, not
+    re-read + re-``json.loads`` the whole file twice."""
+    activity.log_event("worktree_created", worktree_id="wt-1")
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
+
+    calls: list[Path] = []
+    real_parse_all = activity._parse_all_events
+
+    def _spy(path: Path):
+        calls.append(path)
+        return real_parse_all(path)
+
+    monkeypatch.setattr(activity, "_parse_all_events", _spy)
+    activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+    activity.read_events(worktree_id="wt-1", event="handoff_predecessor_retire")
+    assert len(calls) == 1, "a second call with a different filter must still be a cache hit"
+
+    activity.log_event("handoff_predecessor_retire", worktree_id="wt-1")
+    activity.read_events(worktree_id="wt-1", event="handoff_predecessor_retire")
+    assert len(calls) == 2, "an appended event must force exactly one re-parse"
+
+
+def test_read_events_mutating_a_returned_event_does_not_leak_into_later_reads(
+    patch_install_dir: Path,
+):
+    """A caller that mutates one returned event dict must never corrupt
+    what a LATER caller gets back from a cache hit against the same
+    underlying (shared, by-reference) jsonl_cache entry -- ``read_events``
+    copies only the matched/returned subset, not jsonl_cache's full cached
+    list, so this isolation must hold without paying an O(full log) copy
+    on every hit."""
+    activity.log_event("worktree_created", worktree_id="wt-1")
+
+    first = activity.read_events(worktree_id="wt-1")
+    first[0]["event"] = "mutated"
+    second = activity.read_events(worktree_id="wt-1")
+    assert second[0]["event"] == "worktree_created", (
+        "a caller's in-place mutation must never leak into a later read"
+    )
+
+
+def test_read_events_copies_only_the_tail_limited_subset(patch_install_dir: Path, monkeypatch):
+    """A broad filter matching thousands of records with a small ``limit``
+    must copy only the final, already-tail-limited subset -- never every
+    matched record before limiting, which would still pay an O(every
+    match) cost on a machine-global log a status-monitor sweep calls with
+    ``limit=64`` against a far larger match set."""
+    for i in range(10):
+        activity.log_event("session_started", worktree_id=f"wt-{i}")
+
+    copy_calls = []
+    real_deepcopy = activity.copy.deepcopy
+
+    def _spy(obj):
+        copy_calls.append(obj)
+        return real_deepcopy(obj)
+
+    monkeypatch.setattr(activity.copy, "deepcopy", _spy)
+    result = activity.read_events(event="session_started", limit=2)
+    assert len(result) == 2
+    assert len(copy_calls) == 2, "only the 2 tail-limited records may be deep-copied, not all 10 matches"
+
+
+
 def test_read_events_limit_returns_most_recent(patch_install_dir: Path):
     for i in range(5):
         activity.log_event("session_started", worktree_id=f"wt-{i}")
@@ -274,6 +345,73 @@ def test_prune_drops_old_lines(patch_install_dir: Path):
     assert kept == 1
     remaining = activity.read_events()
     assert len(remaining) == 1
+    assert remaining[0]["worktree_id"] == "new"
+
+
+def test_prune_invalidates_this_path_s_jsonl_cache_entry(patch_install_dir: Path, monkeypatch):
+    """``_prune()`` rewrites ``activity.jsonl`` in place at the same path --
+    on a filesystem with coarse mtime resolution, the rewritten file can
+    coincidentally reproduce the exact ``(mtime_ns, size)`` stamp the pre-
+    prune content was cached under. ``_prune`` must invalidate that path's
+    jsonl_cache entry itself rather than rely on the stamp always differing
+    (see jsonl_cache's own ``invalidate()`` docstring)."""
+    from agent_worktrees import jsonl_cache
+
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+
+    calls: list[Path] = []
+    real_invalidate = jsonl_cache.invalidate
+
+    def _spy(path: Path):
+        calls.append(path)
+        return real_invalidate(path)
+
+    monkeypatch.setattr(jsonl_cache, "invalidate", _spy)
+    activity._prune(log, retention_days=7)
+    assert calls == [log], "_prune must invalidate exactly this path's cache entry"
+
+
+def test_prune_is_visible_to_a_cache_entry_invalidate_can_never_reach(
+    patch_install_dir: Path,
+):
+    """The real ``_prune()`` call runs inside a detached
+    ``activity-prune-worker`` subprocess (``_dispatch_background_prune``),
+    not the resident status-monitor's own process -- its ``invalidate()``
+    call only clears ITS OWN process-local cache, never the monitor's. The
+    monitor must still see the rewrite via the stamp alone: ``tmp.replace
+    (path)`` allocates a new inode at this path, so a cache entry this
+    call's own ``invalidate()`` could never reach (simulated here by
+    reinserting it after ``_prune`` runs) still misses on its stamp."""
+    from agent_worktrees import jsonl_cache
+
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+    stale = activity.read_events()  # "the monitor process" primes its own cache
+    assert len(stale) == 2
+    with jsonl_cache._cache_lock:
+        other_process_entry = jsonl_cache._cache[str(log)]
+
+    activity._prune(log, retention_days=7)  # runs in "a different process"
+
+    # Reinsert the pre-prune entry -- standing in for the monitor's cache,
+    # which this call's invalidate() was never able to reach.
+    with jsonl_cache._cache_lock:
+        jsonl_cache._cache[str(log)] = other_process_entry
+    remaining = activity.read_events()
+    assert len(remaining) == 1, "the new inode at this path must still miss this stale entry"
     assert remaining[0]["worktree_id"] == "new"
 
 

@@ -1,0 +1,9 @@
+{
+  "comment": "status-monitor: cache activity/handoff-trace log parses to stop fleet-wide CPU pinning on the handoff-retire sweep (same shape as #3751, different call path)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
