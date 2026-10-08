@@ -107,7 +107,7 @@ def _cmd_next(args: argparse.Namespace) -> int:
     for line in _banner(envelope):
         print(line)
     if item is None:
-        print("Nothing needs you.")
+        print("Nothing needs you." if envelope["status"] == "clear" else "No items read.")
     else:
         print("\n".join(_item_lines(item)))
         print(f"    next: agent-dispatch attention next --after {result['cursor']}")
@@ -117,10 +117,13 @@ def _cmd_next(args: argparse.Namespace) -> int:
 def _cmd_source(args: argparse.Namespace) -> int:
     path = srcs.registry_path()
     try:
-        raw = json.loads(path.read_text(encoding="utf-8")).get("sources", {})
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        raw = doc.get("sources", {}) if isinstance(doc, dict) else None
+        if not isinstance(raw, dict):
+            raise ValueError("its sources is not an object")
     except FileNotFoundError:
         raw = {}
-    except (OSError, ValueError, AttributeError) as exc:
+    except (OSError, ValueError) as exc:
         if args.source_verb != "list":
             print(f"agent-dispatch: {path} is unreadable ({exc}); fix or remove it first", file=sys.stderr)
             return 1

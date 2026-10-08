@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -32,10 +33,13 @@ def now_iso() -> str:
 
 
 def iso(value: Any, fallback: str) -> str:
-    """A coordinator timestamp (epoch seconds, or already ISO-8601) as ISO-8601 UTC."""
+    """A coordinator timestamp (epoch seconds, or ISO-8601) as canonical UTC."""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec="seconds")
-    return value if isinstance(value, str) and value else fallback
+    try:
+        return ac.canonical_time(value)
+    except ac.ContractError:
+        return fallback
 
 
 # -- the dispatch source ---------------------------------------------------------
@@ -70,10 +74,18 @@ def _task_item(task: dict[str, Any], read_at: str) -> dict[str, Any] | None:
     return item
 
 
-def read_dispatch(client_factory: Callable[[], Any], read_at: str) -> dict[str, Any]:
+#: The most open tasks one read fetches. A read that hits it may have missed
+#: older tasks, so it says so (``uncertain``) rather than claiming a full queue.
+DISPATCH_READ_LIMIT = 5000
+
+
+def read_dispatch(client_factory: Callable[[], Any], read_at: str,
+                  limit: int = DISPATCH_READ_LIMIT) -> dict[str, Any]:
     with client_factory() as client:
-        tasks = client.list(repo=None, status=_OPEN_STATES, limit=1000)
-    items = [i for i in (_task_item(t, read_at) for t in tasks or []) if i]
+        tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
+    items = [i for i in (_task_item(t, read_at) for t in tasks) if i]
+    if len(tasks) >= limit:
+        return {"items": items, "status": "uncertain", "uncertain": 1, "read_at": read_at}
     return {"items": items, "status": "ok", "uncertain": 0, "read_at": read_at}
 
 
@@ -191,18 +203,30 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
     read_at = read_at or now_iso()
     names = sorted(n for n in (selected if selected is not None else readers) if n in readers)
     results: dict[str, dict[str, Any]] = {}
-    pool = ThreadPoolExecutor(max_workers=max(1, len(names)))
-    futures = {name: pool.submit(readers[name], read_at) for name in names}
-    for name in names:
+    outcomes: dict[str, Any] = {}
+
+    def run(name: str) -> None:
         try:
-            raw = futures[name].result(timeout=timeouts.get(name, DEFAULT_TIMEOUT))
-        except FutureTimeout:
-            raw = ac.command_failure(f"timed out after {timeouts.get(name, DEFAULT_TIMEOUT):g}s")
+            outcomes[name] = readers[name](read_at)
         except Exception as exc:  # noqa: BLE001 -- a source failure is that source's, never the aggregate's
-            raw = ac.command_failure(f"{type(exc).__name__}: {exc}")
+            outcomes[name] = ac.command_failure(f"{type(exc).__name__}: {exc}")
+
+    # Daemon threads, not an executor: a reader that hangs past its timeout is
+    # abandoned, and can't keep the CLI process alive at exit (an executor's
+    # exit hook would join it).
+    threads = {n: threading.Thread(target=run, args=(n,), daemon=True, name=f"attention-{n}")
+               for n in names}
+    started = time.monotonic()
+    for thread in threads.values():
+        thread.start()
+    for name in names:
+        limit = timeouts.get(name, DEFAULT_TIMEOUT)
+        threads[name].join(max(0.0, started + limit - time.monotonic()))
+        raw = outcomes.get(name) if not threads[name].is_alive() else None
+        if raw is None:
+            raw = ac.command_failure(f"timed out after {limit:g}s")
         raw.setdefault("read_at", read_at)
         results[name] = _finish(name, raw)
-    pool.shutdown(wait=False, cancel_futures=True)
     store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at)
     if selected is not None:
         config_errors = [e for e in config_errors if e["name"] in selected]

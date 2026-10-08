@@ -44,7 +44,28 @@ def one_line(text: Any, limit: int = REASON_MAX) -> str:
 
 
 def make_id(source: str, entity: str, entity_ref: str) -> str:
+    """``source`` and ``entity`` can't contain ``:``, so the id splits back
+    unambiguously (only ``entity_ref``, last, may)."""
     return f"{source}:{entity}:{entity_ref}"
+
+
+CUSTOM_KIND = re.compile(r"^[a-z0-9_-]+$")
+
+
+def canonical_time(value: Any) -> str:
+    """An ISO-8601 timestamp with an offset, normalized to UTC seconds
+    (``YYYY-MM-DDTHH:MM:SS+00:00``) so the queue orders by time, not by spelling."""
+    from datetime import datetime, timezone
+
+    if not isinstance(value, str) or not value:
+        raise ContractError("a timestamp must be an ISO-8601 string")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ContractError(f"{value!r} is not an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ContractError(f"{value!r} has no UTC offset")
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def canonical_entity(entity: Any, source: str) -> str:
@@ -56,11 +77,11 @@ def canonical_entity(entity: Any, source: str) -> str:
         return entity
     if entity.startswith("x."):
         prefix = f"x.{source}."
-        if not entity.startswith(prefix) or len(entity) == len(prefix):
-            raise ContractError(f"entity {entity!r} is namespaced for another source")
+        if not entity.startswith(prefix) or not CUSTOM_KIND.match(entity[len(prefix):]):
+            raise ContractError(f"entity {entity!r} is namespaced for another source, or malformed")
         return entity
-    if "." in entity:
-        raise ContractError(f"entity {entity!r} is not a shared kind or a bare custom kind")
+    if not CUSTOM_KIND.match(entity):
+        raise ContractError(f"entity {entity!r} is not a shared kind or a bare custom kind [a-z0-9_-]+")
     return f"x.{source}.{entity}"
 
 
@@ -103,8 +124,8 @@ def validate_item(item: Any) -> None:
             or "\n" in item["reason"]:
         raise ContractError(f"reason must be one non-empty line of at most {REASON_MAX} characters")
     for key in ("created_at", "updated_at"):
-        if not isinstance(item[key], str) or not item[key]:
-            raise ContractError(f"{key} must be an ISO-8601 timestamp")
+        if canonical_time(item[key]) != item[key]:
+            raise ContractError(f"{key} is not canonical UTC (YYYY-MM-DDTHH:MM:SS+00:00)")
     if item["confidence"] not in CONFIDENCES:
         raise ContractError(f"confidence {item['confidence']!r} is unknown")
     if not isinstance(item["actions"], list):
@@ -235,9 +256,10 @@ def normalize_command_result(raw: Any, *, name: str) -> dict[str, Any]:
                 "error": error or "source reported failed without an error"}
     result = {"items": items, "status": status, "uncertain": uncertain}
     if raw.get("read_at") is not None:
-        if not isinstance(raw["read_at"], str) or not raw["read_at"]:
-            return command_failure("read_at must be an ISO-8601 timestamp")
-        result["read_at"] = raw["read_at"]
+        try:
+            result["read_at"] = canonical_time(raw["read_at"])
+        except ContractError as exc:
+            return command_failure(f"read_at: {exc}")
     return result
 
 
@@ -260,6 +282,9 @@ def stamp_command_item(item: Any, *, name: str) -> dict[str, Any]:
     if item.get("also"):
         raise ContractError("also[] is aggregator-owned; a source must not fill it")
     item.update(source=name, id=derived, also=[])
+    for key in ("created_at", "updated_at"):  # a command may send any ISO-8601 spelling
+        if item.get(key) is not None:
+            item[key] = canonical_time(item[key])
     if item.get("display_state") in SEVERITY:
         item.setdefault("severity", SEVERITY[item["display_state"]])
     return item

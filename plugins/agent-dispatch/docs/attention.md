@@ -24,7 +24,7 @@ didn't issue, or a registration that isn't valid.
   `request_input` form as `input` (submit it with `agent-dispatch steer
   submit`). An operator hold (`hold_reason`) is `blocked`; a completion claim
   awaiting confirmation (`submitted`) is `review`. `completed` is never an item.
-  One item per task, the worst condition winning.
+  One item per task, the worst condition winning. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`.
 - **Command sources**: a command registered on this machine
   (`attention source add`, stored beside the coordinator's install as
   `attention-sources.json`) under a name that is its identity: unique,
@@ -32,7 +32,7 @@ didn't issue, or a registration that isn't valid.
   registration is not a source: it is listed in `config_errors[]`, and it makes
   a read that includes it `degraded`.
 
-Each source runs under its own timeout (a command's own `--timeout`, default
+Each source runs under its own timeout (a reader that hangs past it is abandoned, never keeping the command alive) (a command's own `--timeout`, default
 20 s, at most 120 s), as a contained process tree. A timeout, a crash or any
 contract violation makes that source `failed` with a one-line `error`.
 
@@ -69,13 +69,13 @@ after it even when that item was resolved meanwhile; it wraps to the top.
 |---|---|
 | `schema` | `1`, on every item |
 | `id` | `<source>:<entity>:<entity_ref>`; unique per entity, the order's final tie-breaker |
-| `entity` | `task`, `session`, `pr`, `queue`, or a source's own `x.<source>.<kind>` |
+| `entity` | `task`, `session`, `pr`, `queue`, or a source's own `x.<source>.<kind>` (`<kind>` matches `[a-z0-9_-]+`, so the `id` splits back unambiguously) |
 | `entity_ref` | the durable reference within its kind (a task id, ...) |
 | `lifecycle_state` | the owner's state (`started`, `submitted`, ...), or `null` |
 | `display_state` | `failed`, `stalled`, `awaiting_input`, `blocked`, `review` (worst first) |
 | `severity` | the rank of `display_state` (0 = `failed`) |
 | `reason` | one line, at most 200 characters |
-| `created_at`, `updated_at` | when the condition began / was last observed |
+| `created_at`, `updated_at` | when the condition began / was last observed, as canonical UTC (`YYYY-MM-DDTHH:MM:SS+00:00`); a command source may send any ISO-8601 spelling with an offset, which is normalized |
 | `confidence` | `reported`, `scanned` or `heuristic` |
 | `actions[]` | `{verb, argv}` that run as-is; the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>` |
 | `source` | the source that produced it |

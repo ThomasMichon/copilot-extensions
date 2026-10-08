@@ -349,3 +349,60 @@ def test_cli_source_add_list_remove(monkeypatch, capsys):
 def test_cli_bad_cursor_is_a_usage_error(monkeypatch, capsys):
     rc, _ = _cli(monkeypatch, capsys, ["attention", "next", "--after", "%%%"])
     assert rc == 2
+
+
+def test_a_read_that_hits_the_limit_says_it_may_be_incomplete():
+    tasks = [{"id": f"t{i}", "title": "x", "status": "submitted"} for i in range(3)]
+    result = srcs.read_dispatch(lambda: _Client(tasks), T1, limit=3)
+    assert (result["status"], result["uncertain"]) == ("uncertain", 1)
+    assert srcs.read_dispatch(lambda: _Client(tasks), T1, limit=4)["status"] == "ok"
+
+
+def test_a_hung_reader_never_keeps_the_process_alive(tmp_path):
+    import sys
+    import time
+
+    script = (
+        "import time\n"
+        "from agent_dispatch import attention_sources as s\n"
+        "from agent_dispatch.attention_store import FirstObserved\n"
+        f"store = FirstObserved(__import__('pathlib').Path(r'{tmp_path}') / 'o.json')\n"
+        "env = s.collect({'hang': lambda r: time.sleep(60)}, timeouts={'hang': 0.3}, selected=None,\n"
+        "                config_errors=[], store=store)\n"
+        "print(env['sources'][0]['status'])\n"
+    )
+    started = time.monotonic()
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
+    assert done.stdout.strip() == "failed" and time.monotonic() - started < 15
+
+
+def test_cli_next_on_a_degraded_empty_read_is_not_all_clear(monkeypatch, capsys):
+    srcs.save_registrations({"broken": {"argv": ["definitely-not-a-real-command-xyz"], "timeout": 2}})
+    rc, out = _cli(monkeypatch, capsys, ["attention", "next"])
+    assert "[DEGRADED]" in out.out and "Nothing needs you" not in out.out and "No items read." in out.out
+
+
+def test_cli_source_add_refuses_a_registry_whose_sources_is_not_an_object(monkeypatch, capsys):
+    srcs.registry_path().write_text('{"sources": []}', encoding="utf-8")
+    rc, out = _cli(monkeypatch, capsys, ["attention", "source", "add", "ext", "--", "x"])
+    assert rc == 1 and "not an object" in out.err
+
+
+@pytest.mark.parametrize("entity", ["a:b", "x.ext.a:b", "x.ext.A"])
+def test_a_custom_kind_cannot_carry_an_id_delimiter(entity):
+    with pytest.raises(ac.ContractError):
+        ac.canonical_entity(entity, "ext")
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("2026-10-07T12:00:00Z", "2026-10-07T12:00:00+00:00"),
+    ("2026-10-07T13:00:00.123+01:00", "2026-10-07T12:00:00+00:00"),
+])
+def test_command_timestamps_are_normalized_to_utc(value, expected):
+    result = _command(json.dumps({"schema": 1, "items": [_cmd_item(created_at=value)]}))
+    assert result["items"][0]["created_at"] == expected
+
+
+@pytest.mark.parametrize("value", ["zzz", "2026-10-07T12:00:00", 5])
+def test_a_bad_or_offsetless_timestamp_fails_the_source(value):
+    assert _command(json.dumps({"schema": 1, "items": [_cmd_item(created_at=value)]}))["status"] == "failed"
