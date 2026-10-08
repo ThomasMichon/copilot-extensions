@@ -302,14 +302,19 @@ Operator, end of a long multi-repo session:
             design tracker `#3761` provide context). This scoped
             comparison does not complete the branch's machine convergence,
             trust, telemetry, or every accountability path.
-      - [ ] `visions/native-convergence/README.md` — standards/native proof
-            boundary reconciled: concrete AHP interoperability is not proof of
+      - [x] `visions/native-convergence/README.md` — standards/native proof
+            boundary slice reconciled: concrete AHP interoperability is not proof of
             a released native Copilot host; command or metadata presence is not
             enough to transfer primitive ownership. Existing `#985`/`#986`/
             `#988`, `#1266`, and `#1460` retain their respective convergence
             work. Phase B `#987` is closed with an unrelated closing artifact;
             its mapping scope remains under open umbrella `#985`, not inferred
             complete from that issue state.
+      - [ ] `visions/native-convergence/README.md` — remaining root/catalog/
+            working-boundary source coverage beyond this proof-boundary slice.
+            Verify actual mapping/interop and existing tracker disposition;
+            do not substitute help presence, issue closure, or projection-only
+            tests for that audit.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -1140,3 +1145,7 @@ then rather than assuming either answer.
   not native layout/catalog convergence or a Copilot AHP round trip. No
   clean-room or native-host launch was run: the diff changes intent and audit
   evidence, not runtime adoption or installation.
+- PR `#5783` review clarified Plan accounting: marked the completed
+  proof-boundary slice done and split remaining root/catalog/working-boundary
+  source coverage into its own open item. The completed slice does not
+  silently complete the remaining native audit or its implementation phases.
