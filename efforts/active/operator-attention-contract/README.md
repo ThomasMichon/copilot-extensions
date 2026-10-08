@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`, sources in `agent-bridge` and `agent-worktrees`)
 - **Branch(es):** two implementation PRs off `dev` -- ThomasMichon/copilot-extensions#5668 (the contract, the aggregator, the CLI, command sources and the `dispatch` source), then one for the `bridge` and `pr` sources with their sibling commands; Phase 4 clients as separate PRs (the Tasks pane in this repository; a downstream dashboard in its own)
 - **Created:** 2026-10-07
-- **Status:** Draft
+- **Status:** Active (Phase 1 in review: ThomasMichon/copilot-extensions#5668)
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md) §Behaviors *buildup-is-a-health-signal*, §Features *verify-the-completion-claim* (work "held for attention")
 
 ## Guiding Intent
