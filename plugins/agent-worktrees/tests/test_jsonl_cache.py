@@ -98,3 +98,59 @@ def test_clear_drops_every_entry(tmp_path: Path):
     jsonl_cache.clear()
     jsonl_cache.cached_parse(path, parser)
     assert len(calls) == 2, "clear() must force the next call to re-parse"
+
+
+def test_invalidate_drops_only_the_given_path(tmp_path: Path):
+    path_a = tmp_path / "a.jsonl"
+    path_b = tmp_path / "b.jsonl"
+    _write_lines(path_a, ["a"])
+    _write_lines(path_b, ["b"])
+    calls_a: list[Path] = []
+    calls_b: list[Path] = []
+    jsonl_cache.cached_parse(path_a, _line_count_parser(calls_a))
+    jsonl_cache.cached_parse(path_b, _line_count_parser(calls_b))
+
+    jsonl_cache.invalidate(path_a)
+    jsonl_cache.cached_parse(path_a, _line_count_parser(calls_a))
+    jsonl_cache.cached_parse(path_b, _line_count_parser(calls_b))
+    assert len(calls_a) == 2, "the invalidated path must re-parse"
+    assert len(calls_b) == 1, "an unrelated path's cache entry must be untouched"
+
+
+def test_invalidate_a_never_cached_path_is_a_noop(tmp_path: Path):
+    jsonl_cache.invalidate(tmp_path / "never-read.jsonl")  # must not raise
+
+
+def test_without_invalidate_an_aliased_stamp_would_return_stale_data(tmp_path: Path):
+    """The reviewed gap ``invalidate()`` exists to close: a cache entry
+    stamped ``(mtime_ns, size)`` that happens to match the CURRENT file's
+    real stamp is indistinguishable from "unchanged" to ``cached_parse``
+    alone, even when the file's actual content differs -- a real caller
+    (``activity._prune()`` rewriting ``activity.jsonl`` in place,
+    ``handoff_trace.remove_trace()`` + a reused worktree id recreating the
+    same path) must invalidate explicitly after a same-path replace/
+    recreate rather than rely on the stamp to always differ."""
+    path = tmp_path / "log.jsonl"
+    _write_lines(path, ["aa"])
+    calls: list[Path] = []
+    parser = _line_count_parser(calls)
+    jsonl_cache.cached_parse(path, parser)
+
+    _write_lines(path, ["bb"])
+    # Force the CURRENT real stamp to be recorded against the OLD content --
+    # simulating the exact collision a coarse-mtime filesystem (or a rewrite
+    # that happens to reproduce the old byte size) can produce, which
+    # ``cached_parse`` alone cannot detect.
+    real_stat = path.stat()
+    with jsonl_cache._cache_lock:
+        jsonl_cache._cache[str(path)] = (real_stat.st_mtime_ns, real_stat.st_size, ["aa"])
+
+    aliased = jsonl_cache.cached_parse(path, parser)
+    assert aliased == ["aa"], "a stamp collision alone returns the stale cached content"
+    assert len(calls) == 1, "that was a false HIT -- the parser must not have been called again"
+
+    jsonl_cache.invalidate(path)
+    fixed = jsonl_cache.cached_parse(path, parser)
+    assert fixed == ["bb"], "invalidate() must force a real re-parse despite the aliased stamp"
+    assert len(calls) == 2
+

@@ -539,6 +539,13 @@ def _prune(path: Path, retention_days: int) -> int:
             tmp.unlink()
         except OSError:
             pass
+    else:
+        # The rewrite replaced the file at this same path -- a passive
+        # (mtime_ns, size) check alone could coincidentally alias the
+        # prior cache stamp (coarse mtime resolution + a kept-line count
+        # that happens to reproduce the old byte size); invalidate
+        # explicitly rather than rely on the stamp always differing.
+        jsonl_cache.invalidate(path)
     return len(kept)
 
 

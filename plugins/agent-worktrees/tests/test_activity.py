@@ -306,6 +306,36 @@ def test_prune_drops_old_lines(patch_install_dir: Path):
     assert remaining[0]["worktree_id"] == "new"
 
 
+def test_prune_invalidates_this_path_s_jsonl_cache_entry(patch_install_dir: Path, monkeypatch):
+    """``_prune()`` rewrites ``activity.jsonl`` in place at the same path --
+    on a filesystem with coarse mtime resolution, the rewritten file can
+    coincidentally reproduce the exact ``(mtime_ns, size)`` stamp the pre-
+    prune content was cached under. ``_prune`` must invalidate that path's
+    jsonl_cache entry itself rather than rely on the stamp always differing
+    (see jsonl_cache's own ``invalidate()`` docstring)."""
+    from agent_worktrees import jsonl_cache
+
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+
+    calls: list[Path] = []
+    real_invalidate = jsonl_cache.invalidate
+
+    def _spy(path: Path):
+        calls.append(path)
+        return real_invalidate(path)
+
+    monkeypatch.setattr(jsonl_cache, "invalidate", _spy)
+    activity._prune(log, retention_days=7)
+    assert calls == [log], "_prune must invalidate exactly this path's cache entry"
+
+
 def test_dispatch_background_prune_reaps_the_child_without_blocking(monkeypatch):
     """A long-lived caller (the picker, a resident daemon) must never
     accumulate zombie/unreaped children from repeated dispatches: the

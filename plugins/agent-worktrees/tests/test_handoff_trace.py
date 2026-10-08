@@ -157,6 +157,33 @@ def test_remove_trace_deletes_file_and_lock(patch_install_dir: Path):
     assert handoff_trace.read_trace("proj-a", "wt-1") == []
 
 
+def test_remove_trace_invalidates_this_path_s_jsonl_cache_entry(
+    patch_install_dir: Path, monkeypatch,
+):
+    """A reused worktree id recreates a trace file at this exact same path
+    -- on a filesystem with coarse mtime resolution, the recreated file can
+    coincidentally reproduce the deleted predecessor's cached ``(mtime_ns,
+    size)`` stamp. ``remove_trace`` must invalidate that path's jsonl_cache
+    entry itself rather than rely on the stamp always differing (see
+    jsonl_cache's own ``invalidate()`` docstring)."""
+    from agent_worktrees import jsonl_cache
+
+    handoff_trace.append_event("proj-a", "wt-1", {"event": "x"})
+    handoff_trace.read_trace("proj-a", "wt-1")  # primes the cache
+    path = handoff_trace.trace_path("proj-a", "wt-1")
+
+    calls: list[Path] = []
+    real_invalidate = jsonl_cache.invalidate
+
+    def _spy(p: Path):
+        calls.append(p)
+        return real_invalidate(p)
+
+    monkeypatch.setattr(jsonl_cache, "invalidate", _spy)
+    handoff_trace.remove_trace("proj-a", "wt-1")
+    assert calls == [path], "remove_trace must invalidate exactly this path's cache entry"
+
+
 def test_remove_trace_no_ops_on_missing_or_unsafe_identifiers(patch_install_dir: Path):
     # Missing project/worktree_id, unknown worktree, and unsafe identifiers
     # must never raise.
@@ -165,6 +192,7 @@ def test_remove_trace_no_ops_on_missing_or_unsafe_identifiers(patch_install_dir:
     handoff_trace.remove_trace("proj-a", "no-such-worktree")
     handoff_trace.remove_trace("../../escape", "wt-1")
     handoff_trace.remove_trace("proj-a", "../../escape")
+
 
 
 def test_concurrent_appends_produce_no_interleaved_or_dropped_lines(

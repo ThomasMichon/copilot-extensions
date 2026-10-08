@@ -203,7 +203,10 @@ def remove_trace(project: str | None, worktree_id: str | None) -> None:
     Best-effort (never raises) -- called wherever a tracking ``<id>.yaml`` is
     unlinked, mirroring ``disposition_history.remove``, so the trace does not
     outlive the worktree it belongs to and a reused worktree id never reads a
-    stale predecessor's events.
+    stale predecessor's events. Also explicitly drops this path's
+    :mod:`jsonl_cache` entry -- a reused worktree id recreates a trace file at
+    this exact same path, and a passive ``(mtime_ns, size)`` check alone could
+    coincidentally alias the deleted predecessor's cached stamp.
     """
     if not project or not worktree_id:
         return
@@ -216,3 +219,4 @@ def remove_trace(project: str | None, worktree_id: str | None) -> None:
             candidate.unlink(missing_ok=True)
         except Exception:
             pass
+    jsonl_cache.invalidate(path)

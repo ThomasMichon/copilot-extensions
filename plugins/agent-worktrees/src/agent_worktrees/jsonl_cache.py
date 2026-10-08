@@ -74,3 +74,23 @@ def clear() -> None:
     """Drop every cached entry (tests only)."""
     with _cache_lock:
         _cache.clear()
+
+
+def invalidate(path: Path) -> None:
+    """Drop one path's cached entry, if present.
+
+    For a caller that just **replaced or recreated** the file out from
+    under the passive ``(mtime_ns, size)`` stamp -- ``activity._prune()``
+    rewrites ``activity.jsonl`` in place, and ``handoff_trace.
+    remove_trace()`` deletes a worktree's trace file specifically so a
+    later-reused worktree id can never inherit a predecessor's events.
+    Both can coincidentally reproduce the exact previous ``(mtime_ns,
+    size)`` pair on a filesystem with coarse mtime resolution, which the
+    passive stat-based check alone cannot distinguish from "unchanged" --
+    an explicit invalidation at the one call site that performed the
+    replace/delete closes that gap instead of relying on the stamp to
+    always differ. Best-effort / idempotent: no-ops if the path was never
+    cached.
+    """
+    with _cache_lock:
+        _cache.pop(str(path), None)
