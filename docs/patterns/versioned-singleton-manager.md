@@ -148,37 +148,38 @@ successor already running in my own tree?*
    resulting handle *value* to the thread that called it (`deploy`'s own);
    it does not by itself tell the *manager* what value landed in the
    manager's own handle table, so a dedicated IPC channel carries that value
-   across: `deploy` was spawned with an inherited pipe/socket back to the
-   manager (mirroring the gate-pipe shape `_launch_gated` already uses
-   elsewhere in this suite) and writes the duplicated handle's numeric value
-   plus the candidate's pid over it. The manager reads that message, records
-   the `(handle, pid)` pair in its own registry, calls
-   `AssignProcessToJobObject` (via a freshly opened
+   across. This channel is **not** a one-shot inherited pipe tied to a
+   single spawn event — a cutover is not a one-time occurrence: the passive
+   daemon promoted by *this* cutover eventually becomes active and, in its
+   own turn, triggers its *own* `_spawn_self_deploy` for the *next*
+   cutover, with no ancestry relationship back to this manager left to
+   inherit a handle through. The manager therefore listens on one **durable,
+   well-known named pipe** (`\\.\pipe\<name>` on Windows, a Unix domain
+   socket on Linux if ever needed there, deterministically named from
+   `manager_state_dir` the same way the Job's and the bridge's own pipe
+   already are, ACL-restricted to the same principal) for its **entire
+   lifetime**, not just around one spawn — every `deploy` invocation, for
+   every daemon generation this manager ever supervises, connects to this
+   same fixed address to perform the handle-registration dance below,
+   rather than depending on an inheritance chain that only the very first
+   generation could ever have had. `deploy` connects, writes the duplicated
+   handle's numeric value plus the candidate's pid over it. The manager
+   reads that message, records the `(handle, pid)` pair in its own registry,
+   calls `AssignProcessToJobObject` (via a freshly opened
    `PROCESS_SET_QUOTA | PROCESS_TERMINATE` handle on the same object) to
    bring the still-suspended candidate under the Job, and only then writes
-   an acknowledgement back over the same channel. `deploy` waits for that
+   an acknowledgement back over the same connection. `deploy` waits for that
    acknowledgement before calling `ResumeThread` — so the candidate is
    registered in the manager's table and already Job-assigned before it ever
    runs a single instruction, closing the ordering gap a bare
-   "duplicate-then-resume" sequence would leave open. The manager's own
-   `hProcess`, needed as `DuplicateHandle`'s target, is threaded down to
-   `deploy` as an inheritable handle value, but **scoped**, not blanket: a
-   bare `bInheritHandles=TRUE` at `_spawn_self_deploy`'s own `CreateProcess`
-   call would inherit *every* inheritable handle the manager's spawn call
-   currently holds into `deploy` — and, if `deploy` naively forwarded the
-   same flag onward, into the passive daemon too, needlessly exposing the
-   manager's own process handle to code that has no legitimate use for it.
-   Use this repository's existing scoped-inheritance pattern instead
-   (`plugins/agent-dispatch/src/agent_dispatch/companion.py`'s
-   `_launch_gated`: `STARTUPINFO.lpAttributeList = {"handle_list": [handle]}`
-   plus `close_fds=True`) at `_spawn_self_deploy`'s own spawn, so only the
-   one intended handle (and the IPC pipe endpoint) reaches `deploy` —
-   nothing else inheritable leaks across that boundary. `deploy` itself does
-   **not** forward that handle into its own spawn of the passive daemon at
-   all: it already holds the manager handle from its own inherited set, so
-   it duplicates a *separate* handle to the passive daemon it just created
-   and sends that into the manager — the passive daemon never needs, and
-   never receives, a handle to the manager itself. Because a `HANDLE` is a
+   "duplicate-then-resume" sequence would leave open. `deploy` itself does
+   **not** forward anything about this channel or the manager's own process
+   into its own spawn of the passive daemon at all: it connects to the
+   manager's well-known pipe directly (no inheritance needed from either
+   side), and separately duplicates a handle to the passive daemon it just
+   created and sends that into the manager over the same connection — the
+   passive daemon never needs, and never receives, a handle to the manager
+   itself, or any knowledge of this channel. Because a `HANDLE` is a
    reference to the exact kernel process object, not a reusable numeric pid,
    the manager's registry of duplicated handles is immune to the PID-reuse
    failure a post-hoc walk cannot escape, and it does not depend on any
@@ -344,17 +345,19 @@ successor already running in my own tree?*
       handle-closes trigger) before the bridge is even scheduled to run,
       which would kill the live daemon as collateral, the exact failure
       this whole bridge exists to prevent. The bridge, once scheduled,
-      makes itself **fully self-sufficient** before ever signaling ready —
-      deliberately **not** depending on a handle relayed from the old
-      manager at all, since that relay's own timing was exactly the
-      earlier source of an unrecorded-handoff race: (a) it calls
-      `OpenJobObject` on the same **named** Job (item 4); (b) it
-      independently establishes its **own** trusted handle to the daemon by
-      reading the persisted `daemon` record's pid and baseline token (item
-      2 — already durable, already published, needing no relay from
-      anyone), calling `OpenProcess` for that pid, and running the exact
-      same baseline-comparison check item 2 already defines before trusting
-      the resulting handle; (c) it creates a **named pipe**
+      makes itself **fully self-sufficient** before ever signaling ready,
+      in a specific order chosen so the old manager — which is still alive
+      and blocking throughout this entire sequence, not just its first
+      step — can detect and abort on any failure along the way: (a) the
+      bridge first requests the **legitimate** trusted daemon handle from
+      the old manager itself, over the inherited pipe — the old manager
+      duplicates the handle it already holds (from item 1's own spawn-time
+      chain, the only legitimate source of Windows trust this pattern
+      recognizes; see the note below on why an independently-established
+      handle is not an acceptable substitute) into the bridge via
+      `DuplicateHandle`, and the bridge acks receipt before anything else
+      proceeds; (b) only then does it call `OpenJobObject` on the same
+      **named** Job (item 4); (c) it creates a **named pipe**
       (`\\.\pipe\<name>`, the name deterministically derived from
       `manager_state_dir` the same way the Job's own name already is,
       created with a discretionary ACL restricting connection to the same
@@ -364,7 +367,24 @@ successor already running in my own tree?*
       to request the daemon handle in step 3; an inherited pipe (as item 1
       uses for `deploy`, itself a direct child of the process holding the
       other end) cannot serve this purpose, since the new manager process
-      shares no ancestry with the bridge at all; (d) **the bridge itself —
+      shares no ancestry with the bridge at all. **Trust model note:** this
+      relay — not an independently re-derived `OpenProcess` plus
+      baseline-token check — is deliberately the *only* way the bridge ever
+      acquires its daemon handle, consistent with item 2's own Windows
+      rule that pid/token revalidation alone is insufficient and only
+      spawn-time handle custody (here, relayed custody from a process that
+      itself legitimately held it) constitutes real trust; a bare
+      `OpenProcess` fallback would quietly reintroduce the exact class of
+      unproven-identity risk item 1 and item 2 exist to close out, so this
+      pattern does not offer one anywhere, on either side of the handoff.
+      Doing the relay **first**, before the bridge does anything else, also
+      means the old manager is never asked to exit before this one
+      precondition is already durably true — unlike basing readiness on a
+      handle the bridge tries to establish independently later, there is no
+      window where "the old manager might die" and "the bridge might lack
+      a legitimate handle" can coincide, since the relay happens while the
+      old manager is still alive and blocking on exactly this acknowledgement.
+      (d) **the bridge itself —
       not the old manager — persists the `handoff` record** (its own pid,
       `process_start_time` token, and the named pipe's identifier,
       distinct from the `daemon` record above, in the same manager-scoped
@@ -391,7 +411,8 @@ successor already running in my own tree?*
       (mirroring the IPC channel item 1 already uses for `deploy`); the old
       manager's own role shrinks to simply **waiting for that signal**
       before proceeding to step 2 — it writes nothing itself. If the
-      bridge-ready signal does not arrive within a bounded timeout, the old
+      handle-relay acknowledgement, or the later bridge-ready signal, does
+      not arrive within a bounded timeout, the old
       manager **aborts the update** and keeps running as the current
       version rather than proceeding blind — a failed or slow bridge is a
       reason to retry later, never a reason to exit without
@@ -417,7 +438,25 @@ successor already running in my own tree?*
       exit — a condition the bridge can observe directly, since it was
       spawned as the old manager's own child and already holds (or can
       trivially acquire at spawn time) an inheritable handle to it,
-      satisfied by a single `WaitForSingleObject` — rather than waiting on a restart-on-failure heuristic that was
+      satisfied by a single `WaitForSingleObject`. A single `/run` call
+      immediately after that wait is not itself reliable, though: these
+      tasks run with `MultipleInstancesPolicy=IgnoreNew` (already required
+      elsewhere in this suite —
+      [`service-lifecycle-supervision`](service-lifecycle-supervision.md),
+      `plugins/agent-bridge/scripts/install.ps1`), so Task Scheduler's own
+      internal state can still report the prior instance as "Running" for
+      a brief interval after the tracked process has already exited —
+      `/run` requested in exactly that window is silently accepted and
+      launches nothing. The bridge therefore does not fire one
+      `/run` and assume success: after the `WaitForSingleObject` confirms
+      process exit, it polls the task's own state (`schtasks /query`, or
+      `IRegisteredTask::State`) until it reports non-`Running`, issues
+      `/run`, and then waits for the **new manager's own handshake** (a
+      connection on its named pipe, per step 3) as the actual success
+      signal — retrying the poll-then-run sequence, bounded by the same
+      overall adoption deadline item 5 already defines, rather than
+      trusting a single fire-and-forget invocation. This replaces a
+      restart-on-failure heuristic that was
       never the right trigger for an intentional handoff. This sidesteps
       the retry-exhaustion failure mode entirely too — a bridge-driven
       re-run has no `RestartCount` to run out of — leaving that policy free
@@ -469,44 +508,44 @@ successor already running in my own tree?*
       Job handle are all confirmed does it signal the bridge to exit (e.g.
       a named event). The bridge closing its handles is now safe — the new
       manager already holds its own, independent copies of both.
-   **Adoption never depends solely on the `handoff` record being present or
-   absent** — this is what makes the bridge's own cleanup ordering safe
-   regardless of exactly how it unwinds. A new manager's startup always
-   independently checks the persisted `daemon` record's baseline first
-   (item 2's own check, via `OpenProcess` + token comparison), *before*
-   ever deciding whether to treat a `handoff` record as meaningful: a
-   confirmed-alive daemon is re-adopted directly the same way the bridge
-   itself establishes its handle in step 1(b), with or without a bridge
-   still around to help; only a confirmed-dead daemon makes `spawn` the
-   right call. The `handoff` record and the bridge's pipe are a **faster**
-   adoption path when available (an already-open Job handle, an
-   already-verified daemon handle ready to relay) — never the *only* path,
-   and never something a new manager treats as authoritative on its own.
-   This is what resolves the bridge's own fail-closed cleanup: the bridge
-   does not simply wait on its named pipe forever. It carries a **bounded
-   adoption deadline** (started the moment it finishes step 1's handoff)
-   for when no new manager ever connects — the bridge-triggered re-run
-   itself failing, or a new manager crashing before it reaches step 3, are
-   real failure modes this pattern must not leave unhandled. On expiry, the
-   bridge marks the `handoff` record **abandoned** (a fast, atomic
-   rename/flag flip, while the bridge is still fully alive) and only *then*
-   closes its own Job handle — triggering `KILL_ON_JOB_CLOSE` for itself,
-   the daemon, and every other Job member in one step, since the bridge is
-   itself a Job member (inherited from the old manager that spawned it) and
-   cannot survive past that point to do anything further; nothing beyond
-   this one `CloseHandle` call is needed or possible once it runs. Because
-   the preceding paragraph already makes a new manager's adoption decision
-   depend on the *daemon's own* baseline, not on this record's exact
-   timing, the brief window between the record being marked abandoned and
-   the handle actually closing is **not** a correctness hazard the way a
-   bare "record absent ⇒ assume dead" rule would have made it: a new
-   manager arriving in that narrow window still finds the daemon's own
-   baseline genuinely alive and re-adopts it directly, exactly as it would
-   with a healthy bridge still relaying. Left unhandled, a hung bridge
-   would otherwise hold the Job open indefinitely, silently preventing
-   `KILL_ON_JOB_CLOSE` from ever protecting against exactly the stray-
-   survivor class item 3/4 exist to close — recreating, via a different
-   path, the same untracked-daemon failure this entire pattern is for.
+   A new manager with **no** `handoff` record to work from (the ordinary
+   real-crash case, or a bridge that has already cleaned up and exited)
+   has **no safe way to re-adopt the daemon directly** — there is
+   deliberately no `OpenProcess`-plus-baseline-token fallback here, for the
+   same trust-model reason step 1(a) gives: a pid/token match alone is not
+   proof of legitimate custody on Windows, only a relayed, spawn-time-
+   derived handle is, and with no bridge alive there is nothing left to
+   relay one from. Such a new manager therefore always takes the ordinary
+   `spawn` path, exactly as if this were a genuine crash — which, by the
+   time this matters, it has become: the bridge's own fail-closed cleanup
+   (below) ensures that whenever its handoff record is gone, the daemon it
+   was protecting is gone too, not merely unreachable. The bridge does not
+   simply wait on its named pipe forever: it carries a **bounded adoption
+   deadline** (started the moment it finishes step 1's handoff) for when no
+   new manager ever connects — the bridge-triggered re-run itself failing,
+   or a new manager crashing before it reaches step 3, are real failure
+   modes this pattern must not leave unhandled. On expiry, the bridge, in
+   one uninterrupted sequence with no intervening work (no I/O, no wait, no
+   scheduling point that could let another process observe an inconsistent
+   state in between): marks the `handoff` record **abandoned** (a fast,
+   atomic rename/flag flip) and *immediately* closes its own Job handle —
+   triggering `KILL_ON_JOB_CLOSE` for itself, the daemon, and every other
+   Job member in the same kernel operation, since the bridge is itself a
+   Job member (inherited from the old manager that spawned it) and cannot
+   survive past that point to do anything further. Because the two steps
+   run back-to-back with nothing observable in between, the brief window in
+   which the record reads "abandoned" but the daemon has not yet actually
+   been terminated is not a window any other process gets a meaningful
+   chance to act within — and even in the vanishingly unlikely case a new
+   manager's `spawn` call and the Job's kill both land within that same
+   instant, the result is a daemon that dies virtually immediately after
+   being created, not a permanent duplicate: a bounded, self-resolving
+   residual, never an indefinite untracked-survivor state. Left unhandled
+   entirely, a hung bridge would instead hold the Job open indefinitely,
+   silently preventing `KILL_ON_JOB_CLOSE` from ever protecting against
+   exactly the stray-survivor class item 3/4 exist to close — recreating,
+   via a different path, the same untracked-daemon failure this entire
+   pattern is for.
    From here the new manager proceeds exactly like any other launch,
    entering `run()` and supervising the daemon going forward — it never
    exits early, so a later crash of *this* instance still triggers a real
@@ -651,9 +690,22 @@ systemd ExecStart / Scheduled Task Action
     -> zdd.singleton_manager.run(
            config_dir=...,                 # the daemon's own active.json (zdd.routing); read-only to the manager
            manager_state_dir=...,          # the manager's own daemon/handoff records; owned by the manager
-           spawn=lambda: subprocess.Popen([resolved_python, "-m", "my_daemon", "serve"]),
+           spawn=lambda: windowless_daemon_spawn(resolved_python, "-m", "my_daemon", "serve"),
        )
 ```
+
+The sample `spawn` above is **not** a bare `subprocess.Popen` — on Windows,
+the real coordinator adopter has recurring console descendants and already
+requires the platform-aware launch primitive
+(`agent_dispatch/coordinator_cli.py`'s own `windowless_daemon_kwargs()`,
+per the established launch rule in
+[`windows-background-process-launch`](windows-background-process-launch.md)
+that a `pythonw.exe`-style root must not spawn console-subsystem descendants
+without that primitive). This consumer contract **requires** the
+platform-aware daemon spawn primitive, not bare `Popen`, precisely because
+the manager itself runs windowless on Windows (per "What does change"
+above) — any adopter whose `spawn` callback skips this can silently
+reintroduce visible terminal windows the moment this pattern is adopted.
 
 `zdd.singleton_manager.run` blocks for the manager's own lifetime (mirroring
 `agent_dispatch serve`'s own blocking contract, so the service manager's
