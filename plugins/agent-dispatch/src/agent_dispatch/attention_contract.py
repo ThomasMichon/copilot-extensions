@@ -43,6 +43,21 @@ def one_line(text: Any, limit: int = REASON_MAX) -> str:
     return " ".join(str(text or "").split())[:limit]
 
 
+def is_schema(value: Any) -> bool:
+    """Exactly the integer ``SCHEMA``: JSON ``true`` and ``1.0`` compare equal in
+    Python but aren't the documented integer."""
+    return type(value) is int and value == SCHEMA
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def for_terminal(text: str) -> str:
+    """``text`` with control characters escaped, so a source's error or a
+    registry name can't drive the terminal (JSON output keeps values intact)."""
+    return _CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+
+
 def make_id(source: str, entity: str, entity_ref: str) -> str:
     """``source`` and ``entity`` can't contain ``:``, so the id splits back
     unambiguously (only ``entity_ref``, last, may)."""
@@ -103,7 +118,7 @@ def validate_item(item: Any) -> None:
     missing = [k for k in _REQUIRED if k not in item]
     if missing:
         raise ContractError(f"item is missing {', '.join(missing)}")
-    if item["schema"] != SCHEMA:
+    if not is_schema(item["schema"]):
         raise ContractError(f"item schema {item['schema']!r} is not {SCHEMA}")
     source = item["source"]
     if not isinstance(source, str) or not SOURCE_NAME.match(source):
@@ -235,7 +250,7 @@ def normalize_command_result(raw: Any, *, name: str) -> dict[str, Any]:
     :func:`stamp_command_item`; a contract violation becomes ``failed``."""
     if not isinstance(raw, dict):
         return command_failure("output is not a JSON object")
-    if raw.get("schema") != SCHEMA:
+    if not is_schema(raw.get("schema")):
         return command_failure(f"unsupported schema {raw.get('schema')!r}")
     items = raw.get("items")
     if not isinstance(items, list):

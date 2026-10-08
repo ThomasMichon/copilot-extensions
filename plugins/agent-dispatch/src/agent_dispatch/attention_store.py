@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
+from . import attention_contract as ac
+
 _LOCK_TIMEOUT = 10.0
 _SEP = "\t"
 
@@ -59,7 +61,16 @@ def _read(path: Path) -> dict[str, str]:
     entries = data.get("entries") if isinstance(data, dict) else None
     if not isinstance(entries, dict):
         return {}  # malformed state is recovered as empty, like unreadable JSON
-    return {k: v for k, v in entries.items() if isinstance(k, str) and isinstance(v, str)}
+    return {k: v for k, v in entries.items() if isinstance(k, str) and _canonical(v)}
+
+
+def _canonical(value: object) -> bool:
+    """A stored time is used only if it's still a canonical timestamp; anything
+    else is dropped as malformed state (the item is then first seen now)."""
+    try:
+        return ac.canonical_time(value) == value
+    except ac.ContractError:
+        return False
 
 
 def _write(path: Path, entries: dict[str, str]) -> None:

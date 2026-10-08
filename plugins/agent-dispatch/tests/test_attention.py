@@ -530,3 +530,34 @@ def test_command_timestamps_are_normalized_to_utc(value, expected):
 @pytest.mark.parametrize("value", ["zzz", "2026-10-07T12:00:00", 5])
 def test_a_bad_or_offsetless_timestamp_fails_the_source(value):
     assert _command(json.dumps({"schema": 1, "items": [_cmd_item(created_at=value)]}))["status"] == "failed"
+
+
+@pytest.mark.parametrize("schema", [True, 1.0])
+def test_a_schema_that_only_compares_equal_to_1_is_rejected(schema):
+    with pytest.raises(ac.ContractError):
+        ac.validate_item({**_item(), "schema": schema})
+    assert ac.normalize_command_result({"schema": schema, "items": []}, name="ext")["status"] == "failed"
+
+
+def test_human_output_escapes_control_characters_but_json_keeps_them(monkeypatch, capsys):
+    monkeypatch.setattr(srcs, "load_registrations",
+                        lambda path=None: ({}, [{"name": "evil", "error": "boom\x1b[2Jgone\x07"}]))
+    rc, out = _cli(monkeypatch, capsys, ["attention"])
+    assert "\x1b" not in out.out and "\x07" not in out.out and "\\x1b[2J" in out.out
+    rc, out = _cli(monkeypatch, capsys, ["attention", "--json"])
+    assert json.loads(out.out)["config_errors"][0]["error"] == "boom\x1b[2Jgone\x07"
+
+
+def test_a_stored_time_that_is_not_canonical_is_dropped(tmp_path):
+    path = tmp_path / "observed.json"
+    path.write_text(json.dumps({"version": 1, "entries": {"a": "bad", "b": T0, "c": "2026-10-07T10:00:00Z"}}),
+                    encoding="utf-8")
+    assert attention_store._read(path) == {"b": T0}
+
+
+def test_lanes_past_the_backlog_budget_are_uncertain_not_a_failed_source():
+    tasks = [{"id": f"q{i}", "title": "x", "status": "started", "awaiting_steer": True, "repo": f"o/r{i}"}
+             for i in range(3)]
+    result = srcs.read_dispatch(lambda: _Client(tasks), T1, backlog_budget=0)
+    assert result["status"] == "uncertain" and result["uncertain"] == 3
+    assert {i["entity_ref"] for i in result["items"]} == {"q0", "q1", "q2"}  # the task items survive

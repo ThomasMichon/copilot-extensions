@@ -76,14 +76,14 @@ def _banner(envelope: dict[str, Any]) -> list[str]:
     elif envelope["status"] == "partial":
         lines.append("[PARTIAL] some entities couldn't be classified: " + ", ".join(
             f"{s['name']} ({s['uncertain']})" for s in envelope["sources"] if s["status"] == "uncertain"))
-    return lines
+    return [ac.for_terminal(line) for line in lines]
 
 
 def _item_lines(item: dict[str, Any]) -> list[str]:
     lines = [f"[{item['display_state']}] {item['reason']}", f"    {item['id']}  since {item['created_at']}"]
     if item["actions"]:
         lines.append("    -> " + " ".join(item["actions"][0]["argv"]))
-    return lines
+    return [ac.for_terminal(line) for line in lines]
 
 
 def _cmd_attention(args: argparse.Namespace) -> int:

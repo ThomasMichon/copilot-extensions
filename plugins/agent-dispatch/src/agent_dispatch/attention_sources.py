@@ -85,6 +85,9 @@ DISPATCH_READ_LIMIT = 5000
 QUEUED_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_QUEUED_AFTER_SECS"
 HELD_LIVE_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS"
 DEFAULT_STALLED_AFTER = 1800.0
+#: Seconds the per-lane backlog reads may take, well inside the source's own
+#: deadline (lanes not read by then are ``uncertain``, never a failed source).
+BACKLOG_BUDGET = 8.0
 
 
 def _threshold(env: str) -> float:
@@ -118,17 +121,25 @@ def _queue_item(repo: str, backlog: dict[str, Any], read_at: str, cli: tuple[str
 
 def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
-                  cli: tuple[str, ...] = ("agent-dispatch",)) -> dict[str, Any]:
+                  cli: tuple[str, ...] = ("agent-dispatch",),
+                  backlog_budget: float = BACKLOG_BUDGET) -> dict[str, Any]:
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
         lanes = sorted({t["repo"] for t in tasks
                         if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
-        backlogs = {repo: (client.health(repo=repo) or {}).get("backlog") or {} for repo in lanes}
+        # One /health read per lane, within a budget: lanes it doesn't reach count
+        # toward ``uncertain``, so many lanes never fail the task items already read.
+        deadline, backlogs, unread = time.monotonic() + backlog_budget, {}, 0
+        for repo in lanes:
+            if time.monotonic() >= deadline:
+                unread += 1
+                continue
+            backlogs[repo] = (client.health(repo=repo) or {}).get("backlog") or {}
     items = [i for i in (_task_item(t, read_at, cli) for t in tasks) if i]
     items += [i for i in (_queue_item(r, b, read_at, cli) for r, b in backlogs.items()) if i]
-    if len(tasks) >= limit:
-        return {"items": items, "status": "uncertain", "uncertain": 1, "read_at": read_at}
-    return {"items": items, "status": "ok", "uncertain": 0, "read_at": read_at}
+    uncertain = unread + (1 if len(tasks) >= limit else 0)
+    return {"items": items, "status": "uncertain" if uncertain else "ok", "uncertain": uncertain,
+            "read_at": read_at}
 
 
 # -- command sources ---------------------------------------------------------------
