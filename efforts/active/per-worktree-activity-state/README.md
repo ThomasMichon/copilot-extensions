@@ -140,6 +140,27 @@ follow-ons.
       `retire_attempts`, `retire_last_attempt_at`, `retire_last_outcome`,
       `retire_last_method`, **`retire_first_attempt_at`**,
       **`retire_disqualified_by_nonterminal`** (bool).
+- [ ] **Also durably record pending-request metadata, not just spawn/retire
+      outcomes.** `_monitor_pending_handoff_request`
+      (`status_monitor_runtime.py:931-990`) needs more than spawn/retire
+      state to do its job: for each live token it reads the originating
+      `handoff_requested` event and pulls `session_id` (the predecessor
+      session, falling back to `handoff.predecessor` when absent),
+      `session_state` (a custom session-state path override, falling back
+      to the default per-session-id path when absent), and
+      `predecessor_pid` (used to confirm the predecessor process is still
+      the same one via `locks.process_start_time`). None of that is
+      captured by the spawn/retire fields above -- removing the journal
+      read without adding somewhere durable for it would silently discard
+      request routing/identity data, including a custom session-state
+      path. Extend `SessionHandoff` with `request_predecessor_session_id`,
+      `request_session_state_path` (nullable -- absence still means "use
+      the default path", computed the same way at read time), and
+      `request_predecessor_pid`, written once at request time (the same
+      commit-ordering discipline as the crash-safe ordering item below:
+      slot first, then the diagnostic log mirror). Cover these three
+      fields explicitly in the Phase 2 test for this call site, including
+      the custom-session-state-path and absent-pid cases.
 - [ ] **Crash-safe commit ordering.** The slot and the diagnostic log are
       not one atomic commit -- a YAML write under `_RecordLock` and a
       best-effort JSONL append cannot both land atomically, and the
@@ -235,27 +256,49 @@ follow-ons.
       between the backfill and a legacy writer that might acquire them in
       the opposite order), perform the read-current-journal-state-and-write
       as one atomic operation while holding both, then release in reverse
-      order. (`activity.jsonl`'s own append has no lock to join today;
-      either add one for the duration of the backfill window, or treat a
-      race against the unlocked global-log append as already closed by
-      Phase 2's cutover boundary below, since Phase 3-4 keep it
-      dual-written and reconciled by UUID regardless.) Define an explicit
-      cutover boundary on top of that: Phase 2's slot-trusting readers
-      must not go live for a given handoff until *after* its backfill has
-      completed under this full lock set, so no legacy producer can still
-      mutate journal-only truth inside the window where slots are already
-      being trusted. Add a concurrent-write test: a legacy writer appends
-      new journal state for a token while its backfill is in flight
-      (exercised under the real lock order, not just a single-threaded
-      read/write replay); confirm the backfilled slot reflects the newer
-      state, never the stale pre-write snapshot, and that no deadlock
-      occurs under contention.
+      order. **This alone is still not sufficient for `activity.jsonl`'s
+      append** (`log_event()`, unlocked today): holding only the trace
+      lock and `_RecordLock` does not fence an in-flight `log_event()`
+      call that already began before the backfill started -- it can
+      append to the unlocked global file after the backfill's read, then
+      separately block on the trace lock, and append the mirrored trace
+      entry only *after* the backfill has already saved its now-stale
+      slot. Closing this requires one of: (a) give `activity.jsonl`'s
+      append its own lock too, and add it to the same fixed acquisition
+      order the backfill takes (global-log lock, then trace lock, then
+      `_RecordLock`) -- every writer, legacy or backfill, takes the same
+      ordered set; or (b) an explicit producer fence/drain: before taking
+      its snapshot, the backfill signals every legacy writer path for
+      that token to pause (or waits out any already-in-flight `log_event`
+      call via a generation/sequence check), takes the snapshot only once
+      no writer is mid-append, then resumes writers. Pick one and specify
+      it concretely -- "serialize under a lock" is not enough when one of
+      the two sinks being raced has no lock participating in the first
+      place. Define an explicit cutover boundary on top of that: Phase 2's
+      slot-trusting readers must not go live for a given handoff until
+      *after* its backfill has completed under the chosen protocol, so no
+      legacy producer can still mutate journal-only truth inside the
+      window where slots are already being trusted. Add a
+      concurrent-write test: a legacy writer's `log_event()` call begins
+      before the backfill's snapshot and completes its `activity.jsonl`
+      append *after* that snapshot but *before* its trace-store append
+      (the specific gap the chosen protocol must close); confirm the
+      backfilled slot reflects the newer state, never the stale pre-write
+      snapshot, and that no deadlock occurs under contention.
+
+### Phase 2 — Rewire hot-path consumers onto slots
+- [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
+      directly; stop calling `activity.read_events`/`handoff_trace.read_trace`
 
 ### Phase 2 — Rewire hot-path consumers onto slots
 - [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
       directly; stop calling `activity.read_events`/`handoff_trace.read_trace`
       for decision-making.
-- [ ] `status_monitor_runtime._monitor_pending_handoff_request` -- same.
+- [ ] `status_monitor_runtime._monitor_pending_handoff_request` -- read
+      `record.handoffs`'s spawn/retire fields **and** the new
+      `request_predecessor_session_id` / `request_session_state_path` /
+      `request_predecessor_pid` fields directly; stop calling
+      `activity.read_events` for `handoff_requested` lookups.
 - [ ] `sessions_pane_retire.already_attempted_handoff_tokens` -- same.
 - [ ] `handoff_cutover._maybe_emit_stage_13` -- its `retired` check (an
       unbounded, no-`limit` scan for `handoff_predecessor_retire`/`outcome

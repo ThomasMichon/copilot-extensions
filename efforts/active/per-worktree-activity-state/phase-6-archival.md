@@ -36,6 +36,29 @@ into it directly, and its absence must never block or slow cleanup
       -- fail-open, never block. Add a hung-callback test (a stub provider
       that sleeps past the timeout) alongside the ordinary firing/failing
       cases.
+- [ ] **The archive snapshot must be taken after the final per-worktree
+      journal write, with no writer still able to append afterward --
+      never before or concurrent with it.** Today, two terminal cleanup
+      events (`worktree_reaped`, `external_worktree_tracking_retired`) are
+      logged *after* the tracking record/trace is removed
+      (`__main__.py:4524-4541,4590-4609`). Once every event lives in the
+      per-worktree journal, invoking the archival callback before that
+      final write -- or merely at the same point in cleanup sequencing
+      without confirming no later writer can still append -- would
+      produce an archive that omits the worktree's own terminal event,
+      and then (because the journal file is still live on disk at that
+      point) let a subsequent write silently recreate a new, un-archived
+      live journal file right after the "cleanup" that was supposed to
+      remove it. `agent-worktrees`'s own cleanup/finalize path must
+      therefore order itself as: log every terminal event first, confirm
+      (by the same tombstone/identity decision already authoritative
+      here) that no further per-worktree writer for this worktree will
+      ever run, *then* invoke the archival seam, *then* remove/reclaim the
+      live journal file -- never the other way round. Add a test: drive a
+      real cleanup through to its terminal event, assert the archived
+      bundle contains that terminal event, and assert no live per-worktree
+      journal file exists afterward (not even a fresh, empty one created
+      by a stray late writer).
 
 ### Archived-journal discovery stays lower-tier-owned
 
