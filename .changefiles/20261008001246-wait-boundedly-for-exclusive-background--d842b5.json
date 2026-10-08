@@ -1,0 +1,9 @@
+{
+  "comment": "Wait boundedly for exclusive background cache-stamp writes and report timeouts instead of silently dropping contended state.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -295,6 +295,15 @@ not, per the Recommendation above.
 
 ## Status
 
+**Cache-stamp follow-on:** the background worker now waits boundedly for the
+exclusive record lock and warns on timeout/write failure; the synchronous
+best-effort surface is unchanged. Cross-process regression and real
+interpreter-exit tests prove recovery after short-lived contention and
+preservation of concurrent lifecycle fields. This addresses the dropped-write
+case described above, not the full live recurrence or daemon-authority gate.
+The original recommendations remain the design record; shared computation
+and snapshot/stream authority are still pending.
+
 6a complete as scoped: all three consumer dataflows traced, the two
 additional findings from before this session (`current_worktree_status`'s
 non-daemon pass; `_overlay_cached_state`'s `live` override) investigated —
