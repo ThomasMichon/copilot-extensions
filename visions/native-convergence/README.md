@@ -153,8 +153,10 @@ A native command, metadata file, or advertised protocol is a discovery
 candidate, not proof of the semantics a convergence step requires. Adoption
 establishes the specific operation, identity, working-boundary, recovery, and
 compatibility guarantees it relies on before transferring primitive ownership.
-Where that evidence is absent, the supported fallback remains authoritative;
-the harness does not invent native semantics from a familiar name or shape.
+Where that evidence is absent, adoption does not proceed and the supported
+fallback remains available for harness-owned work. Missing evidence never
+authorizes takeover or reinterpretation of a native-owned object; the harness
+does not invent native semantics from a familiar name or shape.
 
 ### one-owner-per-primitive
 Once a primitive is converged, the **CLI owns** it and the harness **derives**
