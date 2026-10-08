@@ -327,6 +327,59 @@ def test_corrupt_session_archive_surfaces_when_consumed(tmp_path):
         sessions.read_member(ref, "events.jsonl")
 
 
+@pytest.mark.parametrize("kind", ["live", "archive"])
+@pytest.mark.parametrize("member", sessions.SIDECAR_MEMBERS)
+@pytest.mark.parametrize("representation", ["symlink", "broken-symlink", "directory"])
+def test_leaf_reader_rejects_unsafe_session_sidecars(
+    tmp_path: Path, kind: str, member: str, representation: str
+) -> None:
+    corpus = tmp_path / "corpus"
+    root = corpus / "host"
+    if kind == "live":
+        directory = _session(root)
+        sidecar = directory / member
+    else:
+        directory = root / "archived"
+        directory.mkdir(parents=True)
+        with tarfile.open(directory / "session-1.tar.gz", "w:gz"):
+            pass
+        sidecar = directory / f"session-1.{member}"
+    target = tmp_path / "outside"
+    if representation == "directory":
+        sidecar.mkdir()
+    else:
+        if representation == "symlink":
+            target.write_bytes(b"outside-corpus")
+        try:
+            sidecar.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"native symlink creation unavailable: {exc}")
+    source = next(iter_archive_sources(corpus))
+    with pytest.raises(SourceLayoutError, match="not regular"):
+        list(source.iter_sessions())
+
+
+@pytest.mark.parametrize("kind", ["live", "archive"])
+def test_leaf_reader_preserves_regular_and_absent_sidecars(tmp_path: Path, kind: str) -> None:
+    root = tmp_path / "host"
+    if kind == "live":
+        directory = _session(root)
+        sidecars = [directory / member for member in sessions.SIDECAR_MEMBERS]
+    else:
+        directory = root / "archived"
+        directory.mkdir(parents=True)
+        with tarfile.open(directory / "session-1.tar.gz", "w:gz"):
+            pass
+        sidecars = [directory / f"session-1.{member}" for member in sessions.SIDECAR_MEMBERS]
+    source = next(iter_archive_sources(tmp_path))
+    assert len(list(source.iter_sessions())) == 1
+    for member, path in zip(sessions.SIDECAR_MEMBERS, sidecars, strict=True):
+        path.write_bytes(member.encode())
+    ref = next(source.iter_sessions())
+    for member in sessions.SIDECAR_MEMBERS:
+        assert sessions.read_member(ref, member) == member.encode()
+
+
 def test_missing_and_permission_denied_roots_remain_explicit(tmp_path, monkeypatch):
     with pytest.raises(SourceLayoutError, match="missing"):
         list(iter_archive_sources(tmp_path / "absent"))

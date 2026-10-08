@@ -151,6 +151,17 @@ def _optional_directory(path: Path) -> Path | None:
     return _directory(path)
 
 
+def _regular_member(path: Path, *, optional: bool = False) -> None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        if optional:
+            return
+        raise
+    if is_link_or_reparse(path, info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise SourceLayoutError(f"session observation is not regular: {path}")
+
+
 @dataclass(frozen=True)
 class ArchiveSource:
     """One physical source observation; aliases are never silently coalesced."""
@@ -188,12 +199,16 @@ class ArchiveSource:
             if ref.kind == "live":
                 _directory(ref.path)
                 member = ref.path / sessions.EVENTS_MEMBER
+                sidecars = (ref.path / name for name in sessions.SIDECAR_MEMBERS)
             else:
                 _directory(ref.path.parent)
                 member = ref.path
-            info = member.lstat()
-            if is_link_or_reparse(member, info.st_mode) or not stat.S_ISREG(info.st_mode):
-                raise SourceLayoutError(f"session observation is not regular: {member}")
+                sidecars = (
+                    ref.path.parent / f"{ref.id}.{name}" for name in sessions.SIDECAR_MEMBERS
+                )
+            _regular_member(member)
+            for sidecar in sidecars:
+                _regular_member(sidecar, optional=True)
             yield ref
 
     def iter_process_logs(self) -> Iterator[ProcessLogRef]:
