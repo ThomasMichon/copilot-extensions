@@ -372,6 +372,7 @@ def run_sync(
         # log can span several repos/worktrees across its lifetime), so
         # admission fencing for a repo-scoped sync is a known, explicit
         # follow-up -- never silently applied by skipping the filter here.
+        process_logs_failed = False
         if cfg.process_logs_enabled:
             if include is not None:
                 if verbose:
@@ -382,6 +383,7 @@ def run_sync(
             else:
                 plog_result = target.push_process_logs(cfg.process_logs_source, machine)
                 if not plog_result.ok:
+                    process_logs_failed = True
                     print(
                         f"session-sync: process-log push failed: {plog_result.detail}",
                         file=sys.stderr,
@@ -442,6 +444,8 @@ def run_sync(
             )
             if verbose:
                 print(f"session-sync: notify {'sent' if sent else 'failed (ignored)'}")
+        if process_logs_failed:
+            return 1
     return 0
 
 

@@ -108,10 +108,10 @@ class ProcessLogRef:
             raise ValueError("max_line_bytes must be a positive integer")
         if max_line_bytes <= 0:
             raise ValueError("max_line_bytes must be a positive integer")
-        if self.verified_root is not None and _supports_dir_fd():
+        if self.verified_root is not None and supports_dir_fd():
             with (
-                _open_root_dir(self.verified_root) as root_fd,
-                _open_regular_at(root_fd, self.path.name) as raw,
+                open_root_dir(self.verified_root) as root_fd,
+                open_regular_at(root_fd, self.path.name) as raw,
             ):
                 yield from self._read_opened(raw, max_line_bytes)
         else:
@@ -146,21 +146,29 @@ def _lines(stream: BinaryIO, max_line_bytes: int) -> Iterator[str]:
         yield line.decode("utf-8")
 
 
-def _supports_dir_fd() -> bool:
-    # POSIX only -- mirrors the directory-fd gate `_fsync_directory` already
-    # uses elsewhere in this plugin's sync targets. Windows has no equivalent
-    # "openat" primitive, so the root here is re-resolved by path instead; see
-    # `iter_process_log_refs`'s docstring for the resulting platform gap.
+def supports_dir_fd() -> bool:
+    """Whether directory-fd-pinned traversal (``open_root_dir``/
+    ``open_regular_at``) is available on this platform.
+
+    POSIX only -- mirrors the directory-fd gate `_fsync_directory` already
+    uses elsewhere in this plugin's sync targets. Windows has no equivalent
+    "openat" primitive, so the root here is re-resolved by path instead; see
+    `iter_process_log_refs`'s docstring for the resulting platform gap.
+    """
     return os.name != "nt"
 
 
 @contextmanager
-def _open_root_dir(log_root: Path) -> Iterator[int]:
+def open_root_dir(log_root: Path) -> Iterator[int]:
     """Open ``log_root`` once and verify its identity, so later per-entry
     traversal is bound to this directory handle rather than re-resolving the
     root path -- a swap of the final root component (e.g. onto a symlink)
     between the initial check and later entry opens would otherwise let an
-    attacker redirect enumeration/reads outside the configured root."""
+    attacker redirect enumeration/reads outside the configured root.
+
+    Public (not module-private) because this root-pinning primitive is
+    shared with ``agent_logger.sync.targets.filesystem``'s process-log
+    publication path, not only ``iter_process_log_refs`` below."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
     try:
         fd = os.open(log_root, flags)
@@ -186,7 +194,7 @@ def _open_root_dir(log_root: Path) -> Iterator[int]:
 
 
 @contextmanager
-def _open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
+def open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
     """Open a regular file by name within a pinned, already-verified directory
     handle, refusing to follow a symlinked entry."""
     before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
@@ -231,15 +239,15 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
     unaffected by an intervening ``chdir()``.
     """
     log_root = log_root.absolute()
-    if _supports_dir_fd():
-        with _open_root_dir(log_root) as root_fd:
+    if supports_dir_fd():
+        with open_root_dir(log_root) as root_fd:
             entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)
             for entry in entries:
                 name = entry.name
                 if _is_log_name(name.removesuffix(".gz")):
                     yield ProcessLogRef(log_root / name, verified_root=log_root)
                 elif name.endswith(".zip"):
-                    with _open_regular_at(root_fd, name) as raw, zipfile.ZipFile(raw) as archive:
+                    with open_regular_at(root_fd, name) as raw, zipfile.ZipFile(raw) as archive:
                         # Resolve member names while the archive is still
                         # open, then close both the ZIP and its file
                         # descriptor before yielding -- yielding mid-`with`

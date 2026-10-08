@@ -31,6 +31,17 @@ sync:
     min_age_days: 30            # only sessions at least this old
     require_untracked_worktree: true  # skip sessions of picker-tracked worktrees
     archive_root: null          # null => <home>/archived-sessions (out of ~/.copilot)
+  # Process-log evidence alongside session-state (opt-in; filesystem targets
+  # only -- local/onedrive). Publishes `<sync.source>/logs/` under each
+  # machine's `logs/` subfolder, reusing the same incremental size/mtime copy
+  # as session-state. Only runs on an unfiltered pass: it is SKIPPED (not
+  # filtered) whenever repo_allowlist/repo_denylist/require_repo_opt_in above
+  # narrow a pass, since a process log can span several repos/worktrees
+  # across one CLI process's lifetime and isn't scoped per-repo the way
+  # session-state is. See process-log-evidence.md's "Sync publication"
+  # section.
+  process_logs:
+    enabled: false              # opt-in
   # Incremental sync via a local, stat-only change signature db. On by
   # default -- disables only with `enabled: false` (then every run always
   # pushes everything, as before this existed). See SKILL.md's "Change

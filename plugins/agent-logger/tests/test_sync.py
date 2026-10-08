@@ -3127,6 +3127,125 @@ def test_base_target_push_process_logs_reports_unsupported(tmp_path: Path) -> No
     assert "does not support process-log sync" in result.detail
 
 
+@pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
+def test_copy_process_logs_rejects_symlinked_root(tmp_path: Path) -> None:
+    """A deterministic stand-in for the TOCTOU race flagged in review: once
+    the configured root names a symlink (whether swapped in after the
+    caller's own validation, or from the start), the copy must refuse it
+    rather than traversing through it -- enumeration and every per-entry
+    open are pinned to one directory handle opened with O_NOFOLLOW, not
+    re-resolved by path for each entry (mirroring
+    agent_logger.process_logs's own root-pinning guarantee)."""
+    from agent_logger.sync.targets.filesystem import _copy_process_logs
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "process-111-1.log").write_text("outside evidence\n", encoding="utf-8")
+    configured_root = tmp_path / "configured"
+    configured_root.symlink_to(outside, target_is_directory=True)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ValueError, match="not a directory"):
+        _copy_process_logs(configured_root, dest)
+
+    assert list(dest.iterdir()) == []
+
+
+def test_push_process_logs_reports_failure_for_symlinked_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    configured_root = tmp_path / "configured"
+    try:
+        configured_root.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+
+    result = target.push_process_logs(configured_root, "m1")
+
+    assert not result.ok
+    assert "process-log" in result.detail
+
+
+def test_copy_process_logs_skips_file_rotated_away_mid_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A live log rotated/deleted between this pass's directory scan and its
+    per-file open must be skipped as an ordinary candidate, never crash the
+    whole process-log push -- disappearance is expected for a live source."""
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.filesystem import _copy_process_logs
+
+    logs = _make_process_logs(tmp_path)
+    survivor = logs / "process-555-5.log"
+    survivor.write_text("still here\n", encoding="utf-8")
+    victim = logs / "process-111-1.log"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    if os.name != "nt":
+        real_open_regular_at = filesystem._process_logs.open_regular_at
+
+        def flaky_open_regular_at(dir_fd, name):
+            if name == victim.name:
+                victim.unlink()
+                raise FileNotFoundError(2, "No such file or directory", name)
+            return real_open_regular_at(dir_fd, name)
+
+        monkeypatch.setattr(filesystem._process_logs, "open_regular_at", flaky_open_regular_at)
+    else:
+        real_needs_copy = filesystem._needs_copy
+
+        def flaky_needs_copy(src, dst):
+            if src.name == victim.name:
+                victim.unlink()
+            return real_needs_copy(src, dst)
+
+        monkeypatch.setattr(filesystem, "_needs_copy", flaky_needs_copy)
+
+    copied, _nbytes, locked = _copy_process_logs(logs, dest)
+
+    assert locked == []
+    assert not (dest / victim.name).exists()
+    assert (dest / survivor.name).read_text(encoding="utf-8") == "still here\n"
+    assert copied >= 1
+
+
+def test_engine_run_sync_reports_failure_when_process_log_push_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A failed opt-in process-log push must surface as a nonzero exit code
+    (after any remaining cleanup/notify work still runs) -- the base
+    unsupported-capability response already returns ok=True, so ok=False
+    here specifically represents a real failure schedulers/monitoring must
+    not silently record as a successful sync."""
+    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync.targets.base import PushResult
+
+    src = _make_source(tmp_path)
+    (src / "logs").mkdir()
+    (src / "logs" / "process-999-9.log").write_text("evidence\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    data = dict(cfg.as_dict())
+    data["sync"]["process_logs"] = {"enabled": True}
+    cfg = Config(data, cfg.home)
+
+    monkeypatch.setattr(
+        filesystem.LocalTarget,
+        "push_process_logs",
+        lambda self, log_root, machine: PushResult(ok=False, detail="simulated failure"),
+    )
+
+    assert engine.run_sync(cfg) == 1
+    # The session-state push itself still landed -- only the process-log
+    # leg failed.
+    machines = list(dest.iterdir())
+    assert len(machines) == 1
+    assert (machines[0] / "session-state" / "abc-123" / "events.jsonl").is_file()
+
+
 def test_engine_run_sync_publishes_process_logs_when_enabled(tmp_path: Path) -> None:
     src = _make_source(tmp_path)
     (src / "logs").mkdir()

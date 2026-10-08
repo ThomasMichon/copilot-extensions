@@ -19,7 +19,9 @@ import stat
 import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import BinaryIO
 
+from agent_logger import process_logs as _process_logs
 from agent_logger import sessions
 from agent_logger.process_logs import is_process_log_candidate
 from agent_logger.sessions import SessionRef
@@ -278,25 +280,25 @@ def _fsync_tree(root: Path) -> None:
         _fsync_directory(directory)
 
 
-def _copy_replace(src: Path, dst: Path) -> None:
-    """Copy one regular source without following links."""
+def _copy_stream_replace(source: BinaryIO, stat_source: Path, dst: Path) -> None:
+    """Atomically replace *dst* from an already-open *source* stream.
+
+    Shared by :func:`_copy_replace` (opens by path) and the process-log copy
+    path (opens via a pinned directory fd, see :func:`_copy_process_logs`),
+    so both get the same atomic temp-file + fsync + durable-replace behavior
+    from one place. *stat_source* is used only for a best-effort
+    ``copystat`` (mtime/mode) -- never trusted for the copy's correctness.
+    """
     temporary = dst.with_name(f".{dst.name}.{short_unique_id()}.tmp")
     temporary_io = _windows_extended_path(temporary)
     try:
-        try:
-            source = open_regular_no_follow(src)
-        except OSError as exc:
-            if _is_windows_sharing_violation(exc):
-                raise _LockedSourceFile(f"source file is locked: {src}") from exc
-            raise
-        with source:
-            with open(temporary_io, "xb") as target:
-                shutil.copyfileobj(source, target, length=1024 * 1024)
-                target.flush()
-                os.fsync(target.fileno())
+        with open(temporary_io, "xb") as target:
+            shutil.copyfileobj(source, target, length=1024 * 1024)
+            target.flush()
+            os.fsync(target.fileno())
         try:
             shutil.copystat(
-                _windows_extended_path(src),
+                _windows_extended_path(stat_source),
                 temporary_io,
                 follow_symlinks=False,
             )
@@ -306,6 +308,18 @@ def _copy_replace(src: Path, dst: Path) -> None:
         _durable_replace(temporary, dst)
     finally:
         _unlink_replace_target(temporary)
+
+
+def _copy_replace(src: Path, dst: Path) -> None:
+    """Copy one regular source without following links."""
+    try:
+        source = open_regular_no_follow(src)
+    except OSError as exc:
+        if _is_windows_sharing_violation(exc):
+            raise _LockedSourceFile(f"source file is locked: {src}") from exc
+        raise
+    with source:
+        _copy_stream_replace(source, src, dst)
 
 
 def _needs_copy(src: Path, dst: Path) -> bool:
@@ -319,6 +333,21 @@ def _needs_copy(src: Path, dst: Path) -> bool:
         return True
     s = os.stat(_windows_extended_path(src))
     return s.st_size != d.st_size or s.st_mtime > d.st_mtime + 1e-6
+
+
+def _needs_copy_from_stat(src_stat: os.stat_result, dst: Path) -> bool:
+    """Same comparison as :func:`_needs_copy`, given an already-fetched
+    source ``os.stat_result`` (e.g. from a dir_fd-relative stat) instead of
+    re-resolving the source by path -- used by the process-log copy path,
+    which must not re-resolve a root-pinned directory entry by path."""
+    try:
+        mode = _lstat(dst).st_mode
+        if is_link_or_reparse(dst, mode) or not stat.S_ISREG(mode):
+            return True
+        d = os.stat(_windows_extended_path(dst))
+    except OSError:
+        return True
+    return src_stat.st_size != d.st_size or src_stat.st_mtime > d.st_mtime + 1e-6
 
 
 def _same_file_content(src: Path, dst: Path) -> bool:
@@ -364,12 +393,78 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     a locked source file (transient Windows sharing violation on a live
     in-use log) is recorded in *locked_paths* and skipped, exactly like a
     deferred session file -- never aborting the whole pass.
+
+    On POSIX, *source* is opened once with ``O_NOFOLLOW`` and every entry is
+    scanned and opened relative to that single directory handle, reusing
+    :mod:`agent_logger.process_logs`'s own root-pinning primitives (the same
+    ones :func:`~agent_logger.process_logs.iter_process_log_refs` uses) --
+    a swap of *source* onto a symlink after the caller's own initial
+    validation (e.g. between :func:`_existing_real_directory` and this scan)
+    cannot redirect traversal outside the configured root. Windows has no
+    ``openat`` equivalent and keeps the previous path-based behavior, the
+    same documented platform gap ``process_logs.py`` already carries.
+
+    A source file that disappears mid-pass (log rotation or deletion racing
+    this copy) is treated as an ordinary skipped candidate, never a
+    failure -- disappearance is expected for a live log source. Copied byte
+    counts are read from the just-written destination, never a re-stat of
+    the source, which could itself have rotated away by the time of that
+    re-stat.
     """
-    with os.scandir(_windows_extended_path(source)) as entries:
-        names = sorted(entry.name for entry in entries if is_process_log_candidate(entry.name))
     copied = 0
     nbytes = 0
     locked: list[Path] = []
+
+    def _land(stream: BinaryIO, stat_source: Path, dst_path: Path) -> None:
+        nonlocal copied, nbytes
+        try:
+            _copy_stream_replace(stream, stat_source, dst_path)
+        except OSError as exc:
+            if _is_windows_sharing_violation(exc):
+                locked.append(stat_source)
+                return
+            raise
+        try:
+            size = os.stat(_windows_extended_path(dst_path)).st_size
+        except OSError:
+            return
+        copied += 1
+        nbytes += size
+
+    if _process_logs.supports_dir_fd():
+        try:
+            with _process_logs.open_root_dir(source) as root_fd:
+                entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)
+                for entry in entries:
+                    name = entry.name
+                    if not is_process_log_candidate(name):
+                        continue
+                    try:
+                        before = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    if not stat.S_ISREG(before.st_mode):
+                        continue
+                    dst_path = dest / name
+                    if not _needs_copy_from_stat(before, dst_path):
+                        continue
+                    try:
+                        with _process_logs.open_regular_at(root_fd, name) as stream:
+                            _land(stream, source / name, dst_path)
+                    except (FileNotFoundError, ValueError):
+                        # Vanished or changed identity between the stat above
+                        # and this open (rotation/deletion racing the copy) --
+                        # an ordinary skip, never a failure.
+                        continue
+        except FileNotFoundError:
+            return 0, 0, []
+        return copied, nbytes, locked
+
+    try:
+        with os.scandir(_windows_extended_path(source)) as scanned:
+            names = sorted(entry.name for entry in scanned if is_process_log_candidate(entry.name))
+    except FileNotFoundError:
+        return 0, 0, []
     for name in names:
         src_path = source / name
         try:
@@ -382,14 +477,16 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
         if not _needs_copy(src_path, dst_path):
             continue
         try:
-            _copy_replace(src_path, dst_path)
+            stream = open_regular_no_follow(src_path)
+        except FileNotFoundError:
+            continue
         except OSError as exc:
-            if isinstance(exc, _LockedSourceFile):
+            if _is_windows_sharing_violation(exc):
                 locked.append(src_path)
                 continue
             raise
-        copied += 1
-        nbytes += os.stat(_windows_extended_path(src_path)).st_size
+        with stream:
+            _land(stream, src_path, dst_path)
     return copied, nbytes, locked
 
 
@@ -1691,7 +1788,12 @@ class FilesystemTarget(Target):
             )
         try:
             copied, nbytes, locked_paths = _copy_process_logs(log_root, dest)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            # ValueError surfaces here only from the root-pinning open
+            # itself (e.g. the configured root was replaced with a symlink
+            # between this method's own validation above and the copy) --
+            # a genuinely unsafe root, not the benign per-file skip
+            # `_copy_process_logs` already handles internally.
             return PushResult(ok=False, detail=f"process-log copy failed: {exc}")
         detail = f"-> {dest}"
         if locked_paths:
