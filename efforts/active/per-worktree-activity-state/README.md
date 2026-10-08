@@ -188,6 +188,23 @@ follow-ons.
       spawned-but-not-retired handoff and a pre-upgrade spawned-and-retired
       one, confirming each backfills to the correct slot state rather than
       appearing unattempted after the cutover.
+- [ ] **The backfill can race live mutations -- it must merge under the
+      record lock, with an explicit cutover boundary.** A one-time
+      read-then-later-write backfill can lose a race against an in-flight
+      handoff: a legacy (journal-only) writer that appends newer state
+      *after* the backfill read but *before* it saves would have that
+      newer fact silently overwritten by the backfill's now-stale
+      computed value. The backfill must therefore (a) run its
+      read-current-journal-state-and-write as one atomic operation under
+      the same `_RecordLock` the rest of this phase's writes use -- never
+      read outside the lock and write later -- and (b) define an explicit
+      cutover boundary: Phase 2's slot-trusting readers must not go live
+      for a given handoff until *after* its backfill has completed under
+      lock, so no legacy producer can still mutate journal-only truth
+      inside the window where slots are already being trusted. Add a
+      concurrent-write test: a legacy writer appends new journal state
+      for a token while its backfill is in flight; confirm the backfilled
+      slot reflects the newer state, never the stale pre-write snapshot.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
 - [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
@@ -312,6 +329,10 @@ archived-journal discovery, standalone-install retention floor):
       but not yet retired, one case spawned and retired -- confirm neither
       appears unattempted after the cutover (no duplicate spawn, no
       retry-after-already-retired) (Phase 1).
+- [ ] A backfill-race test: a legacy writer appends new journal-only state
+      for a token concurrently with that token's backfill; confirm the
+      backfilled slot reflects the newer state (the lock-merged result),
+      never a stale snapshot from before the concurrent write (Phase 1).
 - [ ] Unit tests proving the 6 rewired hot-path functions never call
       `activity.read_events`/`handoff_trace.read_trace` (Phase 2) --
       e.g. a monkeypatch that raises if either is called during a sweep or

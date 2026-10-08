@@ -42,6 +42,20 @@ file, this needs an explicit, chosen behavior rather than silently breaking.
     -- an ambiguous/orphaned historical record is still retained history,
     and omitting it from the unscoped view would make it silently vanish
     the moment Phase 5 removes the global file it currently lives in.
+  - **during Phases 3-4's transition window specifically, the still-live
+    global `activity.jsonl` itself.** Migration (Phase 4) is a background/
+    eventual process, not instantaneous -- until it (and Phase 5's final
+    retirement) completes, the global file still holds real,
+    not-yet-migrated history that exists nowhere else yet. Omitting it
+    from the unscoped view during this window would make that
+    not-yet-migrated history silently disappear; merging it in naively
+    (without deduplication) would make every event Phase 3's own
+    dual-write already delivered into its per-worktree file appear
+    *twice*. Deduplicate by the same stable per-event UUID
+    (`phase-4-migration.md`'s identity scheme) across the global and
+    per-worktree copies -- an event present in both counts once. This
+    source drops out of the merge entirely once Phase 5 removes the file
+    for good.
 - [ ] All of the above, globally time-ordered, matching today's output
       shape (same fields, same sort) -- preserving existing UX/back-compat.
       This remains an on-demand diagnostic read only (the `activity` CLI
@@ -51,6 +65,10 @@ file, this needs an explicit, chosen behavior rather than silently breaking.
       the unmigrated sidecar and the unresolved-live-event holding
       location), confirm an unscoped `activity` call surfaces all of them,
       not only the per-worktree-journal subset.
+- [ ] Test (transition window): seed the same UUID-identified event in
+      both the still-live global file and its already-dual-written
+      per-worktree copy; confirm an unscoped call surfaces it exactly
+      once, not twice.
 
 ### Authoritative project routing for live writes
 
@@ -163,6 +181,7 @@ they're written.
       behavior: seed per-worktree journals across 2+ projects, confirm an
       unfiltered call returns every entry, globally time-ordered, matching
       the pre-migration output shape.
+- [ ] The transition-window global-file dedup test named inline above.
 - [ ] The project-routing and worktree-less-events tests named inline above.
 
 Back to the main plan: [`README.md`](README.md).

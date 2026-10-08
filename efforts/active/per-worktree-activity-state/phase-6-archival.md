@@ -122,6 +122,18 @@ regression, not merely a missed optimization.
       scheduled task -- that revisits every cleaned-up-but-still-retained
       journal and reaps/deletes it once it has fully aged out, not merely
       pruning it down.
+- [ ] **This recurring GC must itself stay bounded, not grow with total
+      cleanup history.** Revisiting *every* retained cleaned-up journal on
+      every sweep pass would make sweep cost grow with the machine's
+      lifetime cleanup volume -- exactly the unbounded-sweep-cost problem
+      this whole effort exists to eliminate, just relocated rather than
+      solved. Give the GC pass a fixed per-pass item/time budget (process
+      up to N journals, or stop after T seconds, whichever comes first)
+      with resumable progress (remember where this pass left off; the next
+      pass continues from there, not from the start) -- or run it as a
+      separately-scheduled, independently-bounded worker entirely outside
+      the main status-monitor sweep, so the core sweep's own cost stays
+      flat regardless of how much cleanup history has accumulated.
 - [ ] Archival (when present) is strictly additive longevity on top of this
       floor, never the sole reclaim mechanism.
 - [ ] Add a cleanup test with `agent-logger` absent that confirms the
@@ -152,6 +164,11 @@ regression, not merely a missed optimization.
       prune leaves it intact); advance time past the window; confirm the
       recurring GC pass (not the one-time cleanup prune) reaps/deletes it
       rather than leaving it indefinitely.
+- [ ] A bounded-GC-pass test: seed many more cleaned-up-but-retained
+      journals than one pass's item/time budget allows; confirm a single
+      pass processes only up to the budget and leaves the rest for a
+      subsequent pass (resumable, not all-at-once), and that repeated
+      passes eventually reap everything that has aged out.
 - [ ] An archived-journal discovery test: clean up (archive + reclaim) a
       worktree with `agent-logger` installed, then confirm the unscoped
       `agent-worktrees activity` view still includes its recent history by
