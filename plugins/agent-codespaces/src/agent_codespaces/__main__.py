@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import capture_cli, dial_log_cli
+from . import capture_cli, dial_log_cli, launch_policy
 from . import claim_provider_cli
 from . import pool as pool_mod
 from . import relay_launch
@@ -365,9 +365,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip the pre-delete Copilot session recovery",
     )
 
-    claim_provider_cli.add_claim_provider_parsers(sub)
-    capture_cli.add_capture_parser(sub)
-    dial_log_cli.add_dial_log_parser(sub)
+    for add in (claim_provider_cli.add_claim_provider_parsers, capture_cli.add_capture_parser,
+                dial_log_cli.add_dial_log_parser, launch_policy.add_launch_policy_parsers):
+        add(sub)
     # --- finalize ---
     finalize_parser = sub.add_parser(
         "finalize",

@@ -336,8 +336,13 @@ def claim_or_exit_code(args: argparse.Namespace) -> int | None:
     while a different, still-live worktree holds it.
     """
     from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
+    from .launch_policy import refused_exit_code
     from .worktrees import ContextRefused
 
+    # The host's launch policy first, before any claim is taken or touched.
+    refused = refused_exit_code(args.name)
+    if refused is not None:
+        return refused
     try:
         claim_for_connect(
             args.name,

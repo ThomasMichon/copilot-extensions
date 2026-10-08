@@ -156,6 +156,38 @@ and **refuses** the connect if a *foreign harness* holds it (the seam the
 same-harness ref store cannot see). All degrade-safe — a missing store / identity
 never blocks. See `borrowing-codespaces` for the full lease + fence model.
 
+### Host launch policy
+
+A host that keeps its own reasons to hold a worker back (an operator pause, a
+stop marker, a budget) registers one command on this machine; every CodeSpace
+worker launch asks it first -- attached and detached `copilot`, and
+agent-bridge's Session Host spawn on start or resume (including the implicit
+resume a later `send` triggers):
+
+```bash
+<agent-codespaces catalog argv[0]> launch-policy set [--timeout 20] -- <argv...>
+<agent-codespaces catalog argv[0]> launch-policy show [--json]
+<agent-codespaces catalog argv[0]> launch-policy clear
+<agent-codespaces catalog argv[0]> launch-check <name> [--json]   # exit 0 allowed, 79 refused
+```
+
+The command reads `{"schema": 1, "venue": "codespace", "codespace": "<name>"}`
+on stdin and prints `{"refuse": null}` to allow or `{"refuse": "<reason>"}` to
+refuse. It fails closed: a non-zero exit, a timeout, more than 64 KiB of
+output, any other output, or an unreadable registration refuses the launch.
+With nothing registered every launch is allowed. A refused bridge start fails
+the session with a `launch_refused` event. `--timeout` is at most 45 seconds
+(the bridge allows that plus cleanup), and a timeout kills the policy's whole
+process tree. The registration is owner-only, and `set`/`show` name only the
+command and its argument count -- but a policy's arguments are visible in the
+process list while it runs, so never pass a secret as one: have the policy read
+it from an owner-only file or a secret store.
+
+The bridge side is a daemon behavior (HTTP protocol 25): an already-running
+older daemon launches without asking until agent-bridge is updated and its
+daemon restarted, so `launch-policy set` warns and `show --json` reports
+`bridge_enforces` from the running daemon's advertised protocol.
+
 ## CLI-mode sessions (`copilot`)
 
 `<agent-codespaces catalog argv[0]> copilot <name>` delivers a real interactive Copilot CLI

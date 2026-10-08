@@ -116,6 +116,7 @@ class _SessionResumeMixin:
 
             client: AcpClient | None = None
             from .session_host.spawner import RemoteSpawnCleanupPendingError
+            from .venue_launch_policy import LaunchRefusedError
 
             for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
                 client = None
@@ -202,6 +203,18 @@ class _SessionResumeMixin:
                     )
                     break  # success -- leave the ladder
                 except Exception as exc:
+                    if isinstance(exc, LaunchRefusedError):
+                        # The host's launch policy refused: a deliberate,
+                        # terminal answer -- never retried or recreated around.
+                        session.status = SessionStatus.STOPPED
+                        self._db.update_session_status(
+                            session_id, SessionStatus.STOPPED.value, time.time(),
+                        )
+                        if session.event_log:
+                            session.event_log.append("launch_refused", {
+                                "codespace": exc.codespace, "reason": exc.reason,
+                            })
+                        raise
                     if isinstance(exc, RemoteSpawnCleanupPendingError):
                         session.status = SessionStatus.STOPPED
                         self._db.update_session_status(
