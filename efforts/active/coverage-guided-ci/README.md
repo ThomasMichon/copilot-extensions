@@ -776,7 +776,7 @@ handled before the operator explicitly chose a fix.
 **Separately, same plugin, different root cause:**
 `test_shared_installer_engine_manifest_kind.py`'s 2 tests failed with
 `[Errno 127]`/`returncode 127`, tracing to a garbled path
-(`C:UserstmichonAppDataLocalTemp...` -- every backslash silently
+(`C:Usersyour_userAppDataLocalTemp...` -- every backslash silently
 vanished) passed to `C:\Windows\system32\bash.exe`. This host's `PATH`
 resolves `bash` to Windows' own WSL interop launcher first (confirmed via
 `where.exe bash`: only the WSL shim and a WindowsApps alias resolve, no
