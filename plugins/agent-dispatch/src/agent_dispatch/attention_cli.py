@@ -93,8 +93,9 @@ def _dispatch_reader(args: argparse.Namespace):
     def read(read_at: str) -> dict[str, Any]:
         client = _core()._client(args)
         args.attention_cli = _effective_cli(args, client)
-        result = srcs.read_dispatch(lambda: client, read_at, cli=args.attention_cli)
+        # Before the read: closing the client (as the read does) drops its SSH tunnel.
         scope = _coordinator_scope(args, client)
+        result = srcs.read_dispatch(lambda: client, read_at, cli=args.attention_cli)
         return {**result, "scope": scope} if scope else result
 
     return read

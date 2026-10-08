@@ -725,6 +725,25 @@ def test_an_ssh_failover_read_offers_no_actions(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["items"][0]["actions"] == []
 
 
+def test_an_ssh_failover_read_keeps_its_peer_scope_after_the_client_closes(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    class ViaPeer(_Client):
+        def __init__(self, tasks):
+            super().__init__(tasks)
+            self._tunnel = SimpleNamespace(_machine="peer-a")
+
+        def __exit__(self, *exc):
+            self._tunnel = None  # as DispatchClient.close() does
+            return False
+
+    monkeypatch.setattr(m, "_client", lambda args: ViaPeer([{"id": "t1", "title": "A", "status": "submitted"}]))
+    args = m.build_parser().parse_args(["attention", "--json"])
+    assert args.func(args) == 0
+    stored = json.loads(attention_store.default_path().read_text(encoding="utf-8"))
+    assert set(stored["applied"]) == {"dispatch@ssh:peer-a"}
+
+
 def test_a_coordinator_usage_error_fails_the_source_at_once():
     import time
 
