@@ -220,6 +220,9 @@ class TestPromptTriggeredHandoff:
         assert result["queued"] is True
         assert sm._db.count_pending_prompts(succ.session_id) == 1
         assert sm._db.count_pending_prompts(pred.session_id) == 0
+        # The result names the session that took the prompt, so a caller acting
+        # on "its" session afterwards (a cooperative stop) can follow it.
+        assert result["session_id"] == succ.session_id
 
     @pytest.mark.asyncio
     async def test_prompt_without_optin_is_normal_delivery(

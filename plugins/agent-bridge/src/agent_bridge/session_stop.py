@@ -135,11 +135,10 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
             raise
         result["acknowledged"] = False  # gone before the notice: stop/confirm handle it
         return session_id
-    after = _status(client, session_id) or {}
-    successor = after.get("successor_id")
+    successor = submitted.get("session_id")
     if successor and successor != session_id:
-        # The notice went to the successor the submit handed off to; it is the
-        # live session now, so wait on, withdraw from, and stop that one.
+        # Submitting the notice handed the session off: the successor took the
+        # notice and is the live one, so wait on, withdraw from, and stop that one.
         result["handed_off_from"], session_id = session_id, successor
         result["session_id"], baseline = successor, 0
     queue_id = submitted.get("queue_id") if submitted.get("queued") else None

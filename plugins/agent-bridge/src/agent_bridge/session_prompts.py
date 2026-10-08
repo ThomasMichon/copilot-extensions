@@ -206,12 +206,12 @@ class _SessionPromptMixin:
             successor = await self.handoff_session(
                 session_id, reason="context-pressure-prompt"
             )
-            return (
-                await self.submit_or_queue_prompt(
-                    successor.session_id, prompt, caller_id=caller_id
-                ),
-                None,
+            delivered = await self.submit_or_queue_prompt(
+                successor.session_id, prompt, caller_id=caller_id
             )
+            # Name the session that actually took the prompt, so a caller that
+            # goes on to act on "its" session (a cooperative stop) follows it.
+            return ({**delivered, "session_id": delivered.get("session_id") or successor.session_id}, None)
 
         turn_live = (
             session.status == SessionStatus.RUNNING

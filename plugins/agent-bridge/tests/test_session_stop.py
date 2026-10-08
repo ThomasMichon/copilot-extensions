@@ -189,15 +189,14 @@ def test_a_notice_that_triggers_a_handoff_is_followed_to_the_successor():
 
     class Handoff:
         def get_session(self, sid):
-            if sid == "s1":
-                return {"session_id": "s1", "status": "idle", "turn_count": 9,
-                        **({"successor_id": "s2"} if calls else {})}
+            if sid == "s1":  # SessionInfo carries no successor link
+                return {"session_id": "s1", "status": "stopped" if calls else "idle", "turn_count": 9}
             return {"session_id": "s2", "status": "stopped" if ("stop", "s2") in calls else "idle",
                     "turn_count": 1}
 
         def submit_prompt(self, sid, prompt, **_kw):
             calls.append(("submit", sid))
-            return {"turn_index": 0}
+            return {"turn_index": 0, "session_id": "s2"}  # the successor took it
 
         def list_pending_queue(self, sid):
             return []
