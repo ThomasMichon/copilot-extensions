@@ -18,6 +18,7 @@ dependencies = [
     "agent-plugin-activation",
     "agent-plugin-resolve",
     "agent-procutil",
+    "agent-machine-transport",
 ]
 
 [tool.uv.sources]
@@ -36,6 +37,15 @@ agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
 # manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "../../libs/agent-procutil", editable = true }
+# Shared machines.yaml registry parsing, ambiguity-checked execution
+# identity, and local-vs-SSH transport resolution (module
+# ``machine_transport``). This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# plugin's own root and resolves live to `libs/machine-transport`, so this
+# `dev`-branch checkout has nothing to keep manually in sync -- only a real
+# `main`-branch release (tools/materialize_main.py) ever gets a real local
+# copy.
+agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 
 [project.optional-dependencies]
 dev = [

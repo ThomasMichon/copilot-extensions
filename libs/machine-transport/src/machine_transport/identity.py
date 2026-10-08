@@ -19,6 +19,7 @@ from __future__ import annotations
 import socket
 from collections.abc import Callable, Mapping
 
+from .execution_identity import qualify_guest
 from .registry import MachineIdentity, find_machine_entry
 
 __all__ = ["is_local_machine"]
@@ -30,6 +31,7 @@ def is_local_machine(
     config_machine: str,
     load_entries: Callable[[], Mapping[str, MachineIdentity]],
     real_hostname: str | None = None,
+    guest: bool = False,
 ) -> bool:
     """True when ``name`` (a machine key, alias, ``hostname`` field, or
     display_name) refers to the CURRENT machine.
@@ -53,6 +55,13 @@ def is_local_machine(
     ``real_hostname`` defaults to the real local OS hostname
     (``socket.gethostname()``) -- the final ground-truth check, independent
     of what ``config_machine`` itself resolved to. Override only for tests.
+
+    ``guest=True`` marks the CALLER's own execution as a WSL guest: a guest
+    process must never resolve local against its native host's registry
+    entry just because ``config_machine`` fuzzy-matched that entry (a guest
+    whose own topology has no dedicated ``-wsl`` entry yet) -- native-host
+    collision is denied outright rather than silently granted -- and the
+    real-hostname ground-truth comparison is itself guest-qualified.
     """
     if not name:
         return False
@@ -74,10 +83,18 @@ def is_local_machine(
         # alias-vs-key spelling mismatch for the SAME registry entry safe,
         # without also risking an empty-string false-positive the way
         # comparing two possibly-empty alias strings directly would.
-        if this is not None and target is this:
-            return True
+        if this is not None:
+            if guest and not this.key.casefold().endswith("-wsl"):
+                return False
+            if target is this:
+                return True
     hostname = (real_hostname or socket.gethostname()).lower()
-    if target.hostname and target.hostname.lower() == hostname:
+    target_hostname = target.hostname
+    if guest:
+        hostname = qualify_guest(hostname)
+        if target.key.casefold().endswith("-wsl") and target_hostname:
+            target_hostname = qualify_guest(target_hostname)
+    if target_hostname and target_hostname.lower() == hostname:
         return True
     if target.key.lower() == hostname:
         return True

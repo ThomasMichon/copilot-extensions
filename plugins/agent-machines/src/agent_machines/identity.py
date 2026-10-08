@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Iterable
 
 import yaml
+from machine_transport import (
+    IdentityError,
+    TopologyEntry,
+    detect_platform,
+    resolve_identity,
+)
 
 from .manifest import ManifestError
 
@@ -19,18 +25,6 @@ class MachineIdentity:
     accepted: tuple[str, ...]
     topology_path: Path | None = None
     warnings: tuple[str, ...] = ()
-
-
-def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        cleaned = value.strip()
-        folded = cleaned.casefold()
-        if cleaned and folded not in seen:
-            seen.add(folded)
-            out.append(cleaned)
-    return tuple(out)
 
 
 def _topology_paths(repos: Iterable[Path]) -> list[Path]:
@@ -56,13 +50,15 @@ def resolve_machine(
     *,
     topology_repos: Iterable[Path] = (),
 ) -> MachineIdentity:
-    """Resolve ``value`` through topology key/hostname/alias/display-name fields."""
-    raw = (value or platform.node()).strip()
+    """Resolve an explicit target, or default to this environment's execution key."""
+    selected = value if value is not None else platform.node()
+    if not isinstance(selected, str):
+        raise ManifestError("machine identity must be a string")
+    raw = selected.strip()
     if not raw:
         raise ManifestError("machine identity is empty")
-    folded_raw = raw.casefold()
-    entries: dict[str, tuple[str, list[str], Path]] = {}
-    identity_owners: dict[str, set[str]] = {}
+    entries: list[TopologyEntry] = []
+    sources: dict[str, Path] = {}
     warnings: list[str] = []
     for path in _topology_paths(topology_repos):
         try:
@@ -87,60 +83,27 @@ def resolve_machine(
                 warnings.append(f"{path}: machine {key!r} must be a mapping")
                 continue
             entry = raw_entry
-            identities = [
+            entries.append(TopologyEntry(
                 key,
-                *(
-                    str(entry.get(field)).strip()
+                **{
+                    field: entry[field].strip() if isinstance(entry.get(field), str) else ""
                     for field in ("hostname", "alias", "display_name")
-                    if isinstance(entry.get(field), str)
-                ),
-            ]
-            accepted = list(_dedupe(identities))
-            match_key = key.casefold()
-            if match_key in entries:
-                prior_key, prior_aliases, prior_path = entries[match_key]
-                entries[match_key] = (
-                    prior_key,
-                    list(_dedupe((*prior_aliases, *accepted))),
-                    prior_path,
-                )
-            else:
-                entries[match_key] = (key, accepted, path)
-            for identity in accepted:
-                identity_owners.setdefault(identity.casefold(), set()).add(match_key)
+                },
+            ))
+            sources.setdefault(key.casefold(), path)
 
-    conflicts = {
-        identity: owners
-        for identity, owners in identity_owners.items()
-        if len(owners) > 1
-    }
-    if conflicts:
-        identity, owners = sorted(conflicts.items())[0]
-        keys = ", ".join(sorted(entries[owner][0] for owner in owners))
-        raise ManifestError(
-            f"topology identity {identity!r} is ambiguous across machine entries: {keys}"
+    try:
+        resolved = resolve_identity(
+            raw.casefold() if value is None else raw,
+            entries,
+            guest=value is None and detect_platform() == "wsl",
         )
-
-    matches = {
-        key: entry
-        for key, entry in entries.items()
-        if folded_raw in {item.casefold() for item in entry[1]}
-    }
-    if not matches:
-        return MachineIdentity(
-            raw=raw,
-            canonical=raw,
-            accepted=(raw,),
-            warnings=tuple(warnings),
-        )
-    if len(matches) > 1:
-        keys = ", ".join(sorted(match[0] for match in matches.values()))
-        raise ManifestError(f"machine identity {raw!r} is ambiguous across entries: {keys}")
-    canonical, accepted, path = next(iter(matches.values()))
+    except IdentityError as exc:
+        raise ManifestError(str(exc)) from exc
     return MachineIdentity(
         raw=raw,
-        canonical=canonical,
-        accepted=_dedupe((*accepted, raw)),
-        topology_path=path,
-        warnings=tuple(warnings),
+        canonical=resolved.canonical,
+        accepted=resolved.accepted,
+        topology_path=sources.get((resolved.topology_key or "").casefold()),
+        warnings=tuple(warnings) + resolved.warnings,
     )

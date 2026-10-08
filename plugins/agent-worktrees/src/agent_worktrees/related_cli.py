@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 import subprocess
 
+from agent_procutil import no_window_kwargs
+from machine_transport import IdentityError
+
 from . import config as cfg
 from . import output, state_root as state_root_mod
 from . import status_updater_cli
@@ -87,6 +90,7 @@ def _related_anchor(rest: list[str]) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            **no_window_kwargs(),
         )
         if cp.returncode == 0 and cp.stdout.strip():
             return cp.stdout.strip()
@@ -99,18 +103,27 @@ def _related_anchor(rest: list[str]) -> str | None:
 
 
 def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
+    try:
+        config = cfg.load_config(include_control_plane_related_pr=False)
+    except IdentityError:
+        raise
+    except RuntimeError as exc:
+        if not str(exc).startswith("No active project could be resolved."):
+            raise
+        config = None
+    except (ValueError, OSError, KeyError):
+        config = None  # An unadopted repo may still supply portable topology.
+    if config is not None and config.machine:
+        return config.machine
     for candidate in [base_anchor, *anchors]:
         if not candidate:
             continue
         try:
             if cfg.machines_yaml_path(candidate).exists():
                 return cfg.detect_machine(candidate)
-        except Exception:
+        except OSError:
             continue
-    try:
-        return cfg.detect_machine(base_anchor)
-    except Exception:
-        return ""
+    return cfg.detect_machine(base_anchor)
 
 
 def _related_config_source_anchors(

@@ -72,6 +72,7 @@ def _make_home(tmp: Path) -> Path:
         "    class: worktree\n"
         "    remote: \"https://github.com/example-operator/dotfiles.git\"\n"
         f"    windows: \"{win}\"\n"
+        "    wsl: \"" + str(checkout).replace("\\", "/") + "\"\n"
         "    linux: \"" + str(checkout).replace("\\", "/") + "\"\n"
         "    tags: [control-plane]\n"
         "  some-lib:\n"
@@ -226,7 +227,14 @@ def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, m
     from worktree_manager import harness_state
 
     home = _make_home(tmp_path)
-    # `_make_home`'s `dotfiles` entry has no `wsl:` key at all.
+    repos = home / ".agent-worktrees" / "repos.yaml"
+    repos.write_text(
+        repos.read_text(encoding="utf-8").replace(
+            '    wsl: "' + str(tmp_path / "src" / "dotfiles").replace("\\", "/") + '"\n',
+            "",
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(harness_state, "_exact_platform_key", lambda: "wsl")
     problems = {name: (status, detail) for name, status, detail in mis_registered_repos(home)}
     assert "dotfiles" not in problems

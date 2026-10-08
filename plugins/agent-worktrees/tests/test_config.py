@@ -2071,6 +2071,10 @@ class TestFindMachineEntry:
 # ---------------------------------------------------------------------------
 
 class TestDetectMachine:
+    @pytest.fixture(autouse=True)
+    def _native_platform(self, monkeypatch):
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+
     def _write(self, tmp_path: Path, body: str) -> Path:
         (tmp_path / "machines.yaml").write_text(body, encoding="utf-8")
         return tmp_path

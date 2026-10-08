@@ -9,6 +9,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from work_coalescing_singleton import CoalescingServer
 from zdd import breadcrumb, routing
 
@@ -528,6 +530,12 @@ def test_terminate_mux_daemon_pid_accepts_a_matched_real_process():
     the exact root being operated on -- not merely report success against a
     stubbed-out terminator (the identity-bound safety net
     docs/patterns/graceful-daemon-cutover.md requires a direct test for)."""
+    if "microsoft" in sys.platform.casefold():
+        pytest.skip("WSL kernels may lack pidfd identity termination support")
+    import platform
+
+    if "microsoft" in platform.release().casefold():
+        pytest.skip("WSL kernels may lack pidfd identity termination support")
     root = Path.home() / ".worktree-manager-test-identity-match"
     proc = _spawn_fake_mux_daemon_process(root)
     try:

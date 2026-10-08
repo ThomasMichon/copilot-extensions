@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 
@@ -44,7 +46,7 @@ def test_emits_empty_outside_a_project(monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == "{}"
 
 
-def test_emits_empty_without_machines_yaml(monkeypatch, capsys):
+def test_emits_identity_without_machines_yaml(monkeypatch, capsys):
     monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
@@ -55,7 +57,9 @@ def test_emits_empty_without_machines_yaml(monkeypatch, capsys):
     monkeypatch.setattr(m.cfg, "load_machines_yaml", _raise)
     rc = m.cmd_machine_context(_Args())
     assert rc == 0
-    assert capsys.readouterr().out.strip() == "{}"
+    context = json.loads(capsys.readouterr().out)["additionalContext"]
+    assert "Machine: foo" in context
+    assert "Project: proj" in context
 
 
 def test_emits_additional_context_in_project(monkeypatch, capsys):
@@ -67,14 +71,16 @@ def test_emits_additional_context_in_project(monkeypatch, capsys):
     monkeypatch.setattr(m.cfg, "find_machine_entry", lambda _reg, _name: sentinel)
     monkeypatch.setattr(
         m.cfg, "render_copilot_instructions",
-        lambda _entry, project="": "Machine: Foo\nHostname: bar\nProject: " + project,
+        lambda _entry, project="", machine="": (
+            f"Machine: {machine}\nHostname: bar\nProject: " + project
+        ),
     )
 
     rc = m.cmd_machine_context(_Args())
     assert rc == 0
     obj = json.loads(capsys.readouterr().out)
     assert set(obj.keys()) == {"additionalContext"}
-    assert "Machine: Foo" in obj["additionalContext"]
+    assert "Machine: foo" in obj["additionalContext"]
     assert "Project: proj" in obj["additionalContext"]
 
 
@@ -115,6 +121,30 @@ def test_render_omits_empty_machine_metadata(monkeypatch):
     assert "Role: worker" in rendered
     assert "Description:" not in rendered
     assert "Capabilities:" not in rendered
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+def test_renderer_uses_explicit_platform_and_wrapper_remains_patchable(monkeypatch, platform):
+    from agent_worktrees import machine_instructions
+
+    entry = cfg.MachineEntry(
+        key="example-host", display_name="Example host", environment="Example environment",
+        role="worker", description="Shared metadata", capabilities=["tests"],
+        ssh_environments=[
+            cfg.SSHEnvironment(name=name, alias=f"independent-{name}-transport")
+            for name in ("windows", "wsl", "linux")
+        ],
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    machine = "example-host-wsl" if platform == "wsl" else "example-host"
+    direct = machine_instructions.render_copilot_instructions(
+        entry, "example", machine=machine, platform=platform,
+    )
+    assert cfg.render_copilot_instructions(entry, "example", machine=machine) == direct
+    assert f"Machine: {machine}\n" in direct
+    assert f"Platform: {platform}\n" in direct
+    assert f"Deployment environment: independent-{platform}-transport\n" in direct
+    assert direct.endswith("Binstub: example\n")
 
 
 def test_deploy_retires_machine_files(tmp_path: Path):

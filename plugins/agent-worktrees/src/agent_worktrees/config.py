@@ -15,18 +15,22 @@ import os
 import platform
 import re
 import socket
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
-from machine_transport import find_machine_entry as _mt_find_machine_entry
+from machine_transport import TopologyEntry, detect_platform as _detect_execution_platform
+from machine_transport import machine_entries_to_topology
 from machine_transport import machine_name as _mt_machine_name
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
+from machine_transport import resolve_identity, resolve_machine_identity
 
 from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
+from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
@@ -702,91 +706,62 @@ def find_machine_entry(
     the explicit ``hostname`` field lets a machine keyed by a friendly name still
     be found by its raw COMPUTERNAME. Returns None if no entry matches.
     """
-    return _mt_find_machine_entry(entries, name)
+    if not name:
+        return None
+    resolved = resolve_machine_identity(entries, name)
+    return entries.get(resolved.topology_key) if resolved.topology_key else None
 
 
-def detect_machine(repo_dir: str | Path | None = None) -> str:
-    """Auto-detect machine name from hostname.
+def _identity_entries(entries: dict[str, MachineEntry]) -> list[TopologyEntry]:
+    return machine_entries_to_topology(entries)
 
-    If *repo_dir* is provided, reads ``machines.yaml`` and matches
-    the COMPUTERNAME against machine keys, the explicit ``hostname`` field, and
-    aliases (exact match). Returns the canonical name (alias if set, otherwise
-    key). Falls back to the raw hostname if no registry is available.
-    """
-    hostname = socket.gethostname().lower()
 
+def find_machine_metadata(
+    entries: dict[str, MachineEntry], name: str,
+) -> MachineEntry | None:
+    """Guest identity may borrow host metadata, never host execution ownership."""
+    entry = find_machine_entry(entries, name)
+    if entry is None and name.casefold().endswith("-wsl"):
+        entry = find_machine_entry(entries, name[:-4])
+    return entry
+
+
+def detect_machine(
+    repo_dir: str | Path | None = None, *, value: str | None = None,
+) -> str:
+    """Local execution name; preserve native aliases, qualify WSL guest keys."""
+    hostname = value if value is not None else socket.gethostname().lower()
+    guest = detect_platform() == "wsl"
+    if value is not None and not guest:
+        return resolve_identity(value).canonical
+    entries: dict[str, MachineEntry] = {}
     if repo_dir is not None:
         try:
             entries = load_machines_yaml(repo_dir)
-            # Exact match on key (real hostname) first -- case-insensitive
-            for key, entry in entries.items():
-                if hostname == key.lower():
-                    return machine_name(entry)
-            # Then the explicit ``hostname`` field (key decoupled from COMPUTERNAME)
-            for entry in entries.values():
-                if entry.hostname and hostname == entry.hostname.lower():
-                    return machine_name(entry)
-            # Then check aliases
-            for entry in entries.values():
-                if entry.alias and hostname == entry.alias.lower():
-                    return machine_name(entry)
-        except (FileNotFoundError, ValueError):
-            pass  # no registry -- fall through to raw hostname
-
-    return hostname
+        except FileNotFoundError:
+            pass  # Topology is optional for standalone execution.
+    resolved = resolve_identity(
+        hostname, _identity_entries(entries), guest=guest,
+    )
+    for warning in resolved.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if not guest and resolved.topology_key is not None:
+        return machine_name(entries[resolved.topology_key])
+    return resolved.canonical
 
 
 def render_copilot_instructions(
-    entry: MachineEntry, project: str = "",
+    entry: MachineEntry, project: str = "", *, machine: str = "",
 ) -> str:
-    """Render the content of ``machine.instructions.md`` for a machine.
-
-    Detects the current platform and includes it along with the
-    deployment environment (SSH alias) so agents know their exact
-    identity for service deployments.  When *project* is provided,
-    includes project and binstub metadata.
-    """
-    plat = detect_platform()
-
-    # Find the SSH alias matching the current platform
-    deploy_env = ""
-    for ssh_env in entry.ssh_environments:
-        if ssh_env.name == plat:
-            deploy_env = ssh_env.alias
-            break
-
-    lines = [
-        f"Machine: {entry.display_name}",
-        f"Hostname: {entry.key}",
-        f"Environment: {entry.environment}",
-        f"Platform: {plat}",
-    ]
-    if deploy_env:
-        lines.append(f"Deployment environment: {deploy_env}")
-    if entry.role:
-        lines.append(f"Role: {entry.role}")
-    if entry.description:
-        lines.append(f"Description: {entry.description}")
-    if entry.capabilities:
-        lines.append(f"Capabilities: {', '.join(entry.capabilities)}")
-    if project:
-        lines.append(f"Project: {project}")
-        lines.append(f"Binstub: {project}")
-    return "\n".join(lines) + "\n"
+    """Render machine context through the public platform-detection seam."""
+    return machine_instructions.render_copilot_instructions(
+        entry, project, machine=machine, platform=detect_platform(),
+    )
 
 
 def detect_platform() -> str:
     """Detect the current platform: 'windows', 'wsl', or 'linux'."""
-    if platform.system() == "Windows":
-        return "windows"
-    # WSL detection
-    try:
-        with open("/proc/version") as f:
-            if "microsoft" in f.read().lower():
-                return "wsl"
-    except OSError:
-        pass
-    return "linux"
+    return _detect_execution_platform()
 
 
 def _home() -> Path:
@@ -1127,7 +1102,7 @@ def _load_config_uncached(
             user_assignment_raw = candidate
     repository_assignment_raw = inrepo_profile_assignments.get(repo_name)
 
-    return Config(
+    config = Config(
         srcroot=srcroot,
         machine=machine,
         platform=platform,
@@ -1168,6 +1143,31 @@ def _load_config_uncached(
         ),
         copilot_identity_switch_enabled=bool(machine_raw.get("copilot_identity_switch_enabled", global_raw.get("copilot_identity_switch_enabled", False))),
     )
+    # Native identity is not a migration surface: preserve the winning configured
+    # value (or the prior standalone default), including legacy alias spellings.
+    if detect_platform() != "wsl":
+        return config
+    # Resolve after the config-source binding is available, without calling
+    # load_machines_yaml's overlay fallback (which loads this config recursively).
+    identity_anchors = [config.default_repo.anchor]
+    if config.default_repo.stateless or config.default_repo.requires_external_state_root:
+        from . import state_root
+
+        identity_anchors = [
+            source.anchor for source in state_root.config_source_anchors(
+                config, base_anchor=config.default_repo.anchor,
+            )
+        ]
+    for anchor in identity_anchors:
+        root = Path(anchor)
+        if any((root / rel).is_file() for rel in (
+            Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
+        )):
+            return replace(config, machine=detect_machine(anchor, value=machine))
+    else:
+        if machine_raw.get("machine") or global_raw.get("machine"):
+            return replace(config, machine=detect_machine(value=machine))
+    return config
 
 
 def load_config(
