@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serially landed per-slice PRs against `dev`
 - **Created:** 2026-10-08
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/agent-fabric/README.md`, derive-don't-duplicate and graceful composition
 - **Sub-issues:** #5737 · #5738 · #5740 · #5741
 
@@ -70,8 +70,8 @@ Continuation:
 ## Plan
 
 ### Phase 1 - Review the campaign boundary
-- [ ] Land this proposal through automated review before implementation.
-- [ ] Coordinate with #5689 on shared identity ownership and avoid overlapping edits.
+- [x] Land this proposal through automated review before implementation.
+- [x] Coordinate with #5689 on shared identity ownership and avoid overlapping edits.
 
 ### Phase 2 - Named-machine consumers
 - [ ] Resolve #5737 by migrating Bridge registry and named-machine resolution;
@@ -128,3 +128,48 @@ identity authority: reconcile `machine-transport` with #5689's
 - Integrated four bounded, read-only consumer assessments.
 - Found concurrent #5689; recorded the dependency before implementation.
 - Operator confirmed the effort slug `machine-transport-convergence`.
+
+### 2026-10-08 - Reviewed proposal and Bridge implementation
+- Proposal #5753 merged into `dev`; cooperation with #5689 was recorded before
+  implementation. Its machine-identity, agent-machines and agent-worktrees
+  implementation paths remain untouched.
+- Prepared the #5737 Bridge slice for campaign-owner integration/publication,
+  not issue completion. Shared raw-data parsing preserves Bridge's missing
+  SSH-alias/key and shell/bash defaults, unnamed environments and extended
+  metadata. Shared matching adds case-insensitive machine alias, hostname and
+  display-name resolution; ambiguous identities/SSH aliases now fail explicitly.
+  SSH-alias environment binding and conflicts, platform-specific local
+  loopback, default environment preference and ACP launch shapes remain
+  consumer-owned.
+- Both installer platforms refresh the shared dependency. Windows standalone
+  snapshots stage it and rewrite its nested login-shell pointer; an actual
+  isolated PowerShell snapshot test asserts that contract. Bridge requires `uv`
+  on both platforms and has no pip-only fallback to modify.
+- Focused validation:
+  `python tools/run-plugin-tests.py agent-bridge -k 'topology or bare_name_resolution or test_agent_registry or test_transport or machine_transport_convergence or install_stale_cache_guard or installer_powershell51' --plugin-timeout 900 --subsuite-timeout 300`
+  — **356 passed, 1 skipped**.
+- Full validation:
+  `python tools/run-plugin-tests.py agent-bridge --plugin-timeout 2400 --subsuite-timeout 600`
+  — **3429 passed, 66 skipped**, all eight contained sub-suites green.
+  The first attempt's 300-second file-group budget expired on Windows;
+  the same group completed in 365.61 seconds within the bounded retry.
+- Shared source validation:
+  `.test-venvs/win32/agent-bridge/Scripts/python.exe -m pytest libs/machine-transport/tests -q --basetemp=.test-state/machine-transport --timeout=30`
+  with `PYTHONPATH` pointing to this checkout's `libs/machine-transport/src`
+  and `libs/remote-login-shell/src` — **73 passed**. The initial missing
+  scratch-parent setup error was corrected before this successful run.
+- Touched Python `ruff check --select F,E9`, `check-install-contract.py`
+  (**13 plugins**), `check-module-size.py`, `check-vendored-libs-sync.py`
+  (**5 shared libraries**) and staged/unstaged `git diff --check` passed.
+  A patch changefile covers Bridge and both existing shared-library consumers.
+- Lightweight integration exercises the real resolver-to-ACP-command
+  construction, including auth metadata and breadcrumb-bearing command
+  equivalence. Full fresh-box clean-room and live SSH tiers were not exercised:
+  no disposable target or live venue was assigned, and this slice does not
+  authorize host installation/service changes.
+- Documentation impact: updated the shared-library API/compatibility contract
+  and Bridge's machine-configuration guide. This realizes the reviewed
+  derive-don't-duplicate intent without changing the vision, installation
+  independence or daemon lifecycle contract. Self-reviewed against `REVIEW.md`.
+  No commit, PR, push, merge or deployment was performed; #5737 remains open
+  until parent-owned publication and merge.

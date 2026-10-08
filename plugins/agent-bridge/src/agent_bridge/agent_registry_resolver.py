@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 from dropin_registry import WarningTracker
+from machine_transport import find_machine_entry
 
 from .agent_registry_common import (
     AgentConfig,
@@ -70,17 +71,22 @@ class AgentResolver(_ProviderDiscoveryMixin):
         self._scan_lock = threading.Lock()
         self.cold_store = ColdStoreProviderRegistry()
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
+        self._ambiguous_ssh_aliases: set[str] = set()
         for machine in machines.values():
             for env in machine.ssh_environments:
-                if env.alias in self._alias_index:
+                if not env.alias:
+                    continue
+                alias = env.alias.lower()
+                if alias in self._alias_index:
+                    self._ambiguous_ssh_aliases.add(alias)
                     log.warning(
                         "Duplicate SSH alias '%s' (machines '%s' and '%s')",
                         env.alias,
-                        self._alias_index[env.alias][0].key,
+                        self._alias_index[alias][0].key,
                         machine.key,
                     )
                 else:
-                    self._alias_index[env.alias] = (machine, env)
+                    self._alias_index[alias] = (machine, env)
 
         self._agent_alias_index: dict[str, str | None] = {}
         for canonical, config in agents.items():
@@ -185,14 +191,22 @@ class AgentResolver(_ProviderDiscoveryMixin):
     def _resolve_machine(
         self, host: str, ssh_environment: str | None = None,
     ) -> tuple[MachineConfig, SshEnvironment | None]:
-        """Resolve a host to a machine, checking keys then SSH aliases."""
+        """Resolve shared identities while preserving SSH-alias environment binding."""
         machine = self._machines.get(host)
         if machine:
             return machine, None
-
-        entry = self._alias_index.get(host)
+        machine = find_machine_entry(self._machines, host, reject_ambiguous=True)
+        # Keys keep their historical precedence over environment aliases.
+        if machine and machine.key.lower() == host.lower():
+            return machine, None
+        if host.lower() in self._ambiguous_ssh_aliases:
+            raise ValueError(f"SSH alias '{host}' is ambiguous in topology")
+        entry = self._alias_index.get(host.lower())
         if entry:
-            machine, matched_env = entry
+            alias_machine, matched_env = entry
+            if machine and machine is not alias_machine:
+                raise ValueError(f"Machine '{host}' is ambiguous in topology")
+            machine = alias_machine
             if ssh_environment and ssh_environment != matched_env.name:
                 raise ValueError(
                     f"Host '{host}' resolved via SSH alias to machine "
@@ -201,7 +215,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
                     f"'{ssh_environment}' (conflict)"
                 )
             return machine, matched_env
-
+        if machine:
+            return machine, None
         raise ValueError(f"Machine '{host}' not found by key or SSH alias in topology")
 
     def resolve_ssh_environment(
@@ -698,11 +713,15 @@ class AgentResolver(_ProviderDiscoveryMixin):
 
     def _is_local_loopback_agent(self, config: AgentConfig) -> bool:
         """True when this agent dispatches via local loopback rather than SSH."""
+        if not config.host or not self._local_machine:
+            return False
+        try:
+            machine, forced_env = self._resolve_machine(config.host, config.ssh_environment)
+        except ValueError:
+            return False
         return bool(
-            config.host
-            and self._local_machine
-            and config.host == self._local_machine.key
-            and config.ssh_environment == self._local_platform
+            machine.key == self._local_machine.key
+            and (forced_env.name if forced_env else config.ssh_environment) == self._local_platform
         )
 
     def _agent_to_dict(self, config: AgentConfig) -> dict[str, Any]:

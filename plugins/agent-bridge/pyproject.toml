@@ -39,6 +39,7 @@ dependencies = [
     "agent-dropin-registry",
     "agent-plugin-activation",
     "agent-remote-login-shell",
+    "agent-machine-transport",
 ]
 
 [tool.uv.sources]
@@ -99,6 +100,7 @@ agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
 agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
 # Effective plugin enablement and identity-verified root resolution.
 agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
+agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 
 [project.scripts]
 agent-bridge = "agent_bridge.__main__:main"

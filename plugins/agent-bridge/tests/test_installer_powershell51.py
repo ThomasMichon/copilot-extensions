@@ -263,6 +263,11 @@ def test_powershell_51_stamp_succeeds(tmp_path: Path):
     pyproject = (snapshot / "pyproject.toml").read_text(encoding="utf-8")
     assert 'agent-ssh-manager = { path = "libs/ssh-manager" }' in pyproject
     assert 'agent-procutil = { path = "libs/agent-procutil" }' in pyproject
+    assert 'agent-machine-transport = { path = "libs/machine-transport" }' in pyproject
+    assert (snapshot / "libs" / "machine-transport" / "src" / "machine_transport" / "registry.py").is_file()
+    nested_transport = (snapshot / "libs" / "machine-transport" / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'agent-remote-login-shell = { path = "../remote-login-shell" }' in nested_transport
+    assert "editable = true" not in nested_transport
     assert 'agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }' not in pyproject
     nested_ssh_manager = (snapshot / "libs" / "ssh-manager" / "pyproject.toml").read_text(encoding="utf-8")
     nested_plugin_activation = (snapshot / "libs" / "plugin-activation" / "pyproject.toml").read_text(encoding="utf-8")

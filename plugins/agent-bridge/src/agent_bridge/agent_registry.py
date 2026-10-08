@@ -193,17 +193,16 @@ def _detect_local_machine(
     """Match the local hostname to a machine in topology."""
     import socket
 
-    hostname = socket.gethostname().lower()
+    from machine_transport import is_local_machine
+
+    hostname = socket.gethostname()
     platform = _detect_platform()
 
-    machine = machines.get(hostname)
-    if machine:
-        return machine, platform
-    for key, machine_config in machines.items():
-        if key.lower() == hostname:
-            return machine_config, platform
     for machine_config in machines.values():
-        if getattr(machine_config, "hostname", "") and machine_config.hostname.lower() == hostname:
+        if is_local_machine(
+            machine_config.key, config_machine="", load_entries=lambda: machines,
+            real_hostname=hostname,
+        ):
             return machine_config, platform
     return None, platform
 

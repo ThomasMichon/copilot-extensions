@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from machine_transport import parse_machines_yaml as parse_machine_entries
 
 log = logging.getLogger("agent-bridge")
 
@@ -73,6 +74,7 @@ class MachineConfig:
     ssh_ip: str | None = None
     ssh_ready: bool = False
     auth_hooks: list[AuthHook] = field(default_factory=list)
+    alias: str = ""
 
     def get_ssh_env(self, env_name: str | None = None) -> SshEnvironment | None:
         """Get an SSH environment by name, or the first available one."""
@@ -120,41 +122,21 @@ class MachineConfig:
 def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
     """Parse raw machines.yaml data into typed MachineConfig objects."""
     machines: dict[str, MachineConfig] = {}
-    raw_machines = data.get("machines", {})
-
-    for key, mdata in raw_machines.items():
-        if not isinstance(mdata, dict):
-            continue
-        description_raw = mdata.get("description", "")
-        if description_raw is None:
-            description_raw = ""
-        if not isinstance(description_raw, str):
-            raise ValueError(f"machine '{key}' description must be a string")
-        capabilities_raw = mdata.get("capabilities", [])
-        if capabilities_raw is None:
-            capabilities_raw = []
-        if not isinstance(capabilities_raw, list):
-            raise ValueError(f"machine '{key}' capabilities must be a list")
-        capabilities: list[str] = []
-        for capability_raw in capabilities_raw:
-            if not isinstance(capability_raw, str):
-                raise ValueError(
-                    f"machine '{key}' capabilities must contain only strings"
-                )
-            capability = capability_raw.strip()
-            if capability and capability not in capabilities:
-                capabilities.append(capability)
-        ssh_envs: list[SshEnvironment] = []
-        ssh_block = mdata.get("ssh", {})
-
-        for env_data in ssh_block.get("environments", []):
-            ssh_envs.append(SshEnvironment(
-                name=env_data.get("name", ""),
-                alias=env_data.get("alias", key),
-                port=env_data.get("port", 22),
-                user=env_data.get("user"),
-                shell=env_data.get("shell", "bash"),
-            ))
+    entries = parse_machine_entries(
+        data, default_ssh_alias_to_key=True, default_ssh_shell="bash",
+        keep_unnamed_environments=True,
+    )
+    metadata = {str(key): value for key, value in data.get("machines", {}).items()}
+    for entry in entries.values():
+        key = entry.key
+        # Shared identities are normalized; Bridge-only metadata stays at the edge.
+        mdata = metadata[key]
+        ssh_block = mdata.get("ssh") or {}
+        ssh_envs = [
+            SshEnvironment(name=env.name, alias=env.alias, port=env.port,
+                           user=env.user, shell=env.shell)
+            for env in entry.ssh_environments
+        ]
 
         # Parse auth hooks
         auth_hooks: list[AuthHook] = []
@@ -169,16 +151,17 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
 
         machines[key] = MachineConfig(
             key=key,
-            display_name=mdata.get("display_name", key),
-            environment=mdata.get("environment", ""),
-            hostname=mdata.get("hostname", ""),
-            role=mdata.get("role", ""),
-            description=description_raw.strip(),
-            capabilities=capabilities,
+            display_name=entry.display_name,
+            environment=entry.environment,
+            hostname=entry.hostname,
+            alias=entry.alias,
+            role=entry.role,
+            description=entry.description,
+            capabilities=entry.capabilities,
             field_terminal=bool(mdata.get("field_terminal", False)),
             ssh_environments=ssh_envs,
             ssh_ip=ssh_block.get("ip"),
-            ssh_ready=bool(ssh_block.get("ready", False)),
+            ssh_ready=entry.ssh_ready,
             auth_hooks=auth_hooks,
         )
 
