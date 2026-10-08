@@ -211,7 +211,13 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
     containing only unrelated files, or a ZIP with no supported members --
     yields no refs. This is ordinary, not an error: absence of evidence is
     not evidence of a missing or misconfigured source.
+
+    ``log_root`` is converted to an absolute path (without resolving
+    symlinks) up front, so a relative root is pinned to the working
+    directory at enumeration time -- a later ``iter_lines()`` call is
+    unaffected by an intervening ``chdir()``.
     """
+    log_root = log_root.absolute()
     if _supports_dir_fd():
         with _open_root_dir(log_root) as root_fd:
             entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)

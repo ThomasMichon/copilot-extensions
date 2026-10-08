@@ -128,6 +128,25 @@ def test_root_swapped_after_ref_obtained_is_rejected_on_read(tmp_path: Path) -> 
         list(refs[0].iter_lines())
 
 
+@pytest.mark.skipif(os.name == "nt", reason="pinned absolute root is a POSIX-only guarantee")
+def test_relative_root_is_pinned_against_a_later_chdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative `log_root` must resolve against the working directory at
+    enumeration time, not whatever directory is current when a returned ref
+    is later read -- an intervening chdir() must not redirect the read."""
+    root = tmp_path / "configured"
+    root.mkdir()
+    _write_log(root, "raw", PAYLOAD.encode())
+    monkeypatch.chdir(tmp_path)
+    refs = list(iter_process_log_refs(Path("configured")))
+    assert len(refs) == 1
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert "".join(refs[0].iter_lines()) == PAYLOAD
+
+
 def test_zip_rejects_ambiguous_or_symlink_members(tmp_path: Path) -> None:
     path = tmp_path / "logs.zip"
     with zipfile.ZipFile(path, "w") as archive:
