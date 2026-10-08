@@ -36,6 +36,20 @@ import time
 DEFAULT_DELAY_SECONDS = 120.0
 
 
+def _finite_non_negative_seconds(value: str) -> float:
+    """``argparse`` ``type=`` validator for ``--delay-seconds``: rejects
+    non-finite (``inf``/``nan``) and negative values at parse time, rather
+    than reaching ``time.sleep()`` with one -- ``time.sleep(float("inf"))``
+    raises ``OverflowError`` before this command's own try/except, breaking
+    its "always exits 0" contract."""
+    parsed = float(value)
+    if parsed != parsed or parsed in (float("inf"), float("-inf")) or parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite, non-negative number of seconds: {value!r}"
+        )
+    return parsed
+
+
 def add_parsers(sub) -> None:
     p = sub.add_parser(
         "status-monitor-reap-stale",
@@ -47,7 +61,7 @@ def add_parsers(sub) -> None:
         "notice and run doctor manually.",
     )
     p.add_argument(
-        "--delay-seconds", type=float, default=DEFAULT_DELAY_SECONDS,
+        "--delay-seconds", type=_finite_non_negative_seconds, default=DEFAULT_DELAY_SECONDS,
         help="Seconds to wait before applying the repair (default: "
         f"{DEFAULT_DELAY_SECONDS:g}, long enough to outlast an "
         "ordinary self-retire window without blocking the installer).",
@@ -76,10 +90,20 @@ def schedule_delayed_daemon_health_reap(
 
 def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     """``status-monitor-reap-stale`` -- wait, then apply the identity-verified
-    daemon-health repair. Spawned detached by
+    daemon-health repair, and ensure a monitor is actually running
+    afterward. Spawned detached by
     :func:`schedule_delayed_daemon_health_reap`; not meant to be run
-    interactively. Always exits 0 (advisory, best-effort)."""
-    delay = max(0.0, float(getattr(args, "delay_seconds", DEFAULT_DELAY_SECONDS)))
+    interactively. Always exits 0 (advisory, best-effort).
+
+    ``--delay-seconds`` is already validated finite/non-negative by argparse
+    (:func:`_finite_non_negative_seconds`); the fallback here only guards a
+    direct, non-argparse call (e.g. a test constructing ``Namespace`` by
+    hand) against the same ``OverflowError``/hang a raw ``inf``/``nan``
+    would otherwise cause in ``time.sleep()`` below.
+    """
+    delay = float(getattr(args, "delay_seconds", DEFAULT_DELAY_SECONDS))
+    if delay != delay or delay in (float("inf"), float("-inf")) or delay < 0:
+        delay = DEFAULT_DELAY_SECONDS
     time.sleep(delay)
     try:
         from . import daemon_health
@@ -90,4 +114,28 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     findings = report.get("findings") if isinstance(report, dict) else None
     count = len(findings) if isinstance(findings, list) else 0
     print(f"status-monitor-reap-stale: applied daemon-health repair ({count} finding(s))")
+
+    # The repair above only audits/terminates EXISTING live candidates -- a
+    # rollback that left ZERO live monitors (the other documented ambiguous
+    # outcome, copilot-extensions#5453) produces zero findings and stays
+    # down forever otherwise. `after` (falling back to `before`) reflects
+    # the post-repair candidate count; skip entirely while a genuine
+    # cutover is concurrently in progress elsewhere (`cutover_in_progress`)
+    # -- that attempt owns ensuring a monitor exists, and racing it here
+    # could start a duplicate right as it promotes its own successor.
+    after = report.get("after") if isinstance(report, dict) else None
+    if not isinstance(after, dict):
+        after = report.get("before") if isinstance(report, dict) else None
+    if (
+        isinstance(after, dict)
+        and not after.get("cutover_in_progress")
+        and after.get("candidate_count") == 0
+    ):
+        try:
+            from . import status_monitor_runtime as smr
+            ensured = smr._ensure_status_monitor()
+        except Exception as exc:
+            print(f"status-monitor-reap-stale: ensure-monitor attempt failed (non-fatal): {exc}")
+            return 0
+        print(f"status-monitor-reap-stale: no live monitor after repair -- ensured={ensured}")
     return 0

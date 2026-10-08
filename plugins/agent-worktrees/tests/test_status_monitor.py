@@ -3238,6 +3238,149 @@ def test_cmd_reap_stale_never_raises_on_repair_failure(monkeypatch, capsys):
     assert "non-fatal" in capsys.readouterr().out
 
 
+def test_cmd_reap_stale_ensures_a_monitor_when_zero_candidates_survive(monkeypatch, capsys):
+    """The repair pass only audits/terminates EXISTING live candidates -- a
+    rollback that left ZERO live monitors (the other documented ambiguous
+    outcome, copilot-extensions#5453) must not stay down forever just
+    because there was nothing for the identity-bound repair to terminate."""
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(
+        daemon_health, "doctor_report",
+        lambda *, apply: {
+            "findings": [],
+            "before": {"candidate_count": 0, "cutover_in_progress": False},
+            "after": {"candidate_count": 0, "cutover_in_progress": False},
+        },
+    )
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert ensured["calls"] == 1
+    assert "ensured=True" in capsys.readouterr().out
+
+
+def test_cmd_reap_stale_does_not_ensure_when_a_candidate_already_survives(monkeypatch):
+    """A clean repair leaving exactly one live candidate must NOT trigger an
+    extra ensure-monitor spawn -- that would risk a duplicate."""
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(
+        daemon_health, "doctor_report",
+        lambda *, apply: {
+            "findings": [{"kind": "duplicate_resident"}],
+            "before": {"candidate_count": 2, "cutover_in_progress": False},
+            "after": {"candidate_count": 1, "cutover_in_progress": False},
+        },
+    )
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert ensured["calls"] == 0
+
+
+def test_cmd_reap_stale_does_not_ensure_while_a_cutover_is_in_progress(monkeypatch):
+    """Zero candidates while a genuine cutover is concurrently in progress
+    elsewhere must be left alone -- that attempt owns ensuring a monitor
+    exists, and racing it here could start a duplicate right as it
+    promotes its own successor."""
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(
+        daemon_health, "doctor_report",
+        lambda *, apply: {
+            "findings": [],
+            "before": {"candidate_count": 0, "cutover_in_progress": True},
+            "after": {"candidate_count": 0, "cutover_in_progress": True},
+        },
+    )
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert ensured["calls"] == 0
+
+
+def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(
+        daemon_health, "doctor_report",
+        lambda *, apply: {
+            "findings": [],
+            "before": {"candidate_count": 0, "cutover_in_progress": False},
+            "after": {"candidate_count": 0, "cutover_in_progress": False},
+        },
+    )
+
+    def _boom():
+        raise OSError("no fork slots")
+
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", _boom)
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert "non-fatal" in capsys.readouterr().out
+
+
+def test_delay_seconds_rejects_non_finite_and_negative_values():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    status_monitor_reap_stale.add_parsers(sub)
+    for bad in ("inf", "-inf", "nan", "-1"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["status-monitor-reap-stale", "--delay-seconds", bad])
+
+
+def test_cmd_reap_stale_falls_back_to_default_for_a_hand_built_non_finite_namespace(
+    monkeypatch,
+):
+    """argparse already rejects non-finite/negative values for a real CLI
+    invocation (see the test above); this guards the lower-level function
+    itself against a direct, non-argparse call (e.g. a hand-built
+    Namespace) with the same OverflowError/hang a raw inf/nan would
+    otherwise cause in time.sleep()."""
+    slept = {"seconds": None}
+    monkeypatch.setattr(
+        status_monitor_reap_stale.time, "sleep", lambda s: slept.update(seconds=s)
+    )
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=float("inf"))
+    )
+
+    assert rc == 0
+    assert slept["seconds"] == status_monitor_reap_stale.DEFAULT_DELAY_SECONDS
+
+
 def test_reap_stale_registered_and_exposes_delay_flag():
     assert m.COMMAND_MAP["status-monitor-reap-stale"] is m.cmd_status_monitor_reap_stale
     parser = argparse.ArgumentParser()
