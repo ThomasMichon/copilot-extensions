@@ -63,6 +63,18 @@ agent-chat-driven flow).
 
 ## Runbook — for whichever session is currently driving this effort
 
+**2026-10-08 direction:** Phases 10-11 below now include manual review policy,
+formatted/structured result viewing, and revision history; Phase 12 adds
+completed-task follow-ups and delivery receipts. Backend dependencies and the
+shared operator capture are in the
+[task conversation amendment](../agent-dispatch-monitor-and-confirmed-state/task-conversation-amendment.md).
+That amendment governs new work over historical `completed`/`confirmed`
+terminology in this README. Use SUBMITTED for review pending and COMPLETED for
+terminal acceptance. Re-check already-shipped composer controls before building:
+the current manifest has a New Task action, so extend it rather than recreate it.
+Consume #5668's attention interface and #5701's steering identity when landed;
+do not compete with those open implementations.
+
 **Read this section FIRST in any new session picking up this effort.** It is
 kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
@@ -1292,38 +1304,55 @@ against it.
       `propose`/`queue` call shape; tags map onto the same pool-filter
       predicate a registrar's own filter declaration would use (no
       derivation gap vs. an emitter-authored task).
+- [ ] Extend the current composer with per-task review choice (manual approval
+      by default) and optional runtime output schema. Prose criteria and
+      structured contract are distinct; ordinary routing remains unchanged.
 
 ### Phase 11 — Completion Review card (implementation)
 Realizes the [tasks-pane-ux vision](README.md)'s *The Completion Review
 card* concept. **Depends on**
-`agent-dispatch-monitor-and-confirmed-state`'s Phase 2 (`confirm`/
-`reopen_completed` on `TaskQueue`, plus `board_cli.py`'s `confirmed` group
-projection) — do not start this phase until that sibling effort's Phase 2
-has landed.
-- [ ] A **completed-but-unconfirmed** task's card, reached the same way the
+`agent-dispatch-monitor-and-confirmed-state`'s existing submitted-task review
+operations and new Phases 5-6 (policy/output/history). Backend contracts must
+land before their UI consumers.
+- [ ] A **SUBMITTED** task's card, reached the same way the
       steering card is — reusing `kind:"card"` (`PivotCardScreen`) — showing
-      the worker's result reference, accumulated progress log, and
+      the worker's Markdown, structured data, result reference, progress, and
       prominent artifacts (reusing the Phase 5 shared artifacts surface).
 - [ ] Four actions, never a silent fifth: **Confirm** (calls
-      `TaskQueue.confirm`), **Re-queue with steering** (reuses the
+      `TaskQueue.confirm`, making it COMPLETED), **Reject with steering** (reuses the
       steering-card input verbatim, calls `TaskQueue.reopen_completed` with
       the given steer fields), **Abandon** (existing force-abandon verb),
       **Save for later** (no-op — the card simply closes; per
       *self-tracked-review-is-not-a-lane* this costs no pool slot and needs
-      no special "parked" bookkeeping beyond the task staying `completed`).
-- [ ] `task_phase` palette: add `confirmed` (green/terminal family, same
-      bucket as the existing `Completed`/`Abandoned` dark-grey-terminal
-      treatment) and ensure a `completed`-and-unconfirmed row is visually
-      distinguishable from a `confirmed` one (e.g. an inline "review
-      pending" marker) so the backlog of unreviewed completions is legible
-      at a glance, not just reachable by drilling in.
+      no special "parked" bookkeeping beyond the task staying SUBMITTED).
+- [ ] Keep SUBMITTED/review-pending distinguishable from COMPLETED; present
+      the same review through the existing attention interface, not a second
+      review queue.
+- [ ] Browse chronological card/output, answer, and review revisions on both
+      submitted and completed tasks. Retain rejected submissions; fence actions
+      to the exact revision shown. Reuse the output viewer beside steering forms.
 - [ ] Tests: the card's four actions call the exact sibling-effort API
-      shapes; a `confirmed` task never offers this card (nothing to
-      review); an emitter-driven task whose evaluator already auto-confirmed
-      likewise never surfaces it.
+      shapes; a completed task retains a read-only result/history viewer but
+      never offers rejection or reopening, including auto-confirmed tasks.
+
+### Phase 12 - Completed follow-ups and asynchronous delivery receipts
+
+- [ ] Completed task **Create follow-up** seeds a new composer with accepted
+      outcome, selected history, and new instructions; preserve lineage and
+      never mutate or reopen the parent.
+- [ ] A confirmed steer returns durable acceptance promptly; display delivery
+      pending separately from persistence failure. Reuse the backend operation
+      identity on ambiguous outcomes rather than duplicate the answer.
+- [ ] Observe eventual delivery/worker acknowledgment and expose recoverable
+      failures without retaining a blocking worker-start progress dialog.
+- [ ] Test final-output/history browsing, follow-up cancellation and creation,
+      stale review, double-confirm, timeout-after-commit, cold start, and
+      delivery failure through the actual Picker-to-daemon contract.
 
 ## Validation Plan
 
+- [ ] Complete the shared [task conversation validation matrix](../agent-dispatch-monitor-and-confirmed-state/task-conversation-amendment.md#validation-matrix)
+      for the composer/viewer/review/receipt/follow-up UI boundary.
 - [ ] Unit tests for the Phase 1 liveness-auto-transition-to-Suspended
       reconciliation path (a CLI-embodied session's death is detected and
       transitions the task, exactly like the existing headless-session
@@ -1357,8 +1386,9 @@ has landed.
       worker identity, then kill that CLI session and confirm the task
       auto-transitions to Suspended rather than lingering as Started. Queue
       a small hand-authored batch through the New Task composer, then walk
-      each to `confirmed`, `reopen`, and `abandon` through the Completion
-      Review card.
+      each through submission acceptance, rejection, and abandonment using
+      the Completion Review card. Completed tasks remain readable and can
+      seed a new follow-up, never reopen.
 
 ## Proposal
 
@@ -3143,3 +3173,13 @@ work should wait for the sibling effort's Phase B (or, if the operator
 wants continued forward motion on this effort specifically in the
 meantime, Phase 6/9/11 remain independent and unblocked).
 
+### 2026-10-08 - Submission, history, and follow-up UI amendment
+
+Extended Phases 10-11 and added Phase 12 from the operator's task-conversation
+direction, captured in the
+[backend effort's operator record](../agent-dispatch-monitor-and-confirmed-state/operator-direction.md).
+The backend effort owns policy/schema/history/delivery; this effort owns their
+UI consumers. Completed tasks stay terminal and readable, submitted tasks can
+accept/reject, and manual approval defaults on. No implementation checklist was
+marked done from this design update. Consume open #5668/#5701 work after merge
+rather than replacing it.
