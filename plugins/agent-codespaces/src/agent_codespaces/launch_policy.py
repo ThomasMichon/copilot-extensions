@@ -41,10 +41,14 @@ from typing import Any
 
 from agent_procutil import no_window_flags, spawn_sync_in_kill_on_close_job
 
-from .config import RUNTIME_DIR, ensure_runtime_dir
+from .config import _home
 from .launch_memory import _private as _private_dir
 
-POLICY_FILE = RUNTIME_DIR / "launch-policy.json"
+#: Machine-wide, not per installation cell: every agent-codespaces runtime on
+#: this machine (whichever cell's runtime gate sets ``AGENT_CODESPACES_HOME``)
+#: and the bridge read this one file, so one registration gates every launch.
+#: ``AGENT_HOME`` still relocates it for a sandbox.
+POLICY_FILE = _home() / ".agent-codespaces" / "launch-policy.json"  # marketplace-isolation: allow legacy compatibility root
 LAUNCH_REFUSED_EXIT = 79
 DEFAULT_TIMEOUT = 20.0
 #: The longest a registered policy may take. agent-bridge's ``launch-check``
@@ -145,7 +149,6 @@ def register(argv: list[str], *, timeout: float = DEFAULT_TIMEOUT) -> None:
         raise ValueError("the policy command must be an absolute path and contain no NUL bytes")
     if not 0 < timeout <= MAX_TIMEOUT:
         raise ValueError(f"timeout must be in (0, {MAX_TIMEOUT:g}] seconds")
-    ensure_runtime_dir()
     if not _exclusive_dir(create=True):
         raise PermissionError(f"{POLICY_FILE.parent} can't be made a directory only this user controls")
     tmp = POLICY_FILE.with_name(f".{POLICY_FILE.name}.{os.getpid()}.tmp")

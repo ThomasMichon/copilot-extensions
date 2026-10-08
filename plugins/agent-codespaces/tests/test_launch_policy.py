@@ -23,6 +23,17 @@ def test_nothing_registered_allows():
     assert lp.refusal("cs") is None
 
 
+def test_the_registration_is_machine_wide_not_per_cell(tmp_path):
+    """Every installation cell (each sets its own AGENT_CODESPACES_HOME) and the
+    bridge read one file, under AGENT_HOME or the home directory."""
+    import subprocess
+
+    code = "from agent_codespaces import launch_policy as lp; print(lp.POLICY_FILE)"
+    env = {**os.environ, "AGENT_HOME": str(tmp_path), "AGENT_CODESPACES_HOME": str(tmp_path / "cell-7")}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == str(tmp_path / ".agent-codespaces" / "launch-policy.json")
+
+
 def test_the_policy_gets_the_request_and_can_allow():
     _policy("import json,sys; r=json.load(sys.stdin); "
             "print(json.dumps({'refuse': None if r == {'schema': 1, 'venue': 'codespace', "

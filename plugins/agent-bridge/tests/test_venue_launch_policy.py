@@ -21,9 +21,10 @@ from agent_bridge.transport import SpawnTarget
 def _no_host_registration(tmp_path, monkeypatch):
     """Point the registration probe at an empty directory (never the real home),
     and the provider registry at an empty one (the PATH stub decides)."""
-    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path / "agent-codespaces"))
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(tmp_path / "providers.d"))
-    return tmp_path / "agent-codespaces"
+    (tmp_path / ".agent-codespaces").mkdir()
+    return tmp_path / ".agent-codespaces"
 
 
 def _check(monkeypatch, *, rc=0, stdout="", stderr="", raises=None, binstub="agent-codespaces"):
@@ -75,7 +76,19 @@ def test_refused_carries_the_policy_reason(monkeypatch):
 def test_no_check_possible_allows_only_without_a_registration(monkeypatch, _no_host_registration, kw):
     _check(monkeypatch, **kw)
     assert vlp.codespace_launch_refusal("cs") is None
-    _no_host_registration.mkdir(parents=True)
+    _no_host_registration.mkdir(parents=True, exist_ok=True)
+    (_no_host_registration / "launch-policy.json").write_text('{"argv": ["x"]}', encoding="utf-8")
+    reason = vlp.codespace_launch_refusal("cs")
+    assert reason and "registered but can't be checked" in reason
+
+
+def test_a_cell_runtime_home_never_hides_the_machine_wide_registration(
+    monkeypatch, tmp_path, _no_host_registration,
+):
+    """One registration gates every launch on the machine: an installation
+    cell's own AGENT_CODESPACES_HOME doesn't move where it is looked for."""
+    _check(monkeypatch, binstub=None)
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path / "cell-7"))
     (_no_host_registration / "launch-policy.json").write_text('{"argv": ["x"]}', encoding="utf-8")
     reason = vlp.codespace_launch_refusal("cs")
     assert reason and "registered but can't be checked" in reason

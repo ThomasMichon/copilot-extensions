@@ -59,16 +59,12 @@ def _unchecked_refusal(why: str) -> str | None:
 
 def _registration_present() -> bool:
     """Whether a launch policy is registered on this machine, judged by its file
-    alone (agent-codespaces' ``RUNTIME_DIR/launch-policy.json``, with the same
-    ``AGENT_CODESPACES_HOME`` / ``AGENT_HOME`` overrides), so it holds whatever
-    agent-codespaces version -- or none -- is currently installed."""
-    override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
-    if override:
-        root = Path(override).expanduser()
-    else:
-        home = os.environ.get("AGENT_HOME", "").strip()
-        root = (Path(home) if home else Path.home()) / ".agent-codespaces"
-    path = root / "launch-policy.json"
+    alone (agent-codespaces' machine-wide ``~/.agent-codespaces/launch-policy.json``,
+    with the same ``AGENT_HOME`` sandbox override -- never a per-cell
+    ``AGENT_CODESPACES_HOME``), so it holds whatever agent-codespaces version --
+    or none -- is currently installed."""
+    home = os.environ.get("AGENT_HOME", "").strip()
+    path = (Path(home) if home else Path.home()) / ".agent-codespaces" / "launch-policy.json"
     try:
         os.lstat(path)
     except FileNotFoundError:

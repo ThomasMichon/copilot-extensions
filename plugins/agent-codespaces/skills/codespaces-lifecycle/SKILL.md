@@ -180,7 +180,10 @@ the session with a `launch_refused` event. `--timeout` is at most 45 seconds
 (the bridge allows that plus cleanup), and a timeout kills the policy's whole
 process tree. The registration is owner-only, `set` pins a bare command to its
 absolute path, and the policy always runs from the registration's directory (so
-pass file arguments as absolute paths). On Windows, where file modes don't
+pass file arguments as absolute paths). The registration is machine-wide:
+`~/.agent-codespaces/launch-policy.json` (under `AGENT_HOME` when set), never a
+per-installation runtime directory, so one registration gates every installed
+agent-codespaces runtime and the bridge alike. On Windows, where file modes don't
 express the ACL, a registration is trusted only inside the user's profile (the
 default location is inside it); `set`/`show` name only the
 command and its argument count -- but a policy's arguments are visible in the

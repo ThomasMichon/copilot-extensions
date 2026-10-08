@@ -80,7 +80,6 @@ def _isolate_launch_policy(monkeypatch, tmp_path):
     from agent_codespaces import launch_policy
 
     monkeypatch.setattr(launch_policy, "POLICY_FILE", tmp_path / "launch-policy.json")
-    monkeypatch.setattr(launch_policy, "ensure_runtime_dir", lambda: None)
     monkeypatch.setattr(launch_policy, "bridge_enforcement", lambda: None)  # no daemon probe
 
 
