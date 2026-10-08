@@ -32,7 +32,9 @@ should stream records rather than collect the iterator.
 
 Missing roots, unreadable or corrupt evidence, unsupported ZIP members,
 invalid UTF-8, invalid bounds, and overlong lines raise explicit exceptions.
-An existing empty directory is the only empty-source success. The opened
+A directory with no supported evidence -- including an existing empty
+directory, one containing only unrelated files, or a ZIP with no supported
+members -- yields no refs; this is ordinary, not an error. The opened
 descriptor must refer to the regular file observed before opening; source
 symlinks and identity replacement during opening are rejected.
 
@@ -40,6 +42,16 @@ An active file can grow during reading. This reader does not assert a settled
 snapshot, checkpoint transfer completion, or authorize deletion. The ingestion
 and compaction owners must record source revisions, reconcile late writes, and
 enforce their separate completeness and retention guarantees.
+
+## Root identity and symlink safety
+
+On POSIX, a ref returned by `iter_process_log_refs` reopens the configured
+root with `O_NOFOLLOW` on every later `iter_lines()` call, rather than
+trusting the root by path name -- so replacing the root with a symlink,
+whether before enumeration or any time after a ref was handed to a caller,
+is rejected rather than silently followed. Windows has no `openat`
+equivalent and keeps the previous path-based behavior; this is a documented
+platform gap, not an equivalent guarantee.
 
 ## See Also
 

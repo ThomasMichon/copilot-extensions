@@ -78,23 +78,6 @@ def test_zip_rejects_nonflat_log_members(tmp_path: Path, name: str) -> None:
         list(iter_process_log_refs(tmp_path))
 
 
-def test_zip_rejects_ambiguous_or_symlink_members(tmp_path: Path) -> None:
-    path = tmp_path / "logs.zip"
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(LOG_NAME, b"one")
-        with pytest.warns(UserWarning, match="Duplicate name"):
-            archive.writestr(LOG_NAME, b"two")
-    with pytest.raises(ValueError, match="duplicate"):
-        list(ProcessLogRef(path, LOG_NAME).iter_lines())
-    link = zipfile.ZipInfo(LOG_NAME)
-    link.create_system = 3
-    link.external_attr = (stat.S_IFLNK | 0o777) << 16
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(link, b"target")
-    with pytest.raises(ValueError, match="symlink"):
-        list(iter_process_log_refs(tmp_path))
-
-
 @pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
 def test_root_swapped_to_symlink_after_configuration_is_rejected(tmp_path: Path) -> None:
     """A deterministic stand-in for the race: once `log_root` names a symlink
@@ -111,6 +94,44 @@ def test_root_swapped_to_symlink_after_configuration_is_rejected(tmp_path: Path)
     # The underlying evidence is reachable directly, proving the rejection is
     # about traversal through the swapped root, not a missing/corrupt file.
     assert "".join(secret.iter_lines()) == "outside evidence"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW directory pinning is POSIX-only")
+def test_root_swapped_after_ref_obtained_is_rejected_on_read(tmp_path: Path) -> None:
+    """A ref returned by `iter_process_log_refs` must re-verify the root at
+    `iter_lines()` time too -- not only during the enumeration call that
+    produced it -- since the two can be arbitrarily far apart in time."""
+    root = tmp_path / "configured"
+    root.mkdir()
+    _write_log(root, "raw", PAYLOAD.encode())
+    refs = list(iter_process_log_refs(root))
+    assert len(refs) == 1
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    same_name_outside = outside / LOG_NAME
+    same_name_outside.write_bytes(b"outside evidence")
+    (root / LOG_NAME).unlink()
+    root.rmdir()
+    root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="not a directory"):
+        list(refs[0].iter_lines())
+
+
+def test_zip_rejects_ambiguous_or_symlink_members(tmp_path: Path) -> None:
+    path = tmp_path / "logs.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(LOG_NAME, b"one")
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr(LOG_NAME, b"two")
+    with pytest.raises(ValueError, match="duplicate"):
+        list(ProcessLogRef(path, LOG_NAME).iter_lines())
+    link = zipfile.ZipInfo(LOG_NAME)
+    link.create_system = 3
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(link, b"target")
+    with pytest.raises(ValueError, match="symlink"):
+        list(iter_process_log_refs(tmp_path))
 
 
 def test_corrupt_and_missing_members_fail_loudly(tmp_path: Path) -> None:

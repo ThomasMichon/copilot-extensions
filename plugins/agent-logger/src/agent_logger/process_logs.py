@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import errno
 import gzip
 import os
 import stat
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
@@ -69,6 +70,12 @@ class ProcessLogRef:
 
     path: Path
     member: str | None = None
+    # Set only by `iter_process_log_refs` on POSIX: the directory this ref's
+    # `path` was discovered directly under, re-opened with O_NOFOLLOW at read
+    # time instead of trusting `path`'s parent component by name. Excluded
+    # from equality/repr so refs built directly (as every existing caller and
+    # test does) keep comparing solely on `(path, member)`.
+    verified_root: Path | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.member is not None:
@@ -87,22 +94,32 @@ class ProcessLogRef:
             raise ValueError("max_line_bytes must be a positive integer")
         if max_line_bytes <= 0:
             raise ValueError("max_line_bytes must be a positive integer")
-        with _open_regular(self.path) as raw:
-            if self.member is not None:
-                with zipfile.ZipFile(raw) as archive:
-                    info = next(
-                        (info for info in _zip_logs(archive) if info.filename == self.member),
-                        None,
-                    )
-                    if info is None:
-                        raise ValueError(f"process-log ZIP member is missing: {self.member!r}")
-                    with archive.open(info) as stream:
-                        yield from _lines(stream, max_line_bytes)
-            elif self.path.suffix == ".gz":
-                with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
+        if self.verified_root is not None and _supports_dir_fd():
+            with (
+                _open_root_dir(self.verified_root) as root_fd,
+                _open_regular_at(root_fd, self.path.name) as raw,
+            ):
+                yield from self._read_opened(raw, max_line_bytes)
+        else:
+            with _open_regular(self.path) as raw:
+                yield from self._read_opened(raw, max_line_bytes)
+
+    def _read_opened(self, raw: BinaryIO, max_line_bytes: int) -> Iterator[str]:
+        if self.member is not None:
+            with zipfile.ZipFile(raw) as archive:
+                info = next(
+                    (info for info in _zip_logs(archive) if info.filename == self.member),
+                    None,
+                )
+                if info is None:
+                    raise ValueError(f"process-log ZIP member is missing: {self.member!r}")
+                with archive.open(info) as stream:
                     yield from _lines(stream, max_line_bytes)
-            else:
-                yield from _lines(raw, max_line_bytes)
+        elif self.path.suffix == ".gz":
+            with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
+                yield from _lines(stream, max_line_bytes)
+        else:
+            yield from _lines(raw, max_line_bytes)
 
 
 def _lines(stream: BinaryIO, max_line_bytes: int) -> Iterator[str]:
@@ -135,11 +152,17 @@ def _open_root_dir(log_root: Path) -> Iterator[int]:
         fd = os.open(log_root, flags)
     except FileNotFoundError:
         raise
-    except OSError as exc:
-        # Covers both a non-directory (NotADirectoryError) and a symlinked
-        # root rejected by O_NOFOLLOW (a bare OSError/ELOOP on POSIX, which
-        # has no dedicated subclass).
+    except NotADirectoryError as exc:
         raise ValueError(f"process-log source is not a directory: {log_root}") from exc
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            # A symlinked root rejected by O_NOFOLLOW: no dedicated subclass
+            # exists for this errno, so it only arrives as a bare OSError.
+            raise ValueError(f"process-log source is not a directory: {log_root}") from exc
+        # Permission errors, I/O errors, descriptor exhaustion, overlong
+        # paths, etc. are genuine, actionable failures -- never relabel them
+        # as "not a directory".
+        raise
     try:
         if not stat.S_ISDIR(os.fstat(fd).st_mode):
             raise ValueError(f"process-log source is not a directory: {log_root}")
@@ -173,13 +196,20 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
     """Enumerate live, gzip, and flat ZIP observations without silently
     deduplicating.
 
-    On POSIX, both the directory listing and the per-ZIP header reads it
-    performs are bound to one directory handle opened and verified up front,
-    so a swap of ``log_root`` itself onto a symlink after that check cannot
-    redirect traversal outside the configured root. Windows has no "openat"
-    equivalent, so there the root is re-resolved by path for each access;
-    this is a known, platform-specific gap rather than an equivalent
-    guarantee.
+    On POSIX, directory listing, per-ZIP header reads, and every later
+    ``ProcessLogRef.iter_lines()`` call on a returned ref all reopen
+    ``log_root`` itself with ``O_NOFOLLOW`` rather than trusting a path
+    component by name -- so a swap of ``log_root`` onto a symlink, whether
+    before enumeration or any time after (including well after a ref was
+    returned), cannot redirect traversal or a later read outside the
+    configured root. Windows has no "openat" equivalent, so there the root
+    is re-resolved by path for each access; this is a known, platform-
+    specific gap rather than an equivalent guarantee.
+
+    A directory with no raw/gzip/ZIP process-log evidence -- including one
+    containing only unrelated files, or a ZIP with no supported members --
+    yields no refs. This is ordinary, not an error: absence of evidence is
+    not evidence of a missing or misconfigured source.
     """
     if _supports_dir_fd():
         with _open_root_dir(log_root) as root_fd:
@@ -187,7 +217,7 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
             for entry in entries:
                 name = entry.name
                 if _is_log_name(name.removesuffix(".gz")):
-                    yield ProcessLogRef(log_root / name)
+                    yield ProcessLogRef(log_root / name, verified_root=log_root)
                 elif name.endswith(".zip"):
                     with _open_regular_at(root_fd, name) as raw, zipfile.ZipFile(raw) as archive:
                         # Resolve member names while the archive is still
@@ -198,7 +228,7 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
                         # generator, which can block rotation/compaction.
                         names = [info.filename for info in _zip_logs(archive)]
                     for member in names:
-                        yield ProcessLogRef(log_root / name, member)
+                        yield ProcessLogRef(log_root / name, member, verified_root=log_root)
         return
     root_stat = log_root.lstat()
     if not stat.S_ISDIR(root_stat.st_mode):
