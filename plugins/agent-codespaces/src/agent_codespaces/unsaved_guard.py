@@ -145,7 +145,10 @@ for g in @ROOT@/*/.git @ROOT@/*/*/.git @ROOT@/*/*/*/.git @EXTRAS@; do
   done < <(git -C "$top" worktree list --porcelain -z 2>/dev/null)
 done
 for p in "${list[@]}"; do
-  st=$(git -C "$p" status --porcelain 2>/dev/null) || { err "$p"; continue; }
+  # Explicit flags so repo config (status.showUntrackedFiles, submodule
+  # ignore) cannot hide work from the audit.
+  st=$(git -C "$p" status --porcelain --untracked-files=all --ignore-submodules=none \
+    2>/dev/null) || { err "$p"; continue; }
   d=0; [ -n "$st" ] && d=1
   a=0
   if git -C "$p" rev-parse -q --verify HEAD >/dev/null 2>&1; then

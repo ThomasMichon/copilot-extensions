@@ -131,6 +131,8 @@ def test_audit_script_covers_nested_repos_and_linked_worktrees(tmp_path):
     assert any(p.endswith("elsewhere/wt") for p in paths)
 
     (linked / "scratch.txt").write_text("unsaved\n")
+    # repo config (shared by the linked worktree) must not hide untracked work
+    _git("config", "status.showUntrackedFiles", "no", cwd=main_repo)
     (nested / "f.txt").write_text("y\n")
     _git("commit", "-qam", "local only", cwd=nested)
     audit = _run_audit(root)
