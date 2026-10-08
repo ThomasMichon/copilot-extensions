@@ -44,6 +44,23 @@ print(value if value is not None else "")
 ' "$1" "$2" 2>/dev/null
 }
 
+# Real-forge-state helpers used by the effort-builder/effort-driver
+# corroboration below. Plain functions (no cd, no subshell) so they can be
+# passed straight to `capture` -- its label.log then holds ONLY the echoed
+# command line (line 1) followed by real command output, never a mix.
+_find_archive_path() {  # <owner/repo> <slug> -- locate the real dated archive dir
+    gh api "repos/$1/git/trees/HEAD?recursive=1" --jq '.tree[] | select(.type=="tree") | .path' \
+        | grep -E "^efforts/[0-9]{4}/[0-9]{2}/.*$2\$"
+}
+
+_fetch_readme() {  # <owner/repo> <dir-path> -- raw README.md content via contents API
+    gh api -H "Accept: application/vnd.github.raw" "repos/$1/contents/$2/README.md"
+}
+
+_list_issues_by_label() {  # <owner/repo> <label> -- sorted issue numbers carrying that label
+    gh issue list --repo "$1" --state all --label "$2" --json number --jq '.[].number' | sort -n
+}
+
 phase 9 "post-check: ground-truth after the orchestrator's turn"
 
 if [ ! -d "$REGISTRAR_DIR" ]; then
@@ -151,21 +168,69 @@ if [ -n "$_remote" ]; then
 
     # Owner/repo derived from the same resolved remote (no hardcoded name).
     _owner_repo="$(printf '%s' "$_remote" | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
+    # capture()'s log always carries an echoed "$ <cmd>" first line ahead of
+    # real output -- diff the RAW post-echo file (a clean, sorted dir
+    # listing with no command text) instead of the human-readable capture
+    # log, and track success explicitly rather than inferring it from the
+    # log file merely existing.
     _efforts_active_after="$CR_LOGDIR/pc-efforts-active-after.log"
-    if capture "pc-efforts-active-after" -- bash -lc "set -o pipefail; gh api 'repos/$_owner_repo/contents/efforts/active' --jq '.[] | select(.type==\"dir\") | .name' | sort"; then
+    _efforts_active_after_raw="$CR_LOGDIR/pc-efforts-active-after.raw.log"
+    _efforts_fetch_ok=0
+    printf '  $ gh api repos/%s/contents/efforts/active --jq (dir names) | sort\n' "$_owner_repo" > "$_efforts_active_after"
+    if gh api "repos/$_owner_repo/contents/efforts/active" --jq '.[] | select(.type=="dir") | .name' 2>>"$_efforts_active_after" | sort > "$_efforts_active_after_raw"; then
+        _efforts_fetch_ok=1
+        cat "$_efforts_active_after_raw" >> "$_efforts_active_after"
+    fi
+    if [ "$_efforts_fetch_ok" = 1 ]; then
         _before_list="${_efforts_active_before:-$CR_LOGDIR/efforts-active-before.log}"
         if [ -f "$_before_list" ]; then
-            _added="$(comm -13 "$_before_list" "$_efforts_active_after" 2>/dev/null | tr '\n' ',' )"
-            _removed="$(comm -23 "$_before_list" "$_efforts_active_after" 2>/dev/null | tr '\n' ',' )"
+            _added="$(comm -13 "$_before_list" "$_efforts_active_after_raw" 2>/dev/null | tr '\n' ',' )"
+            _removed="$(comm -23 "$_before_list" "$_efforts_active_after_raw" 2>/dev/null | tr '\n' ',' )"
             cr_meta "efforts_active_added" "$_added"
             cr_meta "efforts_active_removed" "$_removed"
             if [ -n "$_added" ]; then
                 pass "efforts/active/ gained new effort dir(s) since setup: $_added (real effort-builder evidence)"
+
+                # Plain dir creation doesn't corroborate GROUPING -- derive
+                # the expected issue set from effort-builder's own declared
+                # include_labels (never hardcoded) and confirm the new
+                # effort's real README content actually references them.
+                _builder_decl="$REGISTRAR_DIR/effort-builder.yaml"
+                _builder_label="$([ -f "$_builder_decl" ] && grep -E '^include_labels:' "$_builder_decl" | head -1 | sed -E 's/^include_labels:\s*\[?\s*//; s/\s*\]?\s*$//' | cut -d',' -f1 | tr -d '"'"'"'\r' | sed -E 's/^\s+|\s+$//g')"
+                if [ -n "$_builder_label" ]; then
+                    if capture "pc-builder-expected-issues" -- _list_issues_by_label "$_owner_repo" "$_builder_label"; then
+                        _expected_issues_log="$CR_LOGDIR/pc-builder-expected-issues.log"
+                        _expected_issues="$(sed -n '2,$p' "$_expected_issues_log")"
+                        _expected_issue_count="$(printf '%s\n' "$_expected_issues" | grep -c . || true)"
+                        _first_added_dir="$(printf '%s' "$_added" | tr ',' '\n' | head -1)"
+                        if [ "${_expected_issue_count:-0}" -gt 0 ] && [ -n "$_first_added_dir" ]; then
+                            if capture "pc-builder-readme" -- _fetch_readme "$_owner_repo" "efforts/active/$_first_added_dir"; then
+                                _builder_readme_log="$CR_LOGDIR/pc-builder-readme.log"
+                                _missing_refs=""
+                                while IFS= read -r _n; do
+                                    [ -z "$_n" ] && continue
+                                    grep -Eq "#${_n}([^0-9]|\$)" "$_builder_readme_log" || _missing_refs="$_missing_refs,$_n"
+                                done <<<"$_expected_issues"
+                                if [ -z "$_missing_refs" ]; then
+                                    pass "effort-builder's new effort '$_first_added_dir' README references all ${_expected_issue_count} expected issue(s) labeled '$_builder_label' (real grouping evidence)"
+                                else
+                                    info "effort-builder's new effort '$_first_added_dir' README is missing a reference to issue(s) ${_missing_refs#,} expected from label '$_builder_label'"
+                                fi
+                            else
+                                jam "dispatch-config" "could not read the new effort's README content via the contents API (see cr-logs/pc-builder-readme.log)" "check gh auth/rate limits"
+                            fi
+                        else
+                            info "no issues found under effort-builder's declared label '$_builder_label' (or no new effort dir) -- cannot corroborate grouping"
+                        fi
+                    else
+                        jam "dispatch-config" "could not list issues for effort-builder's declared label '$_builder_label' (see cr-logs/pc-builder-expected-issues.log)" "check gh auth/rate limits"
+                    fi
+                fi
             else
                 info "efforts/active/ gained no new directory since setup -- effort-builder may not have created one (or used an existing effort instead)"
             fi
             if [ -n "$_removed" ]; then
-                pass "efforts/active/ lost dir(s) since setup: $_removed (real effort-driver archive evidence, corroborate against efforts/<year>/<month>/<slug> below)"
+                pass "efforts/active/ lost dir(s) since setup: $_removed (real effort-driver removal evidence, corroborate against a dated efforts/<year>/<month>/ archive below)"
             else
                 info "efforts/active/ lost no directory since setup -- effort-driver may not have archived its effort yet"
             fi
@@ -179,16 +244,35 @@ if [ -n "$_remote" ]; then
     # effort-driver's own declared effort_slugs (read straight from its
     # declaration, not hardcoded) -- confirm that exact slug is now ABSENT
     # from efforts/active/ (archived) rather than merely inferring it from
-    # the generic added/removed diff above.
+    # the generic added/removed diff above, then locate the real dated
+    # archive directory via the repo's own git tree (never guessing the
+    # date prefix) and capture its README content as corroborating evidence
+    # of the actual archive move, not just the slug's disappearance.
     _driver_decl="$REGISTRAR_DIR/effort-driver.yaml"
     if [ -f "$_driver_decl" ]; then
         _driver_slug="$(grep -A5 -E '^effort_slugs:' "$_driver_decl" | grep -E '^\s*-\s' | head -1 | sed -E 's/^\s*-\s*//' | tr -d '"'"'"'\r')"
-        if [ -n "$_driver_slug" ]; then
+        if [ -n "$_driver_slug" ] && [ "$_efforts_fetch_ok" = 1 ]; then
             cr_meta "effort_driver_declared_slug" "$_driver_slug"
-            if grep -qx "$_driver_slug" "$_efforts_active_after" 2>/dev/null; then
+            if grep -qx "$_driver_slug" "$_efforts_active_after_raw" 2>/dev/null; then
                 info "effort-driver's declared slug '$_driver_slug' is STILL under efforts/active/ -- not yet archived"
             else
                 pass "effort-driver's declared slug '$_driver_slug' is no longer under efforts/active/ (archived, per the real contents API read)"
+
+                if capture "pc-archive-tree" -- _find_archive_path "$_owner_repo" "$_driver_slug"; then
+                    _archive_path="$(sed -n '2,$p' "$CR_LOGDIR/pc-archive-tree.log" | head -1)"
+                    if [ -n "$_archive_path" ]; then
+                        cr_meta "effort_driver_archive_path" "$_archive_path"
+                        if capture "pc-archive-readme" -- _fetch_readme "$_owner_repo" "$_archive_path" && [ -s "$CR_LOGDIR/pc-archive-readme.log" ]; then
+                            pass "effort-driver's slug '$_driver_slug' is archived at real dated path '$_archive_path' with non-empty README content (real archive-move evidence)"
+                        else
+                            jam "dispatch-config" "found archive path '$_archive_path' but could not read its README content (see cr-logs/pc-archive-readme.log)" "check gh auth/rate limits"
+                        fi
+                    else
+                        info "slug '$_driver_slug' is gone from efforts/active/ but no matching dated path was found under efforts/<year>/<month>/ -- cannot corroborate the archive move"
+                    fi
+                else
+                    info "could not locate a dated archive path for slug '$_driver_slug' under efforts/<year>/<month>/ (see cr-logs/pc-archive-tree.log) -- cannot corroborate the archive move"
+                fi
             fi
         fi
     fi
