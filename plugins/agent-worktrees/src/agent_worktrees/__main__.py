@@ -727,12 +727,11 @@ def _classify_records(
 
             raw = classify_daemon.classify_with_boot(
                 read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
-                # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
-                # MONITOR=0): booting one just to serve this classify request
-                # would defeat a caller's explicit choice to stay per-session
-                # inline-only. A dial-only attempt (no boot) still runs, so an
-                # already-live monitor from before the opt-out was set is
-                # still used if reachable.
+                # Mandatory-monitor check (see status_monitor_runtime.
+                # _status_monitor_enabled's own docstring -- a TEST/DEBUG-ONLY
+                # override, never a production opt-out). A dial-only attempt
+                # (no boot) still runs regardless, so an already-live monitor
+                # is still used if reachable.
                 ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
                 key=key,
                 payload=payload,
@@ -3007,9 +3006,10 @@ def _monitor_pending_handoff_predecessor_retire(
 
     ``require_monitor_enabled`` gates this to the resident daemon's own
     automatic sweep (default). An explicit, on-demand caller (``handoffs-check``)
-    passes ``False`` -- a manual diagnostic must work even when the background
-    monitor is disabled (``AGENT_WORKTREES_STATUS_MONITOR=0``); that toggle
-    only opts a machine out of *automatic* sweeps, not out of an agent's
+    passes ``False`` -- a manual diagnostic must work even under the test
+    harness's disabled-for-this-test override (see
+    ``status_monitor_runtime._status_monitor_enabled``'s own docstring --
+    never true in a real operator session), not just out of an agent's
     ability to explicitly ask "is this worktree's cutover actually finished?".
     """
     # Stage D: status_monitor_runtime is cluster-free.

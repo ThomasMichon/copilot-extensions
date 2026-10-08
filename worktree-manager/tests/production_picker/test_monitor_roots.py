@@ -7,6 +7,26 @@ import pytest
 from worktree_manager.production_picker import monitor_roots
 
 
+def test_status_monitor_enabled_env_override_has_no_effect_outside_test_harness(monkeypatch):
+    """Mirrors ``agent_worktrees.status_monitor_runtime._status_monitor_
+    enabled``'s own regression test exactly: the resident monitor is
+    mandatory infrastructure, so a value that would disable it under the
+    test harness must have NO effect once ``PYTEST_CURRENT_TEST`` is
+    absent -- i.e. in a real operator session running the Picker."""
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert monitor_roots.status_monitor_enabled() is True
+
+
+def test_status_monitor_enabled_env_override_still_works_under_test_harness(monkeypatch):
+    """The companion guarantee: the env var still works for test isolation
+    as long as ``PYTEST_CURRENT_TEST`` is set -- which pytest sets
+    automatically for every test."""
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "some-test (call)")
+    assert monitor_roots.status_monitor_enabled() is False
+
+
 def test_picker_heartbeat_registers_and_cleans_up(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor_roots, "_roots_dir", lambda: tmp_path)
     heartbeat = monitor_roots.PickerHeartbeat("project-a", interval=60)

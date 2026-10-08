@@ -351,9 +351,11 @@ eligible emitters.
 1. Disable the loop on the old host and confirm no emitter command is in flight.
 2. Move the adopter-owned declaration placement or its top-level
    `filters.permit.machine` authority to the new host.
-3. Release the old emitter lease with
-   `agent-dispatch schedule lease-release repository-issue-loop:<name>
-   --holder <old-holder>` or allow the declared lease to expire.
+3. Use [emitter diagnosis](emitter-recovery.md) against the new source
+   declaration and the target machine identity. Only after confirming a
+   safe migration, explicitly apply its renewal-fenced stale-pin recovery.
+   Do not use an unfenced generic lease release to bypass that check.
+   A lease TTL is observability-only: expiry never transfers this pin.
 4. Register/discover the declaration on the new host, enable it there, and
    confirm `status` shows the new source and worker lane served.
 5. Run `discover`, then inspect visible reservations and the active occurrence

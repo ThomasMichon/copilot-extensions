@@ -55,7 +55,7 @@ def _safe_defaults(monkeypatch, info: DockerContainerInfo) -> None:
     )
     monkeypatch.setattr(
         replacement,
-        "get_container",
+        "_resolve_member_info",
         lambda _config, _name: info,
     )
     monkeypatch.setattr(replacement, "inspect_state", lambda _name: None)
@@ -633,7 +633,7 @@ def test_paused_member_unpauses_before_probe_and_rescue(monkeypatch):
     _safe_defaults(monkeypatch, paused)
     monkeypatch.setattr(
         replacement,
-        "get_container",
+        "_resolve_member_info",
         lambda *_args: next(states),
     )
     calls = []

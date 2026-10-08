@@ -11,7 +11,7 @@ from dataclasses import asdict
 import secrets
 
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, FiniteFloat
 
 from .registrations import RegistrationKind
 from .queue import TaskError, TaskQueue
@@ -26,6 +26,11 @@ class ScheduleLeaseBody(BaseModel):
 class ReleaseLeaseBody(BaseModel):
     holder: str
     force: bool = False
+
+
+class ObservedReleaseLeaseBody(BaseModel):
+    holder: str
+    expected_renewed_at: FiniteFloat
 
 
 class AcquireResourceReservationBody(BaseModel):
@@ -205,6 +210,16 @@ def register_registry_routes(
     def release_lease(scope: str, body: ReleaseLeaseBody) -> dict:
         try:
             released = queue.release_schedule_lease(scope, body.holder, force=body.force)
+        except TaskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"released": released, "scope": scope}
+
+    @app.post("/schedule-leases/{scope}/release-observed")
+    def release_observed_lease(scope: str, body: ObservedReleaseLeaseBody) -> dict:
+        try:
+            released = queue.release_schedule_lease(
+                scope, body.holder, expected_renewed_at=body.expected_renewed_at,
+            )
         except TaskError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"released": released, "scope": scope}

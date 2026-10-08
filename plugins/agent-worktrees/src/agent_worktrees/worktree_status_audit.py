@@ -752,11 +752,10 @@ def cmd_worktree_status_audit(args: argparse.Namespace) -> int:
     rng = random.Random(seed) if seed is not None else random.Random()
 
     # Mirror `session_tracking_cli.cmd_worktree_status_bundle`'s own
-    # daemon-first opt-out check exactly: this audit's daemon probe uses
-    # the same production boot path, so it must honor the same opt-out
-    # (`AGENT_WORKTREES_STATUS_MONITOR=0`) that disables the resident
-    # monitor -- an operator who's turned it off deliberately should never
-    # have this audit spawn one anyway.
+    # production boot path exactly: this audit's daemon probe must honor
+    # the same mandatory-monitor check (see
+    # `status_monitor_runtime._status_monitor_enabled`'s own docstring --
+    # always True outside the test harness).
     ensure_monitor = status_monitor_runtime._ensure_status_monitor if status_monitor_runtime._status_monitor_enabled() else None
 
     report = run_audit(

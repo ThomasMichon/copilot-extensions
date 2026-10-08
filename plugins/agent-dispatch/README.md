@@ -638,6 +638,9 @@ lookback window without double-creating.
 
 ### Periodic command emitters (`agent-dispatch emitter`)
 
+For election-versus-production diagnostics and explicit renewal-fenced
+migration recovery, see [Emitter recovery](docs/emitter-recovery.md).
+
 A domain producer that exposes an idempotent one-shot command can be declared as
 an **emitter** and run on a cadence by the singleton supervisor. The supervisor
 owns the process lifetime; the emitter loop owns the interval and a

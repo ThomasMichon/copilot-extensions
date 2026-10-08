@@ -1,6 +1,6 @@
 {
   "name": "agent-dispatch",
-  "version": "0.12.9-dev1",
+  "version": "0.12.10-dev1",
   "description": "Portable durable agent task-loop + per-host coordinator. A single-writer, WAL-mode SQLite work queue with a nine-state model (proposed/queued/claimed/started/suspended/submitted/completed/abandoned/dead_letter), capability-gated atomic claim, affinity routing, and liveness-reconciled recovery (actively held tasks garbage-collected against live workers, no lease TTL) -- so full-auto agents coordinate without origin/master push latency or a dedicated account per agent. Tasks are graduated context-handoffs (prompt + Markdown payload).",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",

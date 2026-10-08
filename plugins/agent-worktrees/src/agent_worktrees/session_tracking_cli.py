@@ -614,8 +614,10 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
     )
     bundle = worktree_status_daemon.status_with_boot(
         read_lock_data=lambda: _locks.read_lock(lock),
-        # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
-        # MONITOR=0), same as `_classify_records`'s own daemon fast path.
+        # Mandatory-monitor check (see status_monitor_runtime.
+        # _status_monitor_enabled's own docstring -- a TEST/DEBUG-ONLY
+        # override, never a production opt-out), same as `_classify_records`'s
+        # own daemon fast path.
         ensure_monitor=ensure_monitor,
         key=worktree_status_daemon.coalescing_key(project, worktree_id),
         payload=payload,

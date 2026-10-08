@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 
+import pytest
+
 from agent_containers import __main__ as cli
 from agent_containers import fleet as fleet_mod
 from agent_containers.config import ContainersConfig
@@ -58,6 +60,12 @@ def test_down_json_distinguishes_unchanged_and_deferred(monkeypatch, capsys):
 # --- stop/remove (single-container, picker-venue-pivots Phase 2) ----------
 # Implemented in lifecycle.py (cmd_stop/cmd_remove); __main__.py's dispatch
 # is a thin call-through, kept out of __main__.py's own module-size budget.
+#
+# Both routes through the identical restricted-member rescue path
+# `down <fleet>`/`rm <fleet>` already apply per-member (session-rescue-parity
+# follow-up, #session-coverage-audit-8169-adjacent) -- a single-container
+# stop/remove must never be a cheaper way to skip the evidence-rescue
+# safety net the fleet-wide commands enforce.
 
 def test_stop_refuses_a_leased_container(monkeypatch, capsys):
     import agent_containers.lease as lease
@@ -67,19 +75,37 @@ def test_stop_refuses_a_leased_container(monkeypatch, capsys):
         effort = "3bac"
 
     monkeypatch.setattr(lease, "get_lease", lambda name: _Lease())
-    rc = cmd_stop("box-1")
+    rc = cmd_stop(ContainersConfig(), "box-1")
     assert rc == 1
     assert "leased to 3bac" in capsys.readouterr().err
 
 
-def test_stop_calls_stop_container_when_unleased(monkeypatch, capsys):
+def _untracked_inspect_doc(name: str = "box-1") -> dict:
+    """A successful docker inspect for a genuinely non-fleet, non-restricted
+    container -- no labels at all. Used so the untracked-container tests
+    exercise a real (mocked) successful inspection, per review feedback,
+    rather than conflating 'container not found by discovery' with
+    'inspection itself failed' (the latter must propagate, never fall
+    through to a bare destructive call -- see the dedicated
+    inspection-failure tests below)."""
+    return {
+        "Id": f"{name}-instance",
+        "Name": f"/{name}",
+        "State": {"Status": "running"},
+        "Config": {"Image": "img", "Labels": {}},
+    }
+
+
+def test_stop_calls_stop_container_when_unleased_and_untracked(monkeypatch, capsys):
     import agent_containers.lease as lease
     import agent_containers.lifecycle as lifecycle
 
     monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda name: _untracked_inspect_doc(name))
     seen = []
     monkeypatch.setattr(lifecycle, "stop_container", lambda name: seen.append(name))
-    rc = lifecycle.cmd_stop("box-1")
+    rc = lifecycle.cmd_stop(ContainersConfig(), "box-1")
     assert rc == 0
     assert seen == ["box-1"]
     assert "Stopped: box-1" in capsys.readouterr().out
@@ -90,14 +116,342 @@ def test_stop_surfaces_lifecycle_errors(monkeypatch, capsys):
     import agent_containers.lifecycle as lifecycle
 
     monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda name: _untracked_inspect_doc(name))
 
     def _boom(name):
         raise RuntimeError(f"docker stop {name} failed: boom")
 
     monkeypatch.setattr(lifecycle, "stop_container", _boom)
-    rc = lifecycle.cmd_stop("box-1")
+    rc = lifecycle.cmd_stop(ContainersConfig(), "box-1")
     assert rc == 1
     assert "boom" in capsys.readouterr().err
+
+
+def test_stop_propagates_an_inspection_failure_instead_of_falling_back(monkeypatch):
+    """A genuine inspection failure (timeout, invalid JSON, docker
+    unreachable) must propagate -- main()'s top-level RuntimeError handler
+    reports it as a real failure -- never be swallowed into "no info,
+    assume safe" and fall through to an unrescued bare stop_container."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+
+    def _boom(name):
+        raise RuntimeError(f"docker inspect {name} failed: timed out")
+
+    monkeypatch.setattr(lifecycle, "inspect_container", _boom)
+
+    def _bare_stop_should_not_run(name):
+        raise AssertionError("bare stop_container must not run after an inspection failure")
+
+    monkeypatch.setattr(lifecycle, "stop_container", _bare_stop_should_not_run)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        lifecycle.cmd_stop(ContainersConfig(), "box-1")
+
+
+def test_stop_routes_a_restricted_running_member_through_rescue(monkeypatch, capsys):
+    """A restricted member must be stopped via `stop_restricted_member`
+    (the rescue-gated path), never the bare `stop_container` call -- parity
+    with `down <fleet>`'s own per-member admission check."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+    from agent_containers.replacement import DestructiveResult
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="running",
+        status="Up", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_stop_should_not_run(name):
+        raise AssertionError("bare stop_container must not run for a restricted member")
+
+    monkeypatch.setattr(lifecycle, "stop_container", _bare_stop_should_not_run)
+
+    import agent_containers.replacement as replacement
+    calls = []
+
+    def _fake_stop_restricted_member(config, fleet, info, *, force_abandon):
+        calls.append((fleet, info.name, force_abandon))
+        return DestructiveResult(name=info.name, status="stopped")
+
+    monkeypatch.setattr(replacement, "stop_restricted_member", _fake_stop_restricted_member)
+
+    config = ContainersConfig()
+    fleet = FleetConfig(security_profile="restricted")
+    config.fleets["sandbox"] = fleet
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 0
+    assert calls == [(fleet, "box-1", False)]
+    assert "Stopped: box-1" in capsys.readouterr().out
+
+
+def test_stop_defers_a_restricted_looking_member_with_no_matching_fleet(monkeypatch, capsys):
+    """Mirrors down_fleet's exact admission check: a container that LOOKS
+    restricted but has no matching restricted fleet in the current config
+    is deferred -- never silently stopped (and never rescued) unrescued."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="running",
+        status="Up", labels={}, fleet=None, security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_stop_should_not_run(name):
+        raise AssertionError("bare stop_container must not run for an unmatched restricted member")
+
+    monkeypatch.setattr(lifecycle, "stop_container", _bare_stop_should_not_run)
+
+    rc = lifecycle.cmd_stop(ContainersConfig(), "box-1")
+
+    assert rc == 75
+    assert "no matching restricted fleet configuration" in capsys.readouterr().err
+
+
+def test_stop_reports_existing_capture_for_an_already_stopped_restricted_member(monkeypatch, capsys):
+    """Mirrors down_fleet's own accounting (#5667 review finding): an
+    already-stopped restricted member with a verified capture on record is
+    reported stopped without re-recording a telemetry loss."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    import agent_containers.rescue as rescue
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda cid: {"State": {}})
+    monkeypatch.setattr(rescue, "container_generation", lambda doc: "gen-1")
+    monkeypatch.setattr(
+        rescue, "verified_capture_for_instance",
+        lambda container, instance, generation: {"capture_id": "x"},
+    )
+
+    def _record_should_not_run(**kwargs):
+        raise AssertionError("record_telemetry_loss must not run when a verified capture exists")
+
+    monkeypatch.setattr(rescue, "record_telemetry_loss", _record_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 0
+    assert "already stopped" in capsys.readouterr().out
+
+
+def test_stop_records_telemetry_loss_when_no_capture_exists_for_an_already_stopped_member(monkeypatch, capsys):
+    """Same scenario with no verified capture on record -- the loss must be
+    explicitly recorded, not silently reported as a clean stop."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    import agent_containers.rescue as rescue
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda cid: {"State": {}})
+    monkeypatch.setattr(rescue, "container_generation", lambda doc: "gen-1")
+    monkeypatch.setattr(
+        rescue, "verified_capture_for_instance",
+        lambda container, instance, generation: None,
+    )
+    calls = []
+    monkeypatch.setattr(rescue, "record_telemetry_loss", lambda **kwargs: calls.append(kwargs))
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 0
+    assert calls == [{
+        "container": "box-1",
+        "container_instance": "abc123",
+        "container_generation": "gen-1",
+        "reason": "already_stopped",
+    }]
+    assert "already stopped" in capsys.readouterr().out
+
+
+def test_stop_defers_a_restricted_member_in_a_nonterminal_state(monkeypatch, capsys):
+    """A restricted member that is paused/restarting/etc (anything other
+    than running, exited, or created) must be deferred, never passed to
+    the bare stop_container fallback -- it has no safe rescue path (the
+    liveness probe assumes a running container) and down_fleet itself
+    defers these states rather than guessing."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="paused",
+        status="Paused", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_stop_should_not_run(name):
+        raise AssertionError("bare stop_container must not run for a paused restricted member")
+
+    monkeypatch.setattr(lifecycle, "stop_container", _bare_stop_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 75
+    assert "not safely stoppable" in capsys.readouterr().err
+
+
+def test_stop_rescues_a_restricted_member_discovery_filtering_misses(monkeypatch, capsys):
+    """get_container (via fleet-membership discovery filtering) can return
+    None for a container that still carries a real restricted
+    security-profile label -- e.g. no fleet/devcontainer label and no
+    matching image prefix. cmd_stop must independently inspect the named
+    target rather than treating 'no info' as 'safe to bare-stop'."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(
+        lifecycle,
+        "inspect_container",
+        lambda name: {
+            "Id": "abc123",
+            "Name": "/box-1",
+            "State": {"Status": "running"},
+            "Config": {
+                "Image": "img",
+                "Labels": {
+                    "agent-containers.fleet": "sandbox",
+                    "agent-containers.security-profile": "restricted",
+                },
+            },
+        },
+    )
+
+    def _bare_stop_should_not_run(name):
+        raise AssertionError("bare stop_container must not run for a discovery-missed restricted member")
+
+    monkeypatch.setattr(lifecycle, "stop_container", _bare_stop_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    import agent_containers.replacement as replacement
+    calls = []
+    monkeypatch.setattr(
+        replacement, "stop_restricted_member",
+        lambda config, fleet, info, *, force_abandon: _record_and_stop(calls, info),
+    )
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 0
+    assert calls == ["box-1"]
+    assert "Stopped: box-1" in capsys.readouterr().out
+
+
+def _record_and_stop(calls, info):
+    from agent_containers.replacement import DestructiveResult
+    calls.append(info.name)
+    return DestructiveResult(name=info.name, status="stopped")
+
+
+def test_stop_resolves_fleet_by_configured_name_prefix_when_label_absent(monkeypatch, capsys):
+    """A container discovered with fleet=None (e.g. image-prefix discovery,
+    no explicit fleet label) but whose name matches a configured fleet's
+    name_prefix convention must still be recognized as that fleet's
+    member -- the same membership _fleet_members (fleet.py) applies for
+    down/rm."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="sandbox-1", container_id="abc123", image="img", state="running",
+        status="Up", labels={}, fleet=None, security_profile="unknown",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_stop_should_not_run(name):
+        raise AssertionError("bare stop_container must not run for a prefix-matched restricted fleet member")
+
+    monkeypatch.setattr(lifecycle, "stop_container", _bare_stop_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    import agent_containers.replacement as replacement
+    calls = []
+    monkeypatch.setattr(
+        replacement, "stop_restricted_member",
+        lambda config, fleet, info, *, force_abandon: _record_and_stop(calls, info),
+    )
+
+    rc = lifecycle.cmd_stop(config, "sandbox-1")
+
+    assert rc == 0
+    assert calls == ["sandbox-1"]
+
+
+def test_stop_reports_busy_exit_when_rescue_defers(monkeypatch, capsys):
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+    from agent_containers.replacement import DestructiveResult
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="running",
+        status="Up", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    import agent_containers.replacement as replacement
+    monkeypatch.setattr(
+        replacement, "stop_restricted_member",
+        lambda *_a, **_k: DestructiveResult(name="box-1", status="deferred", reason="active session"),
+    )
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    rc = lifecycle.cmd_stop(config, "box-1")
+
+    assert rc == 75
+    assert "active session" in capsys.readouterr().err
 
 
 def test_remove_refuses_a_leased_container(monkeypatch, capsys):
@@ -108,26 +462,272 @@ def test_remove_refuses_a_leased_container(monkeypatch, capsys):
         effort = "3bac"
 
     monkeypatch.setattr(lease, "get_lease", lambda name: _Lease())
-    rc = cmd_remove("box-1", force=False)
+    rc = cmd_remove(ContainersConfig(), "box-1", force=False)
     assert rc == 1
     assert "leased to 3bac" in capsys.readouterr().err
 
 
-def test_remove_calls_remove_container_when_unleased(monkeypatch, capsys):
+def test_remove_calls_remove_container_when_unleased_and_untracked(monkeypatch, capsys):
     import agent_containers.lease as lease
     import agent_containers.lifecycle as lifecycle
 
     monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda name: _untracked_inspect_doc(name))
     seen = []
     monkeypatch.setattr(
         lifecycle,
         "remove_container",
         lambda name, force=False: seen.append((name, force)),
     )
-    rc = lifecycle.cmd_remove("box-1", force=True)
+    rc = lifecycle.cmd_remove(ContainersConfig(), "box-1", force=True)
     assert rc == 0
     assert seen == [("box-1", True)]
     assert "Removed: box-1" in capsys.readouterr().out
+
+
+def test_remove_propagates_an_inspection_failure_instead_of_falling_back(monkeypatch):
+    """Mirrors the stop-side inspection-failure test for remove."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+
+    def _boom(name):
+        raise RuntimeError(f"docker inspect {name} failed: timed out")
+
+    monkeypatch.setattr(lifecycle, "inspect_container", _boom)
+
+    def _bare_remove_should_not_run(name, force=False):
+        raise AssertionError("bare remove_container must not run after an inspection failure")
+
+    monkeypatch.setattr(lifecycle, "remove_container", _bare_remove_should_not_run)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        lifecycle.cmd_remove(ContainersConfig(), "box-1", force=True)
+
+
+def test_remove_routes_a_restricted_member_through_rescue(monkeypatch, capsys):
+    """Mirrors the stop-side test: a restricted member's removal must go
+    through `destroy_restricted_member` (rescue-then-remove), never the bare
+    `remove_container` call."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+    from agent_containers.replacement import DestructiveResult
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_remove_should_not_run(name, force=False):
+        raise AssertionError("bare remove_container must not run for a restricted member")
+
+    monkeypatch.setattr(lifecycle, "remove_container", _bare_remove_should_not_run)
+
+    import agent_containers.replacement as replacement
+    calls = []
+
+    def _fake_destroy_restricted_member(config, fleet, info, *, operation, force_remove, force_abandon, migrating=False):
+        calls.append((fleet, info.name, operation, force_remove, migrating))
+        return DestructiveResult(name=info.name, status="removed")
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", _fake_destroy_restricted_member)
+
+    config = ContainersConfig()
+    fleet = FleetConfig(security_profile="restricted")
+    config.fleets["sandbox"] = fleet
+
+    rc = lifecycle.cmd_remove(config, "box-1", force=True)
+
+    assert rc == 0
+    assert calls == [(fleet, "box-1", "remove", True, False)]
+    assert "Removed: box-1" in capsys.readouterr().out
+
+
+def test_remove_defers_a_restricted_looking_member_with_no_matching_fleet(monkeypatch, capsys):
+    """Same no-matching-fleet admission check as the stop side."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet=None, security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_remove_should_not_run(name, force=False):
+        raise AssertionError("bare remove_container must not run for an unmatched restricted member")
+
+    monkeypatch.setattr(lifecycle, "remove_container", _bare_remove_should_not_run)
+
+    rc = lifecycle.cmd_remove(ContainersConfig(), "box-1", force=True)
+
+    assert rc == 75
+    assert "no matching restricted fleet configuration" in capsys.readouterr().err
+
+
+def test_remove_rescues_a_restricted_member_discovery_filtering_misses(monkeypatch, capsys):
+    """Mirrors the stop-side discovery-filtering-bypass test: get_container
+    returning None must not be treated as 'safe to bare-remove' when a raw
+    docker inspect shows a real restricted security-profile label."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: None)
+    monkeypatch.setattr(
+        lifecycle,
+        "inspect_container",
+        lambda name: {
+            "Id": "abc123",
+            "Name": "/box-1",
+            "State": {"Status": "exited"},
+            "Config": {
+                "Image": "img",
+                "Labels": {
+                    "agent-containers.fleet": "sandbox",
+                    "agent-containers.security-profile": "restricted",
+                },
+            },
+        },
+    )
+
+    def _bare_remove_should_not_run(name, force=False):
+        raise AssertionError("bare remove_container must not run for a discovery-missed restricted member")
+
+    monkeypatch.setattr(lifecycle, "remove_container", _bare_remove_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    import agent_containers.replacement as replacement
+    calls = []
+    monkeypatch.setattr(
+        replacement, "destroy_restricted_member",
+        lambda config, fleet, info, *, operation, force_remove, force_abandon, migrating=False: _append_and_remove(calls, info),
+    )
+
+    rc = lifecycle.cmd_remove(config, "box-1", force=True)
+
+    assert rc == 0
+    assert calls == ["box-1"]
+
+
+def test_remove_resolves_fleet_by_configured_name_prefix_when_label_absent(monkeypatch, capsys):
+    """Mirrors the stop-side name-prefix-resolution test for remove."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="sandbox-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet=None, security_profile="unknown",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_remove_should_not_run(name, force=False):
+        raise AssertionError("bare remove_container must not run for a prefix-matched restricted fleet member")
+
+    monkeypatch.setattr(lifecycle, "remove_container", _bare_remove_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+
+    import agent_containers.replacement as replacement
+    calls = []
+    monkeypatch.setattr(
+        replacement, "destroy_restricted_member",
+        lambda config, fleet, info, *, operation, force_remove, force_abandon, migrating=False: _append_and_remove(calls, info),
+    )
+
+    rc = lifecycle.cmd_remove(config, "sandbox-1", force=True)
+
+    assert rc == 0
+    assert calls == ["sandbox-1"]
+
+
+def _append_and_remove(calls, info):
+    from agent_containers.replacement import DestructiveResult
+    calls.append(info.name)
+    return DestructiveResult(name=info.name, status="removed")
+
+
+def test_remove_passes_migrating_true_for_a_drifted_restricted_member(monkeypatch, capsys):
+    """A container whose OWN discovered profile is restricted, under a fleet
+    whose current containers.yaml config has since relaxed to trusted, must
+    still be rescued -- with migrating=True (the same conformance-skip
+    `remove_fleet`'s profile-drift path uses)."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+    from agent_containers.replacement import DestructiveResult
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet="sandbox", security_profile="restricted",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="trusted")
+
+    import agent_containers.replacement as replacement
+    calls = []
+
+    def _fake_destroy_restricted_member(config, fleet, info, *, operation, force_remove, force_abandon, migrating=False):
+        calls.append(migrating)
+        return DestructiveResult(name=info.name, status="removed")
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", _fake_destroy_restricted_member)
+
+    rc = lifecycle.cmd_remove(config, "box-1", force=False)
+
+    assert rc == 0
+    assert calls == [True]
+
+
+def test_remove_defers_a_drifted_member_with_no_supported_migration_path(monkeypatch, capsys):
+    """A container whose OWN discovered profile is neither 'restricted' nor
+    matching the fleet's current config (e.g. an unlabeled/'unknown' legacy
+    member) has no safe migration path and must be deferred for manual
+    recreation -- never silently removed unrescued."""
+    import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
+    from agent_containers.config import FleetConfig
+    from agent_containers.lifecycle import DockerContainerInfo
+
+    monkeypatch.setattr(lease, "get_lease", lambda name: None)
+    info = DockerContainerInfo(
+        name="box-1", container_id="abc123", image="img", state="exited",
+        status="Exited", labels={}, fleet="sandbox", security_profile="unknown",
+    )
+    monkeypatch.setattr(lifecycle, "get_container", lambda config, name: info)
+
+    def _bare_remove_should_not_run(name, force=False):
+        raise AssertionError("bare remove_container must not run for a drifted-unknown member")
+
+    monkeypatch.setattr(lifecycle, "remove_container", _bare_remove_should_not_run)
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="trusted")
+
+    rc = lifecycle.cmd_remove(config, "box-1", force=True)
+
+    assert rc == 75
+    assert "no supported migration path" in capsys.readouterr().err
 
 
 def test_append_copilot_args_is_noop_without_extra_args():
