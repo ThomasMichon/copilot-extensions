@@ -24,7 +24,13 @@ didn't issue, or a registration that isn't valid.
   `request_input` form as `input` (submit it with `agent-dispatch steer
   submit`). An operator hold (`hold_reason`) is `blocked`; a completion claim
   awaiting confirmation (`submitted`) is `review`. `completed` is never an item.
-  One item per task, the worst condition winning. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`.
+  One item per task, the worst condition winning. A lane that isn't draining
+  (the coordinator's `backlog`) is one `stalled` item per repo (`entity: queue`):
+  its oldest queued task waited longer than
+  `AGENT_DISPATCH_ATTENTION_QUEUED_AFTER_SECS`, or a **live** owner made no
+  progress for longer than `AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS`
+  (both strictly greater, default 1800; `0` turns that half off). Held tasks
+  whose owner is `unknown` or `gone` never count. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`.
 - **Command sources**: a command registered on this machine
   (`attention source add`, stored beside the coordinator's install as
   `attention-sources.json`) under a name that is its identity: unique,

@@ -284,8 +284,8 @@ def test_a_registration_under_a_builtin_name_is_rejected_not_listed(tmp_path):
 
 
 class _Client:
-    def __init__(self, tasks):
-        self.tasks = tasks
+    def __init__(self, tasks, backlogs=None):
+        self.tasks, self.backlogs = tasks, backlogs or {}
 
     def __enter__(self):
         return self
@@ -295,6 +295,40 @@ class _Client:
 
     def list(self, **_kw):
         return self.tasks
+
+    def health(self, repo=None):
+        return {"backlog": self.backlogs.get(repo, {})}
+
+
+def _lane(age_queued=None, age_held=None, **counts):
+    return {"queued": 1, "held_live": 0, "held_unknown": 0, "held_gone": 0,
+            "oldest_queued_age": age_queued, "oldest_held_live_age": age_held, **counts}
+
+
+@pytest.mark.parametrize("backlog,stalled", [
+    (_lane(age_queued=1800), False),           # exactly the threshold is not stalled
+    (_lane(age_queued=1801), True),            # one second over is
+    (_lane(age_held=1801, held_live=1), True),  # a live owner stopped progressing
+    (_lane(held_unknown=3, held_gone=2), False),  # unknown/gone owners never count
+])
+def test_a_lane_that_isnt_draining_is_one_stalled_queue_item(monkeypatch, backlog, stalled):
+    monkeypatch.delenv(srcs.QUEUED_AFTER_ENV, raising=False)
+    monkeypatch.delenv(srcs.HELD_LIVE_AFTER_ENV, raising=False)
+    tasks = [{"id": "q1", "title": "x", "status": "queued", "repo": "o/r"}]
+    result = srcs.read_dispatch(lambda: _Client(tasks, {"o/r": backlog}), T1)
+    queue = [i for i in result["items"] if i["entity"] == "queue"]
+    assert bool(queue) is stalled
+    if stalled:
+        (item,) = queue
+        assert (item["entity_ref"], item["display_state"], item["lifecycle_state"]) == ("o/r", "stalled", None)
+        ac.validate_item({**item, "created_at": T1})
+
+
+def test_a_zero_threshold_turns_that_half_off(monkeypatch):
+    monkeypatch.setenv(srcs.QUEUED_AFTER_ENV, "0")
+    tasks = [{"id": "q1", "title": "x", "status": "queued", "repo": "o/r"}]
+    result = srcs.read_dispatch(lambda: _Client(tasks, {"o/r": _lane(age_queued=99999)}), T1)
+    assert not [i for i in result["items"] if i["entity"] == "queue"]
 
 
 def _cli(monkeypatch, capsys, argv, tasks=()):

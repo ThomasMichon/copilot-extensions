@@ -81,6 +81,39 @@ def _task_item(task: dict[str, Any], read_at: str,
 #: The most open tasks one read fetches. A read that hits it may have missed
 #: older tasks, so it says so (``uncertain``) rather than claiming a full queue.
 DISPATCH_READ_LIMIT = 5000
+#: Buildup thresholds (seconds; strictly greater counts; ``0`` turns that half off).
+QUEUED_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_QUEUED_AFTER_SECS"
+HELD_LIVE_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS"
+DEFAULT_STALLED_AFTER = 1800.0
+
+
+def _threshold(env: str) -> float:
+    try:
+        value = float(os.environ.get(env, DEFAULT_STALLED_AFTER))
+    except ValueError:
+        return DEFAULT_STALLED_AFTER
+    return value if value >= 0 else DEFAULT_STALLED_AFTER
+
+
+def _queue_item(repo: str, backlog: dict[str, Any], read_at: str, cli: tuple[str, ...]) -> dict[str, Any] | None:
+    """An undraining lane (the vision's *buildup-is-a-health-signal*): the oldest
+    queued task waited too long, or a **live** owner stopped progressing. Held
+    tasks whose owner is ``unknown`` or ``gone`` never count."""
+    queued_after, held_after = _threshold(QUEUED_AFTER_ENV), _threshold(HELD_LIVE_AFTER_ENV)
+    queued_age, held_age = backlog.get("oldest_queued_age"), backlog.get("oldest_held_live_age")
+    queued_stalled = bool(queued_after) and isinstance(queued_age, (int, float)) and queued_age > queued_after
+    held_stalled = bool(held_after) and isinstance(held_age, (int, float)) and held_age > held_after
+    if not (queued_stalled or held_stalled):
+        return None
+    reason = (f"{repo} isn't draining: {backlog.get('queued', 0)} queued (oldest {queued_age or 0:.0f}s), "
+              f"{backlog.get('held_live', 0)} held live (oldest without progress {held_age or 0:.0f}s)")
+    return {
+        "schema": ac.SCHEMA, "entity": "queue", "entity_ref": repo, "lifecycle_state": None,
+        "display_state": "stalled", "severity": ac.SEVERITY["stalled"], "reason": ac.one_line(reason),
+        "created_at": None, "updated_at": read_at, "confidence": "reported",
+        "actions": [{"verb": "show", "argv": [*cli, "list", "--repo", repo, "--status", "queued,claimed,started"]}],
+        "source": "dispatch", "id": ac.make_id("dispatch", "queue", repo), "also": [],
+    }
 
 
 def read_dispatch(client_factory: Callable[[], Any], read_at: str,
@@ -88,7 +121,11 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   cli: tuple[str, ...] = ("agent-dispatch",)) -> dict[str, Any]:
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
+        lanes = sorted({t["repo"] for t in tasks
+                        if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
+        backlogs = {repo: (client.health(repo=repo) or {}).get("backlog") or {} for repo in lanes}
     items = [i for i in (_task_item(t, read_at, cli) for t in tasks) if i]
+    items += [i for i in (_queue_item(r, b, read_at, cli) for r, b in backlogs.items()) if i]
     if len(tasks) >= limit:
         return {"items": items, "status": "uncertain", "uncertain": 1, "read_at": read_at}
     return {"items": items, "status": "ok", "uncertain": 0, "read_at": read_at}
