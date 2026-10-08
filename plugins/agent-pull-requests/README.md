@@ -47,6 +47,11 @@ joining each have a five-second deadline; exceeding either raises an explicit
 error rather than reporting a completed graceful shutdown. Pending subscriptions
 are retained, not cleared by shutdown.
 
+`serve restart` probes actual lease availability for up to twenty seconds
+before starting its successor. If the predecessor still owns the lease, restart
+fails without spawning another daemon. After starting, restart requires a live
+health response within ten seconds; a stale rendezvous file is not readiness.
+
 This is the drain boundary for the existing on-demand stop/restart path, not a
 zero-downtime active/passive rollout. See the shared
 [graceful cutover pattern](../../docs/patterns/graceful-daemon-cutover.md)

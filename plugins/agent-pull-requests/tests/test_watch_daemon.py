@@ -351,3 +351,52 @@ def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
         assert lifecycle == [
             "acquire", "close-admission", "stop-listener", "drain", "drain", "join", "release",
         ]
+
+
+@pytest.mark.parametrize("lease_stuck", [False, True])
+def test_restart_waits_for_lease_and_live_health(lease_stuck, tmp_path, monkeypatch):
+    import single_instance_lease
+    from agent_pull_requests import __main__ as cli, watch_daemon
+
+    now = [0.0]
+    booted = []
+    health_checks = []
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    class Lease:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def acquire(self):
+            if lease_stuck or now[0] < 11:
+                raise single_instance_lease.AlreadyRunningError(tmp_path / "lease", 123)
+
+        def release(self):
+            assert now[0] >= 11
+
+    def request(kind, payload, **kwargs):
+        assert kwargs == {"boot_wait_s": 0.0, "boot": False}
+        if kind == "shutdown":
+            return {"shutting_down": True}
+        health_checks.append(now[0])
+        return {"pid": 456} if now[0] >= 12 else {"error": "not reachable"}
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
+    monkeypatch.setattr(watch_daemon, "read_lock_data", lambda: {"pid": 123})
+    monkeypatch.setattr(cli, "_watch_request", request)
+    monkeypatch.setattr(cli, "_watch_dial", lambda: ("localhost", 1234, "stale"))
+    monkeypatch.setattr(cli, "_watch_boot", lambda: booted.append(now[0]))
+    monkeypatch.setattr(cli.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(cli.time, "sleep", sleep)
+
+    result = cli._cmd_serve_restart(SimpleNamespace(json=True))
+    if lease_stuck:
+        assert result == 1
+        assert not booted
+        assert not health_checks
+    else:
+        assert result == 0
+        assert len(booted) == 1 and booted[0] >= 11
+        assert health_checks[0] < 12 <= health_checks[-1]
