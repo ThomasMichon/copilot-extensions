@@ -125,6 +125,8 @@ _AUDIT_SCRIPT = r"""
 shopt -s nullglob dotglob 2>/dev/null
 declare -A seen common
 list=()
+wl=$(mktemp) || exit 1
+trap 'rm -f "$wl"' EXIT
 err() { printf 'CHECKOUT_ERR\t%s\n' "$1"; }
 add() {
   case "$1" in *$'\n'*|*$'\t'*) err unsafe-path; return 0;; esac
@@ -136,13 +138,13 @@ for g in @ROOT@/*/.git @ROOT@/*/*/.git @ROOT@/*/*/*/.git @EXTRAS@; do
   [ -e "$g" ] || continue
   top=$(git -C "$(dirname "$g")" rev-parse --show-toplevel 2>/dev/null) \
     || { err "$(dirname "$g")"; continue; }
-  # -z: raw (unquoted) paths; enumeration failure fails closed (and the
-  # top-level checkout is then never reported clean).
-  git -C "$top" worktree list --porcelain -z >/dev/null 2>&1 || { err "$top"; continue; }
+  # One checked -z listing (raw, unquoted paths), parsed from the same output;
+  # an enumeration failure fails closed and $top is then never reported clean.
+  git -C "$top" worktree list --porcelain -z >"$wl" 2>/dev/null || { err "$top"; continue; }
   add "$top"
   while IFS= read -r -d '' rec; do
     case "$rec" in "worktree "*) add "${rec#worktree }";; esac
-  done < <(git -C "$top" worktree list --porcelain -z 2>/dev/null)
+  done <"$wl"
 done
 for p in "${list[@]}"; do
   # Explicit flags so repo config (status.showUntrackedFiles, submodule
@@ -209,7 +211,8 @@ def _int(value: str) -> int:
 
 def parse_audit(output: str | None) -> CheckoutAudit:
     """Parse :func:`audit_command` output. Never raises; incomplete -> unknown."""
-    if not output or _MARK_DONE not in output:
+    lines = [ln for ln in (output or "").splitlines() if ln.strip()]
+    if not lines or lines[-1].strip() != _MARK_DONE:
         return CheckoutAudit(known=False, error="audit did not complete")
     checkouts: dict[str, CheckoutState] = {}
     for line in output.splitlines():

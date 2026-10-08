@@ -35,6 +35,11 @@ def test_refusal_detection_is_exact():
 def test_parse_audit_requires_completion_marker():
     out = "CHECKOUT\t0\t0\t0\t/workspaces/a\n"
     assert unsaved_guard.parse_audit(out).known is False
+    # the marker must be the final line, not merely present (e.g. in a path)
+    sneaky = "CHECKOUT\t0\t0\t0\t/workspaces/CHECKOUT_AUDIT=1\n"
+    assert unsaved_guard.parse_audit(sneaky).known is False
+    truncated = "CHECKOUT_AUDIT=1\nCHECKOUT\t0\t0\t0\t/workspaces/a\n"
+    assert unsaved_guard.parse_audit(truncated).known is False
     assert unsaved_guard.parse_audit(None).known is False
 
 
