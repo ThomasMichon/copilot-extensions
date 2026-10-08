@@ -792,7 +792,9 @@ async def post_live_message(
     if message_id is None:  # defensive: unreachable when reason is None
         raise HTTPException(status_code=500, detail="enqueue produced no id")
 
-    if not body.wait:
+    if not body.wait or duplicate:
+        # A duplicate enqueued nothing, so there is no new turn to wait for:
+        # waiting would block, or attach an unrelated later turn as its reply.
         return SendMessageResult(session_id=target_session_id, message_id=message_id, duplicate=duplicate)
 
     store = _store(request)

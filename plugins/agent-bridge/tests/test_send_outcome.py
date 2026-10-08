@@ -93,6 +93,23 @@ def test_an_identical_retry_reports_duplicate_with_the_original_id(api, tmp_db):
     assert len(tmp_db.list_pending_live_messages("cli-1")) == 1
 
 
+def test_a_duplicate_never_waits_for_a_reply(api, tmp_db):
+    """A retry enqueues nothing, so there is no turn to wait for: it returns at
+    once, never blocking or borrowing a later turn as its reply."""
+    from agent_bridge.live_representation import LiveEventStore
+
+    api.app.state.live_event_store = LiveEventStore()
+    _register(tmp_db, "cli-1")
+    first = _post(api, "cli-1", idempotency_key="k").json()
+    started = time.monotonic()
+    retry = _post(api, "cli-1", idempotency_key="k", wait=True, wait_timeout=3)
+    assert time.monotonic() - started < 2  # it didn't sit out the reply wait
+    assert retry.status_code == 200, retry.text
+    body = retry.json()
+    assert body["duplicate"] is True and body["message_id"] == first["message_id"]
+    assert body["replied"] is False
+
+
 def test_other_errors_are_not_classified():
     assert send_outcome.refusal_from_live_error(BridgeClientError(500, "boom"), "t") is None
     assert send_outcome.refusal_from_live_error(BridgeClientError(409, "something else"), "t") is None

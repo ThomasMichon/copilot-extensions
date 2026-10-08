@@ -117,6 +117,8 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
     read in between can show an idle session with the notice already gone. So
     the dequeue has to be seen on one poll, and the settled session on a later
     one, before it counts as acknowledged."""
+    from .client import BridgeClientError
+
     baseline = int(session.get("turn_count") or 0)
     submitted = client.submit_prompt(session_id, STOP_NOTICE, queue=True)
     queue_id = submitted.get("queue_id") if submitted.get("queued") else None
@@ -124,8 +126,13 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
     dequeued_before = queue_id is None  # an immediate notice is running on return
     deadline = clock() + grace
     while True:
-        dequeued_now = dequeued_before or not any(
-            p.get("id") == queue_id for p in client.list_pending_queue(session_id))
+        try:
+            dequeued_now = dequeued_before or not any(
+                p.get("id") == queue_id for p in client.list_pending_queue(session_id))
+        except BridgeClientError as exc:
+            if exc.status != 404:
+                raise
+            break  # the session disappeared during the grace window
         session = _status(client, session_id)
         if session is None:
             break
@@ -140,8 +147,6 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
         sleep(poll)
     result["acknowledged"] = False
     if queue_id is not None:
-        from .client import BridgeClientError
-
         try:
             client.remove_pending_prompt(session_id, queue_id)
             result["notice"]["withdrawn"] = True

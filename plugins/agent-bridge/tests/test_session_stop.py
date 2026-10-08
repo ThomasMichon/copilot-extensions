@@ -135,6 +135,24 @@ def test_an_agent_that_ignores_the_notice_is_stopped_after_the_grace_and_the_not
     assert clock.t >= 10
 
 
+def test_a_session_that_disappears_during_the_grace_is_still_stopped_cleanly():
+    """The queue snapshot 404s before the status read sees the session gone."""
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "running", "turn_count": 1}, 2: None}, queued=True,
+                 withdraw_error=BridgeClientError(404, "gone"))
+
+    def queue(sid):
+        if clock.t >= 2:
+            raise BridgeClientError(404, f"Session {sid} not found")
+        return list(fake.pending)
+
+    fake.list_pending_queue = queue
+    fake.stop_error = BridgeClientError(404, "gone")
+    result = _run(fake, clock, grace=60)
+    assert result["outcome"] == "stopped" and result["acknowledged"] is False
+    assert clock.t < 60  # it didn't wait out the grace for a session that is gone
+
+
 def test_a_notice_dispatched_just_before_withdrawal_is_tolerated():
     clock = _Clock()
     fake = _Fake(clock, {0: {"status": "running", "turn_count": 1}}, queued=True,
