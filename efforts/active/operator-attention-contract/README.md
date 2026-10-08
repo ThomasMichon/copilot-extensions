@@ -81,7 +81,7 @@ an empty queue.
   |---|---|
   | `schema` | the item's own version, `1`; carried on every item, separately from the envelope's |
   | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:wt:<machine>/<worktree-id>`, `pr:pr:<authority>/<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
-  | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>` (two external adapters' `login` items never collide) |
+  | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>`, where `<kind>` matches `[a-z0-9_-]+` (so neither it nor the source name can contain `:`, and `id` splits back unambiguously) (two external adapters' `login` items never collide) |
   | `entity_ref` | the canonical, **durable** reference within its kind: a task id; a PR as `<authority>/<owner/name>#<n>`, where `<authority>` is the canonical provider authority agent-worktrees resolves for its repository: the provider's authority endpoint with its scheme, credentials, default port and trailing slash dropped and its host lowercased, but its path kept (e.g. `github.com`, `ghes.example.com`, `dev.azure.com/<org>`, `gitea.example.com/api/v1`), so a provider whose organization lives in the path never collapses two organizations' `project/repo#<n>` -- never a raw URL, so two spellings of one PR are one key, while the same `owner/name#<n>` under two authorities stays two; a queue as its canonical repo; a session as its logical delegate reference (agent-bridge's identity model), never a bridge escrow `session_id` or a live registration, which a restart, takeover or handoff replaces: `wt:<machine>/<worktree-id>` when a managed worktree hosts it, else `lineage:<durable id of its lineage root>` for a bridge-owned line of work (the root's `durable_session_id`, reached through its predecessor links), else `copilot:<Copilot session id>` for an interactive session with no worktree |
   | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...); `null` for an entity with no owner lifecycle (a `queue`) |
   | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
@@ -89,7 +89,7 @@ an empty queue.
   | `reason` | one line, ≤ 200 chars |
   | `created_at`, `updated_at` | when the condition began / was last observed. A source that only knows when it observed something (e.g. a `pr bar` read) gets `created_at` from the aggregator's persisted first-observed time, kept **per source** for `(source, entity, entity_ref, display_state)`, so repeated reads keep the same order. Each source's time is cleared only by proof from that same source that the condition ended: a read of it with `status: ok` that no longer contains the item. An item missing from a `failed` or `uncertain` read, or from a source that is now `disabled`, keeps its time -- an outage proves nothing, so recovery doesn't reorder an unchanged queue -- and one source's `ok` omission never clears another source's evidence for the same entity. A deduplicated item's `created_at` is the earliest of its *currently reporting* sources' times: when the source with the earliest time ends its evidence (an `ok` read without the item), the item's age falls back to the earliest remaining source's time. That is deliberate -- there is no aggregate store that outlives every source's own evidence |
   | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
-  | `actions[]` | `{verb, argv}`, in order (the first is the item's default): sanctioned commands that run **as-is**, with no placeholder to fill. `argv` is a non-empty string array. `verb` is the machine-readable operation, never a display label (a client derives its own label from it), from a closed set: `show` (read-only: prints the entity's detail, safe to run without confirmation), `resume` (continues or re-attaches the entity's owner -- mutating, so operator-initiated), `open` (opens the entity in an external viewer, e.g. a browser). A source extends it only under its own prefix, `x.<source>.<verb>`; a client treats a verb it doesn't know as operator-initiated. Any other `verb` makes the item invalid (and its source `failed`). E.g. `{"verb": "show", "argv": ["agent-dispatch", "card", "show", "<task-id>"]}`, `{"verb": "resume", "argv": ["agent-bridge", "resume", "<session-id>"]}`, `{"verb": "open", "argv": ["gh", "pr", "view", "<n>", "--repo", "<authority>/<owner/name>", "--web"]}`. An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
+  | `actions[]` | `{verb, argv}`, in order (the first is the item's default): sanctioned commands that run **as-is**, with no placeholder to fill. `argv` is a non-empty string array. `verb` is the machine-readable operation, never a display label (a client derives its own label from it), from a closed set: `show` (read-only: prints the entity's detail; a client may run it without confirmation **only** for an item from a built-in source, whose argv the aggregator generated), `resume` (continues or re-attaches the entity's owner -- mutating, so operator-initiated), `open` (opens the entity in an external viewer, e.g. a browser). A source extends it only under its own prefix, `x.<source>.<verb>`; a client treats a verb it doesn't know, and **every** action of an external (command) source -- `show` included, since its argv is the command's own -- as operator-initiated, never auto-run. Any other `verb` makes the item invalid (and its source `failed`). E.g. `{"verb": "show", "argv": ["agent-dispatch", "card", "show", "<task-id>"]}`, `{"verb": "resume", "argv": ["agent-bridge", "resume", "<session-id>"]}`, `{"verb": "open", "argv": ["gh", "pr", "view", "<n>", "--repo", "<authority>/<owner/name>", "--web"]}`. An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
   | `source` | the adapter that produced it |
   | `input` | optional: the card's `request_input` form spec when resolving it needs an operator's answer (submitted with `agent-dispatch steer submit`) |
   | `also[]` | **aggregator-owned**: the lower-ranked items deduplicated into this one (each a full item, in queue order); empty when none. A source never fills it -- an adapter or command item with a non-empty `also[]` is malformed, and that source is `failed` -- so a nested item can't slip past the identity stamping and the one-item-per-entity check |
@@ -259,12 +259,13 @@ an empty queue.
   read with explicit project context (`agent-worktrees -p <project> pr bar
   <worktree-id> --json`), so the result is the same from any CWD. A project whose
   tracked PRs can't be enumerated makes the source `failed`: a partial list
-  can't claim to be complete. **Dependency:** no CLI enumerates this today
-  (`list` is project-scoped, `repos list` is the repo catalog, not the adopted
-  projects, and `claims find pr` needs a known repo), so this slice adds one to
-  agent-worktrees: `agent-worktrees list --all-projects --tracked-prs --json`,
-  returning `{"schema": 1, "projects": [{"project", "status": "ok" | "failed",
-  "error"?, "prs": [{"worktree_id", "authority", "repo", "number", "state"}]}]}` (`authority` the canonical provider host above) over every
+  can't claim to be complete. **Dependency:** `agent-worktrees claims find pr`
+  already scans every adopted project's tracked PRs, but only for one known
+  `--repo`. This slice extends that command rather than adding a parallel one:
+  `--repo` becomes optional (every repo), and its `--json` output gains a
+  versioned envelope, `{"schema": 1, "projects": [{"project", "status": "ok" |
+  "failed", "error"?, "prs": [{"worktree_id", "authority", "repo", "number",
+  "state"}]}]}` (`authority` the canonical provider authority above), over every
   adopted project on the machine. It exits non-zero only when the project
   registry itself can't be read. Tests cover two projects, one project failing
   while the other still lists, and an empty registry.
@@ -284,8 +285,11 @@ an empty queue.
   its id, so `next` returns the first item strictly after that position in the
   current read even when the item it names was resolved (gone) or deduped into
   another; it wraps to the top once nothing is after it.
-- [ ] **External adapters:** a host project registers a source as a command (an
-  `argv`) in config under a **name** that is the source's identity: it must be
+- [ ] **External adapters:** the operator registers a source as a command (an
+  `argv`) on this machine, through the CLI only (`agent-dispatch attention
+  source add <name> -- <argv>`), in a machine-local file outside any repository.
+  Repository-owned content never registers or activates a command, so reading
+  attention in an untrusted checkout runs nothing it brought. It is registered under a **name** that is the source's identity: it must be
   unique, match `[a-z0-9-]+`, and not be a built-in source's name (`dispatch`,
   `bridge`, `pr`), or the registration is rejected. A rejected registration is
   **not** a source -- listing it under its colliding name would give two
@@ -337,7 +341,7 @@ an empty queue.
   and the attention item schema in the plugin docs; plus the two sibling
   commands in their own plugins' CLI references, each with its operands, JSON
   envelope and failure semantics: `agent-bridge --json attention <session>` in
-  agent-bridge's, and `agent-worktrees list --all-projects --tracked-prs --json`
+  agent-bridge's, and `agent-worktrees claims find pr [--repo] --json`
   in agent-worktrees'.
 
 ### Phase 4 — Clients
