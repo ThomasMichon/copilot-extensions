@@ -26,6 +26,7 @@ launch is allowed. A refusal exits ``LAUNCH_REFUSED_EXIT`` (79).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -232,6 +233,13 @@ def _run_contained(argv: list[str], request: str, timeout: float) -> tuple[int, 
     else:
         kwargs["start_new_session"] = True
     proc, job = spawn_sync_in_kill_on_close_job(argv, **kwargs)
+    if os.name == "nt" and job is None:
+        # Without a Job Object a timeout could kill only the policy itself and
+        # leave its descendants running: fail closed instead of running it.
+        proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=_CLEANUP_GRACE)
+        raise RuntimeError("the policy's process tree couldn't be contained (no Windows Job Object)")
     try:
         out, err, overflow = bytearray(), bytearray(), threading.Event()
         readers = [threading.Thread(target=_capped_reader, args=(stream, sink, overflow), daemon=True)

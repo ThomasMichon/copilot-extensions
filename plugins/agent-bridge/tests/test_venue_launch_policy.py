@@ -224,3 +224,18 @@ async def test_a_refused_start_fails_the_session_with_a_typed_event(tmp_db, monk
     assert session.status == SessionStatus.FAILED
     events = {e.event: e.data for e in session.event_log.get_events()}
     assert events["launch_refused"] == {"codespace": "example-codespace", "reason": "the operator paused it"}
+
+
+def test_the_check_output_is_decoded_leniently(monkeypatch):
+    """Malformed bytes must reach the answer validation (and refuse), never raise
+    UnicodeDecodeError out of the gate."""
+    seen = {}
+
+    def run(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "\ufffd{not json", "")
+
+    monkeypatch.setattr(vlp.shutil, "which", lambda _n: "agent-codespaces")
+    monkeypatch.setattr(vlp.subprocess, "run", run)
+    assert "without an explicit allow" in vlp.codespace_launch_refusal("cs")
+    assert seen.get("encoding") == "utf-8" and seen.get("errors") == "replace"

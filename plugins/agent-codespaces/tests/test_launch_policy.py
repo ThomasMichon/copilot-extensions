@@ -354,3 +354,25 @@ def test_clear_names_a_non_empty_directory_instead_of_crashing(capsys):
     (lp.POLICY_FILE / "stray").write_text("x", encoding="utf-8")
     assert _cli(["launch-policy", "clear"]) == 1
     assert "remove it by hand" in capsys.readouterr().err
+
+
+def test_without_windows_containment_the_policy_is_refused_not_run(monkeypatch):
+    """No Job Object means a timeout could orphan the policy's descendants."""
+    killed = []
+
+    class Proc:
+        pid = 4242
+
+        def kill(self):
+            killed.append("proc")
+
+        def wait(self, timeout=None):
+            return -9
+
+    _policy("print('{\"refuse\": null}')")
+    monkeypatch.setattr(lp.os, "name", "nt")
+    monkeypatch.setattr(lp, "shutil", type("S", (), {"which": staticmethod(lambda c: None)}))
+    monkeypatch.setattr(lp, "no_window_flags", lambda: 0)
+    monkeypatch.setattr(lp, "spawn_sync_in_kill_on_close_job", lambda argv, **kw: (Proc(), None))
+    reason = lp.refusal("cs")
+    assert "couldn't be contained" in reason and killed == ["proc"]

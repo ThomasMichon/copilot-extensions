@@ -104,7 +104,9 @@ def codespace_launch_refusal(codespace: str) -> str | None:
         result = subprocess.run(
             [*command, "launch-check", codespace, "--json",
              "--deadline", f"{time.time() + _CHECK_TIMEOUT - _CHECK_DEADLINE_MARGIN:.3f}"],
-            capture_output=True, text=True, timeout=_CHECK_TIMEOUT,
+            # Decode leniently: malformed bytes must reach the answer validation
+            # below (and refuse), not escape it as a UnicodeDecodeError.
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_CHECK_TIMEOUT,
             creationflags=no_window_flags(),
         )
     except subprocess.TimeoutExpired:
