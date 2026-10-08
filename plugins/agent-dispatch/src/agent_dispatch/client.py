@@ -116,8 +116,8 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
 
     # -- reads ---------------------------------------------------------------
 
-    def health(self) -> dict:
-        return self._unwrap(self._http.get("/health"))
+    def health(self, repo: str | None = None) -> dict:  # repo: scope `backlog` to one lane
+        return self._unwrap(self._http.get("/health", params={"repo": repo} if repo else None))
 
     def get(self, task_id: str) -> dict:
         return self._unwrap(self._http.get(f"/tasks/{task_id}"))
