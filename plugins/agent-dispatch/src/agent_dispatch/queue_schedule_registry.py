@@ -333,7 +333,8 @@ class ScheduleRegistrationMixin:
         return ScheduleLease._from_row(row), granted
 
     def release_schedule_lease(
-        self, scope: str, holder: str, *, force: bool = False, now: float | None = None
+        self, scope: str, holder: str, *, force: bool = False, now: float | None = None,
+        expected_renewed_at: float | None = None,
     ) -> bool:
         """Release the job-lease for ``scope``. The current holder may release
         its own lease; ``force=True`` lets an operator reassign a lease held by
@@ -343,7 +344,7 @@ class ScheduleRegistrationMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT holder FROM schedule_leases WHERE scope = ?", (scope,)
+                "SELECT holder, renewed_at FROM schedule_leases WHERE scope = ?", (scope,)
             ).fetchone()
             if row is None:
                 conn.execute("COMMIT")
@@ -354,6 +355,9 @@ class ScheduleRegistrationMixin:
                     f"lease {scope!r} is held by {row['holder']!r}, not {holder!r} "
                     "(use force to reassign)"
                 )
+            if expected_renewed_at is not None and row["renewed_at"] != expected_renewed_at:
+                conn.execute("COMMIT")
+                raise TaskError(f"lease {scope!r} renewed since diagnosis; refusing release")
             conn.execute("DELETE FROM schedule_leases WHERE scope = ?", (scope,))
             conn.execute("COMMIT")
         return True

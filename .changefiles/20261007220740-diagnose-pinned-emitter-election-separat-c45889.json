@@ -1,0 +1,9 @@
+{
+  "comment": "Diagnose pinned emitter election separately from production and add explicit renewal-fenced migration recovery",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -60,6 +60,9 @@ class FakeClient:
     def list(self, **_kwargs):
         return list(self.tasks)
 
+    def get_schedule_lease(self, _scope):
+        return None
+
     def list_reservations(self, *, task_id=None, state=None, **_kwargs):
         return [
             reservation

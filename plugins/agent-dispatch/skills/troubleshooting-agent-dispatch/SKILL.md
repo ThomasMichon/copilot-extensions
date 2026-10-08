@@ -11,6 +11,15 @@ alone -- each of those omits exactly the state this skill exists to surface.
 
 ## Quick checks
 
+For an emitter process that is alive but produces nothing, inspect election
+separately from process health with `emitter doctor <spec> --holder <machine>`.
+`ok: true, held: false` is not successful production; it can be an ordinary
+fresh remote pin or a stale pin left by a host/guest identity migration.
+Never infer death or wait for automatic TTL takeover: leases are pinned.
+Use [Emitter recovery](../../docs/emitter-recovery.md) for source eligibility,
+report-first diagnosis, and explicit renewal-fenced repair. Verify each host's
+current source declarations; a stale checkout is not an identity-detector bug.
+
 > **Before you start — use the payload-local session commands.**
 > The agent-dispatch, agent-bridge, and agent-mcp session command catalogs
 > each supply an exact `argv[0]` owned by that plugin's own payload. Replace

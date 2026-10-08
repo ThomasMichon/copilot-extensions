@@ -648,7 +648,8 @@ def serve(
         elif not result.get("held"):
             print(
                 f"agent-dispatch emitter: lease {result.get('scope')!r} held by "
-                f"{(result.get('lease') or {}).get('holder')!r} -- idling",
+                f"{(result.get('lease') or {}).get('holder')!r} -- "
+                f"{result.get('production_state', 'idling')}",
                 file=sys.stderr,
             )
         else:
@@ -693,6 +694,16 @@ def serve(
                 **no_window_kwargs(),
             )
             result = _parse_tick_process_output(completed)
+            from ..emitter_diagnostics import diagnose
+
+            observed = time.time()
+            health = {"updated_at": observed, "ok": not result.get("error"), **result}
+            production = diagnose(
+                spec, holder=holder, lease=result.get("lease"),
+                health=health, now=observed,
+            )
+            result["production_state"] = production["production_state"]
+            result["lease_age_seconds"] = production["lease_age_seconds"]
             report(result)
             health_path.write_text(
                 json.dumps(
