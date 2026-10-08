@@ -3163,6 +3163,24 @@ class _StatefulFakeProvider:
         self.create_calls = 0
         self.captured: list = []
 
+    def authority_endpoint(self, api_base: str = "") -> str:
+        # Mirrors GiteaProvider.authority_endpoint's own contract: the
+        # configured api_base IS the authority (no separate web-vs-API host
+        # split the way GitHub has). Needed by trusted_target()
+        # (copilot-extensions#5609) before any reconciliation/merge-status
+        # read of a tracked PR whose record carries a URL.
+        return (api_base or "").rstrip("/")
+
+    def publish_source_marker(
+        self, repo: str, number: int, marker: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        # "" means success, matching the real provider contract
+        # (providers/base.py). Tests here exercise reconciliation/rerun
+        # behavior, not attribution-marker content -- recording the call
+        # would add nothing no current test asserts on.
+        return ""
+
     def create_pull(self, scope, *, token=None):
         self.create_calls += 1
         n = self._next
