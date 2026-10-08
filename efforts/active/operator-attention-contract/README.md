@@ -77,274 +77,21 @@ an empty queue.
 
 ### Phase 1 — The item contract + aggregator core (agent-dispatch)
 
-- [ ] `attention_contract.py`: the item, versioned (`schema: 1`):
+- [ ] The versioned item, the order, deduplication, per-source results with first-observed times, and the aggregate envelope, as specified in [contract.md](contract.md). Only discovered sources take part. (ThomasMichon/copilot-extensions#5668)
+- [ ] Unit tests: ordering, dedupe, degraded vs empty, item and envelope round-trip.
 
-  | Field | Meaning |
-  |---|---|
-  | `schema` | the item's own version, `1`; carried on every item, separately from the envelope's |
-  | `id` | stable per item: `<source>:<entity>:<entity_ref>`, e.g. `dispatch:task:<task-id>`, `bridge:session:wt:<machine>/<project>/<worktree-id>`, `pr:pr:<authority>/<owner/name>#<n>` -- unique per entity, so it's the order's deterministic final tie-breaker (and the last component of the `next` cursor's position; the id alone is never a cursor) |
-  | `entity` | a shared kind -- `task` \| `session` \| `pr` \| `queue`, dedupable across sources -- or a pluggable source's own kind, namespaced by that source as `x.<source>.<kind>`, where `<kind>` matches `[a-z0-9_-]+` (so neither it nor the source name can contain `:`, and `id` splits back unambiguously) (two external adapters' `login` items never collide) |
-  | `entity_ref` | the canonical, **durable** reference within its kind: a task id; a PR as `<authority>/<owner/name>#<n>`, where `<authority>` is the canonical provider authority agent-worktrees resolves for its repository: the provider's authority endpoint with its scheme, credentials, default port and trailing slash dropped and its host lowercased, but its path kept (e.g. `github.com`, `ghes.example.com`, `dev.azure.com/<org>`, `gitea.example.com/api/v1`), so a provider whose organization lives in the path never collapses two organizations' `project/repo#<n>` -- never a raw URL, so two spellings of one PR are one key, while the same `owner/name#<n>` under two authorities stays two; a queue as its canonical repo; a session as its logical delegate reference (agent-bridge's identity model), never a bridge escrow `session_id` or a live registration, which a restart, takeover or handoff replaces: `wt:<machine>/<project>/<worktree-id>` when a managed worktree hosts it (the project too: one worktree id can exist in two projects), else `lineage:<durable id of its lineage root>` for a bridge-owned line of work (the root's `durable_session_id`, reached through its predecessor links), else `copilot:<Copilot session id>` for an interactive session with no worktree |
-  | `lifecycle_state` | the owner's own state (`started`, `submitted`, `live`, `open`, ...); `null` for an entity with no owner lifecycle (a `queue`) |
-  | `display_state` | `failed` \| `stalled` \| `awaiting_input` \| `blocked` \| `review` |
-  | `severity` | derived from `display_state`: `failed` > `stalled` > `awaiting_input` > `blocked` > `review` |
-  | `reason` | one line, ≤ 200 chars |
-  | `created_at`, `updated_at` | when the condition began / was last observed. A source that only knows when it observed something (e.g. a `pr bar` read) gets `created_at` from the aggregator's persisted first-observed time, kept **per source** for `(source, entity, entity_ref, display_state)`, so repeated reads keep the same order. Each source's time is cleared only by proof from that same source that the condition ended: a read of it with `status: ok` that no longer contains the item. An item missing from a `failed` or `uncertain` read, or from a source that is now `disabled`, keeps its time -- an outage proves nothing, so recovery doesn't reorder an unchanged queue -- and one source's `ok` omission never clears another source's evidence for the same entity. A deduplicated item's `created_at` is the earliest of its *currently reporting* sources' times: when the source with the earliest time ends its evidence (an `ok` read without the item), the item's age falls back to the earliest remaining source's time. That is deliberate -- there is no aggregate store that outlives every source's own evidence |
-  | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
-  | `actions[]` | `{verb, argv}`, in order (the first is the item's default): sanctioned commands that run **as-is**, with no placeholder to fill. `argv` is a non-empty string array. `verb` is the machine-readable operation, never a display label (a client derives its own label from it), from a closed set: `show` (read-only: prints the entity's detail; a client may run it without confirmation **only** for an item from a built-in source, whose argv the aggregator generated), `resume` (continues or re-attaches the entity's owner -- mutating, so operator-initiated), `open` (opens the entity in an external viewer, e.g. a browser). A source extends it only under its own prefix, `x.<source>.<verb>`; a client treats a verb it doesn't know, and **every** action of an external (command) source -- `show` included, since its argv is the command's own -- as operator-initiated, never auto-run. Any other `verb` makes the item invalid (and its source `failed`). E.g. `{"verb": "show", "argv": ["agent-dispatch", "card", "show", "<task-id>"]}`, `{"verb": "resume", "argv": ["agent-bridge", "resume", "<session-id>"]}`, `{"verb": "open", "argv": ["gh", "pr", "view", "<n>", "--repo", "<authority>/<owner/name>", "--web"]}`. An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
-  | `source` | the adapter that produced it |
-  | `input` | optional: the card's `request_input` form spec when resolving it needs an operator's answer (submitted with `agent-dispatch steer submit`) |
-  | `also[]` | **aggregator-owned**: the lower-ranked items deduplicated into this one (each a full item, in queue order); empty when none. A source never fills it -- an adapter or command item with a non-empty `also[]` is malformed, and that source is `failed` -- so a nested item can't slip past the identity stamping and the one-item-per-entity check |
+### Phase 2 — Built-in adapters ([sources.md](sources.md#built-in-adapters))
 
-- [ ] **Display, not lifecycle.** A `live`/`started` entity waiting on a human
-  surfaces. `blocked` counts only when nothing inbound can still resolve it.
-- [ ] **Order:** severity (worst first), then `created_at` (oldest first), then
-  `id`, so the order is fully deterministic.
-- [ ] **Dedupe** on `(entity, entity_ref)` — the canonical kind plus its canonical
-  reference, never the bare reference (a task id and a session id can share a
-  string; a source's own `x.<source>.<kind>` keeps its references to itself).
-  The winner, and the order of `also[]`, use the queue's own precedence --
-  severity, then `created_at`, then `id` -- so identical reads give identical
-  results however the adapters' timeouts interleave: keep the highest severity; the others become `also[]` on the kept item,
-  so nothing is silently dropped.
-- [ ] **Source result:** each adapter returns `{items[], status, error?, uncertain, read_at}`,
-  with **at most one item per `(entity, entity_ref)`**. An adapter with several
-  pieces of evidence for one entity (the bridge's represented `permission_required`
-  and its transcript presence `awaiting_input` for the same session) coalesces them
-  before returning: it keeps the highest severity, then the strongest confidence
-  (`reported` > `scanned` > `heuristic`), and the kept item's `reason` names the
-  rest. So `(source, entity, entity_ref)` -- and with it `id` and the
-  first-observed key -- is unique within a read, and cross-source dedupe never
-  meets two equal ids. A source result (a command's too) that carries two items
-  for one entity is malformed, and that source is `failed`. The `status` is one of `ok` (fully read), `failed` (couldn't be read), `uncertain`
-  (read, but `uncertain` of its entities couldn't be classified -- e.g. presence
-  `unknown`, a `pr bar` exit 12) or `disabled` (not installed). The aggregate's
-  `status` is the first that applies, in this precedence: `degraded` when any
-  enabled source `failed` or `config_errors[]` is non-empty; `partial` when any is `uncertain` (with the counts);
-  `attention` when there are items; `clear` otherwise (every enabled source `ok`,
-  no items). One read gives one status, however its sources fail -- so neither a failed nor a partly unreadable source can read
-  as "all clear". `disabled` sources never change it.
-- [ ] **Aggregate response** (`attention --json`), versioned on its own -- never a
-  bare item list, so a client can always tell `clear` from `degraded`:
+- [ ] `dispatch`: steering asks, holds, unconfirmed completion claims, and stalled queues. (ThomasMichon/copilot-extensions#5668)
+- [ ] `bridge`, with its sibling `agent-bridge --json attention <session>` read. (Follow-up PR.)
+- [ ] `pr`, with `agent-worktrees claims find pr` extended across every project and repo. (Follow-up PR.)
+- [ ] A per-source timeout bounds each adapter; a timeout is that source's `failed`.
 
-  ```json
-  {
-    "schema": 1,
-    "status": "clear | attention | partial | degraded",
-    "read_at": "<ISO-8601 UTC>",
-    "selected": null,
-    "sources": [
-      {"name": "dispatch", "status": "ok | failed | uncertain | disabled",
-       "error": "<one line; only when failed>", "uncertain": 0,
-       "items": 0, "read_at": "<ISO-8601 UTC>"}
-    ],
-    "config_errors": [{"name": "<registered name>", "error": "<one line>"}],
-    "items": ["<item>, in queue order"]
-  }
-  ```
+### Phase 3 — CLI + pluggable sources ([sources.md](sources.md#cli-and-pluggable-sources))
 
-  `sources[]` lists every discovered or validly configured source, `disabled` ones
-  included, sorted by `name`; `uncertain` and `items` are counts. A **selective
-  read** (`--source <name>...`) is scoped to the named sources: `sources[]` lists
-  only them, `items` and the aggregate `status` cover only them, and the envelope
-  carries `"selected": ["<name>", ...]` (`null` for a full read). `config_errors[]`
-  is scoped the same way: a full read lists every rejected registration, a
-  selective read only those whose `name` is selected, so a malformed registration
-  of an unselected name doesn't degrade `--source dispatch`, while selecting the
-  name a rejected registration claimed reports why it didn't run. It's sorted by
-  `name`, then `error`. A scoped
-  `clear` therefore says "nothing needs you *from these sources*", and a client
-  can tell it from a full read. `attention next`
-  returns the same envelope with `item` (one item, or `null` when the queue is
-    empty) and `cursor` in place of `items`. **Schema evolution** (envelope and
-    item alike): adding an **optional** field -- one a consumer may find absent --
-    is compatible and keeps `schema`; renaming, removing or retyping a field, or
-    adding one consumers must rely on, bumps it.
-- [ ] **Only discovered sources take part** (standalone-first,
-  [a-la-carte independence](../../../docs/patterns/a-la-carte-independence.md)):
-  an optional sibling that isn't installed (agent-bridge, agent-worktrees) is
-  listed `disabled` and stays dark — it never degrades the result. An
-  agent-dispatch-only install is a complete, non-degraded queue of its own items.
-- [ ] Unit tests: ordering, dedupe, degraded vs empty, item and envelope schema round-trip.
-
-### Phase 2 — Built-in adapters
-
-- [ ] **dispatch**:
-  - `awaiting_steer` → `awaiting_input`;
-  - `hold_reason` → `blocked` (the operator's own hold: low severity, still listed);
-  - a self-tracked task in `submitted` (a completion claim awaiting
-    confirmation) → `review`. `completed` is the confirmed terminal and is never
-    an item;
-  - undraining buildup (vision *buildup-is-a-health-signal*) → `stalled`, one
-    item per repo (`entity: queue`, `entity_ref`: the canonical repo), built on
-    `backlog_health(repo=...)`. The predicate is `oldest_queued_age >
-    queued_after` **or** `oldest_held_live_age > held_live_after` (strictly
-    greater, in seconds), with both thresholds in agent-dispatch config under
-    `attention.stalled` (`queued_after_secs`, `held_live_after_secs`; default
-    1800 each; `0` turns that half off). Held tasks whose owner's liveness is
-    `unknown` or `gone` never count: only a live owner that stopped progressing
-    is buildup. `reason` carries both ages and the `queued`/`held_live` counts;
-    the item clears on an `ok` read where neither age exceeds its threshold.
-- [ ] **bridge** -- every reason in agent-bridge's `AttentionReason` vocabulary
-  (`models.py`) is mapped, so no parked session can drop out of the queue
-  unnoticed:
-  - `input_required` → `awaiting_input` (`reported`);
-  - `permission_required` and `policy_required` (a represented snapshot /
-    `wait --attention`; each waits on an operator decision) →
-    `awaiting_input` (`reported`);
-  - `failed` (a local result snapshot) → `failed` (`reported`);
-  - `unreachable` → `failed` (`reported`): the bridge settles it only on
-    authoritative terminal evidence, after its reconnect policy is exhausted,
-    so it's a real operator boundary, not an unreadable observation;
-  - `contract_changed` isn't an item: the session's state can't be trusted, so
-    it counts toward the bridge source's `uncertain` (never `clear`);
-  - `turn_complete`, `turn_cancelled`, `stopped` and `ended` are settled
-    states, not operator asks: no item;
-  - a reason this adapter doesn't know (a newer bridge) counts toward
-    `uncertain` too, never silently dropped;
-  - presence `awaiting_input` → `awaiting_input` (`scanned`/`heuristic`);
-  - presence `unknown` is **not** an item: it means the transcript couldn't be
-    read or holds no presence signal, not that the session stalled. It counts
-    toward the bridge source's status (`uncertain: n`). `stalled` needs independent
-    evidence: a session the bridge calls busy whose transcript hasn't moved for
-    longer than a configured threshold (an open question below; no bridge
-    `stalled` items until it's decided).
-
-  Local reads only by default; remote venues opt in (`--include-remote`), since
-  each is an SSH read.
-
-  **Candidates:** the union of agent-bridge's two session registries, read
-  through its own API (never its database): **bridge-managed sessions**
-  (`agent-bridge --json sessions`, the sessions it spawned and drives) and
-  **registered interactive CLI sessions** (`agent-bridge --json live-sessions
-  list`, live rows only; `--json` is the bridge's global option, so it comes first). Candidates
-  are keyed by their logical delegate reference (see `entity_ref`), so a session
-  that appears in both registries, or a successor that replaced one after a
-  restart, takeover or handoff, is one entity whose first-observed time and
-  cursor position carry over; its actions name the *current* session handle,
-  resolved at read time. A candidate that has no durable reference yet -- a
-  bridge-owned session before its ACP identity is reported (its
-  `durable_session_id` still the escrow id), or an interactive session with no
-  worktree whose Copilot session id the registration doesn't expose -- is never
-  an item under a provisional key that could change later: it counts toward
-  `uncertain` until the reference exists. Every candidate is classified from its
-  **attention state** and its presence, as listed above. The attention state is
-  the reason agent-bridge's own attention evaluator would settle a `wait
-  --attention` on -- the only place `policy_required` (and, for bridge-managed
-  sessions, `permission_required`) is observable today; result snapshots alone
-  miss them. This slice therefore adds a bounded, non-blocking read of that
-  evaluator to agent-bridge for both registry types (`agent-bridge --json
-  attention <session>`: the current reason or `null`, never a wait), and the
-  adapter reads it per candidate. Serving that evaluation for a registered
-  interactive session is new daemon behavior (today's attention endpoint
-  resolves owned sessions only), so it lands as an HTTP protocol capability:
-  `HTTP_PROTOCOL_VERSION` is bumped with a named capability constant, and the
-  command gates on `BridgeClient.daemon_supports()`. Against an older daemon it
-  reports represented sessions as `unsupported` rather than sending the request,
-  and the adapter counts those candidates toward `uncertain`, so a version skew
-  reads as `partial`, never as `clear` or as every session failing. A candidate whose attention can't be read
-  counts toward `uncertain`. If either listing fails or
-  times out, the bridge source is `failed`, never `ok` on the other alone: a
-  parked session in the registry that wasn't read must not read as `clear`.
-  With `--include-remote`, each remote venue's registry is a further candidate
-  set under the same rule, and a venue that can't be read makes the source
-  `failed` too.
-- [ ] **pr** (`pr bar`, on `dev` since #5566): a PR whose `pr bar` JSON reports it
-  **`OPEN`** with verdict `failed` (exit 11) → `failed` (the author has something
-  to do). The live state decides, never the tracked record's: a closed or merged
-  PR is no item even when its record still says `open`, and a reopened PR is a
-  candidate even when its record says `closed`. Exit 12 (`unknown`)
-  counts toward the source's status, not as an item. **Candidates:** every
-  PR tracked by agent-worktrees, whatever its local state, across **every project registered on this
-  machine**, not just the one the caller's CWD belongs to. They're enumerated
-  through agent-worktrees' own CLI (never by reading its files), and each one is
-  read with explicit project context (`agent-worktrees -p <project> pr bar
-  <worktree-id> --json`), so the result is the same from any CWD. A project whose
-  tracked PRs can't be enumerated makes the source `failed`: a partial list
-  can't claim to be complete. **Dependency:** `agent-worktrees claims find pr`
-  already scans every adopted project's tracked PRs, but only for one known
-  `--repo`. This slice extends that command rather than adding a parallel one:
-  `--repo` becomes optional (every repo), and its `--json` output gains a
-  versioned envelope, `{"schema": 1, "projects": [{"project", "status": "ok" |
-  "failed", "error"?, "prs": [{"worktree_id", "authority", "repo", "number",
-  "state"}]}]}` (`authority` the canonical provider authority above), over every
-  adopted project on the machine. It exits non-zero only when the project
-  registry itself can't be read. Tests cover two projects, one project failing
-  while the other still lists, and an empty registry.
-- [ ] Each adapter is bounded by a per-source timeout. A timeout is that source's
-  `status: failed` (with the timeout as its `error`), not a hang.
-
-### Phase 3 — CLI + pluggable sources
-
-- [ ] `agent-dispatch attention [--json] [--source <name>...] [--include-remote]`:
-  the ordered queue, with the degraded banner in text mode. `--source` names a
-  known source (built-in or registered); an unknown name is a usage error (exit
-  2, nothing read), never silently omitted -- a typo must not read as `clear`.
-- [ ] `agent-dispatch attention next [--after <cursor>] [--json] [--source <name>...] [--include-remote]`
-  (each flag on the `next` subcommand itself, so it's accepted after `next`): the oldest worst item (a
-  keyboard walk in a UI is this, repeated). The cursor is opaque but carries the
-  queue position -- `(severity, created_at, id)` of the item last shown -- not just
-  its id, so `next` returns the first item strictly after that position in the
-  current read even when the item it names was resolved (gone) or deduped into
-  another; it wraps to the top once nothing is after it.
-- [ ] **External adapters:** the operator registers a source as a command (an
-  `argv`) on this machine, through the CLI only (`agent-dispatch attention
-  source add <name> -- <argv>`), in a machine-local file outside any repository.
-  Repository-owned content never registers or activates a command, so reading
-  attention in an untrusted checkout runs nothing it brought. It is registered under a **name** that is the source's identity: it must be
-  unique, match `[a-z0-9-]+`, and not be a built-in source's name (`dispatch`,
-  `bridge`, `pr`), or the registration is rejected. A rejected registration is
-  **not** a source -- listing it under its colliding name would give two
-  `sources[]` entries one identity. It is reported in the envelope's
-  `config_errors[]` (`{"name", "error"}`, empty when none), and any config error
-  the read lists makes the aggregate `degraded`: a source that was meant to run
-  didn't. A selective read lists only the selected names' errors (see the
-  aggregate response), and a name a rejected registration claimed still counts
-  as known to `--source`. The aggregator **stamps** identity at the
-  boundary rather than trusting the command. A command item is the item schema
-  with `source`, `id`, `created_at` and `updated_at` **optional**; validation runs in this order: (0)
-  `entity` is canonicalized first: a shared kind (`task | session | pr | queue`)
-  stays as-is, a bare custom kind `<kind>` becomes `x.<source>.<kind>`, an
-  already-namespaced `x.<source>.<kind>` under the command's own name is kept
-  (never double-prefixed), and another source's `x.` prefix rejects the item;
-  every later step uses the canonical `entity`; (1) a
-  present `source` or `id` that differs from the registered name or the derived
-  id rejects the item; (2) the aggregator sets `source` to the registered name
-  and derives `id` from `(source, entity, entity_ref)`, and fills an omitted
-  `created_at` from that source's persisted first-observed time (the same
-  per-source store a built-in adapter that only knows when it observed
-  something uses) and an omitted `updated_at` from the read's `read_at`; (3)
-  the completed item is validated against the item schema. So a command that
-  doesn't know when a condition began keeps a stable position across reads, and
-  an external
-  source can never alias a built-in producer, mint a duplicate `id`, or clear
-  another source's first-observed time. The command prints the same source-result envelope a
-  built-in adapter returns, `{"schema": 1, "items": [...], "status"?,
-  "uncertain"?, "error"?, "read_at"?}`, so a partial read can say so: it reports
-  `status: uncertain` with the count of entities it couldn't classify. Omitted
-  fields are translated, never guessed: no `status` means `ok` when `uncertain`
-  is absent or 0 and `uncertain` otherwise; no `read_at` means the aggregator's
-  receipt time. `disabled` is the aggregator's to set, never a command's. Its own
-  kinds are namespaced `x.<source>.<kind>` in step (0) (it may also use the
-  shared kinds). Its own signals (sign-in
-  expiry, coordination asks) then join the same queue with no code in this repo,
-  under the same timeout and degraded rules. Failure contract: a non-zero exit, a
-  timeout, output that isn't JSON, a missing or unsupported `schema` (anything but
-  `1`), a response without `items[]`, a `status`
-  outside `ok | failed | uncertain`, a status that contradicts `uncertain`
-  (`ok` with a count above 0, `uncertain` with 0), or any item that
-  doesn't validate against the schema makes that source `failed` (with the reason
-  as its `error`) -- never a crash of the aggregate, never an empty source. A
-  command that reports `status: failed` itself is `failed` with its own `error`,
-  which must be a non-empty single line (≤ 200 chars); a self-reported failure
-  without one gets the aggregator's own `error`, `"source reported failed without
-  an error"`, so every response maps to the aggregate shape.
-- [ ] Docs: `plugins/agent-dispatch/docs/cli-reference.md`, the skill reference,
-  and the attention item schema in the plugin docs; plus the two sibling
-  commands in their own plugins' CLI references, each with its operands, JSON
-  envelope and failure semantics: `agent-bridge --json attention <session>` in
-  agent-bridge's, and `agent-worktrees claims find pr [--repo] --json`
-  in agent-worktrees'.
+- [ ] `attention` and `attention next` with the position cursor. (ThomasMichon/copilot-extensions#5668)
+- [ ] Command sources registered through `attention source add`. (ThomasMichon/copilot-extensions#5668)
+- [ ] Docs: each plugin's CLI reference, the skill reference, and the item schema.
 
 ### Phase 4 — Clients
 
@@ -354,93 +101,16 @@ an empty queue.
 
 ## Validation Plan
 
-- [ ] Unit: contract, ordering, dedupe — cross-source dedupe of one entity (two
-  sources naming the same PR), cross-kind non-collision (a task and a session
-  with the same id), and an equal-severity tie resolved the same way in any
-  adapter order — repeated reads keep a source's first-observed `created_at`,
-  including across processes (a fresh aggregator instance opening the same
-  persisted first-observed store returns the same `created_at`, as two separate
-  CLI invocations do),
-  and so does an outage and recovery (the source reads `failed`, then `uncertain`
-  without the item, then `ok` with it: the same `created_at` throughout), while
-  an `ok` read without the item followed by its return gives a new one; two
-  sources naming one PR, where one source's `ok` read drops it while the other
-  still reports it, keep the item, with the remaining source's own `created_at` — and
-  each aggregate status (`clear`, `attention`, `degraded`, `partial`, and a
-  mixed failed-plus-uncertain read resolving to `degraded`) from fixtures, with `disabled` sources leaving it unchanged — degraded vs empty vs disabled, each adapter on fixtures.
-- [ ] Unit, the envelope: `attention --json` and `attention next --json` match
-  the exact documented shape (keys, types, `sources[]` order) and round-trip,
-  including an item with `lifecycle_state: null` (a queue), and every item
-  carries its own `schema: 1`;
-  `clear` and `degraded` with zero items stay distinguishable; a `--source
-  dispatch` read lists only `dispatch` in `sources[]`, carries `"selected":
-  ["dispatch"]`, and its status ignores a failing unselected source; with a
-  malformed registration named `foo`, `--source dispatch` carries an empty
-  `config_errors[]` and keeps its status, while `--source foo` lists `foo`'s
-  error and is `degraded`. Actions: a `verb` outside `show | resume | open` and
-  not under the source's own `x.<source>.` prefix (including another source's
-  prefix) is an invalid item, and so is an empty `argv`.
-- [ ] Unit, the dispatch adapter: a `submitted` task is a `review` item and a
-  `completed` one isn't; `stalled` at exactly the threshold isn't an item and one
-  second over is; held tasks with an `unknown` or `gone` owner never count; a
-  threshold of `0` turns its half off.
-- [ ] Unit, command sources: a partial read (`status: uncertain`, `uncertain:
-  2`) makes the aggregate `partial`; `{"schema": 1, "items": [...]}` alone reads
-  as `ok`; a missing `schema` and `schema: 2` are each `failed`; a self-reported
-  `status: failed` without an `error` gets the aggregator's fallback error; each
-  contradiction in the failure contract is `failed`.
-- [ ] Unit, the bridge adapter: a bridge-managed session parked on
-  `permission_required` and one parked on `policy_required` each yield an
-  `awaiting_input` item through `agent-bridge --json attention`, and so does a
-  registered interactive one; an attention read that fails counts as
-  `uncertain`. Every `AttentionReason` value maps as listed
-  (`policy_required` and `unreachable` are items; `contract_changed` and an unknown
-  reason count as `uncertain`); a session with both a represented
-  `permission_required` and transcript `awaiting_input` yields one `reported`
-  item whose reason names both, in any read order; a command source returning two
-  items for one entity is `failed`; a parked session found only in the
-  bridge-managed registry and one found only in the live-session registry each
-  yield an item, one present in both yields a single item, and a failed listing
-  of either registry makes the bridge source `failed`. Identity: a parked
-  worktree session replaced by a successor (a CLI restart, a takeover, a bridge
-  handoff) keeps its `entity_ref`, `id` and `created_at`, while its actions
-  name the successor; a bridge-owned lineage with no worktree keeps its root
-  reference across two handoffs; two worktrees never share one, including one
-  worktree id in two projects; no item's
-  `id` contains a bridge escrow `session_id`; and a pre-ACP bridge session and
-  a worktree-less interactive session without an exposed Copilot session id
-  each count as `uncertain`, not as an item.
-- [ ] Unit, external identity: a command source registered as `dispatch` (or as
-  a duplicate name) is rejected into `config_errors[]` -- never a second
-  `sources[]` entry under that name -- and the aggregate is `degraded`; an item stating another `source` or a foreign
-  `id` is invalid; an item omitting both is stamped and then validated; a
-  custom `entity: "login"` and `entity: "x.<own>.login"` both canonicalize to
-  `x.<own>.login` with the same `id` (`<own>:x.<own>.login:<ref>`), while
-  `x.<other>.login` is invalid; an item
-  omitting `created_at` gets the same first-observed time on two separate reads
-  (two CLI invocations), and a new one after an `ok` read that dropped it; a
-  stamped item's `id` and first-observed key are its own; an item arriving with a
-  non-empty `also[]` fails its source. `--source bridgge` (an
-  unknown name) exits 2 without reading anything, and `attention next --json
-  --source dispatch` parses with the flags after `next`.
-- [ ] Unit, the pr adapter: from a CWD outside any project, two registered
-  projects each tracking a PR with a failing bar give both items; a project
-  whose tracked PRs can't be enumerated makes the source `failed`; a record
-  still saying `open` for a PR the provider reports closed gives no item, and a
-  record saying `closed` for a reopened, failing PR gives one. Two projects
-  tracking `owner/name#42` on different providers (`github.com` and a GHES or
-  Gitea host), or under two organizations of one host (`dev.azure.com/<a>`
-  and `dev.azure.com/<b>`), give two items that never dedupe, while one PR
-  reached through two spellings of the same authority gives one.
-- [ ] Simple e2e: a local bridge session parked on `ask_user`, a task with
-  `awaiting_steer`, and a tracked PR with a failing bar produce three items in the
-  expected order. Kill one source and the result is `degraded` with the others
-  intact. A command source that exits non-zero, prints non-JSON, or returns a
-  malformed item is `failed`. Resolve the current item between two `next` calls
-  (and have its entity deduped into another source's item) and the walk still
-  advances deterministically.
-- [ ] Live: an operator machine with real sessions and tasks; compare with what
-  each owner's own CLI reports.
+Each tier's required cases are in [validation.md](validation.md).
+
+- [ ] Unit: contract, ordering, dedupe and first-observed times.
+- [ ] Unit: the envelope and selective reads.
+- [ ] Unit: the dispatch adapter.
+- [ ] Unit: command sources and external identity.
+- [ ] Unit: the bridge adapter.
+- [ ] Unit: the pr adapter.
+- [ ] Simple e2e.
+- [ ] Live.
 
 ## Proposal
 
@@ -453,13 +123,22 @@ _Pending._ Decided:
 Open questions for review:
 
 1. **The bridge `stalled` threshold.** How long a busy session's transcript may
-   stay still before it's `stalled` (presence `unknown` alone never is). The
-   dispatch queue's threshold is specified above; until this one is, the bridge
+   stay still before it's `stalled` (presence `unknown` alone never is). The dispatch queue's threshold is specified in [sources.md](sources.md); until this one is, the bridge
    adapter emits no `stalled` items.
 2. **Hold as an item.** An operator's own hold is listed (low severity) so it
    isn't forgotten. It could instead be filtered out by default.
 
 ## Journal
+
+### 2026-10-08 — Two PRs; design in sibling docs
+- Implementation lands in two PRs: ThomasMichon/copilot-extensions#5668 (the
+  core, the CLI, command sources and the `dispatch` source), then the `bridge`
+  and `pr` sources with their sibling commands. This supersedes the one-PR plan
+  below. The design moved to [contract.md](contract.md),
+  [sources.md](sources.md) and [validation.md](validation.md). A session no
+  managed worktree hosts stays `uncertain` until agent-bridge exposes a logical
+  reference; built-in actions carry the read's coordinator; the stalled
+  thresholds are environment variables.
 
 ### 2026-10-07 — Review fixes
 - Lifecycle names follow agent-dispatch's current states (`submitted` awaiting
