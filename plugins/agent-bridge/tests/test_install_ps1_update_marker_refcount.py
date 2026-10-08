@@ -122,12 +122,18 @@ def test_overlapping_processes_marker_survives_until_both_release(
     under the long one.
     """
     long_holding = tmp_path / "long-holding"
+    long_may_release = tmp_path / "long-may-release"
     long_released = tmp_path / "long-released"
+    # The long holder waits for an explicit signal instead of a fixed sleep,
+    # so a slow short-process startup (a loaded machine) cannot let the long
+    # holder release before the overlap is observed.
     long_harness = _write_harness(
         tmp_path,
         "Write-UpdateMarker\n"
         f"New-Item -ItemType File -Path '{long_holding}' | Out-Null\n"
-        "Start-Sleep -Seconds 3\n"
+        "$deadline = (Get-Date).AddSeconds(60)\n"
+        f"while (-not (Test-Path '{long_may_release}') -and (Get-Date) -lt $deadline) "
+        "{ Start-Sleep -Milliseconds 50 }\n"
         "Clear-UpdateMarker\n"
         f"New-Item -ItemType File -Path '{long_released}' | Out-Null\n",
     )
@@ -160,7 +166,8 @@ def test_overlapping_processes_marker_survives_until_both_release(
             "the long holder was still running"
         )
 
-        long_out, long_err = long_proc.communicate(timeout=10)
+        long_may_release.touch()
+        long_out, long_err = long_proc.communicate(timeout=30)
         assert long_proc.returncode == 0, long_err.decode()
         assert long_released.exists()
 

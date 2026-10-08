@@ -17,6 +17,7 @@ from agent_bridge.models import ServiceConfig
 from agent_bridge.protocol import (
     AT_REST_PROJECTION_PROTOCOL_VERSION,
     ATTENTION_WAIT_PROTOCOL_VERSION,
+    CALLER_SESSION_ID_PROTOCOL_VERSION,
     CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION,
     CONDITIONAL_IDLE_END_PROTOCOL_VERSION,
     CONTAINER_RECREATE_PROTOCOL_VERSION,
@@ -102,6 +103,11 @@ def test_live_session_alias_capability_is_advertised() -> None:
 def test_events_before_paging_capability_is_advertised() -> None:
     assert EVENTS_BEFORE_PAGING_PROTOCOL_VERSION == 23
     assert EVENTS_BEFORE_PAGING_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
+def test_caller_session_id_capability_is_advertised() -> None:
+    assert CALLER_SESSION_ID_PROTOCOL_VERSION == 24
+    assert CALLER_SESSION_ID_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):

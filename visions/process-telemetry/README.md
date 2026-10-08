@@ -157,7 +157,8 @@ resource figures are sampled, never in the emitted shape.
 
 ## Non-Goals / Boundaries
 
-- **Not an operational process-registration ledger.** A separate state service
+- **Not an operational process-registration ledger.** [Process Registry](../process-registry/README.md)
+  governs this distinct capability. A separate state service
   may let processes register/unregister their current membership, answer
   on-demand inventory queries, and retain bounded local snapshot journals,
   analogous to a port-reservation ledger or an on-demand log tool. That state

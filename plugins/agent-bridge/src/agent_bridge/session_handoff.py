@@ -323,6 +323,7 @@ class _SessionHandoffMixin:
             session.target,
             agent_name=session.agent_name,
             caller_id=session.caller_id,
+            caller_session_id=session.caller_session_id,
             mcp_servers=[dict(server) for server in session.mcp_servers],
             model=session.model_override,
             effort=session.effort_override,

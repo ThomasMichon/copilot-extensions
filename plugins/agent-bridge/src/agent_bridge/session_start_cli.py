@@ -207,6 +207,7 @@ def _start_agent_session(
             charter=charter,
             target_dir=target_dir,
             caller_id=caller_id,
+            caller_session_id=core._get_caller_session_id(),
             sender_repo=core._sender_repo(),
             force_new=force_new,
             caller_owner_ref=core._worktrees_get("owner-ref"),

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-logger"
-version = "0.2.15-dev1"
+version = "0.2.16-dev1"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, local/rescue session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -78,4 +78,6 @@ dev = [
 testpaths = ["tests"]
 markers = [
     "no_autotrust: opt out of the autouse repo-config trust-gate bypass (see conftest.py)",
+    "guard: fast structural/contract guard tests run automatically in the pre-push hook; the full suite runs in CI",
+    "contract(name): names the behavioral contract a test enforces, for traceability",
 ]

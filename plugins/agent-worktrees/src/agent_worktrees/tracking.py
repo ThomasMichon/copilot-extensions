@@ -6,6 +6,7 @@ tracking its lifecycle state.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -3665,23 +3666,15 @@ def stamp_session_state(
     throttle_secs: float = 30.0,
     sync: bool = False,
 ) -> bool:
-    """Persist the picker's session-render cache back onto a worktree's record.
+    """Cache session turns/summary/git state for the picker's next first paint.
 
-    picker-cache-first-paint (dotfiles#948): the populate pass and a per-worktree
-    Refresh call this to cache ``session_turns`` / ``session_summary`` /
-    ``git_state`` for the cache-only first paint. Only provided fields update;
-    ``None`` means "leave as-is". Writes **only when a value actually changed**
-    (the render cache never ages out on read, so there is no freshness renewal --
-    which also avoids churning every YAML on every populate).
-
-    **Async by default.** File writes are kept OFF the caller's thread (user
-    interaction / render) and serialized through a single background writer
-    (:data:`_STAMP_QUEUE`), so a frequent background stamp never blocks a
-    keystroke and never collides with a foreground YAML write (a resume's
-    ``mark_resumed``). The mutation is coalesced per worktree and applied by the
-    writer thread. Pass ``sync=True`` to apply inline (tests, or a caller that
-    needs the write durable before it returns). Returns True when it wrote (sync)
-    or when the mutation was enqueued (async); best-effort, never raises.
+    Only changed, non-None fields write; there is no freshness renewal.
+    Async (default) coalesces per-worktree mutations in :data:`_STAMP_QUEUE`,
+    off the render thread. The worker waits boundedly for exclusive record
+    access and warns on timeout/failure, rather than dropping a contended write
+    silently. True means enqueued, not a persistence acknowledgement.
+    ``sync=True`` retains the immediate, nonblocking best-effort write contract:
+    True means written; absent/unchanged/contended records return False.
     """
     if sync:
         return _apply_session_state_stamp(
@@ -3696,19 +3689,17 @@ def _apply_session_state_stamp(
     turns: int | None = None,
     summary: str | None = None,
     git_state: str | None = None,
+    lock_timeout: float = 0.0,
 ) -> bool:
-    """The synchronous read-modify-write for :func:`stamp_session_state` --
-    run by the async writer thread (or inline when ``sync=True``). Serialized
-    per path (``_RecordLock`` -> in-process lock) and best-effort; returns True
-    iff the record was rewritten."""
+    """Apply a stamp; only background callers opt into a bounded lock wait."""
     yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False
     try:
-        # Best-effort background writer (#4547): the Picker's session-render
-        # cache. Skip on contention so a sweep never blocks a critical updater;
-        # the next populate re-stamps the (idempotent) cache.
-        with _RecordLock(yaml_path, blocking=False) as lk:
+        with _RecordLock(
+            yaml_path, timeout=lock_timeout, blocking=lock_timeout > 0,
+            require_sidecar=lock_timeout > 0,
+        ) as lk:
             if not lk.acquired:
                 return False
             record = load_record(yaml_path)
@@ -3727,20 +3718,24 @@ def _apply_session_state_stamp(
             record.session_state_at = _now_iso()
             save_record(record)
             return True
+    except TimeoutError:
+        logging.getLogger(__name__).warning(
+            "Cache stamp for %s timed out acquiring the record lock", worktree_id,
+        )
+        return False
     except Exception:
+        logging.getLogger(__name__).warning(
+            "Cache stamp for %s failed", worktree_id, exc_info=True,
+        )
         return False
 
 
 class _StampWriteQueue:
     """Single-writer async queue for the session-render-cache stamps.
 
-    Per the harness design guidance, YAML writes are kept off the
-    user-interaction/render path and serialized through one background worker: a
-    frequent stamp from the picker's populate/repoll threads never blocks a
-    keystroke, and -- because one thread performs every stamp write -- stamps
-    never race each other. Pending mutations are coalesced per worktree (only the
-    latest merged fields are written), so a burst collapses to a single write.
-    The worker is started lazily on first use and flushed at interpreter exit.
+    Coalesced latest fields drain through one lazy worker, off the render path,
+    including at interpreter exit. Session stamps wait up to 0.5s per lock
+    layer (in-process and cross-process); expiry warns without writing unlocked.
     """
 
     def __init__(self) -> None:
@@ -3801,7 +3796,7 @@ class _StampWriteQueue:
         mux = fields.pop("_mux", None)
         try:
             if fields:
-                _apply_session_state_stamp(worktree_id, **fields)
+                _apply_session_state_stamp(worktree_id, **fields, lock_timeout=0.5)
             if mux is not None:
                 live, refresh, throttle = mux
                 _stamp_liveness(
@@ -3812,7 +3807,7 @@ class _StampWriteQueue:
             pass
 
     def flush(self) -> None:
-        """Block until every queued stamp has been applied (tests / shutdown).
+        """Drain queued stamp attempts (tests / shutdown), including warnings.
 
         Waits for the worker to drain the queue -- including any write already
         in flight (so a caller that reads the YAML right after sees the value) --

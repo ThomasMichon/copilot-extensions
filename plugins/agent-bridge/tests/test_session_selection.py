@@ -79,6 +79,7 @@ class FakeClient:
         charter=None,
         target_dir=None,
         caller_id=None,
+        caller_session_id=None,
         sender_repo=None,
         force_new=False,
         caller_owner_ref=None,
@@ -89,7 +90,7 @@ class FakeClient:
     ):
         self.started.append(
             {"agent": agent, "charter": charter, "target_dir": target_dir,
-             "caller_id": caller_id,
+             "caller_id": caller_id, "caller_session_id": caller_session_id,
              "sender_repo": sender_repo, "force_new": force_new,
              "caller_owner_ref": caller_owner_ref,
              "worktree_id": worktree_id,

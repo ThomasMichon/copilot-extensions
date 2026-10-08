@@ -771,11 +771,13 @@ class Session:
         target: SpawnTarget,
         agent_name: str | None = None,
         caller_id: str | None = None,
+        caller_session_id: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.name = name
         self.agent_name = agent_name
         self.caller_id = caller_id
+        self.caller_session_id = caller_session_id
         self.target = target
         self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED

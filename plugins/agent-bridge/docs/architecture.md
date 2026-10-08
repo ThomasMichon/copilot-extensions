@@ -214,6 +214,25 @@ response also carries `acp_session_id` (the durable Copilot session id) and
 `session_id` directly -- see the `agent-bridge` skill's *Session identity*
 section for the full contract and the incident that motivated it.
 
+**Caller identity: `caller_id` vs `caller_session_id`.** Session rows
+(`GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`, the
+`GET /api/v1/sessions/{id}/status` dict, and `agent-bridge --json sessions`)
+carry two caller fields. `caller_id` is the caller-affinity and
+delivery-cursor key -- by default the caller's agent-worktrees worktree
+directory, so it names a folder, not a session (empty outside a managed
+worktree). `caller_session_id` is the id of the Copilot session that created
+the bridge session, captured by the CLI from `COPILOT_AGENT_SESSION_ID` (or
+sent as `caller_session_id` on `POST /api/v1/sessions`). It is informational
+only (never used for reuse or cursors), recorded only when it is a safe id
+(alphanumeric plus `._:@-`, at most 128 chars), `null` otherwise, and carried
+forward to handoff successors, worktree restarts, and parity container
+recreation. The create response (`POST /api/v1/sessions`) echoes the recorded
+value -- for a caller-affinity reuse, the reused session's own value. The
+request field is gated on HTTP protocol version 24
+(`CALLER_SESSION_ID_PROTOCOL_VERSION`): against an older daemon, which would
+silently ignore it, `BridgeClient` omits the field, still creates the session,
+and prints one stderr warning per process.
+
 The SSE stream (`/events`) resumes from the caller's last-acked **delivery
 cursor** when `after` is omitted and `caller_id` is supplied; pass an explicit
 `?after=<id>` for a fixed start point. The cursor advances only via `POST
