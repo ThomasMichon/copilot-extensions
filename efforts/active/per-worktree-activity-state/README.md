@@ -163,9 +163,11 @@ follow-ons.
       fires on every ordinary `status --activity` CLI call fleet-wide, not
       just the daemon sweep.
 - [ ] Confirm `handoff_diagnostics.py`, `session_binding_cli.py`'s on-demand
-      verbs, and `handoffs-check` remain the only journal readers, explicitly
+      verbs, `handoffs-check`, and `health.find_orphaned_handoffs()` (the
+      on-demand maintenance audit/repair flow, called from
+      `maintenance_cli.py`) remain the only journal readers, explicitly
       (diagnostic/on-demand only, per the Request's item 5) -- audit for any
-      further automatic (non-on-demand) caller beyond the five above before
+      further automatic (non-on-demand) caller beyond the six above before
       declaring this phase done.
 
 ### Phase 3 — Generalize the per-worktree journal
