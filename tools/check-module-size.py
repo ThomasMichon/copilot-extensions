@@ -77,7 +77,8 @@ even one unrelated entry's ceiling.
 
 Usage::
 
-    python tools/check-module-size.py                  # enforce (pre-push/CI push/dispatch)
+    python tools/check-module-size.py                  # full-tree audit (CI push/dispatch)
+    python tools/check-module-size.py --changed-since origin/dev  # pre-push contribution scope
     python tools/check-module-size.py --changed-since REF [--head REF2]  # enforce,
                                                              # PR-diff-scoped (CI pull_request);
                                                              # if REF's diff touches
