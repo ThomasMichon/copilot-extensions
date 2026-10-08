@@ -147,10 +147,15 @@ def test_audit_script_fails_closed_on_git_errors_and_odd_paths(tmp_path):
         if obj.is_file():
             obj.chmod(0o600)
             obj.write_bytes(b"garbage")
+    linked = tmp_path / "outside" / "wt\\odd"
+    _git("worktree", "add", "-q", "-b", "side", str(linked), cwd=odd)
+    (linked / "unsaved.txt").write_text("x\n")
     audit = _run_audit(root)
     assert audit.known
     by_name = {c.path.rsplit("/", 1)[-1]: c for c in audit.checkouts}
     assert by_name["back\\slash"].clean  # backslash path emitted verbatim
+    # a linked worktree with a backslash in its path is found (-z, unquoted)
+    assert by_name["wt\\odd"].dirty
     assert not by_name["broken"].clean
     assert not audit.all_clean
 

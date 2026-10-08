@@ -137,8 +137,11 @@ for g in @ROOT@/*/.git @ROOT@/*/*/.git @ROOT@/*/*/*/.git @EXTRAS@; do
   top=$(git -C "$(dirname "$g")" rev-parse --show-toplevel 2>/dev/null) \
     || { err "$(dirname "$g")"; continue; }
   add "$top"
-  while IFS= read -r w; do add "$w"; done < <(git -C "$top" worktree list \
-    --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  # -z: raw (unquoted) paths; enumeration failure fails closed.
+  git -C "$top" worktree list --porcelain -z >/dev/null 2>&1 || { err "$top"; continue; }
+  while IFS= read -r -d '' rec; do
+    case "$rec" in "worktree "*) add "${rec#worktree }";; esac
+  done < <(git -C "$top" worktree list --porcelain -z 2>/dev/null)
 done
 for p in "${list[@]}"; do
   st=$(git -C "$p" status --porcelain 2>/dev/null) || { err "$p"; continue; }
