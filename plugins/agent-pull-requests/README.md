@@ -47,7 +47,8 @@ joining each have a five-second deadline; exceeding either raises an explicit
 error rather than reporting a completed graceful shutdown. Pending subscriptions
 are retained, not cleared by shutdown.
 
-`serve restart` probes actual lease availability for up to twenty seconds
+`serve restart` uses a live health response, not leftover rendezvous metadata,
+to decide whether a predecessor is running. It probes actual lease availability for up to twenty seconds
 before starting its successor. If the predecessor still owns the lease, restart
 fails without spawning another daemon. After starting, restart requires a live
 health response within ten seconds; a stale rendezvous file is not readiness.

@@ -354,13 +354,18 @@ def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
 
 
 @pytest.mark.parametrize("lease_stuck", [False, True])
-def test_restart_waits_for_lease_and_live_health(lease_stuck, tmp_path, monkeypatch):
+@pytest.mark.parametrize("was_running", [False, True])
+def test_restart_waits_for_lease_and_live_health(
+    lease_stuck, was_running, tmp_path, monkeypatch, capsys
+):
     import single_instance_lease
     from agent_pull_requests import __main__ as cli, watch_daemon
 
     now = [0.0]
     booted = []
     health_checks = []
+    initial_health_checked = []
+    ready_at = 12 if was_running else 1
 
     def sleep(seconds):
         now[0] += seconds
@@ -379,9 +384,13 @@ def test_restart_waits_for_lease_and_live_health(lease_stuck, tmp_path, monkeypa
     def request(kind, payload, **kwargs):
         assert kwargs == {"boot_wait_s": 0.0, "boot": False}
         if kind == "shutdown":
+            assert was_running
             return {"shutting_down": True}
+        if not initial_health_checked:
+            initial_health_checked.append(True)
+            return {"pid": 123} if was_running else {"error": "not reachable"}
         health_checks.append(now[0])
-        return {"pid": 456} if now[0] >= 12 else {"error": "not reachable"}
+        return {"pid": 456} if now[0] >= ready_at else {"error": "not reachable"}
 
     monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
     monkeypatch.setattr(watch_daemon, "read_lock_data", lambda: {"pid": 123})
@@ -392,11 +401,13 @@ def test_restart_waits_for_lease_and_live_health(lease_stuck, tmp_path, monkeypa
     monkeypatch.setattr(cli.time, "sleep", sleep)
 
     result = cli._cmd_serve_restart(SimpleNamespace(json=True))
-    if lease_stuck:
+    if lease_stuck and was_running:
         assert result == 1
         assert not booted
         assert not health_checks
     else:
         assert result == 0
-        assert len(booted) == 1 and booted[0] >= 11
-        assert health_checks[0] < 12 <= health_checks[-1]
+        assert len(booted) == 1
+        assert booted[0] >= 11 if was_running else booted[0] == 0
+        assert health_checks[0] < ready_at <= health_checks[-1]
+        assert json.loads(capsys.readouterr().out)["was_running"] is was_running

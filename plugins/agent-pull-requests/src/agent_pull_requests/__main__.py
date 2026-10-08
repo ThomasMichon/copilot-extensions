@@ -631,9 +631,10 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
     an update' never orphans a caller that's suspended waiting on a PR."""
     from single_instance_lease import AlreadyRunningError, SingleInstance
 
-    from .watch_daemon import read_lock_data, state_dir
+    from .watch_daemon import state_dir
 
-    was_running = read_lock_data() is not None
+    health = _watch_request("health", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
+    was_running = "pid" in health
     if was_running:
         stop_result = _watch_request(
             "shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False
