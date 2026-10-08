@@ -50,6 +50,13 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
     )
 
 
+def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    assert runner._plugin_dir("worktree-manager") == tmp_path / "worktree-manager"
+    assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
+    assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
+
+
 def test_optional_file_override_is_validated_only_when_present(
     monkeypatch,
     tmp_path: Path,
@@ -372,4 +379,3 @@ def test_changed_plugins_empty_diff_schedules_nothing(monkeypatch) -> None:
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: next(calls))
     monkeypatch.setattr(runner, "_has_suite", lambda name: True)
     assert runner.changed_plugins("origin/main") == []
-

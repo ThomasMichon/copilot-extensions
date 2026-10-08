@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from worktree_manager.harness_state import (
     build_projects,
     build_repos,
@@ -227,14 +229,10 @@ def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, m
     from worktree_manager import harness_state
 
     home = _make_home(tmp_path)
-    repos = home / ".agent-worktrees" / "repos.yaml"
-    repos.write_text(
-        repos.read_text(encoding="utf-8").replace(
-            '    wsl: "' + str(tmp_path / "src" / "dotfiles").replace("\\", "/") + '"\n',
-            "",
-        ),
-        encoding="utf-8",
-    )
+    registry = home / ".agent-worktrees" / "repos.yaml"
+    data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    data["repos"]["dotfiles"].pop("wsl")
+    registry.write_text(yaml.safe_dump(data), encoding="utf-8")
     monkeypatch.setattr(harness_state, "_exact_platform_key", lambda: "wsl")
     problems = {name: (status, detail) for name, status, detail in mis_registered_repos(home)}
     assert "dotfiles" not in problems

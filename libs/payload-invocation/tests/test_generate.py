@@ -472,14 +472,33 @@ def _copied_agent_machines_payload(tmp_path: Path) -> Path:
             "*.egg-info",
         ),
     )
+    _stage_payload_dependencies(payload)
     return payload
 
 
 def _agent_procutil_src(payload: Path) -> Path:
     local = payload / "libs" / "agent-procutil" / "src"
-    if local.is_dir():
-        return local
-    return REPO / "libs" / "agent-procutil" / "src"
+    assert local.is_dir(), "the copied payload must contain its own portable dependency"
+    return local
+
+
+def _stage_payload_dependencies(payload: Path) -> None:
+    helper = (
+        REPO / "worktree-manager" / "src" / "worktree_manager"
+        / "_trusted_pointer_materializer.py"
+    )
+    spec = importlib.util.spec_from_file_location("payload_dependency_materializer", helper)
+    assert spec and spec.loader
+    materializer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(materializer)
+    result = materializer.materialize_uv_editable_ref_into(
+        source_consumer_dir=REPO / "plugins" / "agent-machines",
+        dest_consumer_dir=payload,
+        canonical_root=REPO,
+        dest_root=payload,
+    )
+    assert not any(line.startswith("SKIP ") for line in result), result
+    assert (payload / "libs" / "machine-identity" / "src" / "machine_identity").is_dir()
 
 
 def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
@@ -496,6 +515,7 @@ def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
             "*.egg-info",
         ),
     )
+    _stage_payload_dependencies(payload)
     write_json = {
         "name": "example",
         "owner": {"name": "Example"},
@@ -776,6 +796,7 @@ def _agent_worktrees_test_environment(
                     str(payload / "libs" / "config-migrate" / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
+                    str(payload / "libs" / "machine-identity" / "src"),
                     str(payload / "libs" / "dropin-registry" / "src"),
                     str(payload / "libs" / "plugin-activation" / "src"),
                 ]
@@ -1427,6 +1448,7 @@ def test_agent_machines_required_context_preserves_absent_policy_legacy_use(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
+                    str(payload / "libs" / "machine-identity" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1524,6 +1546,7 @@ def test_agent_machines_active_context_selects_only_its_cell_root(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
+                    str(payload / "libs" / "machine-identity" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1582,6 +1605,7 @@ def test_agent_machines_blocked_context_states_never_run_legacy(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
+                    str(payload / "libs" / "machine-identity" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1692,6 +1716,7 @@ def test_agent_machines_removed_policy_keeps_active_cell_authoritative(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
+                    str(payload / "libs" / "machine-identity" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
