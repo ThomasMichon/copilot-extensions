@@ -691,7 +691,7 @@ survey above.
       `direct-read-is-a-degrade-not-a-peer` reads remain sanctioned;
       writes do not.
 
-### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(not started)_
+### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(in progress — 6a done)_
 _(Added 2026-10-06, operator-directed formal follow-on from
 `pivot-streaming-transport`. Addresses the Worktrees-pivot half of
 [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555):
@@ -782,34 +782,64 @@ than hypothetical:
       latency/freshness contracts and a wrong default risks silently
       slowing down the Picker's default classify path.
 
-      **Done (2026-10-07/08) — see `phase-6-audit.md`.** Traced all three
-      candidate compute paths (`classify_daemon`/`_classify_records`;
-      `worktree_status_compute`/agent-dispatch's relay; `status-segment`'s
-      own inline classify). Ruled out the two additional findings above as
-      the reported oscillation's own mechanism in the sense of "two daemons
-      disagreeing" — `worktree_status_compute` and `status-segment` are
-      confirmed uninvolved in the Worktrees-pivot row render at all (a
-      different consumer and a `active_paths=None` immune path,
-      respectively). The actual oscillation is a single render protocol's
-      two intentional phases (`list --json --cache-only` then `--classify`)
-      interacting with `picker_support.data_local._overlay_cached_state`'s
-      unconditional `live -> state="active"` override on the cache-only
-      first paint, independently of this phase's own structural
-      consolidation. Decided shape (i) for 6b (generalize
-      `worktree_status_compute` with a `fetch: bool` param; `classify_daemon`
-      becomes a thin no-fetch view). **Scoped a second, separate fix**
-      (narrow, not part of 6b/6c/6d) for the override itself — see the
-      audit doc's Recommendation section — required before this phase's
-      closing claim on #5555, per 6d's own "don't let a silent gap stand"
-      requirement.
+      **Done (2026-10-07/08, revised 2026-10-08 after review) — see
+      `phase-6-audit.md`.** Traced all three candidate compute paths
+      (`classify_daemon`/`_classify_records`; `worktree_status_compute`/
+      agent-dispatch's relay; `status-segment`'s own inline classify).
+      Confirmed `worktree_status_compute` and `status-segment` are
+      uninvolved in the Worktrees-pivot row render (a different consumer,
+      and an `active_paths=None` path respectively) — the oscillation is
+      not two daemons disagreeing. **A first-round review (this effort's
+      own repo gate) correctly disproved the first draft's claimed
+      mechanism**: `_classify_records`' own `active_paths` (built by
+      `_build_active_paths`) already forces `ACTIVE` for a genuinely live
+      worktree during the classify pass too, so a classify re-run does not
+      unconditionally "correct back" to the stale git state while a
+      session stays live, and `derive.py`'s `_state()` already prioritizes
+      liveness marker fields over the raw `state` field on every render —
+      so overwriting `state` in `_overlay_cached_state` is largely moot for
+      the lock/bound-live signals specifically. Re-traced and found the
+      actual, concretely-confirmed divergence: `list_cli.py`'s
+      `--cache-only` branch calls `_worktree_to_dict(rec, ...)` with
+      **no `mux_info` and no `session_ctx`** at all, so the cache-only
+      payload can never carry `mux_session`/`mux_attached`/
+      `session_lock_live`-via-`session_ctx` — only the classify payload
+      (which always passes `mux_info`/`session_ctx`) can. A worktree whose
+      only liveness signal is an attached mux session (not a registered
+      `inuse.<pid>.lock`, not a fresh cached `bound_live` hint) renders its
+      stale/cached git state on cache-only first paint, flips to `ACTIVE`
+      on the next classify populate (mux visibility appears), then flips
+      back on the next first-paint cycle (mux visibility disappears again)
+      — a genuine, repeating, code-confirmed oscillation. Decided shape
+      (i) for 6b's compute-sharing (generalize `worktree_status_compute`
+      with a `fetch: bool` param; `classify_daemon` becomes a thin no-fetch
+      view) — see the audit doc for why **neither** existing
+      `work_coalescing_singleton` server/rendezvous is actually retired
+      under this shape (the two request granularities — whole-project
+      batch vs. single-worktree bundle — remain genuinely distinct
+      consumers; only the common leaf `git_ops.classify_worktree` call is
+      shared). **Scoped a second, separate fix** (narrow, not part of
+      6b/6c/6d) to close the mux-visibility gap in the cache-only payload
+      — see the audit doc's Recommendation section — required before this
+      phase's closing claim on #5555, per 6d's own "don't let a silent gap
+      stand" requirement.
 - [ ] **6b — Implement the chosen consolidation**, keeping both existing
       external call-site contracts (`_classify_records`'s `daemon_filters`
       path; `session_tracking_cli`'s `worktree-status` bundle command)
       unchanged in shape — only the shared internal compute path changes.
-      Retire whichever of the two rendezvous/daemon implementations 6a
-      designates as subsumed (its `work_coalescing_singleton` `kind` and
-      lock-file rendezvous fields), rather than leaving a second, now-dead
-      daemon process running alongside the unified one.
+      **Neither `work_coalescing_singleton` server is retired** (6a found
+      the two serve genuinely different request shapes — a whole-project
+      batch vs. a single-worktree bundle — so both `classify_daemon`'s and
+      `worktree_status_daemon`'s own `CoalescingServer`/rendezvous fields
+      in the lock file stay live); only their shared leaf computation
+      (`git_ops.classify_worktree`, parametrized by `fetch: bool`) is
+      unified. Also preserve, in the shared seam's adapter layering (not
+      folded into the generalized function itself), the facts Path A adds
+      that Path B does not: `active_paths`-forced `ACTIVE`,
+      `_apply_tracking_override`'s FINAL/MERGED closure refinement, and
+      `refine_state_with_session`'s `CONVO` refinement — a thin
+      `fetch=False` view that drops any of these would silently change
+      Picker-rendered states (ACTIVE/FINAL/CONVO), not just latency.
 - [ ] **6c — Structural delegation test proving one shared compute seam,**
       not a same-answer coincidence test: a same-repository-state agreement
       check cannot distinguish "two implementations that happen to agree on
@@ -884,6 +914,31 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-08 — Phase 6a corrected after review: the oscillation is a mux-visibility gap in the cache-only payload, not a state-field override
+This repo's own Copilot review (PR #5659, round 1) correctly disproved the
+first draft's central claim: `_classify_records`'s own `active_paths`
+mechanism already forces `ACTIVE` during the classify pass too when a
+session is genuinely live, so a classify re-run does not unconditionally
+revert to stale git state while live — and `derive.py`'s `_state()` already
+prioritizes liveness marker fields over the raw `state` field on every
+render, making the originally-proposed fix (stop overwriting `state`)
+insufficient on its own. Re-traced and found the real, code-confirmed
+divergence: `list_cli.py`'s `--cache-only` branch calls `_worktree_to_dict`
+with no `mux_info`/`session_ctx` at all, so the cache-only payload can
+never carry `mux_session`/`mux_attached`, unlike the classify payload which
+always does. A worktree live only via an attached mux session (no
+registered lock file, no fresh cached bound-live hint) genuinely oscillates:
+stale/cached state on first paint, `ACTIVE` on classify populate, back to
+stale on the next first paint. Also resolved the daemon-retention question
+6a was missing: neither `classify_daemon`'s nor `worktree_status_daemon`'s
+`CoalescingServer`/rendezvous is retired under shape (i) — they serve
+genuinely different request granularities (whole-project batch vs.
+single-worktree bundle); only the shared leaf `git_ops.classify_worktree`
+call is unified, with Path A's extra adapter-layer facts (`active_paths`,
+tracking-override refinement, session-turn `CONVO` refinement) preserved
+outside the generalized function. `phase-6-audit.md` rewritten accordingly;
+Phase 6 heading corrected from "not started" to "in progress."
 
 ### 2026-10-08 — Phase 6a complete: traced all three compute paths; oscillation's real mechanism is narrower than the title implies
 Full trace in `phase-6-audit.md`. Confirmed via code reading (not
