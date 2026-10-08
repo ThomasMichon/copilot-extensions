@@ -255,6 +255,12 @@ unconditionally -- worktree create/resume, `sessionStart`, or any read path --
 since a failure on one source never blocks another and nothing it does
 mutates a checked-in file or git history.
 
+Local delivery never withholds safe guidance because of a context-budget excess.
+Template, per-file and aggregate excess, and invalid budget configuration, are
+warning findings for this path; `scan`/checked-in `sync` retain their independent
+audit policy. Safety/ownership refusals remain blocking. The authoritative
+distinction is in `docs/patterns/worktree-scoped-dynamic-guidance.md`.
+
 The CLI (`main()`/`__main__`) is the actual consent-gated scheduled-worker
 surface: it calls `projection_reflect_consent.load_consent()` first and
 refuses to run at all -- no mutation, no trust decision made -- without this

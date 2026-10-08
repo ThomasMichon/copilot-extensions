@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, serially landed proposal and implementation slices
 - **Created:** 2026-10-08
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/harness-guidance` -- closes `resilient-safety-boundary`
   and `ambient-delivery-fails-open`; extends `attributable-context-budget` so
   budget auditing cannot withhold otherwise-safe local guidance.
@@ -93,23 +93,23 @@ Existing source and destination safety checks are not context-budget checks.
 ## Plan
 
 ### Phase 0 - Reviewed delivery contract
-- [ ] Land this proposal and the vision clarification through automated review
+- [x] Land this proposal and the vision clarification through automated review
   before runtime implementation.
-- [ ] Verify this capture against the operator's two requests and preserve the
+- [x] Verify this capture against the operator's two requests and preserve the
   distinction between requested delivery and agent-recommended validation.
 
 ### Phase 1 - Budget-independent local installation
-- [ ] Make per-projection and aggregate budget excess advisory for local-cache
+- [x] Make per-projection and aggregate budget excess advisory for local-cache
   rendering: write every safe, unambiguous enabled source, including an
   over-budget stack, without changing the configured budget.
-- [ ] Separate budget audit findings from source/destination safety failures.
+- [x] Separate budget audit findings from source/destination safety failures.
   Check bounded provenance readers and existing-cache validation so a large
   local file is not reclassified as foreign merely for exceeding an audit cap.
-- [ ] Keep checked-in files and projection locks byte-identical during local
+- [x] Keep checked-in files and projection locks byte-identical during local
   rendering, including when checked-in sync is independently blocked.
-- [ ] Preserve the existing scan/report path for periodic size auditing;
+- [x] Preserve the existing scan/report path for periodic size auditing;
   no additional resident daemon or live schedule changes are authorized.
-- [ ] Update the authoritative pattern/skill documentation with the implemented
+- [x] Update the authoritative pattern/skill documentation with the implemented
   local delivery versus audit distinction.
 
 ### Phase 2 - Pre-session lifecycle coverage and observable repair
@@ -144,13 +144,13 @@ Existing source and destination safety checks are not context-budget checks.
 The specific proofs below are **agent-recommended** ways to verify the
 operator-requested contract, not additional operator requirements.
 
-- [ ] Oversized aggregate and oversized individual source still install their
+- [x] Oversized aggregate and oversized individual source still install their
   full local content; warnings retain byte counts/source attribution.
-- [ ] Audit still detects the excess, with unchanged budget configuration.
-- [ ] Re-render is byte-idempotent; stale/missing cache repair completes.
-- [ ] Checked-in marker mismatch or independently blocked sync cannot prevent
+- [x] Audit still detects the excess, with unchanged budget configuration.
+- [x] Re-render is byte-idempotent; stale/missing cache repair completes.
+- [x] Checked-in marker mismatch or independently blocked sync cannot prevent
   a safe local-only render; checked-in content and lock bytes stay unchanged.
-- [ ] Unsafe paths, foreign existing local files, ambiguous identities and
+- [x] Unsafe paths, foreign existing local files, ambiguous identities and
   tracked local destinations retain their safety refusals without dropping
   unrelated safe sources.
 - [ ] Lifecycle ordering tests prove rendering precedes agent startup on each
@@ -171,6 +171,30 @@ checked-in fallback and its privileged review transaction separate. Do not
 force marker/lock repair or raise size limits to disguise the delivery gap.
 
 ## Journal
+
+### 2026-10-08 - Renderer slice implemented
+- Local template/per-file/aggregate size excess and invalid budget config are
+  warning findings, not delivery admission failures. Scan/sync remain strict.
+- Independent 1 MiB template and 2 MiB cache safety-read bounds preserve bounded
+  provenance checks; large local guidance remains refreshable and reconcilable.
+- The complete customizing-copilot suite passed: 331 tests, 8 explicit skips,
+  no marker warnings after declaring its existing `guard` marker. Targeted
+  source lint, install-contract and whitespace gates passed.
+- A source-CLI demonstration installed 27 local siblings in approximately
+  1.3 seconds on an enabled stack that previously installed zero. Aggregate
+  excess was still reported, the configured budget and projection lock hash
+  were unchanged, and no tracked consumer files changed. This proves the
+  renderer slice, not yet the promoted lifecycle integration.
+- A bounded renderer delegate owned only the customizing-copilot implementation
+  and tests; the Driving agent owns integration, docs, PRs and remaining phases.
+
+### 2026-10-08 - Proposal reviewed; execution begins
+- PR #5709 merged after automated approval and passing checks. The operator's
+  creation/session-start ordering and advisory-budget decision remain verbatim.
+- Transition the Driving agent from Phase 0 to Phase 1. The small publication
+  attribution repair passed all 23 module-size guard tests.
+- The nonblocking vision-wording finding is corrected with the first
+  implementation slice.
 
 ### 2026-10-08 - Inception
 - Confirmed the prior primacy effort is Done; this is a follow-on reliability

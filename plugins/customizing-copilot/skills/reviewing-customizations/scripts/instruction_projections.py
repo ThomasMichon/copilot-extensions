@@ -50,6 +50,8 @@ MAX_DECLARATION_BYTES = 16 * 1024
 MAX_PROJECTIONS_PER_PLUGIN = 16
 MAX_TEMPLATE_BYTES = 4 * 1024
 MAX_PROJECTION_BYTES = 4 * 1024
+MAX_LOCAL_TEMPLATE_BYTES = 1024 * 1024
+MAX_LOCAL_CACHE_BYTES = 2 * MAX_LOCAL_TEMPLATE_BYTES
 MAX_AGGREGATE_BYTES = 12 * 1024
 MIN_AGGREGATE_BYTES = MAX_PROJECTION_BYTES
 MAX_AGGREGATE_BYTES_CEILING = 64 * 1024
@@ -351,7 +353,8 @@ def _read_bounded_regular(path: Path, limit: int) -> bytes:
         or info.st_size > limit
     ):
         raise ValueError("file is not a bounded regular file")
-    raw = path.read_bytes()
+    with path.open("rb") as handle:
+        raw = handle.read(limit + 1)
     if len(raw) > limit:
         raise ValueError("file exceeds its byte limit")
     return raw
@@ -534,6 +537,7 @@ def _load_specs(
     result: Result,
     *,
     locked_plugins: frozenset[str] = frozenset(),
+    template_limit: int = MAX_TEMPLATE_BYTES,
 ) -> tuple[list[ProjectionSpec], set[str]]:
     specs: list[ProjectionSpec] = []
     unknown_plugins: set[str] = set()
@@ -740,7 +744,7 @@ def _load_specs(
                     raise ValueError("skipLocalCache must be a boolean")
                 template_path = _safe_existing_file(payload_root, template_rel)
                 template_raw = _canonical_template_bytes(
-                    _read_bounded_regular(template_path, MAX_TEMPLATE_BYTES)
+                    _read_bounded_regular(template_path, template_limit)
                 )
                 if _frontmatter_apply_to(template_raw) != apply_to:
                     raise ValueError(
@@ -978,13 +982,11 @@ def render_local_cache(
       destination -- otherwise the source is skipped as a conflict (a
       finding is reported) rather than silently overwriting someone else's
       file.
-    * **Budget enforcement.** Each candidate is checked against
-      ``MAX_PROJECTION_BYTES`` and the repository's aggregate budget
-      (:func:`_load_aggregate_budget`) before being written, exactly like
-      ``sync_repository``. A malformed aggregate-budget config stops this
-      call from publishing anything at all, matching ``sync_repository``'s
-      own refusal in that case -- it never silently proceeds on a fallback
-      default.
+    * **Budget auditing, not admission.** Template, per-file and aggregate
+      guidance budgets produce warnings without omitting safe local content.
+      Invalid budget config warns and uses the default for size accounting.
+      Separate local safety bounds keep source and provenance reads bounded;
+      checked-in scan/sync retain their strict budget policy.
     * **`.github` indirection is rejected**, not just ``.github/instructions``
       -- a symlinked/junctioned ``.github`` could otherwise let the walk (and
       the stale-cleanup unlink) reach files outside the repository.
@@ -1082,7 +1084,9 @@ def _render_local_cache_locked(
     """The actual render_local_cache work, run only while
     ``_local_cache_lock(root)`` is held -- see :func:`render_local_cache`.
     """
-    specs, _unknown_plugins = _load_specs(root, sources, result)
+    specs, _unknown_plugins = _load_specs(
+        root, sources, result, template_limit=MAX_LOCAL_TEMPLATE_BYTES
+    )
 
     by_source_key: dict[str, list[ProjectionSpec]] = {}
     for spec in specs:
@@ -1136,43 +1140,43 @@ def _render_local_cache_locked(
         except ValueError as exc:
             result.add(BLOCKING, "projection-local-cache", spec.destination, str(exc))
             continue
-        if rendered.byte_count > MAX_PROJECTION_BYTES:
+        if rendered.byte_count > MAX_LOCAL_CACHE_BYTES:
             result.add(
                 BLOCKING,
+                "projection-local-cache",
+                local_destination,
+                f"rendered local cache exceeds the {MAX_LOCAL_CACHE_BYTES}-byte "
+                "safety read limit",
+            )
+            continue
+        if spec.template_bytes > MAX_TEMPLATE_BYTES:
+            result.add(
+                WARNING,
+                "projection-local-cache-budget",
+                spec.template,
+                f"{spec.source_key} template is {spec.template_bytes} bytes; "
+                f"template budget is {MAX_TEMPLATE_BYTES} bytes",
+            )
+        if rendered.byte_count > MAX_PROJECTION_BYTES:
+            result.add(
+                WARNING,
                 "projection-local-cache-budget",
                 local_destination,
                 f"rendered local cache is {rendered.byte_count} bytes; the "
                 f"per-file budget is {MAX_PROJECTION_BYTES} bytes",
             )
-            continue
         accepted.append((local_destination, spec, rendered))
 
-    blocking_before_budget = result.blocking
-    aggregate_budget = _load_aggregate_budget(root, result)
-    budget_config_failed = result.blocking > blocking_before_budget
-    if budget_config_failed:
-        # The aggregate-budget config itself is malformed/unreadable --
-        # sync_repository refuses to write anything in this state, and this
-        # render-only path must match that refusal rather than silently
-        # proceeding on the fallback default MAX_AGGREGATE_BYTES value.
-        # Refusing new/refreshed writes is not the same as leaving stale
-        # caches in place, though: the reconciliation pass below still
-        # needs to run against an *empty* accepted set so a source that has
-        # since gone away doesn't get to keep overriding the checked-in
-        # fallback indefinitely just because this call also hit a config
-        # error.
-        accepted = []
-    else:
-        aggregate = sum(rendered.byte_count for _dest, _spec, rendered in accepted)
-        if aggregate > aggregate_budget:
-            result.add(
-                BLOCKING,
-                "projection-local-cache-budget",
-                "<local-cache-aggregate>",
-                f"local cache aggregate is {aggregate} bytes; budget is "
-                f"{aggregate_budget} bytes",
-            )
-            accepted = []
+    aggregate_budget = _load_aggregate_budget(root, result, severity=WARNING)
+    aggregate = sum(rendered.byte_count for _dest, _spec, rendered in accepted)
+    if aggregate > aggregate_budget:
+        result.add(
+            WARNING,
+            "projection-local-cache-budget",
+            "<local-cache-aggregate>",
+            f"local cache aggregate is {aggregate} bytes; budget is "
+            f"{aggregate_budget} bytes",
+        )
 
     existing_local_cache_files = list(_iter_local_cache_files(root))
     existing_local_cache_relatives: list[str] = []
@@ -1291,7 +1295,7 @@ def _render_local_cache_locked(
         if relative in valid_destinations:
             continue
         try:
-            raw = _read_bounded_regular(path, MAX_PROJECTION_BYTES)
+            raw = _read_bounded_regular(path, MAX_LOCAL_CACHE_BYTES)
         except (OSError, ValueError):
             continue
         if _parse_owned_local_cache_marker(raw, relative) is None:
@@ -1419,17 +1423,14 @@ def _resolve_git_tracked_paths(
 
 
 def _read_existing_local_cache(path: Path) -> bytes | None:
-    """Bounded, symlink-safe read of whatever currently sits at a
-    local-cache destination.
+    """Read an existing cache safely, returning None only if absent.
 
-    Returns ``None`` when nothing exists there yet. A file that is not a
-    plain regular file, or exceeds ``MAX_PROJECTION_BYTES`` (the same cap a
-    fresh render is held to), raises ``ValueError`` rather than being read
-    in full -- an oversized or unsafe existing file at this path must never
-    be loaded wholesale merely to decide whether to overwrite it.
+    Reads use the local safety bound, not the guidance audit budget, so owned
+    oversized renders remain refreshable. Nonregular/indirected files and files
+    above MAX_LOCAL_CACHE_BYTES are refused without loading them wholesale.
     """
     try:
-        return _read_bounded_regular(path, MAX_PROJECTION_BYTES)
+        return _read_bounded_regular(path, MAX_LOCAL_CACHE_BYTES)
     except FileNotFoundError:
         return None
 
@@ -1561,16 +1562,15 @@ def _validate_lock_entry(entry: object) -> dict[str, object]:
     return dict(entry)
 
 
-def _load_aggregate_budget(repo_root: Path, result: Result) -> int:
+def _load_aggregate_budget(
+    repo_root: Path, result: Result, *, severity: str = BLOCKING
+) -> int:
     """Resolve the effective aggregate projection budget for this repository.
 
-    Defaults to ``MAX_AGGREGATE_BYTES``. A repository may opt into a
-    different ceiling via a small, strictly validated, checked-in config
-    file so a harness with a genuinely larger reviewed set of static
-    fail-safe/pointer projections is not stuck at a value sized for a
-    smaller stack. A malformed or out-of-range override is a blocking
-    finding -- the default remains in effect rather than silently accepting
-    an unsafe or unbounded value.
+    A small, strictly validated checked-in config can override the default
+    MAX_AGGREGATE_BYTES. Invalid/unreadable config retains that default and
+    reports at the requested severity: blocking for scan/sync, warning for
+    local delivery. Config validity never gates local content.
     """
     config_path = repo_root.joinpath(*CONFIG_RELATIVE.parts)
     try:
@@ -1579,7 +1579,7 @@ def _load_aggregate_budget(repo_root: Path, result: Result) -> int:
         return MAX_AGGREGATE_BYTES
     except OSError as exc:
         result.add(
-            BLOCKING,
+            severity,
             "projection-config",
             CONFIG_RELATIVE.as_posix(),
             f"projection config is unreadable: {exc}",
@@ -1608,7 +1608,7 @@ def _load_aggregate_budget(repo_root: Path, result: Result) -> int:
             )
     except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
         result.add(
-            BLOCKING,
+            severity,
             "projection-config",
             CONFIG_RELATIVE.as_posix(),
             f"projection config is invalid, using default budget: {exc}",
