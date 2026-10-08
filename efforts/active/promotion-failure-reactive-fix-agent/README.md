@@ -52,6 +52,11 @@
   human-opened one from an agent commit), the cap-attempts-per-signature
   guardrail, and explicit out-of-scope-instruction enforcement; see the
   Validation Plan's remaining unchecked items.
+  **Latest monitoring (2026-10-08):** six new signature issues authorized and
+  reached the agent, but none produced a verified fix PR. Five test failures
+  were independently fixed and their stale trackers closed; #5590's timeout
+  and #4783's execution-blockage tracker remain open. See the
+  [consolidated monitoring record](journal/2026/10.08-standing-monitoring.md).
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -2731,3 +2736,12 @@ posture caught** (distinct from #5276's crash-vs-decline gap) --
 further evidence the "watch for a real failure, fix what it reveals,
 with the same rigor as a real contribution" posture is doing real work,
 not just confirming the mechanism already works.
+
+### 2026-10-08 - Consolidated standing-monitoring check
+
+[Six new signatures and their actual worker outcomes](journal/2026/10.08-standing-monitoring.md):
+authorization and agent execution worked for all six; verification was
+unavailable and no verified automatic fix PR was produced. Five independently
+fixed signature issues were closed after targeted current-dev checks; the
+timeout and existing execution-defect trackers remain open. The effort's
+Validation Plan stays unresolved.
