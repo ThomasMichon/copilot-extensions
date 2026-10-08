@@ -253,17 +253,17 @@ class StartSessionRequest(BaseModel):
 class SubmitPromptRequest(BaseModel):
     """Request to submit a prompt to a session.
 
-    ``queue`` opts into durable send-or-queue (#4114): when the session is busy
-    the prompt is persisted to the bridge's ``pending_prompts`` table and
-    delivered FIFO on the next turn-settle -- surviving a caller remount, an NF
-    crash, and a bridge/host restart -- instead of being rejected with 409.
-    Default False preserves the legacy 409-on-busy contract. ``caller_id`` tags
-    the queued row with who submitted it (for display / attribution).
+    ``queue`` opts into durable send-or-queue (#4114): a busy session's prompt
+    is persisted (``pending_prompts``) and delivered FIFO on the next settle,
+    surviving remount, crash and restart, instead of a 409 (the default).
+    ``caller_id`` tags the queued row. With ``queue``, ``no_resume`` refuses a
+    stopped session (409 ``session_stopped``) instead of resuming it (gen 25).
     """
 
     prompt: str
     queue: bool = False
     caller_id: str | None = None
+    no_resume: bool = False
 
 
 class ResumeSessionRequest(BaseModel):
@@ -326,15 +326,15 @@ class StartSessionResponse(BaseModel):
 
 
 class SubmitPromptResponse(BaseModel):
-    """Result of a prompt submission.
-
-    On the immediate-run path ``turn_index`` is the started turn. On the durable
-    send-or-queue path (``queued=True``, #4114) the prompt was persisted rather
-    than run: ``turn_index`` is None and ``queue_id`` / ``position`` describe its
-    place in the FIFO queue.
+    """Result of a prompt submission to ``session_id`` (a successor when the submit
+    handed an over-critical idle session off). Immediate run: ``turn_index`` is
+    the started turn. Durable send-or-queue (``queued=True``, #4114): the prompt
+    was persisted rather than run, ``turn_index`` is None and ``queue_id`` /
+    ``position`` place it in the FIFO queue.
     """
 
     status: SessionStatus
+    session_id: str | None = None
     turn_index: int | None = None
     queued: bool = False
     queue_id: int | None = None
@@ -649,16 +649,16 @@ class SendMessageRequest(BaseModel):
 class SendMessageResult(BaseModel):
     """Result of enqueuing a message for delivery into a live session.
 
-    When the request set ``wait``, the bridge also watches the target's
-    *represented* event stream for the reply turn (D1): ``replied`` is True once
-    the next ``turn_complete`` lands, ``reply`` carries the assistant text of
-    that turn, and ``stop_reason`` its stop reason. On a wait timeout ``replied``
-    is False and the message still sits durably in the queue.
+    ``duplicate``: an identical idempotent retry matched the original
+    (``message_id``). With ``wait`` (D1), ``replied`` is True once the reply turn's
+    ``turn_complete`` lands, with its text (``reply``) and ``stop_reason``; on a
+    timeout it is False and the message still sits durably in the queue.
     """
 
     ok: bool = True
     session_id: str
     message_id: int
+    duplicate: bool = False
     replied: bool = False
     reply: str | None = None
     stop_reason: str | None = None

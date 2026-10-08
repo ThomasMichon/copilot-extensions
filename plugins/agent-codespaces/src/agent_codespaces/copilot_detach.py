@@ -52,6 +52,7 @@ from venue_copilot import (
 )
 
 from .model_launch import model_copilot_args
+from venue_copilot.resume_claim import resume_target, settle_resumed_claim
 from venue_copilot.supervisor import with_supervisor
 
 _BUSY_EXIT = 75
@@ -736,6 +737,13 @@ def cmd_detach(
                 f"`agent-codespaces copilot {args.name}` or stop it with --stop.",
                 plan, pane_tail=_pane_tail(args.name, plan["mux_session"]),
             )
+        # A resume by id may claim through a placeholder whose process then exits:
+        # renew the claim (and venue) for the resumed id. Bounded: ~2 heartbeats.
+        operation = reservation["reservation_id"]
+        session_id, reservation = settle_resumed_claim(
+            plan["scope_id"], reservation, plan["venue"], expected=resume_target(copilot_args),
+            claimed=session_id, timeout=min(args.register_timeout, 75.0), ttl_seconds=_RESERVATION_TTL,
+        )
         owner.hold(
             args.name, plan["tenant"], daemon_port=daemon_port,
             mux_session=plan["mux_session"], confirmed=True,
@@ -756,7 +764,7 @@ def cmd_detach(
                 "seed was never typed; delivering over bridge"
             )
             _progress("seed-bridge", detail)
-            seed_delivery_status = "bridge" if deliver_note(session_id, seed, operation=reservation["reservation_id"], **alias_floor) else "failed"
+            seed_delivery_status = "bridge" if deliver_note(session_id, seed, operation=operation, **alias_floor) else "failed"
         refs_delivered = None
         if refs_note_text:
             # A typed new session got the note in its seed; a running one (or a
@@ -773,7 +781,7 @@ def cmd_detach(
                 refs_delivered = "unconfirmed"
             elif not created:
                 refs_delivered = (
-                    "message" if deliver_note(session_id, refs_note_text, operation=reservation["reservation_id"], **alias_floor) else "failed"
+                    "message" if deliver_note(session_id, refs_note_text, operation=operation, **alias_floor) else "failed"
                 )
             else:
                 refs_delivered = "failed"

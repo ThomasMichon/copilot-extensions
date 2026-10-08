@@ -13,13 +13,13 @@ that pattern to this repository.
 | [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Draft | #5707 |
 | [Lean Session Lifecycle](active/lean-session-lifecycle/README.md) | Draft | #5579, #5664, #2619 |
 | [Session Intelligence and Accounting](active/session-intelligence-and-accounting/README.md) | Active | #5665 |
+| [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Active (Phase 1 in review) | #5668 (core + `dispatch`), then `bridge` + `pr`; clients separately |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
 | [Resume Prompt: Durable `--interactive` Seed Delivery, No-Mux Parity](active/resume-prompt-durable-seed-and-mux-fix/README.md) | Active (Phase 1 done) | #5415 |
 | [Compatibility-Root Decoupling](active/compatibility-root-decoupling/README.md) | Draft | #5293 |
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
 | [ai-attribution Audience-Based Disclosure Policy](active/ai-attribution-audience-policy/README.md) | Active (Phase 1 done) | #2965 |
 | [Devcontainer Test Isolation](active/devcontainer-test-isolation/README.md) | Done; pending archive | #5040 |
-| [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Active | #4691 |
 | [agent-dispatch Recipe Composability](active/agent-dispatch-recipe-composability/README.md) | Active | #4959 |
 | [agent-dispatch Workers Configuration Section](active/agent-dispatch-workers-config-section/README.md) | Draft | See effort |
 | [Configurable token-command sourcing](active/token-command-sourcing/README.md) | Draft | _pending_ |

@@ -4,14 +4,15 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** Active (Phase 9 done; Phase 2 -- the Gitea backlog provider
-  and reviewer adapter -- is now fully closed, merged via PR #5414
-  2026-10-06; Phase 3's own tracked single-emitter-primitive follow-on
-  slice remains, explicitly out of this effort's own scope. Of this
-  effort's own Validation Plan: each Phase's own tests independently, the
+- **Status:** Done (archived 2026-10-08). Phase 9 done; Phase 2 -- the
+  Gitea backlog provider and reviewer adapter -- fully closed, merged via
+  PR #5414 2026-10-06; Phase 3's single-emitter-primitive taxonomy
+  refactor deferred to `ThomasMichon/copilot-extensions#5732`. Every
+  Validation Plan item resolved: each Phase's own tests independently, the
   real consuming-repo migration, the recipe README cross-check, and the
-  live fixture exercising each of the 4 named recipes end-to-end are all
-  done (2026-10-08); only a clean full-suite run remains open)
+  live fixture exercising each of the 4 named recipes end-to-end (PR
+  #5647, 2026-10-08) are all done; the one clean full-suite run deferred
+  to `ThomasMichon/copilot-extensions#5731`.
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -29,10 +30,10 @@
 - **Sub-issues:** _TBD, one per Plan phase once filed_
 - **Full design context:** the `extends:`/recipe-taxonomy critique that
   seeded #4691 is Round 1 of
-  [`efforts/active/task-verification-gate/inception-transcript.md`](../task-verification-gate/inception-transcript.md)
+  [`efforts/active/task-verification-gate/inception-transcript.md`](../../../active/task-verification-gate/inception-transcript.md)
   — read it before starting design work here (per #4691's own instruction);
   this effort does not re-quote it in full.
-- **Related:** [`agent-dispatch-recipe-composability`](../agent-dispatch-recipe-composability/README.md)
+- **Related:** [`agent-dispatch-recipe-composability`](../../../active/agent-dispatch-recipe-composability/README.md)
   (#4959) builds on this effort's `extends:` resolution mechanism to
   generalize it (any already-resolved declaration as a base, chaining,
   script-path-hook override values) — a distinct, later-starting effort,
@@ -305,7 +306,8 @@ recipe-reference syntax and merge semantics, and why the `extends:` work is
 sequenced independently of the single-emitter-primitive taxonomy refactor
 below — read it before starting any Phase 3 work).
 
-- [ ] Introduce the single `emitter` producer primitive, with schedule/
+- [x] Deferred to `ThomasMichon/copilot-extensions#5732`: Introduce the
+      single `emitter` producer primitive, with schedule/
       webhook/websocket as emitter *triggers* rather than separate `kind`
       values. **Tracked as its own follow-on slice** (sub-plan §*Sub-PRs*,
       item 4) — not a blocking dependency for `extends:` itself.
@@ -479,7 +481,8 @@ below — read it before starting any Phase 3 work).
 
 ## Validation Plan
 
-- [ ] Full `agent-dispatch` plugin suite green
+- [x] Deferred to `ThomasMichon/copilot-extensions#5731`: Full `agent-dispatch`
+      plugin suite green
       (`test-supervisor -- python3 tools/run-plugin-tests.py agent-dispatch`).
       **Still open 2026-10-06** (see Journal): every recipe-library-specific
       test module (`test_registrar_recipes.py`, `test_registrar_discovery.py`,
@@ -1958,8 +1961,34 @@ correctly fail closed against its current, already-exercised state --
 `efforts/active/scratch-effort` needs restoring and its existing dated
 archive removed first).
 
-**Outstanding per this effort's own completion gate:** the operator has
-not yet been consulted on whether to archive this effort now that 4/5
-items are closed (the one remaining item, per the "Next" note above, is a
-named candidate for being carried as a tracked follow-on rather than
-blocking archival) -- do not archive unilaterally.
+Two small follow-up PRs landed immediately after: #5719 (updated this
+README's Validation Plan item + this Journal entry to cite the merged PR
+#5647) and #5720 (documented the two remaining infra gotchas not yet
+covered by round 15's new adoption-doc section -- `orphan_after_seconds`
+tuning for fast-iterating test fixtures in
+`repository-issue-loop-adoption.md`, and the general `gh`-auth-persistence
+requirement for any multi-`docker exec` clean-room scenario, generalized
+into the `validating-in-clean-room` skill).
+
+### 2026-10-08 (continued) — Archived: consulted the operator, both remaining items deferred
+
+With PR #5647 merged and this README's own validation record current,
+consulted the operator on how to proceed (per this effort's own
+completion gate -- never archive unilaterally). Chose: archive now, with
+the one remaining Validation Plan item tracked as a named follow-on.
+
+Filed two tracking issues and transferred both still-open Plan/Validation
+Plan items to them, using the machine-checked `Deferred to` form:
+- `ThomasMichon/copilot-extensions#5731` -- the one clean full-suite
+  `agent-dispatch` test run (blocked on #5582/#5584).
+- `ThomasMichon/copilot-extensions#5732` -- Phase 3's single-emitter-
+  primitive taxonomy refactor (already explicitly out-of-scope per
+  `phase-3-extends-registrar.md`'s own Sub-PRs plan, but never previously
+  given its own tracked issue).
+
+Every Plan and Validation Plan item is now resolved or transferred.
+**Status: Done.** Archiving to the standard dated path
+(`efforts/2026/10/08 agent-dispatch-recipe-library/`) in the same change
+that updates `efforts/README.md`'s active index, per the `planning-efforts`
+skill's archive protocol. This worktree had no bound `active_effort`
+focus to release.

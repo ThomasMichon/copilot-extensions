@@ -204,6 +204,7 @@ class _SessionLifecycleMixin:
             raise KeyError(f"Session {session_id} not found")
 
         if not force and session.has_active_background_tasks:
+            session._stop_requested = False  # the stop a notice announced isn't happening
             raise SessionBusyError(session_id, session.active_background_tasks)
 
         if allow_background_recovery is None:
@@ -223,6 +224,7 @@ class _SessionLifecycleMixin:
                     self._reap_host_record(rec, "idle reap (#1826)")
 
             session.status = SessionStatus.STOPPED
+            session._stop_requested = False  # the stop a notice announced has happened
             now = time.time()
             self._db.update_session_stopped(session_id, now, allow_background_recovery)
             session.background_recovery_enabled = allow_background_recovery
