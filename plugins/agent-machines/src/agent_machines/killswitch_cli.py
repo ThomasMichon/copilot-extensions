@@ -27,6 +27,8 @@ import socket
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .fleet_update_lock import _pid_alive
+
 
 def _state_file() -> Path:
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
@@ -62,12 +64,8 @@ def _live_reconciling_plugins() -> list[str]:
             pid = int(lock.read_text(encoding="utf-8").strip())
         except (OSError, ValueError):
             continue
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            continue  # not alive (or we can't signal it) -- not in flight
-        except Exception:
-            continue  # platform doesn't support this probe -- skip, don't guess
+        if not _pid_alive(pid):
+            continue  # not alive -- not in flight
         live.append(lock.parent.name.lstrip("."))
     return live
 

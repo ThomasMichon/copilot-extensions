@@ -72,22 +72,9 @@ DEFAULT_DB = _HERE / "ci_telemetry.sqlite3"
 # and are few enough in practice to track by hand rather than justifying a
 # second live-fetch path this phase does not need. Remove an entry here once
 # its owning effort resolves it (confirmed via a fresh `refresh` + `report`
-# showing it no longer applies).
-KNOWN_NOISY_NONBLOCKING_CHECKS: tuple[dict, ...] = (
-    {
-        "key": "identifier-leak-guard-unconfigured",
-        "title": "identifier leak guard: FORBIDDEN_IDS_FACILITY/FORBIDDEN_IDS_WORK secrets unset",
-        "note": (
-            "Red on every PR because the repo secrets it needs are not "
-            "configured -- not a code defect. Owned end-to-end by "
-            "efforts/active/ci-identifier-leak-guard/ (#3923); this entry "
-            "should be removed once that effort lands and a fresh refresh "
-            "confirms the check no longer fires red."
-        ),
-        "occurrences": None,  # not counted from run history -- see module docstring
-        "blocking": False,
-    },
-)
+# showing it no longer applies). Currently empty -- no check is both
+# permanently noisy and non-blocking right now.
+KNOWN_NOISY_NONBLOCKING_CHECKS: tuple[dict, ...] = ()
 
 
 # --------------------------------------------------------------------------
@@ -344,15 +331,18 @@ def load_failures(conn: sqlite3.Connection) -> list[FailureRecord]:
 # Network I/O (GitHub Actions REST API via `gh`)
 # --------------------------------------------------------------------------
 
-# PR-triggered `ci.yml` runs carry two job names that must never become
-# per-run failure signatures of their own: `PR gate (required check)` is a
+# PR-triggered `ci.yml` runs carry a job name that must never become a
+# per-run failure signature of its own: `PR gate (required check)` is a
 # redundant aggregate of whatever real job already failed (double-counting
-# it), and `identifier leak guard` is the *already-known*, unconditionally
-# red, non-blocking check tracked once via `KNOWN_NOISY_NONBLOCKING_CHECKS`
-# above -- letting it in here would silently duplicate that entry under a
-# different (organically-mined) key instead of the one intentional,
-# hand-tracked row.
-PR_SKIP_JOB_NAMES = frozenset({"PR gate (required check)", "identifier leak guard"})
+# it). `identifier leak guard` is a custom Check Run created by a separate
+# `workflow_run` follow-up workflow (whose own Actions job is named `scan +
+# report`), not a job inside the `push`/`pull_request`-event `ci.yml` runs
+# `fetch_runs`/`fetch_failures_for_run` enumerate here -- job-name matching
+# can never see it, so it needs no entry in this skip-list. Ingesting the
+# PR head's check-runs API explicitly (with its own regression test) would
+# be needed to cover a real leak-guard failure in this telemetry at all;
+# not yet done.
+PR_SKIP_JOB_NAMES = frozenset({"PR gate (required check)"})
 
 
 def _fetch_prior_attempts(repo: str, run: dict, source: str) -> list[RunRecord]:
@@ -505,6 +495,8 @@ def render_report(stats: list[SignatureStat]) -> str:
         )
 
     lines.append("\n## Known noisy, non-blocking checks (tracked separately, not run-history-derived)\n")
+    if not KNOWN_NOISY_NONBLOCKING_CHECKS:
+        lines.append("- none currently tracked\n")
     for entry in KNOWN_NOISY_NONBLOCKING_CHECKS:
         lines.append(f"- `{entry['key']}` **{entry['title']}** -- {entry['note']}")
 
