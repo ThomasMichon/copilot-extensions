@@ -40,8 +40,9 @@ def field_list_problem(fields: Any) -> str | None:
         if name in seen:
             return f"duplicate field {name!r}"
         seen.add(name)
-        if field.get("type") not in FIELD_TYPES:
-            return f"field {name!r}: unknown type {field.get('type')!r}"
+        kind = field.get("type")
+        if not isinstance(kind, str) or kind not in FIELD_TYPES:  # a list or dict isn't hashable
+            return f"field {name!r}: unknown type {kind!r}"
         choice = field["type"] in FIELD_CHOICE_TYPES
         options = field.get("options")
         if choice != (options is not None):

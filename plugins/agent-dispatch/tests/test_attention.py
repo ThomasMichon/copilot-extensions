@@ -787,6 +787,8 @@ def test_no_next_hint_when_no_invocation_reaches_the_coordinator(monkeypatch, ca
 
 
 @pytest.mark.parametrize("form", [
+    [{"name": "a", "type": []}],                                            # an unhashable type
+    [{"name": "a", "type": {"k": "v"}}],
     {"answer": "text"},                                                     # an object, not a field list
     [],                                                                     # empty
     [{"name": "a", "type": "slider"}],                                      # unknown type
