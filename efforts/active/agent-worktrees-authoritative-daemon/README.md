@@ -828,6 +828,14 @@ than hypothetical:
       — see the audit doc's Recommendation section — required before this
       phase's closing claim on #5555, per 6d's own "don't let a silent gap
       stand" requirement.
+- [x] **6a follow-on — Bound background cache-stamp lock acquisition**
+      _(agent-recommended, reviewed in #5659)_: background stamps wait up to
+      0.5s per lock layer, fail closed on exhaustion, and report timeout/write
+      failures. Synchronous best-effort callers remain nonblocking. Regression
+      coverage reproduces cross-process lost stamps, checks foreground-field
+      preservation, newer queued stamps, timeout recovery, and actual
+      interpreter-exit drainage. This closes the dropped-stamp failure mode,
+      not #5555's full repeated-oscillation or daemon-authority acceptance gate.
 - [ ] **6b — Implement the chosen consolidation**, keeping both existing
       external call-site contracts (`_classify_records`'s `daemon_filters`
       path; `session_tracking_cli`'s `worktree-status` bundle command)
@@ -927,6 +935,27 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-08 — Phase 6 cache-stamp follow-on: reproduced contention; bounded the background wait
+
+The regression failed against the prior implementation: a real separate
+process held the record sidecar while the async worker attempted an ACTIVE
+stamp; after queue drainage the durable record still said completed. The
+new worker opts into `_RecordLock`'s bounded, sidecar-required acquisition,
+with 0.5s per lock layer. It never falls through to an unlocked write.
+Timeout and storage errors are reported; synchronous nonblocking callers
+retain their behavior. An actual child interpreter exiting normally also
+persists the contended stamp after the holder releases.
+
+Focused validation: 81 stamp/record-lock tests and the complete affected
+tracking/cache-consumer selection (400 tests) passed, including the real
+cross-process and process-exit contracts. The implementation is a
+below-altitude reliability repair on the transitional cache path, not a
+substitute for the vision's sole-daemon authority. Remaining Phase 6 work:
+shared computation, structural delegation tests, mux-cache consistency if
+still necessary, and snapshot/stream plus daemon-only read authority.
+No claim is made that synthetic contention reproduces the reported live
+recurrence cadence.
 
 ### 2026-10-08 — Phase 6a: traced all three compute paths; oscillation mechanism confirmed (contended-write skip) after three successive hypotheses refined through review
 Full trace in `phase-6-audit.md`. Confirmed `worktree_status_compute`
