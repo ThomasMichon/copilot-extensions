@@ -21,6 +21,40 @@ set -uo pipefail
 _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 
+_yaml_list_values() {  # <yaml-file> <top-level-key> -- ALL scalars in a
+    # top-level YAML list declared EITHER inline ("key: [a, b]") or in block
+    # style ("key:\n  - a\n  - b"), one per line.
+    python3 - "$1" "$2" <<'PY' 2>/dev/null
+import sys
+path, key = sys.argv[1], sys.argv[2]
+lines = open(path, encoding="utf-8").read().splitlines()
+for i, line in enumerate(lines):
+    k, sep, v = line.partition(":")
+    if not sep or k.strip() != key:
+        continue
+    val = v.split("#", 1)[0].strip()
+    if val.startswith("["):
+        inner = val.strip("[]")
+        for item in inner.split(","):
+            item = item.strip().strip("\"'")
+            if item:
+                print(item)
+        break
+    if val:
+        print(val.strip("\"'"))
+        break
+    for nxt in lines[i + 1:]:
+        if nxt.strip() == "":
+            continue
+        if not nxt.startswith((" ", "\t")):
+            break
+        s = nxt.strip()
+        if s.startswith("- "):
+            print(s[2:].strip().strip("\"'"))
+    break
+PY
+}
+
 MARKETPLACE_REPO="${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}"
 MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
 UV_INDEX="${CR_UV_INDEX:-}"
@@ -287,6 +321,30 @@ _efforts_active_before="$CR_LOGDIR/efforts-active-before.log"
 ( cd "$FIXTURE_DIR" && find efforts/active -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort ) > "$_efforts_active_before" || true
 cr_meta "efforts_active_before" "$(tr '\n' ',' < "$_efforts_active_before" 2>/dev/null)"
 
+# The effort-driver recipe's whole PURPOSE is archiving an already-active
+# effort -- so its required STARTING state is that every slug its own
+# declared effort_slugs names is actually present under efforts/active/
+# right now. Since this fixture repo is deliberately retained across
+# reruns, a PRIOR successful run already archives that slug, and a rerun
+# would otherwise proceed with it already absent -- post_check.sh then
+# correctly declines to attribute the (nonexistent) archive move to THIS
+# run, but that is an invalid-fixture-state failure being misreported as a
+# recipe failure. Fail setup closed instead.
+_driver_decl_path="$_registrar_dir/effort-driver.yaml"
+if [ -f "$_driver_decl_path" ]; then
+    _driver_slugs="$(_yaml_list_values "$_driver_decl_path" "effort_slugs")"
+    _driver_missing_slugs=""
+    while IFS= read -r _slug; do
+        [ -z "$_slug" ] && continue
+        grep -qx "$_slug" "$_efforts_active_before" 2>/dev/null || _driver_missing_slugs="$_driver_missing_slugs,$_slug"
+    done <<<"$_driver_slugs"
+    if [ -n "$_driver_missing_slugs" ]; then
+        jam "dispatch-config" "effort-driver's declared effort_slugs entry(ies) not present under efforts/active/ before this run: ${_driver_missing_slugs#,}" "re-seed the fixture repo's efforts/active/ with every declared effort-driver slug (e.g. restore it from the archive, or create a fresh one) before running this scenario again -- a prior successful run already archived it"
+        cr_finalize
+    fi
+    pass "effort-driver's declared effort_slugs entry(ies) are all present under efforts/active/ before this run (valid starting state)"
+fi
+
 # effort-builder's own contract accepts an opened (unmerged) effort PR, not
 # only a direct default-branch commit -- post_check.sh falls back to
 # scanning real OPEN PRs for a newly-added efforts/active/<dir>/README.md
@@ -355,9 +413,9 @@ _aw_list_out="$CR_LOGDIR/worktrees-repos-list.log"
 # agent_dispatch.identity._repo_registry()/name_for_repo() actually reads)
 # carries a usable path.
 if ( bash -lc 'agent-worktrees repos list --json' ) > "$_aw_list_out" 2>&1 && grep -q "$FIXTURE_DIR" "$_aw_list_out"; then
-    pass "agent-worktrees registry carries a path for 'recipe-fixture' ($FIXTURE_DIR)"
+    pass "agent-worktrees registry carries a path for '$PROJECT_NAME' ($FIXTURE_DIR)"
 else
-    jam "dispatch-config" "agent-worktrees repos list does not show a path for 'recipe-fixture' (see cr-logs/worktrees-repos-list.log)" "check the register step above"
+    jam "dispatch-config" "agent-worktrees repos list does not show a path for '$PROJECT_NAME' (see cr-logs/worktrees-repos-list.log)" "check the register step above"
 fi
 
 # =========================================================================

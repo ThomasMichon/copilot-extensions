@@ -1,0 +1,9 @@
+{
+  "comment": "Document headless-embody's agent-bridge/agent-worktrees runtime prerequisites (venue registration, project-name fallback) in the repository-issue-loop adoption guide, surfaced by the agent-dispatch-recipe-loops-eval clean-room scenario",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

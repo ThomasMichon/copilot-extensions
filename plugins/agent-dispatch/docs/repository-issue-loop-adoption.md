@@ -8,6 +8,40 @@ internal behavior (reservation protocol, forge adapters, host migration),
 see [`repository-issue-loop.md`](repository-issue-loop.md); this doc is the
 adoption path, that one is the reference.
 
+## 0. Runtime prerequisites for headless embody
+
+A `repository-issue-loop` spawns each occurrence's worker as a **headless**
+Copilot process -- that spawn path has two genuine runtime dependencies
+beyond `agent-dispatch` itself, neither of which this schema reference
+enforces at declare time (a `doctor`/`status` check sees a healthy
+*declaration*, not a broken spawn path):
+
+1. **A real, addressable agent-bridge venue.** `--headless-agent AGENT`
+   (default `task-worker`) names the venue a spawned body targets --
+   [`spawn-supervisor.md`](spawn-supervisor.md) documents that this name
+   must already be registered with `agent-bridge` on the host *before* any
+   occurrence ticks, or the spawn silently deadlocks waiting on a venue
+   that was never there.
+2. **The declaring repo registered with `agent-worktrees`.** Every headless
+   spawn's `create_worktree()` unconditionally shells out to
+   `agent-worktrees create` -- so the repo needs an `agent-worktrees`
+   project registration, not just a plain git clone, before the first
+   occurrence ticks. The registered project **name** matters too:
+   `embody.project_for_task()` resolves a task's `--project` by first
+   reversing its `repo` field (this declaration's own bare `owner/name`
+   string) through `agent-worktrees`' canonical-remote registry -- which
+   always carries a host prefix (e.g. `github.com/owner/name`), so a bare
+   `owner/name` never matches it directly -- then falling back to that
+   `repo` string's own trailing path segment (`owner/name` -> `name`).
+   Register the project under exactly that trailing segment for the
+   fallback to resolve it.
+
+Neither dependency is specific to this recipe -- any headless-embody
+consumer needs both -- but a colleague following only this adoption path,
+with no other agent-dispatch headless deployment to crib from, can easily
+miss both and watch a declaration sit healthy-but-silent forever. Set up
+both *before* `setup`, not after diagnosing a stuck occurrence.
+
 ## 1. Declaration schema reference
 
 A declaration is one YAML (or JSON) document under
