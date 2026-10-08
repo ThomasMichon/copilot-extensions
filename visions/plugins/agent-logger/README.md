@@ -1,13 +1,12 @@
 # agent-logger — Vision
 
-- **Subject:** The **chronicler** capability of agent-logger — a scheduled,
-  fleet-wide background service that turns the synced corpus of Copilot sessions
-  into an objective, retrievable **daily chronicle** of what the fleet actually
-  did, landed as versioned logs in each session's own home repository.
-- **Scope:** leaf (a per-plugin vision; a **consumer** that rides the
+- **Subject:** The portable **session intelligence and chronicler** capabilities
+  of agent-logger: durable collection, digests, attributable usage accounting,
+  fleet aggregation, and objective daily records.
+- **Scope:** branch (a per-plugin vision; a **consumer** that rides the
   [agent-fabric](../../agent-fabric/README.md) delegation layer, not a layer of it)
 - **Status:** Draft
-- **Last revised:** 2026-09-28
+- **Last revised:** 2026-10-07
 - **Reality docs:** [`plugins/agent-logger/docs/architecture.md`](../../../plugins/agent-logger/docs/architecture.md) ·
   [`plugins/agent-logger/docs/deployment-topologies.md`](../../../plugins/agent-logger/docs/deployment-topologies.md) ·
   [`plugins/agent-logger/docs/manifest-contract.md`](../../../plugins/agent-logger/docs/manifest-contract.md)
@@ -53,6 +52,14 @@ without letting a broad default silently capture another repository's sessions
 or destinations.
 
 ## Concepts & Components
+
+### The session intelligence backend
+The [session intelligence and accounting](session-intelligence/README.md)
+capability preserves the source evidence, produces digests and attributable
+usage records for the complete session corpus, and supports machine-assigned
+daily aggregation. Its durable catalog and reusable query surfaces serve both
+the chronicler and independent downstream applications. Structured derivation
+is useful without prose rendering, an LLM, or a dashboard.
 
 The chronicler is an **orchestrator daemon** with two pluggable **seams** on
 either side of a shared middle, driven by the fabric's delegation layer and
@@ -183,6 +190,13 @@ separate from the chronicler's own scheduled **write** job — it never files,
 schedules, or claims anything; it only resolves and returns.
 
 ## Features
+
+### portable-session-intelligence
+Collection, digest production, durable session catalogs, usage accounting, and
+fleet daily aggregation are complete, reusable backend capabilities. Consumers
+adopt the same implementation through supported embedding or process-boundary
+surfaces while retaining their own presentation and workflow policy. The
+[child vision](session-intelligence/README.md) governs their guarantees.
 
 ### fleet-wide-background-chronicle
 The fleet's session activity is recorded **automatically, on a schedule, from one
@@ -353,6 +367,8 @@ idempotency, single-election, fencing, or any other core guarantee.
 
 ## Non-Goals / Boundaries
 
+- **Not a dashboard dependency.** Digest and accounting production does not
+  require a consumer's UI, renderer, proprietary pricing policy, or tracker.
 - **Not a per-session live logger.** Writing the *current* session on demand, and
   clearing a local backlog by hand, are the existing interactive/backlog flows.
   This vision is the **scheduled, fleet-wide, background** chronicler on top of
@@ -394,6 +410,7 @@ idempotency, single-election, fencing, or any other core guarantee.
 
 ## See Also
 
+- Child: [session intelligence and accounting](session-intelligence/README.md).
 - Depends on: [agent-dispatch](../agent-dispatch/README.md) — the delegation
   layer whose **scheduled-production** mode drives the chronicler's recurring
   runs and whose **claimable mesh** (atomic claim, liveness-reconciled recovery)
