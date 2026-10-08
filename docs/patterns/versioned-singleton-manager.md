@@ -127,10 +127,30 @@ successor already running in my own tree?*
    the chain is still guaranteed alive, via one narrowly scoped
    instrumentation point rather than a suite-wide requirement: `deploy`'s own
    spawn of the passive daemon (already inside `zdd.cutover`'s Windows
-   breakaway path, the one known call site that produces this chain)
-   duplicates a handle to its freshly created child — via `DuplicateHandle`,
-   called the instant `CreateProcess` returns, before the child has any
-   chance to exit — into the manager's own process. The manager's own
+   breakaway path, the one known call site that produces this chain) creates
+   it with `CREATE_SUSPENDED` — `CreateProcess` can schedule the child's
+   primary thread before it even returns to the caller, so without this flag
+   there is no guarantee the passive daemon is still unstarted (and has not
+   already spawned descendants of its own) by the time the steps below run.
+   With the child suspended, `deploy` duplicates a handle to it — via
+   `DuplicateHandle`, whose target is the manager's own process — before the
+   child has any chance to run at all. `DuplicateHandle` only returns the
+   resulting handle *value* to the thread that called it (`deploy`'s own);
+   it does not by itself tell the *manager* what value landed in the
+   manager's own handle table, so a dedicated IPC channel carries that value
+   across: `deploy` was spawned with an inherited pipe/socket back to the
+   manager (mirroring the gate-pipe shape `_launch_gated` already uses
+   elsewhere in this suite) and writes the duplicated handle's numeric value
+   plus the candidate's pid over it. The manager reads that message, records
+   the `(handle, pid)` pair in its own registry, calls
+   `AssignProcessToJobObject` (via a freshly opened
+   `PROCESS_SET_QUOTA | PROCESS_TERMINATE` handle on the same object) to
+   bring the still-suspended candidate under the Job, and only then writes
+   an acknowledgement back over the same channel. `deploy` waits for that
+   acknowledgement before calling `ResumeThread` — so the candidate is
+   registered in the manager's table and already Job-assigned before it ever
+   runs a single instruction, closing the ordering gap a bare
+   "duplicate-then-resume" sequence would leave open. The manager's own
    `hProcess`, needed as `DuplicateHandle`'s target, is threaded down to
    `deploy` as an inheritable handle value, but **scoped**, not blanket: a
    bare `bInheritHandles=TRUE` at `_spawn_self_deploy`'s own `CreateProcess`
@@ -142,24 +162,20 @@ successor already running in my own tree?*
    (`plugins/agent-dispatch/src/agent_dispatch/companion.py`'s
    `_launch_gated`: `STARTUPINFO.lpAttributeList = {"handle_list": [handle]}`
    plus `close_fds=True`) at `_spawn_self_deploy`'s own spawn, so only the
-   one intended handle reaches `deploy` — nothing else inheritable leaks
-   across that boundary. `deploy` itself does **not** forward that handle
-   into its own spawn of the passive daemon at all: it already holds the
-   manager handle from its own inherited set, so it duplicates a *separate*
-   handle to the passive daemon it just created and sends that into the
-   manager — the passive daemon never needs, and never receives, a handle
-   to the manager itself. Because a `HANDLE` is a reference to the exact
-   kernel process object, not a reusable numeric pid, the manager's registry
-   of duplicated handles is immune to the PID-reuse failure a post-hoc walk
-   cannot escape, and it does not depend on any intermediary still being
-   alive later to prove its own ancestry — the proof was already captured
-   the moment it mattered. **Handle custody, established at spawn time, is
-   the trust decision; Job (re-)membership is purely bookkeeping for the
-   crash-cleanup backstop (item 3) afterward.** Once the manager holds a
-   duplicated handle for a candidate process, it calls
-   `AssignProcessToJobObject` (via a freshly opened
-   `PROCESS_SET_QUOTA | PROCESS_TERMINATE` handle on the same object) to
-   bring it back under the Job.
+   one intended handle (and the IPC pipe endpoint) reaches `deploy` —
+   nothing else inheritable leaks across that boundary. `deploy` itself does
+   **not** forward that handle into its own spawn of the passive daemon at
+   all: it already holds the manager handle from its own inherited set, so
+   it duplicates a *separate* handle to the passive daemon it just created
+   and sends that into the manager — the passive daemon never needs, and
+   never receives, a handle to the manager itself. Because a `HANDLE` is a
+   reference to the exact kernel process object, not a reusable numeric pid,
+   the manager's registry of duplicated handles is immune to the PID-reuse
+   failure a post-hoc walk cannot escape, and it does not depend on any
+   intermediary still being alive later to prove its own ancestry — the
+   proof was already captured the moment it mattered. **Handle custody,
+   established at spawn time, is the trust decision; Job (re-)membership is
+   purely bookkeeping for the crash-cleanup backstop (item 3) afterward.**
 2. **On child-exit, read the daemon's own liveness record** (`zdd.routing`'s
    `active.json` — already how every `zdd` consumer tracks "who is live"
    today): a `pid`/`generation` entry is checked against the manager's own
@@ -175,22 +191,27 @@ successor already running in my own tree?*
    itself carries no process-identity token (only a pid and a routing
    generation, which order publications but do not by themselves rule out
    **PID reuse** — the recorded pid exiting and an unrelated process reusing
-   that exact number before this check runs). The manager closes that gap
-   itself: it captures a process-start-time token
-   (`zdd.diagnostics.process_start_time` — has a Linux and a Windows
-   backend, used identically on both platforms here) for the candidate pid
-   at the moment of adoption and re-verifies that token on every later
-   liveness poll of the adopted process, the same freshest-practical-moment
-   convention `reap_tree_posix` (below) already uses — a reused pid is
-   therefore caught the moment its start time no longer matches, not trusted
-   indefinitely off one lucky first read. (On Windows this token is a
-   secondary belt-and-suspenders check — the duplicated handle itself
-   already rules out pid reuse by construction, since it names the kernel
-   object directly rather than a numeric pid.) Ancestry/handle confirmation
-   happens *before* this token is ever captured, so
-   the token itself is always anchored to a process already independently
-   known to be legitimate, never to whatever process merely happens to
-   currently hold the recorded pid.
+   that exact number before this check runs). Checking ancestry and only
+   *afterward* reading a fresh identity token would leave a TOCTOU window of
+   its own — the validated descendant could exit, and its pid get reused,
+   in the gap between the ancestry check and the token read. The manager
+   closes the whole window, not just half of it: it reads a
+   process-start-time token (`zdd.diagnostics.process_start_time` — has a
+   Linux and a Windows backend, used identically on both platforms here)
+   for the candidate pid **immediately before** running the ancestry check,
+   runs the ancestry check, then reads the same token **again immediately
+   after** — and only adopts the pid if both reads returned a non-`None`
+   value and the two values are equal. A mismatch (or either read coming
+   back empty) means the pid changed identity somewhere across the check
+   and is treated as a real crash, never adopted. This same
+   read-check-read-and-require-both-to-match bracket is re-run on every
+   later liveness poll of the adopted process, the same freshest-practical-
+   moment convention `reap_tree_posix` (below) already uses — a reused pid
+   is therefore caught the moment either side of the bracket no longer
+   matches, not trusted indefinitely off one lucky first read. (On Windows
+   this token bracket is a secondary belt-and-suspenders check — the
+   duplicated handle itself already rules out pid reuse by construction,
+   since it names the kernel object directly rather than a numeric pid.)
 3. **Reap every other live descendant before exiting on a real crash.**
    Exiting the manager does **not** by itself clear its tree: a subreaper
    claim or Job Object membership only governs *reparenting*, not lifetime —
@@ -262,19 +283,38 @@ successor already running in my own tree?*
    minimal, deliberately short-lived **bridge** process closes exactly that
    gap and nothing more:
    1. Before updating, the old manager (already Task-tracked) spawns the
-      bridge, which immediately opens its own handle to the same **named**
-      Job (item 4) — now two independent open handles exist (the old
-      manager's and the bridge's) — and the old manager records the
+      bridge and **waits for an explicit bridge-ready acknowledgement**
+      before doing anything else — "spawns the bridge" alone is not
+      sufficient: the old manager could exit (triggering step 2's last-
+      handle-closes trigger) before the bridge is even scheduled to run,
+      which would kill the live daemon as collateral, the exact failure
+      this whole bridge exists to prevent. The bridge, once scheduled,
+      calls `OpenJobObject` on the same **named** Job (item 4) and writes a
+      ready signal back to the old manager over an inherited pipe
+      (mirroring the IPC channel item 1 already uses for `deploy`); only
+      once the old manager has read that signal does it record the
       bridge's pid and `process_start_time` token in the manager-scoped
-      `active.json` (distinct from the daemon's own, exactly as before),
-      so a later manager process has something durable to look for.
-   2. The old manager exits. Because the bridge's handle is still open,
-      the Job's last-handle-closes trigger does not fire — the daemon and
-      every other Job member survive untouched. The manager deliberately
-      does **not** attempt to suppress the Scheduled Task's restart policy
-      here (no `SELF_UPDATE_EXIT_CODE`-style trick, unlike Linux): a real
-      restart is wanted every time, so Task Scheduler re-tracks a live
-      process rather than silently going idle.
+      `active.json` (distinct from the daemon's own, exactly as before) and
+      proceed to step 2. If the acknowledgement does not arrive within a
+      bounded timeout, the old manager **aborts the update** and keeps
+      running as the current version rather than proceeding blind — a
+      failed or slow bridge is a reason to retry later, never a reason to
+      exit without handle-continuity confirmed.
+   2. Only now does the old manager exit — and it exits with a
+      **documented, non-zero self-update exit status** (distinct from a
+      real crash's own exit codes, and distinct from Linux's
+      `SELF_UPDATE_EXIT_CODE`, which this path does not reuse): Task
+      Scheduler's restart action is a *restart-on-failure* policy
+      (`RestartCount`/`RestartInterval`), so an ordinary success exit is not
+      guaranteed to trigger step 3 at all — a graceful-looking exit could
+      leave only the bridge and daemon alive, with no Task-tracked process
+      and no pending restart. The manager deliberately does **not** attempt
+      to suppress the restart here (unlike Linux, which needs no restart at
+      all thanks to `execve`): a real restart is wanted every time, so the
+      non-zero status is chosen specifically to satisfy the Task's own
+      failure condition, and the stable launcher (below) preserves that
+      exact exit code unchanged on every path it wraps, rather than
+      translating or swallowing it.
    3. Task Scheduler's restart policy fires and launches the stable
       launcher fresh. **This new process is the permanently Task-tracked
       successor from this point on** — never a check-and-exit shim, and
