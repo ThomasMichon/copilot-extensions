@@ -14,7 +14,7 @@
 # -- it is not literally scoped to "each Maintainer's own PRs" (GitHub's
 # ruleset model has no such concept); see CONTRIBUTING.md's "Contribution
 # flow" section for the accepted residual-trust tradeoff this implies.
-*                      @ThomasMichon @JakeSchieber @anarmawala @namankanakiya
+*                      @ThomasMichon @JakeSchieber @anarmawala @namankanakiya @rvamsi
 
 # Workflows, actions, and this file itself are additionally locked down to
 # ThomasMichon alone -- not the wider Maintainer group. A Maintainer's PR
@@ -29,5 +29,4 @@
 /.github/workflows/    @ThomasMichon
 /.github/actions/      @ThomasMichon
 /.github/CODEOWNERS    @ThomasMichon
-
 
