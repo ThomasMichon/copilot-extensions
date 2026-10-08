@@ -693,36 +693,41 @@ survey above.
 
 ### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(not started)_
 _(Added 2026-10-06, operator-directed formal follow-on from
-`pivot-streaming-transport`. Closes the Worktrees-pivot half of
+`pivot-streaming-transport`. Addresses the Worktrees-pivot half of
 [`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555):
 `_classify_records`'s resident daemon fast path (`classify_daemon.py`,
 no-fetch, coalesced) and this effort's own `worktree_status_daemon.py`
 (`worktree_status_compute.py`, fetch-confirmed, TTL-cached) independently
-compute overlapping git-state facts for the same worktree today. The actual
-tracking-record stamp happens in `picker_support/data_local.py`, fed by the
-`classify_daemon` path — `worktree_status_compute` itself only returns a
-read-only bundle (confirmed in code review on PR #5565; do not reintroduce
-the "both write the record" framing that review corrected). Two
-independently-computed answers for the same underlying fact, consumed at
-different points by the Picker, is still the oscillation risk this phase
-closes — just via one shared compute path, not a shared writer.)_
+compute overlapping git-state facts for the same worktree. Today,
+`picker_support/data_local.py` renders and stamps the Worktrees Picker's
+row state from `classify_daemon`'s answer only; `worktree_status_compute`'s
+`git_state` fact is consumed separately, by
+`agent-dispatch/worktree_status_relay.py`. Whether/how these two consumers'
+answers can actually diverge against the same worktree — and whether that
+is the row-oscillation issue #5555 describes, or a distinct risk — is not
+yet traced; 6a establishes that before any consolidation work starts.)_
 - [ ] **6a — Design sub-pass (do this first, in its own PR per this effort's
-      own Phase 1 precedent):** enumerate every fact `classify_daemon`
-      computes (`git_ops.WorktreeStateInfo`: `state`, `dirty`, `behind`,
-      `ahead`, etc.) against every fact `worktree_status_compute.compute()`
-      assembles, and classify each as (a) identical/overlapping — a single
-      source should serve both call sites — or (b) distinct — stays
-      source-specific. Decide and document the consolidation shape: either
-      (i) `classify_daemon` becomes a thin no-fetch/fast-mode view onto a
-      generalized `worktree_status_compute` (add a `fetch: bool` parameter
-      so the existing fast, coalesced, no-fetch call path keeps its latency
-      profile while sharing one implementation), or (ii) the reverse —
-      `worktree_status_compute`'s fetch-confirmed facts become an opt-in
-      enrichment layered on top of `classify_daemon`'s existing fast path.
-      Do not start 6b until this design is written down and reviewed (this
-      effort's own repo PR review gate) — the two existing call sites have
-      different latency/freshness contracts and a wrong default risks
-      silently slowing down the Picker's default classify path.
+      own Phase 1 precedent):** first, trace both consumers' actual
+      dataflow (`picker_support/data_local.py`'s classify consumer;
+      `agent-dispatch/worktree_status_relay.py`'s status-bundle consumer)
+      to establish concretely whether/when they can disagree for the same
+      worktree, rather than assuming it. Then enumerate every fact
+      `classify_daemon` computes (`git_ops.WorktreeStateInfo`: `state`,
+      `dirty`, `behind`, `ahead`, etc.) against every fact
+      `worktree_status_compute.compute()` assembles, and classify each as
+      (a) identical/overlapping — a single source should serve both call
+      sites — or (b) distinct — stays source-specific. Decide and document
+      the consolidation shape: either (i) `classify_daemon` becomes a thin
+      no-fetch/fast-mode view onto a generalized `worktree_status_compute`
+      (add a `fetch: bool` parameter so the existing fast, coalesced,
+      no-fetch call path keeps its latency profile while sharing one
+      implementation), or (ii) the reverse — `worktree_status_compute`'s
+      fetch-confirmed facts become an opt-in enrichment layered on top of
+      `classify_daemon`'s existing fast path. Do not start 6b until this
+      design is written down and reviewed (this effort's own repo PR
+      review gate) — the two existing call sites have different
+      latency/freshness contracts and a wrong default risks silently
+      slowing down the Picker's default classify path.
 - [ ] **6b — Implement the chosen consolidation**, keeping both existing
       external call-site contracts (`_classify_records`'s `daemon_filters`
       path; `session_tracking_cli`'s `worktree-status` bundle command)
@@ -731,14 +736,16 @@ closes — just via one shared compute path, not a shared writer.)_
       designates as subsumed (its `work_coalescing_singleton` `kind` and
       lock-file rendezvous fields), rather than leaving a second, now-dead
       daemon process running alongside the unified one.
-- [ ] **6c — Regression test proving the oscillation is actually closed:**
+- [ ] **6c — Regression test proving the two compute paths now agree:**
       a test that calls both existing entry points
       (`_classify_records(daemon_filters=...)` and
       `session_tracking_cli`'s `worktree-status` bundle fetch) for the same
       worktree in the same process and asserts they report the identical
       `git_state`/`dirty`/`behind` values — not just "both succeed," but
       "both agree" — so a future regression that reintroduces a second
-      independent compute path fails this test immediately.
+      independent compute path fails this test immediately. Whether this
+      closes a real, traced row-oscillation bug or a latent divergence risk
+      depends on 6a's dataflow findings, not assumed here.
 - [ ] Update `classify_daemon.py`'s and `worktree_status_compute.py`'s own
       module docstrings to describe the consolidated architecture, so a
       future reader doesn't rediscover this effort's own "two daemons, one
