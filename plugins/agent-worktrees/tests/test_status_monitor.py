@@ -3636,6 +3636,46 @@ def test_installer_after_update_schedules_even_on_an_unexpected_cutover_exceptio
     assert scheduled["n"] == 1
 
 
+def test_installer_after_update_schedules_even_when_lease_release_itself_raises(
+    monkeypatch,
+):
+    """A ``lease.release()`` failure must not itself skip scheduling the
+    backstop -- the two must run in independent (nested) ``finally``
+    blocks, not sequentially in the same one, or a release exception would
+    propagate past the scheduler call and leave it never invoked."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: "http://x")
+
+    class _RaisingReleaseLease:
+        def release(self):
+            raise OSError("lock file vanished mid-release")
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda lock_root: _RaisingReleaseLease())
+    monkeypatch.setattr(smc.breadcrumb, "read_breadcrumb", lambda *a, **k: None)
+    monkeypatch.setattr(
+        smc.breadcrumb, "recover_stale_cutover", lambda *a, **k: {"recovered": False},
+    )
+    monkeypatch.setattr(smc, "_reap_abandoned_passive", lambda *a, **k: None)
+
+    def _boom_orchestrator(*a, **k):
+        raise RuntimeError("orchestrator never even got constructed")
+
+    monkeypatch.setattr(smc, "CutoverOrchestrator", _boom_orchestrator)
+
+    with pytest.raises(OSError, match="lock file vanished mid-release"):
+        smc.activate_after_update(monitor_was_live=True)
+
+    assert scheduled["n"] == 1
+
+
 def test_installers_invoke_monitor_cutover_after_activation():
     # Graceful-cutover Phase 1 contract: BOTH runtime installers must invoke the
     # post-activation cutover helper, or a live status-monitor silently regresses
