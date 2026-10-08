@@ -1430,54 +1430,6 @@ than blocking the detach itself. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Features/*hibernate-the-wait*).
 
-### Delegating a PR-watch wait to the shared daemon (`--pr-watch-repo`)
-
-A plain `--detach` wait spawns one OS process per task -- fine for an
-occasional wait, wasteful when many tasks are each independently polling the
-same handful of PRs. For a PR-watch specifically, opt in to delegation
-instead: the coordinator registers the wait with `agent-pull-requests`'s
-shared watch daemon (one poller per `(repo, PR)`, any number of subscribers
-multiplexed onto it) rather than spawning a process at all.
-
-```bash
-agent-dispatch run --detach --resume <machine/worktree> --task <id> \
-  --pr-watch-repo owner/name --pr-watch-number 42 \
-  [--pr-watch-until merged,closed,review_changed] \
-  [--pr-watch-timeout 259200]
-```
-
-This is an **explicit opt-in** -- never inferred from the `-- <cmd>` tail's
-own argv shape, which this layer has no business parsing or depending on.
-Both `--pr-watch-repo` and `--pr-watch-number` are required together, and
-only alongside `--detach --task`. The waiter is armed **synchronously**,
-immediately, with a sentinel identity (never a real PID) and `kind:
-"delegated"` instead of a process -- the dead-waiter recovery sweep checks
-this `kind` explicitly and never attempts PID/host liveness for it at all
-(never relying on the sentinel host string merely failing to match a real
-machine, which an operator-configured `AGENT_DISPATCH_SUPERVISE_MACHINE`
-could coincidentally do); the daemon's own durable, restart-reattaching
-subscriber state is the real liveness backstop. `--pr-watch-timeout`
-(default 3 days) bounds how long the subscription stays active on its own
-before firing a `timed_out` event -- never unbounded, so an abandoned PR's
-subscription always eventually clears even without an explicit unsubscribe.
-
-Resolves the `agent-pull-requests` runtime through its own provenance-
-checked installation (`~/.agent-pull-requests`'s versioned slot) -- never an
-ambient `PATH` lookup, which could select an unrelated or attacker-
-controlled executable ahead of the installed dependency. The daemon
-callback (`--finish-delegated-waiter`) never carries a bearer/control token
-in its durably-persisted argv (the daemon writes the full subscription,
-including `notify_argv`, to `watch-subscriptions.json`, and later exposes it
-in the callback process's own command line) -- only non-secret routing
-(`--url`/`--shared`) is forwarded; the callback resolves credentials the
-same way an ordinary CLI invocation would, from the daemon's own ambient
-environment/config.
-
-Known gap: if the task's waiter is retired through a different path (e.g. an
-operator aborts the task directly), the daemon subscription isn't
-automatically cancelled -- it lingers harmlessly until the PR resolves or
-`--pr-watch-timeout` fires.
-
 ### Diagnosing a stuck hibernation (`agent-dispatch doctor`)
 
 A hibernating task's session is *supposed* to be gone -- that's the whole

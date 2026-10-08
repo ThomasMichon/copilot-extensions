@@ -128,7 +128,6 @@ class QueueRunWaitersMixin:
         pid: int,
         host: str,
         start_token: str,
-        kind: str = "process",
         now: float | None = None,
     ) -> dict[str, Any] | None:
         ts = self._now(now)
@@ -145,8 +144,8 @@ class QueueRunWaitersMixin:
                 return None
             conn.execute(
                 "UPDATE run_waiters SET state = 'active', pid = ?, host = ?, start_token = ?,"
-                " kind = ?, updated_at = ? WHERE id = ? AND state = 'preparing'",
-                (int(pid), host, start_token, kind, ts, row["id"]),
+                " updated_at = ? WHERE id = ? AND state = 'preparing'",
+                (int(pid), host, start_token, ts, row["id"]),
             )
             if task is not None:
                 self._audit(
@@ -171,7 +170,6 @@ class QueueRunWaitersMixin:
         start_token: str | None,
         resume_worktree: str,
         command: list[str],
-        kind: str = "process",
         now: float | None = None,
     ) -> dict[str, Any]:
         ts = self._now(now)
@@ -201,8 +199,8 @@ class QueueRunWaitersMixin:
                 "INSERT INTO run_waiters ("
                 " task_id, generation, task_generation, owner, owner_session_id,"
                 " pid, host, start_token, resume_worktree,"
-                " command_json, state, created_at, updated_at, kind"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+                " command_json, state, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
                 (
                     task_id,
                     generation,
@@ -216,7 +214,6 @@ class QueueRunWaitersMixin:
                     json.dumps(command, separators=(",", ":")),
                     ts,
                     ts,
-                    kind,
                 ),
             )
             self._audit(
@@ -992,5 +989,4 @@ class QueueRunWaitersMixin:
             "retired_reason": row["retired_reason"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            "kind": row["kind"] if "kind" in row.keys() else "process",
         }

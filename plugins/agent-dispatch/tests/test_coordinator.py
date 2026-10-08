@@ -1655,6 +1655,8 @@ def test_steer_retries_a_read_timeout_reusing_the_same_idempotency_key(monkeypat
     attempt = {"n": 0}
 
     def handler(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"steer_idempotency_key": True})
         body = json.loads(request.content)
         seen_keys.append(body["idempotency_key"])
         attempt["n"] += 1
@@ -1674,10 +1676,55 @@ def test_steer_retries_a_read_timeout_reusing_the_same_idempotency_key(monkeypat
     assert seen_keys[0]  # a real, non-empty key was generated
 
 
+def test_steer_does_not_retry_against_a_coordinator_without_the_capability(monkeypatch):
+    """An older coordinator mid zero-downtime update doesn't advertise
+    ``steer_idempotency_key`` on ``/health`` -- it would silently ignore the
+    field and perform no dedup at all, so retrying an ambiguous timeout
+    against one must never happen (it would duplicate the answer)."""
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES", "2")
+    attempts = {"n": 0}
+
+    def handler(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"version": "0.11.0"})  # no capability flag
+        attempts["n"] += 1
+        raise httpx.ReadTimeout("simulated slow response", request=request)
+
+    with DispatchClient(
+        "http://coordinator", transport=httpx.MockTransport(handler)
+    ) as client:
+        with pytest.raises(httpx.TimeoutException):
+            client.steer("t1", fields={"a": "b"})
+    assert attempts["n"] == 1  # never retried
+
+
+def test_steer_does_not_retry_when_the_health_probe_itself_fails(monkeypatch):
+    """A failed/unreachable capability probe is never treated as permission
+    to retry -- it degrades to the same conservative "don't retry" answer
+    as a confirmed-old coordinator."""
+    monkeypatch.setenv("AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES", "2")
+    attempts = {"n": 0}
+
+    def handler(request):
+        if request.url.path == "/health":
+            raise httpx.ConnectError("coordinator unreachable", request=request)
+        attempts["n"] += 1
+        raise httpx.ReadTimeout("simulated slow response", request=request)
+
+    with DispatchClient(
+        "http://coordinator", transport=httpx.MockTransport(handler)
+    ) as client:
+        with pytest.raises(httpx.TimeoutException):
+            client.steer("t1", fields={"a": "b"})
+    assert attempts["n"] == 1
+
+
 def test_steer_exhausts_its_retry_budget_and_raises_on_persistent_timeout(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES", "1")
 
     def handler(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"steer_idempotency_key": True})
         raise httpx.ReadTimeout("always slow", request=request)
 
     with DispatchClient(
@@ -1982,6 +2029,14 @@ def test_events_route_advertises_ready_frame_capability(api):
     relay client can gate on genuine daemon support before waiting for the
     frame -- see `board_relay.py`."""
     assert api.get("/health").json()["events_ready_frame"] is True
+
+
+def test_health_advertises_steer_idempotency_key_capability(api):
+    """``client_steering.py``'s ``steer()`` gates its timeout-retry on this
+    flag -- an older coordinator that doesn't advertise it must never be
+    retried against (see the ``test_steer_does_not_retry_against_a_*``
+    tests)."""
+    assert api.get("/health").json()["steer_idempotency_key"] is True
 
 
 def test_goal_and_progress_log_over_http(api):

@@ -44,7 +44,6 @@ class RunWaiterArmBody(BaseModel):
     pid: PositiveInt
     host: NonEmptyText
     start_token: NonEmptyText
-    kind: str = "process"
 
 
 class RunWaiterFinishBody(RunWaiterArmBody):
@@ -192,7 +191,6 @@ def register_verification_routes(
                 pid=body.pid,
                 host=body.host,
                 start_token=body.start_token,
-                kind=body.kind,
             )
         except TaskError as exc:
             msg = str(exc)

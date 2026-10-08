@@ -260,23 +260,6 @@ def agent_bridge_launch_prefix() -> list[str] | None:
     )
 
 
-def agent_pull_requests_launch_prefix() -> list[str] | None:
-    """Resolve ``agent-pull-requests`` without ambient ``PATH`` lookup.
-
-    Required for any cross-plugin invocation (e.g. the pr-watch-daemon
-    delegation in :mod:`agent_dispatch.execution_cli`): a payload-only
-    orchestrator resolves a sibling command only inside its own
-    provenance-checked installation (``~/.agent-pull-requests``'s own
-    versioned runtime slot), never via ``shutil.which`` -- an ambient
-    ``PATH`` lookup could select an unrelated or attacker-controlled
-    executable ahead of the installed dependency (see
-    ``docs/patterns/README.md``'s *Cross-plugin payload argv remains data*).
-    """
-    return _sibling_runtime_launch_prefix(
-        "agent-pull-requests", "agent_pull_requests", "agent-pull-requests"
-    )
-
-
 def _sibling_runtime_launch_prefix(
     plugin_id: str, module: str, path_command: str
 ) -> list[str] | None:

@@ -45,6 +45,24 @@ class SteeringClientMixin:
         """Clear a task's saved draft. Never touches ``awaiting_steer``/status."""
         return self._unwrap(self._http.delete(f"/tasks/{task_id}/card-draft"))
 
+    def _coordinator_supports_steer_idempotency_key(self) -> bool:
+        """Whether this coordinator's ``/health`` advertises that it
+        recognizes and dedups a repeated ``idempotency_key`` on
+        ``/tasks/{id}/steer`` (see that route's ``SteerBody`` and
+        ``coordinator_status.py``'s ``/health``). An older coordinator mid
+        zero-downtime update simply ignores the unrecognized field and
+        performs no dedup at all -- retrying an ambiguous timeout against one
+        would append a second, duplicate answer, the exact failure this
+        feature exists to prevent. A failed/unreachable health probe itself
+        degrades to "unsupported" (never retry), the same conservative
+        answer as a confirmed-old coordinator.
+        """
+        try:
+            health = self.health()
+        except Exception:  # noqa: BLE001 -- any failure here means "don't retry"
+            return False
+        return bool(health.get("steer_idempotency_key"))
+
     def steer(
         self,
         task_id: str,
@@ -68,6 +86,12 @@ class SteeringClientMixin:
         the shared key lets the coordinator recognize a retry and return the
         already-committed result instead of submitting a second, duplicate
         answer.
+
+        The first timeout lazily checks
+        :meth:`_coordinator_supports_steer_idempotency_key` (once, not on
+        every attempt) before committing to any retry at all -- an older
+        coordinator that doesn't yet dedup on this key must never be
+        retried, or the "ambiguous timeout" becomes a guaranteed duplicate.
         """
         key = idempotency_key or uuid.uuid4().hex
         payload = {
@@ -80,12 +104,17 @@ class SteeringClientMixin:
         }
         attempts = default_idempotent_retries() + 1
         delay = 0.1
+        checked_capability = False
         for attempt in range(attempts):
             try:
                 return self._unwrap(self._http.post(f"/tasks/{task_id}/steer", json=payload))
             except httpx.TimeoutException:
                 if attempt == attempts - 1:
                     raise
+                if not checked_capability:
+                    checked_capability = True
+                    if not self._coordinator_supports_steer_idempotency_key():
+                        raise
                 time.sleep(delay)
                 delay = min(delay * 2, 1.0)
         raise AssertionError("unreachable")  # pragma: no cover

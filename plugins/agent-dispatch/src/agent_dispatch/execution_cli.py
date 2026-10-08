@@ -217,299 +217,6 @@ def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | No
     _ = (args, spec)
     return None
 
-
-#: Sentinel ``host``/``pid`` a *delegated* (daemon-backed) run waiter is armed
-#: with instead of a real process identity -- see
-#: :func:`_delegate_to_pr_watch_daemon`. ``_PR_WATCH_DAEMON_HOST`` is chosen
-#: to never collide with a real machine name (``remote_dispatch.local_machine``
-#: returns a hostname), which is exactly what makes the existing dead-waiter
-#: recovery sweep (:func:`agent_dispatch.run_waiter_recovery.recover_run_waiters`)
-#: treat a delegated waiter as permanently ``"unknown"`` (never falsely
-#: declared dead) without needing a new waiter-kind/liveness branch of its
-#: own: that sweep only ever acts on an *active* waiter whose recorded
-#: ``host`` matches *this* machine, and this sentinel never does.
-_PR_WATCH_DAEMON_HOST = "pr-watch-daemon"
-_PR_WATCH_DAEMON_PID = 1
-
-
-def _pr_watch_subscriber_id(task_id: str, generation: int) -> str:
-    return f"{task_id}:{generation}"
-
-
-def _pr_watch_start_token(repo: str, number: int, subscriber_id: str) -> str:
-    """An opaque identity token binding an armed delegated waiter to the
-    exact agent-pull-requests subscription it registered -- reusing the
-    ``(pid, host, start_token)`` triple a *process* waiter is armed/finished
-    with (see :func:`arm_run_waiter`/:func:`finish_run_waiter`), just with a
-    registration identity in place of a process-start identity."""
-    return f"pr-watch:{repo}#{number}:{subscriber_id}"
-
-
-def _global_cli_flags(args: argparse.Namespace) -> list[str]:
-    """Reconstruct the top-level ``--url``/``--shared`` flags (never a
-    bearer credential) from a parsed ``args``, so a notify-argv invoked much
-    later by an external daemon -- never inheriting this process's own
-    environment -- still targets the same coordinator this call used.
-
-    Deliberately never forwards ``--token``/``--control-token``: this argv is
-    durably persisted by the daemon (``watch-subscriptions.json``) and later
-    becomes visible in the callback process's own command line -- exactly
-    the exposure this plugin's README already warns against for the control
-    token ("keep it out of process arguments"). A caller that needs the
-    finish callback to authenticate relies on the same default resolution
-    (``AGENT_DISPATCH_URL``/``AGENT_DISPATCH_TOKEN``/config) an ordinary CLI
-    invocation would -- present in the daemon's own ambient environment, not
-    baked into durable, world-readable argv.
-    """
-    flags: list[str] = []
-    if getattr(args, "shared", False):
-        flags.append("--shared")
-    elif getattr(args, "url", None):
-        flags += ["--url", str(args.url)]
-    return flags
-
-
-#: Default deadline (seconds) a delegated pr-watch subscription is bounded
-#: by when the caller doesn't pass ``--pr-watch-timeout`` -- long enough to
-#: cover a normal multi-day review cycle, but never unbounded: an operator
-#: this plugin's own docstring promises will eventually time out must
-#: actually do so (confirmed review finding: omitting a timeout altogether
-#: leaves the daemon's poller running forever for an abandoned PR).
-_DEFAULT_PR_WATCH_TIMEOUT_SECONDS = 259200.0  # 3 days
-
-
-def _delegated_waiter_message(payload: dict) -> str:
-    """A bounded, human-readable summary of the fired/timed-out event the
-    agent-pull-requests watch daemon piped as JSON on this process's stdin
-    (see its ``default_notify``) -- used as the resume nudge text."""
-    repo = payload.get("repo", "")
-    number = payload.get("number", "")
-    where = f"{repo}#{number}" if repo or number else "the watched PR"
-    if payload.get("timed_out"):
-        return f"PR watch for {where} timed out with no transition."
-    transitions = ", ".join(str(t) for t in (payload.get("transitions") or [])) or "a change"
-    bits = [f"PR {where} fired: {transitions}."]
-    pr_state = payload.get("pr_state")
-    if pr_state:
-        bits.append(f"state={pr_state}")
-    if payload.get("merged"):
-        bits.append("merged=true")
-    return " ".join(bits)
-
-
-def _delegate_to_pr_watch_daemon(args: argparse.Namespace, spec: Any, prepared: dict) -> dict:
-    """Register this detached wait with the shared ``agent-pull-requests``
-    watch daemon instead of spawning a per-task OS waiter process -- the
-    *hibernate-the-wait* variant requested via the explicit
-    ``--pr-watch-repo``/``--pr-watch-number`` opt-in (never inferred from the
-    wait command's own argv shape, which this module has no business parsing
-    or depending on).
-
-    Arms the waiter **synchronously**, in this same foreground call, right
-    after the daemon confirms registration -- so the gap between
-    ``prepare_run_waiter`` and ``arm_run_waiter`` stays as short as a real
-    process spawn's, and the existing "never armed within the grace period"
-    recovery path is unaffected. Armed with ``kind="delegated"`` -- the dead-
-    waiter recovery sweep (:mod:`agent_dispatch.run_waiter_recovery`) checks
-    this explicitly and never attempts PID/host liveness for it at all,
-    regardless of what its sentinel host string happens to be (a host-string
-    heuristic alone is not reliable: ``AGENT_DISPATCH_SUPERVISE_MACHINE``
-    could coincidentally be configured to the same sentinel value).
-
-    Subscribing happens *before* arming (never the reverse): if the daemon
-    call fails, the waiter is simply never armed and the ordinary "never
-    armed within the grace period" recovery reclaims it -- whereas arming
-    first and then failing to subscribe would leave an active, permanently
-    orphaned waiter with no subscription anything will ever fire. The
-    narrow resulting race (the daemon's poller fires an already-terminal PR
-    before this call's own, very next, arm request lands) is handled on the
-    *finish* side instead -- see :func:`_cmd_run_finish_delegated_waiter`'s
-    bounded retry.
-
-    When the daemon later fires (a real transition, or its own timeout), its
-    ``notify_argv`` re-invokes this same CLI with ``--finish-delegated-waiter``
-    (see the matching branch in :func:`_cmd_run`), which retires the waiter
-    and lets the coordinator's existing wake-delivery subsystem
-    (``run_waiter_wakes``) resume the worker -- no new resume mechanism.
-
-    Known gap: if the task's run waiter is retired through a different path
-    (e.g. an operator aborts the task directly) the agent-pull-requests
-    subscription is not automatically cancelled -- it lingers harmlessly
-    until the PR itself resolves or the bounded timeout above fires.
-    """
-    generation = int(prepared["generation"])
-    repo = str(args.pr_watch_repo)
-    number = int(args.pr_watch_number)
-    subscriber_id = _pr_watch_subscriber_id(str(spec.task_id), generation)
-    start_token = _pr_watch_start_token(repo, number, subscriber_id)
-
-    from .procutil import agent_pull_requests_launch_prefix, resolve_own_runtime_python
-
-    python = resolve_own_runtime_python()
-    notify_argv = [
-        python,
-        "-m",
-        "agent_dispatch",
-        *_global_cli_flags(args),
-        "run",
-        "--finish-delegated-waiter",
-        "--resume",
-        spec.resume_worktree or "",
-        "--task",
-        str(spec.task_id),
-        "--waiter-generation",
-        str(generation),
-        "--pr-watch-start-token",
-        start_token,
-    ]
-
-    prefix = agent_pull_requests_launch_prefix()
-    if prefix is None:
-        raise RuntimeError(
-            "could not resolve an installed 'agent-pull-requests' runtime -- "
-            "install the agent-pull-requests plugin (it owns the shared "
-            "PR-watch daemon --pr-watch-repo/--pr-watch-number delegates to)"
-        )
-    timeout_s = getattr(args, "pr_watch_timeout", None)
-    if timeout_s is None:
-        timeout_s = _DEFAULT_PR_WATCH_TIMEOUT_SECONDS
-    argv = [
-        *prefix, "watch", "subscribe",
-        "--repo", repo,
-        "--number", str(number),
-        "--subscriber-id", subscriber_id,
-        "--timeout", str(float(timeout_s)),
-    ]
-    until = getattr(args, "pr_watch_until", None)
-    if until:
-        for item in str(until).split(","):
-            item = item.strip()
-            if item:
-                argv += ["--until", item]
-    argv += ["--json", "--notify-argv", *notify_argv]
-    proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via provenance-checked runtime
-        argv, capture_output=True, text=True, timeout=30, check=False, **no_window_kwargs()
-    )
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()[:2000]
-        raise RuntimeError(f"agent-pull-requests watch subscribe failed: {detail}")
-    try:
-        result = json.loads(proc.stdout)
-    except ValueError as exc:
-        raise RuntimeError(
-            f"agent-pull-requests watch subscribe returned unparsable output: {exc}"
-        ) from exc
-    if not result.get("registered"):
-        raise RuntimeError(
-            f"agent-pull-requests watch subscribe did not confirm registration: {result}"
-        )
-
-    with _core()._client(args) as c:
-        armed = c.arm_run_waiter(
-            spec.task_id,
-            generation=generation,
-            pid=_PR_WATCH_DAEMON_PID,
-            host=_PR_WATCH_DAEMON_HOST,
-            start_token=start_token,
-            kind="delegated",
-        )
-    if not armed or not armed.get("accepted"):
-        raise RuntimeError(
-            f"agent-pull-requests watch subscribe succeeded, but the coordinator "
-            f"refused to arm the waiter (generation {generation} may already have "
-            f"been superseded/recovered): {armed}"
-        )
-    return {
-        "delegated_to": "agent-pull-requests-watch-daemon",
-        "repo": repo,
-        "number": number,
-        "subscriber_id": subscriber_id,
-        "pid": None,
-        "argv": argv,
-    }
-
-
-#: Bounded retry for :func:`_cmd_run_finish_delegated_waiter`'s own
-#: ``finish_run_waiter`` call -- see that function's docstring for the
-#: narrow arm/subscribe race this closes.
-_FINISH_DELEGATED_WAITER_RETRIES = 5
-_FINISH_DELEGATED_WAITER_RETRY_DELAY_S = 0.5
-
-
-def _cmd_run_finish_delegated_waiter(args: argparse.Namespace) -> int:
-    """The ``--finish-delegated-waiter`` mode: invoked as the ``notify_argv``
-    of an ``agent-pull-requests watch subscribe`` registration made by
-    :func:`_delegate_to_pr_watch_daemon`, when the daemon fires (a real
-    transition or its own timeout). Reads the fired event JSON the daemon
-    piped on stdin, retires the delegated waiter via the ordinary
-    ``finish_run_waiter`` coordinator call -- the ``(pid, host, start_token)``
-    triple must match exactly what :func:`_delegate_to_pr_watch_daemon` armed
-    it with -- and lets the coordinator's existing wake-delivery subsystem
-    (``run_waiter_wakes``) take it from there. No new resume mechanism.
-
-    Retries a rejected ``finish_run_waiter`` a bounded number of times: the
-    daemon's poller can fire near-instantly for an already-terminal PR (its
-    very first poll, started the moment ``subscribe`` registers it), racing
-    the foreground ``_delegate_to_pr_watch_daemon`` call's own very next
-    ``arm_run_waiter`` request. A rejection this early almost always means
-    "not armed *yet*", not "gone" -- the retry window here (a few seconds)
-    comfortably covers that one extra local HTTP round trip without masking
-    a genuinely stuck/retired waiter, which simply keeps failing after the
-    budget is exhausted exactly as it did before this retry existed.
-    """
-    import time
-
-    try:
-        raw = sys.stdin.read()
-    except OSError:
-        raw = ""
-    try:
-        payload = json.loads(raw) if raw.strip() else {}
-    except ValueError:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-
-    task_id = args.task
-    generation = args.waiter_generation
-    start_token = args.pr_watch_start_token
-    if not task_id or generation is None or not start_token:
-        print(
-            "agent-dispatch: --finish-delegated-waiter requires --task, "
-            "--waiter-generation, and --pr-watch-start-token",
-            file=sys.stderr,
-        )
-        return 2
-
-    message = _delegated_waiter_message(payload)
-    result: dict | None = None
-    for attempt in range(_FINISH_DELEGATED_WAITER_RETRIES + 1):
-        with _core()._client(args) as c:
-            result = c.finish_run_waiter(
-                task_id,
-                generation=int(generation),
-                pid=_PR_WATCH_DAEMON_PID,
-                host=_PR_WATCH_DAEMON_HOST,
-                start_token=str(start_token),
-                message=message,
-            )
-        if isinstance(result, dict) and result.get("accepted"):
-            break
-        if attempt < _FINISH_DELEGATED_WAITER_RETRIES:
-            time.sleep(_FINISH_DELEGATED_WAITER_RETRY_DELAY_S)
-    return _core()._emit(
-        {
-            "delegated": True,
-            "task_id": task_id,
-            "generation": int(generation),
-            "message": message,
-            "event": payload,
-            "waiter": result.get("waiter") if isinstance(result, dict) else None,
-            "accepted": bool(result.get("accepted")) if isinstance(result, dict) else False,
-        }
-    )
-
-
 def _cmd_run(args: argparse.Namespace) -> int:
     """Hand a blocking wait to the layer (*hibernate-the-wait*): run ``-- <cmd>``
     to completion, then resume the worktree-affinitied worker via agent-bridge.
@@ -523,45 +230,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from . import bridge
     from .hibernation import RunSpec, run_and_resume
 
-    if getattr(args, "finish_delegated_waiter", False):
-        return _cmd_run_finish_delegated_waiter(args)
-
-    pr_watch_repo = getattr(args, "pr_watch_repo", None)
-    pr_watch_number = getattr(args, "pr_watch_number", None)
-    if bool(pr_watch_repo) != bool(pr_watch_number):
-        print(
-            "agent-dispatch: --pr-watch-repo and --pr-watch-number must be given together",
-            file=sys.stderr,
-        )
-        return 2
-    if pr_watch_repo and not (args.detach and args.task):
-        print(
-            "agent-dispatch: --pr-watch-repo/--pr-watch-number require both "
-            "--detach and --task (delegation only makes sense for a "
-            "detached, task-suspending wait)",
-            file=sys.stderr,
-        )
-        return 2
-
     command = getattr(args, "_dashdash_tail", None)
     if command is None:
         command = list(args.command or [])
         if command and command[0] == "--":
             command = command[1:]
-    if not command and not pr_watch_repo:
+    if not command:
         print(
             "agent-dispatch: run needs a command after '--', e.g. "
             "`agent-dispatch run --resume <worktree> -- <blocking-cmd>`",
             file=sys.stderr,
         )
         return 2
-    if not command:
-        # Delegated mode: nothing is actually executed -- this is a display/
-        # audit placeholder only (``command_json`` in the coordinator, the
-        # `hibernating: ...` suspend reason, etc.).
-        command = [
-            f"<delegated-to-agent-pull-requests-watch-daemon:{pr_watch_repo}#{pr_watch_number}>"
-        ]
 
     spec = RunSpec(
         command=tuple(command),
@@ -662,16 +342,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         try:
             globals()["_DETACHED_CLI_ARGS"] = args
-            if pr_watch_repo:
-                handle = _core()._delegate_to_pr_watch_daemon(args, spec, prepared)
-            else:
-                handle = _core()._spawn_detached_waiter(spec)
+            handle = _core()._spawn_detached_waiter(spec)
         except Exception as exc:  # noqa: BLE001
             if suspended and suspended.get("claim") is not None:
                 rollback = _rollback_detached_wait(args, spec, suspended)
             else:
                 rollback = {"error": str(exc)}
-            verb = "register the pr-watch delegation" if pr_watch_repo else "spawn detached waiter"
             return _core()._emit(
                 {
                     "detached": False,
@@ -680,7 +356,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "suspended": suspended,
                     "waiter": waiter,
                     "rollback": rollback,
-                    "error": f"could not {verb}: {exc}",
+                    "error": f"could not spawn detached waiter: {exc}",
                 }
             )
         finally:

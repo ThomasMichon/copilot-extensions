@@ -200,7 +200,7 @@ class QueueSteeringMixin:
         # still indexed; without this, the truthiness check below would
         # silently skip the dedup lookup for a blank key while the INSERT
         # still collided with it on retry, raising a raw SQLite uniqueness
-        # error instead of returning the committed result (review finding).
+        # error instead of returning the committed result.
         idempotency_key = idempotency_key or None
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")

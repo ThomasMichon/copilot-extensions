@@ -84,6 +84,15 @@ def register_status_routes(
             # enough (a daemon that doesn't advertise this never receives the
             # request parameter either -- see client.py's stream_events()).
             "events_ready_frame": True,
+            # Advertises that /tasks/{id}/steer recognizes and dedups a
+            # repeated idempotency_key, so a client only retries an ambiguous
+            # (connected-but-the-response-timed-out) submission once it has
+            # confirmed the coordinator it's actually talking to can safely
+            # absorb that retry -- an older coordinator mid zero-downtime
+            # update ignores the unrecognized field entirely and would
+            # otherwise record a second, duplicate answer (see
+            # client_steering.py's steer()).
+            "steer_idempotency_key": True,
         }
 
     @app.get("/events")
