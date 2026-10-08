@@ -214,3 +214,12 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 - The reader is an input primitive, not completed log sync or compression.
   Scheduled preservation, all-session derivation/catalog/accounting, daily role
   aggregation, consumer vendoring, and release-backed adoption remain outstanding.
+
+### 2026-10-07 - Evidence reader validated and published
+- Validated the process-log evidence reader: full `agent-logger` suite (752
+  passed, 25 skipped) and `ruff` pass inside the test-isolation devcontainer;
+  install-contract, docs-consistency, runbook-references, version-consistency,
+  module-size, and large-files guards all pass.
+- Rebased cleanly onto `origin/dev` and opened PR #5690 for review. This closes
+  only the reader slice of #5676; scheduled sync/compression and accounting
+  ingestion remain open next slices.
