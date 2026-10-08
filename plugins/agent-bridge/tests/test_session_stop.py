@@ -189,38 +189,6 @@ def test_a_session_archived_after_the_stop_is_confirmed_promptly():
     assert result["outcome"] == "stopped" and clock.t < 5
 
 
-def test_a_notice_that_triggers_a_handoff_is_followed_to_the_successor():
-    """Submitting the notice can hand a critical-context session off: the
-    successor is the live one, so it is the one waited on and stopped."""
-    clock = _Clock()
-    calls = []
-
-    class Handoff:
-        def get_session(self, sid):
-            if sid == "s1":  # SessionInfo carries no successor link
-                return {"session_id": "s1", "status": "stopped" if calls else "idle", "turn_count": 9}
-            return {"session_id": "s2", "status": "stopped" if ("stop", "s2") in calls else "idle",
-                    "turn_count": 1}
-
-        def submit_stop_notice(self, sid, prompt):
-            calls.append(("submit", sid))
-            return {"turn_index": 0, "session_id": "s2"}  # the successor took it
-
-        def daemon_supports(self, _version):
-            return True
-
-        def list_pending_queue(self, sid):
-            return []
-
-        def stop_session(self, sid, **_kw):
-            calls.append(("stop", sid))
-
-    result = _run(Handoff(), clock, grace=30)
-    assert result["session_id"] == "s2" and result["handed_off_from"] == "s1"
-    assert ("stop", "s2") in calls and ("stop", "s1") not in calls
-    assert result["outcome"] == "stopped" and result["acknowledged"] is True
-
-
 def test_grace_against_a_daemon_without_cooperative_stop_refuses_before_any_notice():
     """An older daemon may hand the notice to a successor without naming it, or
     resume a just-stopped session: neither can be detected, so --grace refuses."""

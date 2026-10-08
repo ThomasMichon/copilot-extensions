@@ -135,10 +135,9 @@ def run_stop(
 
 def _cooperate(client, session_id, session, grace, result, phase, *, clock, sleep, poll) -> str | None:
     """Submit the notice and wait up to ``grace`` for its turn to settle; returns
-    the session id to stop (a successor, when submitting the notice handed the
-    session off -- the bridge may do that for a session at critical context), or
-    ``None`` when a concurrent stop already stopped it (the daemon refuses the
-    notice rather than resuming the session).
+    the session id to stop, or ``None`` when a concurrent stop already stopped it.
+    The notice is ``no_resume``: the daemon never hands it off, resumes or
+    respawns for it, so it can't undo a stop racing this one.
 
     A queued notice is popped before its turn is marked running, so a status
     read in between can show an idle session with the notice already gone. So
@@ -156,12 +155,6 @@ def _cooperate(client, session_id, session, grace, result, phase, *, clock, slee
             raise
         result["acknowledged"] = False  # gone before the notice: stop/confirm handle it
         return session_id
-    successor = submitted.get("session_id")
-    if successor and successor != session_id:
-        # Submitting the notice handed the session off: the successor took the
-        # notice and is the live one, so wait on, withdraw from, and stop that one.
-        result["handed_off_from"], session_id = session_id, successor
-        result["session_id"], baseline = successor, 0
     queue_id = submitted.get("queue_id") if submitted.get("queued") else None
     result["notice"] = {"queued": queue_id is not None, "queue_id": queue_id, "withdrawn": False}
     dequeued_before = queue_id is None  # an immediate notice is running on return

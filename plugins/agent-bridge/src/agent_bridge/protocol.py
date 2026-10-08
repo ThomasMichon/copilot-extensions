@@ -148,10 +148,10 @@ CALLER_SESSION_ID_PROTOCOL_VERSION = 24
 
 # First version whose prompt submit (``POST /api/v1/sessions/{id}/turns``)
 # names the session that took the prompt (``session_id``: a successor after a
-# prompt-triggered handoff) and honors ``no_resume`` (a stopped session refuses
-# with 409 instead of being auto-resumed, checked under the session's lock). A
-# cooperative ``stop --grace`` depends on both, so against an older daemon it
-# refuses rather than possibly stopping the wrong session or resuming one.
+# prompt-triggered handoff) and honors ``no_resume``: the prompt is never
+# handed off, resumed or respawned for, so a stopped session refuses with 409
+# (re-checked at turn start). A cooperative ``stop --grace`` depends on it, so
+# against an older daemon it refuses rather than risk undoing a racing stop.
 COOPERATIVE_STOP_PROTOCOL_VERSION = 25
 
 # Current HTTP wire-contract version this build speaks -- bumped alongside the

@@ -259,3 +259,53 @@ class TestNoResume:
             await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
         assert session.status == SessionStatus.STOPPED
         assert sm._db.count_pending_prompts(session.session_id) == 0
+
+    @pytest.mark.asyncio
+    async def test_a_saturated_session_is_never_handed_off_for_a_no_resume_prompt(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="wt-1")
+        pred._crossed_thresholds.add("critical")
+
+        result = await sm.submit_or_queue_prompt(pred.session_id, "wind down", no_resume=True)
+
+        assert not _events(pred, "session_handoff") and pred.status != SessionStatus.STOPPED
+        assert result.get("session_id", pred.session_id) == pred.session_id
+
+    @pytest.mark.asyncio
+    async def test_a_stop_landing_after_admission_is_refused_at_turn_start(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """The stop serializes on a different lock than admission, so the turn
+        start re-checks: a session stopped in between is refused, not resumed."""
+        from agent_bridge.session_prompts import SessionStoppedError
+
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        real = sm._submit_or_queue_prompt_locked
+
+        async def stop_then_admit(sess, prompt, **kw):
+            await sm.stop_session(sess.session_id)  # lands between the check and the turn start
+            return await real(sess, prompt, **kw)
+
+        sm._submit_or_queue_prompt_locked = stop_then_admit
+        with pytest.raises(SessionStoppedError):
+            await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert session.status == SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_the_drain_kick_never_resumes_for_a_no_resume_prompt(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.stop_session(session.session_id)
+        resumed = []
+
+        async def resume(*a, **k):
+            resumed.append(a)
+
+        sm.resume_session = resume
+        await sm._kick_pending_drain(session, allow_resume=False)
+        assert resumed == [] and session.status == SessionStatus.STOPPED
