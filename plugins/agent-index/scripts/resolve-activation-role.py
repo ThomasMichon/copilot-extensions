@@ -18,6 +18,7 @@ from resolve_effective_config import (
     _load_yaml_mapping,
     _parse_simple_yaml,
     _validate_config,
+    resolve as resolve_effective_config,
 )
 
 
@@ -61,15 +62,26 @@ def resolve(
     return "host" if machine.strip().casefold() in machines else "client"
 
 
+def resolve_repository(repo: str, machine: str) -> str:
+    effective = resolve_effective_config(repo)
+    if not effective["opted_in"]:
+        return "unconfigured"
+    machines = [item["machine"].casefold() for item in effective["indexers"]]
+    if not machines:
+        return "unconfigured"
+    return "host" if machine.strip().casefold() in machines else "client"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--config")
     source.add_argument("--data-b64")
+    source.add_argument("--repo")
     parser.add_argument("--machine", required=True)
     args = parser.parse_args()
     print(
-        resolve(
+        resolve_repository(args.repo, args.machine) if args.repo else resolve(
             Path(args.config) if args.config else None,
             args.machine,
             data_b64=args.data_b64,

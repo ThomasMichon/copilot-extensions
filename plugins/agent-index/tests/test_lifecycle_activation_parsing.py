@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib.util
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -63,6 +65,84 @@ def test_empty_or_missing_designation_is_unconfigured(tmp_path):
     assert MODULE.resolve(empty, "host") == "unconfigured"
     assert MODULE.resolve(unrelated, "host") == "unconfigured"
     assert MODULE.resolve(tmp_path / "missing.yaml", "host") == "unconfigured"
+
+
+def _repository(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    return repo
+
+
+def test_repository_role_uses_machine_local_overlay(tmp_path):
+    repo = _repository(tmp_path)
+    overlay = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    _write(overlay, {"indexer": {"machine": "host"}})
+
+    assert MODULE.resolve_repository(str(repo), "host") == "host"
+    assert MODULE.resolve_repository(str(repo), "client") == "client"
+
+
+def test_repository_role_uses_bound_knowledge_overlay(tmp_path, monkeypatch):
+    repo = _repository(tmp_path)
+    policy = repo / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    _write(policy, {"stateless": True, "requires_external_state_root": True})
+    knowledge = tmp_path / "knowledge"
+    config = knowledge / ".agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    _write(config, {"indexer": {"machine": "host"}})
+    effective = sys.modules[MODULE.resolve_effective_config.__module__]
+    monkeypatch.setattr(effective, "_external_state_root", lambda _root: ("ready", knowledge))
+
+    assert MODULE.resolve_repository(str(repo), "host") == "host"
+    assert MODULE.resolve_repository(str(repo), "client") == "client"
+
+
+def test_repository_role_fails_closed_without_designation(tmp_path, monkeypatch):
+    repo = _repository(tmp_path)
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+
+    assert MODULE.resolve_repository(str(repo), "host") == "unconfigured"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer error handling")
+def test_posix_resolver_failure_is_reported_and_does_not_abort(tmp_path):
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is unavailable")
+    source = (SCRIPT.parent / "install.sh").read_text(encoding="utf-8")
+    activation = source.split("_activation_role() {", 1)[1].split("\n_install_engine()", 1)[0]
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    python = tools / "python3"
+    python.write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    python.chmod(0o755)
+    script = (
+        "set -e\n"
+        "_warn() { printf '%s\\n' \"$1\" >&2; }\n"
+        "_activation_role() {" + activation + "\n"
+        "role=\"$(_activation_role)\"\n"
+        "printf '%s\\n' \"$role\" survived\n"
+    )
+    result = subprocess.run(
+        [bash, "-c", script],
+        env={
+            **os.environ,
+            "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+            "AGENT_INDEX_REPO": str(tmp_path),
+            "AGENT_INDEX_MACHINE": "host",
+            "SCRIPT_DIR": str(SCRIPT.parent),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["unconfigured", "survived"]
+    assert "Activation role resolver failed" in result.stderr
 
 
 def test_fallback_parser_handles_canonical_and_inline_forms():

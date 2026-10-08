@@ -95,6 +95,13 @@ def _capture_promoting_routing(monkeypatch, tmp_path, capsys):
 def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> None:
     captured = {}
     spawned = {}
+    detached = __main__.detached_kwargs
+
+    def detach(**kwargs):
+        spawned["detach_kwargs"] = kwargs
+        return detached(**kwargs)
+
+    monkeypatch.setattr(__main__, "detached_kwargs", detach)
 
     class FakeResult:
         def __init__(self) -> None:
@@ -182,6 +189,7 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
     assert spawned["kwargs"]["cwd"] == str((tmp_path / "home").resolve())
     assert "PYTHONPATH" not in spawned["kwargs"]["env"]
     assert "PYTHONHOME" not in spawned["kwargs"]["env"]
+    assert spawned["detach_kwargs"] == {"breakaway": True}
 
 
 def test_namespaced_deploy_spawns_private_cell_entrypoint(
