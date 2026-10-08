@@ -9,7 +9,7 @@
   venue provider.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -44,10 +44,17 @@ layer **pre-allocates** the execution home a launching CLI session will bind
 to; the CLI's own extension **discovers and binds** to that specific
 assignment rather than defaulting to an ambient daemon; and venue providers
 symmetrically gain the ability to **launch** such a session, the same way the
-local worktree/mux launch path already does, riding the single uniform SSH
-substrate venue-parity establishes. Once bound, the session is ordinary,
+local worktree/mux launch path already does, riding the selected shared
+transport venue-parity establishes. Once bound, the session is ordinary,
 coordinated, reattachable, multi-observer work — no new vocabulary, no
 duplicated retirement or replay machinery.
+
+SSH-specific forwarding and TTY launch shapes below apply to SSH-backed venues.
+An optional [machine-fleet Gateway](../machine-fleet/README.md) does not gain
+interactive-session capability merely by exposing daemon/task control. A provider
+offering interactive Gateway reach must explicitly satisfy this same reservation,
+launch, interaction, reattach, credentials, observation, and retirement contract;
+unsupported interaction remains visible rather than silently falling back to SSH.
 
 This is deliberately an **explicit, per-request mode**, not a default execution
 shape most agents should reach for. Ordinary delegated/headless work continues
@@ -143,9 +150,10 @@ exclusive to the local worktree/mux launch path. Any venue provider —
 machine — can offer the same launch shape: prepare the venue, allocate the
 paired CLI-mode reservation, and start a standard muxed CLI process bound to
 it, self-registering into `live_sessions` with a reattach descriptor that
-knows how to reach that venue over a daemon-port reverse forward set up as
-part of the same launch. This rides the single SSH transport and auth-relay
-back-channel [venue-parity](../venue-parity/README.md) already establishes
+knows how to reach that venue over the provider's shared channel established
+as part of the same launch (a daemon-port reverse forward for SSH-backed
+venues). This rides the selected transport and auth-relay contract
+[venue-parity](../venue-parity/README.md) already establishes
 for headless dispatch; it does not require or invent a second,
 venue-specific transport for the interactive case.
 
@@ -309,7 +317,7 @@ headless session's mechanics do not actually extend to an attended one.
   and the origin of the Session-host-provider and
   single-current-session-per-worktree concepts this vision builds on.
 - Sibling vision: [venue-parity](../venue-parity/README.md) — the thin,
-  symmetric SSH transport and auth-relay back-channel this vision's venue
+  symmetric selected transport and auth-relay contract this vision's venue
   launch rides rather than duplicates.
 - Related vision: [plugins/agent-codespaces](../plugins/agent-codespaces/README.md) —
   owns the venue-launch primitive itself (`copilot <name>` /

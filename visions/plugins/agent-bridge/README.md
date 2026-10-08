@@ -274,6 +274,25 @@ position. The raw event stream remains available for fidelity and recovery, but
 ordinary delegation does not require ingesting the entire transcript or every
 tool event.
 
+### inspectable-delivery-decisions
+
+A caller can distinguish a request admitted for execution, work durably
+queued for later delivery, an identical request already accepted, and a
+semantic refusal. The decision identifies the target and what is known about
+delivery so admission is not mistaken for completed work. Where an older
+participant cannot establish duplicate or successor identity, that limit
+remains explicit rather than being filled with a confident guess.
+
+### cooperative-stop-with-confirmed-state
+
+A caller can request a bounded opportunity for a session to wind down before
+it is stopped and preserved for resume. The notice follows the session's
+ordinary serialized conversation instead of interrupting an existing turn.
+Request, observed acknowledgement, provider stop, and confirmed stopped state
+remain distinct; repeating a stop against an already-stopped or gone target
+is harmless. Explicit forced stopping remains available without pretending
+it provided that cooperative opportunity.
+
 ### standards-compatible-host-control
 
 An AHP client can discover agents, create or subscribe to sessions and chats,
@@ -522,6 +541,22 @@ Stopping, updating, cutting over, or retiring a session first seeks a safe
 state: finish the turn, cancel gracefully, mark for resume, carry context
 forward, and only then let go. A hard kill is an explicit last resort, never the
 normal maintenance path.
+
+### stop-intent-does-not-resurrect-work
+
+A wind-down notice cannot undo a concurrent stop by resuming, recreating, or
+handing the target off to a successor. An expired notice is withdrawn from
+pending delivery so it cannot surprise a later resumed session. A participant
+that cannot uphold those protections refuses the cooperative operation before
+admitting the notice, rather than substituting a weaker success.
+
+### acknowledgement-is-not-confirmation
+
+A grace deadline expiring does not establish acknowledgement, and a provider
+accepting a stop does not establish the final session state. Unacknowledged,
+blocked, or unconfirmed outcomes remain visible. Confirming the session is
+stopped does not claim every retained host or background resource was reclaimed;
+their lifetime remains governed by their owning contract.
 
 ### the next generation earns the handoff, never assumes it
 
@@ -826,8 +861,11 @@ machine may deliberately gate outbound reach until policy allows it.
 - Sibling leaf: [agent-dispatch](../agent-dispatch/README.md) — the delegation
   layer that records claimable work, may embody workers through this runtime,
   and can hibernate a genuinely asynchronous wait until work needs attention.
-- Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer the
-  bridge's cross-machine reach rides on.
+- Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity authority
+  for the bridge's static/SSH-backed reach.
+- Related: [machine-fleet](../../machine-fleet/README.md) — optional
+  driver-based Gateway routing over the same supported coordination contracts,
+  without replacing bridge/session authority.
 - Venue provider: [agent-codespaces](../agent-codespaces/README.md) — a remote
   venue presented through the bridge's coordination contract.
 - Cold-store provider: [agent-logger](../agent-logger/README.md) — registers
@@ -837,6 +875,12 @@ machine may deliberately gate outbound reach until policy allows it.
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
 
 ## Provenance
+
+- **2026-10-08** — Folded back faithful delivery decisions and cooperative
+  stop with independently observable acknowledgement and final-state
+  confirmation. Preserved ordinary admission policy, compatibility boundaries,
+  resumable state, and protection against a wind-down notice resurrecting work.
+  Derived from the delivery-result and cooperative-stop implementation.
 
 - **2026-10-08** — Sharpened generation-handoff custody, shared deployment and
   recovery authority, and observable deployment freshness. Mined from the

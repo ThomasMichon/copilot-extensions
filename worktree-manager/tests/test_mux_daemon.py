@@ -6,6 +6,7 @@ this step's own scope (see ``mux_daemon.py``'s module docstring)."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -572,14 +573,29 @@ def test_apply_status_options_false_on_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _fake_run_factory(*, has_session=True, set_option_ok=True):
+def _fake_run_factory(
+    *,
+    has_session=True,
+    set_option_ok=True,
+    list_clients_lines=None,
+    list_clients_ok=True,
+):
     """A ``subprocess.run`` stand-in distinguishing ``has-session`` (the
-    session-liveness revalidation probe) from ``set-option`` (the actual
-    apply), so tests can control each independently."""
+    session-liveness revalidation probe), ``list-clients`` (the
+    attached-clients refresh probe), and ``set-option`` (the actual apply),
+    so tests can control each independently. ``list_clients_lines``
+    defaults to an empty listing (zero attached clients) when
+    ``list_clients_ok`` is ``True``."""
 
     def _fake_run(argv, **kwargs):
         if "has-session" in argv:
             return subprocess.CompletedProcess(argv, 0 if has_session else 1)
+        if "list-clients" in argv:
+            if not list_clients_ok:
+                return subprocess.CompletedProcess(argv, 1, stdout="")
+            lines = list_clients_lines if list_clients_lines is not None else []
+            stdout = "\n".join(lines) + ("\n" if lines else "")
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout)
         return subprocess.CompletedProcess(argv, 0 if set_option_ok else 1)
 
     return _fake_run
@@ -740,6 +756,217 @@ def test_compute_invalidates_a_mapping_whose_mux_session_has_died(tmp_path, monk
     # the dead mapping must be invalidated (tombstoned), not left "live"
     invalidated = registry.get("proj", "wt-1")
     assert invalidated["live"] is False
+
+
+def test_republish_refreshes_clients_without_changed_status_options(tmp_path, monkeypatch):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=0))
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _fake_run_factory(list_clients_lines=["/dev/pts/1: wt-1", "/dev/pts/2: wt-1"]),
+    )
+    compute = mux_daemon.build_compute(registry)
+    result = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
+    )
+    assert result == {"applied": True}
+    refreshed = registry.get("proj", "wt-1")
+    assert refreshed["attached_clients"] == 0
+    observations = []
+
+    def publish(entry, **kwargs):
+        observations.append(entry["attached_clients"])
+        return {"applied": True}
+
+    monkeypatch.setattr(mux_daemon, "publish_live_observation", publish)
+    mux_daemon.AttachedClientObserver().observe(registry)
+    assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
+    assert registry.get("proj", "wt-1")["attached_clients"] == 2
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory(list_clients_lines=[]))
+    # No further status push: rendered values have not changed.
+    mux_daemon.AttachedClientObserver().observe(registry)
+    assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
+    assert registry.get("proj", "wt-1")["attached_clients"] == 0
+    assert observations == [2, 0]
+    assert registry.get("proj", "wt-1")["mapping_revision"] == 1
+
+
+def test_republish_leaves_attached_clients_unchanged_on_probe_failure(tmp_path, monkeypatch):
+    """A transient list-clients probe hiccup (unknown count) must never
+    stomp a previously-observed, real attached-client count with a
+    misleading 0."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=3))
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory(list_clients_ok=False))
+    monkeypatch.setattr(
+        mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True}
+    )
+    mux_daemon.AttachedClientObserver().observe(registry)
+    assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
+    refreshed = registry.get("proj", "wt-1")
+    assert refreshed["attached_clients"] == 3
+
+
+def test_slow_attachment_probe_does_not_block_status_and_is_drained(tmp_path, monkeypatch):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    entered = threading.Event()
+    release = threading.Event()
+
+    def run(argv, **kwargs):
+        if "list-clients" in argv:
+            entered.set()
+            assert release.wait(timeout=10)
+        return subprocess.CompletedProcess(argv, 0, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(
+        mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True}
+    )
+    runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
+    runtime.start()
+    assert runtime.server is not None
+
+    def observe():
+        with runtime.loop_mutation():
+            runtime.attachment_observer.observe(runtime.registry)
+
+    observer = threading.Thread(target=observe)
+    observer.start()
+    try:
+        assert entered.wait(timeout=3)
+        rv = mux_daemon.rendezvous_fields(runtime.server)
+        host, port, token = mux_daemon.endpoint_from_rendezvous(rv)
+        payload = {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "unchanged"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        }
+        assert wcs_client.request(
+            host, port, token,
+            kind=mux_daemon.KIND,
+            key=mux_daemon.status_push_key(payload),
+            payload=payload,
+            request_deadline_s=1.0,
+            client_id=wcs_client.new_client_id(),
+        ) == {"applied": True}
+        assert observer.is_alive()
+        assert runtime.drain({"timeout": 0})["drained"] is False
+        release.set()
+        observer.join(timeout=5)
+        assert not observer.is_alive()
+        assert runtime.drain({"timeout": 0})["drained"] is True
+    finally:
+        release.set()
+        observer.join(timeout=5)
+        runtime.shutdown()
+
+
+def test_republish_skips_registry_write_when_attached_clients_already_matches(tmp_path, monkeypatch):
+    """No in-place refresh write (and no revision/observed_at churn) when
+    the probed count already matches what's stored."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=1, observed_at="2026-09-25T00:00:00Z"))
+    monkeypatch.setattr(
+        subprocess, "run", _fake_run_factory(list_clients_lines=["/dev/pts/1: wt-1"])
+    )
+    original_update = registry.update_attached_clients
+    calls = []
+
+    def _tracking_update(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(registry, "update_attached_clients", _tracking_update)
+    monkeypatch.setattr(
+        mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True}
+    )
+    mux_daemon.AttachedClientObserver().observe(registry)
+    assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
+    assert calls == []
+    refreshed = registry.get("proj", "wt-1")
+    assert refreshed["attached_clients"] == 1
+    assert refreshed["observed_at"] == "2026-09-25T00:00:00Z"
+
+
+def test_daemon_observes_attachments_without_status_monitor(tmp_path, monkeypatch):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=0))
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: tmp_path / "absent.lock")
+    monkeypatch.setattr(
+        subprocess, "run", _fake_run_factory(list_clients_lines=["client-one"])
+    )
+    assert mux_daemon.run_daemon_foreground(
+        tmp_path, poll_interval_s=0, max_iterations=2
+    ) == 0
+    assert registry.get("proj", "wt-1")["attached_clients"] == 1
+
+
+@pytest.mark.parametrize("race_entry", [1, 2])
+def test_drain_winning_before_loop_fence_prevents_new_mutation(tmp_path, monkeypatch, race_entry):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    mutations = []
+    entries = [0]
+    original_fence = mux_daemon.MuxDaemonRuntime.loop_mutation
+
+    @contextlib.contextmanager
+    def fence(runtime):
+        entries[0] += 1
+        if entries[0] == race_entry:
+            runtime.begin_drain()
+            assert runtime.drain({"timeout": 0})["drained"] is True
+        with original_fence(runtime):
+            yield
+
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "loop_mutation", fence)
+    monkeypatch.setattr(
+        mux_daemon.AttachedClientObserver, "observe",
+        lambda self, registry: mutations.append("observe"),
+    )
+    monkeypatch.setattr(mux_daemon, "_status_monitor_generation", lambda _: "fixed")
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: tmp_path / "absent.lock")
+
+    def republish(*args, **kwargs):
+        mutations.append("publish")
+        return True
+
+    monkeypatch.setattr(mux_daemon, "_republish_live_mappings", republish)
+    assert mux_daemon.run_daemon_foreground(
+        tmp_path, poll_interval_s=0, max_iterations=1
+    ) == 0
+    assert mutations == ([] if race_entry == 1 else ["observe"])
+
+
+def test_republish_reads_one_registry_snapshot_not_one_per_mapping(tmp_path, monkeypatch):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    for i in range(31):
+        registry.register(_entry(worktree_id=f"wt-{i}"))
+    snapshots = []
+    original_snapshot = registry.snapshot
+
+    def snapshot():
+        snapshots.append(True)
+        return original_snapshot()
+
+    def get(*args):
+        raise AssertionError("per-entry registry read")
+
+    monkeypatch.setattr(registry, "snapshot", snapshot)
+    monkeypatch.setattr(registry, "get", get)
+    monkeypatch.setattr(
+        mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True}
+    )
+    assert mux_daemon._republish_live_mappings(registry, ensure_monitor=False)
+    assert snapshots == [True]
 
 
 def test_status_push_key_requires_project_worktree_id_and_rendered_at():
@@ -958,7 +1185,7 @@ def test_compute_rechecks_revision_immediately_before_applying(tmp_path, monkeyp
 
 
 def test_shutdown_waits_for_an_in_flight_handler_before_closing(tmp_path, monkeypatch):
-    """Copilot review finding: CoalescingServer.close() does not join
+    """CoalescingServer.close() does not join
     already-running handler threads -- a handler mid-apply must be fenced
     (waited for) before shutdown proceeds, so run_daemon_foreground never
     releases its single-instance lease while a stale handler could still
@@ -972,7 +1199,7 @@ def test_shutdown_waits_for_an_in_flight_handler_before_closing(tmp_path, monkey
         if "set-option" in argv:
             entered.set()
             release.wait(timeout=3)
-        return subprocess.CompletedProcess(argv, 0)
+        return subprocess.CompletedProcess(argv, 0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", _slow_run)
 

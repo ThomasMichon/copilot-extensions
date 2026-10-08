@@ -3,7 +3,7 @@
 - **Subject:** The dispatch **venue** layer — how the coordination layer launches, reaches, authenticates, and monitors a Copilot agent in a remote venue (a GitHub CodeSpace, a local Docker container, or a directly SSH-registered machine/local checkout), via the `agent-codespaces`, `agent-containers`, and static-registry SSH/local dispatch paths.
 - **Scope:** leaf (cross-cutting capability across the venue providers)
 - **Status:** Active
-- **Last revised:** 2026-10-05
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md)
 - **Parent vision:** [agent-fabric](../agent-fabric/README.md)
 
@@ -41,7 +41,7 @@ deny-by-construction sandbox where the provider mostly wrangles the container
 runtime and offers an à-la-carte tool surface, and the host agent + scenario
 decide what to use. Untrusted venues are **out of the parity scope by design**;
 the trust model and both postures are owned by the
-[agent-containers vision](plugins/agent-containers/README.md).
+[agent-containers vision](../plugins/agent-containers/README.md).
 
 ## Concepts & Components
 
@@ -58,10 +58,12 @@ the trust model and both postures are owned by the
   provider implements. Its surface is only the genuinely venue-specific concerns:
   - **Lifecycle** — provision, start, stop, and remove a venue (`gh codespace`
     for CodeSpaces; `docker` for containers).
-  - **An SSH endpoint for remote venues** — *every remote* venue (CodeSpace,
-    container, or a genuinely remote SSH-registered machine) is reached over
-    SSH. A container exposes SSH just as a CodeSpace does, so the transport
-    the core drives is identical. **Local loopback is not a remote venue**
+  - **An authorized shared endpoint for remote venues** — SSH-backed venues
+    expose the common SSH transport; an explicitly adopted
+    [machine-fleet Gateway](../machine-fleet/README.md) may carry the same
+    coordination/provider contracts through its authorized connector path.
+    A Gateway route is not a reason to weaken launch, staging, identity, or
+    relay guarantees. **Local loopback is not a remote venue**
     and carries none of this — it shares the dispatching machine's process
     and filesystem directly, with no network hop, no SSH endpoint, and no
     relay back-channel to establish; it still owes the same launch/plugin/
@@ -74,15 +76,12 @@ the trust model and both postures are owned by the
     connect; a local container simply starts. The core tolerates the wait a
     venue declares.
 
-- **One auth-relay back-channel, over SSH, for remote venues.** The credential
-  relay is reached the **same way from every remote venue**: over the SSH
-  reverse-forward (`-R`) from the venue back to the host relay. There is a
-  single back-channel and a single relay-reach code path for CodeSpaces,
-  containers, and remote SSH targets alike — not a per-venue transport (no
-  venue-specific host-gateway TCP hop). Auth "just works" in a container
-  exactly as it does in a CodeSpace because it travels the identical
-  channel. Local loopback needs no relay at all — it already runs with the
-  dispatching machine's own ambient credentials.
+- **One auth-relay contract on the selected shared channel.** SSH-backed venues
+  reach the relay through the shared SSH reverse-forward, not bespoke per-venue
+  host-gateway hops. Gateway-connected fleet venues carry that same scoped
+  credential-provider contract through the adopted Gateway transport, without
+  inventing new credential authority. Local loopback needs no remote relay;
+  it already runs with the dispatching machine's own ambient credentials.
 
 - **The container venue as parity/repro harness.** Local containers are the
   controllable substrate for reproducing and hardening venue flows: put them into
@@ -90,7 +89,7 @@ the trust model and both postures are owned by the
   that the same fix holds in a CodeSpace because the code path is shared.
 
 - **Symmetric, thin venue providers.** `agent-codespaces` and `agent-containers`
-  shrink toward the same shape: lifecycle + SSH endpoint + token bootstrap +
+  shrink toward the same shape: lifecycle + shared endpoint + token bootstrap +
   boot semantics, and nothing else. Shared launch/session/auth logic is not
   duplicated between them.
 
@@ -110,7 +109,7 @@ the trust model and both postures are owned by the
   boundary. Every other **SSH-backed** static target (one resolved to a
   machine/environment pair, as opposed to a bare command-backed launch with
   no host at all) is **genuine remote SSH**, reached over the same SSH
-  transport this vision already mandates, whichever concrete launch shape
+  transport this vision supplies for SSH-backed targets, whichever concrete launch shape
   the coordination layer composes for it. A command-backed static target
   carries none of these SSH/relay requirements — it is its own launch shape,
   covered separately by the elevated/privileged-relay staging guarantee
@@ -131,14 +130,17 @@ venue. Plugins that explicitly target *operating within a venue* (an in-context
 venue-agent plugin) remain venue-scoped and are layered on top.
 
 ### single-ssh-transport
-Every venue is reached over **one SSH transport**. A container provides an SSH
+SSH-backed remote venues are reached over **one SSH transport**. A container provides an SSH
 endpoint just as a CodeSpace does, so dispatch, interactive reach, and staging
-run over the same channel with no venue-specific transport code.
+run over the same channel with no venue-specific transport code. Explicit
+Gateway fleet adoption adds an alternative shared transport contract, not a
+separate transport implementation for every service or capability.
 
 ### unified-auth-relay-back-channel
-Credentials are relayed over a **single back-channel** — the SSH reverse-forward
-to the host relay — for all venues. One relay-reach path serves ADO, Azure, and
-GitHub auth in any venue.
+Credentials are relayed over the selected **shared back-channel**, using the
+same scoped provider semantics across venues. SSH-backed venues use the common
+reverse-forward; Gateway fleet venues use their authorized connector channel.
+Account/audience authority is not inferred from the choice of transport.
 
 ### token-bootstrap-abstraction
 GitHub-token acquisition is a venue responsibility behind a uniform seam: a
@@ -221,10 +223,13 @@ shared back-channel with no venue-specific setup visible to the agent.
   projection targets **trusted** venues (CodeSpaces + trusted fleets). A
   restricted sandbox deliberately receives none of it by default; provisioning it
   and offering à-la-carte tools is the
-  [agent-containers vision](plugins/agent-containers/README.md)'s concern, not a
+  [agent-containers vision](../plugins/agent-containers/README.md)'s concern, not a
   parity gap.
 
 ## See Also
+
+- [machine-fleet](../machine-fleet/README.md) — optional driver-based Gateway
+  transport with the same coordination and scoped credential-provider guarantees.
 
 - Parent vision: [agent-fabric](../agent-fabric/README.md)
 - Related visions: [plugins/agent-bridge](../plugins/agent-bridge/README.md) (the coordination layer that owns the dispatch core) · [plugins/agent-codespaces](../plugins/agent-codespaces/README.md) (the CodeSpace venue provider) · [plugins/agent-containers](../plugins/agent-containers/README.md) (the container venue provider + the trusted/restricted trust model this vision scopes parity by)

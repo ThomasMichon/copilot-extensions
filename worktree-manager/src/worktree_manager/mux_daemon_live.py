@@ -286,12 +286,14 @@ def republish_live_mappings(
     registry: MuxMappingRegistry,
     *,
     ensure_monitor: bool,
+    publish: Callable | None = None,
 ) -> bool:
+    publish = publish if publish is not None else publish_live_observation
     published_any = False
     for entry in registry.snapshot().values():
         if not entry.get("live"):
             continue
-        result = publish_live_observation(entry, ensure_monitor=ensure_monitor)
+        result = publish(entry, ensure_monitor=ensure_monitor)
         if result.get("applied"):
             published_any = True
         else:
