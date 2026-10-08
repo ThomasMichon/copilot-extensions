@@ -708,13 +708,6 @@ def cmd_detach(
                 plan,
             )
         created = bool(embodied.get("created"))
-        if created and rejoining:  # the worker stopped meanwhile: this was a launch after all
-            from .launch_policy import refused_exit_code
-
-            refused = refused_exit_code(args.name)
-            if refused is not None:  # ok stays False: the session just started is stopped
-                print(json.dumps({"ok": False, "error": "launch refused by the host launch policy", **plan}, indent=2))
-                return refused
         actual_mux = embodied.get("session")
         if actual_mux and actual_mux != plan["mux_session"]:
             # The venue named its session differently than predicted; the
@@ -723,6 +716,13 @@ def cmd_detach(
             plan["mux_session"] = actual_mux
             plan["venue"]["mux_session_name"] = actual_mux
             owner.hold(args.name, plan["tenant"], daemon_port=daemon_port, mux_session=actual_mux)
+        if created and rejoining:  # the worker stopped meanwhile: this was a launch after all
+            from .launch_policy import refused_exit_code
+
+            refused = refused_exit_code(args.name)
+            if refused is not None:  # ok stays False: cleanup stops the session it really started
+                print(json.dumps({"ok": False, "error": "launch refused by the host launch policy", **plan}, indent=2))
+                return refused
         from venue_copilot import seed_outcome
 
         seed_delivery_status, seed_needs_bridge = seed_outcome(embodied, created=created, seed=seed)

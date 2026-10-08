@@ -758,8 +758,9 @@ passes `--deadline` (its own 60 s timeout less a 5 s margin), so the policy's
 timeout shrinks to fit a slow start-up and the check's own tree-kill cleanup
 always runs before the daemon would kill the check. Only an
 exit 0 carrying `{"refuse": null}` allows the spawn; a refusal, a timeout, or
-malformed output refuses it, recorded as `launch_refused` (a refused resume is
-terminal). When no check is possible (no provider, or one that predates
+malformed output refuses it. A refused start or resume is recorded as
+`launch_refused` (a refused resume is terminal); a refused resync stops the
+session and is logged. When no check is possible (no provider, or one that predates
 `launch-check`), the spawn is allowed only if no registration file exists. The
 gate is a spawner subclass built in `codespace_transport.build_codespace_spawner`,
 and `transport.spawn` asks the same policy before any raw-transport CodeSpace

@@ -1360,3 +1360,17 @@ def test_a_rejoin_that_created_a_session_is_still_refused_and_stopped(seams, mon
     assert rc == launch_policy.LAUNCH_REFUSED_EXIT
     assert any("kill-session" in c for c in seams.remote)
     assert "over the core budget" in capsys.readouterr().err
+
+
+def test_a_refused_rejoin_stops_the_session_the_venue_actually_named(seams, monkeypatch):
+    """The venue named the session it started differently than predicted: the
+    refusal's cleanup must stop that session, not the predicted name."""
+    from agent_codespaces import launch_policy
+
+    monkeypatch.setattr(launch_policy, "refusal", lambda cs: "over the core budget")
+    seams.live_rows["anchor-example-web@cs-1"]["status"] = "live"
+    renamed = json.dumps({"ok": True, "created": True, "session": "wt-anchor-renamed"})
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=renamed))
+    assert rc == launch_policy.LAUNCH_REFUSED_EXIT
+    kills = [c for c in seams.remote if "kill-session" in c]
+    assert kills and all("=wt-anchor-renamed" in c for c in kills)
