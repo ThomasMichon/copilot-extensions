@@ -136,9 +136,10 @@ for g in @ROOT@/*/.git @ROOT@/*/*/.git @ROOT@/*/*/*/.git @EXTRAS@; do
   [ -e "$g" ] || continue
   top=$(git -C "$(dirname "$g")" rev-parse --show-toplevel 2>/dev/null) \
     || { err "$(dirname "$g")"; continue; }
-  add "$top"
-  # -z: raw (unquoted) paths; enumeration failure fails closed.
+  # -z: raw (unquoted) paths; enumeration failure fails closed (and the
+  # top-level checkout is then never reported clean).
   git -C "$top" worktree list --porcelain -z >/dev/null 2>&1 || { err "$top"; continue; }
+  add "$top"
   while IFS= read -r -d '' rec; do
     case "$rec" in "worktree "*) add "${rec#worktree }";; esac
   done < <(git -C "$top" worktree list --porcelain -z 2>/dev/null)
@@ -212,6 +213,8 @@ def parse_audit(output: str | None) -> CheckoutAudit:
         parts = line.split("\t")
         if parts[0] == "CHECKOUT" and len(parts) >= 5:
             path = "\t".join(parts[4:])
+            if path in checkouts and checkouts[path].error:
+                continue  # an error for this checkout always takes precedence
             checkouts[path] = CheckoutState(
                 path=path, dirty=parts[1].strip() != "0", ahead=_int(parts[2]),
                 unpushed_branches=_int(parts[3]),

@@ -57,6 +57,17 @@ def test_parse_audit_per_checkout():
     assert clean.all_clean
 
 
+def test_checkout_error_is_never_overwritten_by_a_clean_record():
+    out = "\n".join([
+        "CHECKOUT_ERR\t/workspaces/a",  # e.g. `git worktree list` failed
+        "CHECKOUT\t0\t0\t0\t/workspaces/a",
+        "CHECKOUT_AUDIT=1",
+    ])
+    audit = unsaved_guard.parse_audit(out)
+    assert not audit.all_clean
+    assert [c.path for c in audit.dirty_checkouts] == ["/workspaces/a"]
+
+
 def test_empty_audit_is_not_clean():
     assert not CheckoutAudit(known=True, checkouts=[]).all_clean
 
