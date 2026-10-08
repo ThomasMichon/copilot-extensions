@@ -198,27 +198,38 @@ successor already running in my own tree?*
    itself carries no process-identity token (only a pid and a routing
    generation, which order publications but do not by themselves rule out
    **PID reuse** — the recorded pid exiting and an unrelated process reusing
-   that exact number before this check runs). Checking ancestry and only
-   *afterward* reading a fresh identity token would leave a TOCTOU window of
-   its own — the validated descendant could exit, and its pid get reused,
-   in the gap between the ancestry check and the token read. The manager
-   closes the whole window, not just half of it: it reads a
-   process-start-time token (`zdd.diagnostics.process_start_time` — has a
-   Linux and a Windows backend, used identically on both platforms here)
-   for the candidate pid **immediately before** running the ancestry check,
-   runs the ancestry check, then reads the same token **again immediately
-   after** — and only adopts the pid if both reads returned a non-`None`
-   value and the two values are equal. A mismatch (or either read coming
-   back empty) means the pid changed identity somewhere across the check
-   and is treated as a real crash, never adopted. This same
-   read-check-read-and-require-both-to-match bracket is re-run on every
-   later liveness poll of the adopted process, the same freshest-practical-
-   moment convention `reap_tree_posix` (below) already uses — a reused pid
-   is therefore caught the moment either side of the bracket no longer
-   matches, not trusted indefinitely off one lucky first read. (On Windows
-   this token bracket is a secondary belt-and-suspenders check — the
-   duplicated handle itself already rules out pid reuse by construction,
-   since it names the kernel object directly rather than a numeric pid.)
+   that exact number before this check runs). A token comparison that only
+   checks **internal self-consistency** — reading the same token twice in
+   quick succession and requiring the two reads to agree — is not enough:
+   it only proves the pid held one identity across that one short window,
+   never that it is the *same* identity originally adopted. A process can
+   exit and have its pid reused by an unrelated descendant *between* two
+   separate polls; two adjacent reads taken entirely after that swap would
+   still agree with **each other** and wrongly pass. The manager therefore
+   never compares a fresh read only to another fresh read: at the moment of
+   **first legitimate adoption** of a given pid (immediately after the
+   ancestry/handle check above passes), it captures a process-start-time
+   token (`zdd.diagnostics.process_start_time` — has a Linux and a Windows
+   backend, used identically on both platforms here) for that pid and
+   persists it as a durable **baseline**, keyed to that pid, in the
+   manager's own `daemon` record (`manager_state_dir`, per the Consumer
+   contract below — never just held in memory, since item 5's `execve`
+   path wipes memory and must survive the same way). The capture itself is
+   still bracketed around the ancestry/handle check (read immediately
+   before, run the check, read immediately after, require both non-`None`
+   reads to agree) purely to close the TOCTOU window *at the single moment
+   of capture* — but the resulting baseline, once persisted, is what every
+   later poll is compared against, not another fresh pair of reads. Every
+   subsequent liveness poll of the adopted process — however much later —
+   reads the pid's *current* token and compares it to this one persisted
+   baseline: a match means it is still provably the same process originally
+   adopted; any mismatch, or the pid no longer resolving to a live process
+   at all, means a **real crash**, even if a same-numbered replacement
+   process now exists and would have passed a bare self-consistency check.
+   (On Windows this baseline comparison is a secondary belt-and-suspenders
+   check — the duplicated handle itself already rules out pid reuse by
+   construction, since it names the kernel object directly rather than a
+   numeric pid.)
 3. **Reap every other live descendant before exiting on a real crash.**
    Exiting the manager does **not** by itself clear its tree: a subreaper
    claim or Job Object membership only governs *reparenting*, not lifetime —
@@ -298,14 +309,14 @@ successor already running in my own tree?*
    see the Consumer contract below for why these cannot share one path —
    and on every entry to `run()` — a fresh launch, a crash restart, *and*
    an `execve` self-update alike — the manager's first action is to check
-   that record before ever considering a call to `spawn`: if it names a pid
-   that passes the same read-check-read ancestry/token bracket item 2
-   already defines, the manager re-adopts that pid as the watched child and
-   resumes supervising it; only an empty or failed-bracket record means
-   there is truly nothing to adopt, and `spawn` is the right call. This is
-   one single adoption path, not a special case for `execve` — item 2's
-   bracket check is what both a routine child-exit poll and a just-exec'd
-   fresh image call into.
+   that record before ever considering a call to `spawn`: if the recorded
+   pid's current token still matches the persisted baseline per item 2's
+   adoption check, the manager re-adopts that pid as the watched child and
+   resumes supervising it; only an empty record or a baseline mismatch
+   means there is truly nothing to adopt, and `spawn` is the right call.
+   This is one single adoption path, not a special case for `execve` —
+   item 2's baseline-comparison check is what both a routine child-exit
+   poll and a just-exec'd fresh image call into.
    Windows has no pid-preserving exec equivalent, so a real process
    boundary is unavoidable there — but unlike the daemon's own cutover, the
    **manager** has no in-flight request to protect across that boundary; it
@@ -381,15 +392,24 @@ successor already running in my own tree?*
       so that future daemon spawns inherit containment the same way the
       very first launch's spawns did; skipping this step here would let
       every subsequent daemon spawned by this restarted manager silently
-      escape the Job and survive a later manager crash unreaped. The new
+      escape the Job and survive a later manager crash unreaped.
+      `AssignProcessToJobObject` can itself fail if Task Scheduler already
+      placed the launcher in its own Job and the platform does not permit
+      nesting: Windows 8 / Server 2012 and later support nested Jobs, which
+      this pattern already requires as a baseline (consistent with the
+      `CREATE_BREAKAWAY_FROM_JOB` + `JOB_OBJECT_LIMIT_BREAKAWAY_OK`
+      requirement in item 1); on an unsupported older platform this call
+      failing is a hard adoption failure — the manager must treat it the
+      same as a failed bracket (abort re-adoption, log the platform
+      mismatch) rather than silently continuing unassigned. The new
       manager also — this is the part a Job-membership check alone cannot
       provide — requests the bridge duplicate *its* daemon handle onward
       into the new manager, the same handle-plus-IPC-acknowledgement shape
       as step 1's own transfer. Only once the new manager holds its own
       duplicated daemon handle does it cross-check that handle's pid
-      against the persisted `daemon` record via item 2's read-check-read
-      bracket, and publish its own liveness over the bridge's. This is the
-      **same** persisted-identity re-adoption path item 5's Linux
+      against the persisted `daemon` record's baseline token via item 2's
+      adoption check, and publish its own liveness over the bridge's. This
+      is the **same** persisted-identity re-adoption path item 5's Linux
       discussion above defines, not a Windows-specific special case: the
       new manager re-adopts the already-recorded watched daemon and never
       calls `spawn` here — calling `spawn` on this path would create a
