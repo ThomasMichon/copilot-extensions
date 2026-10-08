@@ -1,0 +1,9 @@
+{
+  "comment": "status-monitor: make the resident daemon mandatory, always-on infrastructure; AGENT_WORKTREES_STATUS_MONITOR is now test/debug-only (no production opt-out)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
