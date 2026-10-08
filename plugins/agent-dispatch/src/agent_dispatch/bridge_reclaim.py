@@ -281,6 +281,7 @@ def resume_worktree_and_send(
     wait: bool,
     json_output: bool,
     timeout: float | None,
+    allow_takeover: bool = True,
 ) -> subprocess.CompletedProcess:
     """Take over ``worktree_id`` (killing a live interactive CLI holder first
     if one exists) and deliver ``prompt`` attributed to ``caller``.
@@ -288,6 +289,10 @@ def resume_worktree_and_send(
     ``agent`` is accepted for API symmetry with ``bridge.spawn_worker`` (the
     worktree's own bound agent resolves the resumed/created session, not this
     parameter) but is otherwise unused here.
+
+    ``allow_takeover=False`` is the non-forcing conversation-recovery path:
+    a live interactive holder raises ``BridgeCarriedSessionBusy`` without a
+    stop, restart, or forced resume.
 
     Tries a plain (non-forcing) resume first. On a genuine 409
     ``live_cli_holds_worktree`` refusal, delegates the whole
@@ -308,6 +313,13 @@ def resume_worktree_and_send(
         reason, holder = _resume_refusal(resumed)
         if reason != _LIVE_CLI_HOLDS_WORKTREE:
             return resumed
+        if not allow_takeover:
+            from .bridge import BridgeCarriedSessionBusy
+
+            raise BridgeCarriedSessionBusy(
+                f"worktree {worktree_id!r} has a live interactive holder; "
+                "refusing takeover during conversation resume"
+            )
         if not isinstance(holder, str) or not holder:
             # No usable holder id to fence the stop on -- forcing through
             # would run 'agent-bridge restart-worktree' unfenced (no

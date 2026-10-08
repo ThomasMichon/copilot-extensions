@@ -801,6 +801,7 @@ def make_headless_spawn(
                 liveness_fn=embody.local_body_verdict,
                 target_dir=task.get("spawn_worktree_path"),
                 worktree_id=task.get("spawn_worktree"),
+                resume_worktree=task.get("spawn_worktree_ownership") == "reused",
                 wait=False,
                 json_output=True,
             )

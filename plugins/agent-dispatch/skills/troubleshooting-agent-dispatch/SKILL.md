@@ -11,6 +11,13 @@ alone -- each of those omits exactly the state this skill exists to surface.
 
 ## Quick checks
 
+A reviewer or other durable worker may stop its process after a turn while its
+conversation remains resumable. An expired task lease is not proof that the
+conversation died. For a retained worktree with a missing bridge handle, the
+headless factory uses the non-forcing worktree resume path; a live interactive
+holder defers recovery rather than being stopped. See
+[cold headless bodies](../../docs/spawn-supervisor.md#headless-fleet-body---headless--the-reliable-remote-embodiment).
+
 For an emitter process that is alive but produces nothing, inspect election
 separately from process health with `emitter doctor <spec> --holder <machine>`.
 `ok: true, held: false` is not successful production; it can be an ordinary

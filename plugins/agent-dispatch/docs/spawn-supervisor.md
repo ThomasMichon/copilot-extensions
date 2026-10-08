@@ -1022,6 +1022,16 @@ next turn to that same session id, starts a fresh child, and returns the cold
 reservation to `spawned`; it does not release the task for a new embodiment.
 Confirmed session loss still follows the ordinary liveness recovery path.
 
+If retry preparation retains a worktree but the bridge recovery handle was
+never captured, the headless factory resolves that worktree's existing
+conversation through the bridge's non-forcing resume path. It does not call
+`create` merely because the process or bridge handle is absent. A live
+interactive holder defers the attempt; transport or metadata failures remain
+explicit failures, not success-shaped fresh conversations. A genuinely new
+allocation still creates its first conversation. The disposable-CLI label
+remains a terminal cleanup policy, not permission to replace conversations
+between candidate rounds.
+
 CLI:
 
 ```
