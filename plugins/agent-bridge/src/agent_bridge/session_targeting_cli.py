@@ -335,8 +335,14 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
             raise
         raise refused from exc
     if args.json:
-        emit({"delivered": True, "target": session_id, **result,
-              "outcome": live_outcome(result, delivery)})
+        # A daemon that reports duplicates always includes the field; an older
+        # one omits it, so a keyed retry can't be told from a first delivery.
+        duplicate_known = not idempotency or "duplicate" in result
+        payload = {"delivered": True, "target": session_id, **result,
+                   "outcome": live_outcome(result, delivery, duplicate_known=duplicate_known)}
+        if not duplicate_known:
+            payload["duplicate"] = None
+        emit(payload)
         return
     mid = result.get("message_id")
     kind_note = "" if kind == "prompt" else f", kind {kind}"

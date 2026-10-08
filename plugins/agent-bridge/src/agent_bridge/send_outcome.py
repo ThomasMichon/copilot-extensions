@@ -9,6 +9,9 @@ path's existing keys and exit 0:
 - ``steered`` / ``interrupted``: a live-session message with that delivery.
 - ``duplicate``: an identical ``--idempotency-key`` retry; ``message_id`` is the
   original message's, and nothing new was enqueued.
+- ``accepted``: a keyed live message taken by an older daemon whose response
+  has no ``duplicate`` field, so it can't say whether it matched an earlier
+  request (``duplicate: null``).
 
 Refusals print ``{"outcome", "target", "retryable", "reason", "error"}`` and
 exit with a distinct code, so a caller never parses text:
@@ -62,9 +65,13 @@ class SendRefused(Exception):
                 "reason": self.reason, "error": self.error}
 
 
-def live_outcome(result: dict[str, Any], delivery: str) -> str:
+def live_outcome(result: dict[str, Any], delivery: str, *, duplicate_known: bool = True) -> str:
+    """``duplicate_known`` is False for a keyed send to a daemon too old to say
+    whether it matched an earlier request: then the outcome is ``accepted``."""
     if result.get("duplicate"):
         return "duplicate"
+    if not duplicate_known:
+        return "accepted"
     return _LIVE_DELIVERY_OUTCOMES.get(delivery, "queued")
 
 

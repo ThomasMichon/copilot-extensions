@@ -101,7 +101,9 @@ Accepted (exit 0, the path's existing keys kept): `delivered` (a prompt started
 a turn), `queued` (a `--queue` prompt behind a busy turn, or a live message with
 `--delivery queue`), `steered`, `interrupted`, and `duplicate` (an identical
 `--idempotency-key` retry; `message_id` is the original's, nothing new
-enqueued). Refused, as `{outcome, target, retryable, reason, error}` with a
+enqueued; a keyed live send to an older daemon, whose response has no
+`duplicate` field, reports `accepted` with `duplicate: null`, since it can't
+tell). Refused, as `{outcome, target, retryable, reason, error}` with a
 distinct exit code: `refused_busy` (75: the target is running a turn),
 `refused_unavailable` (69: `not_found`, `stale`, `superseded` or
 `expected_mismatch`; `stale`/`superseded` are retryable after re-resolving),

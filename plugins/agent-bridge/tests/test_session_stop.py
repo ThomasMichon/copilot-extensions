@@ -151,6 +151,28 @@ def test_force_skips_the_notice_and_the_grace():
     assert result["notice"] is None and result["acknowledged"] is None and clock.t == 0
 
 
+def test_a_zero_grace_still_sends_the_notice():
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "running", "turn_count": 1}}, queued=True)
+    result = _run(fake, clock, grace=0)
+    assert fake.calls[0] == ("submit", session_stop.STOP_NOTICE, True)
+    assert result["acknowledged"] is False and result["notice"]["withdrawn"] is True
+    assert result["outcome"] == "stopped"
+
+
+def test_idle_in_the_gap_between_dequeue_and_turn_start_is_not_an_acknowledgement():
+    """The notice is popped before its turn is marked running: a read in that gap
+    sees an idle session (an earlier prompt moved turn_count) and no queued
+    notice. Only a later poll that finds the notice's turn settled counts."""
+    clock = _Clock()
+    fake = _Fake(clock, {0: {"status": "running", "turn_count": 4},
+                         3: {"status": "idle", "turn_count": 5, "dispatched": True},  # the gap
+                         4: {"status": "running", "turn_count": 6, "dispatched": True},
+                         8: {"status": "idle", "turn_count": 6, "dispatched": True}}, queued=True)
+    result = _run(fake, clock, grace=60)
+    assert result["acknowledged"] is True and clock.t >= 8
+
+
 @pytest.mark.parametrize("record", [None, {"status": "stopped"}])
 def test_repeating_a_stop_is_an_idempotent_no_op(record):
     clock = _Clock()

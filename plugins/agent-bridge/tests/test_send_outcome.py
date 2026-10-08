@@ -150,6 +150,23 @@ def test_live_duplicate_is_accepted(monkeypatch, capsys):
     assert (code, out["outcome"]) == (0, "duplicate")
 
 
+def test_a_keyed_send_to_an_older_daemon_does_not_guess(monkeypatch, capsys):
+    """An older daemon's response has no duplicate field: a keyed retry can't be
+    told from a first delivery, so it is never reported as a fresh one."""
+    code, out, _ = _run(monkeypatch, capsys, _LiveClient(), idempotency_key="k")
+    assert (code, out["outcome"], out["duplicate"]) == (0, "accepted", None)
+
+
+def test_an_unkeyed_send_to_an_older_daemon_is_unaffected(monkeypatch, capsys):
+    code, out, _ = _run(monkeypatch, capsys, _LiveClient())
+    assert (code, out["outcome"]) == (0, "steered") and "duplicate" not in out
+
+
+def test_a_keyed_first_delivery_on_a_current_daemon(monkeypatch, capsys):
+    code, out, _ = _run(monkeypatch, capsys, _LiveClient(result={"duplicate": False}), idempotency_key="k")
+    assert (code, out["outcome"]) == (0, "steered")
+
+
 def test_live_refusal_prints_one_typed_document_and_exits_distinctly(monkeypatch, capsys):
     error = BridgeClientError(409, "live session x was superseded by y; refusing delivery")
     code, out, err = _run(monkeypatch, capsys, _LiveClient(error=error))

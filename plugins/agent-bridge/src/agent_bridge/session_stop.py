@@ -83,7 +83,7 @@ def run_stop(
         return result
 
     phase("requested")
-    if grace and not force and session.get("status") in ("idle", "running"):
+    if grace is not None and not force and session.get("status") in ("idle", "running"):
         _cooperate(client, session_id, session, grace, result, phase, clock=clock, sleep=sleep, poll=poll)
 
     try:
@@ -111,23 +111,30 @@ def run_stop(
 
 
 def _cooperate(client, session_id, session, grace, result, phase, *, clock, sleep, poll) -> None:
-    """Submit the notice and wait up to ``grace`` for its turn to settle."""
+    """Submit the notice and wait up to ``grace`` for its turn to settle.
+
+    A queued notice is popped before its turn is marked running, so a status
+    read in between can show an idle session with the notice already gone. So
+    the dequeue has to be seen on one poll, and the settled session on a later
+    one, before it counts as acknowledged."""
     baseline = int(session.get("turn_count") or 0)
     submitted = client.submit_prompt(session_id, STOP_NOTICE, queue=True)
     queue_id = submitted.get("queue_id") if submitted.get("queued") else None
     result["notice"] = {"queued": queue_id is not None, "queue_id": queue_id, "withdrawn": False}
+    dequeued_before = queue_id is None  # an immediate notice is running on return
     deadline = clock() + grace
     while True:
+        dequeued_now = dequeued_before or not any(
+            p.get("id") == queue_id for p in client.list_pending_queue(session_id))
         session = _status(client, session_id)
         if session is None:
             break
-        pending = queue_id is not None and any(
-            p.get("id") == queue_id for p in client.list_pending_queue(session_id))
-        if (not pending and session.get("status") == "idle"
+        if (dequeued_before and session.get("status") == "idle"
                 and int(session.get("turn_count") or 0) > baseline):
             result["acknowledged"] = True
             phase("acknowledged")
             return
+        dequeued_before = dequeued_now
         if clock() >= deadline:
             break
         sleep(poll)
