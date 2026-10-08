@@ -80,6 +80,8 @@ An adopter can choose static-machine or provider-managed membership without
 changing the controller's purpose or its consumers. Driver selection is explicit;
 there is no silent fallback to another substrate, account, or resource pool.
 Existing provider registries remain authoritative for identities and reachability.
+Exactly one selected driver/provider owns each target's substrate reachability;
+Gateway route health is a derived connection observation, not a competing registry.
 
 ### shell-independent-service-control
 

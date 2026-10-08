@@ -37,8 +37,9 @@ first-class.
 
 ## Concepts & Components
 
-The fabric is a **layered stack of capabilities**; each layer is its own subject (a
-per-plugin child vision refines it under `visions/plugins/<name>/`). Two
+The fabric is a **layered stack of capabilities**; each layer is its own subject
+with a child vision at its scope-appropriate home: plugin-specific subjects under
+`visions/plugins/<name>/`, cross-cutting subjects under `visions/<capability>/`. Two
 load-bearing properties bind the layers:
 
 - **Graceful composition.** A lower layer is fully useful alone; a higher layer
@@ -91,7 +92,7 @@ session hosting, live-session messaging, peer bridge ownership, and
 project-addressed mesh control.
 
 ### agent-ssh — the connectivity layer
-Owns the **SSH mesh** the fabric's cross-machine reach rides on. It
+Owns the **SSH mesh** the static/SSH fleet driver's cross-machine reach rides on. It
 **provisions and maintains** the transport (OpenSSH substrate, keys, host-key
 pinning), **adopts** machines into a declared mesh, stands up a **pluggable
 transport module** per machine (direct, a tunnel-based provider, or real-user
@@ -101,7 +102,7 @@ path. Where the coordination layer and the venue providers assume they can reach
 another machine, this layer is what makes that assumption *true* — turning "SSH
 is borrowed" into "SSH is provisioned, verified, and maintained." Per
 *derive-don't-duplicate*, its machine registry is the **single owning store** of
-mesh reachability, which the layers above route **over** rather than copy. A
+SSH-mesh reachability, which the layers above route **over** rather than copy. A
 per-plugin child vision refines it at
 [`visions/plugins/agent-ssh/`](../plugins/agent-ssh/README.md).
 
@@ -111,6 +112,10 @@ machine connectors without replacing local service, worktree, task, session, or
 credential authorities. Drivers supply the substrate; the default adopts static
 machines through agent-ssh. Shell-independent control and recoverable observation
 augment existing direct/SSH paths rather than making the Gateway mandatory.
+Each target has exactly one selected driver/provider authority for identity and
+substrate reachability. Other drivers retain that ownership through their own
+contracts; controller routing and connection-health observations derive from it,
+never becoming a second owning mesh registry.
 The [machine-fleet](../machine-fleet/README.md) child vision refines this boundary.
 
 ### agent-dispatch — the delegation layer
@@ -735,7 +740,7 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
 - Child vision: [machine-fleet](../machine-fleet/README.md) — optional
   driver-based Gateway coordination with scoped service and credential reach.
 - Child visions: [agent-ssh](../plugins/agent-ssh/README.md) — the connectivity /
-  transport layer the fabric's cross-machine reach rides on;
+  transport authority for the static/SSH fleet driver;
   [agent-dispatch](../plugins/agent-dispatch/README.md) — the delegation layer's
   task queue (production modes, fire-and-forget vs. driven, liveness-reconciled
   recovery); [picker](../picker/README.md) — the fabric's **front-door
