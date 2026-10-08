@@ -90,12 +90,12 @@ def schedule_delayed_daemon_health_reap(
 
 def _ensure_monitor_if_zero_candidates_under_cutover_guard() -> str:
     """Re-check live candidate state and ensure a monitor exists, ALL while
-    holding the cutover lock -- never from a stale report already released
-    by the time this runs (review finding: a prior design checked
-    ``apply_daemon_health()``'s returned report, but that call acquires and
-    releases its OWN cutover guard internally before returning, leaving a
-    real TOCTOU window in which a genuine concurrent cutover could start
-    between the check and the spawn, racing a successor being promoted).
+    holding the cutover lock -- never by checking
+    ``apply_daemon_health()``'s returned report. That call acquires and
+    releases its OWN cutover guard internally before returning, so a
+    report-only check-then-act here would have a real TOCTOU window in
+    which a genuine concurrent cutover could start between the check and
+    the spawn, racing a successor being promoted.
 
     Acquiring this SAME lock `activate_after_update()` itself acquires
     before running `CutoverOrchestrator.run()` makes the two mutually
@@ -108,7 +108,9 @@ def _ensure_monitor_if_zero_candidates_under_cutover_guard() -> str:
     Returns one of: ``"ensured"`` (spawned or confirmed live),
     ``"skipped-live"`` (a candidate already existed once re-checked),
     ``"skipped-cutover-busy"`` (another cutover holds the lock), or
-    ``"error:<detail>"`` (best-effort, never raises).
+    ``"error:<detail>"`` (best-effort, never raises -- including a
+    non-fatal spawn failure reported by ``_ensure_status_monitor()``
+    itself).
     """
     from . import status_monitor_cutover as smc
     from . import status_monitor_runtime as smr
@@ -131,8 +133,9 @@ def _ensure_monitor_if_zero_candidates_under_cutover_guard() -> str:
         from . import daemon_health
         candidates = daemon_health._candidates()
         if not candidates:
-            smr._ensure_status_monitor()
-            return "ensured"
+            if smr._ensure_status_monitor():
+                return "ensured"
+            return "error:ensure-status-monitor reported spawn failure"
         return "skipped-live"
     except Exception as exc:
         return f"error:{exc}"

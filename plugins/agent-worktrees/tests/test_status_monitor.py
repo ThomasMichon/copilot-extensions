@@ -3366,13 +3366,28 @@ def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):
     assert "non-fatal" in capsys.readouterr().out
 
 
+def test_ensure_monitor_helper_reports_an_ordinary_spawn_failure(monkeypatch):
+    """``_ensure_status_monitor()`` reports an ORDINARY spawn failure (e.g.
+    ``Popen`` failing) by returning ``False``, not by raising -- the helper
+    must not ignore that return value and report success anyway, which
+    would leave the host with zero monitors while logging "ensured"."""
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: False)
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome != "ensured"
+    assert outcome.startswith("error:")
+
+
 def test_ensure_monitor_helper_never_calls_doctor_report_while_holding_the_lock(
     monkeypatch,
 ):
-    """Regression for the TOCTOU race a review finding identified: the
-    recheck-and-ensure step must use the lock-free ``_candidates()`` probe,
-    never ``daemon_health.doctor_report()``/``apply_daemon_health()`` --
-    both try to acquire this SAME cutover guard themselves (non-blocking,
+    """The recheck-and-ensure step must use the lock-free ``_candidates()``
+    probe, never ``daemon_health.doctor_report()``/``apply_daemon_health()``
+    -- both try to acquire this SAME cutover guard themselves (non-blocking,
     per-call), which would self-block/no-op against the lease this
     function is already holding, silently defeating the atomicity this
     helper exists to provide."""
