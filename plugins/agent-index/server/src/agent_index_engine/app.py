@@ -485,8 +485,15 @@ def _reset_priority_for_reload() -> None:
     ``main()``), never re-applied per reload, so it never compounds and a
     reload was never throttled-before-loading in the first place.
     """
+    if not sys.platform.startswith("win"):
+        # POSIX never resets the guard -- there is nothing to protect against
+        # on a later reload (see docstring): it was already lowered once,
+        # eagerly, at process startup, and stays that way for the process's
+        # whole lifetime.
+        return
+
     global _priority_lowered, _priority_baseline
-    if sys.platform.startswith("win") and _priority_lowered and _priority_baseline is not None:
+    if _priority_lowered and _priority_baseline is not None:
         from agent_index.indexing.priority import set_priority_class
 
         set_priority_class(_priority_baseline)
