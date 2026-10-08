@@ -11,7 +11,23 @@ from typing import Any
 
 from .models import SessionStatus
 from .session_manager import DaemonDrainingError, Session, log
+from .session_stop import SESSION_NOT_RUNNING, SESSION_STOPPED
 from .transport import SpawnTarget
+
+
+class SessionStoppedError(ValueError):
+    """A ``no_resume`` prompt reached a STOPPED session. A ``ValueError``, so the
+    turns route answers 409 with this message, which starts with ``code``."""
+
+    code = SESSION_STOPPED
+
+
+class SessionNotRunningError(ValueError):
+    """A ``no_resume`` prompt reached a session whose client isn't running (a
+    crash, not a stop): nothing can take the notice, but the session still needs
+    stopping. A 409 whose message starts with ``code``."""
+
+    code = SESSION_NOT_RUNNING
 
 
 class _SessionPromptMixin:
@@ -28,7 +44,7 @@ class _SessionPromptMixin:
         async with session._turn_start_lock:
             return await self._submit_prompt_locked(resolved, prompt)
 
-    async def _submit_prompt_locked(self, session_id: str, prompt: str) -> int:
+    async def _submit_prompt_locked(self, session_id: str, prompt: str, *, no_resume: bool = False) -> int:
         """Submit a prompt to a session, returning the turn index.
 
         The prompt is sent to the ACP subprocess. Streaming events
@@ -51,9 +67,14 @@ class _SessionPromptMixin:
             raise ValueError(
                 f"Session {session_id} is {session.status.value}, not idle"
             )
+        if no_resume and session.status == SessionStatus.STOPPED:
+            raise SessionStoppedError(f"{SessionStoppedError.code}: Session {session_id} is stopped")
 
         # Auto-resume if the process is dead but session is recoverable
         if not session.client or not session.client.is_running:
+            if no_resume:  # re-checked here: a stop may have landed since admission
+                raise SessionNotRunningError(
+                    f"{SessionNotRunningError.code}: Session {session_id} has no running client")
             log.info(
                 "Session %s (%s) process is dead -- auto-%s",
                 session_id,
@@ -143,6 +164,7 @@ class _SessionPromptMixin:
         prompt: str,
         *,
         caller_id: str | None = None,
+        no_resume: bool = False,
     ) -> dict[str, Any]:
         """Send a prompt now, or durably queue it if the session is busy.
 
@@ -163,6 +185,8 @@ class _SessionPromptMixin:
         queue already exists (a new submit joins the back of the line -- never
         jumps ahead of already-queued follow-ups). Otherwise it runs immediately
         via ``submit_prompt`` (which auto-resumes a recoverable STOPPED session).
+        ``no_resume`` refuses a STOPPED session instead (:class:`SessionStoppedError`),
+        decided under the session's lock so a concurrent stop can't be undone.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -171,13 +195,16 @@ class _SessionPromptMixin:
         async with session._turn_start_lock:
             if self._sessions.get(session_id) is not session:
                 raise KeyError(f"Session {session_id} not found")
+            if no_resume and session.status == SessionStatus.STOPPED:
+                raise SessionStoppedError(f"{SessionStoppedError.code}: Session {session_id} is stopped")
             result, kick_session = await self._submit_or_queue_prompt_locked(
                 session,
                 prompt,
                 caller_id=caller_id,
+                no_resume=no_resume,
             )
         if kick_session is not None:
-            await self._kick_pending_drain(kick_session)
+            await self._kick_pending_drain(kick_session, allow_resume=not no_resume)
         return result
 
     async def _submit_or_queue_prompt_locked(
@@ -186,8 +213,12 @@ class _SessionPromptMixin:
         prompt: str,
         *,
         caller_id: str | None = None,
+        no_resume: bool = False,
     ) -> tuple[dict[str, Any], Session | None]:
-        """Admit or queue one prompt while conditional teardown is excluded."""
+        """Admit or queue one prompt while conditional teardown is excluded.
+
+        ``no_resume`` (a stop's wind-down notice) never hands off, resumes, or
+        respawns: each of those would undo a stop racing this admission."""
         session_id = session.session_id
 
         # Context-pressure handoff (opt-in, prompt-triggered): a prompt into an
@@ -199,19 +230,23 @@ class _SessionPromptMixin:
         # asking for the next turn. A live turn is left to the proactive
         # turn-settle path (it would be handed off mid-turn otherwise); the
         # successor is fresh, so this never recurses.
-        if (session.status in (SessionStatus.IDLE, SessionStatus.STOPPED)
+        if no_resume:  # a stop is under way: the notice must not leave a successor behind
+            session._stop_requested, session._handoff_pending = True, False
+            session._stop_notices += 1
+        if (not no_resume
+                and session.status in (SessionStatus.IDLE, SessionStatus.STOPPED)
                 and self._is_over_critical(session)
                 and self._auto_handoff_eligible(session)):
             session._handoff_pending = False
             successor = await self.handoff_session(
                 session_id, reason="context-pressure-prompt"
             )
-            return (
-                await self.submit_or_queue_prompt(
-                    successor.session_id, prompt, caller_id=caller_id
-                ),
-                None,
+            delivered = await self.submit_or_queue_prompt(
+                successor.session_id, prompt, caller_id=caller_id
             )
+            # Name the session that actually took the prompt, so a caller that
+            # goes on to act on "its" session (a cooperative stop) follows it.
+            return ({**delivered, "session_id": delivered.get("session_id") or successor.session_id}, None)
 
         turn_live = (
             session.status == SessionStatus.RUNNING
@@ -224,7 +259,12 @@ class _SessionPromptMixin:
         must_queue = turn_live or queue_nonempty or self._draining
 
         if not must_queue:
-            turn_index = await self._submit_prompt_locked(session_id, prompt)
+            if not no_resume:
+                # An ordinary prompt starting a turn (nothing queued ahead of it,
+                # so the notice already ran) means the stop was abandoned. One
+                # merely queued behind the notice says nothing, so it's left set.
+                session._stop_requested = False
+            turn_index = await self._submit_prompt_locked(session_id, prompt, no_resume=no_resume)
             return (
                 {
                     "queued": False,
@@ -257,7 +297,7 @@ class _SessionPromptMixin:
         # admission cannot leave the session dormant despite a queued prompt
         # already committed to running it (review of #3058).
         kick_session = session if not turn_live and not self._draining else None
-        if kick_session is not None and session.status == SessionStatus.STOPPED:
+        if kick_session is not None and session.status == SessionStatus.STOPPED and not no_resume:
             self._set_background_recovery_enabled(session, True)
         return (
             {
@@ -269,20 +309,21 @@ class _SessionPromptMixin:
             kick_session,
         )
 
-    async def _kick_pending_drain(self, session: Session) -> None:
+    async def _kick_pending_drain(self, session: Session, *, allow_resume: bool = True) -> None:
         """Start draining a queue when no turn-settle will do it for us.
 
         For an IDLE session with a live client, drain directly. For a
         recoverable STOPPED session (queue outlived a restart, or a fresh submit
         landed on a dormant session), resume it -- ``resume_session`` drains as
-        it lands IDLE. Best-effort: a failure here leaves the rows durably
-        queued for the next resume/settle, never lost.
+        it lands IDLE -- unless ``allow_resume`` is off (a stop notice, whose
+        session a racing stop may just have stopped). Best-effort: a failure here
+        leaves the rows durably queued for the next resume/settle, never lost.
         """
         try:
             if (session.status == SessionStatus.IDLE
                     and session.client and session.client.is_running):
                 await self._drain_pending_prompts(session)
-            elif (session.status == SessionStatus.STOPPED
+            elif (allow_resume and session.status == SessionStatus.STOPPED
                     and session.acp_session_id):
                 await self.resume_session(session.session_id)
         except Exception as exc:

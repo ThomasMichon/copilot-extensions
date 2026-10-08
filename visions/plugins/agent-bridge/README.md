@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-09-28
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -189,6 +189,16 @@ directly — concretely, `GET /api/v1/dispatch-tasks/{id}/session`
 task record and durable attachment history before applying this same layer's
 any-session-any-registered-worktree resolution.
 
+### observation and provenance
+
+Session observation distinguishes **what a target is doing**, **what it has
+reported spending**, and **who produced or initiated the work**. These are
+related evidence, not interchangeable authority: activity is not process
+liveness, reported consumption is not a complete bill, and a recorded creator
+is not a controller. The bridge presents compact observations alongside their
+source, freshness, and uncertainty without requiring a model turn merely to
+inspect the target.
+
 ### peer bridges
 
 Bridge instances can cooperate as peers. A local bridge may delegate ownership of
@@ -344,6 +354,51 @@ The mesh is inspectable: sessions, subscribers, context use, turn status,
 delivery progress, topology, capability resolution, peer reachability, drain
 state, current heads, and stranded hosts are visible from logs, CLI output, and
 event streams before a caller needs to guess.
+
+### evidence-backed-session-presence
+
+A caller can inspect whether a session is working, waiting for human input,
+at rest under its execution mode, shut down, or not sufficiently observable.
+The answer is derived from the target's recorded execution rather than its
+own activity claim. Pending permission requests and the distinction between
+interactive and unattended work remain visible; a sub-agent finishing does
+not by itself settle the parent's turn. The observation carries freshness,
+confidence, and a reason so a caller can distinguish evidence from inference.
+
+### reported-session-consumption
+
+A caller can inspect the consumption a session has actually reported, distinct
+from how full its current context is. Cumulative figures survive resumes
+without being counted anew at each report. Each figure retains its own report
+provenance; an older known figure is distinguishable from a freshly reported
+one. Multi-session summaries state their coverage, and missing reports remain
+unknown rather than becoming zero spend or an apparently complete total.
+
+### attributable-delegated-work
+
+Where the agent runtime supplies sufficient evidence, the session timeline
+distinguishes a sub-agent's lifecycle, tool activity, and output from the main
+agent's work and relates it to the delegation that launched it. Attribution
+enriches the existing transcript without duplicating content or delaying its
+delivery. An optional or incomplete attribution feed never becomes a
+prerequisite for ordinary session control.
+
+### creator-provenance-distinct-from-caller-affinity
+
+A hosted session can retain the creating Copilot session's identity separately
+from the caller relationship used for reuse and delivery. That provenance
+survives deliberate session replacement without rewriting history to name a
+later observer as the creator. Missing or unsupported provenance is explicit;
+it neither blocks otherwise valid creation nor grants control, changes caller
+affinity, or advances a delivery cursor.
+
+### continuity-aware-history-browsing
+
+A consumer can browse older events in bounded, ordered pages independently of
+live delivery. Each page belongs to one coherent history generation; a rebuild
+between pages invalidates the old position visibly instead of silently mixing
+histories, skipping events, or duplicating them. Historical browsing never
+acknowledges or consumes the caller's live output.
 
 ### one-canonical-deploy-path
 
@@ -583,6 +638,23 @@ can actually guarantee. A lower-fidelity truthful view is preferred over a
 high-fidelity illusion, and control that cannot be mediated safely is left with
 the surface that genuinely owns it.
 
+### unknown-observation-is-not-a-verdict
+
+Unreadable, truncated, unsupported, or ambiguous evidence remains visibly
+unknown or unattributed, never a fabricated idle state, zero consumption, or
+confident assignment to another agent. Any heuristic is labelled as such.
+Inspection does not submit a prompt, resume the target, seize ownership, or
+turn a historical observation into proof that a destructive action is safe.
+
+### inherits-runtime-service-invariants
+
+The bridge inherits the applicable
+[plugin-service contracts](../../plugin-services/README.md): independently
+owned runtime and installation state, discoverable and minimally exposed local
+control, graceful optional composition, supported version skew, and safe
+generation cutover. Observation and attribution enrich that service without
+adding a rival daemon, a mandatory sibling, or a second ownership authority.
+
 ### cursor-stable-replay
 
 Event IDs and delivery cursors remain stable across frontend cycles and
@@ -723,6 +795,9 @@ machine may deliberately gate outbound reach until policy allows it.
 - Cross-cutting hosting vision:
   [session-hosting](../../session-hosting/README.md) — the provider boundary
   agent-bridge implements for sessions it owns.
+- Cross-cutting service vision:
+  [plugin-services](../../plugin-services/README.md) — the installation,
+  lifecycle, composition, and version-skew contracts inherited by this runtime.
 - Sibling leaf: [agent-dispatch](../agent-dispatch/README.md) — the delegation
   layer that records claimable work, may embody workers through this runtime,
   and can hibernate a genuinely asynchronous wait until work needs attention.
@@ -737,6 +812,13 @@ machine may deliberately gate outbound reach until policy allows it.
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
 
 ## Provenance
+
+- **2026-10-08** — Folded back evidence-backed presence, reported consumption,
+  conservative sub-agent attribution, creator provenance distinct from caller
+  affinity, and continuity-aware history browsing. Kept observation separate
+  from liveness and control authority, and linked the inherited service model.
+  Derived from the session observation and attribution implementations and
+  their architecture/delegation documentation.
 
 - **2026-09-21** — Extended *any-session-any-registered-worktree-regardless
   -of-liveness* to explicitly cover transcript/event content (not only

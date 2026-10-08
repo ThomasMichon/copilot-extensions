@@ -4,7 +4,7 @@ This is the rubric for `clean-room-judge` to score the driven-agent transcript
 under **literal mode**. It elaborates `manifest.json`'s `expected_outcome`. This
 is the live-fixture-repo validation item for the `agent-dispatch-recipe-library`
 effort's own Validation Plan
-(`efforts/active/agent-dispatch-recipe-library/README.md`).
+(`efforts/2026/10/08 agent-dispatch-recipe-library/README.md`).
 
 ## The task the agent was given
 

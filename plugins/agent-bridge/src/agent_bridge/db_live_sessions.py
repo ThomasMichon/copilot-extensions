@@ -759,6 +759,7 @@ class _LiveSessionsMixin:
         expected_session_id: str | None = None,
         idempotency_key: str | None = None,
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+        report_duplicate: bool = False,
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
 
@@ -780,6 +781,8 @@ class _LiveSessionsMixin:
         ``superseded:<sid>``, or ``expected_mismatch:<sid>`` (map to 409). The
         reason is derived from a follow-up read purely to shape the caller's
         error message; the accept/reject decision itself is the atomic insert.
+        An identical idempotent retry returns the original id with ``None``, or
+        with ``"duplicate"`` when ``report_duplicate`` is set.
         """
         delivery = _validate_live_message_delivery(delivery)
         cutoff = now - stale_seconds
@@ -840,7 +843,7 @@ class _LiveSessionsMixin:
                     and bool(original["same_expected"])
                 )
                 if same_request:
-                    return int(original["id"]), None
+                    return int(original["id"]), ("duplicate" if report_duplicate else None)
                 return None, "idempotency_conflict"
         # Rejected -- derive a reason for the error message (best-effort; the
         # authoritative decision was the 0-row insert above).

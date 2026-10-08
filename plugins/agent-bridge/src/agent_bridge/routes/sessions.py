@@ -1098,7 +1098,7 @@ async def submit_prompt(
     try:
         if req.queue:
             result = await mgr.submit_or_queue_prompt(
-                session_id, req.prompt, caller_id=req.caller_id
+                session_id, req.prompt, caller_id=req.caller_id, no_resume=req.no_resume
             )
         else:
             turn_index = await mgr.submit_prompt(session_id, req.prompt)
@@ -1117,20 +1117,16 @@ async def submit_prompt(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    session = mgr.get_session(session_id)
+    effective = result.get("session_id") or session_id  # a successor, after a prompt-triggered handoff
+    session = mgr.get_session(effective)
     status = session.status if session else SessionStatus.IDLE
     if result.get("queued"):
         response.status_code = 202
         return SubmitPromptResponse(
-            status=status,
-            queued=True,
-            queue_id=result.get("queue_id"),
-            position=result.get("position"),
+            status=status, session_id=effective, queued=True,
+            queue_id=result.get("queue_id"), position=result.get("position"),
         )
-    return SubmitPromptResponse(
-        turn_index=result.get("turn_index"),
-        status=status,
-    )
+    return SubmitPromptResponse(turn_index=result.get("turn_index"), status=status, session_id=effective)
 
 
 @router.get("/{session_id}/queue", response_model=PendingQueueResponse)

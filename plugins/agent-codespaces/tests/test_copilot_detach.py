@@ -246,6 +246,21 @@ def test_a_resumed_seed_needs_a_daemon_that_follows_renames(
     assert out["seeded"] is daemon_has_aliases
     assert out["session_id"] == "sid-42" and seams.releases == []  # the session is kept
 
+
+def test_a_resume_from_a_new_process_keeps_its_venue_and_reports_the_resumed_id(seams, capsys):
+    """The placeholder that claimed exited; the resumed id registered from a new
+    process (an extension-host restart): the claim is renewed with the venue."""
+    seams.live_rows = {"sid-9": {"session_id": "sid-9"}}  # sid-42 (the placeholder) is gone
+    seams.claim_rows += [{"reservation_id": "r1", "claimed_by_session_id": "sid-42"},  # still the stale claim
+                         {"reservation_id": "r1", "claimed_by_session_id": "sid-9"}]  # the renewal, claimed
+    resumed = json.dumps({"ok": True, "created": True, "seed_submitted": True})
+    rc = detach.cmd_detach(_args(copilot_args=["--resume=sid-9"], seed=None),
+                           ssh_session=_ssh(seams, stdout=resumed))
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["session_id"] == "sid-9"
+    assert len(seams.reserve) == 2 and seams.reserve[1] == seams.reserve[0]  # same scope + venue
+    assert seams.release_res[0] == ("anchor-example-web@cs-1", "r1")
+
 def test_unregistered_session_is_an_explicit_failure(seams, capsys):
     seams.claim_rows.clear()  # reservation never claimed
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))

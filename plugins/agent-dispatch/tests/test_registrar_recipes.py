@@ -1,6 +1,6 @@
 """Tests for the registrar `extends:` resolution mechanism (recipe refs +
 deep-merge) -- see `registrar_recipes.py` and
-`efforts/active/agent-dispatch-recipe-library/phase-3-extends-registrar.md`.
+`efforts/2026/10/08 agent-dispatch-recipe-library/phase-3-extends-registrar.md`.
 """
 
 from __future__ import annotations

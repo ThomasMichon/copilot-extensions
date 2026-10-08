@@ -207,6 +207,10 @@ run with. Only a resume of that same session id with no other flags
 and no `--driver` reuses them -- never a new session, another
 session, `--continue`, or a launch with explicit flags -- and a rejoin of an
 already running session leaves the record alone.
+Such a resume also keeps the session's venue and `supervisor_ref` on the host
+bridge even when Copilot reloads the resumed conversation in a new extension
+process: the placeholder id that first claimed the reservation exits, so the
+launch reserves again (same venue) for the named id, and reports that id.
 The record keeps the session's `--forward` ports as well, because the
 Connection Owner releases them along with a stopped CodeSpace's session: a
 resume of the recorded session id that passes no `--forward` re-adds them

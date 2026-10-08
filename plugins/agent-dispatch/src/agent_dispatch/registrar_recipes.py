@@ -1,6 +1,6 @@
 """Registrar ``extends:`` resolution -- recipe references + deep-merge.
 
-See ``efforts/active/agent-dispatch-recipe-library/phase-3-extends-registrar.md``
+See ``efforts/2026/10/08 agent-dispatch-recipe-library/phase-3-extends-registrar.md``
 for the full design (why this sits ahead of ``registrar_discovery.py``'s
 ``kind``-dispatch rather than adding a new branch to it, the three
 reference kinds, and merge semantics). In short: an ``extends:``-bearing
