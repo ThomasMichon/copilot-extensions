@@ -20,7 +20,9 @@
   `visions/plugins/agent-containers` (interactive-venue-reach-trusted,
   restricted-venue-picker-discovery, host-backed persistence),
   `visions/plugins/agent-worktrees/pull-requests` (confirmed realized;
-  closed 2 stale issues, narrowed 1)
+  closed 2 stale issues, narrowed 1), `visions/plugins/agent-index`
+  (per-source git ref override + authenticated fetch, multi-project corpus
+  grafting, shared dropin-registry library)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
@@ -224,6 +226,26 @@ Operator, end of a long multi-repo session:
             Only the opening narrative, the reality-docs pointer, and the
             tracked-issue state had drifted — the Feature/Behavior prose
             itself needed no correction.
+      - [x] `visions/plugins/agent-index/README.md` — reconciled against 70
+            commits of drift since its 2026-09-18 last revision. Folded
+            back three realized-but-undocumented capabilities: a `git:`
+            source's per-source `ref:` override + `auth.account`
+            authenticated fetch (sharpening `continuous-delta-freshness`'s
+            "canonical default branch" framing from an absolute rule to a
+            default-with-exception); corpus composition as a dynamically
+            grafted, multi-project config (every locally-adopted project's
+            `corpus.sources` unioned via the worktree registry) as the
+            concrete mechanism realizing "a harness repo and its close
+            ecosystem"; and the `providers.d/` external-content-domain-
+            provider discovery now running on the shared `dropin-registry`
+            library that agent-bridge's own namespace resolvers also
+            consume (sharpened from "the same shape" to "the same
+            library"). No conformance gap found requiring a new issue —
+            the remaining drift (CPU-priority throttling, FTS
+            rebuild/recovery refinements, server-venv packaging split,
+            peer-launch/CWD-compliance/mutable-dev-slot cross-cutting
+            infra) is either already-described behavior being bug-fixed,
+            or cross-cutting infra already tracked by `#5472` (Phase 3).
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -706,4 +728,41 @@ then rather than assuming either answer.
   itself (102 commits since 2026-10-02) or `plugins/agent-index` (71 since
   2026-09-18) are the next candidates by the same ranking; `agent-worktrees`
   is large enough to warrant scoping before diving in.
+
+### 2026-10-07 — Phase 2 slice: `agent-index` vision reconciliation
+- Picked `plugins/agent-index` (70 commits confirmed since its 2026-09-18
+  last revision) over the much larger `plugins/agent-worktrees` mega-vision,
+  per the prior slice's own recommendation to take the more tractable
+  single-PR win first.
+- Read the vision in full, then cross-checked candidate drift directly
+  against source (`config.py`'s `read_corpus_sources()` docstring,
+  `sources/git_repo.py`, `indexing/engine.py`'s `SourceSpec`, and the
+  `libs/dropin-registry` package) rather than trusting commit-message
+  summaries alone — most of the 70 commits turned out to be bug fixes
+  (CPU-priority throttling that silently never worked, FTS rebuild
+  recovery, server-venv packaging, dependency ceiling typos) or
+  cross-cutting infra shared with many other plugins (peer-launch,
+  CWD-compliance, mutable-dev-slot — already tracked by `#5472`/Phase 3,
+  out of this vision's own scope), not new vision-worthy capability.
+- Found three genuine fold-back candidates: (1) a `git:` source now
+  accepts a per-source `ref:` override + `auth.account` authenticated
+  fetch (#4829) — this directly sharpens `continuous-delta-freshness`'s
+  prior "tracks the canonical default branch" framing, which read as an
+  absolute rule, into a default with a named, deliberate exception; (2) the
+  effective `corpus.sources` is dynamically **grafted from every
+  locally-adopted project** (via the sibling agent-worktrees project
+  registry), not a single hand-authored list — the concrete mechanism that
+  was always implied by "a harness repo and its close ecosystem" but never
+  actually described; (3) the `providers.d/` external-content-domain-
+  provider discovery now runs on the extracted, shared `dropin-registry`
+  library — confirmed agent-bridge's own namespace resolvers consume the
+  same library (not merely a similar pattern), sharpening that citation.
+- No new conformance gap or stale/phantom issue found this slice — the
+  vision's existing Non-Goals ("not a facility-wide, all-source
+  aggregator") already bounded the multi-project grafting correctly, so no
+  contradiction needed reconciling there.
+- Next: continue Phase 2 with `plugins/agent-worktrees` itself (needs its
+  own scoping pass — one section/concept per slice, not the whole ~52KB
+  file at once) or `plugins/agent-bridge`/`plugins/context-handoff` (not
+  yet investigated).
 
