@@ -24,6 +24,12 @@ def _core() -> Any:
     return core
 
 
+def _record_launch_refused(session: Any, exc: Any) -> None:
+    """The typed event for a host launch-policy refusal of a respawn."""
+    if session.event_log:
+        session.event_log.append("launch_refused", {"codespace": exc.codespace, "reason": exc.reason})
+
+
 class _SessionResumeMixin:
     """Session resume and resync helpers."""
 
@@ -210,10 +216,7 @@ class _SessionResumeMixin:
                         self._db.update_session_status(
                             session_id, SessionStatus.STOPPED.value, time.time(),
                         )
-                        if session.event_log:
-                            session.event_log.append("launch_refused", {
-                                "codespace": exc.codespace, "reason": exc.reason,
-                            })
+                        _record_launch_refused(session, exc)
                         raise
                     if isinstance(exc, RemoteSpawnCleanupPendingError):
                         session.status = SessionStatus.STOPPED
@@ -382,7 +385,11 @@ class _SessionResumeMixin:
                         session_id, SessionStatus.STOPPED.value, time.time()
                     )
                     exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
-                    if session.event_log:
+                    if isinstance(exc, LaunchRefusedError):
+                        # A refusal at the recreate step is the same terminal
+                        # answer as one in the ladder: the same typed event.
+                        _record_launch_refused(session, exc)
+                    elif session.event_log:
                         session.event_log.append("error", {
                             "message": f"Resume + recreate failed: {exc_desc}",
                         })

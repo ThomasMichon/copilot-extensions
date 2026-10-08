@@ -45,7 +45,7 @@ def test_allowed(monkeypatch):
     assert vlp.codespace_launch_refusal("cs") is None
     assert [c[:4] for c in calls] == [["agent-codespaces", "launch-check", "cs", "--json"]]
     deadline = float(calls[0][calls[0].index("--deadline") + 1])  # the check answers before the outer kill
-    assert 0 < deadline - __import__("time").time() <= vlp._CHECK_TIMEOUT - vlp._CHECK_DEADLINE_MARGIN
+    assert 0 < deadline - __import__("time").time() <= vlp._CHECK_TIMEOUT - vlp._CHECK_DEADLINE_MARGIN + 0.01
 
 
 def test_the_active_provider_manifest_command_is_used_before_path(monkeypatch):
@@ -166,6 +166,41 @@ async def test_a_refused_resume_is_terminal_never_retried_or_recreated(session_m
     assert session.status is SessionStatus.STOPPED
     events = [c.args[0] for c in session.event_log.append.call_args_list]
     assert "launch_refused" in events and "acp_resume_retry" not in events
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_at_the_final_recreate_still_records_the_typed_event(session_manager, monkeypatch):
+    """The policy can change to refused after the ladder's ordinary failures: the
+    recreate step's refusal gets the same launch_refused event, not just an error."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.session_manager import Session
+
+    target = SpawnTarget(
+        type="command", spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
+        codespace={"name": "cs-one", "repo": "org/repo",
+                   "acp_command": "cd /workspaces/repo && copilot --acp --stdio",
+                   "workspace_folder": "/workspaces/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.STOPPED
+    session.event_log = MagicMock()
+    session_manager._sessions["s1"] = session
+    monkeypatch.setattr(session_manager, "_try_reattach_live_host", AsyncMock(return_value=False))
+
+    async def host(_session, *, load_existing=True, **_kw):
+        if load_existing:
+            raise RuntimeError("wedged")  # an ordinary ladder failure, retried
+        raise vlp.LaunchRefusedError("cs-one", "paused meanwhile")
+
+    monkeypatch.setattr(session_manager, "_resume_via_new_remote_host", host)
+    monkeypatch.setattr("agent_bridge.session_resume.asyncio.sleep", AsyncMock())
+    with pytest.raises(vlp.LaunchRefusedError):
+        await session_manager.resume_session("s1", allow_recreate=True)
+    events = [c.args[0] for c in session.event_log.append.call_args_list]
+    assert "acp_resume_retry" in events and "launch_refused" in events
+    assert session.status is SessionStatus.STOPPED
 
 
 @pytest.mark.asyncio

@@ -340,3 +340,17 @@ def test_on_windows_a_registration_outside_the_profile_fails_closed(monkeypatch,
     assert "only this user controls" in lp.refusal("cs")
     with pytest.raises(PermissionError):
         lp.register([sys.executable])
+
+
+def test_clear_recovers_from_an_empty_directory_at_the_registration_path(capsys):
+    lp.POLICY_FILE.mkdir()
+    assert "not a regular file" in lp.refusal("cs")  # every launch refused...
+    assert _cli(["launch-policy", "clear"]) == 0  # ...until the documented recovery clears it
+    assert lp.refusal("cs") is None
+
+
+def test_clear_names_a_non_empty_directory_instead_of_crashing(capsys):
+    lp.POLICY_FILE.mkdir()
+    (lp.POLICY_FILE / "stray").write_text("x", encoding="utf-8")
+    assert _cli(["launch-policy", "clear"]) == 1
+    assert "remove it by hand" in capsys.readouterr().err

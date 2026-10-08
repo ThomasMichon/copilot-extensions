@@ -178,10 +178,21 @@ def _exclusive_dir(*, create: bool) -> bool:
 
 
 def clear() -> bool:
+    """Remove the registration. A directory squatting on its path (which every
+    read refuses as corrupt) is removed when it is empty; otherwise this raises
+    ``OSError`` naming what the operator has to remove by hand."""
     try:
         POLICY_FILE.unlink()
     except FileNotFoundError:
         return False
+    except (IsADirectoryError, PermissionError):  # Windows reports a directory as PermissionError
+        if POLICY_FILE.is_symlink() or not POLICY_FILE.is_dir():
+            raise
+        try:
+            POLICY_FILE.rmdir()
+        except OSError as exc:
+            raise OSError(f"{POLICY_FILE} is a directory, not a registration, and isn't empty: "
+                          "remove it by hand") from exc
     return True
 
 
@@ -380,7 +391,11 @@ def cmd_launch_policy(args) -> int:
         _warn_if_bridge_skips(bridge_enforcement())
         return 0
     if args.policy_verb == "clear":
-        removed = clear()
+        try:
+            removed = clear()
+        except OSError as exc:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+            return 1
         if args.json:
             print(json.dumps({"cleared": removed}))
         else:
