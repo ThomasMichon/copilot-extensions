@@ -229,15 +229,25 @@ def test_failed_tail_decode_never_changes_shared_history_or_cursor(tmp_path):
     ]
 
 
-def test_excessively_nested_json_does_not_hide_later_records(tmp_path):
+def test_excessively_nested_json_does_not_hide_later_records(tmp_path, monkeypatch):
+    """Exercise decoder failure without assuming a CPython C recursion limit."""
     path = tmp_path / "log.jsonl"
-    nested = b"[" * (sys.getrecursionlimit() + 100) + b"0" + b"]" * (
-        sys.getrecursionlimit() + 100
-    )
+    nested = b"[[0]]"
+    real_loads = json.loads
+    rejected = []
+
+    def loads(raw):
+        if raw == nested.decode("ascii"):
+            rejected.append(raw)
+            raise RecursionError("simulated JSON decoder recursion limit")
+        return real_loads(raw)
+
+    monkeypatch.setattr(jsonl_cache, "json", SimpleNamespace(loads=loads))
     path.write_bytes(b'{"event":"before"}\n' + nested + b'\n{"event":"after"}\n')
     assert list(jsonl_cache.read_jsonl(path)) == [
         {"event": "before"}, {"event": "after"},
     ]
+    assert rejected == [nested.decode("ascii")]
 
 
 def test_oversized_integer_does_not_hide_later_records(tmp_path):
