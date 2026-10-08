@@ -111,9 +111,13 @@ feed and real consumer stability checks below.
       rendered state; prove stable state and that caller reductions did not
       execute. Also verify a real fact change is reflected, not hidden by
       indefinite last-good caching.
-- [ ] Run affected engine and Manager suites, document Windows/Linux parity,
-      update the engine/Picker contract and graceful-cutover impact statement,
-      add changefiles for every changed payload, and drive each PR to merge.
+- [ ] Run affected engine and Manager suites and document Windows, Linux, and
+      macOS coverage separately, including session/process-liveness and feed
+      cutover adapters. An unavailable live platform needs a justified,
+      explicitly tracked validation exemption, not an implicit claim that
+      Linux tests establish all POSIX behavior. Update the engine/Picker
+      contract and graceful-cutover impact statement, add changefiles for
+      every changed payload, and drive each PR to merge.
 - [ ] Verify normal promotion, unified deployment, and activated daemon
       generation before claiming the new authority/feed shipped. Reconcile
       consumer projections after updating. Close only the Worktrees scope of

@@ -975,9 +975,7 @@ nor the already-merged repairs are a substitute for its consumer acceptance.
 
 The shared-wrapper implementation and its structural/freshness tests merged
 as #5743 (merge commit `9a09837d699600b47888bf053769f8a89654752f`).
-Review found only the missing PR impact statements after a publication retry
-lost the supplied body; those statements were restored and the thread resolved
-before merge. Its promotion/deployment remains a separate pending obligation.
+Its promotion/deployment remains a separate pending obligation.
 The implementation worktree is retained for Phase 6d, not finalized merely
 because this slice landed.
 
