@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
+import sys
+
+import pytest
 
 import ssh_manager.relay_channel as relay_mod
 from ssh_manager.config_sources import SSHConfig
@@ -52,12 +57,19 @@ def test_pid_change_callback_tracks_establish_restart_and_stop(monkeypatch):
     assert seen[-1] == (222, "id-222")
 
 
+class _KillableProc(_FakeProc):
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+
 def _supervised(monkeypatch, *, gate=None):
     """A relay whose spawned ssh 'dies' on demand, with fake spawn/kill."""
     spawned: list[_FakeProc] = []
 
-    async def fake_spawn(*_args, **_kwargs):
-        proc = _FakeProc(1000 + len(spawned))
+    async def fake_spawn(*_args, **kwargs):
+        proc = _KillableProc(1000 + len(spawned))
+        proc.env = kwargs.get("env")
         spawned.append(proc)
         return proc
 
@@ -143,30 +155,23 @@ async def test_monitor_without_gate_still_reconnects(monkeypatch):
     await relay.stop()
 
 
-def _capture_killpg(monkeypatch):
-    killed = []
-    monkeypatch.setattr(
-        relay_mod.os, "killpg",
-        lambda pgid, sig: killed.append((pgid, sig)),
-        raising=False,
-    )
-    monkeypatch.setattr(relay_mod.signal, "SIGKILL", 9, raising=False)
-    return killed
-
-
-async def test_stop_nowait_cancels_monitor_and_kills_process_group(monkeypatch):
+async def test_stop_nowait_cancels_monitor_and_kills_owned_tree(monkeypatch):
     relay, spawned = _supervised(monkeypatch)
     await relay.start()
     proc = spawned[0]
-    relay._groups[id(proc)] = proc.pid  # as recorded at spawn on POSIX
-    killed = _capture_killpg(monkeypatch)
+    sweeps = []
+    monkeypatch.setattr(
+        SupervisedRelayForward, "_kill_owned_descendants",
+        lambda self: sweeps.append(self) or 0,
+    )
     monitor = relay._monitor_task
 
     relay.stop_nowait()
     relay.stop_nowait()  # idempotent
 
     await _settle(lambda: not relay._cleanup_tasks)
-    assert (proc.pid, 9) in killed
+    assert proc.killed is True
+    assert sweeps, "surviving ProxyCommand descendants must be swept"
     assert relay._proc is None
     assert relay._monitor_task is None
     assert monitor.cancelled() or monitor.done()
@@ -175,20 +180,55 @@ async def test_stop_nowait_cancels_monitor_and_kills_process_group(monkeypatch):
     assert len(spawned) == 1
 
 
-async def test_teardown_reaches_descendants_after_root_exited(monkeypatch):
+async def test_spawned_ssh_carries_the_supervisor_owner_token(monkeypatch):
+    relay, spawned = _supervised(monkeypatch)
+    await relay.establish()
+
+    assert spawned[0].env[relay_mod._OWNER_ENV] == relay._owner_token
+    other, _ = _supervised(monkeypatch)
+    assert other._owner_token != relay._owner_token
+    await relay.stop()
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux") or not hasattr(os, "pidfd_open"),
+    reason="owner-token sweep is Linux-only",
+)
+def test_owner_sweep_kills_only_processes_carrying_its_token():
+    relay = SupervisedRelayForward(SSHConfig(host_alias="box"), 41000)
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+    # An orphaned ProxyCommand child that outlived its ssh root.
+    ours = subprocess.Popen(
+        sleeper, env={**os.environ, relay_mod._OWNER_ENV: relay._owner_token},
+    )
+    stranger = subprocess.Popen(
+        sleeper, env={**os.environ, relay_mod._OWNER_ENV: "someone-else"},
+    )
+    try:
+        assert relay._kill_owned_descendants() == 1
+        assert ours.wait(timeout=10) == -9
+        assert stranger.poll() is None
+    finally:
+        for proc in (ours, stranger):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+
+
+async def test_teardown_sweeps_descendants_after_root_exited(monkeypatch):
     relay, spawned = _supervised(monkeypatch)
     await relay.establish()
     proc = spawned[0]
-    relay._groups[id(proc)] = proc.pid
     proc.returncode = 255  # root gone; a ProxyCommand child may survive
-    killed = _capture_killpg(monkeypatch)
+    sweeps = []
+    monkeypatch.setattr(
+        SupervisedRelayForward, "_kill_owned_descendants",
+        lambda self: sweeps.append(self) or 0,
+    )
 
     await relay.stop()
 
-    assert killed == [(proc.pid, 9)]
-    assert relay._groups == {}
-
-
+    assert sweeps == [relay]
 async def test_gated_reconnect_rechecks_gate_before_each_retry(monkeypatch):
     answers = [True, False, False]
 

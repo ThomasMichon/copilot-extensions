@@ -22,6 +22,7 @@ import logging
 import os
 import signal
 import sys
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -34,6 +35,9 @@ from .proxy import create_ssh_subprocess
 log = logging.getLogger("ssh-manager.relay")
 
 _ESTABLISH_ATTEMPTS = 4
+# Inherited by the ssh root and every ProxyCommand descendant it starts, so
+# teardown can prove which processes this supervisor owns (Linux).
+_OWNER_ENV = "SSH_MANAGER_RELAY_OWNER"
 _READY_SETTLE_MAX = 0.25
 _REMOTE_FORWARD_FAILURE_MARKERS = (
     "remote port forwarding failed",
@@ -113,7 +117,7 @@ class SupervisedRelayForward:
         self._stopped = False
         self._retired = False
         self._gated_establish = False
-        self._groups: dict[int, int] = {}
+        self._owner_token = uuid.uuid4().hex
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
 
     @property
@@ -212,12 +216,12 @@ class SupervisedRelayForward:
             proc = await create_ssh_subprocess(
                 *args,
                 config=self._config,
+                env={**os.environ, _OWNER_ENV: self._owner_token},
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
             self._proc = proc
-            self._track_group(proc)
             self._notify_pid_change()
             try:
                 settled = await self._wait_settled(proc)
@@ -313,7 +317,7 @@ class SupervisedRelayForward:
         self._proc = None
         if proc is None:
             return
-        self._kill_tree_nowait(proc, self._groups.get(id(proc)))
+        self._kill_tree_nowait(proc)
         self._notify_pid_change()
         try:
             loop = asyncio.get_running_loop()
@@ -323,50 +327,60 @@ class SupervisedRelayForward:
         self._cleanup_tasks.add(cleanup)
         cleanup.add_done_callback(self._cleanup_tasks.discard)
 
-    def _track_group(self, proc: asyncio.subprocess.Process) -> None:
-        """Record the fresh ssh root's own process group (POSIX).
+    def _kill_owned_descendants(self) -> int:
+        """SIGKILL surviving processes this supervisor spawned (Linux only).
 
-        Captured at spawn, while the root is known to be ours, so teardown can
-        still reach a surviving ProxyCommand child (e.g. ``gh codespace ssh``)
-        after the root has exited -- without a later, PID-reuse-prone lookup.
+        A ProxyCommand child (e.g. ``gh codespace ssh``) can outlive its ssh
+        root, after which the root's process group id is no longer provably
+        ours. Ownership is proven instead by the per-supervisor token in each
+        process's inherited environment, re-checked after pinning the process
+        with a pidfd so a reused PID is never signalled. Returns the count.
         """
-        if sys.platform == "win32" or not isinstance(proc, asyncio.subprocess.Process):
-            return
-        try:
-            pgid = os.getpgid(proc.pid)
-        except OSError:
-            return
-        # start_new_session makes the root its own group leader; never adopt
-        # a group that is not the root's own, or is this process's.
-        if pgid == proc.pid and pgid != os.getpgrp():
-            self._groups[id(proc)] = pgid
+        if not sys.platform.startswith("linux") or not hasattr(os, "pidfd_open"):
+            return 0
+        marker = f"{_OWNER_ENV}={self._owner_token}".encode()
 
-    @staticmethod
-    def _signal_group(pgid: int | None) -> bool:
-        if pgid is None:
-            return False
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except OSError:
-            return False
-        return True
+        def owned(pid: int) -> bool:
+            try:
+                with open(f"/proc/{pid}/environ", "rb") as fh:
+                    return marker in fh.read().split(b"\0")
+            except OSError:
+                return False
 
-    @classmethod
-    def _kill_tree_nowait(
-        cls, proc: asyncio.subprocess.Process, pgid: int | None,
-    ) -> None:
-        if cls._signal_group(pgid) or proc.returncode is not None:
-            return
+        killed = 0
         try:
-            proc.kill()
-        except (ProcessLookupError, OSError):
-            pass
+            pids = [int(e.name) for e in os.scandir("/proc") if e.name.isdigit()]
+        except OSError:
+            return 0
+        for pid in pids:
+            if pid == os.getpid() or not owned(pid):
+                continue
+            try:
+                fd = os.pidfd_open(pid)
+            except OSError:
+                continue
+            try:
+                if owned(pid):  # still the same process: the pidfd pins its PID
+                    signal.pidfd_send_signal(fd, signal.SIGKILL)
+                    killed += 1
+            except OSError:
+                pass
+            finally:
+                os.close(fd)
+        return killed
+
+    def _kill_tree_nowait(self, proc: asyncio.subprocess.Process) -> None:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+        self._kill_owned_descendants()
 
     async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
-        """Kill ``proc`` and any descendants that outlived an exited root."""
-        pgid = self._groups.pop(id(proc), None)
+        """Kill ``proc`` and any owned descendants that outlived the root."""
         await self._kill(proc)
-        self._signal_group(pgid)
+        self._kill_owned_descendants()
         # Releases a Windows ProxyCommand owner even when the root had already
         # exited (``terminate_ssh_process_tree`` only runs for a live root).
         await run_process_cleanup(proc)
