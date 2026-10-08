@@ -1,0 +1,9 @@
+{
+  "comment": "Add reusable test fixtures + docs for testing indexer-machine routing without an assigned indexer (a paired local-only knowledge repo, or a machine-local overlay), plus a FakeEmbeddingEngineClient test double for a real index/search round trip without the heavy model.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

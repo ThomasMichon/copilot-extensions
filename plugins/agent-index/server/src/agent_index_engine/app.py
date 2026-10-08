@@ -98,9 +98,23 @@ def _check_gpu_deps() -> bool:
 
 
 def _get_pipeline():
-    """Get or lazily create the EmbeddingPipeline."""
+    """Get or lazily create the EmbeddingPipeline, ensuring its model is
+    loaded before returning.
+
+    On Windows, model loading happens here at whatever priority this
+    process already inherited (normal, unless an operator explicitly
+    started it niced) -- the host good-citizen throttle is applied only
+    AFTER a successful first load (``_ensure_priority_lowered_once``,
+    Windows-only path), so the one-time load itself is never throttled,
+    only the ongoing embedding work that follows it. On POSIX the throttle
+    is instead applied eagerly at process startup (see ``main()``) because
+    ``os.nice()`` only affects the calling thread, inherited by threads
+    created *afterward* -- applying it here, inside a request-handling
+    thread, would miss every other worker/inference thread already created
+    during startup.
+    """
     global _pipeline, _config
-    if _pipeline is not None:
+    if _pipeline is not None and _pipeline.is_loaded:
         return _pipeline
 
     if not _check_gpu_deps():
@@ -114,7 +128,12 @@ def _get_pipeline():
 
     if _config is None:
         _config = IndexConfig()
-    _pipeline = EmbeddingPipeline(_config)
+    if _pipeline is None:
+        _pipeline = EmbeddingPipeline(_config)
+
+    _pipeline.warm_up()
+    if sys.platform.startswith("win"):
+        _ensure_priority_lowered_once()
     return _pipeline
 
 
@@ -314,6 +333,7 @@ async def spindown() -> SpinResponse:
         if _pipeline is not None:
             _pipeline.unload()
             _pipeline = None
+        _reset_priority_for_reload()
 
     return SpinResponse(status="ok", model_loaded=False)
 
@@ -385,11 +405,17 @@ def _build_parser():
 
 
 def _lower_own_priority() -> None:
-    """Host good-citizen throttle, applied once before the server starts.
+    """Host good-citizen throttle: lower this process's scheduling priority.
 
-    On a CPU-only device this engine is the actual CPU-bound consumer during a
-    large reindex (continuous model inference) -- distinct from the index
-    worker's own ``indexer_nice`` throttle, which does not touch this process.
+    On a CPU-only device this engine is the actual CPU-bound consumer during
+    a large reindex (continuous model inference) -- distinct from the index
+    worker's own ``indexer_nice`` throttle, which does not touch this
+    process.
+
+    Never call this directly outside ``_ensure_priority_lowered_once`` /
+    ``main()``'s POSIX startup path -- see their own docstrings for *when*
+    each platform applies it and why the timing differs.
+
     Best-effort and never raises; see ``IndexConfig.engine_nice`` for the
     env var and default.
     """
@@ -402,9 +428,89 @@ def _lower_own_priority() -> None:
         logger.debug("could not apply engine host-politeness throttle", exc_info=True)
 
 
+# Tracks whether the throttle has been applied this process lifetime. Kept
+# separate from `_pipeline`/`is_loaded` (which `/spindown` resets) so a later
+# reload never re-lowers (POSIX's os.nice() is a RELATIVE increment that
+# would otherwise compound on every spinup/spindown/spinup cycle: 5, 10, 15,
+# 19, ...) -- see `_reset_priority_for_reload`.
+_priority_lowered = False
+# Windows-only: the priority class captured just before the throttle first
+# lowers it, so a later restore can return to that EXACT baseline (an engine
+# may have deliberately been started at some other non-normal class) rather
+# than assuming NORMAL_PRIORITY_CLASS. ``None`` until captured, and whenever
+# the throttle is disabled (``engine_nice <= 0``) -- in which case nothing
+# was ever changed, so there is nothing to restore either.
+_priority_baseline: int | None = None
+
+
+def _ensure_priority_lowered_once() -> None:
+    """Apply the host-politeness throttle at most once per process lifetime.
+
+    Windows-only call site (see ``_get_pipeline``): deferred until after a
+    successful model load so the one-time, latency-sensitive load itself
+    runs at normal priority (an eagerly-applied throttle was observed to
+    stall it indefinitely at Windows IDLE_PRIORITY_CLASS under concurrent
+    host load). SetPriorityClass is process-wide regardless of which thread
+    calls it or when, so deferring costs nothing on Windows.
+    """
+    global _priority_lowered, _priority_baseline
+    if _priority_lowered:
+        return
+    _priority_lowered = True
+    if sys.platform.startswith("win"):
+        from agent_index.index_config import IndexConfig
+
+        if IndexConfig().engine_nice > 0:
+            from agent_index.indexing.priority import get_current_priority_class
+
+            _priority_baseline = get_current_priority_class()
+    _lower_own_priority()
+
+
+def _reset_priority_for_reload() -> None:
+    """Called from ``/spindown`` so a LATER reload (``/spinup`` or the next
+    ``/embed``) isn't throttled before its own ``warm_up()`` completes --
+    otherwise every reload after the first would reproduce the Windows
+    load-stall bug ``_ensure_priority_lowered_once`` exists to avoid.
+
+    Windows-only: restores the EXACT class captured before the throttle
+    first ran (not a hardcoded ``NORMAL_PRIORITY_CLASS``), so an engine
+    deliberately started at some other class isn't clobbered to normal.
+    Nothing to do when the throttle was disabled (``_priority_baseline`` is
+    ``None`` in that case -- see ``_ensure_priority_lowered_once``) or never
+    applied. POSIX's ``os.nice()`` cannot be raised back without
+    ``CAP_SYS_NICE``/root for an unprivileged process, so there is nothing
+    to restore there -- and nothing further to protect against either:
+    POSIX's throttle is applied once, eagerly, at process startup (see
+    ``main()``), never re-applied per reload, so it never compounds and a
+    reload was never throttled-before-loading in the first place.
+    """
+    if not sys.platform.startswith("win"):
+        # POSIX never resets the guard -- there is nothing to protect against
+        # on a later reload (see docstring): it was already lowered once,
+        # eagerly, at process startup, and stays that way for the process's
+        # whole lifetime.
+        return
+
+    global _priority_lowered, _priority_baseline
+    if _priority_lowered and _priority_baseline is not None:
+        from agent_index.indexing.priority import set_priority_class
+
+        set_priority_class(_priority_baseline)
+    _priority_lowered = False
+    _priority_baseline = None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the engine worker from the command line."""
-    _lower_own_priority()
+    if not sys.platform.startswith("win"):
+        # POSIX: os.nice() only affects the calling thread, inherited by
+        # threads created *afterward* -- applying it here, before uvicorn
+        # creates its worker/event-loop threads, is what makes it cover the
+        # whole running server rather than just whichever thread happens to
+        # handle the first /embed request (see _get_pipeline's Windows-only
+        # deferred path for the opposite platform's reasoning).
+        _ensure_priority_lowered_once()
     parser = _build_parser()
     args = parser.parse_args(argv)
     run_engine(host=args.host, port=args.port)
@@ -413,3 +519,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

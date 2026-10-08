@@ -100,6 +100,53 @@ compatibility entry points are inert in both installation modes, including
 when invoked directly. Absent/default/explicit-false installation policy keeps
 the legacy client layout, not legacy host provisioning authority.
 
+### Testing without an assigned indexer machine
+
+A repository's own checked-in `.agent-index/config.yaml` often carries no
+`indexer:`/`indexers:` designation at all -- correctly so for a stateless,
+shareable harness repo (e.g. `example-harness`): baking a machine-specific
+designation into shared, forkable config would defeat the point of sharing
+it. A real operator's bound **knowledge repo** supplies that designation at
+runtime (its own `.agent-index/config.yaml` carries the `indexers:` block,
+grafted in as a config layer -- see `config._knowledge_root_for_repo`). A
+container or CI run has neither a real knowledge repo nor a second real
+machine to designate, so `transport.plan_route()` resolves `unconfigured`/
+`client` there unless you supply one of these two stand-ins:
+
+1. **Pair a temporary, local-only knowledge repo (mocked pytest setup
+   only).** `tests/_indexer_assignment_fixtures.py`'s
+   `paired_knowledge_repo_indexer` fixture builds a plain directory with its
+   own `.agent-index/config.yaml` declaring `indexers:`, then **monkeypatches
+   `config._external_state_root`** to resolve straight to it. That monkeypatch
+   is what makes this work in a test -- the real resolver requires an actual
+   `agent-worktrees state-root --json` response reporting `bound: true` and
+   `source: "knowledge_repo"` (`_knowledge_overlay.py`'s `external_state_root`,
+   around the `payload.get("bound") is not True` checks), which a bare,
+   unregistered directory does **not** satisfy on its own. Creating the
+   directory and marking the subject repo's `.agent-worktrees/config.yaml`
+   with `requires_external_state_root: true` (also done by this fixture,
+   since that's what makes the knowledge-repo layer consulted at all) is not
+   sufficient for a real CLI/service run outside a test -- a real run needs
+   the knowledge repo genuinely registered and bound via `agent-worktrees`.
+2. **A machine-local overlay.** Write
+   `<repo>/.copilot-extensions/agent-index/config.yaml` with
+   `indexer: {machine: <this-machine>}` directly -- no knowledge repo or
+   external-state resolution involved at all. See the
+   `machine_local_indexer_overlay` fixture in the same file. This path is
+   **not** automatically gitignored by anything in agent-index itself
+   (`write_indexers_designation()` writes the file without adding an ignore
+   rule) -- add `.copilot-extensions/` (or the specific config file) to the
+   target repository's own `.gitignore` before using this in a real repo,
+   or the machine-specific designation is left available to commit.
+
+Both fixtures are drop-in `pytest` fixtures; import them and request by name.
+For a genuine index -> embed -> store -> search round trip without the heavy
+`torch`/`jinaai` model, pair either fixture with
+`tests/_fake_engine.py`'s `FakeEmbeddingEngineClient` -- a deterministic,
+in-process stand-in matching the real `EngineClient` interface (`embed_texts`,
+`embed_query`, `health`, `is_ready`). See
+`tests/test_indexer_assignment_workarounds.py` for both fully worked examples.
+
 ## Usage
 
 | Need | Use |
