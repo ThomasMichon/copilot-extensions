@@ -34,6 +34,15 @@ _TERMINAL_TOOL_STATUSES = frozenset(
 )
 
 
+def is_nested_event_data(data: dict[str, Any]) -> bool:
+    """Whether an event's data belongs to a sub-agent rather than the parent.
+
+    A sub-agent's events carry ``agent_id`` and/or ``parent_tool_call_id`` (a
+    represented CLI event may carry only the latter).
+    """
+    return bool(data.get("agent_id") or data.get("parent_tool_call_id"))
+
+
 @dataclass
 class SseEvent:
     """A single SSE-ready event with a monotonic ID."""
@@ -396,7 +405,7 @@ class EventLog:
             if not include_nested:
                 open_calls = [
                     event for event in open_calls
-                    if not event.data.get("agent_id")
+                    if not is_nested_event_data(event.data)
                 ]
             if not open_calls:
                 return None

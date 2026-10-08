@@ -773,7 +773,8 @@ two capabilities without the destructive take-over:
   `--json` for machine-readable output). Beyond registration/liveness the view
   carries **turn-state** derived from the represented event tail --
   `turn_state` (`running`/`idle`) plus a computed `liveness` label
-  (`active`/`stalled`/`idle`) -- and an operator session's **`latest_progress`**
+  (`active`/`stalled`/`idle`); only the main agent's own events drive it, so a
+  busy background sub-agent never makes an idle session read `stalled` -- and an operator session's **`latest_progress`**
   beat (see below). This is the surface **agent-dispatch** joins against to track
   a CLI-embodied task: a leased task's owner is `<machine>/<worktree>`, so it
   resolves the worktree to its live session and overlays

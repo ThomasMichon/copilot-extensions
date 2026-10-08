@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
-import { InFlightMessages, adoptSessionId, drainControls, drainInbox, serializedRegister } from "./delivery.mjs";
+import { InFlightMessages, MainTurn, adoptSessionId, drainControls, drainInbox, serializedRegister } from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { processIdentity, resolveMetadataAsync } from "./metadata.mjs";
@@ -84,6 +84,7 @@ const state = {
   deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer MUTE toggle (delivery on by default)
   delivering: false, // guard against overlapping inbox drains
   inFlight: new InFlightMessages(), // delivered but not yet recorded by the CLI
+  mainTurn: new MainTurn(), // is the main agent's turn running (not a sub-agent's)?
   lastEventAt: 0, // advanced by the observe-only event handler
 };
 
@@ -265,7 +266,8 @@ async function pollInbox() {
   state.delivering = true;
   try {
     await drainInbox(state.sessionId, {
-      getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight, log: extLog,
+      getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight,
+      mainTurn: state.mainTurn, log: extLog,
     });
   } finally {
     state.delivering = false;
@@ -336,6 +338,7 @@ session.on((event) => {
   try {
     state.lastEventAt = Date.now();
     state.inFlight.observe(event);
+    state.mainTurn.observe(event);
     if (adoptSessionId(state, event?.sessionId)) {
       // A late id, or a resume that renamed this conversation: register it
       // off the event loop (the bridge folds a renamed placeholder into it).
@@ -366,7 +369,12 @@ session.on((event) => {
       }
       // Forward the id so the bridge can dedup too (defense-in-depth) and any
       // consumer has the event's stable identity.
-      state.pendingEvents.push({ type, id: eventId ?? null, data: event.data ?? {} });
+      // The envelope's agentId marks a sub-agent's event (absent for the main
+      // agent), so the bridge never mistakes background sub-agent activity
+      // for the session's own turn.
+      const forwarded = { type, id: eventId ?? null, data: event.data ?? {} };
+      if (event.agentId) forwarded.agentId = event.agentId;
+      state.pendingEvents.push(forwarded);
       if (state.pendingEvents.length > MAX_QUEUE) {
         state.pendingEvents.splice(0, state.pendingEvents.length - MAX_QUEUE);
       }

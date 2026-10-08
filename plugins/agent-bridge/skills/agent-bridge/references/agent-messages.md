@@ -63,7 +63,10 @@ protocol to learn:
 - `--delivery` sets live-session urgency without changing `kind`: `queue`
   (default) waits until the receiver's current turn ends, `steer` injects at the
   running turn's next step without cancelling it, and `interrupt` aborts the
-  current turn before sending. Shorthands: `--steer`, `--interrupt`.
+  current turn before sending. Shorthands: `--steer`, `--interrupt`. Aborting
+  a running turn also cancels the receiver's background sub-agents; when its
+  main turn is idle (only background sub-agents running), `interrupt` sends
+  immediately without aborting, so those sub-agents keep running.
 
 This is the everyday way to interrogate a peer: one `send`, read the reply, no
 cold sub-agent and no operator relay.
