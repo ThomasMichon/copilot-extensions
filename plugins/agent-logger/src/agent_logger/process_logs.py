@@ -125,5 +125,11 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
             yield ProcessLogRef(path)
         elif path.suffix == ".zip":
             with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
-                for info in _zip_logs(archive):
-                    yield ProcessLogRef(path, info.filename)
+                # Resolve member names while the archive is still open, then
+                # close both the ZIP and its file descriptor before yielding
+                # -- yielding mid-`with` would otherwise pin the archive open
+                # for as long as the caller takes to consume (or abandon) the
+                # generator, which can block rotation/compaction on Windows.
+                names = [info.filename for info in _zip_logs(archive)]
+            for name in names:
+                yield ProcessLogRef(path, name)
