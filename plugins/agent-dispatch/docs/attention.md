@@ -103,8 +103,10 @@ operator omits `created_at`; it is kept per source in a machine-local store
 (`attention-observed.json`), so repeated reads keep the same order. A time is
 cleared only when that same source reads `ok` without the item; a `failed` or
 `uncertain` read keeps it, so an outage never reorders an unchanged queue.
-Concurrent reads are ordered by a nanosecond token taken when each starts, so a
-slower, older read that finishes last can't re-add a time a newer one cleared.
+Concurrent reads are ordered by a read number each takes when it starts --
+persisted in the first-observed store and strictly increasing across processes
+(no clock: same-instant reads and clock rollback can't tie or reorder them) --
+so a slower, older read that finishes last can't re-add a time a newer one cleared.
 
 ## Writing a command source
 
