@@ -1,9 +1,0 @@
-{
-  "comment": "Document setting orphan_after_seconds to its 60s minimum for fast-iterating test/clean-room fixtures, to avoid the 3600s default blocking quick manual retries",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix test_providers.py regressions from #5609's stricter trusted_target reconciliation gate",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

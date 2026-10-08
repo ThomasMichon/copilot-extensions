@@ -1,9 +1,0 @@
-{
-  "comment": "Prevent PR-watch persistence temporary-file collisions and stop/join pollers before daemon restart.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

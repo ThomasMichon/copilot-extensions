@@ -1,9 +1,0 @@
-{
-  "comment": "ACP sessions request Copilot's raw session-event feed and record sub-agent attribution (subagent_started/completed/failed lifecycle events, agent_id/parent_tool_call_id on sub-agent tool calls, retroactive subagent_message/subagent_thought markers); the session events endpoint gains before=/limit= backward JSON paging, continuity-qualified and atomic with event-log rebuilds (HTTP protocol 23).",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

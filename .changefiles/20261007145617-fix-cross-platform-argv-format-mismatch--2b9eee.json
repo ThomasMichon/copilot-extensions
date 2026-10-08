@@ -1,9 +1,0 @@
-{
-  "comment": "Fix cross-platform argv-format mismatch in double-dash CopilotArgs regression test (Linux CI breakage from #5617)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

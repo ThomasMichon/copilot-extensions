@@ -1,9 +1,0 @@
-{
-  "comment": "Fix test_pr_nudge.py regression from #5609's stricter trusted_target reconciliation gate",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

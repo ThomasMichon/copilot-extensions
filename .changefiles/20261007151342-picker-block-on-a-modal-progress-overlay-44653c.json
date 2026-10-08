@@ -1,9 +1,0 @@
-{
-  "comment": "Picker: block on a modal progress overlay from steer Confirm until delivery completes",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
