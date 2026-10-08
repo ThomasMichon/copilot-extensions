@@ -308,15 +308,17 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   this entry incorrectly framed the merge as meeting that bar because no
   *new* Medium/High finding appeared after round six; that conflated "no
   new finding" with "zero open findings," which are not the same test.
-  Separately, `dev`'s branch ruleset requires no approving review and
-  does not enforce admins, so nothing in branch protection mechanically
-  blocked merging anyway -- but that is a statement about what the
-  ruleset enforces, not a judgment that the documented review bar was
-  satisfied. Recording both facts plainly: the merge went through
-  (ruleset permitted it), and it carried known-open Medium/High findings
-  that were declined, not resolved -- now tracked as #5727 instead of
-  silently treated as accepted. `pr-complete` reconciled this worktree
-  onto `origin/dev`.
+  Separately, and correcting a second misstatement in an earlier draft
+  of this entry: `dev` *does* require an approving review (ruleset "dev
+  branch policy: review required (maintainer bypass)", see
+  [docs/pipelines.md](../../../docs/pipelines.md)) -- the repo owner who
+  merged #5710 is a named `bypass_actors` entry on that ruleset, so this
+  genuinely was the documented **Maintainer bypass**, not an absence of
+  any review rule. Recording all three facts plainly: the merge used the
+  documented Maintainer bypass (mechanically permitted), and it still
+  carried known-open Medium/High findings that were declined, not
+  resolved -- now tracked as #5727 instead of silently treated as
+  accepted. `pr-complete` reconciled this worktree onto `origin/dev`.
 - This closes only the "extend configured sync" bullet's filesystem-
   targets/unfiltered-passes slice. SSH/ingest target support, repo-scoped
   admission fencing, scheduled settled-log ZIP compaction, and unified
