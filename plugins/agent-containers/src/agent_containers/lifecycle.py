@@ -16,6 +16,7 @@ from agent_procutil import no_window_flags
 
 from .config import (
     FLEET_LABEL,
+    RESTRICTED_PROFILE,
     SECURITY_GID_LABEL,
     SECURITY_HOME_LABEL,
     SECURITY_IMAGE_ID_LABEL,
@@ -598,13 +599,20 @@ def remove_container(
         raise RuntimeError(f"docker rm {name} failed: {res.stderr.strip()}")
 
 
-def cmd_stop(name: str) -> int:
+def cmd_stop(config: ContainersConfig, name: str) -> int:
     """CLI handler for ``agent-containers stop <name>`` (picker-venue-pivots
     Phase 2) -- the per-container analogue of "down"'s whole-fleet scope,
     backing the Containers pivot's gated Stop action. Refuses a leased
     container (the same "settle the claim first" discipline "down"/"rm"
     already apply at the fleet level) rather than yanking it out from under
-    an active borrow."""
+    an active borrow.
+
+    Routes through the same rescue-before-stop path ``down <fleet>`` already
+    applies per-member for a restricted member (by current fleet config OR
+    its own discovered security profile, mirroring ``down_fleet``'s exact
+    admission check) -- a single-container ``stop`` must never be a cheaper
+    way to skip the evidence-rescue safety net the fleet-wide command
+    enforces."""
     import sys
 
     from .lease import get_lease
@@ -617,6 +625,44 @@ def cmd_stop(name: str) -> int:
             file=sys.stderr,
         )
         return 1
+
+    info = get_container(config, name)
+    if info is not None:
+        fleet = config.fleets.get(info.fleet) if info.fleet else None
+        restricted = bool(fleet and fleet.restricted) or info.security_profile == RESTRICTED_PROFILE
+        if restricted and (fleet is None or not fleet.restricted):
+            # Mirrors down_fleet's exact admission check: a restricted-
+            # looking container with no matching restricted fleet config
+            # is deferred, never silently stopped unrescued.
+            print(
+                f"Deferred: {name} (restricted container has no matching "
+                "restricted fleet configuration)",
+                file=sys.stderr,
+            )
+            return _BUSY_EXIT
+        if restricted and info.state == RUNNING:
+            from .replacement import stop_restricted_member
+            from .rescue import RescueError
+
+            try:
+                decision = stop_restricted_member(
+                    config,
+                    fleet,
+                    info,
+                    force_abandon=False,
+                )
+            except (RescueError, RuntimeError) as exc:
+                print(str(exc), file=sys.stderr)
+                return _BUSY_EXIT
+            if decision.status != "stopped":
+                print(
+                    f"Deferred: {name} ({decision.reason or 'stop deferred'})",
+                    file=sys.stderr,
+                )
+                return _BUSY_EXIT
+            print(f"Stopped: {name}")
+            return 0
+
     try:
         stop_container(name)
     except RuntimeError as exc:
@@ -626,11 +672,17 @@ def cmd_stop(name: str) -> int:
     return 0
 
 
-def cmd_remove(name: str, *, force: bool = False) -> int:
+def cmd_remove(config: ContainersConfig, name: str, *, force: bool = False) -> int:
     """CLI handler for ``agent-containers remove <name>`` -- the
     per-container analogue of "rm"'s whole-fleet scope, backing the
     Containers pivot's gated Remove action. Refuses a leased container for
-    the same reason `cmd_stop` does."""
+    the same reason `cmd_stop` does.
+
+    Same rescue-parity rationale as ``cmd_stop`` above -- a restricted
+    member (by current fleet config OR its own discovered security profile)
+    is rescued before removal exactly as ``rm <fleet>`` already does
+    per-member, so a single-container ``remove`` can't silently destroy
+    session evidence a fleet-wide ``rm`` would have protected."""
     import sys
 
     from .lease import get_lease
@@ -643,6 +695,67 @@ def cmd_remove(name: str, *, force: bool = False) -> int:
             file=sys.stderr,
         )
         return 1
+
+    info = get_container(config, name)
+    if info is not None:
+        fleet = config.fleets.get(info.fleet) if info.fleet else None
+        # Mirrors remove_fleet's exact admission logic -- see its own
+        # docstring/comments for the full case table:
+        #   - fleet exists and is restricted            -> rescue, no migration
+        #   - fleet exists, drifted, member built restricted -> rescue, migrating=True
+        #   - fleet exists, drifted, member built otherwise  -> defer (no migration path)
+        #   - fleet missing entirely, member looks restricted -> defer
+        #   - none of the above                          -> bare remove
+        profile_drifted = fleet is not None and info.security_profile != fleet.security_profile
+        restricted = bool(fleet and fleet.restricted) or info.security_profile == RESTRICTED_PROFILE or profile_drifted
+        if restricted:
+            if fleet is None or not fleet.restricted:
+                if profile_drifted and info.security_profile != RESTRICTED_PROFILE:
+                    print(
+                        f"Deferred: {name} (discovered security profile "
+                        f"{info.security_profile!r} has no supported migration "
+                        "path; recreate it manually)",
+                        file=sys.stderr,
+                    )
+                    return _BUSY_EXIT
+                if not profile_drifted:
+                    print(
+                        f"Deferred: {name} (restricted container has no "
+                        "matching restricted fleet configuration)",
+                        file=sys.stderr,
+                    )
+                    return _BUSY_EXIT
+                # profile_drifted and info.security_profile == RESTRICTED_PROFILE:
+                # still restricted-BUILT -- full rescue/liveness, migrating=True.
+                migrating = True
+            else:
+                migrating = False
+
+            from .replacement import destroy_restricted_member
+            from .rescue import RescueError
+
+            try:
+                decision = destroy_restricted_member(
+                    config,
+                    fleet,
+                    info,
+                    operation="remove",
+                    force_remove=force,
+                    force_abandon=False,
+                    migrating=migrating,
+                )
+            except (RescueError, RuntimeError) as exc:
+                print(str(exc), file=sys.stderr)
+                return _BUSY_EXIT
+            if decision.status != "removed":
+                print(
+                    f"Deferred: {name} ({decision.reason or 'remove deferred'})",
+                    file=sys.stderr,
+                )
+                return _BUSY_EXIT
+            print(f"Removed: {name}")
+            return 0
+
     try:
         remove_container(name, force=force)
     except RuntimeError as exc:
@@ -655,6 +768,19 @@ def cmd_remove(name: str, *, force: bool = False) -> int:
 #: Matches `__main__._BUSY_EXIT` -- the shared "operation deferred/blocked,
 #: retryable" exit code convention this CLI uses across its commands.
 _BUSY_EXIT = 75
+
+
+def dispatch_stop_or_remove(args) -> int:
+    """``__main__``'s ``stop``/``remove`` dispatch, kept here (not inlined
+    in ``__main__.py``) to stay under its own module-size budget -- see
+    the module-level comment atop ``test_cli_operations.py``'s stop/remove
+    section for the same convention."""
+    from .config import load_config
+
+    config = load_config()
+    if args.command == "stop":
+        return cmd_stop(config, args.name)
+    return cmd_remove(config, args.name, force=args.force)
 
 
 def cmd_release(target: str) -> int:
