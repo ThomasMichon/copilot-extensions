@@ -258,9 +258,11 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   publication entirely rather than attempting to filter it -- admission
   fencing for that case is an explicit, named follow-up, not silently
   approximated).
-- Opened PR #5710. Copilot review ran six rounds, COMMENTED throughout
+- Opened PR #5710. Copilot review posted seven verdicts (not six, as an
+  earlier draft of this entry incorrectly stated), COMMENTED throughout
   (verdict tier softened from "Changes recommended" to "Needs a closer
-  look" by the final round), closing a real progression of findings:
+  look" only on the seventh and final round), closing a real progression
+  of findings across the first six:
   POSIX root-pinning for the process-log directory walk (reusing
   `process_logs.py`'s own primitives, now promoted to public:
   `supports_dir_fd`/`open_root_dir`/`open_regular_at`); rotation/deletion
@@ -293,11 +295,20 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   symlinked ancestor (e.g. a relocated `$HOME`). A related Medium
   (composing one clearable status across both transfer legs, rather than
   requiring explicit operator investigation to clear a `partial`) was
-  also declined as a bounded follow-up.
-- Self-merged via maintainer bypass after the sixth round confirmed no
-  new substantive finding, per CONTRIBUTING.md's "actual bar" (zero
-  Medium/High *new* findings), not an unbounded chase of every comment.
-  `pr-complete` reconciled this worktree onto `origin/dev`.
+  also declined as a bounded follow-up. **Both declines were originally
+  recorded only as docstring/PR-description prose, with no tracking
+  issue -- a documented limitation is not remediation.** They are now
+  tracked as [#5727](https://github.com/ThomasMichon/copilot-extensions/issues/5727)
+  so the deferral doesn't silently stay undone.
+- Merged after the sixth round confirmed no new substantive finding, per
+  CONTRIBUTING.md's "actual bar" (zero Medium/High *new* findings open),
+  not an unbounded chase of every comment; the seventh round's single
+  finding was tier-softened ("Needs a closer look"), not a new
+  Medium/High. This repo's `dev` ruleset requires no approving review and
+  does not enforce admins, so this was an ordinary policy-compliant
+  merge -- **not** a maintainer bypass, correcting an earlier draft of
+  this entry that misdescribed it as one. `pr-complete` reconciled this
+  worktree onto `origin/dev`.
 - This closes only the "extend configured sync" bullet's filesystem-
   targets/unfiltered-passes slice. SSH/ingest target support, repo-scoped
   admission fencing, scheduled settled-log ZIP compaction, and unified
