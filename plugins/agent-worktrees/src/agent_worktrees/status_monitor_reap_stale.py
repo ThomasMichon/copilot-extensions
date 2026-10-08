@@ -285,7 +285,16 @@ def _ensure_monitor_if_zero_candidates_under_cutover_guard() -> str:
     except Exception as exc:
         return f"error:{exc}"
     finally:
-        lease.release()
+        try:
+            lease.release()
+        except Exception:
+            # Best-effort: this whole helper's contract is "never raises"
+            # (it is called from a detached, delayed repair process with
+            # no one to observe an exception) -- a release failure here
+            # must not escape and break that contract, matching
+            # activate_after_update()'s own nested-finally handling of the
+            # identical failure mode at the cutover call site.
+            pass
 
 
 def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:

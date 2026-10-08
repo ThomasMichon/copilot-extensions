@@ -3550,6 +3550,30 @@ def _patch_cutover_lock(monkeypatch, *, acquirable: bool):
     return released
 
 
+def test_ensure_monitor_helper_never_raises_when_lease_release_itself_fails(monkeypatch):
+    """The helper's own contract is "never raises" (it runs inside a
+    detached, delayed repair process with no one to observe an exception)
+    -- a lease.release() failure in its own finally must not escape and
+    break that contract, matching activate_after_update()'s own
+    nested-finally handling of the identical failure mode at the real
+    cutover call site."""
+    from agent_worktrees import status_monitor_cutover as smc
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: True)
+
+    class _RaisingReleaseLease:
+        def release(self):
+            raise OSError("lock file vanished mid-release")
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda lock_root, **k: _RaisingReleaseLease())
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "ensured"  # the real work still completed and was reported
+
+
 def test_cmd_reap_stale_ensures_a_monitor_when_zero_candidates_survive(monkeypatch, capsys):
     """The repair pass only audits/terminates EXISTING live candidates -- a
     rollback that left ZERO live monitors (the other documented ambiguous
