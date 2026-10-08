@@ -228,14 +228,15 @@ def test_read_events_reuses_the_cached_parse_across_distinct_filters(
     activity.log_event("worktree_created", worktree_id="wt-1")
     activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
 
-    calls: list[Path] = []
-    real_parse_all = activity._parse_all_events
+    from agent_worktrees import jsonl_cache
+    calls = []
+    real_read = jsonl_cache._read_snapshot
 
-    def _spy(path: Path):
-        calls.append(path)
-        return real_parse_all(path)
+    def _spy(handle, offset, size):
+        calls.append(size - offset)
+        return real_read(handle, offset, size)
 
-    monkeypatch.setattr(activity, "_parse_all_events", _spy)
+    monkeypatch.setattr(jsonl_cache, "_read_snapshot", _spy)
     activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
     activity.read_events(worktree_id="wt-1", event="handoff_predecessor_retire")
     assert len(calls) == 1, "a second call with a different filter must still be a cache hit"
@@ -402,14 +403,14 @@ def test_prune_is_visible_to_a_cache_entry_invalidate_can_never_reach(
     stale = activity.read_events()  # "the monitor process" primes its own cache
     assert len(stale) == 2
     with jsonl_cache._cache_lock:
-        other_process_entry = jsonl_cache._cache[str(log)]
+        other_process_entry = jsonl_cache._cache[(str(log), "strict")]
 
     activity._prune(log, retention_days=7)  # runs in "a different process"
 
     # Reinsert the pre-prune entry -- standing in for the monitor's cache,
     # which this call's invalidate() was never able to reach.
     with jsonl_cache._cache_lock:
-        jsonl_cache._cache[str(log)] = other_process_entry
+        jsonl_cache._cache[(str(log), "strict")] = other_process_entry
     remaining = activity.read_events()
     assert len(remaining) == 1, "the new inode at this path must still miss this stale entry"
     assert remaining[0]["worktree_id"] == "new"

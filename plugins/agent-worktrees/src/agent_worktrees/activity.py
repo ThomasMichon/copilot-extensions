@@ -125,6 +125,7 @@ swallows its own exceptions.
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 import json
 import logging
 import os
@@ -588,34 +589,9 @@ def parse_since(value: str) -> datetime | None:
     return dt
 
 
-def _parse_all_events(path: Path) -> list[dict]:
-    """Every parseable line in *path* as a dict, oldest first, unfiltered.
-
-    The expensive, cacheable half of :func:`read_events` -- full file I/O
-    plus one ``json.loads`` per line. Split out so repeated calls with
-    different filters (the common status-monitor sweep shape: once for
-    ``handoff_cutover_spawn``, once for ``handoff_predecessor_retire``, per
-    worktree, per sweep) hit :mod:`jsonl_cache` instead of re-reading this
-    machine-global log -- which can reach tens of MB after a few days of
-    multi-session use (copilot-extensions#3751's own diagnosis, same shape,
-    different call path) -- from scratch every time.
-    """
-    out: list[dict] = []
-    if not path.exists():
-        return out
-    try:
-        with open(path, encoding="utf-8") as handle:
-            for raw in handle:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    out.append(json.loads(raw))
-                except Exception:
-                    continue
-    except OSError:
-        return out
-    return out
+def _parse_all_events(path: Path) -> Sequence[dict]:
+    """Read an incremental, opening-size-bounded activity-log snapshot."""
+    return jsonl_cache.read_jsonl(path)
 
 
 def _rec_ts(rec: dict) -> datetime | None:
@@ -640,7 +616,7 @@ def read_events(
     """Return matching events, oldest first."""
     path = log_path()
     matched: list[dict] = []
-    for rec in jsonl_cache.cached_parse(path, _parse_all_events):
+    for rec in _parse_all_events(path):
         if worktree_id and rec.get("worktree_id") != worktree_id:
             continue
         if launch_id and rec.get("launch_id") != launch_id:
@@ -651,15 +627,10 @@ def read_events(
             ts = _rec_ts(rec)
             if ts is not None and ts < since:
                 continue
-        matched.append(rec)  # a reference into jsonl_cache's cached list -- not copied yet
+        matched.append(rec)
     if limit is not None and limit > 0:
         matched = matched[-limit:]
-    # Copy only the FINAL (already tail-limited) subset, not jsonl_cache's
-    # full cached list and not even every matched record before limiting --
-    # the cached list can be tens of thousands of entries long (the
-    # machine-global activity.jsonl); a broad filter with a small `limit`
-    # must not still pay an O(every match) copy cost just to hand back an
-    # independent result (jsonl_cache's own "Mutation isolation invariant").
+    # Copy after limiting; cached history remains read-only.
     out = [copy.deepcopy(rec) for rec in matched]
     return out
 

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +16,21 @@ from agent_worktrees import __main__ as m
 from agent_worktrees import activity
 from agent_worktrees import handoff_trace
 from agent_worktrees import tracking
+
+
+def test_append_lock_initializes_sentinel_only_after_acquisition(tmp_path, monkeypatch):
+    path = tmp_path / "trace.lock"
+    observed = []
+
+    def locking(fd, mode, count):
+        observed.append((mode, os.fstat(fd).st_size, count))
+
+    fake = SimpleNamespace(LK_LOCK=1, LK_UNLCK=2, locking=locking)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    monkeypatch.setattr(handoff_trace, "os", SimpleNamespace(name="nt"))
+    with handoff_trace._append_lock(path):
+        assert path.read_bytes() == b"\0"
+    assert observed == [(1, 0, 1), (2, 1, 1)]
 
 
 @pytest.fixture
@@ -60,14 +78,15 @@ def test_read_trace_reuses_the_cached_parse_until_a_new_event_lands(
     full re-read + re-parse."""
     handoff_trace.append_event("proj-a", "wt-1", {"event": "handoff_cutover_spawn"})
 
-    calls: list[Path] = []
-    real_parse = handoff_trace._parse_trace_file
+    from agent_worktrees import jsonl_cache
+    calls = []
+    real_read = jsonl_cache._read_snapshot
 
-    def _spy(path: Path):
-        calls.append(path)
-        return real_parse(path)
+    def _spy(handle, offset, size):
+        calls.append(size - offset)
+        return real_read(handle, offset, size)
 
-    monkeypatch.setattr(handoff_trace, "_parse_trace_file", _spy)
+    monkeypatch.setattr(jsonl_cache, "_read_snapshot", _spy)
     handoff_trace.read_trace("proj-a", "wt-1")
     handoff_trace.read_trace("proj-a", "wt-1")
     assert len(calls) == 1, "second read_trace call must be a cache hit, not a re-parse"
