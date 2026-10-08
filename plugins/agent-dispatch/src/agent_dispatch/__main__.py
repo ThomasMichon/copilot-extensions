@@ -160,6 +160,7 @@ from .steering_cli import (  # noqa: F401 -- re-exported for existing call sites
     register_steering_commands,
 )
 
+from .attention_cli import register_attention_commands
 from .execution_registration_cli import register_execution_commands
 from .declaration_loops_cli import register_declaration_loop_commands
 from .registrar_parser_cli import register_registrar_commands
@@ -658,6 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_task_lifecycle_commands(sub)
 
     register_steering_commands(sub)
+    register_attention_commands(sub)
 
     p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
     p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")

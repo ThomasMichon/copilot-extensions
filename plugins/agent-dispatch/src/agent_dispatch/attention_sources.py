@@ -1,0 +1,210 @@
+"""Attention sources and the aggregator over them.
+
+Built in: ``dispatch`` (this coordinator's tasks). External **command sources**
+are registered on this machine (``agent-dispatch attention source add``) under a
+name that is their identity; each prints a source-result envelope, and the
+aggregator stamps and validates it at the boundary (see
+:mod:`agent_dispatch.attention_contract`). Every source runs under its own
+timeout; a timeout or any contract violation is that source's ``failed``,
+never a crash and never an empty source.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from . import attention_contract as ac
+
+BUILTIN_SOURCES = ("dispatch",)
+DEFAULT_TIMEOUT = 20.0
+MAX_TIMEOUT = 120.0
+#: Lifecycle states that can carry an attention condition.
+_OPEN_STATES = "proposed,queued,claimed,started,suspended,submitted"
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# -- the dispatch source ---------------------------------------------------------
+
+
+def _task_item(task: dict[str, Any], read_at: str) -> dict[str, Any] | None:
+    """One task's item, coalescing its conditions to the worst: an operator ask
+    (``awaiting_steer``), an operator hold (``hold_reason``), or a completion
+    claim awaiting confirmation (``submitted``). ``completed`` is never an item."""
+    task_id, title = str(task.get("id") or ""), ac.one_line(task.get("title"), 120)
+    status = task.get("status")
+    card = task.get("card") if isinstance(task.get("card"), dict) else {}
+    show = {"verb": "show", "argv": ["agent-dispatch", "card", "show", task_id]}
+    if not task_id:
+        return None
+    if task.get("awaiting_steer"):
+        state, reason = "awaiting_input", f"awaiting your answer: {title}"
+        extra = {"input": card["request_input"]} if isinstance(card.get("request_input"), dict) else {}
+    elif task.get("hold_reason"):
+        state, reason, extra = "blocked", f"held ({ac.one_line(task['hold_reason'], 60)}): {title}", {}
+    elif status == "submitted":
+        state, reason, extra = "review", f"completion awaiting confirmation: {title}", {}
+    else:
+        return None
+    item = {
+        "schema": ac.SCHEMA, "entity": "task", "entity_ref": task_id, "lifecycle_state": status,
+        "display_state": state, "severity": ac.SEVERITY[state], "reason": ac.one_line(reason),
+        "created_at": None, "updated_at": task.get("updated_at") or read_at,
+        "confidence": "reported", "actions": [show], "source": "dispatch",
+        "id": ac.make_id("dispatch", "task", task_id), "also": [], **extra,
+    }
+    return item
+
+
+def read_dispatch(client_factory: Callable[[], Any], read_at: str) -> dict[str, Any]:
+    with client_factory() as client:
+        tasks = client.list(repo=None, status=_OPEN_STATES, limit=1000)
+    items = [i for i in (_task_item(t, read_at) for t in tasks or []) if i]
+    return {"items": items, "status": "ok", "uncertain": 0, "read_at": read_at}
+
+
+# -- command sources ---------------------------------------------------------------
+
+
+def registry_path() -> Path:
+    from .config import install_dir
+
+    return install_dir() / "attention-sources.json"
+
+
+def load_registrations(path: Path | None = None) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
+    """``({name: {argv, timeout}}, config_errors)``. A registration that isn't a
+    valid source (a bad or built-in name, no argv, a bad timeout) is rejected into
+    ``config_errors`` -- never listed as a source under that name."""
+    path = path or registry_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}, []
+    except (OSError, ValueError) as exc:
+        return {}, [{"name": "*", "error": ac.one_line(f"{path} is unreadable: {exc}")}]
+    sources = raw.get("sources") if isinstance(raw, dict) else None
+    if not isinstance(sources, dict):
+        return {}, [{"name": "*", "error": ac.one_line(f"{path} has no sources object")}]
+    valid, errors = {}, []
+    for name, spec in sources.items():
+        error = registration_error(name, spec)
+        if error:
+            errors.append({"name": str(name), "error": error})
+        else:
+            valid[name] = {"argv": list(spec["argv"]), "timeout": float(spec.get("timeout", DEFAULT_TIMEOUT))}
+    return valid, errors
+
+
+def registration_error(name: Any, spec: Any) -> str | None:
+    if not isinstance(name, str) or not ac.SOURCE_NAME.match(name):
+        return "a source name must match [a-z0-9-]+"
+    if name in BUILTIN_SOURCES or name in ("bridge", "pr"):
+        return f"{name!r} is a built-in source's name"
+    if not isinstance(spec, dict):
+        return "a registration must be an object"
+    argv = spec.get("argv")
+    if not (isinstance(argv, list) and argv and all(isinstance(a, str) and a for a in argv)):
+        return "argv must be a non-empty list of strings"
+    timeout = spec.get("timeout", DEFAULT_TIMEOUT)
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= MAX_TIMEOUT:
+        return f"timeout must be in (0, {MAX_TIMEOUT:g}] seconds"
+    return None
+
+
+def save_registrations(sources: dict[str, dict[str, Any]], path: Path | None = None) -> None:
+    path = path or registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"sources": sources}, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def read_command(name: str, spec: dict[str, Any], read_at: str,
+                 run: Callable[..., Any] | None = None) -> dict[str, Any]:
+    """Run one command source and translate its envelope (never guessing)."""
+    if run is None:
+        from .procutil import run_background_capture as run
+    done = run(spec["argv"], timeout=spec["timeout"])
+    if done is None:
+        return ac.command_failure(f"did not finish within {spec['timeout']:g}s (or could not start)")
+    if done.returncode != 0:
+        return ac.command_failure(f"exited {done.returncode}: {done.stderr or done.stdout}")
+    try:
+        raw = json.loads(done.stdout)
+    except ValueError:
+        return ac.command_failure("output is not JSON")
+    result = ac.normalize_command_result(raw, name=name)
+    if result["status"] == "failed":
+        return result
+    try:
+        result["items"] = [ac.stamp_command_item(i, name=name) for i in result["items"]]
+    except ac.ContractError as exc:
+        return ac.command_failure(f"invalid item: {exc}")
+    result.setdefault("read_at", read_at)
+    return result
+
+
+# -- the aggregator ----------------------------------------------------------------
+
+
+def _finish(name: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Validate a source's items (``created_at`` may still be unstamped) and the
+    one-item-per-entity rule; any violation makes the source ``failed``. Runs
+    before the first-observed store, so an invalid read never moves its times."""
+    if result["status"] in ("failed", "disabled"):
+        return result
+    keys = set()
+    for item in result["items"]:
+        item.setdefault("updated_at", result["read_at"])
+        try:
+            ac.validate_item({**item, "created_at": item.get("created_at") or result["read_at"]})
+        except ac.ContractError as exc:
+            return ac.command_failure(f"invalid item: {exc}")
+        key = (item["entity"], item["entity_ref"])
+        if key in keys:
+            return ac.command_failure(f"two items for {item['entity']} {item['entity_ref']}")
+        keys.add(key)
+    return result
+
+
+def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: dict[str, float],
+            selected: list[str] | None, config_errors: list[dict[str, str]],
+            store: Any, read_at: str | None = None) -> dict[str, Any]:
+    """Read every (selected) source concurrently and build the aggregate envelope.
+    A selected name that is only a rejected registration is reported through its
+    config error, not as a source."""
+    read_at = read_at or now_iso()
+    names = sorted(n for n in (selected if selected is not None else readers) if n in readers)
+    results: dict[str, dict[str, Any]] = {}
+    pool = ThreadPoolExecutor(max_workers=max(1, len(names)))
+    futures = {name: pool.submit(readers[name], read_at) for name in names}
+    for name in names:
+        try:
+            raw = futures[name].result(timeout=timeouts.get(name, DEFAULT_TIMEOUT))
+        except FutureTimeout:
+            raw = ac.command_failure(f"timed out after {timeouts.get(name, DEFAULT_TIMEOUT):g}s")
+        except Exception as exc:  # noqa: BLE001 -- a source failure is that source's, never the aggregate's
+            raw = ac.command_failure(f"{type(exc).__name__}: {exc}")
+        raw.setdefault("read_at", read_at)
+        results[name] = _finish(name, raw)
+    pool.shutdown(wait=False, cancel_futures=True)
+    store.apply({n: r for n, r in results.items() if r["status"] in ("ok", "uncertain")}, read_at)
+    if selected is not None:
+        config_errors = [e for e in config_errors if e["name"] in selected]
+    sources = [{"name": n, "status": r["status"], "uncertain": r.get("uncertain", 0),
+                "items": len(r["items"]), "read_at": r.get("read_at", read_at),
+                **({"error": r["error"]} if r.get("error") else {})}
+               for n, r in sorted(results.items())]
+    items = ac.dedupe(i for r in results.values() for i in r["items"])
+    config_errors = sorted(config_errors, key=lambda e: (e["name"], e["error"]))
+    return {"schema": ac.SCHEMA, "status": ac.aggregate_status(sources, config_errors, items),
+            "read_at": read_at, "selected": selected, "sources": sources,
+            "config_errors": config_errors, "items": items}
