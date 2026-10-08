@@ -89,7 +89,7 @@ an empty queue.
   | `reason` | one line, ≤ 200 chars |
   | `created_at`, `updated_at` | when the condition began / was last observed. A source that only knows when it observed something (e.g. a `pr bar` read) gets `created_at` from the aggregator's persisted first-observed time, kept **per source** for `(source, entity, entity_ref, display_state)`, so repeated reads keep the same order. Each source's time is cleared only by proof from that same source that the condition ended: a read of it with `status: ok` that no longer contains the item. An item missing from a `failed` or `uncertain` read, or from a source that is now `disabled`, keeps its time -- an outage proves nothing, so recovery doesn't reorder an unchanged queue -- and one source's `ok` omission never clears another source's evidence for the same entity. A deduplicated item's `created_at` is the earliest of its contributing sources' times |
   | `confidence` | `reported` \| `scanned` \| `heuristic` (presence's vocabulary) |
-  | `actions[]` | `{verb, argv}`: sanctioned commands that run **as-is**, with no placeholder to fill (e.g. `agent-dispatch card show <task-id>`, `agent-bridge result <session-id>`). An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
+  | `actions[]` | `{verb, argv}`, in order (the first is the item's default): sanctioned commands that run **as-is**, with no placeholder to fill. `argv` is a non-empty string array. `verb` is the machine-readable operation, never a display label (a client derives its own label from it), from a closed set: `show` (read-only: prints the entity's detail, safe to run without confirmation), `resume` (continues or re-attaches the entity's owner -- mutating, so operator-initiated), `open` (opens the entity in an external viewer, e.g. a browser). A source extends it only under its own prefix, `x.<source>.<verb>`; a client treats a verb it doesn't know as operator-initiated. Any other `verb` makes the item invalid (and its source `failed`). E.g. `{"verb": "show", "argv": ["agent-dispatch", "card", "show", "<task-id>"]}`, `{"verb": "resume", "argv": ["agent-bridge", "resume", "<session-id>"]}`, `{"verb": "open", "argv": ["gh", "pr", "view", "<n>", "--repo", "<owner/name>", "--web"]}`. An answer that needs operator input isn't an action: the item carries the card's own `request_input` form spec (`input`), and the client submits it with `agent-dispatch steer submit` once filled |
   | `source` | the adapter that produced it |
   | `input` | optional: the card's `request_input` form spec when resolving it needs an operator's answer (submitted with `agent-dispatch steer submit`) |
   | `also[]` | **aggregator-owned**: the lower-ranked items deduplicated into this one (each a full item, in queue order); empty when none. A source never fills it -- an adapter or command item with a non-empty `also[]` is malformed, and that source is `failed` -- so a nested item can't slip past the identity stamping and the one-item-per-entity check |
@@ -145,7 +145,12 @@ an empty queue.
   included, sorted by `name`; `uncertain` and `items` are counts. A **selective
   read** (`--source <name>...`) is scoped to the named sources: `sources[]` lists
   only them, `items` and the aggregate `status` cover only them, and the envelope
-  carries `"selected": ["<name>", ...]` (`null` for a full read). A scoped
+  carries `"selected": ["<name>", ...]` (`null` for a full read). `config_errors[]`
+  is scoped the same way: a full read lists every rejected registration, a
+  selective read only those whose `name` is selected, so a malformed registration
+  of an unselected name doesn't degrade `--source dispatch`, while selecting the
+  name a rejected registration claimed reports why it didn't run. It's sorted by
+  `name`, then `error`. A scoped
   `clear` therefore says "nothing needs you *from these sources*", and a client
   can tell it from a full read. `attention next`
   returns the same envelope with `item` (one item, or `null` when the queue is
@@ -270,7 +275,10 @@ an empty queue.
   **not** a source -- listing it under its colliding name would give two
   `sources[]` entries one identity. It is reported in the envelope's
   `config_errors[]` (`{"name", "error"}`, empty when none), and any config error
-  makes the aggregate `degraded`: a source that was meant to run didn't. The aggregator **stamps** identity at the
+  the read lists makes the aggregate `degraded`: a source that was meant to run
+  didn't. A selective read lists only the selected names' errors (see the
+  aggregate response), and a name a rejected registration claimed still counts
+  as known to `--source`. The aggregator **stamps** identity at the
   boundary rather than trusting the command. A command item is the item schema
   with `source` and `id` **optional**; validation runs in this order: (1) a
   present `source` or `id` that differs from the registered name or the derived
@@ -300,7 +308,11 @@ an empty queue.
   without one gets the aggregator's own `error`, `"source reported failed without
   an error"`, so every response maps to the aggregate shape.
 - [ ] Docs: `plugins/agent-dispatch/docs/cli-reference.md`, the skill reference,
-  and the attention item schema in the plugin docs.
+  and the attention item schema in the plugin docs; plus the two sibling
+  commands in their own plugins' CLI references, each with its operands, JSON
+  envelope and failure semantics: `agent-bridge --json attention <session>` in
+  agent-bridge's, and `agent-worktrees list --all-projects --tracked-prs --json`
+  in agent-worktrees'.
 
 ### Phase 4 — Clients
 
@@ -330,7 +342,12 @@ an empty queue.
   carries its own `schema: 1`;
   `clear` and `degraded` with zero items stay distinguishable; a `--source
   dispatch` read lists only `dispatch` in `sources[]`, carries `"selected":
-  ["dispatch"]`, and its status ignores a failing unselected source.
+  ["dispatch"]`, and its status ignores a failing unselected source; with a
+  malformed registration named `foo`, `--source dispatch` carries an empty
+  `config_errors[]` and keeps its status, while `--source foo` lists `foo`'s
+  error and is `degraded`. Actions: a `verb` outside `show | resume | open` and
+  not under the source's own `x.<source>.` prefix (including another source's
+  prefix) is an invalid item, and so is an empty `argv`.
 - [ ] Unit, the dispatch adapter: a `submitted` task is a `review` item and a
   `completed` one isn't; `stalled` at exactly the threshold isn't an item and one
   second over is; held tasks with an `unknown` or `gone` owner never count; a
