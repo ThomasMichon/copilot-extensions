@@ -53,12 +53,34 @@ _find_archive_path() {  # <owner/repo> <slug> -- locate the real dated archive d
         | grep -E "^efforts/[0-9]{4}/[0-9]{2}/.*$2\$"
 }
 
-_fetch_readme() {  # <owner/repo> <dir-path> -- raw README.md content via contents API
-    gh api -H "Accept: application/vnd.github.raw" "repos/$1/contents/$2/README.md"
+_fetch_readme() {  # <owner/repo> <dir-path> [ref] -- raw README.md content via contents API
+    gh api -H "Accept: application/vnd.github.raw" "repos/$1/contents/$2/README.md?ref=${3:-HEAD}"
 }
 
 _list_issues_by_label() {  # <owner/repo> <label> -- sorted issue numbers carrying that label
     gh issue list --repo "$1" --state all --label "$2" --json number --jq '.[].number' | sort -n
+}
+
+_find_builder_pr_added_dir() {  # <owner/repo> -- effort-builder's own contract accepts an
+    # opened (unmerged) effort PR, not only a direct default-branch commit --
+    # a new efforts/active/<dir>/README.md can therefore exist ONLY on an open
+    # PR's head, where the default-branch contents diff above would never see
+    # it. Scan real open PRs' real file-status (REST, which (unlike the
+    # GraphQL files connection) reports true added/modified/removed) for the
+    # first newly ADDED effort README, and print "<pr-number> <headRefName>
+    # <dir>" for it.
+    local or="$1" num ref filename dir
+    while read -r num ref; do
+        [ -z "$num" ] && continue
+        filename="$(gh api "repos/$or/pulls/$num/files" --jq '.[] | select(.status=="added") | .filename' 2>/dev/null \
+            | grep -E '^efforts/active/[^/]+/README\.md$' | head -1)"
+        if [ -n "$filename" ]; then
+            dir="$(printf '%s' "$filename" | sed -E 's#^efforts/active/([^/]+)/README\.md$#\1#')"
+            printf '%s %s %s\n' "$num" "$ref" "$dir"
+            return 0
+        fi
+    done < <(gh pr list --repo "$or" --state open --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"' 2>/dev/null)
+    return 1
 }
 
 phase 9 "post-check: ground-truth after the orchestrator's turn"
@@ -188,13 +210,42 @@ if [ -n "$_remote" ]; then
             _removed="$(comm -23 "$_before_list" "$_efforts_active_after_raw" 2>/dev/null | tr '\n' ',' )"
             cr_meta "efforts_active_added" "$_added"
             cr_meta "efforts_active_removed" "$_removed"
+            _builder_added_dir=""
+            _builder_ref="HEAD"
             if [ -n "$_added" ]; then
                 pass "efforts/active/ gained new effort dir(s) since setup: $_added (real effort-builder evidence)"
+                _builder_added_dir="$(printf '%s' "$_added" | tr ',' '\n' | head -1)"
+            else
+                # effort-builder's own contract accepts an OPENED (unmerged)
+                # effort PR too -- in that valid case the new directory
+                # exists only on the PR head, so the default-branch diff
+                # above stays empty. Before concluding nothing was built,
+                # look for a newly-added efforts/active/<dir>/README.md
+                # across the repo's real open PRs (true add/modify/remove
+                # status, not just path/title) and corroborate against that
+                # PR's own head ref instead.
+                if capture "pc-builder-open-pr-search" -- _find_builder_pr_added_dir "$_owner_repo"; then
+                    _pr_match="$(sed -n '2,$p' "$CR_LOGDIR/pc-builder-open-pr-search.log" | head -1)"
+                    if [ -n "$_pr_match" ]; then
+                        _builder_pr_num="$(printf '%s' "$_pr_match" | awk '{print $1}')"
+                        _builder_ref="$(printf '%s' "$_pr_match" | awk '{print $2}')"
+                        _builder_added_dir="$(printf '%s' "$_pr_match" | awk '{print $3}')"
+                        cr_meta "effort_builder_open_pr" "$_builder_pr_num"
+                        pass "effort-builder's new effort dir '$_builder_added_dir' found on open PR #$_builder_pr_num (ref '$_builder_ref'), not yet on the default branch (real effort-builder evidence)"
+                    fi
+                fi
+                if [ -z "$_builder_added_dir" ]; then
+                    info "efforts/active/ gained no new directory since setup, on the default branch or any open PR -- effort-builder may not have created one (or used an existing effort instead)"
+                fi
+            fi
 
-                # Plain dir creation doesn't corroborate GROUPING -- derive
-                # the expected issue set from effort-builder's own declared
-                # include_labels (never hardcoded) and confirm the new
-                # effort's real README content actually references them.
+            if [ -n "$_builder_added_dir" ]; then
+                # Plain dir/PR creation doesn't corroborate GROUPING --
+                # derive the expected issue set from effort-builder's own
+                # declared include_labels (never hardcoded) and confirm the
+                # new effort's real README content (read from the resolved
+                # ref: default branch or the open PR's own head) actually
+                # references them.
                 _builder_decl="$REGISTRAR_DIR/effort-builder.yaml"
                 _builder_label="$([ -f "$_builder_decl" ] && grep -E '^include_labels:' "$_builder_decl" | head -1 | sed -E 's/^include_labels:\s*\[?\s*//; s/\s*\]?\s*$//' | cut -d',' -f1 | tr -d '"'"'"'\r' | sed -E 's/^\s+|\s+$//g')"
                 if [ -n "$_builder_label" ]; then
@@ -202,9 +253,8 @@ if [ -n "$_remote" ]; then
                         _expected_issues_log="$CR_LOGDIR/pc-builder-expected-issues.log"
                         _expected_issues="$(sed -n '2,$p' "$_expected_issues_log")"
                         _expected_issue_count="$(printf '%s\n' "$_expected_issues" | grep -c . || true)"
-                        _first_added_dir="$(printf '%s' "$_added" | tr ',' '\n' | head -1)"
-                        if [ "${_expected_issue_count:-0}" -gt 0 ] && [ -n "$_first_added_dir" ]; then
-                            if capture "pc-builder-readme" -- _fetch_readme "$_owner_repo" "efforts/active/$_first_added_dir"; then
+                        if [ "${_expected_issue_count:-0}" -gt 0 ]; then
+                            if capture "pc-builder-readme" -- _fetch_readme "$_owner_repo" "efforts/active/$_builder_added_dir" "$_builder_ref"; then
                                 _builder_readme_log="$CR_LOGDIR/pc-builder-readme.log"
                                 _missing_refs=""
                                 while IFS= read -r _n; do
@@ -212,22 +262,20 @@ if [ -n "$_remote" ]; then
                                     grep -Eq "#${_n}([^0-9]|\$)" "$_builder_readme_log" || _missing_refs="$_missing_refs,$_n"
                                 done <<<"$_expected_issues"
                                 if [ -z "$_missing_refs" ]; then
-                                    pass "effort-builder's new effort '$_first_added_dir' README references all ${_expected_issue_count} expected issue(s) labeled '$_builder_label' (real grouping evidence)"
+                                    pass "effort-builder's new effort '$_builder_added_dir' (ref '$_builder_ref') README references all ${_expected_issue_count} expected issue(s) labeled '$_builder_label' (real grouping evidence)"
                                 else
-                                    info "effort-builder's new effort '$_first_added_dir' README is missing a reference to issue(s) ${_missing_refs#,} expected from label '$_builder_label'"
+                                    info "effort-builder's new effort '$_builder_added_dir' (ref '$_builder_ref') README is missing a reference to issue(s) ${_missing_refs#,} expected from label '$_builder_label'"
                                 fi
                             else
                                 jam "dispatch-config" "could not read the new effort's README content via the contents API (see cr-logs/pc-builder-readme.log)" "check gh auth/rate limits"
                             fi
                         else
-                            info "no issues found under effort-builder's declared label '$_builder_label' (or no new effort dir) -- cannot corroborate grouping"
+                            info "no issues found under effort-builder's declared label '$_builder_label' -- cannot corroborate grouping"
                         fi
                     else
                         jam "dispatch-config" "could not list issues for effort-builder's declared label '$_builder_label' (see cr-logs/pc-builder-expected-issues.log)" "check gh auth/rate limits"
                     fi
                 fi
-            else
-                info "efforts/active/ gained no new directory since setup -- effort-builder may not have created one (or used an existing effort instead)"
             fi
             if [ -n "$_removed" ]; then
                 pass "efforts/active/ lost dir(s) since setup: $_removed (real effort-driver removal evidence, corroborate against a dated efforts/<year>/<month>/ archive below)"
@@ -262,7 +310,7 @@ if [ -n "$_remote" ]; then
                     _archive_path="$(sed -n '2,$p' "$CR_LOGDIR/pc-archive-tree.log" | head -1)"
                     if [ -n "$_archive_path" ]; then
                         cr_meta "effort_driver_archive_path" "$_archive_path"
-                        if capture "pc-archive-readme" -- _fetch_readme "$_owner_repo" "$_archive_path" && [ -s "$CR_LOGDIR/pc-archive-readme.log" ]; then
+                        if capture "pc-archive-readme" -- _fetch_readme "$_owner_repo" "$_archive_path" && [ -n "$(sed -n '2,$p' "$CR_LOGDIR/pc-archive-readme.log")" ]; then
                             pass "effort-driver's slug '$_driver_slug' is archived at real dated path '$_archive_path' with non-empty README content (real archive-move evidence)"
                         else
                             jam "dispatch-config" "found archive path '$_archive_path' but could not read its README content (see cr-logs/pc-archive-readme.log)" "check gh auth/rate limits"
