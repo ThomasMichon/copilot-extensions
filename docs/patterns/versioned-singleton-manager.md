@@ -256,18 +256,26 @@ successor already running in my own tree?*
    main pid) as part of the stop-then-start transition a `Restart=`
    directive drives — do not override it to `KillMode=process` for this
    unit. On Windows, the manager's Job is **named** (deterministically, from
-   the manager-scoped `config_dir`), not anonymous, specifically so any
-   process — a crash-triggered restart, or the bridge in item 5 below — can
-   reopen the exact same Job by name rather than depending on a handle
-   handed down from a predecessor that might not get the chance to hand
-   anything down at all. The Job additionally sets
-   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the OS itself terminates every
-   remaining member the instant the job's *last* open handle closes — which
-   a graceful self-update handoff must never let happen, since the live
-   daemon (a Job member throughout) would be killed as collateral. Item 5
-   below describes the bridge that guarantees a second, overlapping handle
-   is already open before the predecessor's own handle closes, so the
-   self-update handoff is never itself the "last handle" closing.
+   the manager-scoped `manager_state_dir` — never the daemon's own
+   `config_dir`, per the Consumer contract below), and the Job additionally
+   sets `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the OS itself terminates
+   every remaining member the instant the job's *last* open handle closes.
+   These two properties combine differently depending on *why* the new
+   manager is starting, and the two cases must not be conflated: on a
+   **bridged self-update handoff** (item 5), the bridge already holds an
+   open handle to this exact named Job before the old manager exits, so
+   `KILL_ON_JOB_CLOSE` never fires and the new manager genuinely **reopens
+   the same, still-live Job by name** (`OpenJobObject`) to join it. On a
+   **real crash**, by contrast, nothing holds the Job open — the old
+   manager's handle was the last one, `KILL_ON_JOB_CLOSE` already fired,
+   every member (including the Job object itself) is gone, and there is no
+   "same Job" left to reopen: the new manager must **create a fresh Job**
+   (the same deterministic name is fine to reuse now that the old kernel
+   object is destroyed) and assign the newly-spawned daemon to it the usual
+   way, exactly as if this were the very first launch. The manager's own
+   startup logic branches on exactly this: consult the `handoff` record in
+   `manager_state_dir` first — present and its bridge still alive means
+   reopen-and-take-over (item 5); absent or stale means create fresh.
 5. **The manager updates itself in place, without ever leaving the service
    manager untracking a live process — or losing track of the daemon it was
    already watching.** "Version-agnostic" does not make a stale manager
@@ -336,8 +344,8 @@ successor already running in my own tree?*
       record above, in the same manager-scoped state directory) and
       proceeds to step 2. The persisted `daemon` record itself is **never**
       overwritten by the bridge's identity — the two records have
-      different lifetimes and different purposes, and conflating them was
-      exactly the mistake an earlier revision of this section made. If the
+      different lifetimes and different purposes: conflating them would
+      let the bridge's own identity silently clobber the daemon's. If the
       bridge-ready acknowledgement or the handle-receipt acknowledgement
       does not arrive within a bounded timeout, the old manager **aborts
       the update** and keeps running as the current version rather than
@@ -364,24 +372,33 @@ successor already running in my own tree?*
       never a second, independent, permanently-running instance the Task
       stays blind to. Before entering its own `run()` loop, it reads the
       transient `handoff` record, finds the bridge's recorded pid/token,
-      opens its *own* handle to the same named Job (now three handles
-      briefly overlap: the exiting bridge waits on this), and — this is
-      the part a Job-membership check alone cannot provide — requests the
-      bridge duplicate *its* daemon handle onward into the new manager, the
-      same handle-plus-IPC-acknowledgement shape as step 1's own transfer.
-      Only once the new manager holds its own duplicated daemon handle does
-      it cross-check that handle's pid against the persisted `daemon`
-      record via item 2's read-check-read bracket, and publish its own
-      liveness over the bridge's. This is the **same** persisted-identity
-      re-adoption path item 5's Linux discussion above defines, not a
-      Windows-specific special case: the new manager re-adopts the
-      already-recorded watched daemon and never calls `spawn` here —
-      calling `spawn` on this path would create a second, redundant daemon
-      racing the one the bridge has been holding alive the whole time.
-   4. Only once the new manager's own daemon handle and Job handle are both
-      confirmed open does it signal the bridge to exit (e.g. a named
-      event). The bridge closing its handles is now safe — the new manager
-      already holds its own, independent copies of both.
+      opens its *own* handle to the same named Job via `OpenJobObject`
+      (now three handles briefly overlap: the exiting bridge waits on
+      this) and — opening a handle alone does not make the new manager
+      *itself* a member — immediately calls `AssignProcessToJobObject` to
+      join the Job. This is not optional bookkeeping: item 1's whole
+      Windows containment model depends on the manager being a Job member
+      so that future daemon spawns inherit containment the same way the
+      very first launch's spawns did; skipping this step here would let
+      every subsequent daemon spawned by this restarted manager silently
+      escape the Job and survive a later manager crash unreaped. The new
+      manager also — this is the part a Job-membership check alone cannot
+      provide — requests the bridge duplicate *its* daemon handle onward
+      into the new manager, the same handle-plus-IPC-acknowledgement shape
+      as step 1's own transfer. Only once the new manager holds its own
+      duplicated daemon handle does it cross-check that handle's pid
+      against the persisted `daemon` record via item 2's read-check-read
+      bracket, and publish its own liveness over the bridge's. This is the
+      **same** persisted-identity re-adoption path item 5's Linux
+      discussion above defines, not a Windows-specific special case: the
+      new manager re-adopts the already-recorded watched daemon and never
+      calls `spawn` here — calling `spawn` on this path would create a
+      second, redundant daemon racing the one the bridge has been holding
+      alive the whole time.
+   4. Only once the new manager's own Job membership, daemon handle, and
+      Job handle are all confirmed does it signal the bridge to exit (e.g.
+      a named event). The bridge closing its handles is now safe — the new
+      manager already holds its own, independent copies of both.
    From here the new manager proceeds exactly like any other launch,
    entering `run()` and supervising the daemon going forward — it never
    exits early, so a later crash of *this* instance still triggers a real
@@ -476,16 +493,24 @@ forward.
 A daemon adopts this pattern with **zero code changes**, as long as it already
 meets the `zdd` consumer contract (publishes `active.json` via
 `zdd.routing.publish_active`, as every `graceful-daemon-cutover` adopter
-already does). The manager is wired in exactly once, at the launcher
-boundary. Two distinct paths are required, not one: `config_dir` is the
-daemon's **own** `zdd.routing` liveness record (`active.json`), unowned and
-unwritten by the manager; `manager_state_dir` is a **separate** directory the
-manager owns entirely, holding its own `daemon` record (item 5's persisted
-watched-pid/token, used for re-adoption across any restart) and, transiently
-during a Windows self-update, the `handoff` record (the bridge's pid/token).
-Collapsing these into one path was an earlier mistake this contract
-deliberately avoids: the manager's own bookkeeping must never collide with,
-or be mistaken for, the daemon's own routing publication it only ever reads.
+already does) — **zero daemon-protocol changes**, not zero changes to this
+suite's Windows cutover machinery: the Windows mechanisms above (item 1's
+`CREATE_SUSPENDED` creation, manager IPC, handle duplication, Job
+assignment, and acknowledgement at `deploy`'s own spawn of the passive
+daemon) are a required, one-time **Windows cutover-adapter integration** at
+that specific call site inside `zdd.cutover`'s own breakaway path — not
+something every daemon author writes, but also not something an
+implementer may skip or treat as optional, or this pattern's entire Windows
+trust boundary goes missing silently. The manager itself is wired in
+exactly once, at the launcher boundary. Two distinct paths are required,
+not one: `config_dir` is the daemon's **own** `zdd.routing` liveness record
+(`active.json`), unowned and unwritten by the manager; `manager_state_dir`
+is a **separate** directory the manager owns entirely, holding its own
+`daemon` record (item 5's persisted watched-pid/token, used for
+re-adoption across any restart) and, transiently during a Windows
+self-update, the `handoff` record (the bridge's pid/token). The manager's
+own bookkeeping must never collide with, or be mistaken for, the daemon's
+own routing publication it only ever reads.
 
 ```
 systemd ExecStart / Scheduled Task Action
