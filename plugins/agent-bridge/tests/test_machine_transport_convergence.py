@@ -111,6 +111,18 @@ def test_ambiguous_identities_and_environment_aliases_fail_closed(monkeypatch):
         resolver.resolve_ssh_environment("missing")
 
 
+def test_duplicate_local_hostnames_do_not_select_a_machine(monkeypatch, caplog):
+    from agent_bridge import agent_registry
+
+    monkeypatch.setattr("socket.gethostname", lambda: "os-box")
+    machines = _machines()
+    machines.update(parse_machines_yaml({"machines": {"other": {"hostname": "OS-BOX"}}}))
+    machine, _platform = agent_registry._detect_local_machine(machines)
+    assert machine is None
+    assert "Cannot determine local machine" in caplog.text
+    assert "ambiguous" in caplog.text
+
+
 @pytest.mark.parametrize("host", ["FRIENDLY", "OS-BOX", "Build Box", "BOX-LINUX"])
 def test_registry_assembly_suppresses_equivalent_local_project(monkeypatch, host):
     from types import SimpleNamespace

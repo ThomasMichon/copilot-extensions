@@ -19,6 +19,7 @@ def test_raw_parser_defaults_and_bridge_policy_are_independent():
     legacy = parse_machines_yaml(
         raw, default_ssh_alias_to_key=True, default_ssh_shell="bash",
         keep_unnamed_environments=True,
+        preserve_environment_values=True,
     )["box"]
     assert [(env.name, env.alias, env.shell) for env in legacy.ssh_environments] == [
         ("", "box", "bash"), ("linux", "box", "bash"), ("wsl", "", ""),
@@ -36,3 +37,19 @@ def test_strict_matching_is_opt_in_and_exact_keys_keep_precedence():
         find_machine_entry(entries, "same", reject_ambiguous=True)
     assert find_machine_entry(entries, "first", reject_ambiguous=True) is first
     assert find_machine_entry(entries, "", reject_ambiguous=True) is None
+
+
+@pytest.mark.parametrize("policy", [
+    {"default_ssh_shell": "bash"},
+    {"default_ssh_alias_to_key": True},
+    {"keep_unnamed_environments": True},
+])
+def test_missing_value_policies_preserve_unrelated_normalization(policy):
+    raw = {"machines": {"box": {"ssh": {"environments": [
+        {"name": " linux ", "alias": " host ", "shell": " zsh "},
+        {"name": 123, "alias": 456, "shell": 789},
+    ]}}}}
+    environments = parse_machines_yaml(raw, **policy)["box"].ssh_environments
+    assert [(env.name, env.alias, env.shell) for env in environments] == [
+        ("linux", "host", "zsh"), ("123", "456", "789"),
+    ]

@@ -133,12 +133,14 @@ def parse_machines_yaml_file(
 def parse_machines_yaml(
     raw: dict[str, Any], *, require_alias: bool = False,
     default_ssh_alias_to_key: bool = False, default_ssh_shell: str = "",
-    keep_unnamed_environments: bool = False,
+    keep_unnamed_environments: bool = False, preserve_environment_values: bool = False,
 ) -> dict[str, MachineEntry]:
     """Parse resolved registry data, with explicit legacy consumer defaults.
 
     File consumers retain their existing defaults. Bridge opts into key aliases,
     bash shells and unnamed environments; explicit empty values stay explicit.
+    Missing-value policies do not change normalization. Consumers preserving
+    historical raw environment values must explicitly opt in.
     """
     if not isinstance(raw, dict) or not isinstance(raw.get("machines", {}), dict):
         raise ValueError("machines.yaml 'machines' must be a mapping")
@@ -174,9 +176,9 @@ def parse_machines_yaml(
         for env in ssh_block.get("environments", []) or []:
             if not isinstance(env, dict):
                 continue
-            if default_ssh_alias_to_key or keep_unnamed_environments or default_ssh_shell:
+            if preserve_environment_values or require_alias:
                 name = env.get("name", "")
-                if not name and not keep_unnamed_environments:
+                if not name and not keep_unnamed_environments and not require_alias:
                     continue
                 if require_alias and ("name" not in env or "alias" not in env):
                     continue
@@ -187,22 +189,14 @@ def parse_machines_yaml(
                     port=env.get("port", 22),
                     user=env.get("user"),
                 ))
-            elif require_alias:
-                if "name" not in env or "alias" not in env:
-                    continue
-                ssh_envs.append(SSHEnvironment(
-                    name=env["name"], alias=env["alias"],
-                    shell=env.get("shell", ""),
-                    port=env.get("port", 22), user=env.get("user"),
-                ))
             else:
                 name = str(env.get("name") or "").strip()
-                if not name:
+                if not name and not keep_unnamed_environments:
                     continue
                 ssh_envs.append(SSHEnvironment(
                     name=name,
-                    alias=str(env.get("alias") or "").strip(),
-                    shell=str(env.get("shell") or "").strip(),
+                    alias=str(env.get("alias", str(key) if default_ssh_alias_to_key else "") or "").strip(),
+                    shell=str(env.get("shell", default_ssh_shell) or "").strip(),
                     port=env.get("port", 22), user=env.get("user"),
                 ))
         # Coerce the entry's own identity fields to ``str`` unconditionally

@@ -124,7 +124,7 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
     machines: dict[str, MachineConfig] = {}
     entries = parse_machine_entries(
         data, default_ssh_alias_to_key=True, default_ssh_shell="bash",
-        keep_unnamed_environments=True,
+        keep_unnamed_environments=True, preserve_environment_values=True,
     )
     metadata = {str(key): value for key, value in data.get("machines", {}).items()}
     for entry in entries.values():

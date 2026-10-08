@@ -84,7 +84,10 @@ The raw-data parser additionally offers explicit compatibility policies:
 `keep_unnamed_environments`. Bridge opts into key aliases, `bash`, and retaining
 unnamed environments to preserve its legacy behavior; file parsing and other
 consumers keep their existing defaults. These policies fill missing fields only,
-not explicitly empty aliases or shells. `SSHEnvironment` also carries optional
+not explicitly empty aliases or shells, and do not change normalization of
+unrelated explicit fields. Bridge separately opts into
+`preserve_environment_values=True` for its historical raw environment values;
+this is independent of the missing-value policies. `SSHEnvironment` also carries optional
 `port` and `user` metadata for consumers that need it.
 
 `find_machine_entry(..., reject_ambiguous=True)` rejects a non-exact identity
