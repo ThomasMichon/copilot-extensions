@@ -405,3 +405,31 @@ def test_recheck_settles_for_a_closing_connection(monkeypatch):
     monkeypatch.setattr(lu, "process_table", lambda: tables.pop(0) if len(tables) > 1 else tables[0])
     monkeypatch.setattr(lu.time, "sleep", lambda s: None)
     lu.refuse_if_in_use(NAME, "delete", settle=5.0)  # second probe is idle -> ok
+
+
+@pytest.mark.parametrize("argv, role", [
+    # remote-command tail is never parsed as ssh options
+    (("ssh", "-F", CFG, "cs.host", "tool", "-O", "value"), lu.ROLE_SSH),
+    (("ssh", "-F", CFG, "cs.host", "tool", "-N"), lu.ROLE_SSH),
+    # bundled / attached forms
+    (("ssh", f"-F{CFG}", "-NT", "cs.host"), lu.ROLE_FORWARD),
+    (("ssh", "-F", CFG, f"-oControlPath={SOCK}", "-oControlMaster=yes", "cs.host"),
+     lu.ROLE_CONTROL_MASTER),
+    (("ssh", "-F", CFG, f"-oControlPath={SOCK}", "cs.host", "ls"), lu.ROLE_MUX),
+])
+def test_ssh_options_parsed_only_up_to_destination(argv, role):
+    users = lu.live_users(NAME, table=_table(ProcInfo(400, 50, argv), ProcInfo(50, 1, ("x",))))
+    assert [u.role for u in users] == [role]
+
+
+def test_remote_command_dash_F_does_not_attribute_another_session():
+    other = CFG.replace(NAME, "other-space")
+    argv = ("ssh", "-F", other, "cs.other", "cat", "-F", CFG)
+    assert lu.live_users(NAME, table=_table(ProcInfo(401, 1, argv))) == []
+
+
+def test_attached_option_never_exposes_remote_command():
+    argv = ("ssh", "-F", CFG, "-oControlPath=/tmp/B", "cs.host", "s3cr3t-cmd", "arg")
+    rendered = lu.render_command(argv)
+    assert rendered == f"ssh -F {CFG} -oControlPath=/tmp/B cs.host ..."
+    assert "s3cr3t" not in rendered

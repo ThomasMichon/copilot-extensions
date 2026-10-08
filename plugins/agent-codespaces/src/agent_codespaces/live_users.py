@@ -220,43 +220,85 @@ def _basename(arg: str) -> str:
     return base[:-4] if base.endswith(".exe") else base
 
 
-def _option_value(argv: tuple[str, ...], *flags: str, attached: bool = False) -> str | None:
-    """Value of the first of ``flags`` in ``argv`` (``-f v``, ``-f=v``, or ``-fv``)."""
+def _option_value(argv: tuple[str, ...], *flags: str) -> str | None:
+    """Value of the first of ``flags`` in ``argv`` (``-f v`` or ``-f=v``)."""
     for i, arg in enumerate(argv[1:], start=1):
         if arg in flags:
             return argv[i + 1] if i + 1 < len(argv) else None
         for flag in flags:
             if arg.startswith(flag + "="):
                 return arg[len(flag) + 1:]
-            if attached and arg.startswith(flag) and len(arg) > len(flag):
-                return arg[len(flag):]
     return None
 
 
-def _ssh_options(argv: tuple[str, ...]) -> dict[str, str]:
-    opts: dict[str, str] = {}
-    for i, arg in enumerate(argv):
-        val = None
-        if arg == "-o" and i + 1 < len(argv):
-            val = argv[i + 1]
-        elif arg.startswith("-o") and len(arg) > 2:
-            val = arg[2:]
-        if val and "=" in val:
-            key, _, value = val.partition("=")
-            opts[key.strip().lower()] = value.strip()
-    return opts
+# ssh options that take a value (``man ssh``). Parsing follows getopt: flags may
+# be bundled (``-NT``); a value flag takes the rest of its token (``-oX=y``,
+# ``-F/path``) or, when last in its token, the next argv element. The first
+# non-option is the destination; everything after it is the remote command,
+# which is never parsed as options and never rendered (it may carry secrets).
+_SSH_VALUE_OPTS = frozenset("BbcDEeFIiJLlmOoPpQRSWw")
 
 
-def _ssh_role(argv: tuple[str, ...]) -> tuple[str, str] | None:
-    """Classify an ``ssh`` argv into (role, detail); None for a transient ``-O``."""
-    if "-O" in argv:
+@dataclass(frozen=True)
+class SshArgs:
+    flags: frozenset[str]
+    values: tuple[tuple[str, str], ...]
+    head_end: int  # argv index just past the destination (or len(argv))
+    has_remote_command: bool
+
+    def value(self, flag: str) -> str | None:
+        for f, v in self.values:
+            if f == flag:
+                return v
         return None
-    opts = _ssh_options(argv)
+
+    def options(self) -> dict[str, str]:
+        opts: dict[str, str] = {}
+        for f, v in self.values:
+            if f == "o" and "=" in v:
+                key, _, value = v.partition("=")
+                opts[key.strip().lower()] = value.strip()
+        return opts
+
+
+def parse_ssh(argv: tuple[str, ...]) -> SshArgs:
+    flags: set[str] = set()
+    values: list[tuple[str, str]] = []
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            i += 1
+            break
+        if not arg.startswith("-") or len(arg) < 2:
+            break  # the destination
+        j = 1
+        while j < len(arg):
+            c = arg[j]
+            if c in _SSH_VALUE_OPTS:
+                if j + 1 < len(arg):
+                    values.append((c, arg[j + 1:]))
+                elif i + 1 < len(argv):
+                    i += 1
+                    values.append((c, argv[i]))
+                break
+            flags.add(c)
+            j += 1
+        i += 1
+    head_end = min(i + 1, len(argv))  # include the destination
+    return SshArgs(frozenset(flags), tuple(values), head_end, head_end < len(argv))
+
+
+def _ssh_role(parsed: SshArgs) -> tuple[str, str] | None:
+    """Classify parsed ssh options into (role, detail); None for a transient ``-O``."""
+    if parsed.value("O") is not None:
+        return None
+    opts = parsed.options()
     control_path = opts.get("controlpath", "")
     detail = f"ControlPath={control_path}" if control_path else ""
     if opts.get("controlmaster", "").lower() in ("yes", "auto", "autoask", "ask"):
         return ROLE_CONTROL_MASTER, detail
-    if "-N" in argv:
+    if "N" in parsed.flags:
         return ROLE_FORWARD, detail
     if control_path:
         return ROLE_MUX, detail
@@ -276,9 +318,6 @@ def _is_ssh(argv: tuple[str, ...]) -> bool:
     return bool(argv) and _basename(argv[0]) == "ssh"
 
 
-# ssh options that take a value (``man ssh``); everything after the destination
-# is the remote command, which may carry secrets and is never rendered.
-_SSH_VALUE_OPTS = set("BbcDEeFIiJLlmOoPpQRSWw")
 _SECRET_RE = re.compile(
     r"(?i)([A-Z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|BEARER|CREDENTIAL|API[_-]?KEY)"
     r"[A-Z0-9_-]*\s*[=:]\s*)[^\s'\";,]+")
@@ -286,31 +325,6 @@ _SECRET_FLAG_RE = re.compile(
     r"(?i)^--?[A-Z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|BEARER|CREDENTIAL|API[_-]?KEY)"
     r"[A-Z0-9_-]*$")
 _OTHER_MAX_TOKENS = 6
-
-
-def _ssh_head(argv: tuple[str, ...]) -> tuple[list[str], bool]:
-    """ssh argv up to and including the destination; (kept, truncated)."""
-    kept = [argv[0]]
-    i = 1
-    while i < len(argv):
-        arg = argv[i]
-        kept.append(arg)
-        if arg == "--":
-            i += 1
-            break
-        if arg.startswith("-") and len(arg) > 1:
-            flag = arg[1:]
-            if flag[-1] in _SSH_VALUE_OPTS and i + 1 < len(argv):
-                kept.append(argv[i + 1])
-                i += 1
-            i += 1
-            continue
-        i += 1  # the destination
-        break
-    if kept and kept[-1] == "--" and i < len(argv):
-        kept.append(argv[i])
-        i += 1
-    return kept, i < len(argv)
 
 
 def render_command(argv: tuple[str, ...]) -> str:
@@ -321,7 +335,8 @@ def render_command(argv: tuple[str, ...]) -> str:
         return ""
     base = _basename(argv[0])
     if base == "ssh":
-        kept, truncated = _ssh_head(argv)
+        parsed = parse_ssh(argv)
+        kept, truncated = list(argv[:parsed.head_end]), parsed.has_remote_command
     elif base == "gh" and "--" in argv:
         cut = argv.index("--")
         kept, truncated = list(argv[:cut]), True
@@ -337,6 +352,17 @@ def render_command(argv: tuple[str, ...]) -> str:
     return text + (" ..." if truncated else "")
 
 
+def _rejoin_config_path(proc: ProcInfo, raw_cfgs: tuple[str, ...]) -> tuple[str, ...]:
+    """ps fallback: re-tokenize so a config path containing spaces stays one
+    argv element (``ps`` output loses argument boundaries)."""
+    for cfg in raw_cfgs:
+        if proc.raw and " " in cfg and cfg in proc.raw:
+            marker = "\0cfg\0"
+            return tuple(cfg if t == marker else t
+                         for t in proc.raw.replace(cfg, f" {marker} ").split())
+    return proc.argv
+
+
 def users_from_table(
     name: str, table: list[ProcInfo], *, exclude_pids: frozenset[int] = frozenset(),
 ) -> list[LiveUser]:
@@ -349,11 +375,11 @@ def users_from_table(
     for proc in table:
         if proc.pid in exclude_pids or not _is_ssh(proc.argv):
             continue
-        config = _option_value(proc.argv, "-F", attached=True)
-        if not (config and _norm(config) in cfgs) and not (
-                proc.raw and any(c in proc.raw for c in raw_cfgs)):
+        parsed = parse_ssh(_rejoin_config_path(proc, raw_cfgs))
+        config = parsed.value("F")
+        if not config or _norm(config) not in cfgs:
             continue
-        classified = _ssh_role(proc.argv)
+        classified = _ssh_role(parsed)
         if classified is None:
             continue
         role, detail = classified
