@@ -6,7 +6,7 @@
   caused it
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-09-12
+- **Last revised:** 2026-10-07
 - **Reality docs:** [`plugins/agent-dispatch/src/agent_dispatch/telemetry.py`](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) ·
   [`plugins/agent-bridge/src/agent_bridge/telemetry.py`](../../plugins/agent-bridge/src/agent_bridge/telemetry.py)
   — the existing generic telemetry seam (fail-open sink registration, the
@@ -157,6 +157,14 @@ resource figures are sampled, never in the emitted shape.
 
 ## Non-Goals / Boundaries
 
+- **Not an operational process-registration ledger.** A separate state service
+  may let processes register/unregister their current membership, answer
+  on-demand inventory queries, and retain bounded local snapshot journals,
+  analogous to a port-reservation ledger or an on-demand log tool. That state
+  protocol is not a telemetry sink or a consumer of this vision's events.
+  It must operate independently of formal telemetry configuration; its local
+  storage/query responsibilities do not move telemetry aggregation into this
+  repo or introduce a second telemetry emission mechanism.
 - **Not a system-wide process monitor.** This vision instruments processes the
   `agent-*` fabric itself spawns and supervises. Watching arbitrary
   non-fabric processes (a user's shell, an unrelated app) is a different
