@@ -44,7 +44,7 @@
   "plugins/agent-logger/scripts/versioned_runtime.py": 1415,
   "plugins/agent-logger/src/agent_logger/aggregate.py": 1708,
   "plugins/agent-logger/src/agent_logger/segmenter/collate.py": 1200,
-  "plugins/agent-logger/src/agent_logger/sync/targets/filesystem.py": 2315,
+  "plugins/agent-logger/src/agent_logger/sync/targets/filesystem.py": 2336,
   "plugins/agent-machines/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-machines/scripts/cell_lifecycle.py": 1017,
   "plugins/agent-machines/scripts/versioned_runtime.py": 1415,
