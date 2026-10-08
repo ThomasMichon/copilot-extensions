@@ -149,9 +149,10 @@ def derive_disposition(
     """Classify one CodeSpace's disposition from its derived signals.
 
     Precedence (first match wins):
+      0. a live local user (lock holder, SSH ControlMaster/forward, gh ssh) or an
+         unknown process census                                 -> IN_USE
       1. terminal-failed gh state            -> FAILED
-      2. a live lease, a cross-machine beacon/L2 hold, or a live local user
-         (target-lock holder, SSH ControlMaster/forward, gh ssh) -> IN_USE
+      2. a live lease or a cross-machine beacon/L2 hold         -> IN_USE
       3. genuinely still-coming-up gh state  -> PROVISIONING
       4. a ``prunable`` marker               -> STALE
       5. a ``recovered`` marker              -> CLEAN
@@ -169,9 +170,11 @@ def derive_disposition(
     Shutdown+recovered box is ``clean``, an unmarked one ``idle``/``stale``).
     """
     bucket = classify_state(state)
+    if has_live_users:
+        return IN_USE
     if bucket == "failed":
         return FAILED
-    if has_live_lease or has_beacon or has_l2_hold or has_live_users:
+    if has_live_lease or has_beacon or has_l2_hold:
         return IN_USE
     if bucket == "pending" and state != _SHUTDOWN:
         return PROVISIONING

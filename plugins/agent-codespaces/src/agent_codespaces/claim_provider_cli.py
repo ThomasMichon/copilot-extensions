@@ -235,7 +235,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                 # Under the lock: never reclaim a box a live local process
                 # (detached ControlMaster, forward, gh ssh) still rides, nor
                 # one whose users cannot be ruled out -- fail closed.
-                from .live_users import refuse_if_in_use
+                from .live_users import recheck_before, refuse_if_in_use
 
                 try:
                     refuse_if_in_use(args.name, "reclaim")
@@ -269,6 +269,14 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                             "provider hold budget is nearly exhausted; "
                             "refusing to start deletion before the fence expires"
                         ),
+                    }))
+                    return 0
+                try:
+                    recheck_before(args.name, "reclaim")
+                except TargetBusyError as busy:
+                    print(json.dumps({
+                        "reclaimed": False,
+                        "detail": f"CodeSpace in use, deferring reclaim: {busy}",
                     }))
                     return 0
                 try:

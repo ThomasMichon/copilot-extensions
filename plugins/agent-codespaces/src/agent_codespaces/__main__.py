@@ -39,6 +39,7 @@ from . import capture_cli, dial_log_cli
 from . import claim_provider_cli
 from .leases_cli import _hold_is_self, _self_claim_identity, _short_owner
 from .live_users import busy_report as _busy_report
+from .live_users import recheck_before as _recheck_before
 from . import pool as pool_mod
 from . import relay_launch
 from .codespace_config import CodespaceSource
@@ -3327,6 +3328,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
                 else:
                     print(f"[WARN] Pre-delete session recovery failed (continuing): "
                           f"{res.get('detail')}", file=sys.stderr)
+            _recheck_before(args.name, "delete", force=args.force)
             delete_codespace(args.name, force=args.force)
             print(f"Deleted: {args.name}")
     except TargetBusyError as busy:
@@ -3442,6 +3444,7 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
                     return 1
 
             if args.delete:
+                _recheck_before(args.name, "finalize", force=args.force)
                 delete_codespace(args.name, force=args.force)
                 print(f"Deleted: {args.name}")
                 _release_lease_quietly(args.name)
@@ -3449,6 +3452,7 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
                 return 0 if res.get("ok") else 1
 
             # Default preserve path: stop (idempotent) then mark recovered.
+            _recheck_before(args.name, "finalize", force=args.force)
             try:
                 stopped = stop_codespace(args.name)
                 print(f"Stopped: {args.name} (preserved -- boots on next connect)"
@@ -3539,6 +3543,7 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
 
                 if args.delete:
                     emit({"type": "progress", "pct": 70.0, "msg": f"Deleting {name}\u2026"})
+                    _recheck_before(name, "finalize", force=args.force)
                     delete_codespace(name, force=args.force)
                     _release_lease_quietly(name)
                     _clear_status_quietly(name)
@@ -3549,6 +3554,7 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
                 # Preserve path: stop (idempotent) then mark recovered.
                 emit({"type": "progress", "pct": 70.0,
                       "msg": f"Stopping {name} (preserving)\u2026"})
+                _recheck_before(name, "finalize", force=args.force)
                 try:
                     stop_codespace(name)
                 except RuntimeError as exc:
@@ -3672,6 +3678,7 @@ def _cmd_stop(args: argparse.Namespace) -> int:
                           f"CodeSpace is preserved, so sessions can be recovered "
                           f"later): {res.get('detail')}", file=sys.stderr)
 
+            _recheck_before(args.name, "stop", force=getattr(args, "force", False))
             stopped = stop_codespace(args.name)
             if stopped:
                 print(f"Stopped: {args.name} (preserved -- boots on next connect)")
@@ -3792,6 +3799,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
                           f"(diagnose): {res.get('detail')}", file=sys.stderr)
                     continue
                 try:
+                    _recheck_before(name, "prune")
                     delete_codespace(name, force=False)
                 except RuntimeError as exc:
                     print(f"[WARN] Delete failed for {name}: {exc}", file=sys.stderr)
@@ -3850,6 +3858,7 @@ def _reclaim_for_quota(err: str) -> str | None:
                     if not (res.get("ok") or res.get("skipped")):
                         continue
                     try:
+                        _recheck_before(name, "prune")
                         delete_codespace(name, force=False)
                     except RuntimeError:
                         continue

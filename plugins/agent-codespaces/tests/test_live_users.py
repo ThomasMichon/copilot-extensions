@@ -94,7 +94,11 @@ def test_gh_codespace_session_counts_but_proxy_child_of_counted_ssh_does_not():
         ProcInfo(301, 101, ("gh", "cs", "ssh", "-c", NAME, "--stdio")),
         ProcInfo(302, 1, ("gh", "codespace", "ssh", "--codespace", NAME, "--stdio")),
     )
-    assert [u.pid for u in lu.live_users(NAME, table=proxied)] == [101]
+    users = lu.live_users(NAME, table=proxied)
+    # 301 is the ProxyCommand child of the counted master; 302 is an orphaned
+    # stdio carrier -- still a live user, labelled as such.
+    assert [u.pid for u in users] == [101, 302]
+    assert "stdio carrier" in users[1].detail
 
 
 def test_own_process_is_never_reported():
@@ -344,3 +348,60 @@ def test_live_users_and_busy_report_use_redacted_commands(monkeypatch):
     users = lu.live_users(NAME)
     assert users and all("s3cr3t" not in u.command for u in users)
     assert "s3cr3t" not in lu.busy_report(NAME, "busy")
+
+
+def test_unreadable_own_proc_entry_makes_census_unknown(monkeypatch):
+    real_open = open
+
+    def fake_open(path, *a, **k):
+        if str(path).startswith("/proc/4242/"):
+            raise PermissionError(path)
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr(lu.os, "listdir", lambda p: ["1", "4242", "self"])
+    monkeypatch.setattr(lu, "open", fake_open, raising=False)
+    monkeypatch.setattr(lu, "_owned_by_other_user", lambda pid: False)
+    assert lu._read_proc_linux() is None
+    monkeypatch.setattr(lu, "_owned_by_other_user", lambda pid: True)
+    table = lu._read_proc_linux()
+    assert table is not None and all(p.pid != 4242 for p in table)
+
+
+def test_failed_box_with_live_users_is_in_use():
+    from agent_codespaces import pool
+
+    common = dict(has_live_lease=False, has_beacon=False, marker=None,
+                  idle_age=None, stale_after=1.0)
+    assert pool.derive_disposition(state="Failed", has_live_users=True, **common) == pool.IN_USE
+    assert pool.derive_disposition(state="Failed", **common) == pool.FAILED
+
+
+def test_stop_rechecks_after_recovery_and_refuses_new_user(monkeypatch, tmp_path, capsys):
+    """A user that appears DURING session recovery is caught by the final
+    pre-stop check (not just the entry-time snapshot)."""
+    import ssh_manager.locks as locks
+
+    from agent_codespaces import __main__ as cli
+
+    monkeypatch.setattr(locks, "locks_dir", lambda: tmp_path)
+    monkeypatch.setattr(lu, "_RECHECK_SETTLE", 0.0)
+    state = {"table": _table()}
+    monkeypatch.setattr(lu, "process_table", lambda: state["table"])
+
+    def sync(name, **kwargs):
+        state["table"] = _table(_master())  # someone connects mid-recovery
+        return {"ok": True, "session_count": 0, "detail": ""}
+
+    monkeypatch.setattr(cli, "sync_codespace_sessions", sync)
+    stopped = []
+    monkeypatch.setattr(cli, "stop_codespace", lambda name: stopped.append(name) or True)
+
+    assert cli.main(["stop", NAME]) == 1
+    assert "[BUSY]" in capsys.readouterr().err and stopped == []
+
+
+def test_recheck_settles_for_a_closing_connection(monkeypatch):
+    tables = [_table(_master()), _table()]
+    monkeypatch.setattr(lu, "process_table", lambda: tables.pop(0) if len(tables) > 1 else tables[0])
+    monkeypatch.setattr(lu.time, "sleep", lambda s: None)
+    lu.refuse_if_in_use(NAME, "delete", settle=5.0)  # second probe is idle -> ok

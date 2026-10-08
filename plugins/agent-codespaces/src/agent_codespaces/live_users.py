@@ -105,6 +105,15 @@ def _raw_config_paths(name: str) -> tuple[str, ...]:
     return tuple(str(d / config_file_name(name)) for d in dirs)
 
 
+def _owned_by_other_user(pid: str) -> bool:
+    try:
+        return os.stat(f"/proc/{pid}").st_uid != os.getuid()
+    except FileNotFoundError:
+        return True  # vanished
+    except OSError:
+        return False
+
+
 def _read_proc_linux() -> list[ProcInfo] | None:
     procs: list[ProcInfo] = []
     try:
@@ -119,8 +128,12 @@ def _read_proc_linux() -> list[ProcInfo] | None:
                 raw = fh.read()
             with open(f"/proc/{entry}/stat", encoding="ascii", errors="replace") as fh:
                 stat = fh.read()
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # exited mid-scan: a harmless race
         except OSError:
-            continue
+            if _owned_by_other_user(entry):
+                continue  # another user's process cannot ride our ssh configs
+            return None  # one of OUR processes is unreadable: census unknown
         argv = tuple(p.decode(errors="replace") for p in raw.split(b"\0") if p)
         if not argv:
             continue
@@ -352,10 +365,9 @@ def users_from_table(
     for proc in table:
         if proc.pid in exclude_pids or proc.ppid in ssh_pids:
             continue  # the ProxyCommand child of an ssh already counted
-        if ssh_pids and "--stdio" in proc.argv:
-            continue  # a ProxyCommand carrier whose ssh parent detached
         if _gh_codespace_target(proc.argv) == name:
-            users.append(LiveUser(proc.pid, ROLE_GH, render_command(proc.argv)))
+            detail = "stdio carrier (ProxyCommand)" if "--stdio" in proc.argv else ""
+            users.append(LiveUser(proc.pid, ROLE_GH, render_command(proc.argv), detail))
     return users
 
 
@@ -517,10 +529,30 @@ class CodespaceInUseError(TargetBusyError):
                      f"{retry}.",)
 
 
-def refuse_if_in_use(name: str, op: str) -> None:
+def refuse_if_in_use(name: str, op: str, *, settle: float = 0.0) -> None:
     """Raise :class:`CodespaceInUseError` when ``name`` has live local users, or
-    when that cannot be ruled out (process table unreadable) -- fail closed."""
-    table = process_table()
-    users = live_users(name, table=table)
-    if users or table is None:
-        raise CodespaceInUseError(name, users, op)
+    when that cannot be ruled out (process table unreadable) -- fail closed.
+
+    ``settle`` (seconds) re-probes while users remain, so a connection THIS
+    operation just closed (e.g. the session-recovery ControlMaster) can exit
+    before the final pre-destruction check counts it.
+    """
+    deadline = time.monotonic() + settle
+    while True:
+        table = process_table()
+        users = live_users(name, table=table)
+        if not users and table is not None:
+            return
+        if time.monotonic() >= deadline:
+            raise CodespaceInUseError(name, users, op)
+        time.sleep(0.5)
+
+
+_RECHECK_SETTLE = 5.0
+
+
+def recheck_before(name: str, op: str, *, force: bool = False) -> None:
+    """The final fail-closed check run immediately before stop/delete (after a
+    possibly long session recovery). No-op with ``force``."""
+    if not force:
+        refuse_if_in_use(name, op, settle=_RECHECK_SETTLE)
