@@ -640,9 +640,8 @@ def _ensure_status_monitor() -> bool:
     live, or freshly spawned) -- the caller falls back to the per-session updater
     when it is not.  Idempotent + cheap: a live, non-superseded monitor is a
     no-op; a superseded (older-runtime) one is left to self-retire while a
-    current one is spawned to take over. Spawns with the resolved CURRENT
-    runtime interpreter (see ``status_monitor_reap_stale.current_runtime_python``),
-    not this process's own, possibly-stale ``sys.executable``."""
+    current one is spawned to take over, with the resolved CURRENT runtime interpreter
+    (``status_monitor_reap_stale.current_runtime_python``), not a possibly stale ``sys.executable``."""
     try:
         from . import locks as _locks
 

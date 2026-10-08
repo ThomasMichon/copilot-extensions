@@ -5394,11 +5394,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--worktree-id", required=True)
     p.add_argument("--provider")
-    p.add_argument(
-        "--state",
-        choices=["active", "disposed", "unknown"],
-        default="active",
-    )
+    p.add_argument("--state", choices=["active", "disposed", "unknown"], default="active")
     p.add_argument("--binding-revision", type=int)
     p.add_argument("--blob-file")
     p.add_argument("--if-match-revision", type=int)
@@ -5407,11 +5403,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reservation-owner")
     p.add_argument("--reservation-owner-pid", type=int)
     p.add_argument("--reservation-owner-start-time")
-    p.add_argument(
-        "--lease-seconds",
-        type=int,
-        default=_EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS,
-    )
+    p.add_argument("--lease-seconds", type=int, default=_EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS)
     p.add_argument("--json", action="store_true")
 
     finalize_cli.add_parsers(sub)
