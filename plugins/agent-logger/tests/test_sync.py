@@ -3276,8 +3276,9 @@ def test_copy_process_logs_detects_rename_based_rotation(
     descriptor's own identity -- the fd-only `_SourceChangedDuringCopy`
     check in `_copy_stream_replace` cannot observe it. `_copy_process_logs`
     must catch it anyway by revalidating the directory ENTRY's identity
-    (by name, via the pinned root_fd) after landing, so a same-name
-    replacement can't be permanently mistaken for "already synced"."""
+    (by name, via the pinned root_fd) BEFORE committing the replace, so a
+    same-name replacement can neither be mistaken for "already synced" NOR
+    destroy a previously landed, still-good destination copy."""
     import contextlib
 
     from agent_logger.sync.targets import filesystem
@@ -3288,6 +3289,9 @@ def test_copy_process_logs_detects_rename_based_rotation(
     target.write_text("original\n", encoding="utf-8")
     dest = tmp_path / "dest"
     dest.mkdir()
+    # A previously synced, still-good copy of this same destination name --
+    # the fix this test guards must never delete it.
+    (dest / "process-111-1.log").write_text("previously synced\n", encoding="utf-8")
 
     real_open_regular_at = filesystem._process_logs.open_regular_at
 
@@ -3309,7 +3313,9 @@ def test_copy_process_logs_detects_rename_based_rotation(
 
     _copied, _nbytes, locked = _copy_process_logs(logs, dest)
 
-    assert not (dest / "process-111-1.log").exists()
+    assert (
+        dest / "process-111-1.log"
+    ).read_text(encoding="utf-8") == "previously synced\n"
     assert any(path.name == "process-111-1.log" for path in locked)
 
 

@@ -17,6 +17,7 @@ import os
 import shutil
 import stat
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
@@ -290,7 +291,9 @@ def _fsync_tree(root: Path) -> None:
         _fsync_directory(directory)
 
 
-def _copy_stream_replace(source: BinaryIO, dst: Path) -> None:
+def _copy_stream_replace(
+    source: BinaryIO, dst: Path, *, revalidate: Callable[[], bool] | None = None,
+) -> None:
     """Atomically replace *dst* from an already-open *source* stream.
 
     Shared by :func:`_copy_replace` (opens by path) and the process-log copy
@@ -308,6 +311,16 @@ def _copy_stream_replace(source: BinaryIO, dst: Path) -> None:
     descriptor's identity or size differs between before and after the
     copy, nothing is landed: :class:`_SourceChangedDuringCopy` signals the
     caller to treat this entry as unlanded this pass, same as a locked file.
+
+    *revalidate*, when given, is called once the temp file is fully written
+    and its metadata set, but strictly BEFORE *dst* is touched at all. A
+    ``False`` result raises :class:`_SourceChangedDuringCopy` without
+    unlinking or replacing *dst* -- this is what lets a caller detect a
+    rename-based rotation (which the fd-only identity check above cannot
+    see; see :func:`_copy_process_logs`) without destroying a previously
+    landed, still-good destination copy: checking only *after* the atomic
+    replace has already committed would otherwise delete that good copy
+    along with the stale one just written.
     """
     before = os.fstat(source.fileno())
     temporary = dst.with_name(f".{dst.name}.{short_unique_id()}.tmp")
@@ -329,6 +342,10 @@ def _copy_stream_replace(source: BinaryIO, dst: Path) -> None:
             os.chmod(temporary_io, stat.S_IMODE(before.st_mode))
         except OSError:
             pass
+        if revalidate is not None and not revalidate():
+            raise _SourceChangedDuringCopy(
+                "source directory entry identity changed during copy"
+            )
         _unlink_replace_target(dst)
         _durable_replace(temporary, dst)
     finally:
@@ -459,13 +476,18 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     nbytes = 0
     locked: list[Path] = []
 
-    def _land(stream: BinaryIO, dst_path: Path) -> int | None:
+    def _land(
+        stream: BinaryIO, dst_path: Path, *, revalidate: Callable[[], bool] | None = None,
+    ) -> int | None:
         """Copy *stream* into *dst_path*; returns the landed byte count, or
-        ``None`` when this entry didn't land this pass (locked, or the
-        source changed identity/size mid-copy) -- callers handle
-        accounting and any further post-land revalidation themselves."""
+        ``None`` when this entry didn't land this pass (locked, the source
+        changed identity/size mid-copy, or *revalidate* rejected it) --
+        callers handle accounting themselves. When given, *revalidate* is
+        checked before dst is ever touched (see
+        :func:`_copy_stream_replace`), so a rejection can never destroy a
+        previously landed, still-good destination copy."""
         try:
-            _copy_stream_replace(stream, dst_path)
+            _copy_stream_replace(stream, dst_path, revalidate=revalidate)
         except OSError as exc:
             if _is_windows_sharing_violation(exc) or isinstance(exc, _SourceChangedDuringCopy):
                 return None
@@ -492,35 +514,38 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
                     dst_path = dest / name
                     if not _needs_copy_from_stat(before, dst_path):
                         continue
+
+                    def _same_entry_identity(
+                        name: str = name, before: os.stat_result = before,
+                    ) -> bool:
+                        # Revalidate the DIRECTORY ENTRY's identity against
+                        # `before`, not just the open descriptor's own fstat
+                        # (which `_copy_stream_replace` already checked): a
+                        # rename-based rotation (writer renames the old file
+                        # aside and creates a fresh one under the same name)
+                        # never changes our already-open descriptor's
+                        # identity -- it still refers to the OLD inode
+                        # throughout the copy -- so the fd-only check in
+                        # `_copy_stream_replace` cannot observe it. Only
+                        # re-stat`ing the NAME (via the pinned `root_fd`,
+                        # never by path) can. Called before dst is touched,
+                        # so a rejection never destroys an existing, still-
+                        # good destination copy.
+                        try:
+                            after = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                        except FileNotFoundError:
+                            return False
+                        return (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+
                     try:
                         with _process_logs.open_regular_at(root_fd, name) as stream:
-                            size = _land(stream, dst_path)
+                            size = _land(stream, dst_path, revalidate=_same_entry_identity)
                     except (FileNotFoundError, ValueError):
                         # Vanished or changed identity between the stat above
                         # and this open (rotation/deletion racing the copy) --
                         # an ordinary skip, never a failure.
                         continue
                     if size is None:
-                        locked.append(source / name)
-                        continue
-                    # Revalidate the DIRECTORY ENTRY's identity against
-                    # `before`, not just the open descriptor's own fstat
-                    # (which `_copy_stream_replace` already checked): a
-                    # rename-based rotation (writer renames the old file
-                    # aside and creates a fresh one under the same name)
-                    # never changes our already-open descriptor's identity
-                    # -- it still refers to the OLD inode throughout the
-                    # copy -- so the fd-only check in `_copy_stream_replace`
-                    # cannot observe it. Only re-stat`ing the NAME (via the
-                    # pinned `root_fd`, never by path) after landing can.
-                    try:
-                        after = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
-                    except FileNotFoundError:
-                        after = None
-                    if after is None or (before.st_dev, before.st_ino) != (
-                        after.st_dev, after.st_ino,
-                    ):
-                        _unlink_replace_target(dst_path)
                         locked.append(source / name)
                         continue
                     copied += 1
@@ -1846,10 +1871,15 @@ class FilesystemTarget(Target):
 
     def _mark_sync_meta_partial(self, machine: str, reason: str) -> None:
         """Best-effort: downgrade this machine's persisted ``sync-meta.json``
-        from ``ok`` to ``partial`` after a process-log leg fails following a
-        successfully-persisted session-state leg -- otherwise
+        from ``ok`` to ``partial`` after the process-log leg fails outright,
+        or lands with at least one deferred (locked/rotated) file, following
+        a successfully-persisted session-state leg -- otherwise
         ``session-sync status``/fleet health would report this machine as
-        fresh and healthy despite the requested evidence not landing.
+        fresh and healthy despite requested evidence not fully landing.
+        A clean process-log retry does not clear a ``partial`` status this
+        sets -- composing a combined, independently-clearable status for
+        both transfer legs is a known, out-of-scope follow-up; staying
+        degraded until explicitly investigated fails safe, not silently.
         Never raises: a failure here must not mask the original failure
         this method exists to record."""
         try:
@@ -1923,6 +1953,10 @@ class FilesystemTarget(Target):
         if locked_paths:
             examples = ", ".join(path.name for path in locked_paths[:3])
             detail += f" (skipped {len(locked_paths)} locked file(s), will retry: {examples})"
+            # ok=True here means "the pass ran," not "every file landed" --
+            # at least one log was deferred (locked/rotated), so persisted
+            # health must reflect that, exactly like an outright failure.
+            self._mark_sync_meta_partial(machine, "process-log evidence deferred")
         return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes)
 
     def sync_status(self, machine: str) -> SyncStatus:

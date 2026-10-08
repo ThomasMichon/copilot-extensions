@@ -218,7 +218,19 @@ def open_root_dir(log_root: Path) -> Iterator[int]:
 @contextmanager
 def open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
     """Open a regular file by name within a pinned, already-verified directory
-    handle, refusing to follow a symlinked entry."""
+    handle, refusing to follow a symlinked entry.
+
+    *name* must be a bare filename -- no path separator, and never
+    absolute. This is enforced here, not only documented: ``os.stat``/
+    ``os.open`` with ``dir_fd`` silently ignore ``dir_fd`` entirely when
+    *name* is itself absolute (POSIX semantics), and a ``../``-containing
+    value can still traverse outside the pinned directory even when
+    relative -- either would let a public caller escape the pinned root
+    this function exists to enforce, rather than relying on every caller
+    to prefilter the value correctly.
+    """
+    if "/" in name or "\\" in name or Path(name).is_absolute():
+        raise ValueError(f"process-log evidence name must be a bare filename: {name!r}")
     before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
         raise ValueError(f"process-log evidence is not a regular file: {name}")
