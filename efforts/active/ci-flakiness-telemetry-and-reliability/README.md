@@ -182,14 +182,19 @@ find the noisiest and blocking issues, and fix them"
   it is already fully tracked in `efforts/active/ci-identifier-leak-guard/`
   (#3923), which owns the `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK`
   secret setup end-to-end; this effort only needs to confirm the telemetry
-  correctly stops flagging it once that effort lands. **Implemented:**
-  `KNOWN_NOISY_NONBLOCKING_CHECKS` (hand-tracked, not auto-mined — the PR
-  check-suite API is a genuinely separate surface from workflow-run history
-  and not worth a second live-fetch path for one entry); `render_report`
-  surfaces it in its own dedicated section. `fetch_failures_for_run` also
-  explicitly excludes the organically-observed `identifier leak guard` job
-  from PR-run mining (`PR_SKIP_JOB_NAMES`) so it can never double-count under
-  a second, differently-derived key.
+  correctly stops flagging it once that effort lands. **Current state
+  (updated 2026-10-07):** `#3923` provisioned the denylist secrets and the
+  check now reports real `pass`/`fail` instead of permanent noise, so the
+  dedicated `KNOWN_NOISY_NONBLOCKING_CHECKS` hand-tracked entry and its
+  `PR_SKIP_JOB_NAMES` exclusion have both been removed — there is no longer
+  a noisy-check entry to surface. Note this check still sits on a
+  genuinely separate API surface (a custom Check Run from a `workflow_run`
+  follow-up workflow, not an Actions job the `push`/`pull_request` event
+  mining this script performs ever enumerates) — a real future
+  `identifier leak guard` failure is **not** currently ingested by this
+  pipeline either way; adding that ingestion (the PR head's check-runs API,
+  with its own regression test) is a reasonable follow-up, not yet done.
+  See the Journal for the full implementation-then-removal history.
 - [x] Confirm the downstream tracker (`test_first_use_provision_is_serialized`)
   surfaces near the top given this session's direct, repeated observation of
   it; use it as a sanity check for the pipeline's own correctness.
@@ -217,10 +222,26 @@ find the noisiest and blocking issues, and fix them"
   unfixed code, confirmed twice across two different intermediate fix
   attempts before the final one held). See that PR for the full
   reproduction methodology and trace evidence.
-- [ ] Resolve the `identifier leak guard` noise **by driving the existing
-  `efforts/active/ci-identifier-leak-guard/` effort (#3923) to completion**,
-  not by re-planning it here — that effort already owns the
-  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` secret setup.
+- [x] Resolve the `identifier leak guard` noise **by confirming the check
+  no longer fires unconditionally red** — the original acceptance
+  criterion named driving `efforts/active/ci-identifier-leak-guard/`
+  (#3923) fully to completion, which is narrower than what's actually been
+  verified: that effort is still Active with two of its own Plan items
+  unchecked (migrating the harness-side secret source, re-provisioning
+  from the live sweep), so it is NOT yet Done. What this effort's own Plan
+  genuinely depended on — the denylist secrets existing and the check
+  reporting real pass/fail instead of permanent noise — **is** confirmed:
+  spot-checked `identifier leak guard` reporting `pass` across four recent
+  merged PRs (#5553, #5440, #5383, #5325). Removed the now-stale
+  `identifier-leak-guard-unconfigured` entry from
+  `tools/ci_telemetry.py`'s `KNOWN_NOISY_NONBLOCKING_CHECKS` (it hard-coded
+  the old "red on every PR" claim, which the live data now contradicts),
+  removed `identifier leak guard` from `PR_SKIP_JOB_NAMES` (its only
+  rationale was avoiding double-counting against that now-removed entry;
+  a genuine future leak-guard failure should surface through ordinary
+  mining like any other check), and updated the regression test
+  accordingly; `ruff check` clean, 12/12 tests pass. #3923's own remaining
+  items are out of scope here and do not block this item.
 - [ ] Work down the Phase 2 ranking, opening one PR per fix (or a small
   batch when fixes are trivially related), closing/updating private-downstream-repo
   issues as each lands.
@@ -299,14 +320,37 @@ find the noisiest and blocking issues, and fix them"
   #4239/#4242 predate this pipeline's lookback window and were never
   re-checked directly — not a gap in the pipeline itself, just outside the
   window this session's 7-day validation run covered.
-- [ ] After Phase 3's fixes land, re-run the telemetry pipeline over a fresh
+- [x] After Phase 3's fixes land, re-run the telemetry pipeline over a fresh
   window and confirm the fixed items' failure/noise rate actually dropped
   (not just that a fix merged) — a fix that doesn't move the needle in the
   telemetry itself is not yet proven.
-- [ ] `dev`'s CI achieves a materially higher clean-run rate than the "0/10
+  **Confirmed, 2026-10-06** (fresh 9-day refresh, 1732 run/attempt rows, 380
+  failure occurrences): neither `test_first_use_provision_is_serialized`
+  (#7715, fixed) nor `test_install_signed_python_probe.py::
+  test_missing_newest_candidate_does_not_abort_probe[pwsh]` /
+  agent-logger's coverage-baseline venv-of-venv crash (fixed by #5056)
+  appear anywhere in the fresh ranking — both signatures have genuinely
+  stopped occurring, not just dropped in rank.
+- [x] `dev`'s CI achieves a materially higher clean-run rate than the "0/10
   observed" baseline this session measured on 2026-09-27 (see the
   mux-daemon-fix session history for that measurement) over a comparable
   observation window.
+  **Confirmed, 2026-10-06:** the 5 most recent `validate-and-promote` runs
+  are 4 `success` / 1 `cancelled` (an expected rapid-concurrent-push
+  supersession, not a failure per this effort's own Context section) — 0
+  genuine failures, a clear improvement over the 0/10-clean baseline.
+  Investigated every other top-ranked signature in the fresh report
+  (`test_context_handoff_handoff_fallback_projection_is_valid` /
+  `test_shipped_projections_fit_the_budgets[context-handoff]`, 22 occ each,
+  246 blocking — traced to a single historical burst entirely on
+  2026-09-29, zero since; the `single-instance-lease` 9-test cluster and
+  the `test_terminate_mux_daemon_pid_*` pair — each traced to a single
+  dense historical window, 2026-10-03/04, zero since; `test_every_real_
+  plugin_covers_its_declared_categories`, newly top-ranked today — passes
+  cleanly on current `dev` HEAD via `test-supervisor`, same cross-cutting
+  content-governance-noise pattern as the marketplace-isolation/
+  session-context-declarations entries documented above, not a standing
+  bug). **No new currently-open Phase 3 target found this pass.**
 
 ## Proposal
 
@@ -314,6 +358,81 @@ _Pending — Phase 3 findings (which fixes land, and in what order) will
 determine whether this section needs anything beyond the Plan above._
 
 ## Journal
+
+### 2026-10-07 — PR #5571 review round 2: fixed a stale Phase 2 spec entry + an inaccurate code comment
+- Copilot review (round 2, on commit `1da4d344f`) raised four findings:
+  two were stale/already-addressed restatements of round 1's comments
+  (the `PR_SKIP_JOB_NAMES` inconsistency and the missing Documentation
+  impact section — both already fixed by the time this round's comments
+  posted, a known resurfacing-thread pattern this effort has hit before
+  with other PRs). Two were genuinely new and valid:
+  1. Removing `identifier leak guard` from `PR_SKIP_JOB_NAMES` doesn't
+     actually restore telemetry visibility into it — it's a custom Check
+     Run from a separate `workflow_run` follow-up workflow (Actions job
+     name `scan + report`), not a job inside the `ci.yml` runs this script
+     mines, so it was likely never reachable by job-name matching at all.
+     Corrected the code comment to say so plainly instead of implying
+     ordinary mining now covers it; noted check-runs-API ingestion as a
+     real, not-yet-done follow-up if ever wanted.
+  2. The Phase 2 Plan item describing the original `KNOWN_NOISY_
+     NONBLOCKING_CHECKS`/`PR_SKIP_JOB_NAMES` implementation still read as
+     current-state prose after both were removed — rewrote it to describe
+     today's actual state (both removed, why, and the same check-runs-API
+     caveat above), per the repository's own timeless-artifact convention
+     (Plan/Phase text describes current state; history belongs in the
+     Journal, not duplicated as a second, now-contradicting spec).
+- Re-validated after both fixes: lint clean, 12/12 `tools/test_ci_
+  telemetry.py` tests pass via `test-supervisor`.
+
+### 2026-10-06 — Validation Plan closed out; identifier-leak-guard dependency confirmed resolved
+- Resumed via handoff recovery (the direct `consume_handoff` targets were
+  stale/already-delivered claims from an earlier leg; recovered the full
+  continuation content from the worktree's own `handoff-request.json`
+  records instead — the effort's own README remained the authoritative
+  source either way, per this facility's completion-gate convention).
+- Fresh telemetry refresh (9-day lookback, 1732 run/attempt rows, 380
+  failure occurrences) confirms both round-4 fixes genuinely landed: the
+  #7715 lock-race signature and the agent-logger venv-of-venv coverage-
+  baseline crash (#5056) no longer appear anywhere in the ranking.
+  `validate-and-promote`'s 5 most recent runs are 4 success / 1 expected
+  cancellation, 0 genuine failures.
+- Investigated every other top-ranked signature in the fresh report by
+  querying occurrence timestamps directly against the persisted sqlite db
+  (not just re-reading prior notes): the `test_context_handoff_handoff_
+  fallback_projection_is_valid` / `test_shipped_projections_fit_the_
+  budgets[context-handoff]` pair (22 occ each, 246 blocking — by far the
+  largest blocking-impact numbers in this report) traces entirely to a
+  single historical burst on 2026-09-29, zero occurrences since (the large
+  blocking-impact figure is an artifact of the widened lookback window
+  counting more subsequent dev-push runs, not renewed activity). The
+  `libs/single-instance-lease` 9-test cluster and the `test_terminate_mux_
+  daemon_pid_*` pair each trace to a single dense window (2026-10-03/04),
+  zero since. `test_every_real_plugin_covers_its_declared_categories`
+  (newly top-ranked, all 11 occurrences today) passes cleanly on current
+  `dev` HEAD via `test-supervisor` — the same cross-cutting content-
+  governance-noise pattern already documented for the marketplace-
+  isolation/session-context-declarations entries, not a standing bug.
+  **No new currently-open Phase 3 fix target found this pass.**
+- Confirmed `efforts/active/ci-identifier-leak-guard/` (#3923) has
+  provisioned the denylist secrets and `identifier leak guard` now reports
+  `pass` consistently (spot-checked PRs #5553, #5440, #5383, #5325) — no
+  longer the "red on every PR" misconfiguration this effort's Phase 3 item
+  was waiting on. Removed the now-stale `identifier-leak-guard-unconfigured`
+  hand-tracked entry from `tools/ci_telemetry.py`'s
+  `KNOWN_NOISY_NONBLOCKING_CHECKS` (left the tuple/section mechanism in
+  place, empty, for a future entry) and updated its regression test;
+  `ruff check` clean, 12/12 `tools/test_ci_telemetry.py` tests pass via
+  `test-supervisor`.
+- Both remaining Validation Plan items now checked off. The sole standing
+  Plan item left unchecked is "work down the Phase 2 ranking" itself —
+  left open by design (new PR-time content-governance trips can recur
+  indefinitely and aren't bugs to fix; this is a monitoring item, not a
+  one-time completion gate).
+- Next: open the PR for this session's `ci_telemetry.py` change (the
+  stale-entry removal) and land it through the normal review flow; after
+  that merges, the effort is functionally at Phase 3 steady-state with no
+  open standing bugs — a future pass only needs a fresh `refresh` if a new
+  recurring/blocking signature appears.
 
 ### 2026-10-03 — Fresh ranked report; agent-logger coverage-baseline root-caused (round 4)
 - Refreshed telemetry (7-day lookback, 1700 run/attempt rows, 384 failure

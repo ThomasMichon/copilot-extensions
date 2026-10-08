@@ -29,11 +29,12 @@
   paths (`worktree_status_compute.py` only assembles a read-only bundle;
   `picker_support/data_local.py` is the path that actually stamps
   `WorktreeRecord.git_state`). #5555 proposes consolidating those two compute
-  paths into one. **Not yet in scope here** — this effort's own Plan
-  explicitly left both kinds unchanged/unrestructured and its Validation Plan
-  has no consolidation check; folding them into one authoritative compute
-  path would need to be added as new Plan/Validation Plan items, not assumed
-  as already underway.
+  paths into one. **Now formally in scope as Phase 6** (added 2026-10-06,
+  operator-directed) — see the Plan below. **Formal follow-on from
+  `pivot-streaming-transport`:** that effort's own Phase 3 note directs
+  whoever closes it out to continue directly into this effort's Phase 6
+  rather than stopping — the four-layer "#5555" direction and this effort's
+  own Worktrees-specific consolidation are sequenced, not parallel, work.
   `module-componentization-discipline`
   (`efforts/active/module-componentization-discipline/README.md`) — has
   already split `tracking.py`'s write surface into `tracking_claims.py` /
@@ -690,6 +691,95 @@ survey above.
       `direct-read-is-a-degrade-not-a-peer` reads remain sanctioned;
       writes do not.
 
+### Phase 6 — Consolidate `classify_daemon` + `worktree_status_compute` into one compute path _(not started)_
+_(Added 2026-10-06, operator-directed formal follow-on from
+`pivot-streaming-transport`. Addresses the Worktrees-pivot half of
+[`ThomasMichon/copilot-extensions#5555`](https://github.com/ThomasMichon/copilot-extensions/issues/5555):
+`_classify_records`'s resident daemon fast path (`classify_daemon.py`,
+no-fetch, coalesced) and this effort's own `worktree_status_daemon.py`
+(`worktree_status_compute.py`, fetch-confirmed, TTL-cached) independently
+compute overlapping git-state facts for the same worktree. The **production**
+Worktrees-pivot route is `worktree-manager`'s own
+`production_picker/picker_tui/data_local.py` →
+`engine_client.list_worktree_rows()` → `agent-worktrees`' `list_cli.py`,
+which *does* pass `daemon_filters` into `_classify_records` (`list_cli.py`
+line ~344) and stamps the result — not
+`plugins/agent-worktrees/picker_support/data_local.py`'s own
+`_classify_records(records, session_ctx)` call (no `daemon_filters`, line
+~359), which is a *different*, non-daemon caller. `worktree_status_compute`'s
+`git_state` fact is consumed separately, by
+`agent-dispatch/worktree_status_relay.py`. Whether/how these two consumers'
+answers can actually diverge against the same worktree — and whether that
+is the row-oscillation issue #5555 describes, or a distinct risk — is not
+yet traced; 6a establishes that before any consolidation work starts.)_
+- [ ] **6a — Design sub-pass (do this first, in its own PR per this effort's
+      own Phase 1 precedent):** first, trace both consumers' actual
+      dataflow — the **production** Worktrees-pivot path
+      (`worktree-manager/production_picker/picker_tui/data_local.py` →
+      `engine_client.list_worktree_rows()` → `list_cli.py`'s
+      `daemon_filters`-passing call, confirmed above), not the non-daemon
+      `plugins/agent-worktrees/picker_support/data_local.py` caller; and
+      `agent-dispatch/worktree_status_relay.py`'s status-bundle consumer —
+      to establish concretely whether/when they can disagree for the same
+      worktree, rather than assuming it. Then enumerate every fact
+      `classify_daemon` computes (`git_ops.WorktreeStateInfo`: `state`,
+      `dirty`, `behind`, `ahead`, etc.) against every fact
+      `worktree_status_compute.compute()` assembles, and classify each as
+      (a) identical/overlapping — a single source should serve both call
+      sites — or (b) distinct — stays source-specific. Decide and document
+      the consolidation shape: either (i) `classify_daemon` becomes a thin
+      no-fetch/fast-mode view onto a generalized `worktree_status_compute`
+      (add a `fetch: bool` parameter so the existing fast, coalesced,
+      no-fetch call path keeps its latency profile while sharing one
+      implementation), or (ii) the reverse — `worktree_status_compute`'s
+      fetch-confirmed facts become an opt-in enrichment layered on top of
+      `classify_daemon`'s existing fast path. Do not start 6b until this
+      design is written down and reviewed (this effort's own repo PR
+      review gate) — the two existing call sites have different
+      latency/freshness contracts and a wrong default risks silently
+      slowing down the Picker's default classify path.
+- [ ] **6b — Implement the chosen consolidation**, keeping both existing
+      external call-site contracts (`_classify_records`'s `daemon_filters`
+      path; `session_tracking_cli`'s `worktree-status` bundle command)
+      unchanged in shape — only the shared internal compute path changes.
+      Retire whichever of the two rendezvous/daemon implementations 6a
+      designates as subsumed (its `work_coalescing_singleton` `kind` and
+      lock-file rendezvous fields), rather than leaving a second, now-dead
+      daemon process running alongside the unified one.
+- [ ] **6c — Structural delegation test proving one shared compute seam,**
+      not a same-answer coincidence test: a same-repository-state agreement
+      check cannot distinguish "two implementations that happen to agree on
+      an unchanged repo" from "one shared compute path" — and would wrongly
+      fail after a legitimate freshness divergence (the no-fetch classify
+      result's `behind` can genuinely differ from the fetch-confirmed
+      bundle's right after a remote ref changes, per 6a's own freshness-
+      contract requirement). Instead: once 6a selects the shared seam
+      (i or ii above), write a test that patches/mocks *that specific
+      shared function* and asserts **both** entry points
+      (`_classify_records(daemon_filters=...)` and `session_tracking_cli`'s
+      `worktree-status` bundle fetch) invoke it — proving structural
+      delegation, not output coincidence. Cover mode-specific freshness
+      behavior (the no-fetch vs. fetch-confirmed `behind` divergence case
+      above) as a **separate**, explicitly-expected-to-differ assertion,
+      not folded into the delegation test.
+- [ ] **6d — Close the remaining snapshot/stream gap, or formally defer it:**
+      6b as scoped only shares a compute implementation between the two
+      existing *polling* entry points — it does not give the Picker's
+      Worktrees pivot the daemon-only initial-snapshot-plus-incremental-
+      update stream #5555 asks for (today `_classify_records` still falls
+      back to caller-side git computation whenever the daemon is
+      unavailable, and `list --json --classify` remains a polled call, not
+      `stream`/`subscribe` per `pivot-streaming-transport`'s own contract).
+      Either scope and schedule that cutover as a 6d sub-phase here, or
+      explicitly narrow this phase's closing claim on #5555 and open a
+      tracked follow-on issue for the snapshot/stream cutover — do not let
+      6a-6c's completion read as "the Worktrees-pivot half of #5555 is
+      done" if this gap is left open silently.
+- [ ] Update `classify_daemon.py`'s and `worktree_status_compute.py`'s own
+      module docstrings to describe the consolidated architecture, so a
+      future reader doesn't rediscover this effort's own "two daemons, one
+      fact" history as a live bug.
+
 ## Validation Plan
 
 - [ ] Phase 1: this design reviewed (operator + this repo's automated PR
@@ -708,6 +798,19 @@ survey above.
 - [ ] Phase 5: a live end-to-end host check (mirroring the accelerator
       effort's own Phase 7 audit tooling) confirming every sampled
       worktree's daemon-held state and its on-disk YAML persistence agree.
+- [ ] Phase 6: 6c's structural delegation test passes (both entry points
+      provably invoke the one shared compute seam, with mode-specific
+      freshness divergence covered as a separate expected-difference
+      assertion); 6d's gap is either closed (daemon-only snapshot/stream
+      cutover shipped and verified) or formally narrowed/deferred to a
+      tracked follow-on issue, never left silently open; and — for whatever
+      scope 6d actually closes — the Picker's rendered Worktrees-pivot row
+      for a sampled worktree does not visibly flip `state` across repeated
+      refreshes with no real underlying git change — the literal acceptance
+      bullet from `ThomasMichon/copilot-extensions#5555` ("No pivot's row
+      state can visibly oscillate between two different values for the same
+      underlying fact with no real change having occurred"), checked here
+      for the Worktrees pivot specifically.
 
 ## Proposal
 
