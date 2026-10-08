@@ -5,7 +5,7 @@
 - **Branch(es):** independent per-phase PRs, this effort file updated in the same worktree as whichever phase is active
 - **Created:** 2026-10-07
 - **Status:** Active
-- **Vision:** zero-downtime / resident-daemon efficiency (status-monitor should never cost more than a bounded sweep)
+- **Vision:** zero-downtime / resident-daemon efficiency (status-monitor should never cost more than a bounded sweep); [resident daemon as the authoritative live-state database](../../../visions/plugins/agent-worktrees/README.md#the-resident-daemon-as-the-authoritative-live-state-database)
 - **Umbrella issue:** ThomasMichon/copilot-extensions#5664
 
 ## Guiding Intent
@@ -16,6 +16,18 @@ a transactionally-updated slot on that worktree's own record; a journal
 (global or per-worktree) exists only for human/on-demand diagnostics ("what
 just happened", a `doctor`-style flow), never as a source of truth an
 automatic sweep depends on.
+
+**Alignment with the single-write-authority vision.** The new handoff-lifecycle
+slot fields (Phase 1) are not a new, independent direct-YAML-write path: they
+are written through the **same `tracking_write` verb-dispatch mechanism**
+already used for every other migrated mutation (e.g. `session_register` in
+`tracking_session_registration_write.py`) -- dispatched to the resident
+daemon when reachable, falling back to the identical in-process
+implementation (never a second, drifting copy of the write logic) when it
+isn't, exactly as the vision's "resident daemon as the authoritative
+live-state database" section directs. This effort does not introduce a
+second write authority; it adds one more piece of state to the single
+authority that already exists.
 
 ## Participants
 
@@ -126,7 +138,8 @@ follow-ons.
 - [ ] Extend `SessionHandoff` (tracking.py) with: `spawn_attempted_at`,
       `predecessor_retire_state` (`pending|retired|abandoned`),
       `retire_attempts`, `retire_last_attempt_at`, `retire_last_outcome`,
-      `retire_last_method`, **`retire_terminal_streak_started_at`**.
+      `retire_last_method`, **`retire_first_attempt_at`**,
+      **`retire_disqualified_by_nonterminal`** (bool).
 - [ ] **Crash-safe commit ordering.** The slot and the diagnostic log are
       not one atomic commit -- a YAML write under `_RecordLock` and a
       best-effort JSONL append cannot both land atomically, and the
@@ -138,18 +151,26 @@ follow-ons.
       crash between the two leaves the slot (authoritative) correct and
       only the diagnostic trail short one event -- never the reverse.
 - [ ] **Preserve the exact abandon-after-N-unrecoverable-failures semantics
-      (`_RETIRE_TERMINAL_FAILURE_METHODS`, `_RETIRE_ABANDON_GRACE_S`).** The
-      existing logic (`__main__.py`'s abandonment pass) requires *every*
-      recorded attempt to be terminal-class, and starts the grace-period
-      clock at the **earliest** attempt in that unbroken run -- a bare
-      "count + last outcome/method/time" cannot reconstruct this: it loses
-      both the original streak-start timestamp and whether a non-terminal
-      attempt ever interrupted the run. `retire_terminal_streak_started_at`
-      is set on the first terminal-class failure after a reset and left
-      untouched by subsequent terminal-class failures; it is explicitly
-      cleared to `None` the moment any non-terminal-class attempt occurs.
-      Abandonment then checks `now - retire_terminal_streak_started_at >=
-      _RETIRE_ABANDON_GRACE_S` directly off the slot -- no journal replay.
+      (`_RETIRE_TERMINAL_FAILURE_METHODS`, `_RETIRE_ABANDON_GRACE_S`) --
+      verified against the real code, not a reinterpretation.** The
+      existing logic (`_pending_handoff_retire_requests`,
+      `__main__.py:2896-2919`) checks `all(...)` across **every retained
+      retire event for a token**: a single non-terminal attempt, anywhere
+      in the retained window, permanently disqualifies that token from
+      ever being abandoned -- there is no "streak" that resets and a new
+      one begins; disqualification is sticky, not resettable, and there is
+      no "N failures" threshold today, only "all of them, ever retained,
+      were terminal-class." Model this precisely: `retire_first_attempt_at`
+      is set once, on the first retire attempt ever recorded for the
+      token, and never changes again (when every attempt is terminal-class,
+      this IS the earliest-terminal-attempt timestamp the current logic
+      computes via `min(failure_times)`).
+      `retire_disqualified_by_nonterminal` starts `False` and is set `True`
+      permanently the first time any non-terminal-class attempt occurs for
+      that token -- never cleared back to `False`. Abandonment then checks
+      `not retire_disqualified_by_nonterminal and now -
+      retire_first_attempt_at >= _RETIRE_ABANDON_GRACE_S` directly off the
+      slot -- no journal replay, and no behavioral change from today.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
 - [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
@@ -235,9 +256,12 @@ archived-journal discovery, standalone-install retention floor):
 [`phase-6-archival.md`](phase-6-archival.md).
 
 - [ ] A fail-open, lower-tier-owned composition seam (never a direct
-      `agent-worktrees` -> `agent-logger` call) that archives a cleaned-up
-      worktree's accumulated per-worktree state, verify-before-reclaim,
-      correctly namespaced by project (not just repo).
+      `agent-worktrees` -> `agent-logger` call, and never an indefinite
+      block on a hung callback -- a bounded timeout, same pattern as
+      `claim_providers.py`'s existing provider-process calls) that
+      archives a cleaned-up worktree's accumulated per-worktree state,
+      verify-before-reclaim, correctly namespaced by project (not just
+      repo).
 - [ ] `agent-worktrees`' own baseline bounded-retention fallback for a
       standalone install with no archiver, so disk use never regresses to
       unbounded growth.
@@ -252,13 +276,15 @@ archived-journal discovery, standalone-install retention floor):
       the diagnostic-event emission; assert the slot remains correct and
       authoritative regardless, and that the diagnostic write never
       precedes the slot commit (Phase 1).
-- [ ] A terminal-streak test: a non-terminal attempt followed by a run of
-      terminal-class failures must start the grace-period clock at the
-      first terminal failure *after* the non-terminal one, not any earlier
-      terminal failure before it; confirm `retire_terminal_streak_started_at`
-      resets correctly on a non-terminal attempt and abandonment fires at
-      exactly `_RETIRE_ABANDON_GRACE_S` past the correct streak start
-      (Phase 1).
+- [ ] A permanent-disqualification test: a single non-terminal attempt,
+      anywhere in a token's history (even followed by many subsequent
+      terminal-class failures), must permanently prevent abandonment --
+      confirm `retire_disqualified_by_nonterminal` is set `True` on the
+      first non-terminal attempt and never clears, and that abandonment
+      never fires for that token regardless of how much later terminal-only
+      activity occurs. A separate token with every attempt terminal-class
+      from the start must still abandon at exactly `_RETIRE_ABANDON_GRACE_S`
+      past `retire_first_attempt_at` (Phase 1).
 - [ ] Unit tests proving the 6 rewired hot-path functions never call
       `activity.read_events`/`handoff_trace.read_trace` (Phase 2) --
       e.g. a monkeypatch that raises if either is called during a sweep or
@@ -295,18 +321,25 @@ _Pending review of Phase 1's PR (first reviewable slice)._
   archival capability in `agent-logger`.
 - Filed ThomasMichon/copilot-extensions#5664 as the umbrella issue.
 
-### 2026-10-08 — Plan review (PR #5669), 8 rounds
-- Drove the plan-only PR through 8 review rounds, resolving a long run of
+### 2026-10-08 — Plan review (PR #5669), 9 rounds
+- Drove the plan-only PR through 9 review rounds, resolving a long run of
   genuine migration/archival/state-model correctness gaps: a crash-safe
-  slot/log commit ordering and exact terminal-failure-streak-start
-  tracking (Phase 1), two additional automatic journal readers (Phase 2),
-  an unscoped-`activity`-view contract, live-write project-routing, and a
-  full worktree-less-events audit beyond just `boot_trace` (Phase 3),
-  stable per-event identity (not content counting alone), generation-safe
+  slot/log commit ordering and the EXACT (verified against the real code,
+  not a reinterpretation) permanent non-terminal-disqualification
+  abandonment semantics (Phase 1), two additional automatic journal
+  readers (Phase 2), an unscoped-`activity`-view contract, live-write
+  project-routing, and a full worktree-less-events audit beyond just
+  `boot_trace` (Phase 3), a UUID-based stable per-event identity (not a
+  PID-reuse-vulnerable pair, not content counting alone), generation-safe
   resumability against the log's own retention-prune file replacement,
   temporal id-reuse/era-matched provenance, and project ambiguity (Phase 4),
-  and a fail-open composition seam plus a standalone-install retention
-  floor for archival (Phase 6).
+  and a fail-open, bounded-timeout composition seam plus a
+  standalone-install retention floor for archival (Phase 6).
+- Reconciled Phase 1 with the repo's own "resident daemon as the
+  authoritative live-state database" vision direction: the new slot
+  fields are written through the same `tracking_write` verb-dispatch
+  mechanism already used elsewhere, not a new, independent direct-YAML
+  write path.
 - Restructured the README per a Low finding and this repo's own
   decompose-liberally convention: extracted Phases 3/4/6's detailed
   design and validation into linked sibling docs

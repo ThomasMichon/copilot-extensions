@@ -23,6 +23,19 @@ into it directly, and its absence must never block or slow cleanup
 - [ ] The authoritative "this worktree is gone" tombstone/identity decision
       stays entirely inside `agent-worktrees` regardless of whether the
       archival seam is present, fires, or fails.
+- [ ] **A failed callback is not the only non-blocking case -- a hung one
+      must not be either.** Fail-open handling of an error return doesn't
+      cover a provider process that never returns at all; a synchronous,
+      unbounded wait on a hung archiver would still block cleanup
+      indefinitely, contradicting the fail-open intent above. Invoke the
+      callback the same way `claim_providers.py`'s existing
+      `_run_provider_process`/`_run_legacy_command` already do for this
+      exact composition-seam shape: a subprocess call with an explicit,
+      finite `timeout`; on `subprocess.TimeoutExpired` (or any other
+      failure), treat it identically to an ordinary failed/absent callback
+      -- fail-open, never block. Add a hung-callback test (a stub provider
+      that sleeps past the timeout) alongside the ordinary firing/failing
+      cases.
 
 ### Archived-journal discovery stays lower-tier-owned
 
@@ -94,6 +107,10 @@ regression, not merely a missed optimization.
       normally and identically whether or not `agent-logger` is installed
       (fail-open), and that the archival callback firing/failing never
       changes `agent-worktrees`' own tombstone decision.
+- [ ] A hung-callback test: a stub archival provider that sleeps past the
+      configured timeout; confirm cleanup still completes promptly
+      (fail-open on timeout, not an indefinite block) exactly like an
+      ordinary failed/absent callback.
 - [ ] An archive-key-collision test: two different projects each with a
       worktree of the same id targeting the same repo; confirm their
       archives land at distinct, non-interfering paths.

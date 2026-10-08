@@ -25,10 +25,14 @@ migration to skip real history rather than duplicate it.
 - [ ] Give every event a **stable, explicit identity assigned at write
       time**, not derived after the fact from content: Phase 3's
       generalized writer (and, for the remaining transition window, the
-      legacy global writer too) stamps each event with a unique id (e.g. a
-      UUID, or a `(writer-pid, monotonic-sequence)` pair) at the moment
-      it's created. Migration then matches by this id, not by counting
-      look-alike content -- exact, not probabilistic.
+      legacy global writer too) stamps each event with a **UUID** (e.g.
+      `uuid4()`) at the moment it's created -- not a `(writer-pid,
+      sequence)` pair, which operating systems can make collide across
+      writer lifetimes (PIDs are reused, and each new process restarts its
+      own sequence from zero, so two genuinely distinct events from
+      different process generations could share an id). Migration then
+      matches by this id, not by counting look-alike content -- exact, not
+      probabilistic.
 - [ ] Crash/retry-safe: if a writer crashes after assigning the id but
       before the write durably lands on one or both sides, the retry must
       reuse the *same* id (not mint a new one), so a later migration pass
