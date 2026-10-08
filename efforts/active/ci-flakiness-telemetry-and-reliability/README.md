@@ -308,6 +308,17 @@ find the noisiest and blocking issues, and fix them"
   and is a reasonable small follow-up, not yet done. If the signature
   recurs even once on a run created after the guard existed, that would be
   genuinely new evidence worth investigating from scratch.
+  **New candidates surfaced 2026-10-08** (from the now-archived
+  `agent-dispatch-recipe-library` effort, #4691): `#5582` (a hypothesized
+  race, confirmed transient -- passes cleanly in isolation) and `#5584` (a
+  documented tight real-world subprocess-startup timeout) both blocked
+  that effort's own "one clean full-suite `agent-dispatch` run" Validation
+  Plan item across 3 consecutive attempts, each failing elsewhere in the
+  suite rather than in that effort's own touched modules. Deferred there
+  to `ThomasMichon/copilot-extensions#5731` (tracking the full-suite-run
+  item itself) since this effort's own Phase 3 ranking work was not
+  picked back up to re-rank/triage them directly -- worth folding into the
+  next ranking pass alongside the above.
 
 ## Validation Plan
 
