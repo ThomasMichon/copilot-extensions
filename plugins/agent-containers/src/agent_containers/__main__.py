@@ -304,8 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_release(args.target)
         if args.command in ("stop", "remove"):
             from . import lifecycle
-            return (lifecycle.cmd_stop(args.name) if args.command == "stop"
-                    else lifecycle.cmd_remove(args.name, force=args.force))
+            return lifecycle.dispatch_stop_or_remove(args)
         if args.command == "leases":
             return _cmd_leases()
         if args.command == "lifecycle-clear":

@@ -188,6 +188,28 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
 def _cmd_emitter(args: argparse.Namespace) -> int:
     from .producers import emitter
 
+    if args.emitter_command == "doctor":
+        from . import emitter_diagnostics
+
+        if args.apply and (not args.expected_holder or not args.declaration):
+            raise SystemExit(
+                "emitter doctor --apply requires --expected-holder and --declaration"
+            )
+        try:
+            spec = emitter.load_spec(args.spec)
+            with _client(args) as client:
+                diagnosis = emitter_diagnostics.inspect(
+                    client, args.spec, spec, holder=args.holder,
+                    declaration_path=args.declaration,
+                )
+                if args.apply:
+                    diagnosis = emitter_diagnostics.recover(
+                        client, diagnosis, expected_holder=args.expected_holder,
+                    )
+            return _emit(diagnosis)
+        except (ValueError, emitter.EmitterError, DispatchError) as exc:
+            print(f"agent-dispatch emitter doctor: {exc}", file=sys.stderr)
+            return 2
     if args.emitter_command == "receipts":
         return _emit(emitter.read_receipts(args.emitter_id, since=args.since))
     if args.emitter_command == "side-load":
@@ -390,6 +412,13 @@ def register_producer_commands(subparsers: Any) -> None:
         help="lease-gated periodic command emitter managed by the singleton supervisor",
     )
     emitter_sub = p.add_subparsers(dest="emitter_command", required=True)
+    ep = emitter_sub.add_parser("doctor", help="diagnose producer pins; explicit guarded recovery")
+    ep.add_argument("spec", help="path to the JSON command-emitter spec")
+    ep.add_argument("--holder", required=True, help="target producer machine identity")
+    ep.add_argument("--declaration", help="source declaration for machine eligibility checks")
+    ep.add_argument("--apply", action="store_true", help="authorize release of a stale foreign pin")
+    ep.add_argument("--expected-holder", help="observed old holder; required with --apply")
+    ep.set_defaults(func=_cmd_emitter)
     ep = emitter_sub.add_parser("tick", help="run one lease-gated emitter tick")
     ep.add_argument("spec", help="path to the JSON command-emitter spec")
     ep.add_argument("--holder", required=True, help="this producer's machine identity")

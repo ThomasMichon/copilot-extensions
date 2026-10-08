@@ -265,10 +265,14 @@ def _repository_issue_loop_status(
         )
 
     coordinator_error = None
+    emitter_lease = None
     tasks = []
     failed_spawn_counts: dict[str, int] = {}
     try:
         with _client(args, ensure=False) as client:
+            from .producers.emitter import lease_scope
+
+            emitter_lease = client.get_schedule_lease(lease_scope(source["spec"]))
             tasks = [
                 task
                 for task in client.list(
@@ -351,6 +355,19 @@ def _repository_issue_loop_status(
     }
     diagnoses = []
     actions = []
+    from .emitter_diagnostics import diagnose as diagnose_emitter
+
+    emitter_production = diagnose_emitter(
+        source["spec"], holder=machine or "", lease=emitter_lease,
+        health=emitter_health if isinstance(emitter_health, dict) else None,
+        eligible=runs_on_machine(
+            next(item for item in declarations if item.kind == "emitter"), machine,
+        ),
+    )
+    if emitter_production["production_state"] == "lease-stale":
+        diagnoses.append("emitter-lease-stale")
+    elif emitter_production["production_state"] == "lease-not-held":
+        diagnoses.append("emitter-lease-not-held")
     if not pointers:
         diagnoses.append("missing-pointer")
         actions.append(f"agent-dispatch repository-issue-loop setup {path}")
@@ -416,6 +433,7 @@ def _repository_issue_loop_status(
                 "last": emitter_health,
                 "read_error": emitter_health_error,
                 "stale": emitter_stale,
+                "production": emitter_production,
             },
             "active_occurrence": (
                 {

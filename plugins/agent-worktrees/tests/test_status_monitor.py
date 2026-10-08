@@ -393,6 +393,30 @@ def test_enabled_env_unset(monkeypatch):
     assert m._status_monitor_enabled() is True
 
 
+def test_env_override_has_no_effect_outside_the_test_harness(monkeypatch):
+    """The real guarantee this flag exists to provide: a value that would
+    disable the monitor under the test harness must have NO effect once
+    ``PYTEST_CURRENT_TEST`` is absent -- i.e. in a real operator session.
+    This is what makes the resident monitor mandatory, always-on
+    infrastructure rather than an operator-facing opt-out."""
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert m._status_monitor_enabled() is True, (
+        "disabling via the env var must be a no-op once this isn't running "
+        "under the test harness"
+    )
+
+
+def test_env_override_still_works_under_the_test_harness(monkeypatch):
+    """The companion guarantee: the SAME env var must still work exactly as
+    before for test isolation, as long as ``PYTEST_CURRENT_TEST`` is set --
+    which pytest sets automatically for every test, so this is the normal
+    in-suite behavior with zero changes needed to any existing test."""
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "some-test (call)")
+    assert m._status_monitor_enabled() is False
+
+
 def test_registry_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
     assert m._register_session_for_monitor("wt-a", "/w/a") is True

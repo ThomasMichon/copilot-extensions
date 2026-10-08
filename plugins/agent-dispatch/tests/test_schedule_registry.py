@@ -237,6 +237,25 @@ def test_http_lease_acquire_refuse_release(client):
     assert client.get_schedule_lease("chronicle") is None
 
 
+def test_http_observed_release_refuses_holder_change_and_renewal(client):
+    first = client.acquire_schedule_lease("chronicle", "example-host")["lease"]
+    client.acquire_schedule_lease("chronicle", "example-host")
+    with pytest.raises(Exception) as error:
+        client.release_schedule_lease(
+            "chronicle", "example-host", expected_renewed_at=first["renewed_at"],
+        )
+    assert error.value.status_code == 409
+    live = client.get_schedule_lease("chronicle")
+    with pytest.raises(Exception) as error:
+        client.release_schedule_lease(
+            "chronicle", "example-host-wsl", expected_renewed_at=live["renewed_at"],
+        )
+    assert error.value.status_code == 409
+    assert client.release_schedule_lease(
+        "chronicle", "example-host", expected_renewed_at=live["renewed_at"],
+    )["released"] is True
+
+
 def test_registry_tick_produces_and_is_idempotent(client):
     client.register_schedule(_entry("hourly", interval_seconds=3600))
     client.register_schedule(_entry("paused", interval_seconds=3600))
