@@ -40,6 +40,7 @@ worktree id never inherits a stale trace.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -189,12 +190,21 @@ def read_trace(project: str, worktree_id: str) -> list[dict]:
     to THIS worktree, so an unchanged file is now a cache hit instead of a
     full re-read + re-parse (copilot-extensions#3751's own diagnosis, same
     shape, different call path).
+
+    Returns an independent ``copy.deepcopy`` of jsonl_cache's cached list
+    (jsonl_cache itself returns its cached list by reference -- see its own
+    "Mutation isolation invariant"): unlike ``activity.read_events``'s
+    machine-global, unfiltered-then-sliced log, this function always
+    returns the FULL per-worktree trace with no filtering of its own, so
+    there is no smaller "only what's actually returned" subset to copy
+    instead -- and a per-worktree trace file is orders of magnitude smaller
+    than the global activity log, so the full copy here stays cheap.
     """
     try:
         path = trace_path(project, worktree_id)
     except ValueError:
         return []
-    return jsonl_cache.cached_parse(path, _parse_trace_file)
+    return copy.deepcopy(jsonl_cache.cached_parse(path, _parse_trace_file))
 
 
 def remove_trace(project: str | None, worktree_id: str | None) -> None:

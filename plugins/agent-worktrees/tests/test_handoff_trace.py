@@ -77,6 +77,22 @@ def test_read_trace_reuses_the_cached_parse_until_a_new_event_lands(
     assert len(calls) == 2, "an appended event must force exactly one re-parse"
 
 
+def test_read_trace_mutating_a_returned_event_does_not_leak_into_later_reads(
+    patch_install_dir: Path,
+):
+    """A caller that mutates one returned event dict must never corrupt
+    what a LATER caller gets back from a cache hit against the same
+    underlying (shared, by-reference) jsonl_cache entry."""
+    handoff_trace.append_event("proj-a", "wt-1", {"event": "original"})
+
+    first = handoff_trace.read_trace("proj-a", "wt-1")
+    first[0]["event"] = "mutated"
+    second = handoff_trace.read_trace("proj-a", "wt-1")
+    assert second[0]["event"] == "original", (
+        "a caller's in-place mutation must never leak into a later read"
+    )
+
+
 def test_two_projects_same_worktree_id_do_not_interleave(patch_install_dir: Path):
     handoff_trace.append_event("proj-a", "wt-1", {"event": "a-event"})
     handoff_trace.append_event("proj-b", "wt-1", {"event": "b-event"})

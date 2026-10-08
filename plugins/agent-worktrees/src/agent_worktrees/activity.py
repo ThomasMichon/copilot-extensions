@@ -124,6 +124,7 @@ swallows its own exceptions.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -650,7 +651,14 @@ def read_events(
             ts = _rec_ts(rec)
             if ts is not None and ts < since:
                 continue
-        out.append(rec)
+        # Copy only a MATCHED record, not jsonl_cache's full cached list --
+        # the cached list can be tens of thousands of entries long (the
+        # machine-global activity.jsonl), while a caller's actual matched/
+        # returned subset is normally small; copying only what is actually
+        # returned keeps a cache hit from paying an O(full log) copy cost
+        # merely to hand back an independent result (jsonl_cache's own
+        # "Mutation isolation invariant").
+        out.append(copy.deepcopy(rec))
     if limit is not None and limit > 0:
         out = out[-limit:]
     return out

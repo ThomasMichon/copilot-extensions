@@ -10,44 +10,46 @@ copilot-extensions#3751 added this pattern for ``tracking.list_records()``'s
 fleet-wide YAML reparse; the resident status-monitor's handoff-retire sweep
 (``_pending_handoff_retire_requests``) turned out to have the same shape of
 bug in a different call path: ``activity.read_events()`` (the machine-global
-``activity.jsonl`` log -- tens of MB after a few days of multi-session use)
-and ``handoff_trace.read_trace()`` (a per-worktree durable trace file) each
-re-read and re-``json.loads`` their *entire* file from scratch on every call,
-with no caching, every sweep tick, for every worktree carrying a pending
-handoff -- not merely a parse-speed problem, a volume one, exactly like
-#3751's own diagnosis.
+``activity.jsonl`` log -- tens of MB / 90k+ lines after a few days of multi-
+session use) and ``handoff_trace.read_trace()`` (a per-worktree durable
+trace file) each re-read and re-``json.loads`` their *entire* file from
+scratch on every call, with no caching, every sweep tick, for every worktree
+carrying a pending handoff -- not merely a parse-speed problem, a volume
+one, exactly like #3751's own diagnosis.
 
 Deliberately NOT a TTL/staleness cache: a file changed since the cached
 stamp is reflected on its very next read, no staleness window is ever
 tolerated. A log is append-only in practice, but this cache makes no such
 assumption -- any content change invalidates it the same way.
+
+**Mutation isolation invariant.** This module returns its cached list (and
+the dicts inside it) by reference, not by copy -- deep-copying the full
+parsed log on every hit would reintroduce an O(log size) cost on every
+cache hit, defeating the point for a 90k-line log. A caller must never
+mutate a dict it receives from :func:`cached_parse` in place; the module's
+own callers (``activity.read_events``, ``handoff_trace.read_trace``) each
+copy only the small, bounded subset they actually return (the matched/
+filtered/tail-limited result), never the full cached list, to give their
+own callers an independent result without paying the full-log copy cost.
 """
 
 from __future__ import annotations
 
-import copy
 import threading
 from pathlib import Path
-from typing import Callable, TypeVar
-
-T = TypeVar("T")
+from typing import Callable
 
 _cache_lock = threading.Lock()
-_cache: dict[str, tuple[int, int, object]] = {}
+_cache: dict[str, tuple[int, int, list[dict]]] = {}
 
 
 def cached_parse(path: Path, parser: Callable[[Path], list[dict]]) -> list[dict]:
     """``parser(path)``, memoized on the file's own ``(mtime_ns, size)``.
 
-    Returns an independent ``copy.deepcopy`` on every call -- a cache HIT
-    must look exactly like a fresh parse to its caller. Mirrors
-    ``record_cache.cached_load``'s own default: a caller that mutates one
-    returned dict in place (``read_trace()`` previously handed back the
-    cache's own list directly; a caller mutating an event would leak that
-    mutation into every later reader, never written to disk) must never be
-    able to corrupt what a later cache hit hands back to a different
-    caller. The copy cost is paid on every hit, not just a miss -- cheap
-    here (a plain list of small dicts), unlike a full ``WorktreeRecord``.
+    Returns the cache's own list, by reference -- see this module's
+    "Mutation isolation invariant" above. The caller must copy whatever
+    bounded subset it actually hands onward to ITS OWN caller, not this
+    whole list.
 
     A missing file parses (and caches) as whatever ``parser`` returns for a
     nonexistent path (typically an empty list) -- callers are expected to
@@ -64,11 +66,11 @@ def cached_parse(path: Path, parser: Callable[[Path], list[dict]]) -> list[dict]
     with _cache_lock:
         cached = _cache.get(key)
         if cached is not None and (cached[0], cached[1]) == stamp:
-            return copy.deepcopy(cached[2])
+            return cached[2]
     parsed = parser(path)
     with _cache_lock:
         _cache[key] = (stamp[0], stamp[1], parsed)
-    return copy.deepcopy(parsed)
+    return parsed
 
 
 def clear() -> None:

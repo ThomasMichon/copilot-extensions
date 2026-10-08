@@ -245,6 +245,26 @@ def test_read_events_reuses_the_cached_parse_across_distinct_filters(
     assert len(calls) == 2, "an appended event must force exactly one re-parse"
 
 
+def test_read_events_mutating_a_returned_event_does_not_leak_into_later_reads(
+    patch_install_dir: Path,
+):
+    """A caller that mutates one returned event dict must never corrupt
+    what a LATER caller gets back from a cache hit against the same
+    underlying (shared, by-reference) jsonl_cache entry -- ``read_events``
+    copies only the matched/returned subset, not jsonl_cache's full cached
+    list, so this isolation must hold without paying an O(full log) copy
+    on every hit."""
+    activity.log_event("worktree_created", worktree_id="wt-1")
+
+    first = activity.read_events(worktree_id="wt-1")
+    first[0]["event"] = "mutated"
+    second = activity.read_events(worktree_id="wt-1")
+    assert second[0]["event"] == "worktree_created", (
+        "a caller's in-place mutation must never leak into a later read"
+    )
+
+
+
 def test_read_events_limit_returns_most_recent(patch_install_dir: Path):
     for i in range(5):
         activity.log_event("session_started", worktree_id=f"wt-{i}")
