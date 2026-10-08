@@ -18,6 +18,13 @@ from collections.abc import Callable
 from typing import Any
 
 from acp.exceptions import RequestError
+from acp.schema import (
+    ClientCapabilities,
+    ClientSessionCapabilities,
+    ElicitationCapabilities,
+    ElicitationFormCapabilities,
+    SessionConfigOptionsCapabilities,
+)
 
 log = logging.getLogger("agent-bridge")
 
@@ -110,6 +117,31 @@ def subagent_event_meta() -> dict[str, Any]:
     if not subagent_events_enabled():
         return {}
     return {COPILOT_META_KEY: {"events": list(SUBAGENT_EVENT_TYPES)}}
+
+
+def client_capabilities(meta: dict[str, Any]) -> ClientCapabilities:
+    """Capabilities advertised on ``initialize``; ``meta`` becomes ``_meta``.
+
+    Copilot CLI honors the raw session-event subscription only here (not as
+    top-level request ``_meta``), so ``meta`` is ``subagent_event_meta()``.
+    """
+    return ClientCapabilities(
+        # Advertise form elicitation so the agent's ``ask_user`` calls are
+        # delivered (as ``elicitation/create``) instead of being self-cancelled
+        # for want of a capable client. The bridge parks each request and
+        # surfaces it as an ``ask_user_request`` event for a human to answer
+        # -- it does NOT auto-answer.
+        elicitation=ElicitationCapabilities(form=ElicitationFormCapabilities()),
+        # Advertise session config-option support so we may drive the agent's
+        # ``model`` / ``reasoning_effort`` select options via
+        # ``session/set_config_option`` (dotfiles#790). Select options need no
+        # capability flag, but advertising is the spec-correct signal that
+        # this client sets config options.
+        session=ClientSessionCapabilities(
+            config_options=SessionConfigOptionsCapabilities(),
+        ),
+        field_meta=meta or None,
+    )
 
 
 def copilot_agent_id_from_meta(meta: Any) -> str | None:
