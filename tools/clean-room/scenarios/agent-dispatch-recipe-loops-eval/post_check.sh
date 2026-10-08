@@ -307,10 +307,22 @@ if [ -n "$_remote" ]; then
         _driver_slug="$(grep -A5 -E '^effort_slugs:' "$_driver_decl" | grep -E '^\s*-\s' | head -1 | sed -E 's/^\s*-\s*//' | tr -d '"'"'"'\r')"
         if [ -n "$_driver_slug" ] && [ "$_efforts_fetch_ok" = 1 ]; then
             cr_meta "effort_driver_declared_slug" "$_driver_slug"
+            _driver_slug_was_active_before=0
+            if [ -n "${_before_list:-}" ] && [ -f "$_before_list" ] && grep -qx "$_driver_slug" "$_before_list" 2>/dev/null; then
+                _driver_slug_was_active_before=1
+            fi
             if grep -qx "$_driver_slug" "$_efforts_active_after_raw" 2>/dev/null; then
                 info "effort-driver's declared slug '$_driver_slug' is STILL under efforts/active/ -- not yet archived"
+            elif [ "$_driver_slug_was_active_before" != 1 ]; then
+                # Absence alone doesn't prove THIS run archived it -- the
+                # fixture repo is deliberately retained across reruns, so a
+                # slug an EARLIER run already archived would otherwise emit
+                # a stale PASS every time. Only attribute the archive move
+                # to this run when the setup-time snapshot shows the slug
+                # was genuinely active before this turn.
+                info "effort-driver's declared slug '$_driver_slug' is not under efforts/active/, but it was already absent before this run started (per the setup-time snapshot) -- cannot attribute the archive move to this run"
             else
-                pass "effort-driver's declared slug '$_driver_slug' is no longer under efforts/active/ (archived, per the real contents API read)"
+                pass "effort-driver's declared slug '$_driver_slug' is no longer under efforts/active/ (archived, per the real contents API read, and confirmed active before this run by the setup-time snapshot)"
 
                 if capture "pc-archive-tree" -- _find_archive_path "$_owner_repo" "$_driver_slug"; then
                     _archive_path="$(sed -n '2,$p' "$CR_LOGDIR/pc-archive-tree.log" | head -1)"

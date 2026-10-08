@@ -333,35 +333,82 @@ bind: 127.0.0.1
 log_level: info
 YAML
 fi
-# Append the topology block without disturbing whatever the already-
-# provisioned config.yaml (schema_version, port, bind, log_level) already
-# carries -- adds a top-level "topologies:" key only if one is not already
-# present, so this is safe to run against either a brand-new or an
-# already-migrated config file.
-python3 - "$_bridge_config" "$HOME/agents.json" <<'PY'
+# Add/replace only the "topologies.local-only" entry, structurally -- never
+# disturbing whatever the already-provisioned config.yaml (schema_version,
+# port, bind, log_level, or any OTHER already-registered topology) carries.
+# Handles: no "topologies:" key yet; an empty "topologies: {}"/bare
+# "topologies:" block; and a rerun against a block that already has our own
+# "local-only:" entry (replaced in place, never duplicated). A non-empty
+# INLINE flow mapping (e.g. "topologies: {foo: {...}}") is not safe to edit
+# with this line-based approach, so that case fails closed (jam) instead of
+# risking silent corruption of real existing topology data.
+_topo_edit_log="$CR_LOGDIR/bridge-topology-edit.log"
+if ! python3 - "$_bridge_config" "$HOME/agents.json" > "$_topo_edit_log" 2>&1 <<'PY'
 import sys
+
 path, agents_path = sys.argv[1], sys.argv[2]
 lines = open(path, encoding="utf-8").read().splitlines()
 new_entry = ["  local-only:", f"    agents_config: {agents_path}"]
-out = []
-replaced = False
-for line in lines:
-    stripped = line.rstrip()
-    if stripped.startswith("topologies:"):
-        # Replace an empty flow mapping ("topologies: {}") or a bare block
-        # starter ("topologies:") with the key plus our one entry; any
-        # pre-existing nested topology entries (indented lines following a
-        # bare "topologies:") are preserved by simply not consuming them here.
-        out.append("topologies:")
-        out.extend(new_entry)
-        replaced = True
-        continue
-    out.append(line)
-if not replaced:
-    out.append("topologies:")
-    out.extend(new_entry)
-open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
+
+topo_idx = None
+for i, line in enumerate(lines):
+    key_part, sep, value_part = line.partition(":")
+    if sep and key_part.strip() == "topologies":
+        value = value_part.split("#", 1)[0].strip()
+        if value not in ("", "{}"):
+            print(f"topologies: has a non-empty inline value on line {i + 1}; "
+                  "refusing to edit it with a line-based rewrite", file=sys.stderr)
+            sys.exit(2)
+        topo_idx = i
+        break
+
+if topo_idx is None:
+    lines.append("topologies:")
+    lines.extend(new_entry)
+else:
+    # Normalize the header itself to a bare "topologies:" -- an original
+    # "topologies: {}" inline-empty form cannot keep its "{}" once we append
+    # indented child keys below it (that would no longer parse as YAML).
+    header = "topologies:"
+    j = topo_idx + 1
+    block_lines = []
+    while j < len(lines) and (lines[j].strip() == "" or lines[j].startswith((" ", "\t"))):
+        block_lines.append(lines[j])
+        j += 1
+
+    out_block = []
+    k = 0
+    replaced_local = False
+    while k < len(block_lines):
+        bl = block_lines[k]
+        if bl.strip() == "local-only:" or bl.lstrip().startswith("local-only:"):
+            base_indent = len(bl) - len(bl.lstrip(" "))
+            k += 1
+            while k < len(block_lines):
+                nxt = block_lines[k]
+                if nxt.strip() == "":
+                    k += 1
+                    continue
+                nxt_indent = len(nxt) - len(nxt.lstrip(" "))
+                if nxt_indent > base_indent:
+                    k += 1
+                    continue
+                break
+            out_block.extend(new_entry)
+            replaced_local = True
+        else:
+            out_block.append(bl)
+            k += 1
+    if not replaced_local:
+        out_block.extend(new_entry)
+    lines[topo_idx:j] = [header] + out_block
+
+open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 PY
+then
+    jam "dispatch-config" "could not safely add the 'local-only' agent-bridge topology entry to $_bridge_config (see cr-logs/bridge-topology-edit.log)" "inspect the config file's existing 'topologies:' value by hand"
+    cr_finalize
+fi
 _agents_out="$CR_LOGDIR/bridge-agents.log"
 # The already-running agent-bridge daemon (started during first-session
 # provisioning, before this config edit) caches its config at startup and
