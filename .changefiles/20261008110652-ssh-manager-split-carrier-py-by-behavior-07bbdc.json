@@ -1,0 +1,21 @@
+{
+  "comment": "ssh-manager: split carrier.py by behavioral responsibility (no behavior change)",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    }
+  ]
+}
