@@ -738,16 +738,27 @@ def test_represented_latest_result_respects_user_turn_boundary(client, app) -> N
     assert body["latest_result"]["value"]["text"] == "new"
 
 
-def test_represented_latest_result_excludes_nested_agent_output(client, app) -> None:
+# The sub-agent markers a represented CLI event may carry: legacy data.agentId,
+# the CLI's envelope agentId, or only data.parentToolCallId.
+_NESTED_MARKERS = [
+    ({}, {"agentId": "sub-1"}),
+    ({"agentId": "sub-1"}, {"parentToolCallId": "tc-task"}),
+    ({}, {"parentToolCallId": "tc-task"}),
+]
+
+
+def _nested(event_id: str, kind: str, marker: tuple[dict, dict], **data) -> dict:
+    envelope, extra = marker
+    return {"id": event_id, "type": kind, **envelope, "data": {**data, **extra}}
+
+
+@pytest.mark.parametrize("marker", _NESTED_MARKERS)
+def test_represented_latest_result_excludes_nested_agent_output(client, app, marker) -> None:
     _register_live(client)
     _ingest_live(
         client,
         {"id": "1", "type": "user.message", "data": {"content": "prompt"}},
-        {
-            "id": "2",
-            "type": "assistant.message",
-            "data": {"content": "nested", "agentId": "sub-1"},
-        },
+        _nested("2", "assistant.message", marker, content="nested"),
         {"id": "3", "type": "assistant.message", "data": {"content": "parent"}},
         {"id": "4", "type": "assistant.turn_end", "data": {}},
     )
@@ -757,21 +768,14 @@ def test_represented_latest_result_excludes_nested_agent_output(client, app) -> 
     assert body["latest_result"]["value"]["text"] == "parent"
 
 
-def test_nested_completion_does_not_set_parent_boundary(client, app) -> None:
+@pytest.mark.parametrize("marker", _NESTED_MARKERS)
+def test_nested_completion_does_not_set_parent_boundary(client, app, marker) -> None:
     _register_live(client)
     _ingest_live(
         client,
         {"id": "1", "type": "user.message", "data": {"content": "prompt"}},
-        {
-            "id": "2",
-            "type": "assistant.message",
-            "data": {"content": "nested", "agentId": "sub-1"},
-        },
-        {
-            "id": "3",
-            "type": "assistant.turn_end",
-            "data": {"agentId": "sub-1"},
-        },
+        _nested("2", "assistant.message", marker, content="nested"),
+        _nested("3", "assistant.turn_end", marker),
         {"id": "4", "type": "assistant.message", "data": {"content": "parent"}},
     )
 

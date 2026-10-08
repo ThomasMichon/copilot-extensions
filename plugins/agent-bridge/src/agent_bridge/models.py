@@ -581,17 +581,16 @@ class LiveSessionListResponse(BaseModel):
 
 
 class SdkEventIn(BaseModel):
-    """One raw Copilot extension SDK event, as forwarded by the extension.
-
-    ``data`` is passed through verbatim to the bridge-side translator; only the
-    fields the translator reads are used. ``timestamp``/``id`` are accepted for
-    forward-compat but the bridge assigns its own monotonic event ids.
-    """
+    """One raw Copilot extension SDK event, as forwarded by the extension: ``data``
+    passes verbatim to the bridge-side translator; ``timestamp``/``id`` are
+    forward-compat (the bridge assigns its own monotonic event ids); ``agentId``
+    is the event envelope's sub-agent instance id, None for the main agent."""
 
     type: str
     data: dict[str, Any] = Field(default_factory=dict)
     timestamp: float | None = None
     id: str | None = None
+    agentId: str | None = None
 
 
 class IngestLiveEventsRequest(BaseModel):

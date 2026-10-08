@@ -119,10 +119,16 @@ def translate_sdk_event(
     # Sub-agent instance id, when present, is passed through so a consumer can
     # attribute nested-agent output without inventing a new event type.
     agent_id = d.get("agentId")
+    # A sub-agent's turn/tool events also name the task tool call that spawned
+    # it; carried as ``parent_tool_call_id`` (the ACP path's name) so an event
+    # with only that marker still reads as nested.
+    parent_tool_call_id = d.get("parentToolCallId")
 
     def _out(payload: dict[str, Any]) -> dict[str, Any]:
         if agent_id:
             payload = {**payload, "agent_id": agent_id}
+        if parent_tool_call_id:
+            payload = {**payload, "parent_tool_call_id": parent_tool_call_id}
         return payload
 
     if sdk_type == "user.message":
@@ -279,6 +285,32 @@ def translate_sdk_event(
     return []
 
 
+def subagent_id(event: dict[str, Any]) -> str | None:
+    """The sub-agent instance id that owns a raw SDK event, else None.
+
+    The Copilot CLI stamps a sub-agent's events with ``agentId`` on the event
+    envelope (absent for the main agent and session-level events); the legacy
+    ``data.agentId`` placement is still honored.
+    """
+    agent_id = event.get("agentId")
+    if not agent_id:
+        data = event.get("data")
+        agent_id = data.get("agentId") if isinstance(data, dict) else None
+    return agent_id if isinstance(agent_id, str) and agent_id else None
+
+
+def is_subagent_event(event: dict[str, Any]) -> bool:
+    """Whether a raw SDK event belongs to a sub-agent, not the main agent.
+
+    Recognizes the envelope ``agentId`` plus the legacy ``data.agentId`` and
+    ``data.parentToolCallId`` markers (the same ownership rule the CLI applies).
+    """
+    if subagent_id(event):
+        return True
+    data = event.get("data")
+    return isinstance(data, dict) and bool(data.get("parentToolCallId"))
+
+
 #: SDK event types that mean "the assistant is actively working a turn."
 _TURN_ACTIVITY_TYPES = frozenset({
     "user.message",
@@ -305,12 +337,15 @@ def derive_turn_state(
     objective, token-free half of progress legibility (Phase 7 Channel A) --
     ``stalled`` is *not* decided here; it is computed on read from
     ``last_activity_at`` vs. a threshold.
+
+    A sub-agent's events (``is_subagent_event``) are skipped: a background
+    sub-agent busy in a long wait must neither mark the parent running nor feed
+    its stall clock.
     """
     state = prior_state
     saw_activity = False
     for event in raw_events:
-        data = event.get("data")
-        if isinstance(data, dict) and data.get("agentId"):
+        if is_subagent_event(event):
             continue
         etype = event.get("type")
         if etype == _TURN_END_TYPE:
@@ -394,9 +429,11 @@ def progress_from_events(
     done = blocked = None
     answered = False
     for event in raw_events:
+        if is_subagent_event(event):  # a sub-agent's prompt or milestone isn't the session's
+            continue
         etype = event.get("type")
         data = event.get("data") or {}
-        if etype == "user.message" and not data.get("agentId"):
+        if etype == "user.message":
             answered = True
             continue
         if etype != "assistant.message":
@@ -699,6 +736,11 @@ class LiveEventStore:
                 continue
             data = item.get("data")
             data = data if isinstance(data, dict) else {}
+            # Carry an envelope ``agentId`` into the translator so a sub-agent's
+            # events are attributed (and its tool calls read as nested).
+            agent_id = subagent_id(item)
+            if agent_id and not data.get("agentId"):
+                data = {**data, "agentId": agent_id}
             for event_type, payload in translate_sdk_event(sdk_type, data):
                 log, appended_id = self._land(session_id, log, log.append(event_type, payload))
                 if isinstance(event_id, str) and event_id:
