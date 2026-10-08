@@ -209,17 +209,21 @@ Operator, end of a long multi-repo session:
       - [x] `visions/plugins/agent-worktrees/pull-requests/README.md` —
             reconciled against 372 commits of drift in the plugin's PR
             surface since its 2026-09-20 last revision. Found in unusually
-            good shape: all three gaps its own 2026-09-14 authoring named
-            are now realized (`reviewer-capable-provider`,
-            `conformance-verified-mock-provider`,
-            `foreign-repo-pr-operations`). Closed two now-stale tracking
-            issues with evidence (`#2699`, `#2691`) rather than leaving
-            them open against shipped capability; narrowed `#2700` instead
-            of closing it — `pr-status`/`pr-diff`/`pr-comment`/`pr-review`
-            still lack a foreign-repo argument, unlike the five commands
-            that already have one. No vision text changed beyond the
-            reality-docs pointer — the should-be prose was already
-            accurate; only the tracked-issue state had drifted.
+            good shape: two of the three gaps its own 2026-09-14 authoring
+            named are now fully realized (`reviewer-capable-provider`,
+            `conformance-verified-mock-provider`); the third,
+            `foreign-repo-pr-operations`, is **partially** realized —
+            `pr-watch`/`pr-merge`/`create-pr`/`pr-ready`/`pr-abandon`
+            support it, but `pr-status`/`pr-diff`/`pr-comment`/`pr-review`
+            still lack a foreign-repo argument. Closed two now-stale
+            tracking issues with evidence (`#2699`, `#2691`) rather than
+            leaving them open against shipped capability; narrowed `#2700`
+            to those four remaining commands instead of closing it.
+            Updated the vision's own stale Purpose & Intent opening, which
+            still described reviewer-side operations as entirely missing.
+            Only the opening narrative, the reality-docs pointer, and the
+            tracked-issue state had drifted — the Feature/Behavior prose
+            itself needed no correction.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -673,10 +677,11 @@ then rather than assuming either answer.
   checked every candidate fold-back against the real `PRProvider` protocol
   (`providers/base.py`), the real GitHub provider (`providers/github.py`),
   and the actual CLI surface (`pr_state_cli.py`) — not just vision prose.
-  Found the vision already in excellent shape: all three gaps its own
-  2026-09-14 authoring named (`reviewer-capable-provider`,
-  `conformance-verified-mock-provider`, `foreign-repo-pr-operations`) are
-  now fully realized in code.
+  Found the vision already in excellent shape: two of the three gaps its
+  own 2026-09-14 authoring named (`reviewer-capable-provider`,
+  `conformance-verified-mock-provider`) are fully realized in code; the
+  third (`foreign-repo-pr-operations`) is partially realized — five
+  commands support it, four don't yet.
 - Found and closed **two stale GitHub issues** that were still open against
   already-shipped capability — exactly the inverse of the `#5614` mistake
   three slices ago (that time, a vision claimed a gap reality had already
@@ -688,10 +693,15 @@ then rather than assuming either answer.
   `pr-ready`/`pr-abandon` all support it, but `pr-status`/`pr-diff`/
   `pr-comment`/`pr-review` genuinely don't yet, a real remaining gap the
   vision's own "symmetry" north star names.
-- No vision Feature/Behavior text needed changing — it was already
-  accurate should-be prose with no gap-list language in it. Only the
-  Reality-docs pointer (added `pr-workflow.md`, the actual authoritative
-  behavior doc) and a confirming Provenance entry were added.
+- No Feature/Behavior text needed changing — it was already accurate
+  should-be prose with no gap-list language. The vision's **Purpose &
+  Intent opening**, however, had genuinely gone stale (it still described
+  reviewer-side operations as entirely missing) — updated that narrative
+  to match reality, added the Reality-docs pointer (`pr-workflow.md`), and
+  recorded a Provenance entry that correctly states two gaps realized and
+  one partially realized (PR #5639 review caught an earlier overstatement
+  that called all three fully realized, contradicting this same entry's
+  own narrowed-`#2700` note two sentences later).
 - Next: continue Phase 2 with the next vision — `plugins/agent-worktrees`
   itself (102 commits since 2026-10-02) or `plugins/agent-index` (71 since
   2026-09-18) are the next candidates by the same ranking; `agent-worktrees`
