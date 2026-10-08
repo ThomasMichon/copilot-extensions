@@ -5423,6 +5423,7 @@ def build_parser() -> argparse.ArgumentParser:
     status_updater_cli.add_parsers(sub)
     status_monitor_cli.add_parsers(sub)
     status_monitor_runtime.add_parsers(sub)
+    status_monitor_reap_stale.add_parsers(sub)
     pane_lifecycle.register_cli(sub)
     handoff_cli.add_parsers(sub)
 
@@ -5674,6 +5675,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'status-context': ('status_bar_cli', 'cmd_status_context'),
     'status-monitor': ('status_monitor_cli', 'cmd_status_monitor'),
     'status-monitor-restart': ('status_monitor_runtime', 'cmd_status_monitor_restart'),
+    'status-monitor-reap-stale': ('status_monitor_reap_stale', 'cmd_status_monitor_reap_stale'),
     'status-segment': ('status_bar_cli', 'cmd_status_segment'),
     'status-updater': ('status_updater_cli', 'cmd_status_updater'),
     'sync': ('worktree_ops_cli', 'cmd_sync'),
@@ -5748,6 +5750,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "status_bar_cli",
     "status_cli",
     "status_monitor_cli",
+    "status_monitor_reap_stale",
     "status_monitor_runtime",
     "status_updater_cli",
     "update_cli",
@@ -5880,14 +5883,14 @@ def _load_full_command_surface() -> None:
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
     global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role
     global cmd_session_tail
-    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
+    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_monitor_reap_stale, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
     global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global identifier_blocklist_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
-    global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
+    global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_reap_stale, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
     global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor, handoff_cancel_cli
     from . import (
@@ -5930,6 +5933,7 @@ def _load_full_command_surface() -> None:
         status_bar_cli,
         status_cli,
         status_monitor_cli,
+        status_monitor_reap_stale,
         status_monitor_runtime,
         status_updater_cli,
         update_cli,
@@ -6105,6 +6109,7 @@ def _load_full_command_surface() -> None:
     _ensure_status_monitor = status_monitor_runtime._ensure_status_monitor
     _restart_status_monitor = status_monitor_runtime._restart_status_monitor
     cmd_status_monitor_restart = status_monitor_runtime.cmd_status_monitor_restart
+    cmd_status_monitor_reap_stale = status_monitor_reap_stale.cmd_status_monitor_reap_stale
     cmd_reconcile_sessions = status_monitor_runtime.cmd_reconcile_sessions
     _monitor_mux_set = status_monitor_runtime._monitor_mux_set
     _monitor_list_sessions = status_monitor_runtime._monitor_list_sessions
@@ -6314,6 +6319,7 @@ def _load_full_command_surface() -> None:
         "status-monitor": cmd_status_monitor,
         "reconcile-sessions": cmd_reconcile_sessions,
         "status-monitor-restart": cmd_status_monitor_restart,
+        "status-monitor-reap-stale": cmd_status_monitor_reap_stale,
         "pane-create": pane_lifecycle.cmd_pane_create,
         "pane-terminate": pane_lifecycle.cmd_pane_terminate,
         "handoff-cutover": cmd_handoff_cutover,

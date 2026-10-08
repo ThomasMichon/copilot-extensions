@@ -1,0 +1,9 @@
+{
+  "comment": "Add an async daemon-health backstop after every status-monitor cutover/restart attempt (copilot-extensions#5453 interim mitigation)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

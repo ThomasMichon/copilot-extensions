@@ -28,6 +28,8 @@ import single_instance_lease
 from agent_worktrees import __main__ as m
 from agent_worktrees import output
 from agent_worktrees import session_catalog
+from agent_worktrees import status_monitor_reap_stale
+from agent_worktrees import status_monitor_runtime
 from agent_worktrees import worktree_identity
 
 
@@ -3007,6 +3009,88 @@ def _boom(*a, **k):  # pragma: no cover - only fires on regression
 
 
 # ---------------------------------------------------------------------------
+# _ensure_status_monitor -- version-skew regression: a long-delayed caller
+# (e.g. status-monitor-reap-stale, which can run up to its configured delay
+# after being spawned) must spawn with the CURRENT runtime slot's
+# interpreter, not its own process's possibly-stale sys.executable.
+# ---------------------------------------------------------------------------
+
+
+def _write_valid_slot(tmp_path, version: str = "1.0.0-dev1", *, sub=("Scripts", "python.exe")):
+    """Create a realistic ``versions/<version>/<sub>`` interpreter plus its
+    matching ``.install-complete.json`` completion marker, so
+    ``current_runtime_python()``'s marker validation succeeds. Emits the
+    REAL canonical schema (``version``/``completed_at``/``pid``), matching
+    ``scripts/versioned_runtime.py``'s own ``validate_marker()`` -- not
+    just a bare ``{"version": ...}``, which the stricter schema check
+    would otherwise reject."""
+    import json
+    slot = tmp_path / "versions" / version
+    python_path = slot.joinpath(*sub)
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 1}),
+        encoding="utf-8",
+    )
+    return python_path
+
+
+def test_ensure_status_monitor_spawns_with_the_current_runtime_interpreter_not_sys_executable(
+    monkeypatch, tmp_path,
+):
+    """Regression: a caller running from an OLD slot's sys.executable (a
+    long-delayed status-monitor-reap-stale invocation whose own slot was
+    superseded mid-delay) must still spawn the monitor with the CURRENT
+    slot's interpreter (cfg.venv_python()), never its own stale
+    sys.executable -- or the spawned monitor is itself already-superseded,
+    gets immediately detected and retired by status_monitor_cli, despite
+    this function reporting success."""
+    from agent_worktrees import locks as _locks
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: "/tmp/mon.lock")
+    monkeypatch.setattr(_locks, "read_lock", lambda p: None)  # no live monitor
+    monkeypatch.setattr(_locks, "lock_is_live", lambda d: False)
+
+    current_python = _write_valid_slot(tmp_path)
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: current_python)
+
+    spawned = {"argv": None}
+    monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.update(argv=argv) or True)
+
+    ok = m._ensure_status_monitor()
+
+    assert ok is True
+    assert spawned["argv"][0] == str(current_python)
+    assert spawned["argv"][0] != m.sys.executable
+
+
+def test_ensure_status_monitor_falls_back_to_sys_executable_when_no_slot_resolves(
+    monkeypatch,
+):
+    """When cfg.venv_python() can't resolve any installed slot (an unusual
+    environment with nothing installed at all), fall back to this
+    process's own sys.executable rather than spawning a non-existent
+    path."""
+    from agent_worktrees import locks as _locks
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: "/tmp/mon.lock")
+    monkeypatch.setattr(_locks, "read_lock", lambda p: None)
+    monkeypatch.setattr(_locks, "lock_is_live", lambda d: False)
+
+    from agent_worktrees import config as _cfg
+    from pathlib import Path
+    monkeypatch.setattr(_cfg, "venv_python", lambda: Path("/does/not/exist/python"))
+
+    spawned = {"argv": None}
+    monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.update(argv=argv) or True)
+
+    ok = m._ensure_status_monitor()
+
+    assert ok is True
+    assert spawned["argv"][0] == m.sys.executable
+
+
+# ---------------------------------------------------------------------------
 # _restart_status_monitor -- the auto-update cutover seam (consolidated-status-
 # daemon Phase 1, dotfiles#1696): reap a superseded monitor + spawn the current
 # one so a deploy never leaves live sessions' bars frozen.
@@ -3159,6 +3243,779 @@ def test_cmd_restart_reports_stale_runtime_reap_count(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "reaped 2 stale-runtime process(es)" in out
+
+
+# ---------------------------------------------------------------------------
+# schedule_delayed_daemon_health_reap / status-monitor-reap-stale --
+# copilot-extensions#5453's own-sanctioned async backstop: a cutover/restart
+# attempt that times out or rolls back ambiguously can leave either a stray
+# duplicate daemon or zero live daemons, with nothing today reconverging on
+# exactly one owner without a human running `doctor --apply-daemon-health`
+# by hand. This schedules that SAME identity-verified repair automatically,
+# on a delay, without ever blocking the installer or the caller.
+# ---------------------------------------------------------------------------
+
+
+def test_current_runtime_python_prefers_the_resolved_current_slot(monkeypatch, tmp_path):
+    current_python = _write_valid_slot(tmp_path)
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: current_python)
+
+    assert status_monitor_reap_stale.current_runtime_python() == str(current_python)
+
+
+def test_current_runtime_python_falls_back_to_sys_executable(monkeypatch):
+    from agent_worktrees import config as _cfg
+    from pathlib import Path
+    monkeypatch.setattr(_cfg, "venv_python", lambda: Path("/does/not/exist/python"))
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_slot_with_no_completion_marker(
+    monkeypatch, tmp_path,
+):
+    """venv_python() itself accepts any existing interpreter unconditionally
+    -- a stale/corrupt current-version pointer, or a slot directory
+    mid-install with no completion marker at all, must not be trusted as a
+    complete, startable runtime."""
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    # No .install-complete.json written -- an in-progress/incomplete install.
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_naming_a_different_version(
+    monkeypatch, tmp_path,
+):
+    """A completion marker that names a DIFFERENT version than its own slot
+    directory (a stale marker copied/left over from a prior slot) must not
+    validate that slot either."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": "0.9.0-dev1", "completed_at": "2026-01-01T00:00:00Z", "pid": 1}),
+        encoding="utf-8",
+    )
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def _write_marker(slot, marker_text: str) -> None:
+    slot.mkdir(parents=True, exist_ok=True)
+    (slot / ".install-complete.json").write_text(marker_text, encoding="utf-8")
+
+
+def test_current_runtime_python_rejects_a_marker_missing_required_fields(
+    monkeypatch, tmp_path,
+):
+    """A marker with a matching version but missing completed_at/pid (the
+    canonical schema's other two required fields, scripts/versioned_runtime.py's
+    validate_marker()) must not validate -- a truncated or partially-written
+    marker is exactly as untrustworthy as a missing one."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({"version": "1.0.0-dev1"}))  # no completed_at/pid
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_with_extra_unknown_keys(
+    monkeypatch, tmp_path,
+):
+    """The canonical schema rejects any key outside
+    version/completed_at/pid/payload_hash -- an extra/unknown key signals a
+    marker that doesn't match the canonical writer's own output and must
+    not be trusted."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({
+        "version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z",
+        "pid": 1, "unexpected_extra_field": "oops",
+    }))
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_with_duplicate_json_fields(
+    monkeypatch, tmp_path,
+):
+    """A marker with a duplicate JSON field (a truncated/concatenated write)
+    must not validate, matching scripts/versioned_runtime.py's own
+    _load_unique_json() duplicate-field rejection."""
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(
+        slot,
+        '{"version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z", '
+        '"pid": 1, "pid": 2}',
+    )
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_rejects_a_marker_with_a_negative_pid(
+    monkeypatch, tmp_path,
+):
+    """pid must be a non-negative integer per the canonical schema -- a
+    negative or non-integer pid (e.g. a bool, which Python's int supertype
+    would otherwise let slip through an isinstance(x, int) check) must not
+    validate."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({
+        "version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z", "pid": -1,
+    }))
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_current_runtime_python_accepts_a_marker_with_optional_payload_hash(
+    monkeypatch, tmp_path,
+):
+    """payload_hash is the ONE optional key the canonical schema allows
+    beyond the three required fields -- a marker carrying it must still
+    validate."""
+    import json
+    slot = tmp_path / "versions" / "1.0.0-dev1"
+    python_path = slot / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    _write_marker(slot, json.dumps({
+        "version": "1.0.0-dev1", "completed_at": "2026-01-01T00:00:00Z",
+        "pid": 1, "payload_hash": "abc123",
+    }))
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: python_path)
+
+    assert status_monitor_reap_stale.current_runtime_python() == str(python_path)
+
+
+def test_current_runtime_python_does_not_fall_back_to_a_sibling_slot(
+    monkeypatch, tmp_path,
+):
+    """When the resolved current-version slot's own marker doesn't
+    validate, fall back DIRECTLY to sys.executable -- never scan for a
+    different, validated sibling slot, even when one exists right next to
+    the broken one. A sibling picked that way can still be immediately
+    self-retired by status_updater_cli._runtime_superseded(), which
+    compares against the RAW current-version pointer value, not whichever
+    slot this resolver happened to validate; under a stale pointer naming
+    a newer, incomplete slot, a spawned older validated sibling would see
+    itself as superseded and exit immediately, right back to zero
+    monitors. sys.executable sidesteps that mismatch entirely."""
+    bad_slot = tmp_path / "versions" / "2.0.0-dev1"
+    bad_python = bad_slot / "Scripts" / "python.exe"
+    bad_python.parent.mkdir(parents=True)
+    bad_python.write_text("", encoding="utf-8")  # no marker -- invalid
+
+    _write_valid_slot(tmp_path, version="1.0.0-dev1")  # a validated sibling exists
+
+    from agent_worktrees import config as _cfg
+    monkeypatch.setattr(_cfg, "venv_python", lambda: bad_python)
+
+    assert status_monitor_reap_stale.current_runtime_python() == status_monitor_reap_stale.sys.executable
+
+
+def test_schedule_delayed_daemon_health_reap_spawns_reap_stale_with_delay(monkeypatch):
+    spawned = {"argv": None}
+
+    def _spawn(argv):
+        spawned["argv"] = argv
+        return True
+
+    monkeypatch.setattr(m, "_spawn_detached", _spawn)
+
+    ok = status_monitor_reap_stale.schedule_delayed_daemon_health_reap(delay_seconds=42.5)
+
+    assert ok is True
+    assert spawned["argv"][-3:] == ["status-monitor-reap-stale", "--delay-seconds", "42.5"]
+
+
+def test_schedule_delayed_daemon_health_reap_uses_default_delay(monkeypatch):
+    spawned = {"argv": None}
+    monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.update(argv=argv) or True)
+
+    status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
+
+    assert spawned["argv"][-2] == "--delay-seconds"
+    assert float(spawned["argv"][-1]) == status_monitor_reap_stale.DEFAULT_DELAY_SECONDS
+
+
+def test_schedule_delayed_daemon_health_reap_never_raises(monkeypatch):
+    def _boom(argv):
+        raise OSError("no fork slots")
+
+    monkeypatch.setattr(m, "_spawn_detached", _boom)
+
+    assert status_monitor_reap_stale.schedule_delayed_daemon_health_reap() is False
+
+
+def test_cmd_reap_stale_sleeps_then_applies_daemon_health(monkeypatch, capsys):
+    slept = {"seconds": None}
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: slept.update(seconds=s))
+
+    applied = {"calls": 0}
+
+    def _fake_doctor_report(*, apply):
+        applied["calls"] += 1
+        assert apply is True
+        return {"findings": [{"kind": "duplicate_resident"}]}
+
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", _fake_doctor_report)
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=7.0)
+    )
+
+    assert rc == 0
+    assert slept["seconds"] == 7.0
+    assert applied["calls"] == 1
+    assert "1 finding(s)" in capsys.readouterr().out
+
+
+def test_cmd_reap_stale_is_a_clean_no_op_when_nothing_to_repair(monkeypatch, capsys):
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert "0 finding(s)" in capsys.readouterr().out
+
+
+def test_cmd_reap_stale_never_raises_on_repair_failure(monkeypatch, capsys):
+    """A repair-pass failure only means the duplicate-termination half
+    didn't run -- it establishes nothing about whether a monitor is
+    actually live. The zero-candidate recheck-and-ensure must still run
+    afterward (it probes liveness independently and reports its own
+    failures safely), or a repair exception would skip healing the exact
+    zero-monitor state this command exists for."""
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+
+    def _boom(*, apply):
+        raise RuntimeError("routing dir unreadable")
+
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", _boom)
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0  # advisory, best-effort -- never fails the caller
+    assert "non-fatal" in capsys.readouterr().out
+    assert ensured["calls"] == 1  # still continued to the ensure step
+
+
+def _patch_cutover_lock(monkeypatch, *, acquirable: bool):
+    """Stub ``status_monitor_cutover._acquire_cutover_lock`` so tests can
+    simulate the lock being free (``acquirable=True``, returns a fake lease
+    with a no-op ``release()``) or already held by a genuine concurrent
+    cutover (``acquirable=False``, raises ``AlreadyRunningError`` exactly
+    like the real ``SingleInstance.acquire()`` does)."""
+    from agent_worktrees import status_monitor_cutover as smc
+    from pathlib import Path
+    from single_instance_lease import AlreadyRunningError
+
+    released = {"n": 0}
+
+    class _FakeLease:
+        def release(self):
+            released["n"] += 1
+
+    def _acquire(lock_root, *, timeout_s=0.0, poll_s=0.2):
+        if acquirable:
+            return _FakeLease()
+        raise AlreadyRunningError(Path(lock_root) / "cutover.lock", 4242)
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", _acquire)
+    return released
+
+
+def test_ensure_monitor_helper_never_raises_when_lease_release_itself_fails(monkeypatch):
+    """The helper's own contract is "never raises" (it runs inside a
+    detached, delayed repair process with no one to observe an exception)
+    -- a lease.release() failure in its own finally must not escape and
+    break that contract, matching activate_after_update()'s own
+    nested-finally handling of the identical failure mode at the real
+    cutover call site."""
+    from agent_worktrees import status_monitor_cutover as smc
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: True)
+
+    class _RaisingReleaseLease:
+        def release(self):
+            raise OSError("lock file vanished mid-release")
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda lock_root, **k: _RaisingReleaseLease())
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "ensured"  # the real work still completed and was reported
+
+
+def test_cmd_reap_stale_ensures_a_monitor_when_zero_candidates_survive(monkeypatch, capsys):
+    """The repair pass only audits/terminates EXISTING live candidates -- a
+    rollback that left ZERO live monitors (the other documented ambiguous
+    outcome, copilot-extensions#5453) must not stay down forever just
+    because there was nothing for the identity-bound repair to terminate."""
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    released = _patch_cutover_lock(monkeypatch, acquirable=True)
+
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert ensured["calls"] == 1
+    assert released["n"] == 1  # the acquired lease was always released
+    assert "ensured" in capsys.readouterr().out
+
+
+def test_cmd_reap_stale_does_not_ensure_when_a_candidate_already_survives(monkeypatch):
+    """A clean repair leaving a live candidate must NOT trigger an extra
+    ensure-monitor spawn -- that would risk a duplicate."""
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(
+        daemon_health, "doctor_report",
+        lambda *, apply: {"findings": [{"kind": "duplicate_resident"}]},
+    )
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [object()])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert ensured["calls"] == 0
+
+
+def test_cmd_reap_stale_does_not_ensure_while_a_cutover_is_in_progress(monkeypatch):
+    """A genuinely concurrent cutover (lock already held elsewhere) must be
+    left entirely alone -- that attempt owns ensuring a monitor exists once
+    it finishes, and racing it here (even a re-check) could start a
+    duplicate right as it promotes its own successor. The non-blocking
+    acquire attempt is the whole point: never wait on it, just back off."""
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    candidates_called = {"n": 0}
+    monkeypatch.setattr(
+        daemon_health, "_candidates",
+        lambda: (candidates_called.update(n=candidates_called["n"] + 1), [])[1],
+    )
+    _patch_cutover_lock(monkeypatch, acquirable=False)
+
+    ensured = {"calls": 0}
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: ensured.update(calls=ensured["calls"] + 1) or True,
+    )
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert ensured["calls"] == 0
+    assert candidates_called["n"] == 0  # never even re-checked while busy
+
+    # Directly confirm the helper genuinely observes AlreadyRunningError
+    # (not some other exception silently caught by the broad except and
+    # reported as "error:..." instead) -- the real regression this guards.
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+    assert outcome == "skipped-cutover-busy"
+
+
+def test_cmd_reap_stale_ensure_failure_is_non_fatal(monkeypatch, capsys):
+    monkeypatch.setattr(status_monitor_reap_stale.time, "sleep", lambda s: None)
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+
+    def _boom():
+        raise OSError("no fork slots")
+
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", _boom)
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=0.0)
+    )
+
+    assert rc == 0
+    assert "non-fatal" in capsys.readouterr().out
+
+
+def test_ensure_monitor_helper_skips_entirely_when_status_monitor_disabled(monkeypatch):
+    """``_ensure_status_monitor()`` assumes its callers already checked
+    ``_status_monitor_enabled()`` -- it does not re-check itself, so an
+    operator who opted the resident monitor out
+    (``AGENT_WORKTREES_STATUS_MONITOR=0``) must never have one spawned on
+    their behalf by this backstop. Skip entirely, before even attempting
+    the cutover lock."""
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+
+    lock_attempted = {"n": 0}
+
+    def _boom(lock_root, *, timeout_s=0.0, poll_s=0.2):
+        lock_attempted["n"] += 1
+        raise AssertionError("must not attempt the cutover lock when disabled")
+
+    from agent_worktrees import status_monitor_cutover as smc
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", _boom)
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda: (_ for _ in ()).throw(AssertionError("must not spawn while disabled")),
+    )
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "skipped-disabled"
+    assert lock_attempted["n"] == 0
+
+
+def test_ensure_monitor_helper_works_on_darwin_despite_repair_support_being_off(
+    monkeypatch,
+):
+    """Identity-bound termination of a DUPLICATE daemon is unsupported on
+    macOS (``daemon_health._context()`` sets ``repair_supported=False``
+    there, a pre-existing, broader zdd.diagnostics/daemon_health
+    limitation this module does not lift). The ZERO-candidate
+    ensure-a-monitor path is a different code path entirely
+    (``_ensure_status_monitor()`` never depends on identity-bound
+    termination) and must still work there."""
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(status_monitor_reap_stale.sys, "platform", "darwin")
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: True)
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "ensured"
+
+
+def test_ensure_monitor_helper_reports_an_ordinary_spawn_failure(monkeypatch):
+    """``_ensure_status_monitor()`` reports an ORDINARY spawn failure (e.g.
+    ``Popen`` failing) by returning ``False``, not by raising -- the helper
+    must not ignore that return value and report success anyway, which
+    would leave the host with zero monitors while logging "ensured"."""
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: False)
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome != "ensured"
+    assert outcome.startswith("error:")
+
+
+def test_ensure_monitor_helper_never_calls_doctor_report_while_holding_the_lock(
+    monkeypatch,
+):
+    """The recheck-and-ensure step must use the lock-free ``_candidates()``
+    probe, never ``daemon_health.doctor_report()``/``apply_daemon_health()``
+    -- both try to acquire this SAME cutover guard themselves (non-blocking,
+    per-call), which would self-block/no-op against the lease this
+    function is already holding, silently defeating the atomicity this
+    helper exists to provide."""
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "_candidates", lambda: [])
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+
+    def _boom(*, apply):
+        raise AssertionError(
+            "must not call doctor_report() while already holding the cutover lock"
+        )
+
+    monkeypatch.setattr(daemon_health, "doctor_report", _boom)
+    _patch_cutover_lock(monkeypatch, acquirable=True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: True)
+
+    outcome = status_monitor_reap_stale._ensure_monitor_if_zero_candidates_under_cutover_guard()
+
+    assert outcome == "ensured"
+
+
+def test_delay_seconds_rejects_huge_finite_values():
+    """A huge-but-finite float such as ``1e308`` is neither inf/nan nor
+    negative, but ``time.sleep()`` still raises ``OverflowError`` for it on
+    supported platforms -- argparse must reject it too, not just the
+    non-finite/negative cases."""
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    status_monitor_reap_stale.add_parsers(sub)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["status-monitor-reap-stale", "--delay-seconds", "1e308"])
+
+
+def test_cmd_reap_stale_falls_back_to_default_for_a_hand_built_huge_delay(monkeypatch):
+    """Defense-in-depth for a direct, non-argparse call (e.g. a hand-built
+    Namespace) carrying a huge-but-finite delay that would otherwise raise
+    OverflowError in time.sleep()."""
+    slept = {"seconds": None}
+    monkeypatch.setattr(
+        status_monitor_reap_stale.time, "sleep", lambda s: slept.update(seconds=s)
+    )
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=1e308)
+    )
+
+    assert rc == 0
+    assert slept["seconds"] == status_monitor_reap_stale.DEFAULT_DELAY_SECONDS
+
+
+def test_delay_seconds_rejects_non_finite_and_negative_values():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    status_monitor_reap_stale.add_parsers(sub)
+    for bad in ("inf", "-inf", "nan", "-1"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["status-monitor-reap-stale", "--delay-seconds", bad])
+
+
+def test_cmd_reap_stale_falls_back_to_default_for_a_hand_built_non_finite_namespace(
+    monkeypatch,
+):
+    """argparse already rejects non-finite/negative values for a real CLI
+    invocation (see the test above); this guards the lower-level function
+    itself against a direct, non-argparse call (e.g. a hand-built
+    Namespace) with the same OverflowError/hang a raw inf/nan would
+    otherwise cause in time.sleep()."""
+    slept = {"seconds": None}
+    monkeypatch.setattr(
+        status_monitor_reap_stale.time, "sleep", lambda s: slept.update(seconds=s)
+    )
+    from agent_worktrees import daemon_health
+    monkeypatch.setattr(daemon_health, "doctor_report", lambda *, apply: {"findings": []})
+
+    rc = status_monitor_reap_stale.cmd_status_monitor_reap_stale(
+        argparse.Namespace(delay_seconds=float("inf"))
+    )
+
+    assert rc == 0
+    assert slept["seconds"] == status_monitor_reap_stale.DEFAULT_DELAY_SECONDS
+
+
+def test_reap_stale_registered_and_exposes_delay_flag():
+    assert m.COMMAND_MAP["status-monitor-reap-stale"] is m.cmd_status_monitor_reap_stale
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    status_monitor_reap_stale.add_parsers(sub)
+    args = parser.parse_args(["status-monitor-reap-stale", "--delay-seconds", "5"])
+    assert args.delay_seconds == 5.0
+
+
+def test_installer_after_update_schedules_async_reap_regardless_of_outcome(monkeypatch):
+    """The installer seam (status_monitor_cutover.activate_after_update) must
+    schedule the async backstop whenever it actually attempts a restart or
+    cutover -- never only on success, since an ambiguous rollback is exactly
+    the case this backstop exists for -- and must never block on it."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: False)
+    monkeypatch.setattr(
+        status_monitor_runtime, "_restart_status_monitor", lambda: {"spawned": True}
+    )
+
+    summary = smc.activate_after_update(monitor_was_live=True)
+
+    assert summary["action"] == "restart"
+    assert scheduled["n"] == 1
+
+
+def test_installer_after_update_does_not_schedule_when_disabled(monkeypatch):
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+
+    summary = smc.activate_after_update(monitor_was_live=True)
+
+    assert summary["enabled"] is False
+    assert scheduled["n"] == 0
+
+
+def test_installer_after_update_does_not_schedule_when_nothing_was_live(monkeypatch):
+    """No prior monitor and no routed monitor: a genuine cold start with
+    nothing to reconcile -- scheduling the backstop here would just be a
+    wasted detached process for every ordinary first-ever activation."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: False)
+
+    summary = smc.activate_after_update(monitor_was_live=False)
+
+    assert summary["action"] == "noop"
+    assert scheduled["n"] == 0
+
+
+def test_installer_after_update_schedules_even_on_an_unexpected_cutover_exception(
+    monkeypatch,
+):
+    """An unexpected exception escaping stale recovery, orchestration, or
+    the lease release itself must still schedule the backstop -- the
+    installer wrapper treats a raised exception from this whole function
+    as a non-fatal failure, so an exception that skips the schedule call
+    would leave an ambiguous daemon state unhealed, exactly the failure
+    mode this backstop exists to cover."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: "http://x")
+
+    class _FakeLease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda lock_root: _FakeLease())
+    monkeypatch.setattr(
+        smc.breadcrumb, "read_breadcrumb", lambda *a, **k: None,
+    )
+
+    def _boom(*a, **k):
+        raise RuntimeError("unexpected orchestration failure")
+
+    monkeypatch.setattr(smc.breadcrumb, "recover_stale_cutover", _boom)
+
+    with pytest.raises(RuntimeError, match="unexpected orchestration failure"):
+        smc.activate_after_update(monitor_was_live=True)
+
+    assert scheduled["n"] == 1
+
+
+def test_installer_after_update_schedules_even_when_lease_release_itself_raises(
+    monkeypatch,
+):
+    """A ``lease.release()`` failure must not itself skip scheduling the
+    backstop -- the two must run in independent (nested) ``finally``
+    blocks, not sequentially in the same one, or a release exception would
+    propagate past the scheduler call and leave it never invoked."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: "http://x")
+
+    class _RaisingReleaseLease:
+        def release(self):
+            raise OSError("lock file vanished mid-release")
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda lock_root: _RaisingReleaseLease())
+    monkeypatch.setattr(smc.breadcrumb, "read_breadcrumb", lambda *a, **k: None)
+    monkeypatch.setattr(
+        smc.breadcrumb, "recover_stale_cutover", lambda *a, **k: {"recovered": False},
+    )
+    monkeypatch.setattr(smc, "_reap_abandoned_passive", lambda *a, **k: None)
+
+    def _boom_orchestrator(*a, **k):
+        raise RuntimeError("orchestrator never even got constructed")
+
+    monkeypatch.setattr(smc, "CutoverOrchestrator", _boom_orchestrator)
+
+    with pytest.raises(OSError, match="lock file vanished mid-release"):
+        smc.activate_after_update(monitor_was_live=True)
+
+    assert scheduled["n"] == 1
 
 
 def test_installers_invoke_monitor_cutover_after_activation():

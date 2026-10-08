@@ -640,7 +640,9 @@ def _ensure_status_monitor() -> bool:
     live, or freshly spawned) -- the caller falls back to the per-session updater
     when it is not.  Idempotent + cheap: a live, non-superseded monitor is a
     no-op; a superseded (older-runtime) one is left to self-retire while a
-    current one is spawned to take over."""
+    current one is spawned to take over. Spawns with the resolved CURRENT
+    runtime interpreter (see ``status_monitor_reap_stale.current_runtime_python``),
+    not this process's own, possibly-stale ``sys.executable``."""
     try:
         from . import locks as _locks
 
@@ -656,7 +658,8 @@ def _ensure_status_monitor() -> bool:
                     return True
     except Exception:
         pass
-    return _spawn_detached([sys.executable, "-m", "agent_worktrees", "status-monitor"])
+    from . import status_monitor_reap_stale as _smrs
+    return _spawn_detached([_smrs.current_runtime_python(), "-m", "agent_worktrees", "status-monitor"])
 
 
 def _restart_status_monitor() -> dict:

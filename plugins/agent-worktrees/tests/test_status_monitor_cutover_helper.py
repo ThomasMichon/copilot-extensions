@@ -147,6 +147,14 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
         "agent_worktrees.status_monitor_runtime._restart_status_monitor",
         lambda: {"spawned": False},
     )
+    # Never spawn a REAL detached subprocess during this test -- the async
+    # daemon-health backstop (copilot-extensions#5453 mitigation) is
+    # exercised in its own dedicated unit tests instead.
+    schedule_calls: list[float] = []
+    monkeypatch.setattr(
+        "agent_worktrees.status_monitor_reap_stale.schedule_delayed_daemon_health_reap",
+        lambda *a, **k: schedule_calls.append(True),
+    )
 
     first_result: dict[str, object] = {}
 
@@ -188,6 +196,11 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
         timeout=10,
         message="superseded generations did not retire to one live daemon",
     )
+
+    # Each cutover attempt schedules the async daemon-health backstop
+    # (copilot-extensions#5453 mitigation), regardless of this cutover's own
+    # outcome -- never blocking, never a real subprocess in this test.
+    assert len(schedule_calls) == 2
 
     for daemon in daemons.values():
         daemon.force_terminate()

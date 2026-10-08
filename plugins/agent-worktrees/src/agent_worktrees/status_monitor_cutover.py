@@ -408,6 +408,7 @@ def activate_after_update(
     monitor_was_live: bool | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
+    from . import status_monitor_reap_stale
     from . import status_monitor_runtime as smr
 
     summary: dict[str, object] = {
@@ -422,6 +423,7 @@ def activate_after_update(
         if monitor_was_live:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor()
+            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
         summary["reason"] = "no-live-monitor"
         return summary
@@ -430,6 +432,7 @@ def activate_after_update(
         if monitor_was_live:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor()
+            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
         summary["reason"] = "no-routed-monitor"
         return summary
@@ -462,10 +465,24 @@ def activate_after_update(
             drain_timeout=drain_timeout,
             force=False,
         )
+        summary["action"] = "cutover"
+        summary["result"] = result.to_dict()
     finally:
-        lease.release()
-    summary["action"] = "cutover"
-    summary["result"] = result.to_dict()
+        try:
+            lease.release()
+        finally:
+            # Async backstop unconditionally, even on an unexpected
+            # exception escaping stale recovery, orchestration, or the
+            # lease release itself above (copilot-extensions#5453): the
+            # installer wrapper suppresses a raised exception from this
+            # whole function as a non-fatal failure, so without this
+            # living in its own nested `finally` (sequential with
+            # `lease.release()` would let a release failure itself skip
+            # it) any such exception would skip scheduling the one thing
+            # meant to heal an ambiguous daemon state left behind by that
+            # very failure. A clean cutover's repair pass simply finds
+            # nothing to do; never blocks this return.
+            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
     return summary
 
 
