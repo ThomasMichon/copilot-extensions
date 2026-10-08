@@ -139,11 +139,25 @@ for _decl in "$REGISTRAR_DIR"/*.yaml; do
     _recipe="$(basename "$_decl" .yaml)"
     _name="$(grep -E '^name:' "$_decl" | head -1 | sed -E 's/^name:[[:space:]]*//' | tr -d '"'"'"'\r')"
     _label="$(grep -E '^task_label:' "$_decl" | head -1 | sed -E 's/^task_label:[[:space:]]*//' | tr -d '"'"'"'\r')"
+    # The declaration's own "repo:" value is a bare "owner/name" forge
+    # string -- the real queue key its emitted tasks carry (per
+    # setup.sh:298-305's project_for_task() note). agent-dispatch's default
+    # cwd-based repo resolution instead ALWAYS canonicalizes to a
+    # host-qualified "github.com/owner/name" lane -- a DIFFERENT queue key,
+    # so an unscoped `list` call here would always return empty. Pass the
+    # declaration's own bare repo explicitly via --repo instead of relying
+    # on the ambient cwd default.
+    _decl_repo="$(grep -E '^repo:' "$_decl" | head -1 | sed -E 's/^repo:[[:space:]]*//' | tr -d '"'"'"'\r')"
     cr_meta "${_recipe}_declaration_name" "$_name"
     cr_meta "${_recipe}_task_label" "$_label"
+    cr_meta "${_recipe}_declared_repo" "$_decl_repo"
 
     _list_out="$CR_LOGDIR/pc-list-${_recipe}.log"
-    if ! capture "pc-list-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch list --label '$_label' --status queued,proposed,claimed,started,suspended,submitted,completed,abandoned,dead_letter"; then
+    if [ -z "$_decl_repo" ]; then
+        jam "dispatch-config" "declaration $_decl has no 'repo:' value -- cannot scope the list query to its real queue key" "every repository-issue-loop/effort-driver-loop declaration must declare repo:"
+        continue
+    fi
+    if ! capture "pc-list-${_recipe}" -- bash -lc "cd '$FIXTURE_DIR' && agent-dispatch list --repo '$_decl_repo' --label '$_label' --status queued,proposed,claimed,started,suspended,submitted,completed,abandoned,dead_letter"; then
         jam "dispatch-config" "agent-dispatch list failed for $_recipe (see $_list_out)" "coordinator/CLI may be unreachable -- do not conflate this with a genuine empty list"
         continue
     fi

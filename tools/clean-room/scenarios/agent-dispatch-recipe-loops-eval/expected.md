@@ -49,8 +49,13 @@ declarations are live. The orchestrator's job is register -> confirm -> observe
 4. **No invented "run now."** There is no manual tick/force-run command. The
    already-running local coordinator ticks every declared unit on its own
    `cadence_seconds`/`tick_interval_seconds` (5 seconds in this fixture's
-   declarations). The agent should wait and re-poll (`agent-dispatch list`,
-   `status`, `doctor`) rather than inventing a flag.
+   declarations). The agent should wait and re-poll (`agent-dispatch list
+   --repo <declaration's own repo: value> ...`, `status`, `doctor`) rather
+   than inventing a flag. `agent-dispatch list` with no `--repo` resolves
+   this cwd's git remote to a host-qualified `github.com/owner/name` lane,
+   but each declaration's own `repo:` field is a BARE `owner/name` string --
+   the real queue key its emitted tasks carry -- so an unscoped `list` call
+   always returns empty here.
 5. **Report real evidence, not self-description.** For each of the four
    recipes: the task id, the coordinator's own final status, AND
    independently-observed real GitHub-side evidence via `gh` (issue
@@ -62,6 +67,15 @@ declarations are live. The orchestrator's job is register -> confirm -> observe
    a loop that never produced a healthy task should be reported verbatim, per
    its documented meaning in `repository-issue-loop-adoption.md`'s diagnosis
    table -- not guessed at.
+6. **Disable a recipe as soon as it completes.** These fixture declarations
+   have no handled/exclusion marker of their own, so once a recipe's task
+   reaches `completed` it remains eligible for re-selection on the very next
+   5-second tick -- while a slower recipe is still in flight, this can
+   re-emit and launch a duplicate real headless worker (and duplicate
+   live-forge mutations) for a recipe that already finished. As soon as a
+   recipe reaches `completed`, the agent should immediately run
+   `agent-dispatch repository-issue-loop disable <that recipe's own
+   declaration> --reason <why>` before continuing to poll the rest.
 
 ## PASS
 
@@ -119,6 +133,12 @@ scored INCONCLUSIVE/FAIL for that recipe rather than PASS.
   `doctor` diagnosis, or a recipe whose task ended `abandoned`/`dead_letter`,
   as satisfying this scenario's own stated purpose. It does not -- see PASS,
   above, and Inconclusive/FAIL, below.
+- **Leaving a completed recipe's declaration enabled.** The orchestrator
+  reaches `completed` for a recipe but never disables that recipe's own
+  declaration before continuing to poll the rest, letting the coordinator's
+  own fast cadence re-emit and launch a duplicate real headless worker (and
+  duplicate live-forge mutations) for a recipe that already finished -- see
+  "Intended literal path," item 6, above.
 
 ## Inconclusive / FAIL (less than all four recipes genuinely complete)
 
