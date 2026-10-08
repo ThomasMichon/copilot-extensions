@@ -207,6 +207,39 @@ def test_provisional_eof_view_does_not_copy_or_extend_prior_snapshot(tmp_path):
         _ = first[-3]
 
 
+def test_failed_tail_decode_never_changes_shared_history_or_cursor(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    first = jsonl_cache.read_jsonl(path)
+    key = str(path), "strict"
+    original = jsonl_cache._cache[key]
+    _append(path, b'{"event":"new"}\n{"event":"bad \xff"}')
+    for _ in range(3):
+        with pytest.raises(UnicodeDecodeError):
+            jsonl_cache.read_jsonl(path)
+        assert jsonl_cache._cache[key] is original
+        assert original.offset == len(b'{"event":"old"}\n')
+        assert original.complete == [{"event": "old"}]
+        assert list(first) == [{"event": "old"}]
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_bytes(b'{"event":"old"}\n{"event":"new"}\n{"event":"fixed"}\n')
+    replacement.replace(path)
+    assert list(jsonl_cache.read_jsonl(path)) == [
+        {"event": "old"}, {"event": "new"}, {"event": "fixed"},
+    ]
+
+
+def test_excessively_nested_json_does_not_hide_later_records(tmp_path):
+    path = tmp_path / "log.jsonl"
+    nested = b"[" * (sys.getrecursionlimit() + 100) + b"0" + b"]" * (
+        sys.getrecursionlimit() + 100
+    )
+    path.write_bytes(b'{"event":"before"}\n' + nested + b'\n{"event":"after"}\n')
+    assert list(jsonl_cache.read_jsonl(path)) == [
+        {"event": "before"}, {"event": "after"},
+    ]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows handle identity")
 def test_zero_fstat_identity_still_hits_and_detects_larger_replacement(tmp_path, monkeypatch):
     real_fstat = os.fstat

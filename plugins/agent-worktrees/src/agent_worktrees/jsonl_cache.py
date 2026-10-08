@@ -121,7 +121,7 @@ def _decode(raw: bytes, errors: str) -> list[dict]:
             continue
         try:
             out.append(json.loads(line))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             continue
     return out
 
@@ -165,11 +165,6 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> Sequence[dict]:
             return []
         boundary = raw.rfind(b"\n") + 1
         decoded = _decode(raw[:boundary], errors)
-        if append:
-            complete = previous.complete
-            complete.extend(decoded)
-        else:
-            complete = decoded
         tail: list[dict] = []
         if boundary < len(raw):
             try:
@@ -177,6 +172,13 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> Sequence[dict]:
             except UnicodeDecodeError as exc:
                 if exc.reason != "unexpected end of data":
                     raise
+        # Publish shared history only after every fallible decode succeeds.
+        # A failed tail must not append duplicate complete records on retry.
+        if append:
+            complete = previous.complete
+            complete.extend(decoded)
+        else:
+            complete = decoded
         visible = _Snapshot(complete, len(complete), tuple(tail))
         entry = _Entry(stamp, offset + boundary, complete, visible)
         _cache[key] = entry
