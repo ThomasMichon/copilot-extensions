@@ -790,27 +790,30 @@ than hypothetical:
       different consumer, and an `active_paths=None` path respectively) —
       the oscillation is not two daemons disagreeing. The classify pass's
       own `active_paths` (built by `_build_active_paths`) already forces
-      `ACTIVE` for a genuinely live worktree, and its write-back
-      (`_stamp_from_raw`) durably persists that state before the subprocess
-      exits, so a classify re-run does not unconditionally revert to stale
-      git state while a session stays live, nor does overwriting `state` in
-      `_overlay_cached_state` matter on its own for the lock/bound-live
-      signals — `derive.py`'s `_state()` already prioritizes those marker
-      fields over `state`. The cache-only (`--cache-only`) payload is
-      confirmed to never carry `mux_session`/`mux_attached` at all (it
-      calls `_worktree_to_dict` with no `mux_info`/`session_ctx`), a real
-      field-coverage gap versus the classify payload — but by itself this
-      does not explain a *repeated* flap given the durable write-back
-      above; the exact timing trigger that would make this gap visible
-      (a lag in when a worktree's mux session is actually created or
-      destroyed — `_build_active_paths` checks only session existence, not
-      attach/detach client-count changes — or in the separate registered-
-      lock transition, relative to when each render pass observes it)
-      remains open, requiring live reproduction rather than further static
-      tracing, before the narrow fix below is scoped with confidence.
-      Decided the consolidation shape for 6b: both paths already call the
-      shared leaf (`git_ops.classify_worktree`); the genuinely new, narrow
-      seam is one
+      `ACTIVE` for a genuinely live worktree, so a classify re-run does
+      not unconditionally revert to stale git state while a session stays
+      live, nor does overwriting `state` in `_overlay_cached_state` matter
+      on its own for the lock/bound-live signals — `derive.py`'s
+      `_state()` already prioritizes those marker fields over `state`.
+      The classify pass's own write-back (`_stamp_from_raw`) is only
+      *attempted* exactly once before the subprocess exits (its queue's
+      `atexit`-registered flush), not guaranteed to succeed:
+      `_apply_session_state_stamp` acquires its per-path record lock
+      **non-blocking** and silently skips the write (no retry) on
+      contention — a fully code-confirmed, self-contained mechanism on
+      its own: a classify pass can compute the correct state and still
+      never persist it on an ordinary clean exit, leaving the next
+      cache-only paint reading stale data. The cache-only (`--cache-only`)
+      payload is separately confirmed to never carry `mux_session`/
+      `mux_attached` at all (it calls `_worktree_to_dict` with no
+      `mux_info`/`session_ctx`), a secondary, real field-coverage gap
+      versus the classify payload. Pinning the *frequency* of the
+      contended-write skip in a real Picker refresh cycle (to fully
+      confirm the reported recurrence cadence) remains open, requiring
+      live reproduction rather than further static tracing — but the
+      mechanism itself needs no further confirmation. Decided the
+      consolidation shape for 6b: both paths already call the shared leaf
+      (`git_ops.classify_worktree`); the genuinely new, narrow seam is one
       level up — `_classify_one_record`'s full wrapper (`active_paths`,
       the classify call, tracking-override closure refinement, and
       session-turn `CONVO` refinement), factored into one function both
@@ -925,35 +928,41 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
-### 2026-10-08 — Phase 6a: traced all three compute paths; two successive oscillation hypotheses disproven by review, real trigger left open pending live repro
+### 2026-10-08 — Phase 6a: traced all three compute paths; oscillation mechanism confirmed (contended-write skip) after three successive hypotheses refined through review
 Full trace in `phase-6-audit.md`. Confirmed `worktree_status_compute`
 (agent-dispatch's Tasks-board relay) and `status-segment` (deliberately
 passes `active_paths=None`) are not implicated in the reported
 `MERGED`→`WIP`/`ACTIVE`→`MERGED` oscillation — it is not two daemons
-disagreeing. Two successive hypotheses for the exact mechanism were each
-disproven by this repo's own PR review with concrete code evidence: (1)
-"`_overlay_cached_state`'s `live` override unconditionally sets `state`"
-— disproven because `derive.py`'s `_state()` already prioritizes liveness
-marker fields over `state` on every render, making the override largely
-moot for the lock/bound-live signals; (2) "the cache-only payload's
-missing `mux_session`/`mux_attached` fields cause a repeating flap" —
-real field-coverage gap, but the classify pass's own `active_paths`
-already forces `ACTIVE` while genuinely live, and its write-back durably
-persists that value (via `tracking._STAMP_QUEUE`'s `atexit`-registered
-flush) before the subprocess exits, so the gap alone does not explain a
-*repeated* flap in the ordinary case. The actual timing trigger — most
-likely a lag in when a worktree's mux session is actually created or
-destroyed (`_build_active_paths` checks only session existence, not
-attach/detach client-count changes), or in the separate registered-lock
-transition, relative to when each render pass observes it — is left
-explicitly open, requiring live reproduction rather than further static
-tracing. Decided the
+disagreeing. Three successive hypotheses for the exact mechanism were
+refined through this repo's own PR review with concrete code evidence:
+(1) "`_overlay_cached_state`'s `live` override unconditionally sets
+`state`" — disproven, since `derive.py`'s `_state()` already prioritizes
+liveness marker fields over `state`; (2) "the cache-only payload's
+missing `mux_session`/`mux_attached` fields alone cause a repeating flap"
+— a real field-coverage gap, but insufficient alone since the classify
+pass's own `active_paths` already forces `ACTIVE` while genuinely live;
+(3) **confirmed as the primary mechanism**: `_apply_session_state_stamp`'s
+write-back acquires its per-path record lock **non-blocking** and
+silently skips the write (no retry) on contention
+(`tracking.py:3708-3710`) — so a classify pass can compute the correct
+state and still never persist it on an ordinary clean exit (the queue's
+`atexit`-registered flush only guarantees the write is *attempted*, not
+that it *succeeds*), leaving the next cache-only paint reading stale data
+with no error surfaced anywhere. This is fully code-confirmed and
+sufficient on its own; only the real-world *frequency* of the contention
+(to match the reported recurrence cadence) remains open, needing live
+reproduction rather than further static tracing. Scoped the primary fix
+as a bounded retry/short block in `_StampWriteQueue._apply` on contention,
+with the mux-visibility-gap fix as a secondary, independent closer.
+Decided the
 consolidation shape for 6b: both paths already call the shared leaf
 (`git_ops.classify_worktree`); the genuinely new seam is
 `_classify_one_record`'s full wrapper (`active_paths`, the classify call,
 tracking-override closure refinement, `CONVO` refinement) one level up,
 shared by both `_classify_daemon_compute` and `worktree_status_compute
-.compute()`. Neither existing `work_coalescing_singleton` server is
+.compute()` (which must keep passing `active_paths=None`, since it
+short-circuits before the fetch and would silently replace Path B's real
+git disposition fact). Neither existing `work_coalescing_singleton` server is
 retired — the two request granularities (whole-project batch vs.
 single-worktree bundle) remain genuinely distinct consumers. Phase 6
 heading corrected from "not started" to "in progress."

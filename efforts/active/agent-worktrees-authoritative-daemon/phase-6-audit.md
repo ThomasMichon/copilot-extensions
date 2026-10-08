@@ -105,57 +105,67 @@ dated investigation history).
   so the classify pass does not generically "correct back" to stale state
   while a session is genuinely live by every signal it checks.
 - `_worktree_to_dict`'s `_classify_records`/`_stamp_from_raw` write-back
-  (`picker_support/data_local.py:379-394`) persists whatever `state` the
-  classify pass computed (including `"active"`) onto `rec.git_state`
-  **durably** before the `list --json --classify` subprocess exits: the
-  write is queued on `tracking._STAMP_QUEUE` (async, off the render
+  (`picker_support/data_local.py:379-394`) **attempts** to persist
+  whatever `state` the classify pass computed (including `"active"`) onto
+  `rec.git_state` via `tracking._STAMP_QUEUE` (async, off the render
   thread), and that queue's `flush()` is registered via `atexit`
   (`tracking.py:3763`) — including on the CLI's hard-exit path
   (`_shutdown_exit.run_and_exit` explicitly runs registered `atexit`
-  handlers) — so a *subsequent* cache-only read is not reading a value
-  the classify pass hasn't finished writing yet, except where the
-  process is killed outright (bypassing `atexit` entirely), not an
-  ordinary exit.
+  handlers) — so every queued mutation is guaranteed to be *attempted*
+  exactly once before the subprocess exits. **This does not mean each
+  attempt succeeds**: `_apply_session_state_stamp` acquires its
+  per-path `_RecordLock` **non-blocking** and silently returns `False`
+  (write skipped, no retry) on contention — "best-effort background
+  writer... skip on contention so a sweep never blocks a critical
+  updater; the next populate re-stamps the (idempotent) cache"
+  (`tracking.py:3708-3710`). So on an ordinary, clean process exit, the
+  classify pass's correctly-computed `"active"` state can still fail to
+  reach `rec.git_state` if anything else (another concurrent `list`
+  invocation, a resume, a sweep) holds that record's lock at the moment
+  the queued write is attempted — leaving `rec.git_state` at whatever it
+  was *before* this classify pass, with no error surfaced anywhere.
 - The cache-only (`list_cli.cmd_list`'s `--cache-only` branch) payload
   never carries `mux_session`/`mux_attached` (confirmed: it calls
   `_worktree_to_dict(rec, ...)` with no `mux_info`/`session_ctx` at all,
   and those fields are only set when those arguments are given —
-  `__main__.py:1333-1335`). This remains a real, confirmed field-coverage
-  gap between the two payloads — but, per the point above, it does **not**
-  by itself explain a *repeated* MERGED↔ACTIVE flap for a worktree whose
-  liveness is otherwise stable, since the classify pass's own durable
-  `git_state` write-back already carries the correct value forward into
-  the next cache-only read in the ordinary (clean-exit) case.
+  `__main__.py:1333-1335`). This is a real, confirmed field-coverage gap
+  between the two payloads, and — combined with the contended-write skip
+  above — is now a fully self-contained, code-confirmed mechanism on its
+  own, independent of any mux-session timing question: a classify pass
+  computes the correct state (e.g. `"active"`), its stamp write is
+  skipped under contention, `rec.git_state` stays at its prior value
+  (e.g. `"MERGED"`), the next cache-only paint renders that stale value
+  (no mux marker to override it), the *next* classify pass recomputes
+  `"active"` correctly again (git state itself never changed) and this
+  time its write succeeds, the cache-only paint after that renders stale
+  `"MERGED"` again only if *that* write was also skipped — i.e. the
+  flap's exact cadence tracks write-lock contention, not a liveness
+  signal disagreeing with itself.
 
-**Not yet confirmed — the actual trigger requires one more investigative
-step before 6b's narrow oscillation-fix item (below) can be scoped with
-confidence:**
+**Not yet confirmed — pinning the frequency/cause of the lock contention,
+not the mechanism itself, which is now code-confirmed above:**
 
-A field-coverage gap that never manifests under a durable, agreeing
-write-back needs a *timing* fault to actually produce the reported flap.
-The most concrete remaining candidate, not yet traced to a conclusion: a
-**disagreement in time**, not in coverage, between the liveness checks the
-two passes use — but the candidate boundary must be the signal
-`_build_active_paths` actually consumes: `sessions._list_mux_sessions()`
-checks only whether a worktree's `wt-*` **mux session exists at all**
-(created vs. destroyed), not whether a client is currently attached to it
-— attach/detach changes only a session's client count, which
-`_build_active_paths` never inspects. The real candidate timing fault is
-therefore a lag between a worktree's mux session being **created or
-destroyed** (and, separately, the registered-lock transition
-`worktree_session_lock_state` itself checks) and when each of the two
-render passes observes that transition — not a mux attach/detach event.
-Confirming this requires either live reproduction (repeated `list --json
---classify` / `--cache-only` calls against a real worktree while actually
-creating/destroying its mux session or its registered lock, observing
-`rec.git_state` and each payload's marker fields across the transition)
-or tracing those two signals' own transition/staleness windows directly
-in `sessions.py`. **This is explicitly left open** rather than asserted —
-6a's purpose was the dataflow trace and the consolidation-shape decision
-(both done below);
-pinning the exact non-deterministic trigger is scoped as a prerequisite
-check for the narrow oscillation fix in 6b's recommendation, not asserted
-as already resolved.
+The contended-write skip is a real, sufficient mechanism confirmed
+directly from the code; what is not yet confirmed is how *often* it
+actually fires in practice — i.e. how frequently concurrent `list --json`
+invocations (or any other `_RecordLock` holder) genuinely contend for the
+same worktree's record during a real Picker refresh cycle, which would
+explain the reported recurrence cadence ("after a brief wait, swings back
+again"). The separate, lower-confidence candidate from the prior revision
+of this section — a timing lag in when a worktree's mux session is
+created/destroyed (`_build_active_paths` tests session existence via
+`sessions._list_mux_sessions()`, not attach/detach client-count changes)
+or in the registered-lock transition `worktree_session_lock_state` checks
+— remains a secondary, unconfirmed contributor, not the primary one.
+Confirming either's actual contribution to the reported cadence requires
+live reproduction (observing `rec.git_state` and `_apply_session_state_stamp`'s
+own return value across repeated render cycles on a real worktree under
+load), not more static tracing — but the contended-write skip alone is
+already sufficient to explain the symptom without assuming any mux/session
+timing disagreement at all. 6a's purpose was the dataflow trace and the
+consolidation-shape decision (both done below); pinning the exact
+contention frequency is scoped as a prerequisite check for the narrow
+oscillation fix in 6b's recommendation, not asserted as already resolved.
 
 ## Recommendation for 6b (updated scope)
 
@@ -212,37 +222,55 @@ into a single change:
    above) was never in disagreement between Path A and Path B to begin
    with — both already compute from the identical leaf.
 2. **The oscillation fix** (new, scoped here since 6a's own purpose is to
-   establish the dataflow before consolidation starts — but gated on
-   confirming the timing trigger above first, not assumed): if the
-   cache-only payload's mux-visibility gap is confirmed as a genuine
-   contributor once the timing question is resolved, close it by
-   **surfacing the existing cached mux-liveness signal the tracking
-   record already carries** — `WorktreeRecord.mux_live`/`mux_live_at`,
-   refreshed by `reconcile_bound_live()` via its own `mux_status_many`
-   call (a **separate** observation from `_build_active_paths`'s own
-   direct `_list_mux_sessions()` call — `__main__.py:453-477` — not the
-   same batched call; both ultimately read the same underlying mux
-   primitive but as two distinct point-in-time observations, which
-   matters for the still-open timing question above), and already
-   freshness-gated by `_fresh_mux_live_hint()`
-   (`picker_support/data_local.py:112-123`, `__main__.py:524-548`) — into
-   the cache-only branch's `_worktree_to_dict`/`_overlay_cached_state`
-   call, rather than adding a second, new liveness source or probe. This
-   is a narrow, independent fix — it does not require or block on the
-   Path A/B consolidation, and per the effort's own prior note should
-   land as its own change, not be read as satisfying the structural
-   consolidation claim on `#5555`.
+   establish the dataflow before consolidation starts): two independent,
+   additive fixes, in priority order —
+   - **Primary: make the classify pass's stamp write-back retry on
+     contention, or block briefly, instead of silently skipping.**
+     `_apply_session_state_stamp`'s non-blocking `_RecordLock` acquire
+     returning `False` on contention (`tracking.py:3708-3710`) is a fully
+     self-contained, code-confirmed mechanism on its own — the classify
+     pass can compute the correct state and still never persist it on an
+     ordinary clean exit, with no error surfaced anywhere, leaving the
+     next cache-only paint reading stale data. A bounded retry (a short
+     blocking wait, or a single re-attempt after a brief delay, inside
+     `_StampWriteQueue._apply`) closes this without changing the
+     non-blocking contract's original purpose (never blocking a
+     *foreground* critical updater) — the stamp write is already off the
+     render thread, so a short bounded wait there costs nothing a
+     render-thread caller would notice.
+   - **Secondary: surface the existing cached mux-liveness signal the
+     tracking record already carries** — `WorktreeRecord.mux_live`/
+     `mux_live_at`, refreshed by `reconcile_bound_live()` via its own
+     `mux_status_many` call (a **separate** observation from
+     `_build_active_paths`'s own direct `_list_mux_sessions()` call —
+     `__main__.py:453-477` — not the same batched call; both ultimately
+     read the same underlying mux primitive but as two distinct
+     point-in-time observations) and already freshness-gated by
+     `_fresh_mux_live_hint()` (`picker_support/data_local.py:112-123`,
+     `__main__.py:524-548`) — into the cache-only branch's
+     `_worktree_to_dict`/`_overlay_cached_state` call, rather than adding
+     a second, new liveness source or probe. This closes the remaining
+     field-coverage gap independent of the primary fix, for a worktree
+     whose only liveness source is genuinely an attached mux session.
 
-Recommend sequencing: confirm the timing trigger (above) first — live
-reproduction, not more static tracing — before scoping fix 2's exact
-diff; land it as its own small PR once confirmed. Proceed with 6b/6c/6d
-for the structural consolidation in parallel, since it is independently
-justified regardless of the oscillation fix's own timing. Both are
-required before this phase's closing claim on `#5555` is complete — 6d's
-own checklist item already requires not letting 6a-6c's completion alone
-read as "the Worktrees-pivot half of #5555 is done" if a known gap is
-left silently open; this oscillation fix is exactly such a gap and must
-not be silently dropped once 6b/6c land.
+Both are narrow, independent fixes — neither requires or blocks on the
+Path A/B consolidation, and per the effort's own prior note both should
+land as their own change(s), not be read as satisfying the structural
+consolidation claim on `#5555`.
+
+Recommend sequencing: land the primary (contended-write retry) fix first
+— it is already fully code-confirmed, with no further live reproduction
+needed to justify it, unlike the prior revision of this section assumed.
+Live reproduction remains useful afterward to confirm how much of the
+reported recurrence it alone resolves, before deciding whether the
+secondary (mux-visibility) fix is still needed. Proceed with 6b/6c/6d for
+the structural consolidation in parallel, since it is independently
+justified regardless of the oscillation fix's own scheduling. All of this
+is required before this phase's closing claim on `#5555` is complete —
+6d's own checklist item already requires not letting 6a-6c's completion
+alone read as "the Worktrees-pivot half of #5555 is done" if a known gap
+is left silently open; this oscillation fix is exactly such a gap and
+must not be silently dropped once 6b/6c land.
 
 ## Enumerated facts: Path A (`WorktreeStateInfo`) vs. Path B (`compute()` bundle)
 
@@ -270,20 +298,24 @@ not, per the Recommendation above.
 6a complete as scoped: all three consumer dataflows traced, the two
 additional findings from before this session (`current_worktree_status`'s
 non-daemon pass; `_overlay_cached_state`'s `live` override) investigated —
-the first ruled out; the second's exact timing trigger is explicitly left
-open pending live reproduction, not asserted as resolved — and the
-consolidation shape decided (6b's actual new seam is the `active_paths`/
-closure/CONVO-refining wrapper one level above the shared leaf call, with
-neither `work_coalescing_singleton` server retired). This closes 6a's own
-scope for 6b/6c (the shared seam's implementation target and test
+the first ruled out; the second resolved into a fully code-confirmed
+primary mechanism (`_apply_session_state_stamp`'s silent, no-retry,
+contended-write skip), with a secondary field-coverage gap and the
+contention's actual real-world frequency left for live reproduction, not
+asserted as resolved — and the consolidation shape decided (6b's actual
+new seam is the `active_paths`/closure/CONVO-refining wrapper one level
+above the shared leaf call, with `compute()` keeping `active_paths=None`
+and neither `work_coalescing_singleton` server retired). This closes 6a's
+own scope for 6b/6c (the shared seam's implementation target and test
 surface); it does **not** close 6d — sharing a compute seam between Path A
 and Path B does not touch 6d's own still-pending snapshot/stream decision
 (`list --json --classify` remaining a polled call vs.
 `pivot-streaming-transport`'s `stream`/`subscribe` contract), which stays
-open and unaffected by anything in this trace. Not yet done: confirming
-the oscillation's timing trigger via live reproduction, 6b implementation,
-the separately-scoped mux-visibility fix (gated on that confirmation),
-6c's delegation test, and 6d's own snapshot/stream closing decision.
+open and unaffected by anything in this trace. Not yet done: landing the
+primary (contended-write retry) and secondary (mux-visibility) oscillation
+fixes, confirming their real-world contribution via live reproduction,
+6b implementation, 6c's delegation test, and 6d's own snapshot/stream
+closing decision.
 
 ## Documentation impact
 
