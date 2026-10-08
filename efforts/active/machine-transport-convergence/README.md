@@ -67,6 +67,14 @@ Continuation:
 
 > "Since we have context, let's tackle the broader objective"
 
+Dispatch integration decision:
+
+> "Use optional shared resolver CLI with standalone alias compatibility"
+
+The operator selected a read-only agent-worktrees transport-resolution command
+backed by the shared library. Dispatch consumes it when available and preserves
+raw SSH-alias operation only when the optional provider is unavailable.
+
 ## Plan
 
 ### Phase 1 - Review the campaign boundary
@@ -173,3 +181,18 @@ identity authority: reconcile `machine-transport` with #5689's
   independence or daemon lifecycle contract. Self-reviewed against `REVIEW.md`.
   No commit, PR, push, merge or deployment was performed; #5737 remains open
   until parent-owned publication and merge.
+
+### 2026-10-08 - Bridge review and next-slice decision
+- Automated review found that registry assembly still used key-only coverage
+  checks. Coverage now reuses the same resolver, including SSH-environment
+  binding, so a differently named explicit local project suppresses its
+  auto-discovered duplicate under alias, hostname, display-name or SSH-alias
+  spellings. Ambiguous/conflicting hosts warn rather than suppressing evidence.
+- Merge-path regressions and related coverage contracts: **59 passed, 1 skipped**;
+  touched-code lint and module-size gate passed.
+- Operator chose the optional shared-resolver CLI for Dispatch, preserving
+  standalone SSH aliases without introducing a duplicate topology configuration.
+- Additional read-only inventory identified agent-ssh's WSL registry emitter as
+  remaining local-machine matching overlap. Its transport-specific projection
+  remains outside the shared resolver; the dtssh alias default and mesh-status
+  projection require boundary checks, not indiscriminate migration.

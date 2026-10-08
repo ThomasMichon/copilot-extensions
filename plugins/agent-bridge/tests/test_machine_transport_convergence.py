@@ -109,3 +109,39 @@ def test_ambiguous_identities_and_environment_aliases_fail_closed(monkeypatch):
     assert resolver.resolve_ssh_environment("box")[0] is machines["box"]
     with pytest.raises(ValueError, match="not found"):
         resolver.resolve_ssh_environment("missing")
+
+
+@pytest.mark.parametrize("host", ["FRIENDLY", "OS-BOX", "Build Box", "BOX-LINUX"])
+def test_registry_assembly_suppresses_equivalent_local_project(monkeypatch, host):
+    from types import SimpleNamespace
+
+    from agent_bridge import agent_registry
+    from agent_bridge.agent_registry_common import AgentConfig
+
+    machines = _machines()
+    agents = parse_agent_registry({"explicit-worker": {
+        "host": host, "project": "example-project", "ssh_environment": "linux",
+    }})
+    monkeypatch.setattr("socket.gethostname", lambda: "os-box")
+    monkeypatch.setattr(agent_registry, "_detect_platform", lambda: "linux")
+    monkeypatch.setattr("agent_bridge.topology.load_machines_yaml", lambda *a, **k: machines)
+    monkeypatch.setattr("agent_bridge.topology.load_control_plane_project", lambda *a: None)
+    monkeypatch.setattr(agent_registry, "load_agent_registry", lambda *a, **k: agents)
+    monkeypatch.setattr(agent_registry, "load_local_repos", lambda: {})
+    monkeypatch.setattr(agent_registry, "infer_control_plane_project", lambda *a: None)
+    monkeypatch.setattr(agent_registry, "_load_related_entries", lambda *a: [])
+    monkeypatch.setattr(agent_registry, "derive_topology_agents", lambda *a, **k: {})
+    monkeypatch.setattr(agent_registry, "_effective_spawn_defaults", lambda *a: ([], {}))
+    monkeypatch.setattr(agent_registry, "discover_local_agents", lambda: {
+        "example-project": AgentConfig(
+            name="example-project", project="example-project", auto_discovered=True,
+        ),
+    })
+    monkeypatch.setattr(agent_registry, "load_elevated_projects", lambda: set())
+    monkeypatch.setattr(agent_registry, "_register_namespace_resolvers", lambda *a: None)
+    monkeypatch.setattr("agent_bridge.config.load_repo_bridge_config", lambda *a: {})
+    profile = SimpleNamespace(machines_yaml="machines.yaml", agents_config="agents.json")
+    resolver = agent_registry.build_resolver(SimpleNamespace(topologies={"test": profile}))
+    assert resolver is not None
+    assert list(resolver.agents) == ["explicit-worker"]
+    assert resolver.resolve("explicit-worker").type == "local"

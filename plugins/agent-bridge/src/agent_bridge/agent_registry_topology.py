@@ -234,20 +234,21 @@ def _find_covering_agent(
         return None
 
     env_name = platform
+    resolver = compat.AgentResolver(registry, machines)
     for name, agent in registry.items():
         if agent.auto_discovered or agent.derived or agent.project != local_agent.project:
             continue
         if not agent.host:
             continue
-        host_lower = agent.host.lower()
-        target_machine = machines.get(host_lower)
-        if not target_machine:
-            for machine_key, machine_config in machines.items():
-                if machine_key.lower() == host_lower:
-                    target_machine = machine_config
-                    break
+        try:
+            target_machine, forced_env = resolver._resolve_machine(
+                agent.host, agent.ssh_environment,
+            )
+        except ValueError as exc:
+            log.warning("Cannot determine local coverage for agent '%s': %s", name, exc)
+            continue
         if target_machine and target_machine.key == machine.key:
-            agent_env = (agent.ssh_environment or "").lower()
+            agent_env = (forced_env.name if forced_env else agent.ssh_environment or "").lower()
             if agent_env == env_name:
                 return name
     return None
