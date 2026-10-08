@@ -69,10 +69,11 @@ def settle_resumed_claim(
     import venue_copilot as vc  # late: callers' test seams patch the package
 
     deadline = clock() + timeout
+    unknown = (vc.VenueCopilotError, OSError)  # a bridge call that failed, or couldn't even start
     while True:
         try:
             row = vc.get_cli_mode_reservation(worktree_id) or {}
-        except vc.VenueCopilotError:
+        except unknown:
             row = None
         if (row is not None and row.get("reservation_id") == reservation.get("reservation_id")
                 and row.get("claimed_by_session_id") == expected):
@@ -82,14 +83,14 @@ def settle_resumed_claim(
                 and resumed.get("status", "live") == "live"
                 # Gone, or a dead row (an unclean exit leaves it to expire).
                 and (not placeholder or placeholder.get("status") in ("expired", "taken-over"))):
-            vc.release_cli_mode(worktree_id, reservation_id=reservation.get("reservation_id"))
             try:
+                vc.release_cli_mode(worktree_id, reservation_id=reservation.get("reservation_id"))
                 renewed = vc.reserve_cli_mode(worktree_id, ttl_seconds=ttl_seconds, venue=venue)
-            except vc.VenueCopilotError:
-                return expected, {}  # live, just without CLI mode; nothing left to release
-            # At least one heartbeat: the renewal can only be claimed by the next one.
-            claimant = vc.await_claim(worktree_id, str(renewed.get("reservation_id") or ""),
-                                      max(deadline - clock(), 2 * _POLL_SECONDS + 30.0))
+                # At least one heartbeat: the renewal can only be claimed by the next one.
+                claimant = vc.await_claim(worktree_id, str(renewed.get("reservation_id") or ""),
+                                          max(deadline - clock(), 2 * _POLL_SECONDS + 30.0))
+            except unknown:
+                return expected, {}  # live, maybe without CLI mode; nothing for the caller to release
             return expected, (renewed if claimant == expected else {})
         if clock() >= deadline:
             return claimed, reservation

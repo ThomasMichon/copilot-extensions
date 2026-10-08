@@ -151,3 +151,23 @@ def test_an_unconfirmed_renewal_is_left_for_the_next_heartbeat(bridge, monkeypat
     monkeypatch.setattr(venue_copilot, "await_claim", lambda *a, **k: claimant)
     assert _settle() == ("sid-9", {})
     assert bridge.released == ["r1"] and len(bridge.reserved) == 1
+
+
+@pytest.mark.parametrize("call", ["get_cli_mode_reservation", "release_cli_mode", "reserve_cli_mode", "await_claim"])
+def test_a_bridge_call_that_cannot_start_never_escapes(bridge, monkeypatch, call):
+    """A spawn failure (OSError) in any settlement call is an unknown outcome,
+    never a launch failure that would stop the healthy resumed session."""
+    bridge.live = {"sid-9": {"session_id": "sid-9"}}
+    real, raised = getattr(venue_copilot, call), []
+
+    def _boom(*a, **k):
+        if not raised:
+            raised.append(call)
+            raise OSError("agent-bridge: cannot start")
+        return real(*a, **k)
+
+    monkeypatch.setattr(venue_copilot, call, _boom)
+    session_id, renewed = _settle()
+    assert raised == [call] and session_id == "sid-9"
+    # A failed first read is just retried; a failed renewal step leaves nothing to release.
+    assert renewed == ({"reservation_id": "r2"} if call == "get_cli_mode_reservation" else {})
