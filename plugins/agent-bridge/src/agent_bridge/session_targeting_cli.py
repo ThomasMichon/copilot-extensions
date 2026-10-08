@@ -171,6 +171,14 @@ def _companion_seed_prompt(prompt: str | None) -> str | None:
 
 
 def _cmd_send(args: argparse.Namespace) -> None:
+    from .send_outcome import run_send
+
+    run_send(args, _send)
+
+
+def _send(args: argparse.Namespace) -> None:
+    from .send_outcome import SendRefused
+
     core = _core()
     if getattr(args, "new", False):
         print(
@@ -206,13 +214,11 @@ def _cmd_send(args: argparse.Namespace) -> None:
         expected = (client.resolve_live_session(expected_session_id) or {}).get(
             "session_id") if precheck else None
         if precheck and live["session_id"] not in (expected_session_id, expected):
-            print(
-                f"[FAIL] Target {target!r} now resolves to session "
-                f"{live['session_id']!r}, not expected session "
-                f"{expected_session_id!r}.",
-                file=sys.stderr,
+            raise SendRefused(
+                "refused_unavailable", reason="expected_mismatch", retryable=False, target=target,
+                error=(f"Target {target!r} now resolves to session {live['session_id']!r}, "
+                       f"not expected session {expected_session_id!r}."),
             )
-            sys.exit(1)
         if not prompt.strip():
             # An empty envelope still costs the receiver a whole model turn.
             print(
@@ -224,12 +230,10 @@ def _cmd_send(args: argparse.Namespace) -> None:
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if getattr(args, "expected_session_id", None):
-        print(
-            f"[FAIL] Target {target!r} has no live session matching "
-            f"{args.expected_session_id!r}.",
-            file=sys.stderr,
+        raise SendRefused(
+            "refused_unavailable", reason="not_found", retryable=False, target=target,
+            error=f"Target {target!r} has no live session matching {args.expected_session_id!r}.",
         )
-        sys.exit(1)
 
     caller_id = core._caller_id_for(args)
     session_id = core._resolve_target(client, target, force=getattr(args, "force", False))
@@ -296,6 +300,9 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
 
 
 def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str) -> None:
+    from .client import BridgeClientError
+    from .send_outcome import emit, live_outcome, refusal_from_live_error
+
     core = _core()
     sender = core._live_sender_label(args)
     reply_to = core._live_reply_to(args)
@@ -310,19 +317,26 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         delivery_options["idempotency_key"] = idempotency
     if expected_session_id:
         delivery_options["expected_session_id"] = expected_session_id
-    result = client.send_live_message(
-        session_id,
-        sender=sender,
-        body=prompt,
-        reply_to=reply_to,
-        kind=kind,
-        delivery=delivery,
-        wait=wait,
-        wait_timeout=wait_timeout,
-        **delivery_options,
-    )
+    try:
+        result = client.send_live_message(
+            session_id,
+            sender=sender,
+            body=prompt,
+            reply_to=reply_to,
+            kind=kind,
+            delivery=delivery,
+            wait=wait,
+            wait_timeout=wait_timeout,
+            **delivery_options,
+        )
+    except BridgeClientError as exc:
+        refused = refusal_from_live_error(exc, session_id)
+        if refused is None:
+            raise
+        raise refused from exc
     if args.json:
-        core._json_out({"delivered": True, "target": session_id, **result})
+        emit({"delivered": True, "target": session_id, **result,
+              "outcome": live_outcome(result, delivery)})
         return
     mid = result.get("message_id")
     kind_note = "" if kind == "prompt" else f", kind {kind}"
@@ -357,6 +371,8 @@ def _submit_and_stream(
     caller_id: str | None,
 ) -> None:
     core = _core()
+    from .send_outcome import emit, prompt_outcome
+
     queue = getattr(args, "queue", False)
     result = client.submit_prompt(
         session_id,
@@ -369,7 +385,8 @@ def _submit_and_stream(
     if result.get("queued"):
         ident = core._connection_identity(client, session_id)
         if args.json:
-            core._json_out({"session_id": session_id, "connection": ident, **result})
+            emit({"session_id": session_id, "connection": ident, **result,
+                  "outcome": prompt_outcome(result)})
             return
         pos = result.get("position")
         qid = result.get("queue_id")
@@ -384,7 +401,8 @@ def _submit_and_stream(
     ident = core._connection_identity(client, session_id)
 
     if args.json:
-        core._json_out({"session_id": session_id, "connection": ident, **result})
+        emit({"session_id": session_id, "connection": ident, **result,
+              "outcome": prompt_outcome(result)})
         return
 
     print(f"[>] Session {session_id} -- turn {turn_index}")

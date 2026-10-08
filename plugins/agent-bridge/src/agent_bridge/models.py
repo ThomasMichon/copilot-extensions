@@ -649,16 +649,16 @@ class SendMessageRequest(BaseModel):
 class SendMessageResult(BaseModel):
     """Result of enqueuing a message for delivery into a live session.
 
-    When the request set ``wait``, the bridge also watches the target's
-    *represented* event stream for the reply turn (D1): ``replied`` is True once
-    the next ``turn_complete`` lands, ``reply`` carries the assistant text of
-    that turn, and ``stop_reason`` its stop reason. On a wait timeout ``replied``
-    is False and the message still sits durably in the queue.
+    ``duplicate``: an identical idempotent retry matched the original
+    (``message_id``). With ``wait`` (D1), ``replied`` is True once the reply turn's
+    ``turn_complete`` lands, with its text (``reply``) and ``stop_reason``; on a
+    timeout it is False and the message still sits durably in the queue.
     """
 
     ok: bool = True
     session_id: str
     message_id: int
+    duplicate: bool = False
     replied: bool = False
     reply: str | None = None
     stop_reason: str | None = None

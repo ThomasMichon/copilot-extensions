@@ -747,7 +747,11 @@ async def post_live_message(
         delivery=body.delivery,
         expected_session_id=body.expected_session_id,
         idempotency_key=body.idempotency_key,
+        report_duplicate=True,
     )
+    duplicate = reason == "duplicate"
+    if duplicate:
+        reason = None
     if reason == "not_found":
         raise HTTPException(status_code=404, detail="live session not found")
     if reason == "stale":
@@ -789,7 +793,7 @@ async def post_live_message(
         raise HTTPException(status_code=500, detail="enqueue produced no id")
 
     if not body.wait:
-        return SendMessageResult(session_id=target_session_id, message_id=message_id)
+        return SendMessageResult(session_id=target_session_id, message_id=message_id, duplicate=duplicate)
 
     store = _store(request)
     registration = db.get_live_session(target_session_id) or {}
@@ -800,6 +804,7 @@ async def post_live_message(
     return SendMessageResult(
         session_id=target_session_id,
         message_id=message_id,
+        duplicate=duplicate,
         replied=bool(reply["replied"]),
         reply=reply["reply"],
         stop_reason=reply["stop_reason"],

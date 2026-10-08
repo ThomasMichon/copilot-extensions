@@ -301,7 +301,7 @@ def test_send_still_rejects_an_unrelated_replacement(monkeypatch, capsys):
     resolved = {"agent-x": {"session_id": "stranger"}, "placeholder": None}
     with pytest.raises(SystemExit) as exc:
         _expected_session_send(monkeypatch, resolved, "placeholder")
-    assert exc.value.code == 1
+    assert exc.value.code == 69  # refused_unavailable
     assert "not expected session" in capsys.readouterr().err
 
 

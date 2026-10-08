@@ -36,7 +36,7 @@ delegated-agent facade.
 | Create a fresh session | `create <agent> [prompt]` | `POST /api/v1/sessions` with `force_new` as needed | Bridge `session_id`, generated display name, session status |
 | Reuse or create for this caller | `send <agent> <prompt>` | Client-side resolve/reuse followed by session creation when absent | Existing or new bridge session |
 | Submit a turn | `send <session> <prompt>` | `POST /api/v1/sessions/{id}/turns` | Immediate `turn_index`, or a queued result when `queue=true` |
-| Handle a busy hosted session | Default `send` refuses; `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode |
+| Handle a busy hosted session | Default `send` refuses (exit 75; with `--json`, `outcome: refused_busy`); `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode; `send --json` names the result in one `outcome` (`delivered`, `queued`, `steered`, `interrupted`, `duplicate`, or a `refused_*` with a distinct exit code) |
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
 | Observe a live turn | attached `send`, bare `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
 | Wait for selected attention | `wait --attention REASON` / `--all-attention`, optionally `--json` and `--position` | Authenticated `GET .../attention` with repeatable reasons, opaque position, and bounded timeout | Structured earliest-boundary settlement; human mode flushes the SSE feed through the boundary, JSON mode remains cursor-neutral |
@@ -47,7 +47,7 @@ delegated-agent facade.
 | Ask what sessions reported spending | `usage` (also `peek --json`'s `usage` block) | Target-execution helper, not a public session route | Premium requests and AIU (tokens once shut down), cumulative per session, read from the transcript; unreported is "not reported", never zero, and the rollup names its coverage |
 | Inspect current state | `status`, `session-usage`, `sessions` | Session, status, usage, queue, and cursor endpoints | Session/process/usage/progress fields |
 | Interrupt one turn | control API; destructive `send --force` is a separate replacement path | `POST .../interrupt` | Current turn receives ACP `session/cancel`; session remains usable |
-| Stop and preserve | `stop` | `POST .../stop` | Session becomes `stopped` and remains resumable |
+| Stop and preserve | `stop`; `stop --grace S` first queues a wind-down notice and waits up to S for it to run, `--force` skips it | `POST .../stop` (the notice uses `queue=true` turns and the queue delete endpoint) | Session becomes `stopped` and remains resumable; `--json` reports `requested`/`acknowledged`/`provider_stopped`/`confirmed` phases, and a stopped or gone session is an idempotent no-op |
 | Resume | `resume` or automatic resume on later send | `POST .../resume` | Session returns to `idle` when recovery succeeds |
 | End and remove | `end` | `DELETE /api/v1/sessions/{id}` | Bridge-owned session state is retired |
 | Answer agent input | `answer` | `POST .../ask-user` | Parked elicitation resumes |
@@ -247,9 +247,9 @@ cursor.
 The current represented-session inbox supports an `idempotency_key`, but the
 ordinary hosted-session prompt queue does not. The current database index makes
 that live-message key globally unique across the table. Repeating it with the
-same session, sender, body, reply target, and kind returns the original message;
-reusing it for different content or a different session returns an
-`idempotency_conflict`.
+same session, sender, body, reply target, and kind returns the original message
+(the response says `duplicate: true`); reusing it for different content or a
+different session returns an `idempotency_conflict`.
 
 The current live-message key is therefore a narrower transport record mechanism,
 not yet the shared logical-message contract.
