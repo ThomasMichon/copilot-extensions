@@ -121,8 +121,7 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
   another; it wraps to the top once nothing is after it.
 - **External adapters:** the operator registers a source as a command (an
   `argv`) on this machine, through the CLI only (`agent-dispatch attention
-  source add <name> -- <argv>`), in a machine-local file outside any repository.
-  Repository-owned content never registers or activates a command, so reading
+  source add <name> -- <argv>`), in a machine-local file outside any repository. `source add` pins the command to an absolute path, a registration whose command isn't absolute is rejected, and the command runs from the registry's own directory, so neither its executable nor a relative argument resolves against the checkout a read runs in (a test reads from an untrusted CWD). Repository-owned content never registers or activates a command, so reading
   attention in an untrusted checkout runs nothing it brought. It is registered under a **name** that is the source's identity: it must be
   unique, match `[a-z0-9-]+`, and not be a built-in source's name (`dispatch`,
   `bridge`, `pr`), or the registration is rejected. A rejected registration is

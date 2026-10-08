@@ -30,7 +30,7 @@ Part of the [Operator Attention Contract](README.md) effort: what each test tier
   prefix) is an invalid item, and so is an empty `argv`.
 - Unit, the dispatch adapter: a `submitted` task is a `review` item and a
   `completed` one isn't; `stalled` at exactly the threshold isn't an item and one
-  second over is; held tasks with an `unknown` or `gone` owner never count; a threshold of `0` turns its half off; a read through `--url <u>` or `--shared` yields actions carrying the same flag and never the token.
+  second over is; held tasks with an `unknown` or `gone` owner never count; a threshold of `0` turns its half off; a task both awaiting an answer and `submitted` yields one `awaiting_input` item, then (once answered) a `review` item first seen at that read; a read through `--url <u>` or `--shared` yields actions carrying the same flag and never the token.
 - Unit, command sources: a partial read (`status: uncertain`, `uncertain:
   2`) makes the aggregate `partial`; `{"schema": 1, "items": [...]}` alone reads
   as `ok`; a missing `schema` and `schema: 2` are each `failed`; a self-reported
