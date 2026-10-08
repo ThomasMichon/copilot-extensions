@@ -1,0 +1,13 @@
+{
+  "comment": "Componentize vendored plugin-activation's resolver.py (1283 lines) into cohesive _config_io/_fs_candidates/_findings/_installed_root/_marketplace_root/_project_roots/_remote_identity modules; no behavior change",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
