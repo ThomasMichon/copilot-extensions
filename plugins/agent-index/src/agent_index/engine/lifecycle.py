@@ -154,6 +154,19 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     kwargs["env"].update(windowless_python_env(python))
     # Detach from the parent console so the engine is independent.
     kwargs.update(detached_kwargs())
+    if sys.platform.startswith("win"):
+        # The spawning process (e.g. the index-worker, itself niced down via
+        # AGENT_INDEX_INDEXER_NICE) must not leak its own lowered priority
+        # class onto this child via normal Windows priority-class
+        # inheritance -- that would defeat the engine's own deferred-
+        # throttle sequencing (agent_index_engine.app._get_pipeline): the
+        # child would start its one-time model load already throttled,
+        # reproducing the load-stall bug through a different path. Force
+        # NORMAL_PRIORITY_CLASS explicitly at spawn (ORed in, not
+        # overwriting detached_kwargs()'s own flags); the engine's own
+        # startup sequencing takes over the throttle decision from there.
+        _NORMAL_PRIORITY_CLASS = 0x00000020
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _NORMAL_PRIORITY_CLASS
     return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
 
 

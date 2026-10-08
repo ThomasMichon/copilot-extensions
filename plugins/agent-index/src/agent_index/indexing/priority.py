@@ -39,14 +39,42 @@ def lower_current_process_priority(nice: int) -> None:
     _lower_io_priority()
 
 
-def restore_normal_priority() -> None:
-    """Best-effort: undo a prior Windows priority-class lowering.
+def get_current_priority_class() -> int | None:
+    """Best-effort: this process's CURRENT Windows priority class.
 
-    Windows-only. POSIX's ``os.nice()`` is a one-way floor for an
-    unprivileged process -- raising it back requires ``CAP_SYS_NICE``/root,
-    which a caller cannot assume, so there is nothing this can do there; a
-    POSIX caller should rely on applying the throttle at most once per
-    process lifetime instead (see ``agent_index_engine.app``'s
+    Windows-only; ``None`` on any other platform or if it could not be
+    queried. Intended to capture a baseline BEFORE lowering it, so a caller
+    can restore the exact prior class later (via :func:`set_priority_class`)
+    rather than assuming it was ``NORMAL_PRIORITY_CLASS`` -- an engine may
+    have deliberately been started at some other class. Never raises.
+    """
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.GetPriorityClass.argtypes = [ctypes.c_void_p]
+        kernel32.GetPriorityClass.restype = ctypes.c_uint32
+        handle = kernel32.GetCurrentProcess()
+        cls = kernel32.GetPriorityClass(handle)
+        return int(cls) if cls else None
+    except Exception:  # pragma: no cover - Windows-only, best-effort
+        log.debug("could not query current Windows priority class", exc_info=True)
+        return None
+
+
+def set_priority_class(priority_class: int) -> None:
+    """Best-effort: set this process's Windows priority class to an exact
+    value (not a relative ``nice`` increment).
+
+    Windows-only; a no-op elsewhere. Used to restore a baseline captured by
+    :func:`get_current_priority_class`. POSIX's ``os.nice()`` is a one-way
+    floor for an unprivileged process -- raising it back requires
+    ``CAP_SYS_NICE``/root, which a caller cannot assume, so there is no
+    POSIX equivalent; a POSIX caller should rely on applying the throttle at
+    most once per process lifetime instead (see ``agent_index_engine.app``'s
     spinup/spindown handling). Never raises.
     """
     if not sys.platform.startswith("win"):
@@ -54,18 +82,17 @@ def restore_normal_priority() -> None:
     try:
         import ctypes
 
-        normal = 0x00000020  # NORMAL_PRIORITY_CLASS
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
         kernel32.GetCurrentProcess.restype = ctypes.c_void_p
         kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         kernel32.SetPriorityClass.restype = ctypes.c_int
         handle = kernel32.GetCurrentProcess()
-        if kernel32.SetPriorityClass(handle, normal):
-            log.debug("priority restored to normal")
+        if kernel32.SetPriorityClass(handle, priority_class):
+            log.debug("priority class set to 0x%x", priority_class)
         else:
-            log.debug("SetPriorityClass(NORMAL) returned 0; priority unchanged")
+            log.debug("SetPriorityClass(0x%x) returned 0; priority unchanged", priority_class)
     except Exception:  # pragma: no cover - Windows-only, best-effort
-        log.debug("could not restore Windows priority", exc_info=True)
+        log.debug("could not set Windows priority class", exc_info=True)
 
 
 def _lower_cpu_priority(nice: int) -> None:

@@ -177,6 +177,7 @@ def test_ensure_priority_lowered_once_is_idempotent(monkeypatch: pytest.MonkeyPa
     module = _load_module()
     calls: list[str] = []
     monkeypatch.setattr(module, "_priority_lowered", False)
+    monkeypatch.setattr(module, "_priority_baseline", None)
     monkeypatch.setattr(module, "_lower_own_priority", lambda: calls.append("lower"))
 
     module._ensure_priority_lowered_once()
@@ -187,30 +188,92 @@ def test_ensure_priority_lowered_once_is_idempotent(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only restore capability")
-def test_reset_priority_for_reload_restores_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ensure_priority_lowered_once_captures_baseline_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-normal starting class (an engine deliberately launched niced,
+    or above-normal) must be captured so a later restore returns to THAT
+    class, not a hardcoded NORMAL_PRIORITY_CLASS."""
     module = _load_module()
-    calls: list[str] = []
-    monkeypatch.setattr(module, "_priority_lowered", True)
+    monkeypatch.setattr(module, "_priority_lowered", False)
+    monkeypatch.setattr(module, "_priority_baseline", None)
+    monkeypatch.setattr(module, "_lower_own_priority", lambda: None)
 
     from agent_index.indexing import priority as priority_module
 
-    monkeypatch.setattr(priority_module, "restore_normal_priority", lambda: calls.append("restore"))
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_NICE", "5")
+    _ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+    monkeypatch.setattr(
+        priority_module, "get_current_priority_class", lambda: _ABOVE_NORMAL_PRIORITY_CLASS
+    )
+
+    module._ensure_priority_lowered_once()
+
+    assert module._priority_baseline == _ABOVE_NORMAL_PRIORITY_CLASS
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only restore capability")
+def test_ensure_priority_lowered_once_skips_baseline_when_throttle_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``engine_nice <= 0`` means the throttle is a no-op -- nothing was
+    changed, so there must be nothing to restore later either (a later
+    /spindown must not call ``set_priority_class`` at all)."""
+    module = _load_module()
+    monkeypatch.setattr(module, "_priority_lowered", False)
+    monkeypatch.setattr(module, "_priority_baseline", None)
+    monkeypatch.setattr(module, "_lower_own_priority", lambda: None)
+
+    from agent_index.indexing import priority as priority_module
+
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_NICE", "0")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        priority_module, "get_current_priority_class", lambda: calls.append("queried") or 0x20
+    )
+
+    module._ensure_priority_lowered_once()
+
+    assert calls == []  # never even queried -- the throttle never ran
+    assert module._priority_baseline is None
+
+    restore_calls: list[str] = []
+    monkeypatch.setattr(priority_module, "set_priority_class", lambda _c: restore_calls.append("set"))
+    module._reset_priority_for_reload()
+    assert restore_calls == []  # nothing to restore
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only restore capability")
+def test_reset_priority_for_reload_restores_captured_baseline_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    calls: list[int] = []
+    _ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+    monkeypatch.setattr(module, "_priority_lowered", True)
+    monkeypatch.setattr(module, "_priority_baseline", _ABOVE_NORMAL_PRIORITY_CLASS)
+
+    from agent_index.indexing import priority as priority_module
+
+    monkeypatch.setattr(priority_module, "set_priority_class", calls.append)
 
     module._reset_priority_for_reload()
 
-    assert calls == ["restore"]
+    assert calls == [_ABOVE_NORMAL_PRIORITY_CLASS]
     assert module._priority_lowered is False
+    assert module._priority_baseline is None
 
 
 @pytest.mark.skipif(not _IS_WINDOWS, reason="Windows-only restore capability")
 def test_reset_priority_for_reload_is_noop_when_never_lowered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_module()
-    calls: list[str] = []
+    calls: list[int] = []
     monkeypatch.setattr(module, "_priority_lowered", False)
+    monkeypatch.setattr(module, "_priority_baseline", None)
 
     from agent_index.indexing import priority as priority_module
 
-    monkeypatch.setattr(priority_module, "restore_normal_priority", lambda: calls.append("restore"))
+    monkeypatch.setattr(priority_module, "set_priority_class", calls.append)
 
     module._reset_priority_for_reload()
 
@@ -220,12 +283,13 @@ def test_reset_priority_for_reload_is_noop_when_never_lowered(monkeypatch: pytes
 @pytest.mark.skipif(_IS_WINDOWS, reason="POSIX has nothing to restore (no root)")
 def test_reset_priority_for_reload_is_noop_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_module()
-    calls: list[str] = []
+    calls: list[int] = []
     monkeypatch.setattr(module, "_priority_lowered", True)
+    monkeypatch.setattr(module, "_priority_baseline", None)
 
     from agent_index.indexing import priority as priority_module
 
-    monkeypatch.setattr(priority_module, "restore_normal_priority", lambda: calls.append("restore"))
+    monkeypatch.setattr(priority_module, "set_priority_class", calls.append)
 
     module._reset_priority_for_reload()
 
@@ -243,9 +307,10 @@ def test_reset_priority_for_reload_is_noop_on_posix(monkeypatch: pytest.MonkeyPa
 @pytest.mark.skipif(not _IS_WINDOWS, reason="exercises the Windows defer+restore lifecycle")
 def test_spinup_spindown_spinup_does_not_compound_or_restall(monkeypatch: pytest.MonkeyPatch) -> None:
     """The exact scenario review flagged: on Windows, a /spindown must
-    restore normal priority so the NEXT /spinup's warm_up() doesn't inherit
-    an already-lowered priority and reproduce the load-stall bug a second
-    time; the throttle itself must not compound across the cycle."""
+    restore the captured baseline priority so the NEXT /spinup's warm_up()
+    doesn't inherit an already-lowered priority and reproduce the
+    load-stall bug a second time; the throttle itself must not compound
+    across the cycle."""
     from fastapi.testclient import TestClient
 
     module = _load_module()
@@ -256,16 +321,20 @@ def test_spinup_spindown_spinup_does_not_compound_or_restall(monkeypatch: pytest
     monkeypatch.setattr(module, "_config", None)
     monkeypatch.setattr(module, "_pipeline", None)
     monkeypatch.setattr(module, "_priority_lowered", False)
+    monkeypatch.setattr(module, "_priority_baseline", None)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_NICE", "5")
 
     lower_calls: list[int] = []
-    restore_calls: list[str] = []
+    restore_calls: list[int] = []
     monkeypatch.setattr(module, "_lower_own_priority", lambda: lower_calls.append(1))
 
     from agent_index.indexing import priority as priority_module
 
+    _NORMAL_PRIORITY_CLASS = 0x00000020
     monkeypatch.setattr(
-        priority_module, "restore_normal_priority", lambda: restore_calls.append("restore")
+        priority_module, "get_current_priority_class", lambda: _NORMAL_PRIORITY_CLASS
     )
+    monkeypatch.setattr(priority_module, "set_priority_class", restore_calls.append)
 
     with TestClient(module.app) as client:
         r1 = client.post("/spinup")
@@ -274,12 +343,13 @@ def test_spinup_spindown_spinup_does_not_compound_or_restall(monkeypatch: pytest
 
         r2 = client.post("/spindown")
         assert r2.status_code == 200
-        assert restore_calls == ["restore"]  # restored so the next load isn't pre-throttled
+        assert restore_calls == [_NORMAL_PRIORITY_CLASS]  # restored to the captured baseline
         assert module._priority_lowered is False
 
         r3 = client.post("/spinup")
         assert r3.status_code == 200
         assert lower_calls == [1, 1]  # lowered again for the second load -- never compounded
+
 
 
 def test_lower_own_priority_reads_configured_engine_nice(monkeypatch) -> None:
