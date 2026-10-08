@@ -354,8 +354,8 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     per cycle, round-robin, within a shared two-second budget; large fleets
     converge over multiple cycles. This function still
     reports whatever is currently stored exactly as-is (it never invents
-    or estimates); a brand-new mapping that hasn't yet seen its first
-    republish cycle, a stopped daemon, or a failed probe can leave the stored
+    or estimates); a brand-new mapping awaiting its first successful
+    observation, a stopped daemon, or a failed probe can leave the stored
     count stale. This implements only the attached-client observation portion
     of #4564's proposed step 1.
     #4564 also proposes a distinct ``reachable`` field (preserving the

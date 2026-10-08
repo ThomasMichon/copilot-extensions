@@ -907,7 +907,8 @@ def run_daemon_foreground(
                 runtime.sync_self_retire()
                 if runtime.republish_enabled:
                     with runtime.loop_mutation():
-                        runtime.attachment_observer.observe(runtime.registry)
+                        if runtime.republish_enabled:
+                            runtime.attachment_observer.observe(runtime.registry)
                 status_monitor_lock = _status_monitor_lock_path()
                 status_monitor_data = (
                     mux_daemon_live.read_lock_data(status_monitor_lock)
@@ -926,7 +927,7 @@ def run_daemon_foreground(
                     and runtime.registry.has_any_live()
                 ):
                     with runtime.loop_mutation():
-                        republished = _republish_live_mappings(
+                        republished = runtime.republish_enabled and _republish_live_mappings(
                             runtime.registry,
                             ensure_monitor=False,
                         )

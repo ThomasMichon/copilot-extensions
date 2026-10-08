@@ -6,6 +6,7 @@ this step's own scope (see ``mux_daemon.py``'s module docstring)."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -907,6 +908,42 @@ def test_daemon_observes_attachments_without_status_monitor(tmp_path, monkeypatc
         tmp_path, poll_interval_s=0, max_iterations=2
     ) == 0
     assert registry.get("proj", "wt-1")["attached_clients"] == 1
+
+
+@pytest.mark.parametrize("race_entry", [1, 2])
+def test_drain_winning_before_loop_fence_prevents_new_mutation(tmp_path, monkeypatch, race_entry):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    mutations = []
+    entries = [0]
+    original_fence = mux_daemon.MuxDaemonRuntime.loop_mutation
+
+    @contextlib.contextmanager
+    def fence(runtime):
+        entries[0] += 1
+        if entries[0] == race_entry:
+            runtime.begin_drain()
+            assert runtime.drain({"timeout": 0})["drained"] is True
+        with original_fence(runtime):
+            yield
+
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "loop_mutation", fence)
+    monkeypatch.setattr(
+        mux_daemon.AttachedClientObserver, "observe",
+        lambda self, registry: mutations.append("observe"),
+    )
+    monkeypatch.setattr(mux_daemon, "_status_monitor_generation", lambda _: "fixed")
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: tmp_path / "absent.lock")
+
+    def republish(*args, **kwargs):
+        mutations.append("publish")
+        return True
+
+    monkeypatch.setattr(mux_daemon, "_republish_live_mappings", republish)
+    assert mux_daemon.run_daemon_foreground(
+        tmp_path, poll_interval_s=0, max_iterations=1
+    ) == 0
+    assert mutations == ([] if race_entry == 1 else ["observe"])
 
 
 def test_republish_reads_one_registry_snapshot_not_one_per_mapping(tmp_path, monkeypatch):
