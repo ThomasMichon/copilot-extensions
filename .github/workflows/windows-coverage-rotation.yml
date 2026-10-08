@@ -1,0 +1,132 @@
+# Fills a real coverage gap: every "full suite" CI job in this repo (the
+# per-PR `smoke` matrix in ci.yml, and the dev->main `full` promotion
+# matrix in validate-and-promote.yml -- itself a fixed 9-plugin list that
+# doesn't even include agent-machines/agent-index) runs on `ubuntu-latest`
+# only. Narrow windows-latest jobs exist (windows-hooks,
+# windows-python-artifact-builder, test-runner-windows,
+# bootstrap-killswitch-powershell-5-1), but none run a whole plugin's test
+# suite on Windows -- so a Windows-only regression can land and never be
+# caught by CI at all. Confirmed empirically (coverage-guided-ci effort,
+# Phase 3.5 follow-up, 2026-10-07): a Windows-only os.kill(pid, 0)
+# process-killing crash in agent-machines, and Windows MAX_PATH/PATH-
+# resolution issues in agent-ssh/agent-vault, were found only by a manual
+# local Windows full-matrix run -- no existing CI gate would ever have
+# caught any of them.
+#
+# Rather than duplicating every plugin's full suite on both OSes every run
+# (true 2x wall-clock cost, for near-zero marginal benefit on OS-agnostic
+# plugins -- and moot as a dollar-cost concern anyway, since this repo is
+# public and GitHub-hosted runners, including windows-latest, are free
+# regardless of OS on public repos), this runs a small, weighted, DAILY
+# ROTATING subset of plugins' full suites on windows-latest: see
+# tools/select_windows_rotation.py for the selection logic and the Tier
+# A/B rationale. Detection-only: a failure here files/updates a tracking
+# issue (same shape as module-health-watchdog.yml) rather than blocking
+# anything, since this is new, exploratory coverage -- the existing
+# Linux-side full matrix remains the actual promotion gate.
+name: Windows coverage rotation
+
+on:
+  schedule:
+    # Once a day; this is additional coverage layered on top of the
+    # existing Linux-side full matrix, not a replacement for a tighter
+    # per-PR cadence.
+    - cron: "41 9 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Override the rotation date (YYYY-MM-DD); defaults to today (UTC)."
+        required: false
+        type: string
+
+concurrency:
+  # A scheduled run and a manually dispatched run could otherwise overlap;
+  # serialize rather than cancel a run already mid-suite.
+  group: windows-coverage-rotation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  select:
+    name: select today's rotation
+    runs-on: ubuntu-latest
+    # schedule always runs against the default branch; workflow_dispatch
+    # can target any ref -- restrict both to dev (the active integration
+    # branch regressions should be caught on, mirroring
+    # validate-and-promote.yml's own choice of branch for its full matrix).
+    if: github.ref == 'refs/heads/dev'
+    outputs:
+      plugins: ${{ steps.select.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: select
+        name: Compute today's rotation picks
+        env:
+          OVERRIDE_DATE: ${{ inputs.date }}
+        run: |
+          if [ -n "$OVERRIDE_DATE" ]; then
+            python tools/select_windows_rotation.py --date "$OVERRIDE_DATE" --format github-output >> "$GITHUB_OUTPUT"
+          else
+            python tools/select_windows_rotation.py --format github-output >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    name: full (Windows) - ${{ matrix.plugin }}
+    needs: select
+    if: needs.select.outputs.plugins != '[]' && needs.select.outputs.plugins != ''
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: ${{ fromJSON(needs.select.outputs.plugins) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Full suite - ${{ matrix.plugin }} (windows-latest)
+        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  report:
+    name: file a tracking issue on failure
+    needs: test
+    if: always() && needs.test.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Ensure the tracking label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh label create windows-rotation-failure --repo "${{ github.repository }}"
+          --color B60205
+          --description "A plugin's full suite failed on windows-latest in the daily rotation"
+          --force
+      - name: File or update the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          existing=$(gh issue list --repo "${{ github.repository }}" --label windows-rotation-failure --state open --json number --jq '.[0].number // empty')
+          body="A plugin in the daily Windows coverage rotation failed its full suite on \`windows-latest\`. See the run: $RUN_URL"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "${{ github.repository }}" --body "$body"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "Windows coverage rotation: a plugin failed on windows-latest" --body "$body" --label windows-rotation-failure
+          fi
