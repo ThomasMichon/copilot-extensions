@@ -238,6 +238,15 @@ class PickerScreen(
         # tracks the live worker threads so the teardown path (and any future
         # extension of it) has visibility into what is still outstanding.
         self._bg_cancel = threading.Event()
+        # Serializes ``on_unmount`` setting ``_bg_cancel`` against
+        # ``_apply_from_worker``'s check-then-post: without a shared lock, a
+        # worker could observe ``_bg_cancel`` unset, then have ``on_unmount``
+        # set it and tear the screen down before the worker's own
+        # ``Inbox.post`` call lands -- reintroducing the exact "failed to
+        # wake the owning render flow" warning the cancel check exists to
+        # avoid. Holding this lock across both sides makes the two
+        # operations atomic relative to each other.
+        self._bg_cancel_lock = threading.Lock()
         self._bg_threads: set[threading.Thread] = set()
         # The sole sanctioned path for a background producer to reach this
         # screen's render flow -- see inbox.py's module docstring. Every

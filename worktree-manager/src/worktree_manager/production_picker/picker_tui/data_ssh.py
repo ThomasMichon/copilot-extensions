@@ -46,7 +46,7 @@ from .loader_lazy import LazyLoadMixin, _lazy_loading_enabled, _ping_argv, _PING
 # ``LOCAL`` is resolved from the actual local source below (so it carries the
 # machine's ``machines.yaml`` display name, matching the tab descriptors) with
 # ``data_local.LOCAL`` as the fallback when the registry is unavailable.
-LOCAL_LABEL = data_local.LOCAL_LABEL
+LOCAL_LABEL, is_local = data_local.LOCAL_LABEL, data_local.is_local
 bucket = derive.bucket
 for_machine = derive.for_machine
 for_source = derive.for_source
