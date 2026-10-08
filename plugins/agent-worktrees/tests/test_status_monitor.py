@@ -3574,6 +3574,46 @@ def test_installer_after_update_does_not_schedule_when_nothing_was_live(monkeypa
     assert scheduled["n"] == 0
 
 
+def test_installer_after_update_schedules_even_on_an_unexpected_cutover_exception(
+    monkeypatch,
+):
+    """An unexpected exception escaping stale recovery, orchestration, or
+    the lease release itself must still schedule the backstop -- the
+    installer wrapper treats a raised exception from this whole function
+    as a non-fatal failure, so an exception that skips the schedule call
+    would leave an ambiguous daemon state unhealed, exactly the failure
+    mode this backstop exists to cover."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(
+        status_monitor_reap_stale, "schedule_delayed_daemon_health_reap",
+        lambda *a, **k: scheduled.update(n=scheduled["n"] + 1),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: "http://x")
+
+    class _FakeLease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda lock_root: _FakeLease())
+    monkeypatch.setattr(
+        smc.breadcrumb, "read_breadcrumb", lambda *a, **k: None,
+    )
+
+    def _boom(*a, **k):
+        raise RuntimeError("unexpected orchestration failure")
+
+    monkeypatch.setattr(smc.breadcrumb, "recover_stale_cutover", _boom)
+
+    with pytest.raises(RuntimeError, match="unexpected orchestration failure"):
+        smc.activate_after_update(monitor_was_live=True)
+
+    assert scheduled["n"] == 1
+
+
 def test_installers_invoke_monitor_cutover_after_activation():
     # Graceful-cutover Phase 1 contract: BOTH runtime installers must invoke the
     # post-activation cutover helper, or a live status-monitor silently regresses

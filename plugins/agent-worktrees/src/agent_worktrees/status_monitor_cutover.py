@@ -465,16 +465,20 @@ def activate_after_update(
             drain_timeout=drain_timeout,
             force=False,
         )
+        summary["action"] = "cutover"
+        summary["result"] = result.to_dict()
     finally:
         lease.release()
-    summary["action"] = "cutover"
-    summary["result"] = result.to_dict()
-    # Async backstop regardless of outcome (copilot-extensions#5453): a
-    # clean cutover's repair pass simply finds nothing to do, while an
-    # ambiguous rollback (duplicate or zero live monitors) self-heals on
-    # this delay instead of needing a human to notice and run
-    # `doctor --apply-daemon-health` by hand. Never blocks this return.
-    status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
+        # Async backstop unconditionally, even on an unexpected exception
+        # escaping stale recovery, orchestration, or the lease release
+        # itself above (copilot-extensions#5453): the installer wrapper
+        # suppresses a raised exception from this whole function as a
+        # non-fatal failure, so without this living in `finally` any such
+        # exception would skip scheduling the one thing meant to heal an
+        # ambiguous daemon state left behind by that very failure. A clean
+        # cutover's repair pass simply finds nothing to do; never blocks
+        # this return.
+        status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
     return summary
 
 
