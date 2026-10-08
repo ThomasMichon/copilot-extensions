@@ -77,6 +77,11 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+from anchor_shell_parser import (
+    git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
+    shell_command_substitutions as _shell_command_substitutions,
+    shell_segments as _shell_segments,
+)
 
 # --- Tool classification (mirrors the sibling guards) -------------------------
 WRITE_TOOLS = frozenset({
@@ -92,18 +97,9 @@ PATH_ARG_KEYS = ("path", "file_path", "filePath", "filename", "fileName",
                  "target_file", "targetFile")
 CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input")
 
-# Write-ish verbs (PowerShell cmdlets + POSIX + git mutations); presence
-# alongside an anchor-path literal in a shell command flips a read into a
-# suspected write. Mirrors cross_repo_guard. ``pull`` stays in this cheap
-# early-out list -- an unsafe (non-``--ff-only``) pull must still reach the
-# precise per-segment analysis below, which is where the real ``--ff-only``
-# exemption lives (see ``_GIT_FF_ONLY_FLAG``). The optional ``-C <path>``
-# uses the same quoted-or-unquoted grammar as ``_GIT_SUBCOMMAND`` below
-# (``"[^"]*"|'[^']*'|\S+``, not a bare ``\S+``) -- an anchor path containing
-# a space (``-C "my anchor path" commit ...``) otherwise makes ``\S+``
-# match only the first word, so the whole early-out fails to match and the
-# entire per-segment analysis below is skipped outright, silently allowing
-# the write.
+# Write-ish verbs (PowerShell cmdlets + POSIX commands) plus any Git invocation.
+# Git is classified precisely per segment below because its global options make
+# a safe regex-only early-out prone to both false positives and false negatives.
 _WRITE_VERBS = re.compile(
     "|".join([
         "Set-Content", "Add-Content", "Out-File", "New-Item", "Remove-Item",
@@ -112,9 +108,7 @@ _WRITE_VERBS = re.compile(
         ">>?",
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
-        r"""git\s+(?:-C\s+(?:"[^"]*"|'[^']*'|\S+)\s+)?(?:apply|commit|checkout|switch|reset|"""
-        r"""restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"""
-        r"""add|init|branch)""",
+        r"\bgit\b",
     ]),
     re.IGNORECASE,
 )
@@ -131,11 +125,6 @@ _IS_WIN = os.name == "nt"
 # mutation targeting the anchor (``-C <anchor>`` or, with no ``-C``, the shell
 # cwd). Fd-dup redirects (``2>&1``) are NOT writes and are excluded.
 
-# Statement separators that end one simple command and start the next. A rough
-# split (quote-unaware) -- over-splitting only makes the heuristic *less*
-# trigger-happy, which is the safe direction for a false-positive fix.
-_SHELL_SEP = re.compile(r"\|\||&&|[;|&\n\r]")
-
 # A write cmdlet / POSIX verb at the START of a segment (after optional
 # whitespace and one optional opening quote). Command-position is the key: a
 # write verb buried mid-segment (e.g. inside a ``--body`` string) is NOT a
@@ -150,11 +139,24 @@ _WRITE_CMD_START = re.compile(
 )
 # A git command at segment start, and the write subcommands that mutate a repo.
 _GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
-_GIT_WRITE_SUB = re.compile(
-    r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|pull|cherry-pick|revert|init|branch)\b",
-    re.IGNORECASE,
-)
+_GIT_WRITE_SUBCOMMANDS = frozenset({
+    "add", "commit", "apply", "checkout", "switch", "reset", "restore",
+    "clean", "rm", "mv", "stash", "merge", "rebase", "pull", "cherry-pick",
+    "revert", "init", "branch", "__configured-alias__",
+})
+_GIT_READ_ONLY_DASHED_SUBCOMMANDS = frozenset({"merge-base"})
+_GIT_WORKTREE_WRITE_SUBCOMMANDS = frozenset({
+    "apply", "checkout", "checkout-index", "cherry-pick", "clean", "merge",
+    "merge-file", "mv", "pull", "rebase", "reset", "restore", "revert", "rm",
+    "stash", "switch", "__configured-alias__",
+})
+_GIT_GLOBAL_LONG_OPTIONS_WITH_VALUE = frozenset({
+    "--namespace", "--super-prefix",
+})
+_GIT_TERMINAL_OPTIONS = frozenset({
+    "-h", "--help", "-v", "--version", "--html-path", "--man-path",
+    "--info-path", "--exec-path",
+})
 # ``pull`` is the one write-sub verb with a narrow, precise exemption: this
 # guard's invariant is "no agent-authored content lands in the anchor" (a
 # stray commit, an edit that never goes through the worktree/PR flow) -- and
@@ -170,78 +172,6 @@ _GIT_WRITE_SUB = re.compile(
 # independent copy of this list (different guard, different repo-delegation
 # reasoning) and is unaffected either way.
 #
-# The exemption must identify the actual git SUBCOMMAND, not merely search
-# the segment for the word ``pull`` -- a bare substring search would
-# misclassify ``git commit -m 'pull --ff-only'`` (a real commit, quoting
-# unrelated text) as an exempt pull. This anchors on ``git`` (+ optional
-# ``-C <path>``) followed immediately by the subcommand word.
-_GIT_SUBCOMMAND = re.compile(
-    r"""^\s*["']?git\b(?:\s+-C\s+(?:"[^"]*"|'[^']*'|\S+))?\s+([A-Za-z][\w-]*)""",
-    re.IGNORECASE,
-)
-_GIT_FF_ONLY_FLAG = re.compile(
-    r"""(?:^|\s)["']?--ff-only["']?(?=\s|$)""", re.IGNORECASE,
-)
-# A ``-C`` (git change-directory) flag anywhere in a git segment.
-_GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
-
-# ``branch`` is the other write-sub verb with a narrow, precise exemption:
-# listing/inspecting branches is a common, safe operation that should
-# remain allowed even against the anchor, while any mutation of a ref or
-# its config must stay denied.
-#
-# ALLOWLIST, not a blacklist: enumerating known MUTATING flags
-# (``-f``/``-d``/``--force``/etc.) and exempting everything else is
-# insufficient -- git's ``branch`` subcommand has more mutating forms than
-# any such list reliably enumerates (``--track`` creates a ref + upstream
-# config; ``--set-upstream-to``/``--unset-upstream`` rewrite config;
-# ``--edit-description`` opens an editor that rewrites a ref-note; a bare
-# positional name creates a ref) -- a blacklist is only ever as safe as its
-# most recently discovered gap. This instead enumerates every known
-# READ-ONLY flag (below) and the exemption applies ONLY when every token
-# after ``branch`` is one of them; an unrecognized flag or any bare
-# positional argument (a branch name, a filter pattern, anything) means
-# "unknown, possibly mutating" and the invocation stays denied -- the safe
-# direction for a write guard, even at the cost of occasionally denying a
-# few benign-but-unrecognized read invocations (e.g. a separate-argument
-# form of ``--contains <ref>`` instead of ``--contains=<ref>``).
-_GIT_BRANCH_SAFE_LONG_FLAG = re.compile(
-    r"""^(?:
-        --list|--all|--remotes|--verbose|--show-current|
-        --column(?:=\S+)?|--no-column|--ignore-case|--omit-empty|
-        --no-abbrev|--no-color|--color(?:=\S+)?|--sort=\S+|--format=\S+|
-        --abbrev=\S+|--points-at=\S+|--contains=\S+|--no-contains=\S+|
-        --merged(?:=\S+)?|--no-merged(?:=\S+)?
-    )$""",
-    re.IGNORECASE | re.VERBOSE,
-)
-# A short-option cluster containing ONLY safe letters (v=verbose,
-# a=all, r=remotes, i=ignore-case, l=list) -- e.g. ``-v``, ``-a``, ``-vv``,
-# ``-avr``, ``-l``. Any OTHER letter anywhere in the cluster (including a
-# mutating one like ``f``/``d``/``m``/``c``, combined or not) fails this
-# and falls through to "unrecognized -> deny".
-_GIT_BRANCH_SAFE_SHORT_CLUSTER = re.compile(r"^-[varil]+$", re.IGNORECASE)
-_GIT_BRANCH_ARG_TOKEN = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
-
-
-def _git_branch_invocation_is_readonly(args_text: str) -> bool:
-    """Whether every token in ``args_text`` (everything after the ``branch``
-    subcommand word in a git invocation) is a known read-only flag -- see
-    the allowlist rationale above. Quoted tokens are unwrapped before
-    classification so ``"--list"`` and ``--list`` are treated alike."""
-    for raw in _GIT_BRANCH_ARG_TOKEN.findall(args_text):
-        token = raw
-        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
-            token = token[1:-1]
-        if not token:
-            continue
-        if _GIT_BRANCH_SAFE_LONG_FLAG.match(token):
-            continue
-        if _GIT_BRANCH_SAFE_SHORT_CLUSTER.match(token):
-            continue
-        return False
-    return True
-
 # Leading benign prefixes to strip so a write verb after them is still seen at
 # "command position": env-assignments (``VAR=val``) and wrapper commands
 # (``sudo``, ``env``, ``nohup``, ...). Wrapper *flags* that take a separate arg
@@ -262,6 +192,261 @@ def _effective_seg(seg: str) -> str:
         prev = seg
         seg = _SEG_STRIP.sub("", seg, count=1)
     return seg
+
+
+def _unquote_shell_token(token: str) -> str:
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+        return token[1:-1]
+    return token
+
+
+def _git_tokens(seg: str, tool: str) -> list[str]:
+    posix_escapes = tool.lower() in {"bash", "sh"}
+    powershell_escapes = tool.lower() in {"powershell", "pwsh"}
+    tokens: list[str] = []
+    current: list[str] = []
+    token_started = False
+    quote = None
+    index = 0
+    while index < len(seg):
+        char = seg[index]
+        if quote:
+            if (
+                powershell_escapes
+                and quote == "'"
+                and char == "'"
+                and index + 1 < len(seg)
+                and seg[index + 1] == "'"
+            ):
+                current.append("'")
+                index += 1
+            elif char == quote:
+                quote = None
+            elif (
+                posix_escapes
+                and char == "\\"
+                and quote == '"'
+                and index + 1 < len(seg)
+                and seg[index + 1] in {'"', "\\", "$", "`"}
+            ):
+                current.append(seg[index + 1])
+                index += 1
+            elif (
+                powershell_escapes
+                and quote == '"'
+                and char == "`"
+                and index + 1 < len(seg)
+            ):
+                current.append(seg[index + 1])
+                index += 1
+            else:
+                current.append(char)
+        elif char in {"'", '"'}:
+            token_started = True
+            quote = char
+        elif char.isspace():
+            if token_started:
+                tokens.append("".join(current))
+                current = []
+                token_started = False
+        elif (
+            posix_escapes
+            and char == "\\"
+            and index + 1 < len(seg)
+            and (seg[index + 1].isspace() or seg[index + 1] in {"'", '"', "\\"})
+        ):
+            current.append(seg[index + 1])
+            token_started = True
+            index += 1
+        elif powershell_escapes and char == "`" and index + 1 < len(seg):
+            current.append(seg[index + 1])
+            token_started = True
+            index += 1
+        else:
+            current.append(char)
+            token_started = True
+        index += 1
+    if token_started:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _git_config_alias_name(value: str) -> str | None:
+    key, separator, _expansion = value.partition("=")
+    if not separator or not key.lower().startswith("alias."):
+        return None
+    name = key[len("alias."):]
+    return name.lower() if name else None
+
+
+def _git_invocation(
+    seg: str, cwd: str, tool: str,
+) -> tuple[str | None, list[str], list[tuple[str, str]], bool]:
+    """Return the Git subcommand and resolved explicit repository targets.
+
+    Git accepts global options before the subcommand. Parse only that prefix;
+    arguments after the subcommand cannot change which operation is running.
+    The final boolean records an explicit repository/cwd override even when its
+    value cannot be resolved, preserving the guard's existing fail-open behavior
+    for variables.
+    """
+    tokens = _git_tokens(seg, tool)
+    if not tokens:
+        return None, [], [], False
+    first = tokens[0].lstrip("\"'")
+    executable = first.lower()
+    if executable.startswith("git-"):
+        subcommand = executable[len("git-"):]
+        if subcommand.endswith(".exe"):
+            subcommand = subcommand[:-len(".exe")]
+        return subcommand or None, tokens[1:], [], False
+    if executable not in {"git", "git.exe"}:
+        return None, [], [], False
+
+    git_cwd = cwd
+    git_cwd_overridden = False
+    targets: dict[str, str] = {}
+    configured_aliases: set[str] = set()
+    has_repo_override = False
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        lower = token.lower()
+        if token == "--":
+            index += 1
+            break
+        if lower in _GIT_TERMINAL_OPTIONS:
+            return None, [], list(targets.items()), has_repo_override
+        if token == "-C":
+            has_repo_override = True
+            if index + 1 < len(tokens):
+                value = tokens[index + 1]
+                git_cwd = _resolve(value, git_cwd)
+                git_cwd_overridden = True
+            index += 2
+            continue
+        if token.startswith("-C") and token != "-C":
+            has_repo_override = True
+            value = _unquote_shell_token(token[2:])
+            if value:
+                git_cwd = _resolve(value, git_cwd)
+                git_cwd_overridden = True
+            index += 1
+            continue
+        if token == "-c":
+            if index + 1 < len(tokens):
+                alias = _git_config_alias_name(tokens[index + 1])
+                if alias:
+                    configured_aliases.add(alias)
+            index += 2
+            continue
+        if token.startswith("-c") and token != "-c":
+            alias = _git_config_alias_name(token[2:])
+            if alias:
+                configured_aliases.add(alias)
+            index += 1
+            continue
+        if lower in {"--git-dir", "--work-tree"}:
+            has_repo_override = has_repo_override or lower == "--git-dir"
+            if index + 1 < len(tokens):
+                value = tokens[index + 1]
+                targets[lower[2:]] = _resolve(value, git_cwd)
+            index += 2
+            continue
+        matched_target = False
+        for option in ("--git-dir", "--work-tree"):
+            if lower.startswith(option + "="):
+                has_repo_override = has_repo_override or option == "--git-dir"
+                value = _unquote_shell_token(token.split("=", 1)[1])
+                if value:
+                    targets[option[2:]] = _resolve(value, git_cwd)
+                matched_target = True
+                break
+        if matched_target:
+            index += 1
+            continue
+        if lower.startswith("--config-env="):
+            alias = _git_config_alias_name(token.split("=", 1)[1])
+            if alias:
+                configured_aliases.add(alias)
+            index += 1
+            continue
+        if lower.startswith("--exec-path="):
+            index += 1
+            continue
+        if any(
+            lower.startswith(option + "=")
+            for option in _GIT_GLOBAL_LONG_OPTIONS_WITH_VALUE
+        ):
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        subcommand = "__configured-alias__" if lower in configured_aliases else lower
+        resolved_targets = _git_resolved_targets(
+            targets, git_cwd, git_cwd_overridden, subcommand,
+        )
+        return subcommand, tokens[index + 1:], resolved_targets, has_repo_override
+    if index < len(tokens):
+        subcommand = tokens[index].lower()
+        if subcommand in configured_aliases:
+            subcommand = "__configured-alias__"
+        resolved_targets = _git_resolved_targets(
+            targets, git_cwd, git_cwd_overridden, subcommand,
+        )
+        return (
+            subcommand,
+            tokens[index + 1:],
+            resolved_targets,
+            has_repo_override,
+        )
+    return None, [], list(targets.items()), has_repo_override
+
+
+def _git_resolved_targets(
+    targets: dict[str, str],
+    git_cwd: str,
+    git_cwd_overridden: bool,
+    subcommand: str,
+) -> list[tuple[str, str]]:
+    resolved = list(targets.items())
+    if "git-dir" in targets:
+        if (
+            "work-tree" not in targets
+            and _git_subcommand_writes_worktree(subcommand)
+        ):
+            resolved.append(("cwd", git_cwd))
+    elif git_cwd_overridden:
+        resolved.append(("cwd", git_cwd))
+    return resolved
+
+
+def _git_effective_ff_mode(args: list[str]) -> str | None:
+    mode = None
+    for arg in args:
+        if arg == "--":
+            break
+        lower = arg.lower()
+        if lower in {"--ff", "--no-ff", "--ff-only"}:
+            mode = lower
+    return mode
+
+
+def _git_subcommand_is_write(subcommand: str | None) -> bool:
+    if not subcommand or subcommand in _GIT_READ_ONLY_DASHED_SUBCOMMANDS:
+        return False
+    if subcommand in _GIT_WRITE_SUBCOMMANDS:
+        return True
+    prefix, separator, _suffix = subcommand.partition("-")
+    return bool(separator and prefix in _GIT_WRITE_SUBCOMMANDS)
+
+
+def _git_subcommand_writes_worktree(subcommand: str) -> bool:
+    if subcommand in _GIT_WORKTREE_WRITE_SUBCOMMANDS:
+        return True
+    prefix, separator, _suffix = subcommand.partition("-")
+    return bool(separator and prefix in _GIT_WORKTREE_WRITE_SUBCOMMANDS)
 
 
 # A command-position directory change (``cd``/``pushd``/``Set-Location``). An
@@ -313,6 +498,14 @@ def _canon(p: str) -> str:
     except (OSError, ValueError):
         return ""
     return os.path.normcase(n)
+
+
+def _real_canon(p: str) -> str:
+    try:
+        n = os.path.realpath(os.path.abspath(p))
+    except (OSError, ValueError):
+        return ""
+    return os.path.normcase(os.path.normpath(n))
 
 
 def find_repo_root(start: str) -> Path | None:
@@ -553,7 +746,68 @@ def _cwd_anchor_dict(path: str, canon_anchor: dict) -> dict | None:
     return canon_anchor.get(_canon(str(root)))
 
 
-def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
+def _git_target_anchor(
+    kind: str, path: str, canon_anchor: dict,
+) -> dict | None:
+    if kind != "git-dir":
+        return _cwd_anchor_dict(path, canon_anchor)
+    target = _real_canon(path)
+    for root, anchor in canon_anchor.items():
+        real_root = _real_canon(root)
+        git_dir = _real_canon(os.path.join(root, ".git"))
+        if (
+            target == real_root
+            or target == git_dir
+            or target.startswith(git_dir + os.sep)
+        ):
+            return anchor
+    return None
+
+
+def _linked_worktree_git_dir(
+    targets: list[tuple[str, str]],
+    effective_cwd: str,
+) -> str | None:
+    by_kind = dict(targets)
+    git_dir = by_kind.get("git-dir")
+    work_tree = by_kind.get("work-tree")
+    if not git_dir:
+        return None
+    if not work_tree:
+        cwd_root = find_repo_root(effective_cwd)
+        if cwd_root is None or not is_linked_worktree(cwd_root):
+            return None
+        work_tree = str(cwd_root)
+    resolved_git_dir = _real_canon(git_dir)
+    git_dir_path = Path(resolved_git_dir)
+    if (
+        git_dir_path.parent.name.lower() != "worktrees"
+        or git_dir_path.parent.parent.name.lower() != ".git"
+    ):
+        return None
+    root = find_repo_root(work_tree)
+    if root is None or not is_linked_worktree(root):
+        return None
+    try:
+        text = (root / ".git").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    prefix = "gitdir:"
+    if not text.lower().startswith(prefix):
+        return None
+    pointer = text[len(prefix):].strip()
+    if not pointer:
+        return None
+    resolved = Path(pointer)
+    if not resolved.is_absolute():
+        resolved = root / resolved
+    expected = _real_canon(str(resolved))
+    return expected if expected == resolved_git_dir else None
+
+
+def _shell_hit(
+    cmd: str, cwd: str, anchors: list[dict], tool: str,
+) -> dict | None:
     """Return an anchor hit for a shell command that WRITES into an anchor, or
     None. Fires only on a real write target (redirect target / command-position
     write verb argument / git mutation via ``-C <anchor>`` or the effective cwd),
@@ -567,29 +821,38 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
     # a repo-scoped git write (no ``-C``) is attributed to the right repo.
     eff_cwd = cwd
 
-    for seg in _SHELL_SEP.split(cmd):
+    for seg in _shell_segments(cmd, tool):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
+        for substitution in _shell_command_substitutions(eff, tool):
+            hit = _shell_hit(substitution, eff_cwd, anchors, tool)
+            if hit is not None:
+                return hit
         at_write_cmd = bool(_WRITE_CMD_START.match(eff))
         is_git = bool(_GIT_START.match(eff))
-        git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
+        subcmd, git_args, git_targets, has_repo_override = (
+            _git_invocation(eff, eff_cwd, tool)
+            if is_git else (None, [], [], False)
+        )
+        git_write = _git_subcommand_is_write(subcmd)
         # A ``pull`` invocation is exempt from ``git_write`` ONLY when its
         # actual SUBCOMMAND (not merely the word ``pull`` anywhere in the
-        # segment -- see ``_GIT_SUBCOMMAND``'s comment) is ``pull`` and the
+        # segment) is ``pull`` and the
         # segment also explicitly carries ``--ff-only``. Any other write-sub
         # verb (or a pull lacking that flag) is untouched.
-        subcmd = _GIT_SUBCOMMAND.match(eff)
-        is_pull = bool(subcmd and subcmd.group(1).lower() == "pull")
-        if git_write and is_pull and _GIT_FF_ONLY_FLAG.search(seg):
+        is_pull = subcmd == "pull"
+        if (
+            git_write
+            and is_pull
+            and _git_effective_ff_mode(git_args) == "--ff-only"
+        ):
             git_write = False
-        # A ``branch`` invocation is exempt from ``git_write`` ONLY when its
-        # actual SUBCOMMAND is ``branch`` and every argument after it is a
-        # known read-only flag -- see ``_git_branch_invocation_is_readonly``'s
-        # allowlist rationale.
-        is_branch = bool(subcmd and subcmd.group(1).lower() == "branch")
-        if git_write and is_branch and _git_branch_invocation_is_readonly(eff[subcmd.end():]):
+        if (
+            git_write
+            and subcmd == "branch"
+            and _git_branch_invocation_is_readonly(git_args)
+        ):
             git_write = False
-        has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for a in anchors:
             gp = a.get("path")
             if not gp:
@@ -604,15 +867,20 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
             #    argument (e.g. ``Set-Content "<anchor>\x"``, ``rm <anchor>``).
             if at_write_cmd and re.search(tok, seg_hay):
                 return {**a, "reason": _deny_reason(a["name"], a["path"])}
-            # 3a. A git mutation naming the anchor via ``-C <anchor>``.
-            if git_write and has_dash_c and re.search(
-                r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay, re.IGNORECASE
-            ):
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
-        # 3b. A repo-scoped git write (no ``-C``) targets the EFFECTIVE cwd's
-        #     repo -- catches ``cd <anchor>; git commit`` as well as a session
-        #     already inside the anchor.
-        if git_write and not has_dash_c:
+        # 3a. A git mutation with an explicit ``-C`` / ``--git-dir`` /
+        #     ``--work-tree`` target writes any anchor named by those options.
+        if git_write:
+            linked_git_dir = _linked_worktree_git_dir(git_targets, eff_cwd)
+            for kind, target in git_targets:
+                if kind == "git-dir" and _real_canon(target) == linked_git_dir:
+                    continue
+                a = _git_target_anchor(kind, target, canon_anchor)
+                if a is not None:
+                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
+        # 3b. Without an explicit target, a repo-scoped git write targets the
+        #     EFFECTIVE cwd's repo -- catches ``cd <anchor>; git commit`` as
+        #     well as a session already inside the anchor.
+        if git_write and not has_repo_override:
             a = _cwd_anchor_dict(eff_cwd, canon_anchor)
             if a is not None:
                 return {**a, "reason": _deny_reason(a["name"], a["path"])}
@@ -646,7 +914,7 @@ def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | Non
         cmd = _pick(args, CMD_ARG_KEYS)
         if not cmd:
             return None
-        return _shell_hit(cmd, cwd, anchors)
+        return _shell_hit(cmd, cwd, anchors, tool)
 
     return None
 
