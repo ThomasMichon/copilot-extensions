@@ -207,6 +207,64 @@ def test_feed_request_does_not_mask_other_errors(_no_model_config) -> None:
     assert conn.new_session.await_count == 1
 
 
+def _run_initialize(monkeypatch, initialize) -> None:
+    conn = MagicMock()
+    conn.initialize = initialize
+    monkeypatch.setattr(acp_mod, "ClientSideConnection", lambda *a, **k: conn)
+    client, _ = _client()
+    asyncio.run(client._init_connection(MagicMock(), MagicMock()))
+
+
+def _initialize_wire(kwargs: dict) -> dict:
+    from acp.schema import InitializeRequest
+
+    meta = {k: v for k, v in kwargs.items() if "/" in k}
+    request = InitializeRequest(
+        protocol_version=kwargs["protocol_version"],
+        client_capabilities=kwargs["client_capabilities"],
+        client_info=kwargs["client_info"],
+        field_meta=meta or None,
+    )
+    return request.model_dump(by_alias=True, exclude_none=True)
+
+
+def test_initialize_requests_raw_event_feed_in_client_capabilities(monkeypatch) -> None:
+    initialize = AsyncMock()
+    _run_initialize(monkeypatch, initialize)
+    wire = _initialize_wire(initialize.await_args.kwargs)
+    assert wire["clientCapabilities"]["_meta"] == EXPECTED_META
+    assert wire["_meta"] == EXPECTED_META
+    # The capability flags the bridge always advertised are preserved.
+    assert "form" in wire["clientCapabilities"]["elicitation"]
+    assert "configOptions" in wire["clientCapabilities"]["session"]
+
+
+@pytest.mark.parametrize("value", ["0", "off"])
+def test_initialize_feed_request_can_be_disabled(monkeypatch, value) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_SUBAGENT_EVENTS", value)
+    initialize = AsyncMock()
+    _run_initialize(monkeypatch, initialize)
+    wire = _initialize_wire(initialize.await_args.kwargs)
+    assert "_meta" not in wire["clientCapabilities"]
+    assert "_meta" not in wire
+
+
+def test_initialize_fails_open_without_any_feed_request(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    async def _initialize(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RequestError(-32602, "Invalid params")
+
+    _run_initialize(monkeypatch, _initialize)
+    assert len(calls) == 2
+    retry = _initialize_wire(calls[1])
+    assert "_meta" not in retry["clientCapabilities"]
+    assert "_meta" not in retry
+    assert "form" in retry["clientCapabilities"]["elicitation"]
+
+
 def test_session_event_route_dispatches_notification() -> None:
     client, events = _client()
     router = MessageRouter()

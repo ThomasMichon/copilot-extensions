@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-09-18
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -46,6 +46,10 @@ load-bearing properties bind the layers:
   owning layer; higher layers *coordinate over* and *derive from* that state
   rather than keeping a second copy. This is what keeps the layers'
   responsibilities separate as the stack grows.
+
+Supporting capabilities may **consume** the fabric without becoming another
+coordination authority. They retain ownership of their own evidence or domain
+state while reusing the existing layers for scheduling, claims, and execution.
 
 ### agent-worktrees — the worktree-lifetime agency ground layer
 Owns repository and worktree identity, isolation, source-control lifecycle,
@@ -118,7 +122,9 @@ liveness-reconciled recovery over lease timers.
 environment to **run agents headlessly** there, and then presents those CodeSpace
 agents to the fabric as a **provider for the coordination layer** — so a remote
 CodeSpace agent is created, inspected, and reached by the *same* contract as a
-local one. A per-plugin child vision refines it at
+local one. Human-attended Copilot sessions are also peers where the venue
+supports that hosting mode, not a separate coordination system. A per-plugin
+child vision refines it at
 [`visions/plugins/agent-codespaces/`](../plugins/agent-codespaces/README.md) — the
 venue lifecycle (boot-on-connect, session-survival on teardown), the single
 multiplexed transport, the host-credential relay (*borrow identity, never bottle
@@ -133,12 +139,19 @@ sandboxes**, making the container's effective authority explicit and enforced
 by construction:
 [`visions/plugins/agent-containers/`](../plugins/agent-containers/README.md).
 
-### agent-logger — the memory layer
+### agent-logger — session intelligence and memory capability
 **Recovers Copilot session data** from local and remote-dispatched agents —
 especially from **ephemeral containers** whose state would otherwise vanish with
 them — and provides **session compilation and segmentation**, distilling raw
 session state into a form a **later agent can digest**. Work survives the agent
-that did it and can be handed forward.
+that did it and can be handed forward. When composed with the fabric, this
+capability **consumes** its delegation and execution services rather than
+introducing another scheduler, task ledger, or coordination layer. Independent
+collection and derivation remain useful without that composition. It owns
+preserved session evidence and its derivations; consumers can use that
+substrate independently of rendered prose or a particular application. Its
+child vision refines the capability at
+[`visions/plugins/agent-logger/`](../plugins/agent-logger/README.md).
 
 ### agent-vault — the trust layer
 Provides **credentials** to agents in the cases where an SSO / identity provider
@@ -169,6 +182,15 @@ service, a daemon, a script operating across several repos — can still drive a
 layer against a specific project, and a human addresses the whole fleet through
 one consistent `<repo> <layer> …` shape rather than a different convention per
 tool.
+
+### human-attended-and-unattended-session-peers
+
+The same fabric can coordinate a human-attended Copilot session and an
+unattended worker in a supported local or remote venue. Hosting mode changes
+how interaction is presented, not the session's place in the fabric or the
+owner of its work. A venue advertises which modes and capabilities it can
+safely provide; restricted authority is not silently widened to imitate a
+trusted development venue.
 
 ### discover-before-duplicate
 Before an agent spins up work on a target, the fabric can answer **"is someone
@@ -501,6 +523,23 @@ Adding, moving, or losing a venue (a CodeSpace, a container, another machine)
 does not change how its agents are addressed: a venue provider makes its agents
 reachable by the fabric's one coordination contract.
 
+### venue-boundaries-remain-honest
+
+The coordination layer owns the shared session-control semantics; each venue
+provider owns its provisioning, lifecycle, and concrete reachability. Uniform
+addressing does not pretend every venue grants the same authority or supports
+every hosting mode. Trusted-venue parity and restricted-venue boundaries
+coexist without a second, competing coordination contract.
+
+### observation-does-not-grant-control
+
+Live activity, session evidence, reported consumption, and recorded provenance
+remain distinguishable from process liveness, durable responsibility, and
+controller authority. Observations carry their fidelity and uncertainty;
+missing evidence is not an idle verdict or zero consumption. Inspecting or
+representing another session does not make the observer its execution owner,
+and recorded activity never silently settles its obligations.
+
 ### guidance-emitted-at-point-of-action
 Every fabric operation that participates in landing work emits its
 rule-and-next-step guidance **inline, on both its success and its failure
@@ -716,6 +755,14 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   `docs/`.
 
 ## Provenance
+
+- **2026-10-08** — Reconciled human-attended and unattended venue peers,
+  provider-owned lifecycle versus shared coordination semantics, and
+  capability-honest trust boundaries. Clarified agent-logger as the
+  session-evidence capability consuming the delegation layer, preserving its
+  collection/digest intent without adding a rival coordination authority.
+  Folded up the observation-versus-authority distinction from the bridge's
+  evidence-backed observation capabilities.
 
 - **2026-07-14** — Initial authoring. Intent mined from the operator's
   description of the layered agent-* stack (ground isolation → coordination →

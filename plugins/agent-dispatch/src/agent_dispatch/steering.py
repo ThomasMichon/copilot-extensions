@@ -26,21 +26,24 @@ from __future__ import annotations
 import json
 import re
 
-#: Supported field types in a ``request-input`` spec.
-FIELD_TEXT = "text"
-FIELD_TEXTAREA = "textarea"
-FIELD_CHOICE = "choice"
-FIELD_MULTICHOICE = "multichoice"
-FIELD_TYPES = frozenset({FIELD_TEXT, FIELD_TEXTAREA, FIELD_CHOICE, FIELD_MULTICHOICE})
-#: The choice-family types (they carry ``options`` and may allow an ``other``).
-FIELD_CHOICE_TYPES = frozenset({FIELD_CHOICE, FIELD_MULTICHOICE})
+# The field schema lives in the owner-neutral steering_fields module (one shape
+# for the parser and every reader of a form); re-exported here.
+from .steering_fields import (  # noqa: F401
+    FIELD_CHOICE,
+    FIELD_CHOICE_TYPES,
+    FIELD_MULTICHOICE,
+    FIELD_NAME_RE,
+    FIELD_TEXT,
+    FIELD_TEXTAREA,
+    FIELD_TYPES,
+    field_list_problem,
+)
 
 #: Bounds so a card can never balloon into a transcript (mirrors the progress
 #: beat's discipline).
 CARD_TITLE_MAX = 200
 CARD_STATUS_MAX = 400
 CARD_BODY_MAX = 20000
-FIELD_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 
 
 class SteeringError(ValueError):
@@ -189,35 +192,9 @@ def parse_request_input(spec: str | None) -> list[dict]:
             field["show_when"] = show_when
         fields.append(field)
 
-    by_name = {field["name"]: field for field in fields}
-    for field in fields:
-        condition = field.get("show_when")
-        if not condition:
-            continue
-        source = condition["field"]
-        source_field = by_name.get(source)
-        if source_field is None:
-            raise SteeringError(
-                f"field {field['name']!r}: condition references unknown field {source!r}"
-            )
-        if source == field["name"]:
-            raise SteeringError(
-                f"field {field['name']!r}: condition cannot reference itself"
-            )
-        if source_field.get("type") != FIELD_CHOICE:
-            raise SteeringError(
-                f"field {field['name']!r}: condition source {source!r} must be a choice"
-            )
-        if source_field.get("show_when"):
-            raise SteeringError(
-                f"field {field['name']!r}: condition source {source!r} "
-                "cannot itself be conditional"
-            )
-        if condition["equals"] not in (source_field.get("options") or []):
-            raise SteeringError(
-                f"field {field['name']!r}: condition value "
-                f"{condition['equals']!r} is not an option of {source!r}"
-            )
+    problem = field_list_problem(fields)
+    if problem:
+        raise SteeringError(problem)
     return fields
 
 

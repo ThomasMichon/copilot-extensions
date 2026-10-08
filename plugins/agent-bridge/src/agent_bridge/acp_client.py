@@ -29,14 +29,10 @@ from acp.schema import (
     AgentThoughtChunk,
     AvailableCommandsUpdate,
     CancelElicitationResponse,
-    ClientCapabilities,
-    ClientSessionCapabilities,
     ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
     DeclineElicitationResponse,
-    ElicitationCapabilities,
-    ElicitationFormCapabilities,
     EnvVariable,
     HttpHeader,
     HttpMcpServer,
@@ -47,7 +43,6 @@ from acp.schema import (
     ReadTextFileResponse,
     ReleaseTerminalResponse,
     RequestPermissionResponse,
-    SessionConfigOptionsCapabilities,
     SessionInfoUpdate,
     SseMcpServer,
     TerminalOutputResponse,
@@ -68,6 +63,8 @@ from .acp_subagents import (
     BG_TASK_LAUNCH_RE as _BG_TASK_LAUNCH_RE,
     BG_TASK_STATUS_RE as _BG_TASK_STATUS_RE,
     SubagentAttribution,
+    client_capabilities,
+    subagent_event_meta,
 )
 from .procgroup import safe_killpg, terminate_windows_tree
 
@@ -666,29 +663,12 @@ class AcpClient:
         await self._subagent_attr.call_with_meta(
             self._connection.initialize,
             protocol_version=PROTOCOL_VERSION,
-            client_capabilities=ClientCapabilities(
-                # Advertise form elicitation so the agent's ``ask_user`` calls
-                # are delivered (as ``elicitation/create``) instead of being
-                # self-cancelled by the agent for want of a capable client. The
-                # bridge parks each request and surfaces it as an
-                # ``ask_user_request`` event for a human to answer -- it does
-                # NOT auto-answer.
-                elicitation=ElicitationCapabilities(
-                    form=ElicitationFormCapabilities(),
-                ),
-                # Advertise session config-option support so we may drive the
-                # agent's ``model`` / ``reasoning_effort`` select options via
-                # ``session/set_config_option`` (dotfiles#790). Select options
-                # need no capability flag, but advertising is the spec-correct
-                # signal that this client sets config options.
-                session=ClientSessionCapabilities(
-                    config_options=SessionConfigOptionsCapabilities(),
-                ),
-            ),
+            client_capabilities=client_capabilities(subagent_event_meta()),
             client_info=Implementation(
                 name="agent-bridge",
                 version=__version__,
             ),
+            retry_overrides={"client_capabilities": client_capabilities({})},
         )
 
     async def new_session(

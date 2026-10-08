@@ -287,6 +287,16 @@ Operator, end of a long multi-repo session:
             binding/coherence remains under `#4022`/`#5225`. The rest of
             hosting, routing, and protocol contracts remain to be reconciled;
             this is not a completed full-leaf sweep.
+      - [ ] `visions/agent-fabric/README.md` — layer/venue/memory seam slice
+            reconciled: attended and unattended session peers, shared
+            coordination versus provider-owned lifecycle, capability-honest
+            restricted venues, observation distinct from control, and
+            agent-logger as a session-evidence consumer rather than a rival
+            coordination layer. Ground/head/claims intent was retained;
+            existing hardening remains in its owning efforts (`#3584` and
+            design tracker `#3761` provide context). This scoped
+            comparison does not complete the branch's machine convergence,
+            trust, telemetry, or every accountability path.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -967,3 +977,63 @@ then rather than assuming either answer.
   cutover, or POSIX native-supervisor run was performed: this is a vision and
   tracker reconciliation with no runtime, installer, or payload changes;
   archived live-drill evidence is historical evidence, not a new run.
+
+### 2026-10-08 — Phase 2 agent-fabric layer/venue/memory seam slice
+- Read the full branch vision, then used three bounded, read-only evidence
+  tracks: ground authority; venue/connectivity; delegation/session memory.
+  Each had disjoint owning source scope, source citations, an explicit stop,
+  and no edit/publication authority. Coordinator retained integration,
+  uncertainty judgment, issue dedup, and PR ownership.
+- Fold-back: provider-owned lifecycle/reachability behind shared coordination
+  semantics, and human-attended remote Copilot sessions as peers of headless
+  workers. Evidence includes the providers' common CLI-mode reservation/
+  registration paths (`agent-codespaces/copilot_venue.py`,
+  `agent-containers/copilot_venue.py`, `agent-ssh/copilot_detach.py`).
+  Restricted containers refuse unsupported attended reach rather than quietly
+  inheriting trusted authority. The branch preserves headless reach and the
+  existing trusted/restricted boundary; no unsupported mode is required.
+- Reconciled a real parent/child terminology contradiction: the parent called
+  agent-logger another fabric layer, while its current child explicitly calls
+  it a consumer of delegation. Preserved all session collection, compilation,
+  segmentation, and survivable-memory intent; clarified the ownership seam
+  rather than removing the capability. Verified the child scope and
+  `chronicle/orchestrator.py`'s use of existing scheduling/lease seams directly
+  because the delegate's claim required that cross-check.
+- Did not accept unsupported delegate gap claims as new issues. A deferred
+  `ManifestWriter` result represents a written manifest, keeps segments
+  reserved, and does not report landed output; that is not proof of a false
+  end-to-end completion verdict. Broad portable catalog/accounting/fleet
+  guarantees remain the existing `#5665` campaign, not newly asserted as
+  implemented or redundantly filed. Linked the parent-memory reconciliation
+  to that campaign.
+- Ground authority already has the relevant branch-level positives. Retained
+  head/succession, asserted disposition versus derived pulse, directional
+  claims, and cross-layer handoff ownership unchanged. Open owning efforts
+  `worktree-head-succession-hardening` and
+  `agent-worktrees-authoritative-daemon`, plus existing `#3584`/`#3761`,
+  retain that work. `#3761` explicitly scopes the design, not all migration
+  implementation; it is not a claim that every remaining runtime obligation
+  closes with that issue. No status/gap wording was copied into the vision
+  from the delegate's suggested prose.
+- Folded up observation-versus-authority from the directly reconciled bridge
+  evidence (`#5734`): fidelity, missing meters, creator provenance, and
+  transcript activity do not silently become liveness, control, or settlement.
+  The service-model/host-provider boundaries remain inherited, not restated
+  as endpoint or runtime specifications.
+- Superset check: preserved every original Feature, Behavior, and Non-Goal.
+  The memory heading clarification preserves the whole capability, and venue
+  peerage augments rather than replaces headless reach. No schema, API, command
+  grammar, credential-bootstrap wiring, or conformance table enters the vision.
+  This is a scoped branch comparison, not a full audit of every machine,
+  trust, telemetry, or resource-accountability implementation.
+- Validation: all three touched READMEs pass the structure guard and the diff
+  whitespace check. No new runtime tests, clean-room, or live-venue probes
+  were run: the diff changes standing parent intent and journal attribution,
+  not execution or installation. Prior provider/bridge implementation
+  citations remain evidence, not a fresh full-venue validation claim.
+- PR `#5759` review found the same terminology contradiction still present in
+  the CodeSpace leaf. Extended the correction to all seven vision-tree
+  references there, preserving rescue-before-teardown, comprehensive capture,
+  optional-peer degradation, and logger-owned analysis. Rechecked the full
+  terminology family rather than only the flagged parent heading; the final
+  diff therefore touches three READMEs, not two.
