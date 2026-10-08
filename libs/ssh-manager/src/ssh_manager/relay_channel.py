@@ -335,6 +335,11 @@ class SupervisedRelayForward:
         ours. Ownership is proven instead by the per-supervisor token in each
         process's inherited environment, re-checked after pinning the process
         with a pidfd so a reused PID is never signalled. Returns the count.
+
+        Other platforms cannot prove ownership of an orphan this way and skip
+        the sweep: Windows releases its registered ProxyCommand owner instead
+        (``_terminate``), and elsewhere a stdio ProxyCommand exits on EOF once
+        its ssh root's pipes close.
         """
         if not (
             sys.platform.startswith("linux")

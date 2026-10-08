@@ -111,6 +111,14 @@ and backs off without connecting while it is in a transitional state (e.g.
 starting or shutting down), so a relay never re-wakes a CodeSpace that was
 stopped on purpose yet still recovers across a restart.
 
+Teardown terminates a live SSH root together with its process tree on every
+platform. A ProxyCommand child that has already outlived its root is swept only
+where ownership can be proven safely: on Linux (with pidfds) by a
+per-supervisor environment token, and on Windows by the registered ProxyCommand
+owner. On other POSIX platforms such a stdio ProxyCommand is left to exit on
+its own when its closed pipes reach EOF; it is never re-spawned, because the
+retired supervisor does not reconnect.
+
 The relay speaks the git credential protocol over TCP and supports the standard
 `get`/`fill`, `store`/`approve`, and `erase`/`reject` shapes plus token actions
 such as `get-github-token`, `get-azure-token`, and `get-access-token`; provider
