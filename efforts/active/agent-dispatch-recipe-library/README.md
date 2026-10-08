@@ -529,8 +529,10 @@ below — read it before starting any Phase 3 work).
       account scratch GitHub repository (created fresh for this validation,
       never under an organization) with real issues/efforts was driven
       end-to-end against a real GitHub forge via a new clean-room Tier-E
-      scenario (`agent-dispatch-recipe-loops-eval`). All four recipes
-      reached real, independently-observed completion evidence:
+      scenario (`agent-dispatch-recipe-loops-eval`), landed as PR #5647
+      (`ThomasMichon/copilot-extensions`, squash-merged 2026-10-08 after 16
+      rounds of automated review). All four recipes reached real,
+      independently-observed completion evidence:
       backlog-triager classified a real issue and linked it to a tracked
       effort via a merged PR; issue-reproducer posted a real reproduction-
       evidence comment with actual command output; effort-builder grouped
@@ -1891,3 +1893,73 @@ slice being explicitly spun off separately):
   and agent-worktrees project-name-fallback prerequisites this scenario's
   own `setup.sh` had to arrange, which the turnkey adoption path
   previously left implicit) plus the required `agent-dispatch` changefile.
+
+### 2026-10-08 (continued) — PR #5647 merged after 16 rounds of automated review
+
+The PR referenced above was still open when the prior entry was written;
+this session drove it the rest of the way to a clean, **squash-merged**
+PR via 16 rounds of automated Copilot review (rounds 6-21 counting the
+earlier session's first five). Every round's finding was fixed, verified
+with real bash/python tests against the live fixture repo (`gh` already
+authenticated as its owning account) before the next push -- never just a
+syntax check. Round 17 came back `APPROVED` with zero open findings;
+merged via this repo's own `pr-merge --now` self-merge flow the same turn.
+
+Categories of real bugs this review loop surfaced and fixed (beyond the
+three infra gaps already in the entry above):
+- **Evidence-attribution correctness** (the largest theme): `post_check.sh`'s
+  corroboration logic initially accepted far too little real forge
+  evidence as proof of a recipe's completion (bare directory
+  presence/absence, not content), and -- once content checks were added --
+  was repeatedly vulnerable to mis-attributing STALE evidence from an
+  earlier run against this deliberately-retained fixture repo (a
+  pre-existing open PR, an already-archived effort, a closed historical
+  issue, a declaration with verification still enabled) to the CURRENT
+  run. Each was closed with either a before-run snapshot + exclusion, or a
+  setup-time fail-closed precondition naming the invalid starting state
+  explicitly rather than letting it surface as a confusing recipe
+  "failure."
+- **A real queue-key bug**: `agent-dispatch list` with no `--repo` resolves
+  the cwd's git remote to a host-qualified `github.com/owner/name` lane,
+  but each declaration's own `repo:` field is a bare `owner/name` string --
+  the actual queue key its emitted tasks carry. An unscoped `list` call
+  always returned empty; fixed by reading each declaration's own `repo:`
+  value and passing it explicitly.
+- **A real safety/cost risk**: this fixture's 5-second cadence + no
+  handled/exclusion marker meant a completed recipe's occurrence stayed
+  eligible for re-selection on the very next tick, risking a duplicate
+  real headless worker (and duplicate live-forge mutations) for a recipe
+  that had already finished. Fixed by instructing the orchestrator to
+  `repository-issue-loop disable` a recipe's declaration immediately once
+  it reaches `completed`.
+- **Scoring-rubric accuracy**: `submitted` (a completion *claim* still
+  awaiting evaluator/manual review) was initially accepted as equivalent
+  to `completed` for PASS purposes, even though every fixture declaration
+  sets `require_verification: false` specifically so a healthy run
+  reaches `completed` directly -- `submitted` here is real evidence of a
+  mismatch, not success. Fixed across the rubric, manifest, and
+  post-check consistently.
+- **Documentation accuracy**: `plugins/agent-dispatch/docs/
+  repository-issue-loop-adoption.md` previously left the agent-bridge/
+  agent-worktrees headless-embody runtime prerequisites implicit; this
+  session added a dedicated section (with the required changefile), then
+  corrected its own first draft's inaccurate agent-bridge failure-mode
+  description (it fails the reservation and leaves the task queued, per
+  `spawn_factories.py`, not a silent deadlock) once review caught it.
+
+With this PR merged, **4 of 5 Validation Plan items are now done** --
+only the clean full-suite run remains open (blocked on #5582/#5584, both
+unrelated pre-existing flakes). The fixture repo
+(`tmichon_microsoft/agent-dispatch-recipe-fixture`) and its real
+issues/PRs/efforts remain in place as durable evidence, per instruction.
+Note for any future re-run of this scenario: the fixture now needs
+re-seeding first (round 15/16's own new setup.sh preconditions will
+correctly fail closed against its current, already-exercised state --
+`efforts/active/scratch-effort` needs restoring and its existing dated
+archive removed first).
+
+**Outstanding per this effort's own completion gate:** the operator has
+not yet been consulted on whether to archive this effort now that 4/5
+items are closed (the one remaining item, per the "Next" note above, is a
+named candidate for being carried as a tracked follow-on rather than
+blocking archival) -- do not archive unilaterally.
