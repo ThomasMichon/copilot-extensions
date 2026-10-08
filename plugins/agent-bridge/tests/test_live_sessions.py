@@ -497,15 +497,16 @@ class TestDeriveTurnState:
         ) == ("idle", False)
 
 
-# A background sub-agent's events, in the Copilot CLI's real shape: ``agentId``
-# on the event envelope (not in ``data``), and ``data.parentToolCallId`` on its
+# A background sub-agent's events, in the Copilot CLI's real shape as the
+# extension forwards it (``{type, id, data, agentId}``): ``agentId`` on the
+# event envelope (not in ``data``), and ``data.parentToolCallId`` on its
 # turn/tool events.
-_SUB_ENVELOPE = {"agentId": "df92a1", "parentId": "p0", "timestamp": "2026-10-08T00:00:00Z"}
+_SUB_ENVELOPE = {"agentId": "df92a1"}
 _SUB_EVENTS = [
     {**_SUB_ENVELOPE, "type": "user.message", "id": "s1",
      "data": {"content": "audit the files", "parentAgentTaskId": "t1"}},
     {**_SUB_ENVELOPE, "type": "assistant.message", "id": "s2",
-     "data": {"content": "", "parentToolCallId": "tc-task", "toolRequests": []}},
+     "data": {"content": "auditing", "parentToolCallId": "tc-task", "toolRequests": []}},
     {**_SUB_ENVELOPE, "type": "tool.execution_start", "id": "s3",
      "data": {"toolCallId": "tc-sub", "toolName": "bash", "parentToolCallId": "tc-task",
               "arguments": {"command": "sleep 600"}}},
@@ -546,14 +547,33 @@ def test_route_background_sub_agent_never_makes_an_idle_parent_stalled(
     stalled -- and the sub-agent's open tool is not read as the parent's."""
     c = client_with_store
     c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
-    c.post("/api/v1/live-sessions/s1/events", json={"events": [
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": [
         {"type": "user.message", "id": "m1", "data": {"content": "go"}},
         {"type": "assistant.turn_end", "id": "m2", "data": {"turnId": "1"}},
     ]})
-    c.post("/api/v1/live-sessions/s1/events", json={"events": _SUB_EVENTS})
+    assert r.status_code == 200, r.text
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": _SUB_EVENTS})
+    assert r.status_code == 200 and r.json()["ingested"] == len(_SUB_EVENTS), r.text
     row = c.app.state.db.get_live_session("s1")
     assert row["turn_state"] == "idle"
     assert live_sessions._live_liveness(row, now=time.time() + 999) == "idle"
+
+
+def test_route_parent_marker_only_sub_agent_tool_never_makes_the_parent_running(
+    client_with_store: TestClient,
+) -> None:
+    """A sub-agent tool call carrying only ``data.parentToolCallId`` (no
+    ``agentId``) is nested: it must not read as the parent's open root tool."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": [
+        {"type": "user.message", "id": "m1", "data": {"content": "go"}},
+        {"type": "assistant.turn_end", "id": "m2", "data": {"turnId": "1"}},
+        {"type": "tool.execution_start", "id": "m3",
+         "data": {"toolCallId": "tc-sub", "toolName": "bash", "parentToolCallId": "tc-task"}},
+    ]})
+    assert r.status_code == 200 and r.json()["ingested"] == 3, r.text
+    assert c.app.state.db.get_live_session("s1")["turn_state"] == "idle"
 
 
 def test_db_update_live_turn_state(tmp_db: Database) -> None:

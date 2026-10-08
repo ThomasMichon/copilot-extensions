@@ -396,7 +396,7 @@ class EventLog:
             if not include_nested:
                 open_calls = [
                     event for event in open_calls
-                    if not event.data.get("agent_id")
+                    if not (event.data.get("agent_id") or event.data.get("parent_tool_call_id"))
                 ]
             if not open_calls:
                 return None

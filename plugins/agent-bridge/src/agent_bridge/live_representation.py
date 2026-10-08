@@ -119,10 +119,16 @@ def translate_sdk_event(
     # Sub-agent instance id, when present, is passed through so a consumer can
     # attribute nested-agent output without inventing a new event type.
     agent_id = d.get("agentId")
+    # A sub-agent's turn/tool events also name the task tool call that spawned
+    # it; carried as ``parent_tool_call_id`` (the ACP path's name) so an event
+    # with only that marker still reads as nested.
+    parent_tool_call_id = d.get("parentToolCallId")
 
     def _out(payload: dict[str, Any]) -> dict[str, Any]:
         if agent_id:
             payload = {**payload, "agent_id": agent_id}
+        if parent_tool_call_id:
+            payload = {**payload, "parent_tool_call_id": parent_tool_call_id}
         return payload
 
     if sdk_type == "user.message":
