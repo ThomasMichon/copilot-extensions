@@ -31,11 +31,16 @@ from .watch_registry import FiredEvent, WatchKey, WatchRegistry
 
 _HOME_ENV = "AGENT_PULL_REQUESTS_HOME"
 _LOCK_FILENAME = "watch-daemon.lock"
+_STATE_FILENAME = "watch-subscriptions.json"
 _DEFAULT_POLL_INTERVAL_S = 30.0
 #: How long a poller keeps running with zero subscribers before exiting --
 #: generous relative to a register/unregister race, short relative to an
 #: operator session.
 _POLLER_IDLE_EXIT_S = 5.0
+#: How long ``serve stop`` waits for a graceful shutdown before giving up
+#: and reporting it as unresponsive (the caller decides what to do next --
+#: this module never force-kills on the caller's behalf).
+_SHUTDOWN_REQUEST_DEADLINE_S = 5.0
 
 
 def state_dir() -> Path:
@@ -47,6 +52,37 @@ def state_dir() -> Path:
 
 def lock_path() -> Path:
     return state_dir() / _LOCK_FILENAME
+
+
+def subscriptions_path() -> Path:
+    """The durable subscriber dump -- survives a ``serve stop``/``serve
+    restart`` (or an ungraceful crash: it's updated on every register/
+    unregister/fire, not only at clean shutdown) so a newly-started daemon
+    reattaches every still-pending subscription exactly where it left off."""
+    return state_dir() / _STATE_FILENAME
+
+
+def _atomic_write_json(path: Path, data: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.replace(path)
+
+
+def read_subscriptions_state() -> list[dict]:
+    try:
+        raw = subscriptions_path().read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def write_subscriptions_state(entries: list[dict]) -> None:
+    _atomic_write_json(subscriptions_path(), entries)
 
 
 def read_lock_data() -> dict | None:
@@ -91,11 +127,7 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
 
 
 def write_lock_data(data: dict) -> None:
-    path = lock_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    tmp.replace(path)
+    _atomic_write_json(lock_path(), data)
 
 
 #: ``fetch(repo, number) -> PRSnapshot``.
@@ -146,7 +178,16 @@ def default_notify(event: FiredEvent) -> None:
 
 
 class WatchDaemon:
-    """Owns the registry, one poller thread per active key, and dispatch."""
+    """Owns the registry, one poller thread per active key, and dispatch.
+
+    Every register/unregister/fire durably persists the subscriber set
+    (``watch_registry.snapshot_state``/``write_subscriptions_state``) so a
+    ``serve stop`` + ``serve restart`` -- the update/reattach path -- never
+    silently drops a subscription that represents a *suspended* caller
+    (e.g. an agent-dispatch task) waiting on this daemon to wake it.
+    ``persist=False`` is for tests that want a hermetic in-memory-only
+    daemon with no real disk I/O.
+    """
 
     def __init__(
         self,
@@ -155,14 +196,45 @@ class WatchDaemon:
         notify: Notify = default_notify,
         poll_interval: float = _DEFAULT_POLL_INTERVAL_S,
         idle_exit: float = _POLLER_IDLE_EXIT_S,
+        persist: bool = True,
     ) -> None:
         self._registry = WatchRegistry()
         self._fetch = fetch
         self._notify = notify
         self._poll_interval = poll_interval
         self._idle_exit = idle_exit
+        self._persist_enabled = persist
+        self._persist_lock = threading.Lock()
         self._pollers: dict[WatchKey, threading.Thread] = {}
         self._pollers_lock = threading.Lock()
+        self._shutdown_event = threading.Event()
+        if persist:
+            self._reattach_from_disk()
+
+    def _reattach_from_disk(self) -> None:
+        """Reload every subscriber a prior generation persisted, and
+        immediately resume polling each restored key -- no caller needs to
+        re-``subscribe``; the reattach is transparent to them."""
+        entries = read_subscriptions_state()
+        if not entries:
+            return
+        self._registry.restore_state(entries)
+        for key in self._registry.active_keys():
+            self._ensure_poller(key)
+
+    def _persist(self) -> None:
+        """Serialize every persist call against every other -- multiple
+        poller threads (any of them, firing concurrently, plus register/
+        unregister from a control-plane handler thread) can all call this
+        for the same shared state file; on Windows an unserialized
+        concurrent ``Path.replace()`` onto the same destination can raise
+        ``PermissionError`` (file in use by the other writer's still-open
+        temp handle), confirmed by a real flaky test failure this lock
+        fixes."""
+        if not self._persist_enabled:
+            return
+        with self._persist_lock:
+            write_subscriptions_state(self._registry.snapshot_state())
 
     # -- control-plane entrypoint -----------------------------------
 
@@ -172,9 +244,19 @@ class WatchDaemon:
         if kind == "unregister":
             key = WatchKey(repo=str(payload.get("repo", "")), number=int(payload.get("number", 0)))
             ok = self._registry.unregister(key, str(payload.get("subscriber_id", "")))
+            self._persist()
             return {"unregistered": ok}
         if kind == "status":
             return {"subscribers": self._registry.status()}
+        if kind == "health":
+            return {
+                "pid": os.getpid(),
+                "subscriber_count": sum(len(v) for v in self._registry.status().values()),
+                "active_keys": len(self._registry.active_keys()),
+            }
+        if kind == "shutdown":
+            self._shutdown_event.set()
+            return {"shutting_down": True}
         return {"error": f"unknown kind {kind!r}"}
 
     def _handle_register(self, payload: dict) -> dict:
@@ -190,7 +272,15 @@ class WatchDaemon:
             timeout=float(timeout) if timeout else None,
         )
         self._ensure_poller(key)
+        self._persist()
         return {"registered": True}
+
+    def wait_for_shutdown(self, poll_interval: float = 1.0) -> None:
+        """Block the caller (``serve``'s own foreground loop) until a
+        ``shutdown`` request arrives over the control plane, checking in
+        short increments so a ``KeyboardInterrupt`` is still responsive."""
+        while not self._shutdown_event.is_set():
+            self._shutdown_event.wait(timeout=poll_interval)
 
     # -- poller lifecycle ---------------------------------------------
 
@@ -221,6 +311,8 @@ class WatchDaemon:
                 time.sleep(self._poll_interval)
                 continue
             fired = self._registry.apply_snapshot(key, snap)
+            if fired:
+                self._persist()
             for event in fired:
                 try:
                     self._notify(event)
@@ -248,7 +340,10 @@ __all__ = [
     "endpoint_from_rendezvous",
     "lock_path",
     "read_lock_data",
+    "read_subscriptions_state",
     "rendezvous_fields",
     "state_dir",
+    "subscriptions_path",
     "write_lock_data",
+    "write_subscriptions_state",
 ]

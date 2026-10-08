@@ -226,35 +226,23 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     return _pr_entry_merge_status(pr, repo)
 
 
-def pull_for(pr, repo):
-    """The configured provider's view of tracked *pr*: ``(provider, slug, number,
-    token, PullResult)``; ``False`` when no PR was ever opened (neither ``number``
-    nor ``repo``); ``None`` when it can't be trusted to name exactly this PR at the
-    configured authority, or the read failed. The one guarded read shared by the
-    merge lookup and :func:`pr_base_ref`."""
+def trusted_target(pr, prcfg, fallback: str = ""):
+    """``(provider, slug)`` to read tracked *pr* from, only when the record can be
+    trusted to name exactly this PR at the configured authority; ``False`` when no
+    PR was ever opened (neither a number nor a repository); ``None`` otherwise
+    (unresolvable, a different provider than the one configured, a PR URL on
+    another authority, or no provider). Every provider read of a tracked PR --
+    the merge lookup and both reconciles -- goes through this one check, so a
+    stale record can never confirm an unrelated PR."""
+    from .pr_reconcile import tracked_pr_slug
     number = getattr(pr, "number", None)
-    slug = getattr(pr, "repo", "") or ""
-    if slug and "/" not in slug:
-        # Older records keep the project name ("my-project"), not the
-        # hosting owner/name the provider needs: asking for it fails and
-        # leaves a merged, aligned worktree unfinalizable forever. The tracked
-        # PR URL names the real repository (its authority is checked below).
-        # The URL and the number are stored separately, so they must name the
-        # same PR: otherwise a stale record could certify a different change.
-        import re
-
-        from .pr_ops import _repo_slug_from_pr_url
-
-        url = (getattr(pr, "url", "") or "").strip()
-        url_number = re.search(r"/pulls?/(\d+)/?$", url)
-        if url_number is None or (number and int(url_number.group(1)) != int(number)):
-            return None
-        slug = _repo_slug_from_pr_url(url, getattr(repo.pr, "api_base", "") or "") or slug
+    slug = tracked_pr_slug(pr, fallback, getattr(prcfg, "api_base", "") or "")
+    if slug is None:
+        return None
     if not number and not slug:
         return False
     if not number or not slug:
         return None
-    prcfg = repo.pr
     provider_name = getattr(pr, "provider", "") or prcfg.provider
     if provider_name != prcfg.provider:
         # A legacy/stale record can retain a different provider than the
@@ -267,27 +255,45 @@ def pull_for(pr, repo):
         from . import providers
         provider = providers.get_provider(prcfg.provider)
         tracked_url = (getattr(pr, "url", "") or "").strip()
-        if tracked_url:
-            expected_endpoint = provider.authority_endpoint(
-                getattr(prcfg, "api_base", "") or "",
-            )
-            if not _authority_matches(tracked_url, expected_endpoint):
-                # Same provider kind, but the configured authority has
-                # since changed -- a different GitHub Enterprise host, a
-                # different Azure DevOps organization on the shared
-                # dev.azure.com host, or a different Gitea instance
-                # path-hosted on the same shared host. Querying the NEW
-                # authority with the OLD slug/number can confirm an
-                # unrelated merged PR there and hand back the wrong head.
-                return None
+        if tracked_url and not _authority_matches(
+                tracked_url, provider.authority_endpoint(getattr(prcfg, "api_base", "") or "")):
+            # Same provider kind, but the configured authority has since
+            # changed -- a different GitHub Enterprise host, a different Azure
+            # DevOps organization on the shared dev.azure.com host, or a
+            # different Gitea instance path-hosted on the same shared host.
+            # Querying the NEW authority with the OLD slug/number can confirm
+            # an unrelated merged PR there and hand back the wrong head.
+            return None
+    except Exception:
+        return None
+    return provider, slug
+
+
+def pull_for(pr, repo):
+    """The configured provider's view of tracked *pr*: ``(provider, slug, number,
+    token, PullResult)``; ``False`` when no PR was ever opened (neither ``number``
+    nor ``repo``); ``None`` when it can't be trusted to name exactly this PR at the
+    configured authority (:func:`trusted_target`), or the read failed. The one
+    guarded read shared by the merge lookup and :func:`pr_base_ref`."""
+    prcfg = getattr(repo, "pr", None)
+    if prcfg is None:
+        number, has_repo = getattr(pr, "number", None), bool(getattr(pr, "repo", ""))
+        return False if not number and not has_repo else None
+    target = trusted_target(pr, prcfg)
+    if not target:
+        return target
+    provider, slug = target
+    number = int(pr.number)
+    try:
+        from . import providers
         token = providers.account_token_for_slug(slug, prcfg)
         api_base = getattr(prcfg, "api_base", "") or ""
         reads = _READS.get()
-        key = (prcfg.provider, api_base, slug.lower(), int(number))
+        key = (prcfg.provider, api_base, slug.lower(), number)
         if reads is not None and key in reads:
             return reads[key]
-        result = provider.get_pull(slug, int(number), api_base=api_base, token=token)
-        pulled = provider, slug, int(number), token, result
+        result = provider.get_pull(slug, number, api_base=api_base, token=token)
+        pulled = provider, slug, number, token, result
         if reads is not None:
             reads[key] = pulled
         return pulled
@@ -809,12 +815,15 @@ def reconcile_every_live_pr(
     skipped. Best-effort throughout: any provider/network failure for one entry
     leaves that entry's local state untouched and moves on -- never raises.
     """
+    # The entry the active-only reconcile reads, taken BEFORE it runs: healing it
+    # makes ``active_pr()`` name the next non-terminal entry, which must not then
+    # be skipped as "already reconciled".
+    active = record.active_pr()
     try:
         from . import pr_reconcile
         pr_reconcile.reconcile_pr_state(record, config)
     except Exception:
         pass
-    active = record.active_pr()
     others = [
         p for p in record.prs
         if p is not active and not tracking._pr_is_terminal(p) and p.number
@@ -824,11 +833,13 @@ def reconcile_every_live_pr(
     prcfg = config.default_repo.pr
     changed = False
     for entry in others:
-        provider_name = entry.provider or prcfg.provider
-        target_repo = entry.repo or (record.repo or "")
+        from .finalize_open_pr_gate import trusted_target
+        target = trusted_target(entry, prcfg, record.repo or "")
+        if not target:
+            continue  # unresolvable or untrusted: keep the local state
+        provider, target_repo = target
         try:
             from . import providers
-            provider = providers.get_provider(provider_name)
             token = providers.account_token_for_slug(target_repo, prcfg)
             pull = provider.get_pull(
                 target_repo, entry.number,

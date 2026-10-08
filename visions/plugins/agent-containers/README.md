@@ -7,7 +7,7 @@
 - **Scope:** leaf (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Active
-- **Last revised:** 2026-08-27
+- **Last revised:** 2026-10-07
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) and
   the plugin's [`README`](../../../plugins/agent-containers/README.md)
 
@@ -87,7 +87,18 @@ interceptor, with any further endpoint granted explicitly.
 Trusted and restricted containers are presented through the same
 `container:` venue-provider contract. The coordination layer addresses the
 participant uniformly while the provider enforces the venue's effective
-posture.
+posture. A trusted venue is reachable **both** headlessly (an orchestrator
+dispatches into it as a fabric participant) and interactively (a human's own
+muxed CLI session, attached or detached) through that same contract —
+restricted venues deliberately receive only the headless/narrow-tool shape,
+never the interactive one, consistent with their reduced authority envelope.
+
+### Externally discoverable venue
+A restricted venue's identity and readiness are not confined to this
+provider's own CLI: a named, read-only venue descriptor can be published for
+a consuming presenter (the Worktree Picker) to discover, connect through, and
+refresh independently — the provider remains the single source of truth for
+the venue's live state; the presenter never stores a competing copy.
 
 ## Features
 
@@ -101,12 +112,37 @@ conventions.
 A trusted-development fleet aims to be a **full harness node**, not a minimal
 runner. The host projects its **launch parity** (model, the repo's own
 local-marketplace plugins/skills, concrete workspace cwd), the **credential
-relay**, and — as the capability matures — **multiple repositories and their
-worktrees created container-local** inside the venue, so agent-bridge drives a
-trusted container as seamlessly as any other venue. The goal is to make the
-container transport *invisible*: as much of the system as can be projected, is.
-Restricted fleets deliberately receive none of this by default (see
-`restricted-credential-boundary` / `harness-and-tool-latitude`).
+relay**, **host-backed persistence and self-maintenance** for an image-backed
+fleet (retaining its workspace/home across container recreation and running
+its own real timer/service units, the same self-maintaining posture a normal
+machine has), and — as the capability matures — **multiple repositories and
+their worktrees created container-local** inside the venue, so agent-bridge
+drives a trusted container as seamlessly as any other venue. The goal is to
+make the container transport *invisible*: as much of the system as can be
+projected, is. Restricted fleets deliberately receive none of this by default
+(see `restricted-credential-boundary` / `harness-and-tool-latitude`).
+
+### interactive-venue-reach-trusted
+A trusted venue is reachable as an attended, muxed, interactive Copilot CLI
+session — or its detached, orchestrator-facing counterpart — under the exact
+same contract agent-codespaces/agent-ssh venues use: a worktree-keyed
+reservation and registration into the coordination layer's `live_sessions`.
+The two reach modes carry the session's bridge and credential-relay reverse
+forwards on different owners with different lifetimes: an attached session
+carries them on its own interactive SSH process, for as long as that process
+stays connected; a detached session carries them on a separate, host-side
+forward keeper, independent of any one launcher's lifetime, so an
+orchestrator's dispatch can end without starving the session it started.
+Restricted venues are deliberately excluded — their reduced authority
+envelope never extends to an interactive session.
+
+### restricted-venue-picker-discovery
+A restricted venue's identity, current instance, lease assignment, readiness,
+and trust posture can be published as a named, read-only source the Worktree
+Picker discovers and refreshes on its own — list/recent-message/session/
+refresh only, no create or lifecycle action exposed through that surface — so
+a presenter can surface a restricted venue without inventing a second,
+competing notion of what it is or whether it's ready.
 
 ### restricted-credential-boundary
 A restricted venue receives no host credential, credential relay, or ambient
@@ -237,6 +273,10 @@ only after inspecting a running process.
 - Parent vision: [`../../agent-fabric/`](../../agent-fabric/README.md)
 - Sibling venue vision:
   [`../agent-codespaces/`](../agent-codespaces/README.md)
+- Related vision: [`../../remote-interactive-sessions/`](../../remote-interactive-sessions/README.md) —
+  owns the should-be contract for a venue-launched CLI-mode session becoming
+  a first-class coordinated peer; `interactive-venue-reach-trusted` is this
+  vision's realization of that contract for a trusted container.
 - Reality docs: [`../../../plugins/agent-containers/README.md`](../../../plugins/agent-containers/README.md)
   · [`../../../docs/architecture.md`](../../../docs/architecture.md)
 - Tracking: [#951](https://github.com/ThomasMichon/copilot-extensions/issues/951)
@@ -268,3 +308,33 @@ only after inspecting a running process.
   internet is absent; repository and controlled-search access are narrow grants.
   Host credential/filesystem boundaries and rescue allowlists remain hard, but
   complexity aimed only at an omnipotent malicious tenant is out of scope.
+
+- **2026-10-07** — Fold-back slice (`vision-backport-sweep` Phase 2):
+  reconciled against 123 commits of drift since this vision's last revision.
+  Added three previously-unstated, already-shipped capabilities found in the
+  plugin's own `README.md`: *interactive-venue-reach-trusted* (`agent-containers
+  copilot <name>` / `--detach` — a trusted venue reachable as an attended or
+  detached CLI-mode session under the exact same contract
+  agent-codespaces/agent-ssh venues use, deliberately excluded for restricted
+  venues); *restricted-venue-picker-discovery* (`ssh-profile <name> --project`
+  — a named, read-only venue source the Worktree Picker discovers and
+  refreshes independently); and extended `full-harness-projection-trusted`
+  with **host-backed persistence and self-maintenance** (`host_workspace_path`/
+  `host_home_path` + `systemd_capable` — an image-backed trusted fleet can
+  retain state across recreation and run real systemd timer/service units),
+  which had moved from "as the capability matures" aspiration to shipped
+  reality without the vision being told. Added a cross-link to
+  `remote-interactive-sessions` for the should-be contract
+  `interactive-venue-reach-trusted` realizes. All additions are fold-back
+  (reality already does these things); no Non-Goal reality violates and no
+  scaling-back occurred. No conformance gap was found requiring a new issue.
+  **Review correction (PR #5631):** removed an implementation-progress
+  phrase ("not yet every fleet, but no longer unavailable") from
+  `full-harness-projection-trusted` — a vision states enduring intent, not
+  rollout status; that detail now lives only in the effort journal.
+  Corrected *interactive-venue-reach-trusted* to distinguish the two reach
+  modes' actual forward ownership: an attached session carries its
+  forwards on its own interactive SSH process (ending when that process
+  disconnects), while a detached session carries them on a separate,
+  host-side keeper independent of the launcher's lifetime — the original
+  wording wrongly attributed both to one keeper.

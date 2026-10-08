@@ -32,6 +32,34 @@ from .config import Config
 from .pr_ops import _reconcile_active_pr
 
 
+def tracked_pr_slug(pr, fallback: str = "", api_base: str = "") -> str | None:
+    """The hosting ``owner/name`` a tracked PR lives in: ``pr.repo``, else *fallback*
+    (the worktree record's own ``repo``).
+
+    Older records keep the project name (``my-project``), not the hosting owner/name
+    the provider needs: asking for it fails, so a PR merged long ago reads as open
+    forever and finalize refuses the worktree. The tracked PR URL names the real
+    repository. The URL and the number are stored separately, so they must name
+    the same PR, or a stale record could certify a different change: then this is
+    ``None`` (unresolvable; never guess). ``""`` when nothing is recorded. The one
+    resolution every provider read of a tracked PR shares."""
+    import re
+
+    from .pr_ops import _repo_slug_from_pr_url
+
+    slug = (getattr(pr, "repo", "") or fallback or "").strip()
+    if "/" in slug:
+        return slug
+    url = (getattr(pr, "url", "") or "").strip()
+    if not url:
+        return None if slug else ""
+    url_number = re.search(r"/pulls?/(\d+)/?$", url)
+    number = getattr(pr, "number", None)
+    if url_number is None or (number and int(url_number.group(1)) != int(number)):
+        return None
+    return _repo_slug_from_pr_url(url, api_base) or slug or None
+
+
 def heal_numberless_active_pr(
     record: tracking.WorktreeRecord | None, config: Config,
 ) -> bool:
