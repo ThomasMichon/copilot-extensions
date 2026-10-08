@@ -497,6 +497,85 @@ class TestDeriveTurnState:
         ) == ("idle", False)
 
 
+# A background sub-agent's events, in the Copilot CLI's real shape as the
+# extension forwards it (``{type, id, data, agentId}``): ``agentId`` on the
+# event envelope (not in ``data``), and ``data.parentToolCallId`` on its
+# turn/tool events.
+_SUB_ENVELOPE = {"agentId": "df92a1"}
+_SUB_EVENTS = [
+    {**_SUB_ENVELOPE, "type": "user.message", "id": "s1",
+     "data": {"content": "audit the files", "parentAgentTaskId": "t1"}},
+    {**_SUB_ENVELOPE, "type": "assistant.message", "id": "s2",
+     "data": {"content": "auditing", "parentToolCallId": "tc-task", "toolRequests": []}},
+    {**_SUB_ENVELOPE, "type": "tool.execution_start", "id": "s3",
+     "data": {"toolCallId": "tc-sub", "toolName": "bash", "parentToolCallId": "tc-task",
+              "arguments": {"command": "sleep 600"}}},
+]
+
+
+class TestDeriveTurnStateIgnoresSubAgents:
+    def test_envelope_agent_id_never_marks_the_parent_running(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        assert derive_turn_state(_SUB_EVENTS, prior_state="idle") == ("idle", False)
+
+    def test_parent_tool_call_id_alone_marks_a_sub_agent_event(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        event = {"type": "tool.execution_complete", "data": {"parentToolCallId": "tc-task"}}
+        assert derive_turn_state([event], prior_state="idle") == ("idle", False)
+
+    def test_legacy_data_agent_id_still_skipped(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        event = {"type": "assistant.message", "data": {"agentId": "sub-1"}}
+        assert derive_turn_state([event], prior_state="idle") == ("idle", False)
+
+    def test_main_turn_end_wins_over_later_sub_agent_activity(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        main = [{"type": "assistant.message", "data": {"content": "dispatched"}},
+                {"type": "assistant.turn_end", "data": {"turnId": "1"}}]
+        assert derive_turn_state(main + _SUB_EVENTS) == ("idle", True)
+
+
+def test_route_background_sub_agent_never_makes_an_idle_parent_stalled(
+    client_with_store: TestClient,
+) -> None:
+    """The parent's turn ended; its background sub-agent keeps working (and then
+    sits in a long tool call). The parent stays idle -- never running, so never
+    stalled -- and the sub-agent's open tool is not read as the parent's."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": [
+        {"type": "user.message", "id": "m1", "data": {"content": "go"}},
+        {"type": "assistant.turn_end", "id": "m2", "data": {"turnId": "1"}},
+    ]})
+    assert r.status_code == 200, r.text
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": _SUB_EVENTS})
+    assert r.status_code == 200 and r.json()["ingested"] == len(_SUB_EVENTS), r.text
+    row = c.app.state.db.get_live_session("s1")
+    assert row["turn_state"] == "idle"
+    assert live_sessions._live_liveness(row, now=time.time() + 999) == "idle"
+
+
+def test_route_parent_marker_only_sub_agent_tool_never_makes_the_parent_running(
+    client_with_store: TestClient,
+) -> None:
+    """A sub-agent tool call carrying only ``data.parentToolCallId`` (no
+    ``agentId``) is nested: it must not read as the parent's open root tool."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": [
+        {"type": "user.message", "id": "m1", "data": {"content": "go"}},
+        {"type": "assistant.turn_end", "id": "m2", "data": {"turnId": "1"}},
+        {"type": "tool.execution_start", "id": "m3",
+         "data": {"toolCallId": "tc-sub", "toolName": "bash", "parentToolCallId": "tc-task"}},
+    ]})
+    assert r.status_code == 200 and r.json()["ingested"] == 3, r.text
+    assert c.app.state.db.get_live_session("s1")["turn_state"] == "idle"
+
+
 def test_db_update_live_turn_state(tmp_db: Database) -> None:
     now = time.time()
     tmp_db.register_live_session(
@@ -693,6 +772,20 @@ def test_a_delivered_message_retires_a_blocker(client_with_store: TestClient) ->
     assert lp["phase"] == "resumed" and "blocker" not in lp
     assert lp["summary"] == "resumed after: builds still running"
     assert lp["pr"] == "42" and lp["markers"] == {"pr": "42", "pr-build": "running"}
+
+
+def test_a_sub_agent_milestone_never_becomes_the_session_progress(
+    client_with_store: TestClient,
+) -> None:
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/progress", json={"summary": "explicit beat"})
+    r = c.post("/api/v1/live-sessions/s1/events", json={"events": [
+        {"type": "assistant.message", "agentId": "sub-1",
+         "data": {"content": "BLOCKED: waiting on review", "parentToolCallId": "tc-task"}},
+    ]})
+    assert r.status_code == 200, r.text
+    assert c.get("/api/v1/live-sessions/s1").json()["latest_progress"]["summary"] == "explicit beat"
 
 
 def test_blocking_again_after_a_message_stays_blocked(client_with_store: TestClient) -> None:

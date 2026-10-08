@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from .events import is_nested_event_data
 from .models import (
     DelegatedResultSnapshot,
     ResultCurrentState,
@@ -20,7 +21,6 @@ from .models import (
     ResultWorkItem,
     SessionStatus,
 )
-
 from .result_tokens import (  # noqa: F401 (ResultTokenError/ResultHistoryChangedError re-exported)
     ResultHistoryChangedError,
     ResultTokenError,
@@ -405,7 +405,7 @@ def _incremental_events(
         event_type = event.event
         data = event.data
         timestamp = event.timestamp
-        if source == "represented" and data.get("agent_id"):
+        if source == "represented" and is_nested_event_data(data):
             last_processed = event_id
             continue
         parts = _event_parts(event_type, data)
@@ -547,7 +547,7 @@ def _represented_latest_result(
         )
 
     parent_events = [
-        event for event in events if not event.data.get("agent_id")
+        event for event in events if not is_nested_event_data(event.data)
     ]
     if not parent_events:
         return (
@@ -583,7 +583,7 @@ def _represented_latest_result(
     message_events = [
         event
         for event in turn_events
-        if event.event == "agent_message" and not event.data.get("agent_id")
+        if event.event == "agent_message" and not is_nested_event_data(event.data)
     ]
     text_value = "".join(
         str(event.data.get("text") or "") for event in message_events
@@ -662,14 +662,14 @@ def _represented_pending_input(
             index
             for index, event in enumerate(events)
             if event.event == "turn_complete"
-            and not event.data.get("agent_id")
+            and not is_nested_event_data(event.data)
         ),
         default=-1,
     )
     pending_by_id: dict[str, Any] = {}
     unkeyed: list[Any] = []
     for event in events[last_complete + 1:]:
-        if event.data.get("agent_id"):
+        if is_nested_event_data(event.data):
             continue
         tool_call_id = (
             event.data.get("tool_call_id") or event.data.get("toolCallId")
@@ -954,7 +954,7 @@ def expand_represented_result_ref(
             )
         if (
             event is None
-            or event.data.get("agent_id")
+            or is_nested_event_data(event.data)
             or _event_parts(event.event, event.data) is None
         ):
             raise KeyError("event detail is no longer available")
@@ -979,7 +979,7 @@ def expand_represented_result_ref(
             for event in events
             if event.id <= end
             and _event_parts(event.event, event.data) is not None
-            and not event.data.get("agent_id")
+            and not is_nested_event_data(event.data)
         ]
         if not events:
             raise KeyError("result detail is no longer available")

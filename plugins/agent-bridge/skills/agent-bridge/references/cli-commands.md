@@ -203,6 +203,11 @@ current turn and running after it ends. `--steer` uses SDK immediate delivery to
 join the running turn at its next step without cancelling it. `--interrupt`
 aborts the current turn first, then sends the message as the fresh next turn.
 
+> **Warning:** interrupting a running turn also cancels the receiver's
+> background sub-agents. When the receiver's main turn is idle (only background
+> sub-agents running) there is nothing to interrupt: the message is sent
+> immediately without an abort, and those sub-agents keep running.
+
 The handle's `commands.attach` lets a human attach the real terminal (tmux),
 and `commands.stop` is the verified stop (it deregisters the session and
 releases its forwards); run them exactly as printed.
