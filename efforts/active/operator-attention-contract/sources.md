@@ -109,7 +109,7 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
 
 - `agent-dispatch attention [--json] [--source <name>...] [--include-remote]`:
   the ordered queue, with the degraded banner in text mode. `--source` names a
-  known source (built-in or registered); an unknown name is a usage error (exit
+  known, enabled source (built-in or registered); an unknown or `disabled` name is a usage error (exit
   2, nothing read), never silently omitted -- a typo must not read as `clear`.
 - `agent-dispatch attention next [--after <cursor>] [--json] [--source <name>...] [--include-remote]`
   (each flag on the `next` subcommand itself, so it's accepted after `next`): the oldest worst item (a
