@@ -767,7 +767,7 @@ def test_cmd_send_rejects_replaced_session(monkeypatch, capsys):
     )
     with pytest.raises(SystemExit) as exc:
         m._cmd_send(args)
-    assert exc.value.code == 1
+    assert exc.value.code == 69  # refused_unavailable
     assert client.delivered == []
     assert "not expected session" in capsys.readouterr().err
 

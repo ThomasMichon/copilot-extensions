@@ -46,6 +46,9 @@ class _SessionHandoffMixin:
         the sender is explicitly asking for the next turn."""
         if not session._handoff_pending:
             return
+        if session._stop_requested:  # a cooperative stop's notice settled: the stop comes next
+            session._handoff_pending = False
+            return
         if session.status != SessionStatus.IDLE:
             return
         if not self._auto_handoff_eligible(session):
@@ -254,6 +257,12 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        # A cooperative stop announced before or at any point during this
+        # handoff wins: never leave a successor the stop can't reach.
+        notices_at_start = session._stop_notices
+
+        def stop_arrived() -> bool:
+            return session._stop_requested or session._stop_notices != notices_at_start
 
         # Single-checkout (CodeSpace/command) agents cannot host predecessor and
         # successor at once, so the spawn-then-retire ordering below does not
@@ -319,6 +328,10 @@ class _SessionHandoffMixin:
         # 2. Spawn the successor in the SAME worktree. Local worktree agents are
         #    unguarded, so predecessor + successor briefly coexist; the
         #    predecessor is retired only after the successor is confirmed up.
+        #    A cooperative stop announced meanwhile wins: no successor it
+        #    wouldn't reach (re-checked once the successor is up, too).
+        if stop_arrived():
+            raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
         successor = await self.start_session(
             session.target,
             agent_name=session.agent_name,
@@ -343,6 +356,10 @@ class _SessionHandoffMixin:
                 f"{successor.session_id} failed to start "
                 f"({successor.status.value}); predecessor retained"
             )
+        if stop_arrived():
+            with contextlib.suppress(Exception):
+                await self.end_session(successor.session_id, force=True)
+            raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
 
         # 3. Persist the two-way succession link.
         now = time.time()

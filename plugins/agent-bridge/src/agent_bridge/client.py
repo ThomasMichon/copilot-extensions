@@ -17,6 +17,7 @@ import yaml
 
 from .caller_session import gate_caller_session_id
 from .client_cli_mode import CliModeClientMixin
+from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -144,7 +145,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
+class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -1091,32 +1092,6 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
             payload,
             request_timeout=request_timeout,
         ) or {}
-
-    def stop_session(
-        self, session_id: str, *, force: bool = False, reap_host: bool = False
-    ) -> None:
-        """POST /api/v1/sessions/{id}/stop
-
-        ``force`` maps to the route's ``?force=true`` — tear down even with
-        active background sub-agent tasks (they are killed). See #191.
-
-        ``reap_host`` maps to ``?reap_host=true`` — additionally FREE the
-        Session-Host child immediately instead of only detaching it (the
-        idle-reaper primitive). The session stays STOPPED and resumable via
-        ``load_session`` replay; use it when the caller never reattaches over
-        the bridge and wants the ~280 MB child reclaimed on the spot rather than
-        after the idle-reaper TTL (#2960).
-        """
-        params: dict[str, str] = {}
-        if force:
-            params["force"] = "true"
-        if reap_host:
-            params["reap_host"] = "true"
-        self._request(
-            "POST",
-            f"/api/v1/sessions/{session_id}/stop",
-            params=params or None,
-        )
 
     def interrupt_relays_for_parity(
         self,

@@ -220,6 +220,9 @@ class TestPromptTriggeredHandoff:
         assert result["queued"] is True
         assert sm._db.count_pending_prompts(succ.session_id) == 1
         assert sm._db.count_pending_prompts(pred.session_id) == 0
+        # The result names the session that took the prompt, so a caller acting
+        # on "its" session afterwards (a cooperative stop) can follow it.
+        assert result["session_id"] == succ.session_id
 
     @pytest.mark.asyncio
     async def test_prompt_without_optin_is_normal_delivery(
@@ -235,3 +238,155 @@ class TestPromptTriggeredHandoff:
         assert pred.status != SessionStatus.STOPPED
         assert result["queued"] is False
         assert not _events(pred, "session_handoff")
+
+
+class TestNoResume:
+    """A ``no_resume`` prompt (a cooperative stop's notice) never revives a
+    session that a concurrent stop already stopped."""
+
+    @pytest.mark.asyncio
+    async def test_a_stopped_session_refuses_instead_of_resuming(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_prompts import SessionStoppedError
+
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.stop_session(session.session_id)
+        assert session.status == SessionStatus.STOPPED
+
+        with pytest.raises(SessionStoppedError, match="^session_stopped"):
+            await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert session.status == SessionStatus.STOPPED
+        assert sm._db.count_pending_prompts(session.session_id) == 0
+
+    @pytest.mark.asyncio
+    async def test_a_saturated_session_is_never_handed_off_for_a_no_resume_prompt(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="wt-1")
+        pred._crossed_thresholds.add("critical")
+
+        result = await sm.submit_or_queue_prompt(pred.session_id, "wind down", no_resume=True)
+
+        assert not _events(pred, "session_handoff") and pred.status != SessionStatus.STOPPED
+        assert result.get("session_id", pred.session_id) == pred.session_id
+
+    @pytest.mark.asyncio
+    async def test_a_stop_landing_after_admission_is_refused_at_turn_start(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """The stop serializes on a different lock than admission, so the turn
+        start re-checks: a session stopped in between is refused, not resumed."""
+        from agent_bridge.session_prompts import SessionStoppedError
+
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        real = sm._submit_or_queue_prompt_locked
+
+        async def stop_then_admit(sess, prompt, **kw):
+            await sm.stop_session(sess.session_id)  # lands between the check and the turn start
+            return await real(sess, prompt, **kw)
+
+        sm._submit_or_queue_prompt_locked = stop_then_admit
+        with pytest.raises(SessionStoppedError):
+            await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert session.status == SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_the_drain_kick_never_resumes_for_a_no_resume_prompt(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.stop_session(session.session_id)
+        resumed = []
+
+        async def resume(*a, **k):
+            resumed.append(a)
+
+        sm.resume_session = resume
+        await sm._kick_pending_drain(session, allow_resume=False)
+        assert resumed == [] and session.status == SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_a_dead_client_is_reported_as_not_running_and_never_respawned(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_prompts import SessionNotRunningError
+
+        sm = SessionManager(tmp_db)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        session.client = None  # crashed: still IDLE, not STOPPED
+        resumed = []
+
+        async def resume(*a, **k):
+            resumed.append(a)
+
+        sm.resume_session = resume
+        with pytest.raises(SessionNotRunningError, match="^session_not_running"):
+            await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert resumed == [] and session.status == SessionStatus.IDLE
+
+    @pytest.mark.asyncio
+    async def test_a_stop_notice_suppresses_a_deferred_handoff_until_the_stop(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """Usage can cross critical during the notice's own turn: the settle must
+        not roll a successor the stop would then leave running."""
+        sm = _sm(tmp_db, enabled=True)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        session._handoff_pending = True  # owed when the notice's turn settles
+        session.status = SessionStatus.IDLE
+        sm._schedule_auto_handoff_if_pending(session)
+        assert not sm._auto_handoff_tasks and session._handoff_pending is False
+        await sm.stop_session(session.session_id)
+        assert session._stop_requested is False  # a later resume hands off normally again
+
+    @pytest.mark.asyncio
+    async def test_a_refused_stop_rolls_the_stop_marker_back(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_manager import SessionBusyError
+
+        sm = _sm(tmp_db, enabled=True)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        assert session._stop_requested is True
+        monkeypatched = type(session).has_active_background_tasks
+        try:
+            type(session).has_active_background_tasks = property(lambda self: True)
+            with pytest.raises(SessionBusyError):
+                await sm.stop_session(session.session_id)
+        finally:
+            type(session).has_active_background_tasks = monkeypatched
+        assert session._stop_requested is False  # later handoffs behave normally again
+
+    @pytest.mark.asyncio
+    async def test_an_in_flight_handoff_yields_to_a_stop_requested_meanwhile(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        """A handoff whose brief was being authored when the stop's notice
+        arrived must not spawn a successor the stop would never reach."""
+        mock_acp_client.send_prompt = AsyncMock(return_value={"response_text": "## Objective\nX",
+                                                               "stop_reason": "end_turn"})
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="wt-1")
+        pred._stop_requested = True  # the notice was admitted while the brief was being written
+        before = set(sm._sessions)
+        with pytest.raises(RuntimeError, match="stop was requested"):
+            await sm.handoff_session(pred.session_id, reason="context-pressure")
+        assert set(sm._sessions) == before and pred.status != SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_a_prompt_queued_behind_the_notice_keeps_the_stop_marker(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        sm = _sm(tmp_db, enabled=True)
+        session = await sm.start_session(spawn_target, caller_id="wt-1")
+        session.status = SessionStatus.RUNNING  # a turn is live: the notice queues
+        await sm.submit_or_queue_prompt(session.session_id, "wind down", no_resume=True)
+        result = await sm.submit_or_queue_prompt(session.session_id, "another ask")
+        assert result["queued"] is True and session._stop_requested is True

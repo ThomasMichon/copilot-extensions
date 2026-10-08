@@ -1,0 +1,9 @@
+{
+  "comment": "send --json carries one typed outcome (delivered/queued/steered/interrupted/duplicate, or refused_busy 75 / refused_unavailable 69 / refused_conflict 65); stop --grace queues a wind-down notice, waits for it, then stops with phased --json output",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

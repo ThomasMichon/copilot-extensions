@@ -171,6 +171,14 @@ def _companion_seed_prompt(prompt: str | None) -> str | None:
 
 
 def _cmd_send(args: argparse.Namespace) -> None:
+    from .send_outcome import run_send
+
+    run_send(args, _send)
+
+
+def _send(args: argparse.Namespace) -> None:
+    from .send_outcome import SendRefused
+
     core = _core()
     if getattr(args, "new", False):
         print(
@@ -206,13 +214,11 @@ def _cmd_send(args: argparse.Namespace) -> None:
         expected = (client.resolve_live_session(expected_session_id) or {}).get(
             "session_id") if precheck else None
         if precheck and live["session_id"] not in (expected_session_id, expected):
-            print(
-                f"[FAIL] Target {target!r} now resolves to session "
-                f"{live['session_id']!r}, not expected session "
-                f"{expected_session_id!r}.",
-                file=sys.stderr,
+            raise SendRefused(
+                "refused_unavailable", reason="expected_mismatch", retryable=False, target=target,
+                error=(f"Target {target!r} now resolves to session {live['session_id']!r}, "
+                       f"not expected session {expected_session_id!r}."),
             )
-            sys.exit(1)
         if not prompt.strip():
             # An empty envelope still costs the receiver a whole model turn.
             print(
@@ -224,12 +230,10 @@ def _cmd_send(args: argparse.Namespace) -> None:
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if getattr(args, "expected_session_id", None):
-        print(
-            f"[FAIL] Target {target!r} has no live session matching "
-            f"{args.expected_session_id!r}.",
-            file=sys.stderr,
+        raise SendRefused(
+            "refused_unavailable", reason="not_found", retryable=False, target=target,
+            error=f"Target {target!r} has no live session matching {args.expected_session_id!r}.",
         )
-        sys.exit(1)
 
     caller_id = core._caller_id_for(args)
     session_id = core._resolve_target(client, target, force=getattr(args, "force", False))
@@ -296,6 +300,9 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
 
 
 def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str) -> None:
+    from .client import BridgeClientError
+    from .send_outcome import emit, live_outcome, refusal_from_live_error
+
     core = _core()
     sender = core._live_sender_label(args)
     reply_to = core._live_reply_to(args)
@@ -310,19 +317,32 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         delivery_options["idempotency_key"] = idempotency
     if expected_session_id:
         delivery_options["expected_session_id"] = expected_session_id
-    result = client.send_live_message(
-        session_id,
-        sender=sender,
-        body=prompt,
-        reply_to=reply_to,
-        kind=kind,
-        delivery=delivery,
-        wait=wait,
-        wait_timeout=wait_timeout,
-        **delivery_options,
-    )
+    try:
+        result = client.send_live_message(
+            session_id,
+            sender=sender,
+            body=prompt,
+            reply_to=reply_to,
+            kind=kind,
+            delivery=delivery,
+            wait=wait,
+            wait_timeout=wait_timeout,
+            **delivery_options,
+        )
+    except BridgeClientError as exc:
+        refused = refusal_from_live_error(exc, session_id)
+        if refused is None:
+            raise
+        raise refused from exc
     if args.json:
-        core._json_out({"delivered": True, "target": session_id, **result})
+        # A daemon that reports duplicates always includes the field; an older
+        # one omits it, so a keyed retry can't be told from a first delivery.
+        duplicate_known = not idempotency or "duplicate" in result
+        payload = {"delivered": True, "target": session_id, **result,
+                   "outcome": live_outcome(result, delivery, duplicate_known=duplicate_known)}
+        if not duplicate_known:
+            payload["duplicate"] = None
+        emit(payload)
         return
     mid = result.get("message_id")
     kind_note = "" if kind == "prompt" else f", kind {kind}"
@@ -348,6 +368,21 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         )
 
 
+def _handed_off_unnamed(client, session_id: str) -> bool:
+    """Whether a successful submit to an older daemon (one that doesn't name the
+    session that took the prompt) was taken by a successor: the target then
+    already reads stopped. A current daemon always names it, so it's not asked."""
+    from .client import BridgeClientError
+    from .protocol import COOPERATIVE_STOP_PROTOCOL_VERSION
+
+    if client.daemon_supports(COOPERATIVE_STOP_PROTOCOL_VERSION):
+        return False
+    try:
+        return (client.get_session(session_id) or {}).get("status") == "stopped"
+    except BridgeClientError:
+        return False
+
+
 def _submit_and_stream(
     client,
     args: argparse.Namespace,
@@ -357,19 +392,52 @@ def _submit_and_stream(
     caller_id: str | None,
 ) -> None:
     core = _core()
-    queue = getattr(args, "queue", False)
-    result = client.submit_prompt(
-        session_id,
-        prompt,
-        queue=queue,
-        caller_id=caller_id,
-        request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
-    )
+    from .send_outcome import emit, prompt_outcome
 
+    queue = getattr(args, "queue", False)
+    from .client import BridgeClientError
+
+    try:
+        result = client.submit_prompt(
+            session_id,
+            prompt,
+            queue=queue,
+            caller_id=caller_id,
+            request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
+        )
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            # The session vanished between resolving it and this submit.
+            from .send_outcome import SendRefused
+
+            raise SendRefused("refused_unavailable", reason="not_found", retryable=False,
+                              target=session_id, error=str(exc.detail)) from exc
+        if exc.status != 409:
+            raise
+        # A turn started between the busy check and this submit: the same
+        # refusal as a busy target, not a generic HTTP failure.
+        print(f"[BUSY] Session {session_id} started a turn before this prompt arrived: {exc.detail}",
+              file=sys.stderr)
+        sys.exit(core._SEND_BUSY_EXIT)
+
+    # A prompt-triggered handoff delivers to a successor: report, and follow, the
+    # session that actually took the prompt. A daemon older than generation 25
+    # doesn't name it; if the target reads stopped right after a successful
+    # submit, a handoff took the prompt elsewhere, so say so rather than report
+    # (or stream) the retired predecessor as if it had run it.
+    if "session_id" not in result and _handed_off_unnamed(client, session_id):
+        print(f"[!] Session {session_id} handed this prompt to a successor this agent-bridge "
+              "daemon doesn't name (update the daemon to follow it)", file=sys.stderr)
+        if args.json:
+            emit({**result, "session_id": None, "handed_off_from": session_id, "connection": None,
+                  "outcome": prompt_outcome(result)})
+        return
+    session_id = result.get("session_id") or session_id
     if result.get("queued"):
         ident = core._connection_identity(client, session_id)
         if args.json:
-            core._json_out({"session_id": session_id, "connection": ident, **result})
+            emit({"session_id": session_id, "connection": ident, **result,
+                  "outcome": prompt_outcome(result)})
             return
         pos = result.get("position")
         qid = result.get("queue_id")
@@ -384,7 +452,8 @@ def _submit_and_stream(
     ident = core._connection_identity(client, session_id)
 
     if args.json:
-        core._json_out({"session_id": session_id, "connection": ident, **result})
+        emit({"session_id": session_id, "connection": ident, **result,
+              "outcome": prompt_outcome(result)})
         return
 
     print(f"[>] Session {session_id} -- turn {turn_index}")
@@ -578,7 +647,7 @@ def _resolve_target(
             sys.exit(1)
 
     print(f"[FAIL] '{target}' is not a known agent name or session ID", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(core._SEND_UNAVAILABLE_EXIT)
 
 
 def _match_agents(target: str, agents: list[dict]) -> list[str]:
@@ -776,13 +845,19 @@ def _cmd_create(args: argparse.Namespace) -> None:
             print(f"[OK] Session {session_id} created -- send work with: agent-bridge send {session_id} \"<prompt>\"")
         return
 
-    core._submit_and_stream(
-        client,
-        args,
-        session_id,
-        _companion_seed_prompt(prompt),
-        caller_id=caller_id,
-    )
+    from .send_outcome import SendRefused
+
+    try:
+        core._submit_and_stream(
+            client,
+            args,
+            session_id,
+            _companion_seed_prompt(prompt),
+            caller_id=caller_id,
+        )
+    except SendRefused as refused:
+        print(f"[FAIL] {refused.error}", file=sys.stderr)
+        sys.exit(refused.exit_code)
 
 
 def _write_session_id_file(path_value: str, session_id: str) -> None:

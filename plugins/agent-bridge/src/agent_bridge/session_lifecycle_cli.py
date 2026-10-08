@@ -27,6 +27,9 @@ def _cmd_stop(args: argparse.Namespace) -> None:
     from .client import BridgeClientError
 
     client = _core()._get_client()
+    if getattr(args, "grace", None) is not None or getattr(args, "json", False):
+        _cmd_stop_phased(client, args)
+        return
     try:
         client.stop_session(
             args.session_id,
@@ -49,6 +52,44 @@ def _cmd_stop(args: argparse.Namespace) -> None:
         print(f"[FAIL] Could not stop session {args.session_id}: {exc.detail}")
         sys.exit(1)
     print(f"[OK] Session {args.session_id} stopped")
+
+
+def _grace_seconds(value: str) -> float:
+    """A finite, non-negative ``--grace`` (``nan``/``inf`` would never time out)."""
+    import math
+
+    try:
+        seconds = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number of seconds: {value!r}") from None
+    if not math.isfinite(seconds) or seconds < 0:
+        raise argparse.ArgumentTypeError("must be a finite number of seconds, 0 or more")
+    return seconds
+
+
+def _cmd_stop_phased(client, args: argparse.Namespace) -> None:
+    """``stop --grace``/``--json``: the cooperative, phased stop (session_stop)."""
+    from .session_stop import STOP_BUSY_EXIT, STOP_UNCONFIRMED_EXIT, STOP_UNSUPPORTED_EXIT, run_stop
+
+    as_json = getattr(args, "json", False)
+    result = run_stop(
+        client, args.session_id, grace=getattr(args, "grace", None),
+        force=getattr(args, "force", False), reap_host=getattr(args, "reap_host", False),
+        on_phase=None if as_json else (lambda name: print(f"[..] {args.session_id}: {name}")),
+    )
+    if as_json:
+        print(json.dumps(result, indent=2))
+    outcome = result["outcome"]
+    if outcome in ("stopped", "already_stopped"):
+        if not as_json:
+            if result["acknowledged"] is False:
+                print("    (the agent didn't wind down within the grace period; stopped anyway)")
+            print(f"[OK] Session {args.session_id} {outcome.replace('_', ' ')}")
+        return
+    if not as_json:
+        print(f"[FAIL] Could not stop session {args.session_id}: {result.get('error')}", file=sys.stderr)
+    sys.exit({"refused_busy": STOP_BUSY_EXIT, "refused_unsupported": STOP_UNSUPPORTED_EXIT}.get(
+        outcome, STOP_UNCONFIRMED_EXIT))
 
 
 def _cmd_end(args: argparse.Namespace) -> None:
@@ -330,9 +371,10 @@ def _cmd_agent(args: argparse.Namespace) -> None:
 
 
 def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None:
-    stop_p = sub.add_parser("stop", help="Stop a session")
+    stop_p = sub.add_parser("stop", help="Stop a session (with --grace, ask the agent to wind down first)")
     stop_p.add_argument("session_id", help="Session ID")
-    stop_p.add_argument("--force", action="store_true", help="Tear down even with active background sub-agent tasks (kills them). Prefer waiting for them to finish.")
+    stop_p.add_argument("--force", action="store_true", help="Tear down even with active background sub-agent tasks (kills them), skipping any --grace notice. Prefer waiting for them to finish.")
+    stop_p.add_argument("--grace", type=_grace_seconds, default=None, metavar="SECONDS", help="Cooperative stop: queue a wind-down notice (never interrupting a running turn), wait up to SECONDS for the agent to act on it and settle, then stop the session either way. A notice still queued at the deadline is withdrawn.")
     stop_p.add_argument("--reap-host", action="store_true", help="Also retire the owned Session Host child instead of preserving it for reattachment")
     stop_p.set_defaults(func=_cmd_stop)
 
