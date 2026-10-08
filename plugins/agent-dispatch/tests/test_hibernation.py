@@ -525,6 +525,283 @@ def test_run_detach_claim_add_degrades_gracefully_without_agent_worktrees(
     assert out["suspended"]["claim"] is None
 
 
+# -- CLI: delegate a detached PR-watch wait to agent-pull-requests ----------
+
+
+def test_run_pr_watch_requires_both_repo_and_number(capsys):
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+                "--pr-watch-repo", "o/n", "--", "sleep", "1",
+            ]
+        )
+    )
+    assert rc == 2
+    assert "together" in capsys.readouterr().err
+
+
+def test_run_pr_watch_requires_detach_and_task(capsys):
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--resume", "m/wt-1",
+                "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+            ]
+        )
+    )
+    assert rc == 2
+    assert "--detach and --task" in capsys.readouterr().err
+
+
+def test_run_pr_watch_delegates_instead_of_spawning(capsys, monkeypatch):
+    from agent_dispatch import hibernation_claims, identity
+
+    spawned = {"called": False}
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._spawn_detached_waiter",
+        lambda spec: spawned.__setitem__("called", True) or {"pid": 1, "argv": []},
+    )
+    delegated = {}
+
+    def fake_delegate(args, spec, prepared):
+        delegated["args"] = (args.pr_watch_repo, args.pr_watch_number)
+        delegated["generation"] = prepared["generation"]
+        return {
+            "delegated_to": "agent-pull-requests-watch-daemon",
+            "pid": None,
+            "argv": ["agent-pull-requests", "watch", "subscribe"],
+        }
+
+    monkeypatch.setattr("agent_dispatch.__main__._delegate_to_pr_watch_daemon", fake_delegate)
+    fake = _FakeSuspendClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt-1"))
+    monkeypatch.setattr(
+        hibernation_claims, "add_hibernation_claim", lambda task_id, **k: {"state": "active"}
+    )
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+                "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+            ]
+        )
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["detached"] is True
+    assert out["delegated_to"] == "agent-pull-requests-watch-daemon"
+    assert out["pid"] is None
+    assert spawned["called"] is False
+    assert delegated["args"] == ("o/n", 42)
+    assert delegated["generation"] == 7
+
+
+def test_run_pr_watch_delegation_failure_rolls_back_like_spawn_failure(capsys, monkeypatch):
+    from agent_dispatch import hibernation_claims, identity
+
+    def fake_delegate(args, spec, prepared):
+        raise RuntimeError("agent-pull-requests binstub not found")
+
+    monkeypatch.setattr("agent_dispatch.__main__._delegate_to_pr_watch_daemon", fake_delegate)
+    fake = _FakeSuspendClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt-1"))
+    monkeypatch.setattr(
+        hibernation_claims, "add_hibernation_claim", lambda task_id, **k: {"state": "active"}
+    )
+    monkeypatch.setattr(
+        hibernation_claims, "release_hibernation_claim", lambda *_a, **_k: {"state": "released"}
+    )
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+                "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+            ]
+        )
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["detached"] is False
+    assert "could not register the pr-watch delegation" in out["error"]
+
+
+def test_delegate_to_pr_watch_daemon_subscribes_and_arms(monkeypatch):
+    from agent_dispatch import execution_cli, hibernation, procutil
+
+    monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
+    monkeypatch.setattr(execution_cli.shutil, "which", lambda name: f"/bin/{name}")
+
+    calls = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"registered": True})
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        calls["argv"] = argv
+        return _Proc()
+
+    monkeypatch.setattr(execution_cli.subprocess, "run", fake_run)
+
+    fake = _FakeWaiterFinishClient()
+    monkeypatch.setattr(
+        execution_cli,
+        "_core",
+        lambda: type("M", (), {"_client": staticmethod(lambda _a: fake)})(),
+    )
+
+    args = _args(
+        [
+            "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+            "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+            "--pr-watch-until", "merged,closed",
+        ]
+    )
+    spec = hibernation.RunSpec(
+        command=("<delegated>",), resume_worktree="m/wt-1", task_id="t-1",
+    )
+
+    result = execution_cli._delegate_to_pr_watch_daemon(args, spec, {"generation": 7})
+
+    assert result["delegated_to"] == "agent-pull-requests-watch-daemon"
+    assert result["pid"] is None
+    argv = calls["argv"]
+    assert argv[0] == "/bin/agent-pull-requests"
+    assert argv[1:4] == ["watch", "subscribe", "--repo"]
+    assert "--subscriber-id" in argv and "t-1:7" in argv
+    assert argv.count("--until") == 2
+    assert "merged" in argv and "closed" in argv
+    notify_idx = argv.index("--notify-argv")
+    notify_argv = argv[notify_idx + 1:]
+    assert notify_argv[0] == "/py"
+    assert "--finish-delegated-waiter" in notify_argv
+    assert "--waiter-generation" in notify_argv
+    assert str(notify_argv[notify_argv.index("--waiter-generation") + 1]) == "7"
+    # arm_run_waiter was called with the sentinel identity, not a real pid/host
+    assert fake.calls[0][0] == "t-1"
+    arm_kwargs = fake.calls[0][1]
+    assert arm_kwargs["generation"] == 7
+    assert arm_kwargs["pid"] == execution_cli._PR_WATCH_DAEMON_PID
+    assert arm_kwargs["host"] == execution_cli._PR_WATCH_DAEMON_HOST
+    assert arm_kwargs["start_token"] in notify_argv
+
+
+def test_delegate_to_pr_watch_daemon_raises_when_subscribe_fails(monkeypatch):
+    from agent_dispatch import execution_cli, hibernation, procutil
+
+    monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
+    monkeypatch.setattr(execution_cli.shutil, "which", lambda name: f"/bin/{name}")
+
+    class _Proc:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr(execution_cli.subprocess, "run", lambda *_a, **_k: _Proc())
+
+    args = _args(
+        [
+            "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+            "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+        ]
+    )
+    spec = hibernation.RunSpec(command=("<delegated>",), resume_worktree="m/wt-1", task_id="t-1")
+
+    try:
+        execution_cli._delegate_to_pr_watch_daemon(args, spec, {"generation": 7})
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "boom" in str(exc)
+
+
+def test_delegate_to_pr_watch_daemon_raises_when_arm_rejected(monkeypatch):
+    from agent_dispatch import execution_cli, hibernation, procutil
+
+    monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "/py")
+    monkeypatch.setattr(execution_cli.shutil, "which", lambda name: f"/bin/{name}")
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"registered": True})
+        stderr = ""
+
+    monkeypatch.setattr(execution_cli.subprocess, "run", lambda *_a, **_k: _Proc())
+
+    class _RejectingClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def arm_run_waiter(self, *_a, **_k):
+            return {"accepted": False, "waiter": None}
+
+    monkeypatch.setattr(
+        execution_cli,
+        "_core",
+        lambda: type("M", (), {"_client": staticmethod(lambda _a: _RejectingClient())})(),
+    )
+
+    args = _args(
+        [
+            "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+            "--pr-watch-repo", "o/n", "--pr-watch-number", "42",
+        ]
+    )
+    spec = hibernation.RunSpec(command=("<delegated>",), resume_worktree="m/wt-1", task_id="t-1")
+
+    try:
+        execution_cli._delegate_to_pr_watch_daemon(args, spec, {"generation": 7})
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "refused to arm" in str(exc)
+
+
+def test_finish_delegated_waiter_retires_via_finish_run_waiter(capsys, monkeypatch):
+    fake = _FakeWaiterFinishClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr(
+        "sys.stdin",
+        type("S", (), {"read": staticmethod(lambda: json.dumps({
+            "repo": "o/n", "number": 42, "transitions": ["merged"],
+            "pr_state": "closed", "merged": True,
+        }))})(),
+    )
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--finish-delegated-waiter",
+                "--resume", "m/wt-1", "--task", "t-1",
+                "--waiter-generation", "7",
+                "--pr-watch-start-token", "pr-watch:o/n#42:t-1:7",
+            ]
+        )
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["delegated"] is True
+    assert out["accepted"] is True
+    assert "merged" in out["message"]
+    assert fake.calls[0][0] == "t-1"
+    finish_kwargs = fake.calls[0][1]
+    assert finish_kwargs["generation"] == 7
+    assert finish_kwargs["start_token"] == "pr-watch:o/n#42:t-1:7"
+
+
+def test_finish_delegated_waiter_requires_identity_args(capsys):
+    rc = _cmd_run(_args(["run", "--finish-delegated-waiter", "--task", "t-1"]))
+    assert rc == 2
+    assert "requires --task" in capsys.readouterr().err
+
+
 def test_release_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
     """Unit-level: release_hibernation_claim builds the expected argv and parses
     a successful JSON reply, and also best-effort mirrors the disposition

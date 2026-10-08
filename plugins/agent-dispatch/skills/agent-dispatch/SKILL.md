@@ -633,6 +633,12 @@ torn down while it waits, then re-woken with its context intact. See the plugin
 README (**Hibernate the wait**) and `visions/plugins/agent-dispatch`
 (§*hibernate-the-wait*).
 
+For a PR-watch specifically, prefer delegating to the shared
+`agent-pull-requests` watch daemon over spawning yet another per-task waiter
+process: `run --detach --task <id> --pr-watch-repo owner/name --pr-watch-number 42`
+(no `-- <cmd>` needed). See the plugin README (**Delegating a PR-watch wait to
+the shared daemon**).
+
 ### 3. Claim, work, finish
 
 ```bash

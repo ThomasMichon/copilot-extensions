@@ -387,10 +387,23 @@ class TaskQueue(
                 "  fields TEXT NOT NULL DEFAULT '{}',"
                 "  sender TEXT,"
                 "  taken INTEGER NOT NULL DEFAULT 0,"
-                "  taken_at REAL"
+                "  taken_at REAL,"
+                "  idempotency_key TEXT"
                 ")"
             )
+            task_steer_columns = {r["name"] for r in conn.execute("PRAGMA table_info(task_steer)")}
+            if "idempotency_key" not in task_steer_columns:
+                conn.execute("ALTER TABLE task_steer ADD COLUMN idempotency_key TEXT")
             conn.execute(            "CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)"
+            )
+            # A client-side retry of an ambiguous (already-committed-but-the-
+            # response-timed-out) submission reuses the same key -- this
+            # unique index is what makes ``submit_steer``'s dedup check a
+            # race-safe DB-level guarantee rather than a check-then-insert
+            # that a concurrent retry could still slip past.
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_steer_idempotency "
+                "ON task_steer(task_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
             )
             conn.execute(
             "CREATE TABLE IF NOT EXISTS run_waiters ("

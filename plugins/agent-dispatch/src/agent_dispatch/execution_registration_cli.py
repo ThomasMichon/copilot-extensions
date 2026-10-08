@@ -44,7 +44,39 @@ def register_execution_commands(sub) -> None:
     rnp.add_argument("--waiter-generation", type=int, help=argparse.SUPPRESS)
     rnp.add_argument("--machine")
     rnp.add_argument("--worktree")
-    rnp.add_argument("command", nargs=argparse.REMAINDER, help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)")
+    rnp.add_argument(
+        "--pr-watch-repo",
+        metavar="OWNER/NAME",
+        help=(
+            "delegate this detached wait to the shared agent-pull-requests "
+            "watch daemon instead of spawning a per-task OS waiter process "
+            "-- the repo slug to watch (requires --detach, --task, and "
+            "--pr-watch-number; the '-- <cmd>' tail becomes optional/"
+            "informational only, since nothing is actually executed)"
+        ),
+    )
+    rnp.add_argument(
+        "--pr-watch-number",
+        type=int,
+        metavar="N",
+        help="PR number to watch (paired with --pr-watch-repo)",
+    )
+    rnp.add_argument(
+        "--pr-watch-until",
+        metavar="CSV",
+        help=(
+            "comma-list of agent-pull-requests transitions to wake on "
+            "(merged, closed, review_changed, mergeable_changed, "
+            "checks_changed); default: its own 'merged,closed'"
+        ),
+    )
+    rnp.add_argument("--finish-delegated-waiter", action="store_true", help=argparse.SUPPRESS)
+    rnp.add_argument("--pr-watch-start-token", help=argparse.SUPPRESS)
+    rnp.add_argument(
+        "command",
+        nargs=argparse.REMAINDER,
+        help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)",
+    )
     rnp.set_defaults(func=_core()._cmd_run)
 
     evp = sub.add_parser(

@@ -1430,6 +1430,36 @@ than blocking the detach itself. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Features/*hibernate-the-wait*).
 
+### Delegating a PR-watch wait to the shared daemon (`--pr-watch-repo`)
+
+A plain `--detach` wait spawns one OS process per task -- fine for an
+occasional wait, wasteful when many tasks are each independently polling the
+same handful of PRs. For a PR-watch specifically, opt in to delegation
+instead: the coordinator registers the wait with `agent-pull-requests`'s
+shared watch daemon (one poller per `(repo, PR)`, any number of subscribers
+multiplexed onto it) rather than spawning a process at all.
+
+```bash
+agent-dispatch run --detach --resume <machine/worktree> --task <id> \
+  --pr-watch-repo owner/name --pr-watch-number 42 \
+  [--pr-watch-until merged,closed,review_changed]
+```
+
+This is an **explicit opt-in** -- never inferred from the `-- <cmd>` tail's
+own argv shape, which this layer has no business parsing or depending on.
+Both `--pr-watch-repo` and `--pr-watch-number` are required together, and
+only alongside `--detach --task`. The waiter is armed **synchronously**,
+immediately, with a sentinel identity (never a real PID) instead of a
+process -- the existing dead-waiter recovery sweep only ever reaps an active
+waiter whose recorded host matches the current machine, so this sentinel is
+permanently treated as "unknown" (never falsely declared dead); the daemon's
+own durable, restart-reattaching subscriber state is the real liveness
+backstop. Requires the `agent-pull-requests` plugin's binstub on `PATH`.
+Known gap: if the task's waiter is retired through a different path (e.g. an
+operator aborts the task directly), the daemon subscription isn't
+automatically cancelled -- it lingers harmlessly until the PR resolves or
+times out.
+
 ### Diagnosing a stuck hibernation (`agent-dispatch doctor`)
 
 A hibernating task's session is *supposed* to be gone -- that's the whole
@@ -1600,6 +1630,17 @@ agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "
   failure never loses the durable steer. `steer take --all` is the owner-gated
   wake-side read that atomically drains every pending answer for the resumed
   worker; plain `steer take` remains the one-at-a-time inspection form.
+- **Safe to retry on an ambiguous timeout.** `submit_steer`'s own write is a
+  single fast local transaction, but the full HTTP round trip can still
+  exceed a client's request timeout under load even though the write already
+  landed and committed (a live-reproduced failure: an operator's answer was
+  already recorded while Picker still reported delivery failure). `steer`
+  carries a caller-supplied-or-generated `idempotency_key`; the coordinator
+  recognizes a retry with the same key and returns the already-committed
+  result unchanged instead of appending a second answer.
+  `DispatchClient.steer()` retries only a genuine `httpx.TimeoutException`
+  (never any other failure) up to `AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES`
+  times (default 2), reusing the same key across attempts.
 - **General, not domain-specific.** The coordinator stores card/steer objects
   opaquely, so any dispatched agent that must block on operator input uses this --
   the same transport a picker "form" surface or an `ask_user` skill writes through.

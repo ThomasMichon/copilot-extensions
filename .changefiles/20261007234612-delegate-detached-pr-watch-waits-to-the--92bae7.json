@@ -1,0 +1,9 @@
+{
+  "comment": "Delegate detached pr-watch waits to the shared agent-pull-requests watch daemon (--pr-watch-repo/--pr-watch-number) instead of spawning a per-task OS process; make steer submit idempotency-keyed and safe to retry on an ambiguous read-timeout so a slow-but-already-committed answer is never reported as a lost delivery",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

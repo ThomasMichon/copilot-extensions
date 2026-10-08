@@ -22,5 +22,11 @@
   ],
   "skills": [
     "skills/"
+  ],
+  "dependencies": [
+    {
+      "name": "agent-pull-requests",
+      "marketplace": "copilot-extensions"
+    }
   ]
 }

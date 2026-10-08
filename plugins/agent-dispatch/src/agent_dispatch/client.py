@@ -18,6 +18,7 @@ from .client_registrations import RegistrationClientMixin
 from .client_schedules import ScheduleClientMixin
 from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
+from .client_steering import SteeringClientMixin
 from .client_suspend import SuspendClientMixin
 from .client_transport import ConnectRetryClient
 from .client_verification import VerificationClientMixin
@@ -48,7 +49,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin):
+class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -507,76 +508,6 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
 
     def detach(self, task_id: str) -> dict:
         return self._unwrap(self._http.post(f"/tasks/{task_id}/detach"))
-
-    # -- steering: card + steer inbox ----------------------------------------
-
-    def set_card(self, task_id: str, worker_id: str, *, card: dict) -> dict:
-        """Attach a card to a held task (awaiting-steer if it carries a form)."""
-        return self._unwrap(
-            self._http.post(
-                f"/tasks/{task_id}/card",
-                json={"worker_id": worker_id, "card": card},
-            )
-        )
-
-    def save_card_draft(self, task_id: str, *, fields: dict) -> dict:
-        """Persist an operator's not-yet-submitted draft answer. Never touches
-        ``awaiting_steer``/status -- the task stays blocked exactly as before,
-        durably visible from any surface/machine via ``get``/``card show``."""
-        return self._unwrap(
-            self._http.post(
-                f"/tasks/{task_id}/card-draft",
-                json={"fields": fields},
-            )
-        )
-
-    def clear_card_draft(self, task_id: str) -> dict:
-        """Clear a task's saved draft. Never touches ``awaiting_steer``/status."""
-        return self._unwrap(self._http.delete(f"/tasks/{task_id}/card-draft"))
-
-    def steer(
-        self,
-        task_id: str,
-        *,
-        fields: dict,
-        sender: str | None = None,
-        wake: bool = True,
-        message: str | None = None,
-        expected_status: str | None = None,
-    ) -> dict:
-        """Submit an answer and ask the coordinator to resume the task owner."""
-        return self._unwrap(
-            self._http.post(
-                f"/tasks/{task_id}/steer",
-                json={
-                    "fields": fields,
-                    "sender": sender,
-                    "wake": wake,
-                    "message": message,
-                    "expected_status": expected_status,
-                },
-            )
-        )
-
-    def steer_take(
-        self, task_id: str, worker_id: str, *, all_pending: bool = False
-    ) -> dict:
-        """Consume the next pending steer (returns ``{task_id, steer}``; steer is
-        the payload dict or ``None`` when the inbox is empty). With
-        ``all_pending``, drains the inbox and returns ``{task_id, steers}``."""
-        return self._unwrap(
-            self._http.post(
-                f"/tasks/{task_id}/steer/take",
-                json={
-                    "worker_id": worker_id,
-                    "all_pending": all_pending,
-                },
-            )
-        )
-
-    def steer_log(self, task_id: str) -> list[dict]:
-        """The full steer inbox for a task (oldest first)."""
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/steer-log"))
 
     def recover(self) -> dict:
         return self._unwrap(self._http.post("/recover"))
