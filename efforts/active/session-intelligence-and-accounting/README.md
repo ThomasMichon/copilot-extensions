@@ -223,3 +223,28 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 - Rebased cleanly onto `origin/dev` and opened PR #5690 for review. This closes
   only the reader slice of #5676; scheduled sync/compression and accounting
   ingestion remain open next slices.
+- Copilot review ran five rounds over PR #5690, each COMMENTED (non-blocking)
+  until the final APPROVED verdict. Real findings addressed in order: (1) a
+  ZIP archive/fd held open for the whole enumeration generator's lifetime,
+  closed before yielding; (2) a High-severity root path-swap race (traversal
+  through a symlinked `log_root` bypassing the final-component-only
+  `O_NOFOLLOW` guard), fixed by pinning directory listing and per-entry ZIP
+  reads to one verified `O_NOFOLLOW`-opened directory handle on POSIX; (3) a
+  second High-severity finding that deferred `iter_lines()` reads still
+  reopened by path, fixed by carrying a `verified_root` on `ProcessLogRef`
+  and reopening it with `O_NOFOLLOW` immediately before each read; (4) an
+  overly broad `except OSError` that relabeled permission/I-O/descriptor
+  failures as "not a directory", narrowed to the two expected non-directory
+  signals; (5) unrelated `.log` ZIP members (e.g. `notes.log`) incorrectly
+  rejected as non-flat, fixed to check the leaf name against the process-log
+  pattern before rejecting; (6) a relative `log_root` resolving against
+  whatever directory was current at read time, fixed by pinning it absolute
+  at enumeration. Windows keeps the previous, weaker path-based guarantee for
+  all of these POSIX-only protections -- a documented, not hidden, platform
+  gap. Final suite: 486 passed, 25 skipped; all repo-wide guards pass.
+- Merged PR #5690 (squash) after the APPROVED verdict; `pr-complete`
+  reconciled this worktree onto `origin/dev` post-merge. This closes the
+  evidence-reader slice of #5676 only -- scheduled process-log sync/
+  compression, all-session derivation/catalog/accounting (#5677), fleet daily
+  aggregation, consumer vendoring, and release-backed adoption (#5678) remain
+  fully outstanding. The umbrella #5665 stays open.
