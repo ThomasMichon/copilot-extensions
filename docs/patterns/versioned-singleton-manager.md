@@ -364,30 +364,42 @@ successor already running in my own tree?*
       to request the daemon handle in step 3; an inherited pipe (as item 1
       uses for `deploy`, itself a direct child of the process holding the
       other end) cannot serve this purpose, since the new manager process
-      shares no ancestry with the bridge at all. Only once all three of
-      these are independently true — Job opened, daemon handle established
-      and baseline-verified, pipe listening — does the bridge signal ready
-      back to the old manager over the inherited pipe (mirroring the IPC
-      channel item 1 already uses for `deploy`), carrying its pid,
-      `process_start_time` token, and the named pipe's identifier. The old
-      manager's **only** remaining action before step 2 is to persist that
-      exact information as the transient `handoff` record (distinct from
-      the `daemon` record above, in the same manager-scoped state
-      directory) — this is now the single commit point, reached only after
-      the bridge is already fully self-sufficient, so there is no window
-      where the record could exist without the bridge backing it, or the
-      bridge could hold readiness without the record describing it: the
-      two become durable together, in one write, right after the one
-      precondition (bridge self-sufficiency) that makes persisting them
-      meaningful. The persisted `daemon` record itself is **never**
-      overwritten by the bridge's identity — the two records have
-      different lifetimes and different purposes: conflating them would
-      let the bridge's own identity silently clobber the daemon's. If the
+      shares no ancestry with the bridge at all; (d) **the bridge itself —
+      not the old manager — persists the `handoff` record** (its own pid,
+      `process_start_time` token, and the named pipe's identifier,
+      distinct from the `daemon` record above, in the same manager-scoped
+      state directory, written atomically via write-to-temp-then-rename)
+      as the **last** step of becoming self-sufficient, strictly **before**
+      it ever signals ready to anyone. This is deliberate: making the old
+      manager responsible for this write, even as its *only* remaining
+      action, would still leave a window between the bridge's
+      self-sufficiency (already holding the Job open, already preventing
+      `KILL_ON_JOB_CLOSE`) and that write actually landing — if the old
+      manager died in exactly that window, the bridge would be alive and
+      blocking kill-on-close with **no record describing it at all**, and
+      a crash-triggered
+      restart would see nothing and take the create-fresh path, spawning a
+      second daemon beside the survivor. Making the bridge respon­sible for
+      its own record eliminates the window entirely: the bridge is already
+      the one thing this design treats as independently durable across the
+      old manager's death (that is the entire reason it exists), so by
+      construction nothing can make the bridge self-sufficient-and-alive
+      without the record also already being true — there is no second
+      party, and therefore no gap between two parties' actions, left to
+      race. Only *after* its own record is durably written does the bridge
+      signal ready back to the old manager over the inherited pipe
+      (mirroring the IPC channel item 1 already uses for `deploy`); the old
+      manager's own role shrinks to simply **waiting for that signal**
+      before proceeding to step 2 — it writes nothing itself. If the
       bridge-ready signal does not arrive within a bounded timeout, the old
       manager **aborts the update** and keeps running as the current
       version rather than proceeding blind — a failed or slow bridge is a
       reason to retry later, never a reason to exit without
-      handle-continuity confirmed.
+      handle-continuity confirmed. The persisted `daemon` record itself is
+      **never** overwritten by the bridge's identity — the two records have
+      different lifetimes, different purposes, and (now) different
+      writers: conflating them would let the bridge's own identity
+      silently clobber the daemon's.
    2. Only now does the old manager exit — and it exits with a
       **documented, non-zero self-update exit status** (distinct from a
       real crash's own exit codes, and distinct from Linux's
