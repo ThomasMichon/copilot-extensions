@@ -36,7 +36,7 @@ def _check(monkeypatch, *, rc=0, stdout="", stderr="", raises=None, binstub="age
         return subprocess.CompletedProcess(argv, rc, stdout, stderr)
 
     monkeypatch.setattr(vlp.shutil, "which", lambda _n: binstub)
-    monkeypatch.setattr(vlp.subprocess, "run", run)
+    monkeypatch.setattr(vlp, "_run_contained", lambda argv, timeout: run(argv))
     return calls
 
 
@@ -226,20 +226,28 @@ async def test_a_refused_start_fails_the_session_with_a_typed_event(tmp_db, monk
     assert events["launch_refused"] == {"codespace": "example-codespace", "reason": "the operator paused it"}
 
 
-def test_the_check_output_is_decoded_leniently(monkeypatch):
+def test_the_contained_check_decodes_leniently():
     """Malformed bytes must reach the answer validation (and refuse), never raise
     UnicodeDecodeError out of the gate."""
-    seen = {}
+    import sys
 
-    def run(argv, **kw):
-        seen.update(kw)
-        return subprocess.CompletedProcess(argv, 0, "\ufffd{not json", "")
+    done = vlp._run_contained([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xff{x')"], 20)
+    assert done.returncode == 0 and done.stdout.startswith("\ufffd")
 
-    monkeypatch.setattr(vlp.shutil, "which", lambda _n: "agent-codespaces")
-    monkeypatch.setattr(vlp.subprocess, "run", run)
-    assert "without an explicit allow" in vlp.codespace_launch_refusal("cs")
-    assert seen.get("encoding") == "utf-8" and seen.get("errors") == "replace"
 
+def test_a_check_timeout_kills_its_whole_tree():
+    """The provider command is a runtime gate that can start children: a
+    grandchild holding the pipes must not keep the launch waiting."""
+    import sys
+    import time
+
+    grandchild = "import time; time.sleep(30)"
+    code = (f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+            "time.sleep(30)")
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        vlp._run_contained([sys.executable, "-c", code], 1.0)
+    assert time.monotonic() - started < 15
 
 @pytest.mark.asyncio
 async def test_a_raw_codespace_spawn_asks_the_policy_too(monkeypatch):

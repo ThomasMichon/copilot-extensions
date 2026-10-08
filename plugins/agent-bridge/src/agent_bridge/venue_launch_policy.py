@@ -95,23 +95,64 @@ def _check_command() -> list[str] | None:
     return [binstub] if binstub else None
 
 
+def _run_contained(argv: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """Run the check with its whole process tree contained, as
+    ``local_cache_refresh._run_bounded`` does: the provider command is a runtime
+    gate that can start further children, so a timeout (or any interruption)
+    must reach all of them, not only the immediate process. Windows: a
+    kill-on-close Job Object, mandatory -- without one the check isn't run.
+    POSIX: its own process group. Output is decoded as UTF-8 with replacement,
+    so malformed bytes reach the answer validation (and refuse) instead of
+    raising. Raises ``subprocess.TimeoutExpired`` after the cleanup."""
+    import contextlib
+    import signal
+
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+                    "creationflags": no_window_flags()}
+    if os.name != "nt":
+        kwargs["start_new_session"] = True
+    proc, job = spawn_sync_in_kill_on_close_job(argv, **kwargs)
+    if os.name == "nt" and job is None:
+        proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        raise RuntimeError("its process tree couldn't be contained (no Windows Job Object)")
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except BaseException:
+        if job is not None:
+            job.close()
+            job = None
+        elif os.name != "nt":
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+        proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.communicate(timeout=5)
+        raise
+    finally:
+        if job is not None:
+            job.close()
+    text = lambda b: (b or b"").decode("utf-8", "replace")  # noqa: E731
+    return subprocess.CompletedProcess(argv, proc.returncode, text(out), text(err))
+
+
 def codespace_launch_refusal(codespace: str) -> str | None:
     """Why the host refuses a worker launch on ``codespace`` now, or ``None``."""
     command = _check_command()
     if not command:
         return _unchecked_refusal("agent-codespaces is not installed")
     try:
-        result = subprocess.run(
+        result = _run_contained(
             [*command, "launch-check", codespace, "--json",
              "--deadline", f"{time.time() + _CHECK_TIMEOUT - _CHECK_DEADLINE_MARGIN:.3f}"],
-            # Decode leniently: malformed bytes must reach the answer validation
-            # below (and refuse), not escape it as a UnicodeDecodeError.
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_CHECK_TIMEOUT,
-            creationflags=no_window_flags(),
+            _CHECK_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         return f"launch policy check timed out after {_CHECK_TIMEOUT:g}s"
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         return f"launch policy check could not run: {exc}"
     if result.returncode == 0:
         # Fail closed on anything but the explicit allow answer: truncated or
