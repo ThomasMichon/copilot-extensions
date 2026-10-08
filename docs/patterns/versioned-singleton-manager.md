@@ -443,10 +443,18 @@ successor already running in my own tree?*
 ## What does **not** change
 
 - `zdd.cutover.CutoverOrchestrator`, `zdd.routing`, `zdd.breadcrumb`,
-  `zdd.diagnostics` — none of it. The manager is a pure **additive** layer
-  outside the existing, already-proven cutover implementation; it observes
-  the same `active.json` every other consumer already reads, and it never
-  drives, blocks, or participates in a drain.
+  `zdd.diagnostics` — the drain/flip/retire **protocol and semantics** are
+  unchanged: the manager is a pure **additive** layer outside the existing,
+  already-proven cutover logic; it observes the same `active.json` every
+  other consumer already reads, and it never drives, blocks, or
+  participates in a drain. This does **not** mean zero lines change inside
+  `zdd.cutover` itself, though: the next bullet's Windows adapter
+  instrumentation (`CREATE_SUSPENDED`, the manager IPC channel, handle
+  duplication) lands at `deploy`'s own spawn of the passive daemon, which
+  *is* inside `zdd.cutover`'s own Windows breakaway path. Treat this as
+  "the orchestration behavior is unchanged" — never as "no code in
+  `zdd.cutover` changes at all," which an implementer could otherwise read
+  as license to skip the required Windows trust-boundary work below.
 - The self-update loop's `_spawn_self_deploy` (or any installer-driven
   activation trigger) — unchanged on Linux: it already detaches its `deploy`
   orchestrator (`start_new_session=True`), and the manager's subreaper claim
