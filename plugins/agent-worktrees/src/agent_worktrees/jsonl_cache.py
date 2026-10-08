@@ -32,6 +32,12 @@ _cache_lock = threading.Lock()
 _MAX_FILES = 64
 log = logging.getLogger(__name__)
 
+# Monotonic, never-reused generation counter for a rebuilt (non-append)
+# ``complete`` buffer -- see :func:`generation_of`. Protected by
+# ``_cache_lock`` (the same lock already guarding every cache mutation);
+# never reset.
+_generation_seq = 0
+
 
 @dataclass
 class _Entry:
@@ -39,6 +45,7 @@ class _Entry:
     offset: int
     complete: list[dict]
     visible: "_Snapshot"
+    generation: int
 
 
 @dataclass(frozen=True)
@@ -48,6 +55,10 @@ class _Snapshot(Sequence[dict]):
     records: list[dict]
     length: int
     tail: tuple[dict, ...] = ()
+    #: See :func:`generation_of`. Defaults to 0 only for a hand-built
+    #: ``_Snapshot`` outside this module (e.g. a test double); every
+    #: snapshot ``read_jsonl`` actually publishes carries a real value.
+    generation: int = 0
 
     def __len__(self) -> int:
         return self.length + len(self.tail)
@@ -73,6 +84,7 @@ class _Snapshot(Sequence[dict]):
 
 
 _cache: OrderedDict[tuple[str, str], _Entry] = OrderedDict()
+
 
 
 @lru_cache(maxsize=1)
@@ -187,15 +199,52 @@ def read_jsonl(path: Path, *, errors: str = "strict") -> Sequence[dict]:
         if append:
             complete = previous.complete
             complete.extend(decoded)
+            generation = previous.generation
         else:
             complete = decoded
-        visible = _Snapshot(complete, len(complete), tuple(tail))
-        entry = _Entry(stamp, offset + boundary, complete, visible)
+            global _generation_seq
+            _generation_seq += 1
+            generation = _generation_seq
+        visible = _Snapshot(complete, len(complete), tuple(tail), generation)
+        entry = _Entry(stamp, offset + boundary, complete, visible, generation)
         _cache[key] = entry
         _cache.move_to_end(key)
         while len(_cache) > _MAX_FILES:
             _cache.popitem(last=False)
         return visible
+
+
+def generation_of(snapshot: Sequence[dict]) -> int:
+    """Opaque per-process identity for ``snapshot``'s underlying append buffer.
+
+    Stable across a benign in-place append (the common case: ``read_jsonl``
+    reuses and extends the same ``complete`` list, publishing a fresh
+    ``_Snapshot`` wrapper around it each time), but changes whenever the
+    buffer itself was rebuilt from scratch -- a truncation, an atomic
+    replace, or an explicit :func:`invalidate`. A caller that incrementally
+    indexes ``snapshot`` (e.g. a per-key partition built once and only ever
+    extended) can compare this value call-to-call: unchanged means "only
+    append new elements from the prior length onward"; changed means "the
+    old partial index is no longer valid against this buffer at all --
+    rebuild from element 0," even if the new length happens to be larger
+    than, equal to, or smaller than before. Comparing ``len(snapshot)``
+    alone cannot distinguish those cases (a replace can coincidentally grow
+    past the old length).
+
+    Backed by a monotonically allocated counter (``_generation_seq``), never
+    an object identity/address: a freed ``complete`` list's memory can be
+    reused by a later, UNRELATED rebuilt buffer, which would make an
+    ``id()``-based token falsely compare equal across two genuinely
+    different buffers. Falls back to ``id(snapshot)`` only for a
+    hand-built, non-``read_jsonl`` ``_Snapshot`` (e.g. a test double that
+    never went through this module's counter), which cannot collide with a
+    real counter value in practice but is not itself collision-proof the
+    way the counter is.
+    """
+    generation = getattr(snapshot, "generation", None)
+    if isinstance(generation, int) and generation > 0:
+        return generation
+    return id(snapshot)
 
 
 def clear() -> None:

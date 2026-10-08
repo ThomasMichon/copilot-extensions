@@ -1,0 +1,9 @@
+{
+  "comment": "Index the activity log by (worktree_id, event) so the monitor's handoff-discovery sweep no longer re-scans the entire machine-global log on every tick",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

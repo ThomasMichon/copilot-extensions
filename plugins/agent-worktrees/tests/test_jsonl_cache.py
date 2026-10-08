@@ -290,3 +290,55 @@ def test_windows_identity_binding_and_pointer_type_are_reused():
     for _ in range(100):
         assert jsonl_cache._windows_identity_api() is first
     assert jsonl_cache._windows_identity_api.cache_info().currsize == 1
+
+
+def test_generation_of_is_stable_across_a_benign_append(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"first"}\n')
+    before = jsonl_cache.read_jsonl(path)
+    generation_before = jsonl_cache.generation_of(before)
+    _append(path, b'{"event":"second"}\n')
+    after = jsonl_cache.read_jsonl(path)
+    assert after is not before, "a real append publishes a fresh snapshot wrapper"
+    assert jsonl_cache.generation_of(after) == generation_before, (
+        "the underlying append-only buffer is reused in place -- a caller "
+        "indexing it incrementally must see this as the SAME generation"
+    )
+
+
+def test_generation_of_changes_after_a_replace(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_bytes(b'{"event":"old"}\n')
+    before = jsonl_cache.read_jsonl(path)
+    generation_before = jsonl_cache.generation_of(before)
+    replacement = tmp_path / "replacement.jsonl"
+    replacement.write_bytes(b'{"event":"old"}\n{"event":"new"}\n')
+    replacement.replace(path)
+    after = jsonl_cache.read_jsonl(path)
+    assert jsonl_cache.generation_of(after) != generation_before, (
+        "a replace/truncation rebuilds the buffer from scratch -- a caller "
+        "indexing it must see a DIFFERENT generation even though the new "
+        "content coincidentally starts with the same first record"
+    )
+
+
+def test_generation_of_never_repeats_even_if_cpython_reuses_a_freed_address(tmp_path):
+    """A pure ``id()``-based token is not durable once the old ``complete``
+    list is released: CPython is free to reuse that same memory address for
+    an entirely unrelated, later-rebuilt buffer, which would make two
+    genuinely different generations compare equal. ``generation_of`` must
+    be backed by a counter that never repeats, independent of any object's
+    address."""
+    path = tmp_path / "log.jsonl"
+    seen: set[int] = set()
+    for i in range(20):
+        path.write_bytes(f'{{"event":"gen-{i}"}}\n'.encode())
+        snapshot = jsonl_cache.read_jsonl(path)
+        generation = jsonl_cache.generation_of(snapshot)
+        assert generation not in seen, (
+            f"generation {generation} repeated across rebuild {i} -- a counter "
+            "must never collide, unlike a reused memory address"
+        )
+        seen.add(generation)
+        jsonl_cache.invalidate(path)
+        del snapshot

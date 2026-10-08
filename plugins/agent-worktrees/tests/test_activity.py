@@ -246,6 +246,112 @@ def test_read_events_reuses_the_cached_parse_across_distinct_filters(
     assert len(calls) == 2, "an appended event must force exactly one re-parse"
 
 
+def test_read_events_by_worktree_and_event_does_not_rescan_unrelated_history(
+    patch_install_dir: Path,
+):
+    """The ``(worktree_id, event)`` call shape -- the monitor sweep's hot
+    path for handoff discovery -- must not linearly re-filter the entire
+    cached event list on every call. A large number of unrelated worktrees'
+    events must not inflate the cost of a later call for one specific
+    (worktree_id, event) pair: the index grows incrementally from where it
+    left off, not by rescanning from element 0."""
+    for i in range(200):
+        activity.log_event("session_started", worktree_id=f"wt-noise-{i}")
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1", handoff_token="tok-1")
+
+    from agent_worktrees import activity as activity_mod
+
+    first = activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+    assert len(first) == 1
+    log = activity.log_path()
+    idx = activity_mod._index_cache[(str(log), "strict")]
+    assert idx.length == 201, "the first call indexes every record seen so far"
+
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1", handoff_token="tok-2")
+    second = activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+    assert len(second) == 2
+    idx_after = activity_mod._index_cache[(str(log), "strict")]
+    assert idx_after.length == 202, "only the ONE newly appended record is indexed, not a rebuild"
+    assert idx_after.generation == idx.generation, (
+        "a benign append must keep the same cache entry (incremental), never force a full rebuild"
+    )
+
+
+def test_read_events_by_worktree_and_event_rebuilds_after_prune(
+    patch_install_dir: Path,
+):
+    """A prune (or any other atomic replace/truncation) changes the
+    underlying buffer's identity, so the stale partial index must be
+    discarded and rebuilt against the new buffer -- never silently reused
+    against content it never actually indexed."""
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
+    activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+
+    from agent_worktrees import activity as activity_mod
+
+    log = activity.log_path()
+    # A negative retention window sets the cutoff strictly in the future, so
+    # the just-logged event is unconditionally treated as "too old" and
+    # dropped -- deterministic, unlike a 0-day window racing the clock.
+    activity_mod._prune(log, retention_days=-1)
+    result = activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+    assert result == []
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1", handoff_token="tok-new")
+    result2 = activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+    assert len(result2) == 1
+    assert result2[0]["handoff_token"] == "tok-new"
+
+
+def test_keyed_event_bucket_bounds_a_concurrent_callers_own_snapshot_size(
+    patch_install_dir: Path,
+):
+    """A caller working from an OLDER, smaller snapshot of the same growing
+    buffer must never see records a FASTER concurrent caller already pushed
+    the shared index past -- even though those records legitimately exist
+    in the underlying buffer, serving them here would violate THIS caller's
+    own opening-size-bounded view (the same "stops at its opening size"
+    contract jsonl_cache itself documents). Reproduces the shape of a real
+    race between the monitor sweep thread and a hook-IPC handler thread
+    without needing actual thread interleaving: both "callers" below share
+    one real, monotonic generation -- only their own observed ``len()``
+    differs, exactly as it would for two snapshots taken moments apart."""
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1", handoff_token="tok-1")
+
+    from agent_worktrees import activity as activity_mod
+
+    first = activity.read_events(worktree_id="wt-1", event="handoff_cutover_spawn")
+    assert [rec["handoff_token"] for rec in first] == ["tok-1"]
+
+    # A second, "faster" caller observes more appended history and advances
+    # the shared index further.
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1", handoff_token="tok-2")
+    log = activity.log_path()
+    real_snapshot = activity_mod._parse_all_events(log)
+    assert len(real_snapshot) == 2
+    activity_mod._keyed_event_bucket(log, real_snapshot, "wt-1", "handoff_cutover_spawn")
+
+    # A "slower" caller's own captured snapshot is still only 1 record long,
+    # but shares the SAME underlying generation (a benign append, not a
+    # replace/rebuild) -- it must only ever see what IT observed, never tok-2.
+    class _StaleView:
+        generation = real_snapshot.generation
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, index):
+            raise AssertionError(
+                "no new records expected for this caller's own smaller total"
+            )
+
+    result = activity_mod._keyed_event_bucket(log, _StaleView(), "wt-1", "handoff_cutover_spawn")
+    assert [rec["handoff_token"] for rec in result] == ["tok-1"], (
+        "a caller's own smaller snapshot size must bound what it sees, even "
+        "though the shared index has already been advanced further by "
+        "another concurrent caller"
+    )
+
+
 def test_read_events_mutating_a_returned_event_does_not_leak_into_later_reads(
     patch_install_dir: Path,
 ):

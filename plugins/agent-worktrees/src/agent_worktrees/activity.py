@@ -605,6 +605,99 @@ def _rec_ts(rec: dict) -> datetime | None:
     return ts
 
 
+class _KeyedIndex:
+    """Incrementally-built ``(worktree_id, event) -> [(position, record), ...]``
+    partition of one activity log, oldest first within each bucket.
+
+    Exists because :func:`read_events` is the monitor sweep's hot path for
+    handoff discovery (``_monitor_pending_handoff_request``,
+    ``_pending_handoff_retire_requests``) -- called with a fixed
+    ``(worktree_id, event)`` pair on every tick, for every worktree with a
+    live/pending handoff. Without this, each call linearly re-scanned and
+    re-filtered the ENTIRE machine-global log (every event, every worktree,
+    every event kind, for the log's whole 7-day retention window) even
+    though nothing new had been appended since the last call -- the
+    confirmed hot path behind the effort's measured ``read_events``/list-
+    warming profiler cost. Scoped to the common
+    ``worktree_id=...; event=...`` call shape only; every other filter
+    combination (bare ``worktree_id``, ``launch_id``, no filters at all --
+    all rare, operator-facing paths, never the per-tick sweep) still uses
+    the original unindexed full scan below, so this optimization can never
+    change which records a less-common query sees.
+
+    Each bucket entry carries the record's position in the underlying
+    buffer alongside the record itself (not just the record): this index is
+    SHARED across concurrently-called ``read_events`` invocations (the
+    resident monitor's sweep thread, its hook-IPC handler threads, and any
+    in-process tracking-write caller), each of which may have captured its
+    OWN ``snapshot``/``total`` at a different moment. Serving a bucket
+    without bounding by position would leak records a slower caller's own
+    opening-size-bounded snapshot never actually included -- a faster,
+    concurrent caller may have already extended this SHARED index further.
+    Recording position lets every caller filter back down to its own
+    ``total`` before returning, honoring the same "stops at its opening
+    size" contract :mod:`jsonl_cache` itself documents.
+    """
+
+    __slots__ = ("generation", "length", "by_key")
+
+    def __init__(self) -> None:
+        self.generation: int | None = None
+        self.length = 0
+        self.by_key: dict[tuple[str, str], list[tuple[int, dict]]] = {}
+
+
+_index_cache: dict[tuple[str, str], _KeyedIndex] = {}
+_index_lock = threading.Lock()
+# Mirrors jsonl_cache's own _MAX_FILES bound. Production ever indexes one
+# path (the single machine-global activity log); this only guards a
+# pathological number of distinct install dirs (e.g. a long test session)
+# from growing this process-local cache without limit.
+_INDEX_MAX_PATHS = 64
+
+
+def _keyed_event_bucket(
+    path: Path, snapshot: Sequence[dict], worktree_id: str, event: str,
+) -> list[dict]:
+    """Return a stable, ``snapshot``-bounded copy of the indexed bucket.
+
+    Only ever appends new elements onto existing per-key buckets -- never
+    re-filters an element already indexed. A changed
+    :func:`jsonl_cache.generation_of` (a truncation, an atomic replace, or an
+    explicit prune invalidation -- never a benign append) discards the whole
+    index and rebuilds it from element 0 against the new buffer.
+
+    Bounds the returned records to THIS call's own ``total`` (``len(snapshot)``)
+    by stored position, and builds the returned list while still holding
+    ``_index_lock`` -- both required so a concurrent caller working from a
+    different (earlier or later) snapshot of the same growing buffer can
+    never see another caller's bucket extended past its own opening size,
+    nor observe a list still being mutated by another thread's in-progress
+    extend.
+    """
+    cache_key = (str(path), "strict")
+    generation = jsonl_cache.generation_of(snapshot)
+    total = len(snapshot)
+    with _index_lock:
+        idx = _index_cache.get(cache_key)
+        if idx is None or idx.generation != generation:
+            idx = _KeyedIndex()
+            idx.generation = generation
+            _index_cache[cache_key] = idx
+            while len(_index_cache) > _INDEX_MAX_PATHS:
+                _index_cache.pop(next(iter(_index_cache)))
+        if idx.length < total:
+            for position in range(idx.length, total):
+                rec = snapshot[position]
+                rec_wt = rec.get("worktree_id")
+                rec_event = rec.get("event")
+                if isinstance(rec_wt, str) and rec_wt and isinstance(rec_event, str) and rec_event:
+                    idx.by_key.setdefault((rec_wt, rec_event), []).append((position, rec))
+            idx.length = total
+        bucket = idx.by_key.get((worktree_id, event), ())
+        return [rec for position, rec in bucket if position < total]
+
+
 def read_events(
     *,
     since: datetime | None = None,
@@ -615,7 +708,16 @@ def read_events(
 ) -> list[dict]:
     """Return matching events, oldest first."""
     path = log_path()
-    matched: list[dict] = []
+    if worktree_id and event and launch_id is None:
+        snapshot = _parse_all_events(path)
+        candidates = _keyed_event_bucket(path, snapshot, worktree_id, event)
+        matched = candidates
+        if since is not None:
+            matched = [rec for rec in matched if (lambda ts: ts is None or ts >= since)(_rec_ts(rec))]
+        if limit is not None and limit > 0:
+            matched = matched[-limit:]
+        return [copy.deepcopy(rec) for rec in matched]
+    matched = []
     for rec in _parse_all_events(path):
         if worktree_id and rec.get("worktree_id") != worktree_id:
             continue

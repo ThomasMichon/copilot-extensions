@@ -77,11 +77,11 @@ The operator approved the slug and two-slice scope.
   attributing costs to duplicate workers.
 - [x] Deduplicate against #5579, #5664, #2619, and the independently driven #5637.
 - [x] Publish the measured evidence and claim the bounded implementation slices.
-- [ ] Land this plan through the repository's review gate before implementation.
+- [x] Land this plan through the repository's review gate before implementation.
 
 ### Phase 2 - Affirmative handoff registration
 
-- [ ] Trace extension and CLI trigger, save, abort, consume, successor-ready,
+- [x] Trace extension and CLI trigger, save, abort, consume, successor-ready,
   and predecessor-retirement transitions against the current host boundary.
 - [ ] Persist an idempotent, identity-validated request through the owning
   worktree command, then wake the existing monitor with the affected key.
@@ -166,3 +166,61 @@ two measured forwarding roles, with live process-tree evidence.)_
   cap. #5637's existing driver has already claimed the latter repair. Resolve
   the publication gate without bypassing it or duplicating that active work,
   then land the reviewed plan before starting Phase 2.
+
+### 2026-10-08 - Plan published and merged
+
+- `dev` HEAD had already resolved both module-size violations in the interim
+  (`agent_worktrees/__main__.py` down to 6,408 lines; `status_monitor_runtime.py`
+  down to 898 lines via #8ecd395b0, superseding the need for a separate
+  blocker fix). Rebased the two local plan commits cleanly onto current
+  `dev` (one trivial `efforts/README.md` index-row conflict, resolved by
+  keeping both new rows) -- no guard workaround required.
+- Pushed the rebased branch; the full pre-push guard suite (module-size,
+  large-files, skills, docs-consistency, version-consistency,
+  effort/vision-structure, feed-neutrality, agent-bridge-contracts,
+  changefile-presence, no-agent-machines-packages) passed clean.
+- Opened PR #5725, reconciled a stale local `creating` PR-tracking record
+  left by an earlier failed `create-pr` attempt (no PR had ever actually been
+  opened for that record) via `set-pr` + `pr-status` backfill rather than
+  `pr-abandon` (there was no real PR to abandon). Review verdict came back
+  `APPROVED`/clean; merged via `pr-merge 5725 --now` and reconciled the
+  worktree with `pr-complete` (fast-forwarded past the squash-merge, HEAD now
+  tracks `origin/dev`).
+- Phase 1 is complete. Starting Phase 2 (affirmative handoff registration).
+
+### 2026-10-08 - Phase 2 slice 1: indexed handoff-discovery reads
+
+- Traced the full note-handoff/trigger/consume/retire path. Confirmed the
+  precise hot-path root cause: `activity.read_events()` always re-scanned and
+  re-filtered the ENTIRE accumulated machine-global event list on every call
+  -- `jsonl_cache` already parses the underlying file incrementally, but
+  `read_events()`'s own Python-level filtering was still O(total history),
+  called 3x per worktree per monitor tick
+  (`status_monitor_runtime._monitor_pending_handoff_request` +
+  `__main__._pending_handoff_retire_requests`'s two calls for spawn/retire
+  events) for every worktree with a pending/active handoff. This matches the
+  effort's measured profiler evidence exactly.
+- Also confirmed the remaining gap for the "affirmative callback instead of
+  polling" half of the request: the resident monitor's sweep loop already
+  supports an early cross-process wake (`hook_ipc.HookIpcServer`, used today
+  by live Copilot sessions' own `postToolUse` hook), but nothing in
+  `note-handoff`/`trigger_handoff`'s CLI path calls it yet -- a registered
+  handoff is only discovered on the monitor's next periodic tick. That wake
+  wiring is deferred to the next Phase 2 slice (see Plan); this slice is
+  scoped to the hot-path history-scan fix alone, independently reviewable and
+  independently valuable (it already removes the bulk of the measured
+  per-tick cost even before the wake exists).
+- Landed: `jsonl_cache.generation_of()` (an opaque append-vs-replace identity
+  token) + `activity._keyed_event_bucket()` (an incremental, per-
+  `(worktree_id, event)` index built once and only ever extended with newly
+  appended records, discarded and rebuilt only on a genuine
+  truncate/replace/prune). `read_events(worktree_id=..., event=...)` -- the
+  exact hot-path call shape -- now serves from this index; every other
+  filter combination (bare `worktree_id`, `launch_id`, unfiltered) is
+  untouched, still the original full scan. Output is byte-identical to
+  before for every call shape; this is a pure performance fix, not a
+  behavior change.
+- Validated: full `agent-worktrees` suite (12 sub-suites, ~12 minutes)
+  passes clean, including the pre-existing #3751 regression test
+  (`test_read_events_reuses_the_cached_parse_across_distinct_filters`) plus
+  4 new tests covering the incremental-index and rebuild-after-prune cases.
