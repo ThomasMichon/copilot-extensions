@@ -76,7 +76,7 @@ The operator approved the slug and two-slice scope.
 - [x] Map launch ancestry and sample representative Python roles before
   attributing costs to duplicate workers.
 - [x] Deduplicate against #5579, #5664, #2619, and the independently driven #5637.
-- [ ] Publish the measured evidence and claim the bounded implementation slices.
+- [x] Publish the measured evidence and claim the bounded implementation slices.
 - [ ] Land this plan through the repository's review gate before implementation.
 
 ### Phase 2 - Affirmative handoff registration
@@ -159,3 +159,10 @@ two measured forwarding roles, with live process-tree evidence.)_
   while #5637's driver is active.
 - Plan is drafted; no implementation or production process termination has
   been performed for this effort.
+- Evidence and scope claims were published on #5579 and #5664. The first plan
+  publication was blocked by existing module-size violations:
+  `agent_worktrees/__main__.py` is 7,012 lines against a shrink-only ceiling
+  of 7,006; `status_monitor_runtime.py` is 1,001 lines against the 1,000-line
+  cap. #5637's existing driver has already claimed the latter repair. Resolve
+  the publication gate without bypassing it or duplicating that active work,
+  then land the reviewed plan before starting Phase 2.
