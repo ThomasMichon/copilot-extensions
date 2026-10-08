@@ -141,9 +141,10 @@ not imply that the portfolio or another concurrently owned effort is complete.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
-- [ ] Review and execute the shared
+- [ ] Review the shared
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
-      before per-plugin code changes. This closes published-slot overwrite and
+      before per-plugin code changes, then execute it through the shared core
+      and phased adopter changes. This closes published-slot overwrite and
       transient first-builder contention at their owning seams, while preserving
       the full per-plugin guard/dev/distinct-generation repair gate below.
 
