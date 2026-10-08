@@ -20,8 +20,11 @@ one owns construction, others wait boundedly, revalidate completion and content,
 and reuse the winner. Contention is neither a corrupt-runtime diagnosis nor
 permission to delete a lease, kill the owner, or write without ownership.
 
-Code and dependency files used by long-lived processes must be pinned to
-immutable runtime inputs, not an unversioned marketplace payload or checkout.
+Code and dependency files used by published numbered-runtime processes must be
+pinned to immutable runtime inputs, not an unversioned marketplace payload or
+checkout. An explicitly claimed dev slot is the existing narrow exception:
+its owner may select the editable worktree input under the parent dev contract,
+never as an implicit ordinary-update fallback.
 Construction ownership is version/installation scoped. Short control-plane
 transactions over selectors, routing, provenance, and claims are separate state
 coordination: they do not authorize modifying a published slot, and must not
