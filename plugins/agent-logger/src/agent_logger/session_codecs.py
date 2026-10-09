@@ -355,7 +355,11 @@ def _open_zip(path: Path) -> Iterator[zipfile.ZipFile]:
         with zipfile.ZipFile(raw) as archive:
             yield archive
         after = os.fstat(raw.fileno())
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
             raise ValueError(f"session ZIP changed during reading: {path}")
 
 

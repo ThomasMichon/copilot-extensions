@@ -48,6 +48,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_logger.session_codecs import (
+    ArchiveMemberDigest,
+)
+from agent_logger.session_codecs import (
     Codec as Codec,
 )
 from agent_logger.session_codecs import (
@@ -200,10 +203,8 @@ def _iter_live_refs(state_root: Path) -> Iterator[SessionRef]:
             yield SessionRef(id=d.name, kind="live", path=d)
 
 
-def _select_archive(refs: list[SessionRef]) -> SessionRef:
+def _matching_archive_digests(refs: list[SessionRef]) -> dict[str, ArchiveMemberDigest]:
     first = refs[0]
-    if len(refs) == 1:
-        return first
     expected = _codec_for_archive(first.path).member_digests(first.path)
     if EVENTS_MEMBER not in expected:
         raise ValueError(f"session archive lacks {EVENTS_MEMBER}: {first.path}")
@@ -213,7 +214,23 @@ def _select_archive(refs: list[SessionRef]) -> SessionRef:
             raise ValueError(
                 f"divergent session archive representations: {first.path} and {ref.path}"
             )
-    return first
+    return expected
+
+
+def _select_archive(refs: list[SessionRef]) -> SessionRef:
+    if not refs:
+        raise ValueError("session archive disappeared before verification")
+    if len(refs) > 1:
+        _matching_archive_digests(refs)
+    return refs[0]
+
+
+def _archive_refs_for_id(session_id: str, store: Path) -> list[SessionRef]:
+    return [
+        SessionRef(id=session_id, kind="archive", path=path, store=store)
+        for suffix in _ARCHIVE_SUFFIXES
+        if (path := store / f"{session_id}{suffix}").is_file()
+    ]
 
 
 def _iter_archive_refs(
@@ -265,13 +282,7 @@ def resolve_ref(session_id: str, state_root: Path, *archive_stores: Path) -> Ses
     if live.is_dir() and (live / EVENTS_MEMBER).exists():
         return SessionRef(id=session_id, kind="live", path=live)
     for store in archive_stores:
-        candidates = []
-        for suffix in _ARCHIVE_SUFFIXES:
-            cand = store / f"{session_id}{suffix}"
-            if cand.is_file():
-                candidates.append(
-                    SessionRef(id=session_id, kind="archive", path=cand, store=store)
-                )
+        candidates = _archive_refs_for_id(session_id, store)
         if candidates:
             return _select_archive(candidates)
     return None
@@ -595,6 +606,7 @@ def archive_session(session_dir: Path, store: Path, *, codec: str = "targz") -> 
     archive_path = store / f"{session_id}{codec_impl.suffix}"
 
     codec_impl.archive_dir(session_dir, archive_path)
+    _select_archive(_archive_refs_for_id(session_id, store))
 
     for member in SIDECAR_MEMBERS:
         src = session_dir / member
@@ -608,16 +620,25 @@ def archive_session(session_dir: Path, store: Path, *, codec: str = "targz") -> 
 
 
 def verify_archive(ref: SessionRef) -> bool:
-    """Sanity-check an archive: readable and contains ``events.jsonl``."""
+    """Verify required content and equality of every same-ID representation."""
     if ref.kind != "archive":
         return False
     try:
         codec = _codec_for_archive(ref.path)
-        raw_members = (
-            list(codec.member_digests(ref.path))
-            if isinstance(codec, ZipCodec)
-            else codec.list_members(ref.path)
-        )
+        overlaps = [
+            ref,
+            *(
+                candidate
+                for candidate in _archive_refs_for_id(ref.id, ref.store or ref.path.parent)
+                if candidate.path != ref.path
+            ),
+        ]
+        if len(overlaps) > 1:
+            raw_members = list(_matching_archive_digests(overlaps))
+        elif isinstance(codec, ZipCodec):
+            raw_members = list(codec.member_digests(ref.path))
+        else:
+            raw_members = codec.list_members(ref.path)
         normalized = [_validate_member_name(member) for member in raw_members]
         if len(normalized) != len(set(normalized)):
             return False

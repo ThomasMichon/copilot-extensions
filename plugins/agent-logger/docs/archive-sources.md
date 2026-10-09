@@ -76,6 +76,18 @@ library can truncate a NUL-containing name.
 Both archive writers validate generated member names before publication;
 unsupported source filenames leave the source and any prior archive intact.
 
+Session archive publication checks every existing same-ID format before
+updating selector sidecars or returning a reference to reclamation callers.
+Conflicting or unprovable representations remain on disk and the live session
+is retained. Verification also checks overlaps, so hub reconciliation cannot
+retire a live directory based on one valid archive beside a divergent sibling.
+Ordinary single-format tar verification remains unchanged.
+
+ZIP descriptor mutation checks include size, mtime, and ctime. POSIX ctime
+detects same-size in-place rewrites even if the writer restores mtime; Windows
+ctime is creation time and does not provide that same guarantee. These checks
+do not freeze concurrent writers or continuously pin mutable directory ancestors.
+
 ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
 decoded file bytes. Creation also bounds inspected source entries and excludes
 linked/name-surrogate directories without descending into them. The central

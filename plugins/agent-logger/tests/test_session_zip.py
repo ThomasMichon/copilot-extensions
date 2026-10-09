@@ -164,7 +164,8 @@ def test_divergent_archive_representations_fail_before_first_observation(
     store = tmp_path / "store"
     tar_ref = sessions.archive_session(source, store)
     (source / member).write_bytes(b"different evidence\n")
-    zip_ref = sessions.archive_session(source, store, codec="zip")
+    zip_ref = sessions.SessionRef(source.name, "archive", store / f"{source.name}.zip", store)
+    sessions.CODECS["zip"].archive_dir(source, zip_ref.path)
     with pytest.raises(ValueError, match="divergent"):
         next(sessions.iter_session_refs(None, store))
     with pytest.raises(ValueError, match="divergent"):
@@ -178,10 +179,87 @@ def test_valid_live_session_still_shadows_older_archive_variants(tmp_path: Path)
     store = tmp_path / "store"
     sessions.archive_session(source, store)
     (source / "events.jsonl").write_bytes(b"continued live evidence\n")
-    sessions.archive_session(source, store, codec="zip")
+    sessions.CODECS["zip"].archive_dir(source, store / f"{source.name}.zip")
     refs = list(sessions.iter_session_refs(state, store))
     assert [(ref.id, ref.kind) for ref in refs] == [(source.name, "live")]
     assert sessions.resolve_ref(source.name, state, store) == refs[0]
+
+
+@pytest.mark.parametrize("existing_codec,new_codec", [("targz", "zip"), ("zip", "targz")])
+def test_compaction_preserves_live_and_archive_evidence_when_formats_diverge(
+    tmp_path: Path, existing_codec: str, new_codec: str
+) -> None:
+    from agent_logger.sync.compact import compact_session
+
+    source = _session(tmp_path / "live")
+    store = tmp_path / "store"
+    prior = sessions.archive_session(source, store, codec=existing_codec)
+    prior_bytes = prior.path.read_bytes()
+    prior_sidecars = {path: path.read_bytes() for path in store.iterdir() if path != prior.path}
+    (source / "events.jsonl").write_bytes(b"continued live evidence\n")
+    (source / "workspace.yaml").write_bytes(b"cwd: /continued\n")
+    live = sessions.SessionRef(source.name, "live", source)
+
+    with pytest.raises(ValueError, match="divergent"):
+        compact_session(live, store, codec=new_codec)
+
+    assert (source / "events.jsonl").read_bytes() == b"continued live evidence\n"
+    assert prior.path.read_bytes() == prior_bytes
+    for path, content in prior_sidecars.items():
+        assert path.read_bytes() == content
+    new_path = store / f"{source.name}{sessions.CODECS[new_codec].suffix}"
+    assert new_path.is_file()
+    assert not sessions.verify_archive(prior)
+    assert not sessions.verify_archive(
+        sessions.SessionRef(source.name, "archive", new_path, store)
+    )
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_hub_reconciliation_preserves_live_data_when_archive_formats_diverge(
+    tmp_path: Path, dry_run: bool
+) -> None:
+    from agent_logger.sync.targets.filesystem import LocalTarget
+
+    hub = tmp_path / "hub"
+    source = _session(hub / "box" / "session-state")
+    store = hub / "box" / "archived"
+    prior = sessions.archive_session(source, store)
+    prior_bytes = prior.path.read_bytes()
+    (source / "events.jsonl").write_bytes(b"continued live evidence\n")
+    zip_path = store / f"{source.name}.zip"
+    sessions.CODECS["zip"].archive_dir(source, zip_path)
+    zip_bytes = zip_path.read_bytes()
+
+    assert LocalTarget({"path": str(hub)}).reconcile_hub("box", dry_run=dry_run) == 0
+    assert (source / "events.jsonl").read_bytes() == b"continued live evidence\n"
+    assert prior.path.read_bytes() == prior_bytes
+    assert zip_path.read_bytes() == zip_bytes
+
+
+@pytest.mark.parametrize("retirement", ["local", "hub"])
+def test_identical_archive_formats_allow_verified_retirement(
+    tmp_path: Path, retirement: str
+) -> None:
+    from agent_logger.sync.compact import compact_session
+    from agent_logger.sync.targets.filesystem import LocalTarget
+
+    hub = tmp_path / "hub"
+    source = _session(hub / "box" / "session-state")
+    store = hub / "box" / "archived"
+    tar_ref = sessions.archive_session(source, store)
+    zip_ref = sessions.archive_session(source, store, codec="zip")
+    assert sessions.verify_archive(tar_ref) and sessions.verify_archive(zip_ref)
+    if retirement == "local":
+        assert (
+            compact_session(sessions.SessionRef(source.name, "live", source), store, codec="zip")
+            > 0
+        )
+    else:
+        assert LocalTarget({"path": str(hub)}).reconcile_hub("box") == 1
+    assert not source.exists()
+    assert tar_ref.path.is_file() and zip_ref.path.is_file()
+    assert sessions.read_member(zip_ref, "events.jsonl") == b'{"type":"session.start"}\n'
 
 
 def test_empty_eventless_zip_is_not_verified(tmp_path: Path) -> None:
@@ -396,6 +474,30 @@ def test_zip_verification_uses_one_descriptor_snapshot(
     assert sessions.verify_archive(ref)
     assert opens == 1
     assert not sessions.verify_archive(ref)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows ctime is creation time, not change time")
+def test_zip_verification_detects_same_size_rewrite_with_restored_mtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "rewrite.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    original = archive.read_bytes()
+    before = archive.stat()
+    original_copy = session_codecs._copy_and_digest
+
+    def rewrite_after_read(source, target, maximum_bytes):
+        result = original_copy(source, target, maximum_bytes)
+        with archive.open("r+b") as writer:
+            writer.write(original)
+        os.utime(archive, ns=(before.st_atime_ns, before.st_mtime_ns))
+        return result
+
+    monkeypatch.setattr(session_codecs, "_copy_and_digest", rewrite_after_read)
+    assert not sessions.verify_archive(sessions.SessionRef("rewrite", "archive", archive))
+    after = archive.stat()
+    assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+    assert after.st_ctime_ns != before.st_ctime_ns
 
 
 @pytest.mark.parametrize("corruption", ["header", "crc"])
