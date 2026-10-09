@@ -65,18 +65,22 @@ class WatchedProcess(Protocol):
     def close(self) -> None: ...
 
 
+def _pidfd_alive(fd: int) -> bool:
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+    events = poller.poll(0)
+    if any(flags & select.POLLNVAL for _, flags in events):
+        raise OSError(errno.EBADF, "invalid process pidfd")
+    return not events
+
+
 @dataclass
 class ProcessReference:
     identity: ProcessIdentity
     fd: int
 
     def alive(self) -> bool:
-        poller = select.poll()
-        poller.register(self.fd, select.POLLIN)
-        events = poller.poll(0)
-        if any(flags & select.POLLNVAL for _, flags in events):
-            raise OSError(errno.EBADF, "invalid process pidfd")
-        return not events
+        return _pidfd_alive(self.fd)
 
     def send_signal(self, number: int) -> bool:
         try:
@@ -125,6 +129,19 @@ class LinuxBackend:
         token = process_start_time(pid)
         return ProcessIdentity(pid, token, self.boot_id) if token is not None else None
 
+    def pid_is_alive(self, pid: int) -> bool:
+        """An identity-free refusal probe; never authority to adopt or signal."""
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("liveness probe requires a positive integer pid")
+        try:
+            fd = _open_pidfd(pid)
+        except ProcessLookupError:
+            return False
+        try:
+            return _pidfd_alive(fd)
+        finally:
+            os.close(fd)
+
     def claim_tree(self) -> None:
         libc = ctypes.CDLL(None, use_errno=True)
         libc.prctl.argtypes = [
@@ -158,7 +175,10 @@ class LinuxBackend:
         current = reference.identity.pid
         seen: set[int] = set()
         ancestry: list[tuple[ProcessIdentity, int]] = []
-        for _ in range(128):
+        deadline = time.monotonic() + 5.0
+        while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("ancestry ownership could not be verified before its deadline")
             if current == self.manager_pid:
                 return reference.alive() and all(
                     self.identify(identity.pid) == identity
@@ -174,7 +194,6 @@ class LinuxBackend:
                 return False
             ancestry.append((identity, stat[1]))
             current = stat[1]
-        return False
 
     def reap_zombies(self, watched_pid: int | None = None) -> None:
         children = Path(

@@ -30,6 +30,7 @@ class Backend(Protocol):
 
     def claim_tree(self) -> None: ...
     def identify(self, pid: int) -> ProcessIdentity | None: ...
+    def pid_is_alive(self, pid: int) -> bool: ...
     def open_process(self, identity: ProcessIdentity) -> WatchedProcess | None: ...
     def owns(self, reference: WatchedProcess) -> bool: ...
     def reap_zombies(self, watched_pid: int | None = None) -> None: ...
@@ -140,6 +141,15 @@ class SingletonManager:
         self.store.write(discovery)
         return discovery
 
+    def _refuse_live_incumbent(
+        self, pid: int, expected: ProcessIdentity | None, message: str,
+    ) -> None:
+        current = self.backend.identify(pid)
+        if current is not None and expected is not None and current != expected:
+            return
+        if self.backend.pid_is_alive(pid):
+            raise UnmanagedDaemonError(message)
+
     def _startup(self) -> tuple[ManagerState, WatchedProcess | None, SpawnedProcess | None]:
         saved = self.store.read()
         if saved is not None and saved.owner == self.backend.owner:
@@ -153,10 +163,10 @@ class SingletonManager:
                 raise UnmanagedDaemonError("persisted daemon is not manager-owned")
             return self._discovering(saved), None, None
         if saved is not None:
-            incumbent = self.backend.open_process(saved.watched)
-            if incumbent is not None:
-                incumbent.close()
-                raise UnmanagedDaemonError("old manager's daemon survived outside supervision")
+            self._refuse_live_incumbent(
+                saved.watched.pid, saved.watched,
+                "old manager's daemon survived outside supervision",
+            )
 
         table = routing.read_table(self.config_dir, strict=True) or {}
         for key in ("active", "previous"):
@@ -170,15 +180,13 @@ class SingletonManager:
                 raise ValueError(f"{key} routing endpoint is unparseable")
             if type(endpoint.pid) is not int or endpoint.pid <= 0:
                 raise UnmanagedDaemonError("routing incumbent has unverifiable process ownership")
-            current = self.backend.identify(endpoint.pid)
-            if current is not None and (
-                endpoint.process_start_time is None
-                or current.start_time == endpoint.process_start_time
-            ):
-                incumbent = self.backend.open_process(current)
-                if incumbent is not None:
-                    incumbent.close()
-                    raise UnmanagedDaemonError("live route is not adoptable by this manager")
+            expected = (
+                ProcessIdentity(endpoint.pid, endpoint.process_start_time, self.backend.boot_id)
+                if endpoint.process_start_time is not None else None
+            )
+            self._refuse_live_incumbent(
+                endpoint.pid, expected, "live route is not adoptable by this manager",
+            )
 
         child = self.spawn()
         identity = self.backend.identify(child.pid)

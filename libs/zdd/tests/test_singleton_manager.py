@@ -48,6 +48,9 @@ class FakeBackend:
     def identify(self, pid: int) -> ProcessIdentity | None:
         return self.identities.get(pid)
 
+    def pid_is_alive(self, pid: int) -> bool:
+        return self.live.get(pid, False)
+
     def open_process(self, identity: ProcessIdentity) -> FakeReference | None:
         if self.identify(identity.pid) != identity or not self.live.get(identity.pid, False):
             return None
@@ -434,3 +437,44 @@ def test_pidfd_close_error_cannot_skip_cleanup_or_release(
         world.manager(**kwargs).run()
     assert events == ["reference-close", "descendant-cleanup", "lease-release"]
     assert world.backend.cleaned and world.lease.closed
+
+
+@pytest.mark.parametrize("token", [None, "200"])
+def test_live_unidentifiable_route_never_permits_bootstrap(
+    tmp_path: Path, token: str | None,
+) -> None:
+    world = World(tmp_path)
+    world.route(20, token)
+    del world.backend.identities[20]
+    with pytest.raises(UnmanagedDaemonError, match="live route"):
+        world.manager().run()
+    assert world.spawns == 0
+
+
+def test_old_manager_live_unidentifiable_incumbent_blocks_spawn(tmp_path: Path) -> None:
+    world = World(tmp_path)
+    StateStore(world.state).write(ManagerState(
+        ProcessIdentity(9, "90", world.backend.boot_id), world.backend.identities[20],
+    ))
+    del world.backend.identities[20]
+    with pytest.raises(UnmanagedDaemonError, match="survived"):
+        world.manager().run()
+    assert world.spawns == 0
+
+
+def test_proven_dead_route_permits_fresh_spawn(tmp_path: Path) -> None:
+    world = World(tmp_path)
+    world.route(20, None)
+    del world.backend.identities[20]
+    world.backend.live[20] = False
+
+    def spawn_replacement() -> FakeChild:
+        world.spawns += 1
+        world.backend.live[30] = True
+        return FakeChild(pid=30)
+
+    world.spawn = spawn_replacement
+    world.on_sleep = lambda: world.backend.live.update({30: False})
+    result = world.manager().run()
+    assert world.spawns == 1
+    assert result.last_watched_pid == 30
