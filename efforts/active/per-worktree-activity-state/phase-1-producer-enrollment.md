@@ -126,8 +126,12 @@ concurrent work before publication.
       A successful monitor drain without the producer proof is refused.
 - [ ] Fresh install, no live monitor, monitor disabled, and handoffs
       created after the initial pass satisfy the same readiness contract.
-- [ ] Real Windows and POSIX resolution/spawn boundaries are exercised;
-      launcher/installer changes preserve headlessness and parity.
+- [ ] Exercise Windows, Linux, and macOS resolution/spawn boundaries
+      separately, or record a justified exemption for each unavailable
+      lane. Process identity and bootstrap coverage must not assume Linux
+      `/proc` on macOS. Launcher/installer changes preserve headlessness
+      and parity; an unproved platform remains unready rather than
+      inheriting another platform's drain proof.
 - [ ] Full changed-plugin suites and install-contract/documentation gates
       pass through supported runners with explicit adequate budgets.
 - [ ] Live staged upgrade proves legacy-root blocking, natural drain,
