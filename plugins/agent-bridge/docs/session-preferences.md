@@ -100,6 +100,9 @@ execution user's effective HOME/settings, UID, working directory, and Linux
 namespace facts. The Host owns a private inherited socket and per-launch nonce.
 It verifies component digest, selected instance/user, child PID/start identity,
 namespace and workspace binding before consenting to PID-preserving exec.
+The digest covers the complete staged Host-role source closure, including the
+channel verifier/consent owner, dispatcher, receipt emitter and survival helpers,
+not just the terminal settings reader.
 Binding variables and the socket are removed before the agent starts. A
 timeout, malformed receipt, binding mismatch or missing inherited model/effort
 defaults refuses startup; no caller settings are substituted.

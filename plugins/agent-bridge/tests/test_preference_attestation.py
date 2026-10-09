@@ -309,6 +309,38 @@ def test_zipapp_dispatch_propagates_refused_exec_status(monkeypatch):
     assert error.value.code == 78
 
 
+@pytest.mark.parametrize("component", [
+    "agent_bridge.session_host.preference_spawn",
+    "agent_bridge.session_host.launcher",
+    "agent_bridge.session_host.host",
+])
+def test_verifier_dispatcher_and_receipt_emitter_are_digest_bound(monkeypatch, component):
+    from importlib.util import find_spec
+
+    original = find_spec
+    before = a.component_digest()
+
+    def changed(name):
+        spec = original(name)
+        if name == component:
+            source = spec.loader.get_source(name)
+            return SimpleNamespace(loader=SimpleNamespace(get_source=lambda ignored: source + "\n# changed\n"))
+        return spec
+
+    monkeypatch.setattr("importlib.util.find_spec", changed)
+    assert a.component_digest() != before
+
+
+def test_digest_covers_the_staged_host_role_closure():
+    from agent_bridge.session_host.bundle import _AGENT_BRIDGE_MODULES
+
+    names = set()
+    for path in _AGENT_BRIDGE_MODULES:
+        name = "agent_bridge." + path.removesuffix(".py").replace("/", ".")
+        names.add(name.removesuffix(".__init__"))
+    assert set(a.AUTHORITY_MODULES) == names | {"agent_procutil"}
+
+
 @pytest.mark.parametrize("consent", [b"\x01", b""])
 def test_exec_component_requires_consent_and_drops_binding_environment(monkeypatch, consent):
     from agent_bridge import preference_exec as e

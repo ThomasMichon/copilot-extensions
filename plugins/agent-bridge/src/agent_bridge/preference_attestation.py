@@ -21,16 +21,27 @@ DIGEST_ENV = "AGENT_BRIDGE_PREFERENCE_DIGEST"
 MODE_ENV = "AGENT_BRIDGE_PREFERENCE_MODE"
 TARGET_ENV = "AGENT_BRIDGE_PREFERENCE_TARGET"
 MAX_FRAME = 8192
+AUTHORITY_MODULES = (
+    "agent_bridge",
+    "agent_bridge.winjob",
+    "agent_bridge.session_preferences",
+    "agent_bridge.preference_attestation",
+    "agent_bridge.preference_exec",
+    "agent_bridge.session_host",
+    "agent_bridge.session_host.protocol",
+    "agent_bridge.session_host.host",
+    "agent_bridge.session_host.osutil",
+    "agent_bridge.session_host.launcher",
+    "agent_bridge.session_host.preference_spawn",
+    "agent_procutil",
+)
 
 
 def component_digest() -> str:
     from importlib.util import find_spec
 
     digest = hashlib.sha256()
-    for name in (
-        "agent_bridge.preference_exec", "agent_bridge.preference_attestation",
-        "agent_bridge.session_preferences",
-    ):
+    for name in AUTHORITY_MODULES:
         spec = find_spec(name)
         if spec is None or spec.loader is None:
             raise RuntimeError("target preference component is unavailable")
