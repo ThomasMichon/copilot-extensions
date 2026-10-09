@@ -522,6 +522,9 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
             return None
     with tracking._RecordLock(rec_path, require_sidecar=True):
         record = tracking.load_record(rec_path)
+        from .execution_spaces import require_project_record_mutation
+
+        require_project_record_mutation(record)
         # Idempotency contract matches `pr_ops._ensure_pr_claim`: capture
         # whether this ref is already an active `pr` claim BEFORE mutating
         # -- `add_resource_claim` reuses a matching ref rather than
@@ -607,6 +610,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                 pending_ref = f"pending-run:{secrets.token_hex(12)}"
                 with tracking._RecordLock(owner_path, require_sidecar=True):
                     owner_record = tracking.load_record(owner_path)
+                    from .execution_spaces import require_project_record_mutation
+
+                    require_project_record_mutation(owner_record)
                     tracking.add_resource_claim(
                         owner_record,
                         tracking.ResourceClaim(
@@ -631,6 +637,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         try:
             with tracking._RecordLock(owner_path, require_sidecar=True):
                 owner_record = tracking.load_record(owner_path)
+                from .execution_spaces import require_project_record_mutation
+
+                require_project_record_mutation(owner_record)
                 owner_record.resources = [
                     item for item in owner_record.resources if item.ref != pending_ref
                 ]

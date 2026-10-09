@@ -434,6 +434,9 @@ def _journal_owner_reciprocal_claim(
 
         def _write_claim() -> None:
             owner_rec = tracking.load_record(owner_path)
+            from .execution_spaces import require_project_record_mutation
+
+            require_project_record_mutation(owner_rec)
             tracking.add_resource_claim(
                 owner_rec,
                 tracking.ResourceClaim(

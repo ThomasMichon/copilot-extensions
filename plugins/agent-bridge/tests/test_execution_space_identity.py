@@ -119,3 +119,23 @@ def test_topology_rejects_casefold_space_collisions():
 def test_topology_normalizes_numeric_keys_like_the_shared_registry():
     machines = parse_machines_yaml({"machines": {123: {"execution_platform": "windows"}}})
     assert machines["123"].key == "123"
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl"])
+def test_worktree_routes_preserve_selected_space_without_hostname_loopback(platform):
+    from agent_bridge.routes.worktrees import _is_local_target
+
+    with patch.object(agent_registry, "_detect_platform", return_value=platform):
+        resolver = AgentResolver(
+            {}, _spaces(), local_execution_space=f"workstation-{platform}",
+        )
+    other = "wsl" if platform == "windows" else "windows"
+    with patch.object(
+        agent_registry, "_detect_local_machine",
+        side_effect=AssertionError("route must reuse the selected execution space"),
+    ), patch("socket.gethostname", return_value="workstation"):
+        assert _is_local_target(f"workstation-{platform}-ssh", resolver)
+        assert _is_local_target(f"workstation-{platform}", resolver)
+        assert not _is_local_target(f"workstation-{other}-ssh", resolver)
+        assert not _is_local_target(f"workstation-{other}", resolver)
+        assert not _is_local_target("workstation", resolver)
