@@ -13,24 +13,17 @@ import pytest
 # These four tests drive real fork/exec/signal process trees (repeated
 # detached cutovers, a real same-process exec, and a pidfd above
 # FD_SETSIZE) rather than mocked kernel state like the other singleton
-# suites in this package. The ZDD_SINGLETON_SMOKE_ONLY=1 marker below skips
-# all four of them -- it exists so a future CI split can gate them off PR
-# CI (which does not yet run libs/zdd/tests at all; see TESTING.md) behind
-# this env var, pairing a path-gated smoke step that sets it with a
-# scheduled/manual full-suite workflow that doesn't, mirroring the
-# crash-diagnostics-stress.yml precedent for real-process regressions that
-# are not safe to gate every PR on. Neither the ci.yml step nor the
-# zdd-singleton-stress workflow exist yet; wiring them in is left as a
-# follow-up for the repo owner (this PR's submitting identity's
-# repo-scoped PAT intentionally lacks the `workflow` grant needed to touch
-# .github/workflows/* itself). Until that follow-up lands, these tests
-# still run wherever libs/zdd/tests is invoked directly (local dev,
-# test-supervisor) with the env var unset.
+# suites in this package. Set ZDD_SINGLETON_SMOKE_ONLY=1 to skip all four,
+# pairing a real-process-free smoke run with a separate full-suite run
+# (mirroring the crash-diagnostics-stress.yml split for real-process
+# regressions not safe to gate every PR run on). libs/zdd/tests is not
+# currently collected by any CI step (see TESTING.md); CI wiring that uses
+# this env var is tracked separately from this source comment.
 pytestmark = [
     pytest.mark.skipif(sys.platform != "linux", reason="Linux pidfd/subreaper contract"),
     pytest.mark.skipif(
         os.environ.get("ZDD_SINGLETON_SMOKE_ONLY") == "1",
-        reason="real-process singleton regression; see zdd-singleton-stress workflow",
+        reason="real fork/exec/signal process-tree regression; unset to run",
     ),
 ]
 

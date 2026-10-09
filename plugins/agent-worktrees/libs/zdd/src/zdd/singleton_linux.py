@@ -184,15 +184,19 @@ class LinuxBackend:
         reference.close()
         return None
 
-    def owns(self, reference: WatchedProcess) -> bool:
+    def owns(self, reference: WatchedProcess, deadline: float | None = None) -> bool:
         if reference.identity.pid == self.manager_pid or not reference.alive():
             return False
         current = reference.identity.pid
         seen: set[int] = set()
         ancestry: list[tuple[ProcessIdentity, int]] = []
-        deadline = time.monotonic() + 5.0
+        # A caller with its own bounded budget (e.g. cleanup()'s shared cleanup
+        # deadline) threads it through here so this scan can't independently
+        # run its own full 5s past that budget; a standalone caller with no
+        # deadline of its own still gets the default 5s ancestry bound.
+        effective_deadline = deadline if deadline is not None else time.monotonic() + 5.0
         while True:
-            if time.monotonic() >= deadline:
+            if time.monotonic() >= effective_deadline:
                 raise TimeoutError("ancestry ownership could not be verified before its deadline")
             if current == self.manager_pid:
                 return reference.alive() and all(
@@ -241,6 +245,14 @@ class LinuxBackend:
             while True:
                 added = False
                 for entry in Path("/proc").iterdir():
+                    # Checked per entry (not only after a full pass) so a
+                    # slow or large scan -- including one that adds nothing --
+                    # can't run past the requested cleanup deadline before
+                    # this raises.
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            "descendant tree did not quiesce before cleanup deadline",
+                        )
                     if not entry.name.isdigit() or int(entry.name) == self.manager_pid:
                         continue
                     identity = self.identify(int(entry.name))
@@ -250,7 +262,7 @@ class LinuxBackend:
                     if reference is None:
                         continue
                     try:
-                        owned = self.owns(reference)
+                        owned = self.owns(reference, deadline)
                     except BaseException:
                         reference.close()
                         raise
@@ -263,8 +275,6 @@ class LinuxBackend:
                         reference.close()
                 if not added:
                     break
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("descendant tree did not quiesce before cleanup deadline")
             for reference in frozen.values():
                 reference.send_signal(signal.SIGKILL)
             while any(reference.alive() for reference in frozen.values()):

@@ -62,7 +62,7 @@ class FakeBackend:
         self.references.append(reference)
         return reference
 
-    def owns(self, reference: FakeReference) -> bool:
+    def owns(self, reference: FakeReference, deadline: float | None = None) -> bool:
         return reference.identity.pid in self.descendants
 
     def reap_zombies(self, watched_pid: int | None = None) -> None:
