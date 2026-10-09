@@ -1,0 +1,9 @@
+{
+  "comment": "Document dynamic Codespace namespace boundary from static named-machine resolution",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
