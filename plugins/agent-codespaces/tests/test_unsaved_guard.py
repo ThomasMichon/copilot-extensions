@@ -3,6 +3,7 @@ box and force only that refusal when all of them are verified clean."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -175,6 +176,37 @@ def test_audit_script_fails_closed_on_git_errors_and_odd_paths(tmp_path):
     # a linked worktree with a backslash in its path is found (-z, unquoted)
     assert by_name["wt\\odd"].dirty
     assert not by_name["broken"].clean
+    assert not audit.all_clean
+
+
+@pytest.mark.skipif(not (shutil.which("git") and shutil.which("bash")),
+                    reason="needs git + bash")
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="needs POSIX permissions enforced (non-root)")
+def test_audit_script_blocks_on_missing_or_unreadable_checkouts(tmp_path):
+    remotes = tmp_path / "remotes"
+    root = tmp_path / "ws"
+    root.mkdir()
+    repo = root / "repo"
+    repo.mkdir()
+    _repo(repo, remotes)
+    hidden_parent = tmp_path / "locked"
+    linked = hidden_parent / "wt"
+    _git("worktree", "add", "-q", "-b", "side", str(linked), cwd=repo)
+    gone = tmp_path / "gone-wt"
+    _git("worktree", "add", "-q", "-b", "gone", str(gone), cwd=repo)
+    shutil.rmtree(gone)  # stale entry, not yet pruned
+    opaque = root / "opaque"
+    opaque.mkdir()
+    hidden_parent.chmod(0o000)
+    opaque.chmod(0o000)
+    try:
+        audit = _run_audit(root)
+    finally:
+        hidden_parent.chmod(0o755)
+        opaque.chmod(0o755)
+    errs = {c.path for c in audit.checkouts if c.error}
+    assert {str(linked), str(gone), str(opaque)} <= errs
     assert not audit.all_clean
 
 

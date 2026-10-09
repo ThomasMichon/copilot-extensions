@@ -130,10 +130,17 @@ trap 'rm -f "$wl"' EXIT
 err() { printf 'CHECKOUT_ERR\t%s\n' "$1"; }
 add() {
   case "$1" in *$'\n'*|*$'\t'*) err unsafe-path; return 0;; esac
-  [ -d "$1" ] || return 0
+  # A listed checkout that is missing or inaccessible cannot be audited:
+  # fail closed (a stale entry blocks until `git worktree prune`).
+  [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ] || { err "$1"; return 0; }
   [ -n "${seen[$1]}" ] && return 0
   seen[$1]=1; list+=("$1")
 }
+# Discovery must be able to descend: an unreadable (non-dot) directory within
+# the scanned depth could hide a checkout, so it fails closed too.
+for d in @ROOT@/[!.]* @ROOT@/[!.]*/[!.]*; do
+  [ -d "$d" ] && ! { [ -r "$d" ] && [ -x "$d" ]; } && err "$d"
+done
 for g in @ROOT@/*/.git @ROOT@/*/*/.git @ROOT@/*/*/*/.git @EXTRAS@; do
   [ -e "$g" ] || continue
   top=$(git -C "$(dirname "$g")" rev-parse --show-toplevel 2>/dev/null) \
