@@ -17,6 +17,41 @@ def _rec(*states: str) -> tracking.WorktreeRecord:
     )
 
 
+# ── load_claim_child_record ──────────────────────────────────────────────────
+
+def test_load_claim_child_record_recognizes_legacy_wsl_owner_ref(tmp_path, monkeypatch):
+    """A record-scoped legacy pre-split WSL child ref (bare native-host name)
+    is still judgeable locally -- not deferred to the cross-machine lease
+    mirror -- when the on-disk record carries explicit platform=wsl evidence
+    consistent with it."""
+    from agent_worktrees import config as cfg
+
+    anchor = tmp_path / "source"
+    anchor.mkdir()
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="example-host-wsl", platform="wsl",
+        repo_name="example",
+        repos={"example": cfg.RepoConfig(anchor=str(anchor), worktree_root=str(tmp_path / "trees"))},
+    )
+    directory = tmp_path / "example" / "worktrees"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: tmp_path / (project or "example"))
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_a, **_k: {})
+    checkout = tmp_path / "trees" / "legacy-child"
+    checkout.mkdir(parents=True)
+    tracking.create_new_record(
+        "legacy-child", "worktree/legacy-child", str(checkout), "example",
+        "example-host", "wsl", directory,
+    )
+    record, judgeable = sweep.load_claim_child_record(
+        "example-host/example/legacy-child", config,
+    )
+    assert judgeable is True
+    assert record is not None
+    assert record.machine == "example-host"
+
+
 # ── gone_of ──────────────────────────────────────────────────────────────────
 
 def test_gone_of_maps_claimant_liveness(monkeypatch):

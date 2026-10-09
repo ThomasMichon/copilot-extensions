@@ -85,8 +85,11 @@ def load_claim_child_record(
     if parsed is None:
         return (None, False)
     if parsed.machine and parsed.machine != config.machine:
-        return (None, False)  # cross-machine -> not judgeable here
-    if parsed.machine and parsed.project:
+        legacy_path = tracking.resolve_legacy_wsl_owner_ref(parsed, config)
+        if legacy_path is None:
+            return (None, False)  # cross-machine -> not judgeable here
+        path = legacy_path
+    elif parsed.machine and parsed.project:
         path = (cfg.project_dir(parsed.project) / "worktrees"
                 / f"{parsed.worktree_id}.yaml")
     else:  # bare/same-repo ref

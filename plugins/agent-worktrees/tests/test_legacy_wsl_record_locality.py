@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -109,3 +110,84 @@ def test_legacy_wsl_record_remains_eligible_for_local_claim_handoff(legacy_recor
     assert path == legacy_records.paths["wsl"]
     assert record.machine == "example-host"
     assert record.platform == "wsl"
+
+
+def test_legacy_wsl_offer_accept_actor_equivalence(legacy_records):
+    """A bundle actor recorded under the pre-split native-host spelling and
+    the current newly-qualified actor must be recognized as the SAME
+    worktree for offer-to-accept (``_same_worktree``/``_load_actor_record``),
+    never just the exact-string consumer the bundle happened to carry."""
+    legacy_actor = legacy_records.owner_ref  # "example-host/example/legacy-wsl"
+    qualified_actor = tracking.format_claim_ref(
+        legacy_records.config.machine, "example", "legacy-wsl",
+    )
+    assert claim_handoffs._same_worktree(qualified_actor, legacy_actor) is True
+    assert claim_handoffs._same_worktree(legacy_actor, qualified_actor) is True
+    # And the consumer-side finish check accepts the legacy spelling as local.
+    path, record = claim_handoffs._load_actor_record(
+        tracking.parse_claim_ref(legacy_actor), role="consumer",
+        machine=legacy_records.config.machine,
+    )
+    assert path == legacy_records.paths["wsl"]
+    assert record.platform == "wsl"
+
+
+def test_legacy_wsl_locality_uses_actual_platform_not_configured_override(
+    legacy_records, monkeypatch,
+):
+    """``config.platform`` is an overridable path-selection setting, not the
+    real execution platform -- a WSL guest configured with ``platform:
+    windows``/``linux`` for path resolution is still physically WSL, and the
+    legacy exception must track reality (``detect_platform()``), not the
+    override."""
+    overridden = replace(legacy_records.config, platform="windows")
+    path, _, error = claims_cli._resolve_owner_ref_record_path(
+        legacy_records.owner_ref, overridden,
+    )
+    assert error is None
+    assert path == legacy_records.paths["wsl"]
+    assert claimant.local_claimant_alive(legacy_records.owner_ref) is True
+
+
+def test_legacy_wsl_owner_ref_resolves_via_hostname_and_alias(tmp_path, monkeypatch):
+    """A historical record can name the raw OS hostname or a configured
+    alias, not just the registry's topology key -- resolution must go
+    through the same topology sources used for identity qualification."""
+    anchor = tmp_path / "source"
+    anchor.mkdir()
+    (anchor / "machines.yaml").write_text(
+        "machines:\n"
+        "  example-host:\n"
+        "    hostname: generated-host\n"
+        "    alias: example-transport\n"
+        "  example-host-wsl: {}\n",
+        encoding="utf-8",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="example-host-wsl", platform="wsl",
+        repo_name="example",
+        repos={"example": cfg.RepoConfig(anchor=str(anchor), worktree_root=str(tmp_path / "trees"))},
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: tmp_path / (project or "example"))
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(claimant, "_owner_looks_dead", lambda _record: False)
+    directory = tmp_path / "example" / "worktrees"
+    directory.mkdir(parents=True)
+    checkout = tmp_path / "trees" / "legacy-hostname"
+    checkout.mkdir(parents=True)
+    # The record itself was written under the raw OS hostname, not the
+    # topology key -- explicit trusted platform=wsl evidence still applies.
+    tracking.create_new_record(
+        "legacy-hostname", "worktree/legacy-hostname", str(checkout), "example",
+        "generated-host", "wsl", directory,
+    )
+    path = directory / "legacy-hostname.yaml"
+    for owner_ref in (
+        "generated-host/example/legacy-hostname",
+        "example-transport/example/legacy-hostname",
+    ):
+        resolved, _, error = claims_cli._resolve_owner_ref_record_path(owner_ref, config)
+        assert error is None
+        assert resolved == path
+        assert claimant.local_claimant_alive(owner_ref) is True

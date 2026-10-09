@@ -59,14 +59,15 @@ def test_settle_persists_and_reloads(tmp_path):
 # ── _settle_parent_obligation hook ───────────────────────────────────────────
 
 def _write_parent(project_root: Path, project: str, parent_id: str,
-                  child_ref: str) -> Path:
+                  child_ref: str, *, machine: str = "machine-x",
+                  platform: str = "windows") -> Path:
     """Write a parent record (with an active claim on the child) to its tracking
     dir under ``~/.{project}/worktrees/``, returning the path."""
     wtdir = project_root / f".{project}" / "worktrees"
     wtdir.mkdir(parents=True, exist_ok=True)
     parent = tracking.create_new_record(
         parent_id, f"worktree/{parent_id}", str(project_root / parent_id),
-        project, "machine-x", "windows", wtdir.parent,
+        project, machine, platform, wtdir.parent,
     )
     parent.resources = [ResourceClaim(kind="worktree", ref=child_ref, state="active")]
     path = wtdir / f"{parent_id}.yaml"
@@ -126,3 +127,33 @@ def test_missing_parent_record_is_noop(_project_root):
     child = SimpleNamespace(owner_claim_ref=tracking.parse_claim_ref(parent_ref))
     config = SimpleNamespace(machine="machine-x", repo_name="childproj")
     _settle_parent_obligation(child, config, "wt-child")  # no file -> no-op, no raise
+
+
+def test_legacy_wsl_parent_claim_settled_using_legacy_child_ref(_project_root, monkeypatch):
+    """A record-scoped legacy pre-split WSL parent (recorded under the bare
+    native-host name) still settles its claim on this child -- and the
+    parent's stored resource ref, itself the child's OLD pre-split spelling,
+    is matched and settled WITHOUT being rewritten."""
+    from agent_worktrees import config as cfg
+
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_a, **_k: {})
+    child_id = "wt-child"
+    legacy_child_ref = tracking.format_claim_ref("machine-x", "childproj", child_id)
+    parent_ref = tracking.format_claim_ref("machine-x", "parentproj", "wt-parent")
+    parent_path = _write_parent(
+        _project_root, "parentproj", "wt-parent", legacy_child_ref,
+        machine="machine-x", platform="wsl",
+    )
+
+    child = SimpleNamespace(owner_claim_ref=tracking.parse_claim_ref(parent_ref))
+    config = SimpleNamespace(
+        machine="machine-x-wsl", repo_name="childproj",
+        default_repo=SimpleNamespace(anchor=str(_project_root)),
+    )
+
+    _settle_parent_obligation(child, config, child_id)
+
+    reloaded = tracking.load_record(parent_path)
+    assert reloaded.resources[0].state == "at-rest"
+    assert reloaded.resources[0].ref == legacy_child_ref  # spelling preserved

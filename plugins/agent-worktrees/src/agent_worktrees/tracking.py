@@ -25,6 +25,7 @@ from . import config as cfg
 from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
 from .legacy_wsl_record_locality import (  # noqa: F401
+    claim_refs_equivalent,
     legacy_wsl_owner_ref_is_local,
     resolve_legacy_wsl_owner_ref,
 )

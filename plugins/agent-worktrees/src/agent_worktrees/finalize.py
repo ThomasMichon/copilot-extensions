@@ -1165,12 +1165,18 @@ def _settle_parent_obligation(
         owner = record.owner_claim_ref  # parsed ClaimRef of the parent, or None
         if owner is None or not owner.is_qualified:
             return
-        if owner.machine != config.machine:
-            return  # cross-machine parent -> lease mirror / sweep handles it
         from . import config as cfg
-        parent_path = (
-            cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
-        )
+        if owner.machine == config.machine:
+            parent_path = (
+                cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
+            )
+        else:
+            # Record-scoped legacy pre-split WSL exception (see
+            # legacy_wsl_record_locality): a parent recorded under the bare
+            # native-host name is still genuinely local to this WSL guest.
+            parent_path = tracking.resolve_legacy_wsl_owner_ref(owner, config)
+            if parent_path is None:
+                return  # cross-machine parent -> lease mirror / sweep handles it
         if not parent_path.exists():
             return
         with tracking._RecordLock(parent_path, require_sidecar=True):
@@ -1181,6 +1187,16 @@ def _settle_parent_obligation(
             settled = tracking.settle_resource_claim(
                 parent, child_ref, obligations.AT_REST, save=False,
             )
+            if settled is None and owner.machine != config.machine:
+                # The parent's stored resource ref may still carry this
+                # child's OLD (pre-split) spelling -- try that exact
+                # historical ref too, never rewriting the stored spelling.
+                legacy_child_ref = tracking.format_claim_ref(
+                    owner.machine, config.repo_name, worktree_id,
+                )
+                settled = tracking.settle_resource_claim(
+                    parent, legacy_child_ref, obligations.AT_REST, save=False,
+                )
             if settled is not None:
                 tracking.save_record(parent, parent_path)
         if settled is not None:
