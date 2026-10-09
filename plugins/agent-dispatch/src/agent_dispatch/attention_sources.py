@@ -23,7 +23,7 @@ import httpx
 
 from . import attention_contract as ac
 from .client import DispatchError
-from .handoff_baton import is_handoff_task
+from .handoff_claim_release import is_handoff_task
 
 BUILTIN_SOURCES = ("bridge", "dispatch", "pr")
 DEFAULT_TIMEOUT = 20.0

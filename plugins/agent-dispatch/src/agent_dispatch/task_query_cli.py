@@ -9,7 +9,7 @@ import sys
 import time
 
 from .client import DispatchError
-from .handoff_baton import is_handoff_task
+from .handoff_claim_release import is_handoff_task
 from .loop_commands import _resolve_cli_module
 from .queue_common import worker_id_for
 
