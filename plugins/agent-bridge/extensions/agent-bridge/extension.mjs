@@ -21,14 +21,18 @@
 // throws into the CLI.
 
 import { existsSync, readFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
-import { InFlightMessages, MainTurn, adoptSessionId, drainControls, drainInbox, serializedRegister } from "./delivery.mjs";
+import {
+  InFlightMessages, MainTurn, REPLAY_MAX_BYTES, adoptSessionId, drainControls, drainInbox, serializedRegister,
+  transcriptTail,
+} from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
-import { processIdentity, resolveMetadataAsync } from "./metadata.mjs";
+import { metadataRefresher, processIdentity, resolveMetadataAsync } from "./metadata.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -178,6 +182,17 @@ async function bridgeGetJson(path) {
 const metadataReady = resolveMetadataAsync()
   .then((meta) => { state.meta = meta; })
   .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
+// A worktree or repo the load-time lookup missed is looked up again (with
+// backoff) before heartbeats, once that first lookup settled.
+let metadataSettled = false;
+metadataReady.finally(() => { metadataSettled = true; });
+const refreshMetadata = metadataRefresher(state);
+async function heartbeat() {
+  if (metadataSettled && await refreshMetadata().catch(() => false)) {
+    extLog(`resolved this session's worktree (${state.meta?.worktree_id || "?"}) after registration`);
+  }
+  return register();
+}
 
 const register = serializedRegister(
   state,
@@ -284,11 +299,33 @@ async function pollControls() {
   state.controlling = true;
   try {
     await drainControls(state.sessionId, {
-      getJson: bridgeGetJson, post: bridgeFetch, session, log: extLog,
+      getJson: bridgeGetJson, post: bridgeFetch, session, replayHistory, log: extLog,
     });
   } finally {
     state.controlling = false;
   }
+}
+
+// The bridge lost this session's represented history in a restart: send it the
+// tail of the session's own transcript (control:replay-history). The bridge
+// lands it before the live events it held meanwhile, and drops duplicates.
+async function replayHistory(sid) {
+  const path = join(homedir(), ".copilot", "session-state", sid, "events.jsonl");
+  let text;
+  const fh = await open(path, "r");
+  try {
+    const { size } = await fh.stat();
+    const start = Math.max(0, size - REPLAY_MAX_BYTES);
+    const buf = Buffer.alloc(size - start);
+    await fh.read(buf, 0, buf.length, start);
+    text = buf.toString("utf-8");
+  } finally {
+    await fh.close();
+  }
+  const events = transcriptTail(text, REPRESENT_TYPES);
+  const ok = await bridgeFetch("POST", `/api/v1/live-sessions/${encodeURIComponent(sid)}/events?replay=true`, { events });
+  extLog(`replayed ${events.length} transcript events of ${sid} to the bridge (${ok ? "ok" : "failed"})`);
+  return ok;
 }
 
 // --- Extension ---
@@ -408,7 +445,7 @@ try {
     // ungraceful CLI exit is handled even if deregister never runs.
     register().catch((e) => extLog(`initial register failed: ${e.message}`));
     state.heartbeat = setInterval(() => {
-      register().catch(() => {});
+      heartbeat().catch(() => {});
     }, HEARTBEAT_MS);
     // Don't let the heartbeat timer keep the CLI process alive on shutdown.
     if (state.heartbeat.unref) state.heartbeat.unref();

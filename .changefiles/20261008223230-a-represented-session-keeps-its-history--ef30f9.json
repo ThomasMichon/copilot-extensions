@@ -1,0 +1,9 @@
+{
+  "comment": "A represented session keeps its history across a bridge restart: the bridge asks its extension to replay the session's own transcript tail (control:replay-history) and lands it before the live events it held meanwhile; and a session whose worktree lookup missed at load looks it up again until it registers with its worktree.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

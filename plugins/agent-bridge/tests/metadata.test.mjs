@@ -188,3 +188,35 @@ test("a reloaded metadata module reports the same process start time exactly", a
   assert.equal(reloaded.processIdentity().pid, process.pid);
 });
 
+
+test("metadataRefresher fills in a worktree the load-time lookup missed, with backoff", async () => {
+  const { metadataRefresher, METADATA_RETRY_MIN_MS } = await import("../extensions/agent-bridge/metadata.mjs");
+  const state = { meta: { machine: "m1", cwd: "/w", worktree_id: null, repo: null, branch: "b" } };
+  let t = 0;
+  const answers = [null, { worktree_id: null, repo: null }, { worktree_id: "wt-1", repo: "proj", machine: "other" }];
+  let calls = 0;
+  const refresh = metadataRefresher(state, async () => { calls += 1; return answers.shift(); }, () => t);
+  assert.equal(await refresh(), false); // the lookup failed again: back off
+  assert.equal(await refresh(), false); // within the backoff: not asked
+  assert.equal(calls, 1);
+  t += METADATA_RETRY_MIN_MS;
+  assert.equal(await refresh(), false); // asked, still missing: back off longer
+  t += METADATA_RETRY_MIN_MS;
+  assert.equal(await refresh(), false); // the doubled backoff hasn't passed
+  assert.equal(calls, 2);
+  t += METADATA_RETRY_MIN_MS;
+  assert.equal(await refresh(), true);
+  assert.deepEqual(state.meta, { machine: "m1", cwd: "/w", worktree_id: "wt-1", repo: "proj", branch: "b" });
+  assert.equal(await refresh(), false); // nothing missing any more: never asked again
+  assert.equal(calls, 3);
+});
+
+test("metadataRefresher never replaces a known identity", async () => {
+  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
+  const state = { meta: { worktree_id: "pinned@cs", repo: "proj" } };
+  let calls = 0;
+  const refresh = metadataRefresher(state, async () => { calls += 1; return { worktree_id: "other" }; }, () => 0);
+  assert.equal(await refresh(), false);
+  assert.equal(calls, 0);
+  assert.equal(state.meta.worktree_id, "pinned@cs");
+});

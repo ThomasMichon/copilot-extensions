@@ -189,6 +189,7 @@ export const SESSION_MODES = ["interactive", "plan", "autopilot"];
 // What to do for one control row: {action: "set-mode", mode} for a mode change
 // the CLI knows, else {action: "skip", reason} (acked so it doesn't loop).
 export function controlPlan(msg) {
+  if (msg?.kind === "control:replay-history") return { action: "replay-history" };
   if (msg?.kind !== "control:set-mode") {
     return { action: "skip", reason: `unknown control ${msg?.kind}` };
   }
@@ -200,6 +201,28 @@ export function controlPlan(msg) {
 // Whether session.rpc.mode.set's result means the mode took effect.
 export function modeApplied(result) {
   return !!result && result.modeApplied !== false;
+}
+
+// The transcript tail a ``control:replay-history`` sends: this session's own
+// events.jsonl (the CLI's durable record, where the CLI runs), the newest
+// ``maxEvents`` of the represented ``types``, read from at most ``maxBytes`` at
+// its end. Each event keeps its id, so the bridge drops what it already has.
+export const REPLAY_MAX_EVENTS = 1500;
+export const REPLAY_MAX_BYTES = 8 * 1024 * 1024;
+
+export function transcriptTail(text, types, maxEvents = REPLAY_MAX_EVENTS) {
+  const out = [];
+  for (const line of String(text || "").split("\n")) {
+    if (!line.trim()) continue;
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; } // a torn first or last line
+    if (!ev || typeof ev.type !== "string" || !types.has(ev.type)) continue;
+    const item = { type: ev.type, id: ev.id ?? null, data: ev.data ?? {} };
+    if (ev.agentId) item.agentId = ev.agentId;
+    if (typeof ev.timestamp === "string") item.timestamp = Date.parse(ev.timestamp) / 1000 || undefined;
+    out.push(item);
+  }
+  return out.slice(-maxEvents);
 }
 
 // Follow the conversation this extension serves. Its id comes from SESSION_ID
@@ -355,7 +378,7 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
 // outcome -- applied or rejected -- so the bridge's ``POST /mode`` reports what
 // really happened; acked under ``sid``, the id it was claimed under (see
 // ``drainInbox``). An older bridge without /controls answers 404 (null).
-export async function drainControls(sid, { getJson, post, session, log = () => {} }) {
+export async function drainControls(sid, { getJson, post, session, replayHistory = null, log = () => {} }) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const data = await getJson(`${base}/controls`);
   const controls = data?.messages;
@@ -368,6 +391,12 @@ export async function drainControls(sid, { getJson, post, session, log = () => {
     if (plan.action === "skip") {
       log(`control ${c.id} rejected: ${plan.reason}`);
       rejected.push(c.id);
+      continue;
+    }
+    if (plan.action === "replay-history") {
+      // The bridge restarted and lost this session's represented history.
+      const replayed = replayHistory ? await replayHistory(sid).catch((e) => { log(`replay failed: ${e.message}`); return false; }) : false;
+      (replayed ? applied : rejected).push(c.id);
       continue;
     }
     try {
