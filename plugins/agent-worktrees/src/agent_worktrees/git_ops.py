@@ -190,6 +190,7 @@ def git(
         result = subprocess.run(
             cmd, cwd=cwd, capture_output=capture, text=True,
             encoding="utf-8", errors="replace", env=env, timeout=timeout,
+            **no_window_kwargs(),
         )
     if check and result.returncode != 0:
         raise GitError(cmd, result.returncode, result.stderr.strip())

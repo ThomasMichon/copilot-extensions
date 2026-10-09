@@ -32,12 +32,19 @@ class RebaseProof:
 
 
 def _git(*args: str, cwd: str) -> str:
-    return _git_raw(*args, cwd=cwd).strip()
-
-
-def _git_raw(*args: str, cwd: str) -> str:
     result = git_ops.git(*args, cwd=cwd, check=False)
-    return result.stdout if result.returncode == 0 else ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _git_bytes(*args: str, cwd: str) -> bytes:
+    cmd = ["git", *args]
+    result = subprocess.run(
+        cmd, cwd=cwd, capture_output=True, timeout=30,
+        env=git_ops.repository_identity_env(), **no_window_kwargs(),
+    )
+    if result.returncode:
+        raise git_ops.GitError(cmd, result.returncode, result.stderr.decode("utf-8", errors="replace"))
+    return result.stdout
 
 
 def _ancestor(old: str, new: str, cwd: str) -> bool:
@@ -55,15 +62,14 @@ def _series(base: str, head: str, cwd: str) -> list[str] | None:
         return None
     if not rows:
         return []
-    diff = _git(
-        "log", "--reverse", "--format=commit %H", "--binary", "--full-index",
+    diff = _git_bytes(
+        "log", "--reverse", "--format=commit %H", "--binary", "--full-index", "--encoding=none",
         "--no-ext-diff", "--no-textconv", "-p", f"{base}..{head}", cwd=cwd,
     )
     try:
         result = subprocess.run(
             ["git", "patch-id", "--verbatim"], input=diff, cwd=cwd,
-            env=git_ops.repository_identity_env(), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30,
+            env=git_ops.repository_identity_env(), capture_output=True, timeout=30,
             **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
@@ -71,10 +77,14 @@ def _series(base: str, head: str, cwd: str) -> list[str] | None:
     pairs = [line.split() for line in result.stdout.splitlines()]
     if (
         result.returncode or len(pairs) != len(rows)
-        or any(len(pair) != 2 or pair[1] != row[0] for pair, row in zip(pairs, rows))
+        or any(
+            len(pair) != 2 or pair[1] != row[0].encode("ascii")
+            or not re.fullmatch(rb"[0-9a-f]{40,64}", pair[0])
+            for pair, row in zip(pairs, rows)
+        )
     ):
         return None
-    return [pair[0] for pair in pairs]
+    return [pair[0].decode("ascii") for pair in pairs]
 
 
 def _replay(branch: str, head: str, cwd: str) -> tuple[str, str, str, list[tuple[str, str]]] | None:
@@ -147,8 +157,8 @@ def _conflict_lineage(
     conflicts = []
     for (old_sha, old_patch), new_sha, new_patch, (_, action) in zip(candidates, new_shas, new, steps):
         identity = "--format=%an%x00%ae%x00%aI%x00%B"
-        before = _git_raw("show", "-s", identity, old_sha, cwd=cwd)
-        after = _git_raw("show", "-s", identity, new_sha, cwd=cwd)
+        before = _git_bytes("show", "--encoding=none", "-s", identity, old_sha, cwd=cwd)
+        after = _git_bytes("show", "--encoding=none", "-s", identity, new_sha, cwd=cwd)
         if not before or before != after:
             return None
         if old_patch != new_patch:

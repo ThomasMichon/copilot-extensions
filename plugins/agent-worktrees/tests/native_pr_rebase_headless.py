@@ -69,23 +69,37 @@ ready = threading.Event()
 seen = set()
 visible = set()
 foreground = set()
+new_visible = set()
+focus_changes = []
 errors = []
 
 
 def observe():
+    baseline_windows = None
+    previous_foreground = None
     try:
         while not stop.is_set():
             seen.update(descendants())
+            current_windows = set()
 
             @callback_type
             def inspect(handle, _param):
-                if user.IsWindowVisible(handle) and window_pid(handle) in seen:
-                    visible.add(int(handle))
+                if user.IsWindowVisible(handle):
+                    current_windows.add(int(handle))
+                    if window_pid(handle) in seen:
+                        visible.add(int(handle))
                 return True
 
             if not user.EnumWindows(inspect, 0):
                 raise ctypes.WinError(ctypes.get_last_error())
+            if baseline_windows is None:
+                baseline_windows = current_windows
+            # Console hosts may be broker-owned rather than process descendants.
+            new_visible.update(current_windows - baseline_windows)
             handle = user.GetForegroundWindow()
+            if previous_foreground is not None and handle != previous_foreground:
+                focus_changes.append(1)
+            previous_foreground = handle
             if handle and window_pid(handle) in seen:
                 foreground.add(int(handle))
             ready.set()
@@ -114,8 +128,10 @@ finally:
     Path(sys.argv[5]).write_text(json.dumps({
         "cycles": cycles, "observed_descendants": len(seen) - 1,
         "visible_windows": len(visible), "foreground_owned": len(foreground),
+        "new_visible_windows": len(new_visible), "foreground_transitions": len(focus_changes),
         "errors": errors,
     }), encoding="utf-8")
 assert not thread.is_alive()
 assert not errors
 assert not visible and not foreground
+assert not new_visible and not focus_changes

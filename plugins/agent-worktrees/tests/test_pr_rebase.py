@@ -273,18 +273,46 @@ def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, comma
 @pytest.mark.parametrize("changed_message", [" Message\n", "Message\n\n"])
 def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch, changed_message):
     def fake_git(*args, cwd, check):
-        if args[0] == "rev-list":
-            stdout = "old\n" if args[-1] == "base..original" else "new\n"
-        else:
-            message = "Message\n" if args[-1] == "old" else changed_message
-            stdout = "Author\x00author@example.com\x002026-01-01T00:00:00Z\x00" + message
+        stdout = "old\n" if args[-1] == "base..original" else "new\n"
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
+    def fake_run(args, **kwargs):
+        assert not kwargs.get("text")
+        message = "Message\n" if args[-1] == "old" else changed_message
+        stdout = b"Author\x00author@example.com\x002026-01-01T00:00:00Z\x00" + message.encode()
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=b"")
+
     monkeypatch.setattr(git_ops, "git", fake_git)
+    monkeypatch.setattr(pr_rebase.subprocess, "run", fake_run)
     assert pr_rebase._conflict_lineage(
         "base", "original", "onto", "finished", ["old-patch"], ["new-patch"], [],
         [("new", "rebase (continue): Message")], "unused",
     ) is None
+
+
+@pytest.mark.guard
+def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tmp_path):
+    path = tmp_path / "raw-patches"
+    path.mkdir()
+    _git("init", cwd=path)
+    _git("config", "user.name", "Developer", cwd=path)
+    _git("config", "user.email", "developer@example.com", cwd=path)
+    data = path / "data.txt"
+    data.write_bytes(b"base\n")
+    _git("add", "data.txt", cwd=path)
+    _git("commit", "-m", "base", cwd=path)
+    base = _git("rev-parse", "HEAD", cwd=path)
+    patches = []
+    for content in (b"\xff", b"\xfe", b"line ", b"line  "):
+        data.write_bytes(content)
+        _git("add", "data.txt", cwd=path)
+        tree = _git("write-tree", cwd=path)
+        head = _git("commit-tree", tree, "-p", base, "-m", "candidate", cwd=path)
+        series = pr_rebase._series(base, head, str(path))
+        assert series is not None and len(series) == 1
+        patches.append(series[0])
+    assert patches[0] != patches[1]
+    assert patches[2] != patches[3]
 
 
 @pytest.mark.skipif(
@@ -305,9 +333,11 @@ def test_owned_pr_rebase_native_headless_two_cycles(pr_repo, tmp_path):
          str(source), str(path), base, head, str(result)],
         capture_output=True, text=True, timeout=90, **no_window_kwargs(),
     )
-    assert proc.returncode == 0, proc.stderr
+    assert result.is_file(), proc.stderr
     observation = json.loads(result.read_text(encoding="utf-8"))
+    assert proc.returncode == 0, (proc.stderr, observation)
     assert observation["cycles"] == 2
     assert observation["observed_descendants"] > 0
     assert observation["visible_windows"] == observation["foreground_owned"] == 0
+    assert observation["new_visible_windows"] == observation["foreground_transitions"] == 0
     assert observation["errors"] == []
