@@ -1,0 +1,9 @@
+{
+  "comment": "Prove exact upstream ancestors before reconstructing owned PR replays with stale recorded bases.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

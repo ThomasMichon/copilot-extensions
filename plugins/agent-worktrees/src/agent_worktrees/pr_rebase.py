@@ -169,6 +169,9 @@ def _conflict_lineage(
     current = onto
     index = 0
     for old_sha, old_parent in old_rows:
+        # A stale recorded base can include upstream history later edited again.
+        if _ancestor(old_sha, onto, cwd):
+            continue
         tree, conflicted = _merge_tree(old_parent, current, old_sha, cwd)
         current_tree = _git("rev-parse", f"{current}^{{tree}}", cwd=cwd)
         if not current_tree:
