@@ -27,13 +27,15 @@ def state_path(yaml_path: Path) -> Path:
     return yaml_path.parent / yaml_path.stem / "launch-seed.json"
 
 
-def peek(yaml_path: Path) -> LaunchSeed | None:
+def _read(yaml_path: Path) -> LaunchSeed | None:
     try:
         data = json.loads(state_path(yaml_path).read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ValueError("Invalid launch-seed state schema")
+    if data.get("finished") is True:
+        return None
     seed_id, kind, text, revision = (
         data.get("seed_id"), data.get("kind"), data.get("text"), data.get("revision"),
     )
@@ -48,6 +50,25 @@ def peek(yaml_path: Path) -> LaunchSeed | None:
     if handoff_id is not None and (not isinstance(handoff_id, str) or not handoff_id):
         raise ValueError("Invalid launch-seed handoff identity")
     return LaunchSeed(seed_id, "new" if kind == "new" else "resume", text, revision, handoff_id)
+
+
+def peek(yaml_path: Path) -> LaunchSeed | None:
+    if not state_path(yaml_path).exists():
+        return None
+    with tracking._RecordLock(yaml_path, require_sidecar=True):
+        current = _read(yaml_path)
+        if current is None:
+            return None
+        try:
+            record = tracking.load_record(yaml_path)
+        except FileNotFoundError:
+            return None
+        if (
+            not getattr(record, "pending_seed", None)
+            and record.pending_seed_revision > current.revision
+        ):
+            return None
+        return current
 
 
 def _write(yaml_path: Path, seed: LaunchSeed) -> None:
@@ -159,9 +180,23 @@ def _apply_finish(args: dict) -> dict:
         if current.seed_id != original.seed_id or current.handoff_id != original.handoff_id:
             return {"finished": False, "reason": "superseded"}
         record.pending_seed_revision = max(record.pending_seed_revision, current.revision) + 1
+        tracking._atomic_write(state_path(path), json.dumps({
+            "version": 1, "finished": True, "seed_id": current.seed_id,
+            "revision": record.pending_seed_revision,
+        }) + "\n")
         tracking.save_record(record, path)
         state_path(path).unlink()
         return {"finished": True}
+
+
+def _apply_remove(args: dict) -> dict:
+    path = Path(args["yaml_path"])
+    target = state_path(path)
+    if args.get("worktree_id") != path.stem:
+        raise ValueError("Launch-seed removal identity mismatch")
+    with tracking._RecordLock(path, require_sidecar=True):
+        target.unlink(missing_ok=True)
+    return {"removed": True}
 
 
 def _dispatch(verb: str, args: dict) -> dict:
@@ -204,6 +239,12 @@ def finish(yaml_path: Path, receipt: dict) -> dict:
     return _dispatch("launch_seed_finish", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "seed": receipt["seed"],
+    })
+
+
+def remove(yaml_path: Path) -> dict:
+    return _dispatch("launch_seed_remove", {
+        "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
     })
 
 
@@ -254,3 +295,4 @@ tracking_write.register_verb("launch_seed_stage", _apply_stage)
 tracking_write.register_verb("launch_seed_take", _apply_take)
 tracking_write.register_verb("launch_seed_restore", _apply_restore)
 tracking_write.register_verb("launch_seed_finish", _apply_finish)
+tracking_write.register_verb("launch_seed_remove", _apply_remove)

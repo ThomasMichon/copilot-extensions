@@ -367,6 +367,11 @@ def _remove_managed_worktree(
     if warns:
         return False, warns
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
+    from . import launch_seed_state, tracking_write
+    try:
+        launch_seed_state.remove(yaml_path)
+    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+        return False, [f"launch-seed remove failed: {exc}"]
     try:
         yaml_path.unlink()
     except OSError as exc:

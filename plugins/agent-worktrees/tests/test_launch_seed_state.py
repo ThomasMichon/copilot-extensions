@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import argparse
+import dataclasses
+import json
+from pathlib import Path
 
 import pytest
 
@@ -130,3 +134,68 @@ def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkey
     assert "cleanup is unconfirmed" in capsys.readouterr().err
     assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 3
     assert len(calls) == 1
+
+
+def test_saved_completion_tombstone_cannot_resurrect_prompt(tmp_path, monkeypatch):
+    from agent_worktrees.resume_seed import seed_for_attempt
+
+    path = _record(tmp_path)
+    seed = state.stage(path, kind="new", text="must not repeat")
+    receipt = state.take(path, seed_id=seed.seed_id)
+    target = state.state_path(path)
+    real_unlink = Path.unlink
+    def fail_seed_unlink(self, *args, **kwargs):
+        if self == target:
+            raise OSError("interrupted after tombstone save")
+        return real_unlink(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", fail_seed_unlink)
+    with pytest.raises(OSError, match="tombstone"):
+        state.finish(path, receipt)
+    assert "must not repeat" not in target.read_text(encoding="utf-8")
+    assert state.peek(path) is None
+    assert state.pending(path) is None
+    record = tracking.load_record(path)
+    assert state.creation_text(path, record) is None
+    assert seed_for_attempt(path, record, argparse.Namespace()) is None
+    assert state.stage(path) is None
+    assert state.take(path, seed_id=seed.seed_id)["seed"] is None
+    assert not state.restore(path, receipt)["restored"]
+
+
+def test_legacy_revision_tombstone_suppresses_extant_old_json(tmp_path):
+    path = _record(tmp_path)
+    seed = state.stage(path, kind="resume", text="already handed off")
+    record = tracking.load_record(path)
+    record.pending_seed_revision = seed.revision + 1
+    tracking.save_record(record, path)
+    state.state_path(path).write_text(
+        json.dumps({"version": 1, **dataclasses.asdict(seed)}), encoding="utf-8",
+    )
+    assert state.peek(path) is None
+    assert state.pending(path) is None
+    assert state.stage(path) is None
+
+
+def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeypatch):
+    from agent_worktrees import reap_cli
+
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="private pending prompt")
+    other = state.state_path(path).parent / "unrelated-state.txt"
+    other.write_text("keep me", encoding="utf-8")
+    record = tracking.load_record(path)
+    record.branch = ""
+    record.worktree_path = ""
+    monkeypatch.setattr(reap_cli.sessions, "has_mux_session", lambda *a: False)
+    monkeypatch.setattr(
+        reap_cli.sessions, "scan_sessions_fast",
+        lambda *a: SimpleNamespace(active_sessions=set()),
+    )
+    monkeypatch.setattr(reap_cli.disposition_history, "remove", lambda *a: None)
+    monkeypatch.setattr(reap_cli.handoff_trace, "remove_trace", lambda *a: None)
+    removed, warnings = reap_cli._remove_managed_worktree(
+        record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+    )
+    assert removed and not warnings
+    assert not path.exists() and not state.state_path(path).exists()
+    assert other.read_text(encoding="utf-8") == "keep me"

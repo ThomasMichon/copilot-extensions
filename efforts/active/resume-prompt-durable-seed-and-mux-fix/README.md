@@ -1078,3 +1078,18 @@ _Pending._
   Updated both release notes for the superseding durable retry model.
   The open PR also became conflicted as `dev` advanced; backup and safe
   rebase/revalidation are next before requesting the current-head verdict.
+- **2026-10-08** -- Rebased the owned PR as one commit onto current `dev`,
+  preserving upstream JSON local-cache refresh. Revalidated 560 engine
+  cases (21 skips) and 508 Manager cases. The publication helper rejected
+  intentional rewritten history; the operator explicitly authorized one
+  exact-old-head lease push to the same PR branch, and PR tracking was
+  reconciled afterward. Review of `ff0f241d8` identified crash-tombstone and
+  managed-reap lifecycle gaps. Completion now atomically replaces plaintext
+  with a text-free finished tombstone before the tracking revision save;
+  all read paths also reject legacy revision-tombstoned JSON. Successful
+  managed reaping removes only the owned launch-seed file through the same
+  daemon writer, retaining unrelated state. Exact interrupted-save/unlink,
+  old-tombstone and scoped-removal regressions added; 199 targeted state,
+  reap and creation-recovery cases pass. The carried post-creation High is
+  implemented and covered; reply with current code/test anchors rather than
+  silently re-fixing it. Publication and current-head review/CI remain.

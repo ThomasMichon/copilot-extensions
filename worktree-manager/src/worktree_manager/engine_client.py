@@ -577,8 +577,9 @@ def resolve_launch_plan(
     remote SSH handoff plan for that same selection. ``seed`` is an optional
     prompt queued as the session's first (``new=True``) or next
     (``worktree_id`` resume, resume-prompt-durable-seed-and-mux-fix) interactive
-    turn, delivered as a durable ``--interactive`` argument on the returned
-    launch command -- meaningful with either ``new=True`` or a plain resume
+    turn. The returned command carries its staged identity; setup supplies
+    full ``--interactive`` only at backend handoff, not at plan construction.
+    Meaningful with either ``new=True`` or a plain resume
     (``worktree_id`` set, ``bare_resume=False``); the engine's own CLI already
     rejects it with ``base=True``, ``bare_resume=True``, or alongside
     ``target_machine``, so this is intentionally NOT re-validated here.
