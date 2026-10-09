@@ -65,6 +65,76 @@ def _make_source(root: Path) -> Path:
     return src
 
 
+def _push_worker(source: str, root: str, host: str, barrier, queue) -> None:
+    barrier.wait(timeout=30)
+    result = LocalTarget({"path": root}).push(
+        Path(source), "m1", {"abc-123"},
+        source_identity=_Identity("github", host, "example", "codespace"),
+    )
+    queue.put((host, result.ok, result.detail))
+
+
+def test_push_tolerates_destination_created_after_missing_leaf_check(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    source = _make_source(tmp_path)
+    root = tmp_path / "dest"
+    root.mkdir()
+    leaf = root / "m1"
+    original_lstat = filesystem._lstat
+    injected = False
+
+    def lstat_with_concurrent_creator(path):
+        nonlocal injected
+        try:
+            return original_lstat(path)
+        except FileNotFoundError:
+            if path == leaf and not injected:
+                leaf.mkdir()
+                injected = True
+            raise
+
+    monkeypatch.setattr(filesystem, "_lstat", lstat_with_concurrent_creator)
+    result = LocalTarget({"path": str(root)}).push(
+        source, "m1", source_identity=_Identity("github", "host-a", "example", "codespace")
+    )
+    assert injected
+    assert result.ok, result.detail
+    assert (leaf / "session-state" / "abc-123" / "events.jsonl").is_file()
+
+
+@pytest.mark.parametrize("same_identity", [True, False])
+def test_concurrent_end_to_end_pushes_admit_only_matching_identities(
+    tmp_path: Path, same_identity: bool,
+) -> None:
+    import multiprocessing
+
+    source = _make_source(tmp_path)
+    root = tmp_path / "dest"
+    ctx = multiprocessing.get_context("spawn")
+    barrier, queue = ctx.Barrier(2), ctx.Queue()
+    hosts = ("host-a", "host-a" if same_identity else "host-b")
+    processes = [
+        ctx.Process(target=_push_worker, args=(str(source), str(root), host, barrier, queue))
+        for host in hosts
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=60)
+        assert process.exitcode == 0
+    outcomes = [queue.get(timeout=5) for _ in processes]
+    winners = [host for host, ok, _ in outcomes if ok]
+    assert len(winners) == (2 if same_identity else 1), outcomes
+    if not same_identity:
+        assert "mismatch" in next(detail for _, ok, detail in outcomes if not ok)
+    marker = json.loads((root / "m1" / PUBLICATION_IDENTITY_MARKER).read_text())
+    assert marker["host"] in winners
+    assert (root / "m1" / "session-state" / "abc-123" / "events.jsonl").is_file()
+
+
 def test_filesystem_push_claims_empty_destination_and_writes_marker(
     tmp_path: Path,
 ) -> None:

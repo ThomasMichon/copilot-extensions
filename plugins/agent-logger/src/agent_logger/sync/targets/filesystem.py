@@ -37,6 +37,7 @@ from agent_logger.sync.meta import heartbeat_sync_meta, read_sync_meta, write_sy
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
     RESCUE_SNAPSHOT_PROVENANCE,
+    ensure_real_directory,
     existing_rescue_snapshot_path,
     is_link_or_reparse,
     open_regular_no_follow,
@@ -708,22 +709,11 @@ def _anchored_path(path: Path) -> Path:
 
 
 def _ensure_real_directory(path: Path) -> Path:
-    """Create a directory only through real directory components."""
-    absolute = _anchored_path(path)
-    current = Path(absolute.anchor)
-    anchor_mode = _lstat(current).st_mode
-    if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
-        raise OSError(f"destination directory is unsafe: {current}")
-    for part in absolute.parts[1:]:
-        current /= part
-        try:
-            mode = _lstat(current).st_mode
-        except FileNotFoundError:
-            _mkdir(current)
-            mode = _lstat(current).st_mode
-        if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
-            raise OSError(f"destination directory is unsafe: {current}")
-    return absolute
+    """Use the shared race-tolerant, no-link directory creation contract."""
+    try:
+        return ensure_real_directory(path)
+    except OSError as exc:
+        raise OSError(f"destination {exc}") from exc
 
 
 def _existing_real_directory(path: Path) -> Path | None:
@@ -778,7 +768,7 @@ def _ensure_relative_directory(root: Path, relative: Path) -> Path:
         try:
             mode = _lstat(current).st_mode
         except FileNotFoundError:
-            _mkdir(current)
+            _ensure_real_directory(current)
             mode = _lstat(current).st_mode
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"destination directory is unsafe: {current}")
