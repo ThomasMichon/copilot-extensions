@@ -238,6 +238,9 @@ def test_publication_identity_root_marker_excluded_but_nested_file_copied(
     b"[" * 10_000 + b"]" * 10_000,
     b"x" * (admission.MAX_MARKER_BYTES + 1),
     _metadata(_identity(), ["../escape"]),
+], ids=[
+    "empty-object", "null", "boolean-schema", "unsupported-schema",
+    "deep-json", "oversized-marker", "unsafe-alias",
 ])
 def test_publication_identity_refuses_invalid_marker(tmp_path: Path, payload: bytes) -> None:
     dest = tmp_path / "m1"

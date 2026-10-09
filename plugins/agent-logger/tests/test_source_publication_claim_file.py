@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -16,30 +17,90 @@ from agent_logger.sync.targets.windows_claim_file import WindowsClaimFile
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="requires native Windows file handles")
 
 _REPLACEMENT_PROBE = """
+import ctypes
 import json
+import msvcrt
 import os
 import sys
+from ctypes import wintypes
+
+
+def failure(error: OSError) -> dict[str, object]:
+    return {
+        "succeeded": False,
+        "errno": error.errno,
+        "winerror": getattr(error, "winerror", None),
+    }
+
+
+def probe_write(fd: int) -> dict[str, object]:
+    opened = os.fstat(fd)
+    result = {
+        "attempted": True,
+        "file_id": [opened.st_dev, opened.st_ino],
+    }
+    try:
+        written = os.write(fd, b"tampered")
+    except OSError as error:
+        result.update(failure(error))
+    else:
+        result.update({"succeeded": True, "bytes_written": written})
+    return result
 
 candidate, held = sys.argv[1:]
-results = {}
+results = {
+    "write": {"attempted": False},
+    "native_write": {"attempted": False},
+}
 try:
     fd = os.open(held, os.O_RDWR | os.O_BINARY)
 except OSError as error:
-    results["write_open"] = error.winerror
+    results["write_open"] = failure(error)
 else:
-    os.close(fd)
-    results["write_open"] = None
+    try:
+        results["write_open"] = {"succeeded": True}
+        results["write"] = probe_write(fd)
+    finally:
+        os.close(fd)
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+create_file = kernel32.CreateFileW
+create_file.argtypes = [
+    wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+    wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+]
+create_file.restype = wintypes.HANDLE
+close_handle = kernel32.CloseHandle
+close_handle.argtypes = [wintypes.HANDLE]
+close_handle.restype = wintypes.BOOL
+
+# Share the owner's write/delete access so only its share mode denies this open.
+handle = create_file(held, 0x80000000 | 0x40000000, 7, None, 3, 0x80 | 0x00200000, None)
+if handle == wintypes.HANDLE(-1).value:
+    results["native_write_open"] = failure(ctypes.WinError(ctypes.get_last_error()))
+else:
+    fd = None
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
+        results["native_write_open"] = {"succeeded": True}
+        results["native_write"] = probe_write(fd)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        elif not close_handle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
 try:
     os.replace(candidate, held)
 except OSError as error:
-    results["replace"] = error.winerror
+    results["replace"] = failure(error)
 else:
-    results["replace"] = None
+    results["replace"] = {"succeeded": True}
 print(json.dumps(results))
 """
 
 
-def _assert_replacement_blocked(candidate: Path, held: Path) -> None:
+def _assert_replacement_blocked(candidate: Path, held: Path, original_id: tuple[int, int]) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -56,8 +117,17 @@ def _assert_replacement_blocked(candidate: Path, held: Path) -> None:
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     failures = json.loads(result.stdout)
-    assert failures["write_open"] in (5, 32), result.stdout
-    assert failures["replace"] in (5, 32), result.stdout
+    for operation in ("write", "native_write"):
+        write = failures[operation]
+        if write["attempted"]:
+            assert tuple(write["file_id"]) == original_id, result.stdout
+            assert not write["succeeded"], result.stdout
+    assert not failures["write_open"]["succeeded"], result.stdout
+    assert failures["write_open"]["errno"] in (errno.EACCES, errno.EPERM), result.stdout
+    assert not failures["native_write_open"]["succeeded"], result.stdout
+    assert failures["native_write_open"]["winerror"] in (5, 32), result.stdout
+    assert not failures["replace"]["succeeded"], result.stdout
+    assert failures["replace"]["winerror"] in (5, 32), result.stdout
     assert candidate.read_bytes() == b"replacement"
 
 
@@ -146,7 +216,7 @@ def test_separate_process_cannot_replace_held_temporary(
         held = temporary[0]
 
         def check_held_file() -> None:
-            _assert_replacement_blocked(candidate, held)
+            _assert_replacement_blocked(candidate, held, original_id)
             assert claim.file_id == original_id
             assert list(tmp_path.glob(".claim-*.tmp")) == [held]
             claim.stream.seek(0)
