@@ -4608,6 +4608,16 @@ def reap_one(
         payload.setdefault("worktree_id", wt_id)
         return payload
 
+    if wt_id == tracking.ANCHOR_ID:
+        return _result(
+            {
+                "ok": False,
+                "removed": False,
+                "skipped": True,
+                "reason": "the project's main checkout is not a removable worktree",
+            }
+        )
+
     if not yaml_path.exists():
         return _result(
             {

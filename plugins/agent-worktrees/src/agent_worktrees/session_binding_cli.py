@@ -342,6 +342,59 @@ def _emit_handoff_claim_stages(
     _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
+def _register_anchor_session(
+    args: argparse.Namespace,
+    session_id: str,
+    anchor,
+    *,
+    pid: int | None,
+    pane_id: str | None,
+    event_at: str | None,
+    source: str,
+) -> bool:
+    """Record a session started in the project's main checkout on the ``@anchor`` ledger.
+
+    The anchor stays a ledger, not a worktree: no status updater, monitor
+    session, profile assignment, or handoff linkage is attached, and every
+    worktree-oriented reader (list, picker, cleanup, finalize) skips it.
+    Best-effort -- a failure here never fails the hook.
+    """
+    try:
+        config = cfg.load_config()
+        tracking.load_or_create_anchor_record(
+            str(anchor), config.repo_name, config.machine, config.platform, cfg.tracking_dir()
+        )
+        tracking.register_session(
+            tracking.ANCHOR_ID,
+            session_id,
+            pid=pid,
+            pane_id=pane_id,
+            started_at=event_at,
+            source=source,
+        )
+    except Exception as e:
+        output.err(f"Could not record main-checkout session: {e}")
+        return False
+    try:
+        from . import handoff_diagnostics
+
+        handoff_diagnostics.stamp_session_state_worktree_binding(
+            session_id,
+            tracking.ANCHOR_ID,
+            worktree_dir=str(anchor),
+            machine=config.machine,
+        )
+    except Exception:
+        pass
+    activity.log_event(
+        "session_started",
+        worktree_id=tracking.ANCHOR_ID,
+        session_id=session_id,
+        launch_id=getattr(args, "launch_id", None),
+    )
+    return True
+
+
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked)."""
     wt_id = getattr(args, "worktree_id", None)
@@ -398,6 +451,18 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         candidate = _resolve_mux_worktree_id(candidate) or candidate
         if candidate and _activate_project_for_worktree_id(candidate):
             wt_id = candidate
+    if not wt_id and cwd:
+        anchor = worktree_identity._anchor_checkout_for_cwd(cwd)
+        if anchor is not None:
+            _register_anchor_session(
+                args,
+                session_id,
+                anchor,
+                pid=pid,
+                pane_id=pane_id,
+                event_at=event_at,
+                source=source,
+            )
     if not wt_id:
         if getattr(args, "emit_context", False):
             from . import session_projection
@@ -910,8 +975,12 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
         yaml_path = _find_tracking_file_by_session(session_id)
         if yaml_path is not None:
             try:
-                wt_id = tracking.load_record(yaml_path).worktree_id
-                _activate_project_for_worktree_id(wt_id)
+                found = tracking.load_record(yaml_path)
+                wt_id = found.worktree_id
+                if wt_id == tracking.ANCHOR_ID and found.repo:
+                    cfg.set_active_project(found.repo)
+                else:
+                    _activate_project_for_worktree_id(wt_id)
             except Exception:
                 wt_id = None
     if wt_id:
@@ -930,7 +999,8 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
             ended_at=event_at,
             source=source,
         )
-        _capture_session_title(wt_id, session_id)
+        if wt_id != tracking.ANCHOR_ID:
+            _capture_session_title(wt_id, session_id)
     except Exception as e:
         output.err(f"Failed to deregister session: {e}")
         return 1

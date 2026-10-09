@@ -132,6 +132,43 @@ def _adopt_linked_worktree(cwd: str | Path) -> str | None:
     return worktree_id
 
 
+def _anchor_checkout_for_cwd(cwd: str | Path | None) -> Path | None:
+    """Return the active project's anchor when ``cwd`` is in the main checkout itself.
+
+    A linked worktree (even one nested under the anchor directory) or a
+    different repository is never treated as the anchor.
+    """
+    if not cwd or not cfg.active_project():
+        return None
+    try:
+        anchor = Path(cfg.load_config().default_repo.anchor).resolve()
+        candidate = Path(cwd).resolve()
+    except Exception:
+        return None
+    if candidate != anchor and anchor not in candidate.parents:
+        return None
+    if _worktree_id_from_git(candidate):
+        return None
+    try:
+        top = git_ops.git("rev-parse", "--show-toplevel", cwd=str(candidate), check=False, timeout=10)
+        if top.returncode == 0 and (top.stdout or "").strip():
+            root = top.stdout.strip()
+        else:
+            # A bare anchor has no work tree; match its git dir instead.
+            git_dir = git_ops.git(
+                "rev-parse", "--absolute-git-dir", cwd=str(candidate), check=False, timeout=10
+            )
+            if git_dir.returncode != 0 or not (git_dir.stdout or "").strip():
+                return None
+            resolved = Path(git_dir.stdout.strip())
+            root = str(resolved.parent if resolved.name == ".git" else resolved)
+    except Exception:
+        return None
+    if git_ops._normalize_wt_path(root) != git_ops._normalize_wt_path(str(anchor)):
+        return None
+    return anchor
+
+
 def _infer_worktree_id_from_worktree_root(config: cfg.Config | None, cwd: Path) -> str | None:
     """Legacy fallback: derive the ID from the first path component under the
     configured ``worktree_root``.
@@ -287,7 +324,11 @@ def _resolve_worktree_id(raw_id: str) -> str:
         return raw_id
 
     # Suffix match: iterate tracking files whose stems end with raw_id
-    matches = [p.stem for p in tdir.glob("*.yaml") if p.stem.endswith(raw_id)]
+    matches = [
+        p.stem
+        for p in tdir.glob("*.yaml")
+        if p.stem.endswith(raw_id) and p.stem != tracking.ANCHOR_ID
+    ]
 
     if len(matches) == 1:
         return matches[0]

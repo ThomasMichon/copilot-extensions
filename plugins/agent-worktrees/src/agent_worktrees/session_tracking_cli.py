@@ -300,11 +300,11 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
         records = []
         for tracking_path in _all_tracking_dirs():
             try:
-                records.extend(tracking.list_records(tracking_path))
+                records.extend(tracking.list_records(tracking_path, include_anchor=True))
             except Exception:
                 continue
     else:
-        records = tracking.list_records(cfg.tracking_dir())
+        records = tracking.list_records(cfg.tracking_dir(), include_anchor=True)
     if wt_id:
         records = [r for r in records if r.worktree_id == wt_id]
         if not records:
@@ -431,7 +431,11 @@ def _find_tracking_file(raw_id: str) -> Path | None:
     for tdir in tdirs:
         if not tdir.exists():
             continue
-        matches += [p for p in tdir.glob("*.yaml") if p.stem.endswith(raw_id)]
+        matches += [
+            p
+            for p in tdir.glob("*.yaml")
+            if p.stem.endswith(raw_id) and p.stem != tracking.ANCHOR_ID
+        ]
     return matches[0] if len(matches) == 1 else None
 
 
@@ -969,7 +973,7 @@ def cmd_recent_messages(args: argparse.Namespace) -> int:
     assistant turn or an unanswered assistant offer.
     """
     wt_id = worktree_identity._resolve_worktree_id(args.worktree_id)
-    records = tracking.list_records(cfg.tracking_dir())
+    records = tracking.list_records(cfg.tracking_dir(), include_anchor=True)
     rec = next((r for r in records if r.worktree_id == wt_id), None)
     if rec is None:
         return output._json_error(f"No worktree found: {args.worktree_id}")

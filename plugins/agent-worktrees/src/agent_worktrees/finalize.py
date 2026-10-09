@@ -195,6 +195,17 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
         )
 
 
+def _refuse_anchor(worktree_id: str, verb: str) -> bool:
+    """Refuse to treat the `@anchor` ledger (the project's main checkout) as a worktree."""
+    if worktree_id != tracking.ANCHOR_ID:
+        return False
+    output.err(
+        f"Cannot {verb} {worktree_id}: it records sessions and claims for the "
+        "project's main checkout, which is not a removable worktree."
+    )
+    return True
+
+
 def _has_live_session(record) -> bool:
     """Return True if this worktree has a live bound Copilot session.
 
@@ -247,6 +258,8 @@ def push_changes(
     Returns:
         True on success, False on failure (worktree preserved).
     """
+    if _refuse_anchor(worktree_id, "push-changes"):
+        return False
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
@@ -1514,6 +1527,8 @@ def validate_and_finalize(
     Returns:
         True on success, False if content is not yet on upstream.
     """
+    if _refuse_anchor(worktree_id, "finalize"):
+        return False
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)

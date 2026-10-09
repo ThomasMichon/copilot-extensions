@@ -53,6 +53,12 @@ only their `~/.copilot/session-state/<session-id>/events.jsonl` files or
 keyed rows in `~/.copilot/session-store.db`. Enumerate first; never begin
 with a recursive state-root or filesystem sweep.
 
+Sessions started in the project's **main checkout** (not a linked worktree)
+are recorded on the reserved `@anchor` ledger: query them with
+`list-sessions --worktree @anchor` or `head-session --worktree @anchor`.
+`@anchor` is never a worktree -- `list`, the picker, `finalize`,
+`push-changes`, and cleanup/reap all skip or refuse it.
+
 ## Binstub and Project-Registration Notes
 
 Project binstubs pin the payload that created them and carry an ownership
