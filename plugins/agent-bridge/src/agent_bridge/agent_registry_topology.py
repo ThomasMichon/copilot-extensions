@@ -249,7 +249,7 @@ def _find_covering_agent(
             continue
         if target_machine and target_machine.key == machine.key:
             environment = forced_env or target_machine.get_ssh_env(agent.ssh_environment)
-            if environment and environment.name.lower() == env_name:
+            if environment and str(environment.name or "").lower() == env_name:
                 return name
     return None
 

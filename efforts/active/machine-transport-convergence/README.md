@@ -307,13 +307,13 @@ identity authority: reconcile `machine-transport` with #5689's
   reconciled current upstream rows with this campaign's Active status and
   retained a pre-rebase backup. Rebased Bridge contracts:
   **242 passed, 1 skipped**.
-- Harness projection reconciliation is in `gim-home/odsp-web-harness#845`.
+- Consumer harness projection reconciliation completed through its own
+  reviewed pull request.
   Its fifteen-file diff changes only projection provenance versions and their
   derived hashes; installed templates and guidance behavior remain unchanged.
   Local synchronization and harness lint passed; review recommended approval
-  with zero findings. Required CI passed, #845 merged as
-  `99c6f69839a2deb8d0904063149dde0c6c605663`, and its dedicated worktree
-  finalized through the normal lifecycle.
+  with zero findings. Required CI passed, the synchronization merged, and its
+  dedicated worktree finalized through the normal lifecycle.
 - The new exhaustive workflow's first live run, `37914963861`, failed on both
   platforms during action setup, before running tests: `setup-uv@v9` does not
   resolve. Follow-up #5905 uses the verified `v9.0.0` tag already used by the
@@ -343,3 +343,23 @@ identity authority: reconcile `machine-transport` with #5689's
   Touched-code lint, exact module ceilings and whitespace checks passed.
 - #5905 merged as `867cc20eaa8faad3c6be62e80a144f29372f172b`.
   The follow-up promotion and corrected exhaustive live run remain outstanding.
+
+### 2026-10-09 - Preserved metadata compatibility and release dependency
+- Resolver indexing ignores preserved non-string SSH aliases with an explicit
+  warning, and remote-operation alias matching treats null/non-string values as
+  non-matches. Local coverage normalizes only its comparison value for an
+  unnamed environment; source metadata remains untouched.
+  New real-parser regressions cover null/numeric aliases and an unnamed
+  environment's valid SSH alias. Related Bridge contracts:
+  **308 passed, 1 skipped**. Touched-code lint and whitespace checks passed;
+  the existing remote-operation module ceiling is retained without widening.
+- Removed downstream repository/account references from the public journal;
+  consumer deployment evidence remains expressed in generic completion terms.
+- Promotion run `37917583420` failed its full agent-worktrees job on the real
+  POSIX lease-wait timeout: a two-second budget returned after 0.7657 seconds.
+  Existing #5907 tracks the failure and #5911's owner is implementing the
+  wrapped-IOException correction. The already-merged #5892 adds native error
+  codes but does not itself unwrap the exception. Posted this release impact
+  to #5911; do not duplicate the owner's patch or bypass/retry the failed gate.
+  Corrected external exhaustive validation remains blocked on that tracked
+  remediation and successful normal promotion.

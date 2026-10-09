@@ -76,6 +76,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
             for env in machine.ssh_environments:
                 if not env.alias:
                     continue
+                if not isinstance(env.alias, str):
+                    log.warning("Ignoring non-string SSH alias on machine '%s'", machine.key)
+                    continue
                 alias = env.alias.lower()
                 if alias in self._alias_index:
                     self._ambiguous_ssh_aliases.add(alias)

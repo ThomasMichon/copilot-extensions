@@ -219,3 +219,50 @@ async def test_remote_operations_accept_case_insensitive_exact_environment_alias
     service = RemoteOperationService(AgentResolver({}, _machines()))
     assert await service._lease(host) is lease
     assert captured == {"alias": f"carrier:{host.lower()}", "remote_platform": platform}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("alias", [None, 123])
+async def test_preserved_non_string_aliases_do_not_crash_resolver_or_remote_guard(monkeypatch, caplog, alias):
+    from agent_bridge.remote_errors import RemoteBridgeError
+    from agent_bridge.remote_operations import RemoteOperationService
+
+    monkeypatch.setattr("socket.gethostname", lambda: "elsewhere")
+    machines = parse_machines_yaml({"machines": {"box": {
+        "ssh": {"ready": True, "environments": [
+            {"name": "linux", "alias": alias},
+            {"name": "windows", "alias": "box-win", "shell": "pwsh"},
+        ]},
+    }}})
+    resolver = AgentResolver({}, machines)
+    assert machines["box"].get_ssh_env("linux").alias == alias
+    if alias is not None:
+        assert "Ignoring non-string SSH alias" in caplog.text
+    assert resolver.resolve_ssh_environment("BOX-WIN")[1].name == "windows"
+    with pytest.raises(RemoteBridgeError) as exc:
+        await RemoteOperationService(resolver)._lease("BOX")
+    assert (exc.value.status, exc.value.code) == (400, "ambiguous_host")
+
+
+def test_unnamed_environment_alias_does_not_crash_local_registry_coverage(monkeypatch):
+    from agent_bridge import agent_registry
+    from agent_bridge.agent_registry_common import AgentConfig
+    from agent_bridge.agent_registry_topology import _find_covering_agent
+
+    monkeypatch.setattr("socket.gethostname", lambda: "os-box")
+    monkeypatch.setattr(agent_registry, "_detect_platform", lambda: "linux")
+    machines = parse_machines_yaml({"machines": {"box": {
+        "hostname": "OS-BOX",
+        "ssh": {"ready": True, "environments": [
+            {"name": None, "alias": "box-unnamed"}, {"name": "linux", "alias": "box-linux"},
+        ]},
+    }}})
+    agents = parse_agent_registry({"explicit-worker": {
+        "host": "BOX-UNNAMED", "project": "example-project",
+    }})
+    assert _find_covering_agent(
+        AgentConfig(name="example-project", project="example-project"), agents, machines,
+    ) is None
+    resolver = AgentResolver(agents, machines)
+    assert resolver.resolve("explicit-worker").type == "ssh"
+    assert not resolver._is_local_loopback_agent(agents["explicit-worker"])

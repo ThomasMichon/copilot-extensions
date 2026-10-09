@@ -871,7 +871,7 @@ class RemoteOperationService:
         environments = list(getattr(machine, "ssh_environments", ()))
         if len(environments) > 1:
             alias_matches = [
-                item for item in environments if item.alias.casefold() == host.casefold()
+                item for item in environments if isinstance(item.alias, str) and item.alias.casefold() == host.casefold()
             ]
             if len(alias_matches) == 1:
                 environment = alias_matches[0]
