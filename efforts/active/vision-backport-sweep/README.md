@@ -335,13 +335,15 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
       - [ ] `visions/plugins/agent-worktrees/README.md` — remaining parent
             reconciliation beyond the account slice, including head/claims,
             contribution roles, daemon authority, and lifecycle coverage.
-      - [ ] `visions/test-portfolio/README.md` — shared-host admission slice
+      - [x] `visions/test-portfolio/README.md` — shared-host admission slice
             reconciled across direct-host and devcontainer entry points. Folded back
             protection of shared mutable test environments, explicit bounded
             contention, and read-only inventory availability; corrected the
-            owning effort's stale guard/collection exemption. The remaining
-            contract-map, effectiveness, tier/effect, and portfolio-observability
-            audit is still open; no tests were removed or reclassified.
+            owning effort's stale guard/collection exemption. No tests were
+            removed or reclassified.
+      - [ ] `visions/test-portfolio/README.md` — remaining contract-map,
+            effectiveness, tier/effect, and portfolio-observability audit beyond
+            the completed admission slice.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
