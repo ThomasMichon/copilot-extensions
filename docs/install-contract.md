@@ -2023,6 +2023,9 @@ and after creation. A corrupt, base-interpreter, wrong-prefix or failed-probe
 runtime is repaired or explicitly rejected. uv interpreter selection remains
 unpinned; Windows CLI/server retain signed-first and Python/pip fallback policy,
 while the independent embedding engine keeps its uv-first policy.
+PowerShell package paths consult only the executable accepted by `Ensure-Uv`;
+a rejected but still-discoverable PATH uv is never selected again for packages.
+If no validated uv remains, CLI/server/engine package paths use Python/pip.
 An exception at the optional server repair boundary warns and retains the
 primary runtime's fallback, restoring the caller's error preference in `finally`.
 
@@ -2064,6 +2067,19 @@ before closing the descriptor, so a descendant retaining that open-file
 description cannot retain admission after the callback returns. The stable lock
 inode is not unlinked or replaced, and legacy PID markers are ignored rather
 than reclaimed. These guards do not alter daemon/engine lifecycle.
+POSIX publication uses a separate installation-wide advisory descriptor (fd9),
+while target/version build admission owns fd8. Invalid-marker preparation and
+final freshness checks, activation, payload/launcher writes, stamping and
+manifests all enter that publication guard. Nested publication calls reuse the
+owning scope without reopening fd9; no publication scope acquires build admission,
+and package work stays outside publication.
+
+An original snapshot origin remains provenance, not a required surviving
+authoring directory. The supported PowerShell runtime gate and installer
+authorization prologue use the validated owning payload for the mandatory
+legacy probe when the origin no longer supplies its invocation declaration.
+The probe still validates the complete declaration and installation governance;
+malformed declarations and denied namespace/legacy authorization remain blocking.
 
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine

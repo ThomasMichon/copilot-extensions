@@ -219,6 +219,7 @@ def test_posix_build_timeout_and_failure_release(tmp_path, fallback):
         pytest.skip("native POSIX bash is unavailable")
     script = f"""
 {function("_with_index_build_lock", "sh")}
+{function("_with_index_advisory_lock", "sh")}
 {function("_bootstrap_python", "sh")}
 {function("_find_python", "sh")}
 LINK_DIR='{tmp_path / "missing-bootstrap-slot"}'
@@ -278,6 +279,7 @@ def test_admission_unlocks_shared_descriptor_while_descendant_is_alive(tmp_path,
     )
     prelude = f"""
 {function("_with_index_build_lock", "sh")}
+{function("_with_index_advisory_lock", "sh")}
 {function("_bootstrap_python", "sh")}
 {function("_find_python", "sh")}
 LINK_DIR='{tmp_path / "missing-bootstrap-slot"}'

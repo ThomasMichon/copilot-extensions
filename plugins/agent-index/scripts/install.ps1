@@ -98,8 +98,13 @@ if ($Action -notin @(
         exit 1
     }
     $probeHost = (Get-Process -Id $PID).Path
+    $authorizationPayload = if (Test-Path -LiteralPath (Join-Path $probePayload 'payload-invocation.json') -PathType Leaf) {
+        $probePayload
+    } else {
+        (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+    }
     & $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
-        -PayloadRoot $probePayload -LegacyRoot $probeLegacyRoot
+        -PayloadRoot $authorizationPayload -LegacyRoot $probeLegacyRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -1253,8 +1258,8 @@ exit /b %ERRORLEVEL%
 }
 
 function Invoke-IndexUvPipInstall {
-    $command = if ($script:UvCommand) { $script:UvCommand } else { 'uv' }
-    $result = Invoke-UvPipInstallResilient -UvCommand $command -Arguments $args
+    if (-not $script:UvCommand) { throw 'No validated uv executable is available for package installation' }
+    $result = Invoke-UvPipInstallResilient -UvCommand $script:UvCommand -Arguments $args
     $global:LASTEXITCODE = $result.ExitCode
     return $result.Output
 }
@@ -1337,7 +1342,7 @@ function Install-ServerVenv {
 
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
+        if ($script:UvCommand) {
             Invoke-IndexUvPipInstall --python $serverVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet | Out-Null
         } else {
             & $serverVenvPython -m pip install "$ZddDir" 2>&1 | Out-Null
@@ -1350,7 +1355,7 @@ function Install-ServerVenv {
     Remove-ConsoleTrampolines -VenvDir $serverVenvDir
 
     $serverPkgSpec = "$PluginDir[store,server]"
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
+    if ($script:UvCommand) {
         $srvOut = Invoke-IndexUvPipInstall --python $serverVenvPython $serverPkgSpec | Out-String
     } else {
         $srvOut = & $serverVenvPython -m pip install $serverPkgSpec 2>&1 | Out-String
@@ -1489,7 +1494,7 @@ function Install-Runtime {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
+        if ($script:UvCommand) {
             $zddOut = Invoke-IndexUvPipInstall --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
         } else {
             $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
@@ -1513,7 +1518,7 @@ function Install-Runtime {
     # the non-uv (bare-pip) fallback below can still resolve it.
     $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
     if ($ProcutilDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
+        if ($script:UvCommand) {
             $procutilOut = Invoke-IndexUvPipInstall --python $VenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
         } else {
             $procutilOut = & $VenvPython -m pip install "$ProcutilDir" 2>&1
@@ -1542,7 +1547,7 @@ function Install-Runtime {
     $installRole = Get-ActivationRole
     if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
     $pkgSpec = if ($installRole -eq 'host') { "$PluginDir[store,server]" } else { "$PluginDir" }
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
+    if ($script:UvCommand) {
         $out = Invoke-IndexUvPipInstall --python $VenvPython $pkgSpec | Out-String
     } else {
         $out = & $VenvPython -m pip install $pkgSpec 2>&1 | Out-String
@@ -1742,7 +1747,7 @@ function Install-Engine {
     # from the vendored lib first so pip can satisfy the requirement.
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
+        if ($script:UvCommand) {
             Invoke-IndexUvPipInstall --python $EngineVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         } else {
@@ -1766,7 +1771,7 @@ function Install-Engine {
     $engRc = 0
     $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
     if ($ProcutilDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
+        if ($script:UvCommand) {
             Invoke-IndexUvPipInstall --python $EngineVenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         } else {
@@ -1804,7 +1809,7 @@ function Install-Engine {
         # agent-procutil's own preinstall above already failed -- skip the
         # rest of the engine install rather than risk silently accepting a
         # stale copy already present in a preserved engine venv.
-    } elseif (Get-Command uv -ErrorAction SilentlyContinue) {
+    } elseif ($script:UvCommand) {
         $baseOut = Invoke-IndexUvPipInstall --python $EngineVenvPython "$PluginDir"
         $engRc = $LASTEXITCODE
         $engOut = @($baseOut)

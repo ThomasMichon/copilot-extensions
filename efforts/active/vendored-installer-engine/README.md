@@ -524,6 +524,45 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-09 — Index cross-version publication and supported snapshot recovery
+
+- Continued only PR #5885 from published head
+  `b0e9125614c62c9096c0a66710158d067b16c041`, preserving its worker-readiness
+  barrier and all prior admission, mutex fallback, interpreter, pip and engine
+  policy changes. Canonical engine and existing changefile are unchanged.
+- POSIX publication now owns installation-wide fd9 independently from
+  version/target build fd8. Freshness, invalid-marker preparation, activation,
+  stamp/payload/launcher writes and manifests share the publication guard.
+  Nested calls reuse their scope, build remains outermost, and heavy package
+  work does not hold publication. Both descriptors retain the same OS advisory
+  locking, bounded admission and explicit-unlock semantics.
+- Missing authoring origins remain source provenance. Runtime-gate and
+  installer mandatory legacy probes select the validated owning snapshot when
+  the original no longer supplies its declaration. Complete declaration and
+  namespace/legacy governance validation are retained rather than bypassed.
+- PowerShell package branches now use only the accepted UvCommand. A failed
+  Ensure-Uv cannot rediscover rejected PATH uv through a literal helper fallback
+  or Get-Command package branch; all three runtimes use Python/pip instead.
+- Real process fixtures interleave an older stamp or invalid-marker repair
+  with newer activation, prove publication blocks while another version's
+  build remains independent, and reject stale direct writers. Supported
+  runtime-gate setup/provision fixtures reach snapshot UV only after the real
+  declaration probe; a denied governance decision blocks before provisioning.
+  A still-discoverable broken executable is rejected by real Ensure-Uv, and
+  all nine CLI/server/engine package calls use pip without invoking it again.
+- Bounded validation: new contract selection 7 passed; combined installer/
+  activation matrix 113 passed; disconnected full suite 745 passed / 102
+  skipped; full host suite 836 passed / 11 skipped; relevant tooling 107
+  passed. Guards, F/E9 lint and shell/PowerShell parsing passed.
+- New measurements: shell 2132, PowerShell 2656, wrappers 4788, unchanged
+  canonical pair 881, aggregate 5669 (+73 against the correctly published
+  2064/2651/4715/5596 table). Runtime-gate grows 941 -> 942 lines separately.
+  The effort's aggregate tightening gate remains open.
+- Native 70 passed / 36 skipped applies to the prior published head after its
+  readiness barrier; neither that result nor its earlier handshake retry is
+  attributed to this follow-up. Native revalidation and publication remain
+  integration-owner work. No live mutation or next adopter was performed.
+
 ### 2026-10-09 — Index POSIX advisory-lock ownership corrected
 
 - Scoped follow-up to the new POSIX helper at local head

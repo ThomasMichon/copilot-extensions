@@ -152,6 +152,7 @@ ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
 {function("_test_index_venv", "sh")}
 {function("_new_index_venv", "sh")}
 {function("_with_index_build_lock", "sh")}
+{function("_with_index_advisory_lock", "sh")}
 {function("_resolve_vendored_lib", "sh")}
 _resolve_zdd() {{ _resolve_vendored_lib zdd; }}
 {function("_install_engine", "sh")}
@@ -522,7 +523,8 @@ def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path):
     env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
     functions = "\n".join(function(name, "sh") for name in (
         "_ensure_uv", "_uv_pip_install", "_resolve_vendored_lib",
-        "_test_index_venv", "_new_index_venv", "_with_index_build_lock", "_install_server_venv", "_ensure_runtime",
+        "_test_index_venv", "_new_index_venv", "_with_index_build_lock", "_with_index_advisory_lock",
+        "_with_index_publication_lock", "_index_publication_fresh", "_version_lt", "_install_server_venv", "_ensure_runtime",
     ))
     result = subprocess.run([bash, "-c", f"""
 set -uo pipefail

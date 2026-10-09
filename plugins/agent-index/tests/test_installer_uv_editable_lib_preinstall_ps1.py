@@ -86,6 +86,7 @@ function Invoke-StubVenvPython {{
     $global:LASTEXITCODE = 0
 }}
 $TheVenvPython = 'Invoke-StubVenvPython'
+$script:UvCommand = {"'uv'" if have_uv else "$null"}
 $PluginDir = '{plugin_dir}'
 $prevEAP = 'Continue'
 $ErrorActionPreference = 'Continue'
@@ -246,6 +247,7 @@ function Resolve-VendoredLib {{
 }}
 function Invoke-StubVenvPython {{ $global:LASTEXITCODE = 0 }}
 $TheVenvPython = 'Invoke-StubVenvPython'
+$script:UvCommand = 'uv'
 $PluginDir = '{plugin_dir}'
 $Upgrade = $false
 $prevEAP = 'Continue'

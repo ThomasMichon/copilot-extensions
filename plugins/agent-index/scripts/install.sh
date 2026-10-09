@@ -17,6 +17,7 @@ _step() { printf '  ...    %s\n' "$1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+unset __index_publication_root
 . "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
 # Refuse every mutating lifecycle action before self-staging touches the legacy
@@ -437,7 +438,9 @@ if [[ "$ACTION" == "slot-provision" ||
 fi
 
 _versioned_activate() {
+    _activate_index_runtime() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    _index_publication_fresh || { _skip 'Newer runtime or stamp superseded activation'; return 0; }
     # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
     # An install/ensure run from a STALE payload (older than the active
     # current-version marker) must not downgrade the running runtime; the marker is
@@ -470,6 +473,8 @@ _versioned_activate() {
         return 1
     fi
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
+    }
+    _with_index_publication_lock _activate_index_runtime
 }
 
 _versioned_current() {
@@ -1046,6 +1051,8 @@ _ensure_uv_index() {
 # Deploy a stable machine-global redirector to the payload-owned lifecycle gate.
 # The gate owns setup consent, runtime readiness, and provisioning.
 deploy_binstub() {
+    _deploy_index_binstub() {
+    _index_publication_fresh || { _skip 'Newer runtime or stamp superseded launcher publication'; return 0; }
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
@@ -1066,16 +1073,22 @@ exec "$_gate" "$@"
 STUBEOF
     chmod +x "$STUB"
     _ok "Binstub: $STUB (setup-gated)"
+    }
+    _with_index_publication_lock _deploy_index_binstub
 }
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build until
 # explicit setup (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
+    _stamp_index_payload() {
+    _index_publication_fresh || { _skip 'Newer runtime or stamp superseded stamp'; return 0; }
     echo ''; echo '=== agent-index stamp (defer runtime to explicit setup) ==='; echo ''
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
+    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
     _ok "Stamped: binstub on PATH; runtime provisions after explicit setup."
+    }
+    _with_index_publication_lock _stamp_index_payload
 }
 
 _test_index_venv() {
@@ -1177,9 +1190,9 @@ _install_server_venv() {
     _ok "Server venv provisioned: $server_venv_dir"
 }
 
-_with_index_build_lock() (
-    local target="$1" timeout="${INDEX_BUILD_LOCK_TIMEOUT_SECONDS:-180}"
-    shift
+_with_index_advisory_lock() (
+    local target="$1" descriptor="$2" timeout="$3"
+    shift 3
     if [[ ! "$timeout" =~ ^[0-9]{1,3}$ ]] || ((10#$timeout > 180)); then
         _warn 'Invalid runtime build admission timeout (expected 0-180 seconds)'
         return 1
@@ -1188,7 +1201,7 @@ _with_index_build_lock() (
     local parent lock lock_python="" use_flock=0
     parent="$(dirname "$target")"
     mkdir -p "$parent" || return 1
-    lock="$parent/.$(basename "$target").build.lock"
+    lock="$parent/.$(basename "$target").lock"
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
         use_flock=1
     else
@@ -1208,19 +1221,19 @@ _with_index_build_lock() (
         fi
     fi
     _python_index_build_lock() {
-        "$lock_python" -I - "$1" "$timeout" "$target" <<'PY'
+        "$lock_python" -I - "$1" "$timeout" "$target" "$descriptor" <<'PY'
 import fcntl
 import sys
 import time
 
 try:
     if sys.argv[1] == "unlock":
-        fcntl.flock(8, fcntl.LOCK_UN)
+        fcntl.flock(int(sys.argv[4]), fcntl.LOCK_UN)
     else:
         deadline = time.monotonic() + int(sys.argv[2])
         while True:
             try:
-                fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(int(sys.argv[4]), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
@@ -1231,30 +1244,69 @@ except OSError as error:
     sys.exit(1)
 PY
     }
-    exec 8>"$lock" || { _warn "Cannot open runtime build admission lock: $lock"; return 1; }
+    if [[ "$descriptor" == 8 ]]; then
+        exec 8>"$lock" || return 1
+    elif [[ "$descriptor" == 9 ]]; then
+        exec 9>"$lock" || return 1
+    else
+        _warn 'Invalid installer lock descriptor'
+        return 1
+    fi
     _release_index_build_lock() {
         local rc=$?
         trap - EXIT
         if [[ "$use_flock" == 1 ]]; then
-            if ! flock -u 8; then _warn "Cannot unlock runtime build admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
+            if ! flock -u "$descriptor"; then _warn "Cannot unlock installer admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
         else
             if ! _python_index_build_lock unlock; then _warn "Cannot unlock runtime build admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
         fi
-        exec 8>&-
+        if [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
         exit "$rc"
     }
     if [[ "$use_flock" == 1 ]]; then
-        if ! flock -w "$timeout" 8; then
+        if ! flock -w "$timeout" "$descriptor"; then
             _warn "Timed out waiting for runtime build admission: $target"
-            exec 8>&-
+            if [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
             return 1
         fi
     else
-        if ! _python_index_build_lock lock; then exec 8>&-; return 1; fi
+        if ! _python_index_build_lock lock; then
+            if [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+            return 1
+        fi
     fi
     trap '_release_index_build_lock' EXIT
     "$@"
 )
+
+_with_index_build_lock() {
+    local target="$1"
+    shift
+    _with_index_advisory_lock "$target.build" 8 "${INDEX_BUILD_LOCK_TIMEOUT_SECONDS:-180}" "$@"
+}
+
+_with_index_publication_lock() {
+    if [[ "${__index_publication_root:-}" == "$INSTALL_DIR" ]]; then
+        "$@"
+    else
+        _index_publication_callback() {
+            local __index_publication_root="$INSTALL_DIR"
+            "$@"
+        }
+        _with_index_advisory_lock "$INSTALL_DIR/publication" 9 20 _index_publication_callback "$@"
+    fi
+}
+
+_index_publication_fresh() {
+    [[ "${FORCE:-0}" == 1 ]] && return 0
+    local marker version
+    for marker in current-version stamped-version; do
+        if [[ -f "$INSTALL_DIR/$marker" ]]; then
+            version="$(tr -d ' \t\r\n' < "$INSTALL_DIR/$marker")" || return 1
+            if [[ -n "$version" ]] && _version_lt "$SRC_VERSION" "$version"; then return 1; fi
+        fi
+    done
+}
 
 _ensure_runtime() {
     _ensure_runtime_build() {
@@ -1275,6 +1327,8 @@ _ensure_runtime() {
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
 
+    _prepare_index_runtime() {
+    _index_publication_fresh || return 3
     # Detach an invalid active marker before any rebuild. If provisioning fails
     # later, no success-shaped current-version pointer remains.
     local active_version="" active_ready=0 active_python=""
@@ -1325,6 +1379,11 @@ _ensure_runtime() {
         fi
     fi
 
+    }
+    local preparation_rc=0
+    _with_index_publication_lock _prepare_index_runtime || preparation_rc=$?
+    if [[ "$preparation_rc" == 3 ]]; then _skip 'Runtime preparation superseded'; return 0; fi
+    [[ "$preparation_rc" == 0 ]] || return "$preparation_rc"
     if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON"; then _versioned_slot_clean; fi
     if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON" "$py" "$have_uv"; then
         _fail "Runtime venv failed interpreter/prefix health validation: $VENV_DIR"
@@ -1406,8 +1465,6 @@ _ensure_runtime() {
 
     _install_server_venv "$install_role" "$py"
 
-    deploy_binstub
-
     local prev_version=""
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
@@ -1420,10 +1477,18 @@ _ensure_runtime() {
             _fail "Runtime completion marker was not published for versions/$SRC_VERSION -- not activating"
             exit 1
         fi
-        _versioned_activate || exit 1
     fi
 
-    _write_manifest
+    _publish_index_runtime() {
+        _index_publication_fresh || return 3
+        _versioned_activate || return $?
+        deploy_binstub || return $?
+        _write_manifest
+    }
+    local publication_rc=0
+    _with_index_publication_lock _publish_index_runtime || publication_rc=$?
+    if [[ "$publication_rc" == 3 ]]; then _skip 'Runtime publication superseded'; return 0; fi
+    [[ "$publication_rc" == 0 ]] || return "$publication_rc"
 
     if _test_index_venv "$(dirname "$(dirname "$LINK_PYTHON")")" "$LINK_PYTHON" \
         && _runtime_origin_under "$LINK_PYTHON" "$(dirname "$(dirname "$LINK_PYTHON")")"; then
@@ -1446,6 +1511,8 @@ _ensure_runtime() {
 }
 
 _write_manifest() {
+    _write_index_manifest() {
+    _index_publication_fresh || return 0
     _git_info() {
         local path="$1" commit branch dirty
         commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -1455,6 +1522,8 @@ _write_manifest() {
         echo "$commit $branch $dirty"
     }
     write_deploy_manifest agent-index agent-index "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-}"
+    }
+    _with_index_publication_lock _write_index_manifest
 }
 
 _machine_role() {
@@ -2041,7 +2110,6 @@ case "$ACTION" in
              # hook's grace window -- no venv, no uv, no heavy runtime build here)
         [ -x "$STUB" ] || {
             mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-            printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
             deploy_binstub
         }
         _ensure_running
