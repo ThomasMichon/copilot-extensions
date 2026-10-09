@@ -915,6 +915,13 @@ Exit-VersionedSlotLease
             f"bounded wait took {elapsed:.1f}s against a 2s budget -- "
             "the timeout is not actually bounding the wait"
         )
+        assert elapsed >= 1.5, (
+            f"bounded wait took only {elapsed:.1f}s against a 2s budget -- "
+            "the configured wait duration is not actually being honored "
+            "(a waiter that ignores the override and returns immediately, "
+            "or after some shorter hardcoded timeout, would also satisfy "
+            "the upper-bound check alone)"
+        )
     finally:
         release_marker.write_text("go")
         try:

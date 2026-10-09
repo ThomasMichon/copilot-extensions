@@ -1649,10 +1649,11 @@ deploy_venv() {
         # this exact version after the caller's full bounded wait
         # (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC, default 180s) -- we do not
         # race it. _VERSIONED_SLOT_LEASE_FAILURE_REASON distinguishes
-        # genuine, still-unresolved contention from any OTHER
-        # lease-machinery failure (lease file/FIFOs couldn't be created,
-        # helper didn't respond, ...) -- never attribute the latter to
-        # "another process".
+        # genuine, still-unresolved contention from any OTHER failure of
+        # the authoritative universal mkdir gate (could not create the
+        # lease lock directory, ...) -- never attribute the latter to
+        # "another process". (The optional flock/fcntl strengthening
+        # layers tolerate their own failures and never surface here.)
         if [[ -n "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" && "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" != "contention" ]]; then
             err "Could not acquire the build lease for runtime slot ($SRC_VERSION): $_VERSIONED_SLOT_LEASE_FAILURE_REASON"
         else
