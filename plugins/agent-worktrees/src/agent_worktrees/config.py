@@ -718,19 +718,9 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
     if repo_dir is not None:
         try:
             entries = load_machines_yaml(repo_dir)
-            # Exact match on key (real hostname) first -- case-insensitive
-            for key, entry in entries.items():
-                if hostname == key.lower():
-                    return machine_name(entry)
-            # Then the explicit ``hostname`` field (key decoupled from COMPUTERNAME)
-            for entry in entries.values():
-                if entry.hostname and hostname == entry.hostname.lower():
-                    return machine_name(entry)
-            # Then check aliases
-            for entry in entries.values():
-                if entry.alias and hostname == entry.alias.lower():
-                    return machine_name(entry)
-        except (FileNotFoundError, ValueError):
+            from .execution_spaces import detect_legacy_machine
+            return detect_legacy_machine(entries, hostname)
+        except FileNotFoundError:
             pass  # no registry -- fall through to raw hostname
 
     return hostname

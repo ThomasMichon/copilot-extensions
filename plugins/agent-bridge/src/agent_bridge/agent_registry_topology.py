@@ -195,11 +195,15 @@ def load_elevated_projects() -> set[str]:
 def _enrich_local_agents(
     agents: dict[str, AgentConfig],
     machines: dict[str, MachineConfig],
+    local_execution_space: str | None = None,
 ) -> None:
     """Set display_name and description on auto-discovered agents."""
     from . import agent_registry as compat
 
-    machine, platform = compat._detect_local_machine(machines)
+    machine, platform = (
+        compat._detect_local_machine(machines, local_execution_space)
+        if local_execution_space is not None else compat._detect_local_machine(machines)
+    )
     if not machine:
         return
 
@@ -222,6 +226,7 @@ def _find_covering_agent(
     local_agent: AgentConfig,
     registry: dict[str, AgentConfig],
     machines: dict[str, MachineConfig],
+    local_execution_space: str | None = None,
 ) -> str | None:
     """Return the name of a registry agent that covers a local agent, or None."""
     if not local_agent.project:
@@ -229,7 +234,10 @@ def _find_covering_agent(
 
     from . import agent_registry as compat
 
-    machine, platform = compat._detect_local_machine(machines)
+    machine, platform = (
+        compat._detect_local_machine(machines, local_execution_space)
+        if local_execution_space is not None else compat._detect_local_machine(machines)
+    )
     if not machine:
         return None
 
@@ -256,6 +264,8 @@ def _find_covering_agent(
 
 def _short_machine_agent_name(machine: MachineConfig, env: SshEnvironment) -> str:
     """Friendly agent name for a control-plane (machine, env) pair."""
+    if machine.execution_platform:
+        return machine.key
     base = (machine.display_name or machine.key).strip()
     name = (env.name or "").lower()
     if name in ("", "windows", "win", "linux"):

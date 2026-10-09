@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve independent registered execution-space identities and fence ambiguous or cross-space local ownership mutations.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

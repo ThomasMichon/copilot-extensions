@@ -577,6 +577,9 @@ def _create_worktree_core(
     _reflect_assignment = _self_override(vars(core), "_reflect_assignment", _resolve_launch_cli._reflect_assignment)
     _slugify = _self_override(vars(core), "_slugify", _worktree_ops_cli._slugify)
 
+    from .execution_spaces import require_current_execution_space
+
+    require_current_execution_space(config)
     repo = config.default_repo
     if kind != "system" and getattr(repo, "knowledge_only", False):
         raise RuntimeError(
@@ -606,9 +609,11 @@ def _create_worktree_core(
             raise RuntimeError(
                 f"--owner-ref must be qualified as machine/project/worktree_id (got {owner_ref!r})"
             )
-        if parsed_owner.machine != config.machine:
+        from .execution_spaces import require_owner_identity
+
+        if not require_owner_identity(parsed_owner.machine, config):
             raise RuntimeError(
-                f"cross-machine owner {owner_ref} cannot synchronously accept "
+                f"cross-space owner {owner_ref} cannot synchronously accept "
                 "this worktree obligation; use a dispatch/lease flow that "
                 "persists remote ownership before creation"
             )

@@ -36,6 +36,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
         *,
         topology_errors: list[str] | None = None,
         topology_warnings: list[str] | None = None,
+        local_execution_space: str | None = None,
     ) -> None:
         from . import agent_registry as compat
 
@@ -109,8 +110,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 else:
                     self._agent_alias_index[key] = canonical
 
-        self._local_machine, self._local_platform = compat._detect_local_machine(
-            machines,
+        self._local_machine, self._local_platform = (
+            compat._detect_local_machine(machines, local_execution_space)
+            if local_execution_space is not None else compat._detect_local_machine(machines)
         )
 
     @property
@@ -210,6 +212,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
             if machine and machine is not alias_machine:
                 raise AmbiguousMachineError(f"Machine '{host}' is ambiguous in topology")
             machine = alias_machine
+            if machine.execution_platform:
+                raise ValueError("independent execution-space targeting requires its registered key")
             if ssh_environment and ssh_environment != matched_env.name:
                 raise ValueError(
                     f"Host '{host}' resolved via SSH alias to machine "
@@ -617,6 +621,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,
+                execution_space_key=(
+                    self._local_machine.key
+                    if self._local_machine and self._local_machine.execution_platform else None
+                ),
             )
 
         machine, alias_env = self._resolve_machine(config.host, config.ssh_environment)
@@ -661,6 +669,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,
+                execution_space_key=machine.key if machine.execution_platform else None,
             )
 
         if not machine.ssh_ready:
@@ -712,6 +721,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
             ssh_shell=ssh_env.shell,
             auth_hooks=auth_hook_dicts,
             mcp_servers=config.mcp_servers,
+            execution_space_key=machine.key if machine.execution_platform else None,
         )
 
     def _is_local_loopback_agent(self, config: AgentConfig) -> bool:

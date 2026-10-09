@@ -421,6 +421,10 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     refs = [claim.ref for claim in world["claims"]]
     bundle = _offer_cross_machine(world, refs)
     seen = {}
+    monkeypatch.setattr(
+        claim_handoff_accept_support, "no_window_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
 
     monkeypatch.setattr(
         claim_handoff_accept_support.claimant,
@@ -434,6 +438,7 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
             return real_run(argv, **kwargs)
         seen["argv"] = argv
         seen["timeout"] = kwargs.get("timeout")
+        seen["creationflags"] = kwargs.get("creationflags")
         accepted = claim_handoffs.accept_source(bundle.bundle_id, actor=world["consumer"])
         return subprocess.CompletedProcess(
             argv,
@@ -451,6 +456,7 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     )
 
     assert accepted.state == "accepted"
+    assert seen["creationflags"] == 0x08000000
     assert seen["argv"][:4] == [
         "ssh", "-o", "BatchMode=yes", "-o",
     ]
