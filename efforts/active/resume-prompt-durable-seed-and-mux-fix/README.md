@@ -1,27 +1,35 @@
-# Resume Prompt: Durable `--interactive` Seed Delivery, No-Mux Parity
+# Resume Prompt: Cold-Start `--interactive` Delivery, No-Mux Parity
 
 - **Slug:** `resume-prompt-durable-seed-and-mux-fix`
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-10-05
 - **Status:** Active
-- **Vision:** `picker` (no existing §Features entry yet -- candidate follow-up
-  once Phase 1 lands; mirrors how `picker-new-session-prompt-and-composer`,
-  its sibling/predecessor effort, left its own vision entry open)
+- **Vision:** `picker` / `cold-start-resume-prompt`
 - **Umbrella issue:** [#5415](https://github.com/ThomasMichon/copilot-extensions/issues/5415)
 
 ## Documentation impact
 
-New CLI behavior (`resolve --worktree-id --seed`, the relaxed seed guard,
-`embody_resume.with_seed`) is self-documenting at the flag-help level (both
-`resolve --help` and the module docstring updated in the implementing
-commits); no separate CLI reference doc exists for `resolve`/`embody` beyond
-their own `--help` text. No vision, architecture, or operating-procedure doc
-describes the Resume launch flow at a level this change affects -- behavior
-is additive and this effort's own README remains the authoritative
-in-progress record, kept current in its Journal each session.
+The current change extends `visions/picker/README.md` with cold-start-only
+Resume intent and documents the actual UI/argv/error contract in
+`worktree-manager/README.md`. This effort captures the scope amendment and
+its validation gates without rewriting historical Journal entries. No daemon,
+installation, topology, or shared architecture contract changes.
 
 ## Guiding Intent
+
+**Current direction (2026-10-08, latest amendment):** Resume prompt is only
+for a stopped worktree's cold Copilot start. New and Resume seeds are staged
+with their distinct provenance in the worktree's state folder through the
+daemon's existing write authority. Failed attempts retain the seed for the
+next attempt; discard it only at the actual Copilot handoff. The operator
+explicitly selected staging for **both New and Resume**, superseding the
+earlier invocation-only/no-persistence Resume restriction. A running session
+is Open, including a live pane with no submitted prompt. Never offer Open with
+a prompt, inject staged text into a live session, or automatically send it
+through agent-bridge. Preserve the separate New-worktree creation capability.
+The earlier phase descriptions and Journal remain historical, not authority
+to restore live seed injection.
 
 `picker-new-session-prompt-and-composer` (Status: Done) built a "New
 worktree…" prompt field, delivered via a persisted `pending_seed` record
@@ -116,6 +124,21 @@ polling for the Resume case entirely.
 
 ## Request
 
+Latest scope-setting direction (2026-10-08):
+
+> If we attach to a live mux pane, we don't need to use this pathway, as the
+> session is (hopefully) already in progress. We can instead use
+> `agent-bridge send` to nudge it along, leveraging the fact that our injected
+> extension should be attached already and can send a prompt. The edge case is if:
+> 1. The worktree was opened or resumed in mux
+> 2. The worktree never had a new prompt submitted since opened in mux
+> That said, the command for opening a mux session is "Open" and not "Resume".
+> We're not adding "Open with prompt", just "Resume". We're only supporting
+> this when Copilot starts cold. "Open" runs quick, so the user will get to
+> the CLI and can judt enter the prompt directly.
+
+Earlier requests (historical context; the latest direction controls):
+
 > It would be nice if, similar to the "New worktree" prompt, we could have a
 > "Resume prompt" option. Usually, when I resume a worktree, the first thing
 > I'll do is just say "Resume", "Check status here", or "Sync worktree on
@@ -151,6 +174,37 @@ Context above. The "no-mux parity, durable args, full `--interactive`" half
 is this effort's actual Phase 1 deliverable.)
 
 ## Plan
+
+### Current slice -- Cold-start-only Resume prompt
+- [x] Stage both New and Resume intent in daemon-mediated worktree state;
+      retain failed attempts and discard only at actual Copilot handoff.
+- [x] Restrict the menu/composer to local, inactive Resume-eligible rows;
+      reject stale composer dispatch after the row becomes live.
+- [x] Reject live or uncertain prompted resolves in both engine paths while
+      preserving staged intent for retry; never silently open seedless.
+      Keep full `--interactive` with the same command's `--resume=<target>`,
+      including no-mux launches.
+- [x] Preserve explicit prompt provenance through the Manager's second
+      resolve; keep New-worktree two-hop prompts intact.
+- [x] Reject the final live-session race (mux or bare) before attachment or direct no-mux
+      execution; remove live-join seed-delivery calls, preserving fresh-create
+      pending-seed fallback.
+- [x] Exercise engine, real Picker composer/dispatch, delegated launcher,
+      actual shell rejection and argv boundaries, plus New-worktree behavior.
+- [ ] Confirm a live Picker-to-Copilot cold resume on the delivered build
+      (the earlier Phase 2 live observation remains unclosed).
+- [ ] Land through current-head green CI and a passing review, then deploy
+      through unified update and synchronize consumer projections.
+
+The latest per-attempt staging amendment also supersedes this slice's earlier
+invocation-only/no-persistence Resume rule. The earlier Phase 2 live-Open
+eligibility/delivery is still superseded by this slice.
+Phase 3's proposed additional New-worktree persistence/claim/lock redesign is
+outside the narrowed Resume feature; retain its historical checklist below
+for explicit follow-up disposition, not as a mandate to expand this change.
+Vision reconciliation: extends `picker`'s `cold-start-resume-prompt` intent.
+Pattern reconciliation: terminal-neutral engine plans, Windows/POSIX parity,
+and fail-loud errors without adding a service or durable Resume queue.
 
 ### Phase 1 — Durable argv-based seed delivery, no-mux parity (Done)
 - [x] `embody_resume.with_seed(launch_cmd, seed)`: pure helper appending the
@@ -866,3 +920,161 @@ _Pending._
     into this session). Next: either the live-Picker spot-check above, or
     pick up a Phase 3 backlog item, whichever the next session/operator
     prioritizes.
+- **2026-10-08** -- Implemented the operator's cold-start-only correction:
+  stopped local Resume rows alone offer the composer; stale/live dispatch
+  refuses; both resolver paths reject live and uncertain explicit seeds before
+  resume-state mutation and never persist them. The Manager keeps explicit
+  request/claimed-seed provenance through its second resolve. Windows/POSIX
+  launchers reject a newly-live mux before update, direct launch, join, and
+  create retry; Open no longer runs the pending-seed delivery helper.
+  Fresh-create New-worktree fallback stays intact. Restore plus an explicit
+  prompt is refused before remux. Validation: 49 engine/seed/creation tests,
+  then 39 final resolve tests after the Restore guard; 432 full touched Manager
+  family tests including New-window/direct-launch behavior. Actual PowerShell
+  execution preserved `--resume`, full `--interactive`, quotes, metacharacters,
+  and multiline prompt text; actual PowerShell/Bash guard execution refused
+  live targets, including no-mux, without launching. Lint, module-size,
+  install-contract and effort/vision guards pass. No actual model conversation
+  through the real Picker has yet been observed on this build; review,
+  publication, promotion/deployment, and that live check remain open.
+- **2026-10-08** -- PR #5756 opened against `dev`. Its first review correctly
+  identified that launcher-local mux probes alone could miss a newly live bare
+  Copilot after resolve. Addressed the class on both platforms: every seeded
+  launcher guard now requests the existing engine `worktree-status-bundle
+  --force-refresh` contract and proceeds only for the exact worktree with
+  confirmed boolean `active: false`. Missing, malformed, failed, or uncertain
+  responses reject rather than attach/launch; the final known-live mux branch
+  still rejects immediately. No new durable queue, claim, service, or engine
+  command was introduced. Real shell guard regressions now cover mux, bare,
+  cold, uncertain, and malformed results. The full touched Manager families
+  pass again (436 tests). A real fresh engine bundle for the target was also
+  inspected to verify the consumer's contract shape. Review/CI against the
+  updated head, promotion/deployment, and live Picker conversation remain open.
+- **2026-10-08** -- The second review of PR #5756 (head `d18af7817`)
+  surfaced a High-severity preservation gap: the delegated second resolve
+  represents an already-claimed New-worktree seed as an explicit `--seed`,
+  indistinguishable from an invocation-only Resume prompt. A subsequent
+  cold-start guard rejection can therefore lose the creation prompt without
+  restoring it. This is a blocking finding, not waived by the earlier
+  documented claim-at-plan-build limitation. Reopened the provenance/
+  New-worktree preservation item above. Next: distinguish creation and Resume
+  provenance through both resolves and keep or restore creation prompts on
+  pre-exec rejection, using existing New-worktree ownership primitives rather
+  than reintroducing a durable Resume queue. Add a regression for the real
+  two-hop New path plus final rejection/retry. No fix for this finding has
+  been implemented yet; the PR is open and must not merge until it is fixed
+  and re-reviewed. The cold-start scope and separate New-worktree capability
+  are unchanged.
+- **2026-10-08** -- Fixed the blocking New ownership boundary in PR #5756.
+  Both Manager resolves request `--defer-new-seed`; New requests no longer
+  forward creation text as an explicit Resume `--seed`. The record remains
+  the creation prompt's owner through discarded plans, launcher guards,
+  update/preflight failures, and create retries. A narrow execution wrapper
+  claims it using the existing New primitive only when the returned command
+  actually runs, adds full `--interactive`, and restores on a proven process
+  creation failure. Explicit Resume text remains invocation-only. Both shells
+  recognize `seed_pending` and refresh the wrapper's interpreter after update.
+  Validation: 53 focused engine cases, including actual New creation,
+  Manager delegation, second resolve, real PowerShell final rejection
+  (live/uncertain), retry through the actual deferred CLI, exact multiline
+  prompt receipt, and no duplicate receipt. 501 Manager family cases passed;
+  real shell guard and lint reruns pass. Installer contract remains green.
+  The new non-JSON preservation case also passes. Final current-head review,
+  live Picker observation, promotion, deployed
+  revalidation, and historical backlog disposition remain open.
+- **2026-10-08** -- Current-head review confirmed the original High fixed,
+  but its overview (despite zero inline/open findings) identified the deferred
+  marker disappearing when either resolver already observes live/uncertain
+  mux liveness. Fixed both paths: retained New ownership emits its wrapper
+  and `seed_pending` before the legacy mux delivery gate. Expanded the actual
+  two-hop rejection test so the second resolver itself observes live/uncertain
+  state, and parameterized non-JSON ownership for cold/live/uncertain verdicts.
+  No merge until these Medium findings pass current-head re-review.
+- **2026-10-08** -- Review of head `8ad51235e` identified the unconditional
+  new flag as a version-skew regression for ordinary launches. Scoped the
+  minimum-capability request to prompted New creation and retained
+  `seed_pending` provenance; ordinary Open/Resume/Base and seedless New do
+  not require that flag. The current engine defers New ownership by default,
+  including direct consumers, while the Manager refuses unsupported prompted
+  New creation before any older-engine mutation. Both launchers pass through
+  the selected marker rather than unconditionally adding it before update.
+  Added older-engine ordinary-launch and fail-closed New negotiation tests.
+  The typo mentioned by the reviewer is in the operator-verbatim historical
+  request, so that quoted source is deliberately preserved, not rewritten.
+- **2026-10-08** -- Expanded resolver coverage after the default ownership
+  change: fixed optional-field compatibility in the non-JSON path, then
+  446 resolver cases passed (19 explicit/platform skips); 56 precise
+  ownership/Resume/creation cases passed. A broader name-based selection also
+  reached an unrelated local fork-publication test and timed out; its isolated
+  confirmation passed in the final 58-case isolated run (including ownership
+  defaults); the earlier timeout occurred during overlapping heavy suites.
+  The Manager suite exposed dynamic create-form lifecycle races on separate
+  runs: inspecting `_q` before composition completed, and activating a tab
+  before its children mounted. The operator explicitly authorized bounded
+  repairs. Conditional synchronization now waits for tab mount readiness;
+  dynamic-form tests await screen mount before inspecting fields. Added
+  deterministic missing/unmounted-tab regressions. Full Manager revalidation
+  passed (508 cases); current-head publication/review, live Picker, promotion/deploy,
+  consumer projection sync and historical backlog disposition remain open.
+- **2026-10-08** -- Head `6b162bbbb` passed review of the version-skew High,
+  but the overview identified a remaining Medium pre-Copilot ownership gap:
+  `new_seed_launch` treats successful child process creation as delivery.
+  That child can be a configured, legacy, or default setup launcher that
+  exits before invoking Copilot, leaving the creation prompt cleared.
+  Reopened the preservation completion item rather than claiming the broader
+  retry guarantee. Next: trace the real `_build_launch_cmd` setup consumers
+  and their existing `copilot_invoked` boundary, retain New ownership until
+  that point or add a bounded pre-Copilot failure handshake using the
+  existing New primitives. Cover a child that starts successfully but rejects
+  before Copilot, on both platforms, without restoring a durable Resume
+  queue or guessing that every nonzero child exit proves non-delivery.
+  No fix for this Medium finding is implemented yet. PR #5756 remains open;
+  current-head required CI was still pending at the last observation.
+- **2026-10-08** -- The operator instructed this same session to continue;
+  cancelled the unconsumed handoff `719bcc1930f843aeb3fbe536d36eb1e9` and
+  restored the host session binding. The operator approved failing closed
+  for uninstrumented New setup launchers, while standard/cooperative setup
+  retains creation ownership until backend invocation. That boundary repair
+  is WIP. The operator then clarified the simpler staging ownership model:
+  save the seed with New/Resume provenance in the worktree state folder via
+  the daemon, preserve it for the next failed-attempt retry, discard once
+  handed to Copilot. Explicitly selected **new-and-resume** in the scope
+  confirmation, superseding the earlier no-persisted-Resume direction.
+  Updated the guiding intent, Picker vision and current completion gates.
+  Implementation should extend the existing daemon-mediated `tracking_write`
+  transaction registry, not add a second service or an independent writer.
+- **2026-10-08** -- Implemented the amended typed staging model. One
+  `launch-seed.json` in the external worktree state folder holds New/Resume
+  provenance, intent identity, text and a fenced handoff identity. Stage,
+  reserve, release and finish reuse the existing daemon-mediated
+  `tracking_write` registry and its logged same-code/no-request-sent fallback.
+  Setup retains ownership; backend startup reserves the seed and successful
+  process creation acknowledges/discards it. A proven startup failure
+  releases the reservation for retry. Uncertain acknowledgement retains the
+  intent without automatic duplicate submission; stale acknowledgements
+  cannot clear replacements. Both resolve paths and the Manager's second
+  hop carry the exact intent identity. Standard PowerShell/Bash setup
+  implements the cooperative invocation boundary; uninstrumented prompt
+  launchers fail closed as approved. New-only fallback cannot consume Resume
+  state. Confirmed composer intent survives a newly-live row (engine stages
+  and refuses launch); New No-Mux no longer drops the prompt.
+  Validation: 10 real-daemon/state-fence cases, 556 engine cases (21
+  platform/explicit skips), and 508 Manager cases passed. Actual
+  PowerShell/Git-Bash setup refusal -> retry -> exact argv receipt covered
+  both kinds. Lint, setup parse, module-size and install-contract gates pass.
+  A host-wide test admission wait expired behind a live holder without
+  bypassing its lease; a subsequently isolated engine run passed. Publication
+  and passing current-head review/CI, live Picker evidence, promotion/deploy,
+  consumer projection sync and final historical-backlog disposition remain.
+- **2026-10-08** -- Review of `ca28122ef` found a High partial-create
+  recovery gap. Seed staging can fail or lose its daemon response after the
+  worktree exists. Wrapped that boundary in a typed failure carrying the
+  existing worktree ID/path/branch, staging intent ID and explicit
+  inspect/retry-existing guidance; JSON resolve/create, interactive resolve
+  and embody report it without suggesting another `--new`. The error string
+  itself retains identity for other callers. Added failed and
+  committed-but-response-lost regressions proving one created record and
+  recovery through the same worktree/intent. 28 targeted cases passed.
+  Updated both release notes for the superseding durable retry model.
+  The open PR also became conflicted as `dev` advanced; backup and safe
+  rebase/revalidation are next before requesting the current-head verdict.

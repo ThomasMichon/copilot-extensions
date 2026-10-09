@@ -1,22 +1,12 @@
-"""resume-prompt-durable-seed-and-mux-fix: ``_create_worktree_core``'s own
-returned launch plan does NOT also embed a queued ``pending_seed`` as a
-``--interactive`` argument -- only `resolve_launch_cli._resolve_resume_context`/
-`resolve_cli._resolve_json_mode` (the Picker's own two-hop flow's real
-delivery point, re-resolving by ``--worktree-id`` -- see
-``test_resolve_seed_delivery.py``) do that. Embedding it in BOTH this
-plan's argv AND leaving it persisted would create two live delivery paths
-for the same prompt (a direct caller execs this plan's `cmd` once, then a
-later `embody`/resume fallback claims the still-persisted `pending_seed`
-and delivers it AGAIN). `pending_seed` persistence stays the single,
-unambiguous owner of "queued but not yet delivered."
-Reuses ``test_codename_cli.py``'s established internals-stubbing pattern to
-drive the real function end to end against a real tracking record.
-"""
+"""New creation stages one intent; returned plans do not consume or duplicate it."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
+
+import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
@@ -97,7 +87,7 @@ def test_create_worktree_core_with_no_seed_leaves_launch_cmd_unchanged(
     assert "--interactive" not in result["launch"]["cmd"]
 
 
-def test_create_worktree_core_still_persists_pending_seed_on_the_record(
+def test_create_worktree_core_stages_seed_in_worktree_state_folder(
     tmp_path: Path, monkeypatch,
 ):
     """The Picker's own two-hop new-worktree flow discards THIS plan and
@@ -105,7 +95,7 @@ def test_create_worktree_core_still_persists_pending_seed_on_the_record(
     still sitting on the record for that re-resolve to pick up and deliver
     (see test_resolve_seed_delivery.py). Confirms persistence is unaffected
     by the single-owner fix above."""
-    from agent_worktrees import tracking
+    from agent_worktrees import launch_seed_state, tracking
 
     config = _create_config(tmp_path)
     tracking_path = tmp_path / "tracking"
@@ -116,4 +106,47 @@ def test_create_worktree_core_still_persists_pending_seed_on_the_record(
 
     worktree_id = result["worktree"]["id"]
     rec = tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)
-    assert rec.pending_seed == "do the thing"
+    assert rec.pending_seed is None
+    saved = launch_seed_state.peek(rec.yaml_path)
+    assert saved.kind == "new" and saved.text == "do the thing"
+    assert result["launch"]["seed_id"] == saved.seed_id
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_post_creation_staging_failure_returns_existing_identity_for_recovery(
+    tmp_path, monkeypatch, capfd, committed,
+):
+    from agent_worktrees import launch_seed_state, resolve_cli, tracking, tracking_write
+    from test_resolve_seed_delivery import _args, _stub_launch_plumbing
+
+    config = _create_config(tmp_path)
+    tracking_path = tmp_path / "tracking"
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    real_stage = launch_seed_state.stage
+    created = []
+    def fail_stage(path, **kwargs):
+        created.append(path)
+        if committed:
+            real_stage(path, **kwargs)
+            raise tracking_write.AmbiguousWriteOutcome("response was lost")
+        raise OSError("state storage unavailable")
+    monkeypatch.setattr(launch_seed_state, "stage", fail_stage)
+    assert resolve_cli.cmd_resolve(_args(new_worktree=True, worktree_id=None, seed="New task")) == 3
+    failure = json.loads(capfd.readouterr().out)
+    assert failure["created"] is True
+    assert failure["worktree"]["id"] == created[0].stem
+    assert failure["recovery"]["worktree_id"] == created[0].stem
+    assert failure["recovery"]["repeat_new"] is False
+    assert "--worktree-id" in failure["error"] and "Do not retry --new" in failure["error"]
+    assert len(tracking.list_records(tracking_path)) == 1
+    if committed:
+        saved = launch_seed_state.peek(created[0])
+        assert saved.seed_id == failure["launch_seed"]["seed_id"]
+        assert failure["launch_seed"]["status"] == "unknown"
+        monkeypatch.setattr(launch_seed_state, "stage", real_stage)
+        _stub_launch_plumbing(monkeypatch, config)
+        assert resolve_cli.cmd_resolve(_args(worktree_id=created[0].stem)) == 0
+        recovered = json.loads(capfd.readouterr().out)
+        assert recovered["launch"]["seed_id"] == saved.seed_id
+        assert len(tracking.list_records(tracking_path)) == 1

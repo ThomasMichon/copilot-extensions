@@ -877,7 +877,10 @@ def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch):
         assert "--new" in cmd
         assert "--seed" in cmd
         assert cmd[cmd.index("--seed") + 1] == "fix the thing"
-        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+        assert "--stage-launch-seed" in cmd
+        return _fake_completed(cmd, stdout=json.dumps({
+            **_RESUME_PLAN, "seed_pending": True, "seed_id": "intent-new", "seed_kind": "new",
+        }))
 
     _install_fake(monkeypatch, handler)
     plan = ec.resolve_launch_plan("dotfiles", new=True, seed="fix the thing")
@@ -1076,7 +1079,9 @@ def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
         if "--bare-resume" in cmd:
             return _fake_completed(cmd, returncode=2,
                                    stderr="unrecognized arguments: --bare-resume")
-        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+        return _fake_completed(cmd, stdout=json.dumps({
+            **_RESUME_PLAN, "seed_pending": True, "seed_id": "intent-resume", "seed_kind": "resume",
+        }))
 
     _install_fake(monkeypatch, handler)
     plan = ec.resolve_launch_plan(

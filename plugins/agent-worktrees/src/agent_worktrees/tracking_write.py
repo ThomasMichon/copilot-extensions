@@ -202,6 +202,7 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.tracking_session_lifecycle_write",
     "agent_worktrees.tracking_session_registration_write",
     "agent_worktrees.tracking_session_deregistration_write",
+    "agent_worktrees.launch_seed_state",
 )
 
 _verb_modules_loaded = False

@@ -1,3 +1,4 @@
+# agent-worktrees:launch-seed-boundary-v1
 <#
 .SYNOPSIS
     Default / normalized session setup script for repos.
@@ -54,6 +55,9 @@ param(
     # Exact current runtime interpreter supplied by the launch plan. Direct
     # callers fall back to the installed runtime resolver.
     [string]$RuntimePython,
+    [string]$LaunchSeedRecord,
+    [string]$LaunchSeedId,
+    [string]$LaunchSeedRuntimePython,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$CopilotArgs
 )
@@ -271,6 +275,23 @@ function Resolve-CopilotApplication {
     return $commands | Select-Object -First 1
 }
 
+function Invoke-CopilotBackend {
+    param([string]$Executable, [string[]]$LeadingArgs = @())
+    if (-not $LaunchSeedRecord) {
+        & $Executable @LeadingArgs @CopilotArgs
+        return
+    }
+    if (-not $LaunchSeedRuntimePython -or -not (Test-Path -LiteralPath $LaunchSeedRuntimePython -PathType Leaf)) {
+        throw 'Launch-seed runtime is unavailable; the prompt remains staged.'
+    }
+    if ([IO.Path]::GetExtension($Executable) -eq '.ps1') {
+        $LeadingArgs = @('-NoProfile', '-NoLogo', '-File', $Executable) + $LeadingArgs
+        $Executable = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    }
+    & $LaunchSeedRuntimePython -I -m agent_worktrees.launch_seed_exec `
+        --invoke --record $LaunchSeedRecord --seed-id $LaunchSeedId -- $Executable @LeadingArgs @CopilotArgs
+}
+
 $copilotCmd = Resolve-CopilotApplication
 # This session's own worktree directory -- captured before launch so the
 # fsmonitor teardown below (in `finally`) targets the exact directory this
@@ -285,19 +306,19 @@ try {
             exit 1
         }
         Invoke-CopilotInvokedLog
-        & $overrideCmd.Source @CopilotArgs
+        Invoke-CopilotBackend $overrideCmd.Source
     } elseif (-not $copilotCmd) {
         $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
         if ($ghCmd) {
             Invoke-CopilotInvokedLog
-            gh copilot @CopilotArgs
+            Invoke-CopilotBackend $ghCmd.Source @('copilot')
         } else {
             Write-Error 'Neither copilot nor gh found on PATH.'
             exit 1
         }
     } else {
         Invoke-CopilotInvokedLog
-        & $copilotCmd.Source @CopilotArgs
+        Invoke-CopilotBackend $copilotCmd.Source
     }
 } finally {
     # worktree-finality-and-obligations: stop this worktree's fsmonitor

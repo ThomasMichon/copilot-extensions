@@ -138,6 +138,41 @@ caller-side fallback and polling contracts remain until that separate cutover.
 
 ## Invariants for every pinned verb
 
+New and Resume prompts use one typed pending intent in
+`<worktree-state-dir>/launch-seed.json`, staged through the resident daemon's
+existing `tracking_write` authority. The same-code logged fallback follows
+that authority's established no-request-sent/version-skew rules; ambiguous
+sent writes are never silently retried.
+
+The Manager requests `resolve --stage-launch-seed` for prompted requests.
+`launch.seed_pending: true`, `launch.seed_id` and `launch.seed_kind` identify
+the saved intent. The second resolve selects it with `--seed-id`, preserving
+New/Resume provenance without restaging text or inferring configured argv.
+Setup retains the seed until backend invocation; successful startup
+acknowledges/discards it and supplies full `--interactive`. Setup refusal or
+proven backend-start failure retains/releases it for the next cold attempt.
+An ambiguous handoff keeps its intent and fencing identity, refusing automatic
+resubmission. Older engines must refuse prompted requests before mutation;
+ordinary seedless launches remain version-skew compatible.
+Explicit replacement is a new intent identity. Reservations and acknowledgements
+are fenced by that identity and a handoff token, so an old attempt cannot clear
+or restore over a newer prompt.
+
+Cooperative setup scripts declare the exact line
+`# agent-worktrees:launch-seed-boundary-v1` and accept `-LaunchSeedRecord`,
+`-LaunchSeedId` and `-LaunchSeedRuntimePython` (PowerShell), or the corresponding
+`--launch-seed-record`, `--launch-seed-id` and `--launch-seed-runtime-python`
+(Bash). They retain the saved intent through all setup
+validation, then invoke the supplied runtime with
+`-I -m agent_worktrees.launch_seed_exec --invoke --record <record> --seed-id <id> -- <backend> <args>`.
+Only that backend invocation reserves ownership, and successful startup
+discards it. The standard setup scripts implement this contract. Uninstrumented
+legacy/configured setup commands fail closed for staged prompts, without execution
+or record mutation; migrate to normalized setup or explicitly adopt this
+boundary. Ordinary seedless commands are unaffected. A failure after backend
+invocation may follow delivery and must not
+automatically restore a potentially submitted prompt.
+
 - **`--json` → stdout is JSON only; stderr is logs only.** No TTY prompts, no
   color, no picker. `--json` implies `--no-mux`.
 - **Non-zero exit on error, with a JSON error envelope on stdout.**

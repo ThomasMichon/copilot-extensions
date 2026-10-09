@@ -785,7 +785,48 @@ aw_joining_live_session() {
     tmux has-session -t "=wt-${_wtid}" 2>/dev/null
 }
 
+aw_assert_cold_resume() {
+    [[ "$_SEEDED_LAUNCH" == "1" ]] || return 0
+    local message='Launch prompt is cold-start-only; a live session appeared. Use Open or retry after it stops. The seed remains staged.'
+    if [[ "${1:-}" != "live-known" ]]; then
+        local check_args=(-m agent_worktrees)
+        [[ -z "$LAUNCH_PROJECT" ]] || check_args+=(--project "$LAUNCH_PROJECT")
+        check_args+=(worktree-status-bundle --worktree "$_SEEDED_WORKTREE_ID" --force-refresh --json)
+        local bundle probe_exit=0
+        if bundle=$("$PYTHON" "${check_args[@]}"); then
+            printf '%s' "$bundle" | "$PYTHON" -c '
+import json,sys
+d=json.load(sys.stdin)
+f=d.get("facts",{}).get("liveness",{})
+v=f.get("value") or {}
+if d.get("worktree_id")!=sys.argv[1] or f.get("confirmed") is not True:
+    sys.exit(2)
+sys.exit(0 if v.get("active") is False else 1)
+' "$_SEEDED_WORKTREE_ID" || probe_exit=$?
+            [[ "$probe_exit" != "0" ]] || return 0
+        else
+            probe_exit=2
+        fi
+        if [[ "$probe_exit" != "1" ]]; then
+            message='Could not verify cold launch target; refresh and retry. The seed remains staged.'
+        fi
+    fi
+    if [[ "${_PENDING_NEW_SEED:-0}" == "1" ]]; then
+        message='Could not start the staged launch prompt on a confirmed cold target. The seed remains staged for retry.'
+    fi
+    setup_log ERROR "$message"
+    echo "ERROR: $message" >&2
+    exit 3
+}
+
 if [[ "$ACTION" == "exec" ]]; then
+    _SEEDED_LAUNCH=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('seed_claimed') or d.get('seed_pending') else '0')")
+    _PENDING_NEW_SEED=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print('1' if json.load(sys.stdin).get('seed_pending') else '0')")
+    _SEEDED_WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('worktree_id') or '')")
+    for _launch_arg in "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"; do
+        [[ "$_launch_arg" != "--seed" && "$_launch_arg" != "--seed-id" ]] || _SEEDED_LAUNCH=1
+    done
+    aw_assert_cold_resume
     # ── Join the background update + apply, before the tmux handoff (#1430) ──
     # The Picker has closed, so it is now safe to swap the runtime venv. This
     # waits for the staged marketplace download, runs the installer if it
@@ -987,6 +1028,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
     PYTHON="$_REFRESHED_PYTHON"
     setup_log INFO "Runtime refreshed before knowledge preflight: $PYTHON"
+    if [[ "$_PENDING_NEW_SEED" == "1" ]]; then
+        CMD_ARRAY[0]="$PYTHON"
+    fi
 
     # Patch a stale `--runtime-python` embedded in CMD_ARRAY (#stale-venv).
     # `resolve` (run BEFORE the update-apply above) bakes the interpreter that
@@ -1018,6 +1062,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         --cwd "$_KNOWLEDGE_CWD" --ensure-ignored --json)
     run_runtime_preflight "Marketplace override preflight" "${_MARKETPLACE_ARGS[@]}" || true
 
+    aw_assert_cold_resume
     if [[ "$NO_MUX" == "1" ]]; then
         setup_log INFO "Mux disabled; launching directly"
     fi
@@ -1151,23 +1196,13 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         # If a tmux session already exists for this worktree, join it.
         # The attacher gets the shared view; no post-exit responsibility.
         if tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
+            aw_assert_cold_resume live-known
             echo "Joining existing session: $TMUX_SESS"
             activity_log mux_attached "$WORKTREE_ID" mux=join
             # Refresh per-session options on (re)connect so a long-lived
             # session picks up the current bar without us owning the global.
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}"
-            # resume-prompt-durable-seed-and-mux-fix Phase 3: this is the
-            # ONE ground-truth point that knows a reattach (not a fresh
-            # launch) is happening -- the engine's own `resolve --json`
-            # call, run earlier in a separate process, can only guess at
-            # mux liveness and conservatively leaves an explicit seed
-            # QUEUED (`pending_seed`) rather than embedding it into a
-            # `cmd` this script discards right here. Deliver it now, the
-            # same way a worktree's first-ever session creation below
-            # already does -- `_aw_deliver_pending_seed` is a no-op when
-            # nothing is queued.
-            _aw_deliver_pending_seed "$WORKTREE_ID"
             set +e
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
@@ -1301,6 +1336,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             for ((TMUX_CREATE_ATTEMPT=1;
                   TMUX_CREATE_ATTEMPT<=TMUX_CREATE_MAX_ATTEMPTS;
                   TMUX_CREATE_ATTEMPT++)); do
+                aw_assert_cold_resume
                 TMUX_CREATE_TOTAL_ATTEMPTS=$((TMUX_CREATE_TOTAL_ATTEMPTS + 1))
                 "${TMUX_COMMAND[@]}" new-session -d -s "$TMUX_SESS" \
                     -c "${WORK_DIR:-.}" \

@@ -548,11 +548,8 @@ def launch_plan_from_dict(d: dict) -> LaunchPlan:
         post_exit=bool(d.get("post_exit")),
         no_mux=bool(d.get("no_mux")),
         exit_code=int(d.get("exit_code") or 0),
-        # Absent on an older engine that predates this field -- treated as
-        # unknown/false, which only means a delegated re-invocation (see
-        # relocated_launch._seed_already_claimed_in) conservatively forwards
-        # no seed rather than guessing from argv shape; it never queues a
-        # DOUBLE delivery, only a possible (pre-existing, version-skew) miss.
+        # Compatibility-only metadata. Current plans retain the seed in
+        # daemon state and carry seed_pending/seed_id/seed_kind in raw.
         seed_claimed=bool(d.get("seed_claimed")),
         raw=d,
     )
@@ -569,6 +566,7 @@ def resolve_launch_plan(
     target_environment: str | None = None,
     target_no_mux: bool = False,
     seed: str | None = None,
+    defer_new_seed: bool | None = None,
     timeout: int = _DEFAULT_TIMEOUT,
 ) -> LaunchPlan:
     """Fetch a launch plan via ``agent-worktrees resolve --json`` (process boundary).
@@ -585,6 +583,11 @@ def resolve_launch_plan(
     rejects it with ``base=True``, ``bare_resume=True``, or alongside
     ``target_machine``, so this is intentionally NOT re-validated here.
 
+    Prompted New/Resume requests require typed retry staging. An older engine
+    must refuse the capability flag before mutation, rather than silently
+    dropping preservation. Ordinary seedless launches retain version-skew
+    compatibility.
+
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
     property :func:`list_worktrees` applies to ``--classify``.
@@ -596,6 +599,9 @@ def resolve_launch_plan(
         )
 
     args = ["resolve", "--json"]
+    require_staging = bool(seed) or bool(defer_new_seed)
+    if require_staging:
+        args.append("--stage-launch-seed")
     if base:
         args.append("--base")
     elif new:
@@ -617,6 +623,11 @@ def resolve_launch_plan(
         obj = run_json(project, args, timeout=timeout)
     except EngineError as e:
         detail = _engine_error_detail(e)
+        if require_staging and "unrecognized arguments" in detail and "--stage-launch-seed" in detail:
+            raise EngineFeatureUnavailable(
+                "the installed engine predates staged launch-prompt ownership; "
+                "update agent-worktrees before launching this prompt"
+            ) from e
         if (
             bare_resume
             and "unrecognized arguments" in detail
@@ -627,6 +638,7 @@ def resolve_launch_plan(
                 base=base, target_machine=target_machine,
                 target_environment=target_environment,
                 target_no_mux=target_no_mux, seed=seed,
+                defer_new_seed=defer_new_seed,
                 bare_resume=False, timeout=timeout)
         if target_machine and any(
             flag in detail
@@ -652,6 +664,14 @@ def resolve_launch_plan(
     # the shell launcher's own unwrap).
     if isinstance(obj.get("launch"), dict):
         obj = obj["launch"]
+    if seed and obj.get("action") == "exec" and (
+        obj.get("seed_pending") is not True
+        or not isinstance(obj.get("seed_id"), str) or not obj["seed_id"]
+        or obj.get("seed_kind") != ("new" if new else "resume")
+    ):
+        raise EngineFeatureUnavailable(
+            "the engine omitted typed staged-prompt ownership; update and retry"
+        )
     return launch_plan_from_dict(obj)
 
 

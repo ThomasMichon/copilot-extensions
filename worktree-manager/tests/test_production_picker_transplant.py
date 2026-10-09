@@ -1253,59 +1253,32 @@ def test_run_launch_relocated_script_uses_base_flag_for_anchor_mode(
     assert "--worktree-id" not in argv
 
 
-def test_seed_already_claimed_in_trusts_only_explicit_metadata():
-    """A configured launch/profile argument can legitimately produce a
-    ``cmd`` that ALSO ends in ``--interactive <value>`` (e.g. a profile
-    that already supplies the flag) even when no seed was ever claimed --
-    so the trailing pair alone is not sufficient provenance. Only the
-    engine's own explicit ``seed_claimed`` metadata authorizes treating it
-    as the claimed seed."""
-    from worktree_manager.relocated_launch import _seed_already_claimed_in
+def test_relocated_hop_does_not_infer_seed_from_configured_interactive_args(monkeypatch):
+    from types import SimpleNamespace
+    from worktree_manager import relocated_launch
 
-    claimed_plan = type(
-        "Plan", (), {
-            "seed_claimed": True,
-            "cmd": ["copilot", "--resume=sess1", "--interactive", "the real seed"],
-        },
-    )()
-    assert _seed_already_claimed_in(claimed_plan) == "the real seed"
-
-    # Same trailing shape, but seed_claimed is False -- a configured
-    # argument coincidentally ending the same way must NOT be mistaken for
-    # a claimed seed.
-    unclaimed_plan = type(
-        "Plan", (), {
-            "seed_claimed": False,
-            "cmd": ["copilot", "--resume=sess1", "--interactive",
-                    "configured, not a seed"],
-        },
-    )()
-    assert _seed_already_claimed_in(unclaimed_plan) is None
-
-    # An older engine predating this field: absent entirely, defaults False.
-    no_metadata_plan = type(
-        "Plan", (), {"cmd": ["copilot", "--resume=sess1", "--interactive", "x"]},
-    )()
-    assert _seed_already_claimed_in(no_metadata_plan) is None
-
-    no_seed_plan = type(
-        "Plan", (), {"seed_claimed": True, "cmd": ["copilot", "--resume=sess1"]},
-    )()
-    assert _seed_already_claimed_in(no_seed_plan) is None
-
-    empty_plan = type("Plan", (), {"seed_claimed": True, "cmd": []})()
-    assert _seed_already_claimed_in(empty_plan) is None
+    calls = []
+    monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        entrypoint.subprocess, "Popen",
+        lambda argv: calls.append(argv) or SimpleNamespace(wait=lambda: 0),
+    )
+    req = SimpleNamespace(
+        mode="resume", project="demo", worktree_id="wt-a",
+        new_window=False, no_mux=False, seed_prompt=None,
+    )
+    plan = SimpleNamespace(
+        worktree_id="wt-a", raw={},
+        cmd=["copilot", "--interactive", "configured, not a seed"],
+    )
+    assert relocated_launch._run_relocated_mux_launch(req, plan, Path("launch-session.ps1")) == 0
+    assert "--seed" not in calls[0] and "--seed-id" not in calls[0]
 
 
-def test_run_launch_relocated_script_forwards_already_claimed_seed(
+def test_run_launch_relocated_script_forwards_staged_identity_not_prompt_text(
     monkeypatch, tmp_path,
 ):
-    """The relocated script re-resolves the launch plan ITSELF rather than
-    reusing ``plan.cmd`` -- so a seed the earlier ``_resolve_for`` call
-    already claimed (persisted ``pending_seed`` cleared) and embedded as
-    ``--interactive <seed>`` into that now-discarded ``plan.cmd`` must be
-    recovered and forwarded as ``--seed`` to this re-invocation, or it is
-    silently lost (claimed once, delivered never)."""
+    """The second resolve selects the first resolve's durable staged intent."""
     from worktree_manager import ahp_provider, engine_client, launcher
 
     plan = type(
@@ -1314,7 +1287,8 @@ def test_run_launch_relocated_script_forwards_already_claimed_seed(
         {
             "action": "exec", "exit_code": 0, "worktree_id": "resolved-id-1234",
             "cmd": ["copilot", "--resume=sess1", "--interactive", "do the thing"],
-            "seed_claimed": True,
+            "seed_claimed": False,
+            "raw": {"seed_pending": True, "seed_id": "intent-a", "seed_kind": "resume"},
         },
     )()
     script = tmp_path / "launch-session.ps1"
@@ -1369,7 +1343,8 @@ def test_run_launch_relocated_script_forwards_already_claimed_seed(
     assert entrypoint._run_launch(request) == 0
     assert len(calls) == 1
     argv = calls[0]
-    assert argv[-2:] == ["--seed", "do the thing"]
+    assert argv[-3:] == ["--stage-launch-seed", "--seed-id", "intent-a"]
+    assert "--seed" not in argv and "do the thing" not in argv
 
 
 def test_run_launch_relocated_script_bare_resume_never_forwards_seed(

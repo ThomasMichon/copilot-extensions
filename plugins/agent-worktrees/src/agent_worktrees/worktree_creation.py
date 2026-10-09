@@ -27,6 +27,7 @@ import argparse
 import os
 import secrets
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -44,6 +45,45 @@ from . import (
     tracking,
 )
 from . import config as cfg
+from .tracking_write import AmbiguousWriteOutcome
+
+
+class LaunchSeedStagingFailure(RuntimeError):
+    """Creation succeeded, but seed staging did not produce a confirmed result."""
+
+    def __init__(self, record, seed_id: str, cause: Exception):
+        self.worktree = {
+            "id": record.worktree_id, "path": record.worktree_path,
+            "branch": record.branch, "repo": record.repo,
+        }
+        self.seed_id = seed_id
+        self.ambiguous = isinstance(cause, AmbiguousWriteOutcome)
+        super().__init__(
+            f"Worktree {record.worktree_id} was created at {record.worktree_path}, "
+            f"but launch-prompt staging did not confirm: {cause}. "
+            f"Do not retry --new; recover this existing --worktree-id {record.worktree_id}."
+        )
+
+    def payload(self) -> dict:
+        return {
+            "error": str(self), "created": True, "worktree": self.worktree,
+            "launch_seed": {
+                "seed_id": self.seed_id, "status": "unknown" if self.ambiguous else "unconfirmed",
+            },
+            "recovery": {
+                "action": "inspect-and-retry-existing",
+                "worktree_id": self.worktree["id"], "repeat_new": False,
+            },
+        }
+
+    def emit(self, *, json_out: bool) -> int:
+        from . import output
+
+        if json_out:
+            output._json_output(self.payload())
+        else:
+            output.err(str(self))
+        return 3
 
 
 def _core():
@@ -515,10 +555,9 @@ def _create_worktree_core(
     a narrower, per-call sibling of the blunt whole-host
     ``AGENT_WORKTREES_NO_PAIR`` env var; either one skips the carve.
 
-    ``pending_seed`` persists an optional first-turn prompt onto the new
-    record -- this function never launches Copilot, so it can only be
-    stored here; `agent-worktrees embody`/`copilot` deliver and clear it
-    on the first attach.
+    ``pending_seed`` stages an optional New first-turn intent in external
+    worktree state through the daemon writer. This function never launches
+    Copilot; its returned plan carries the intent identity without claiming it.
 
     Raises ``RuntimeError`` on failure.
     """
@@ -769,11 +808,24 @@ def _create_worktree_core(
                 # an explicit --owner-ref). Absent = unclaimed.
                 owner_ref=owner_ref or None,
                 bound_agent=bound_agent or None,
-                pending_seed=pending_seed or None,
+                pending_seed=None,
             )
         finally:
             if owner_guard is not None:
                 owner_guard.__exit__(None, None, None)
+
+    from . import launch_seed_state
+    from .launch_seed_exec import deferred_command
+
+    staged_seed = None
+    if pending_seed:
+        seed_id = uuid.uuid4().hex
+        try:
+            staged_seed = launch_seed_state.stage(
+                record.yaml_path, kind="new", text=pending_seed, seed_id=seed_id,
+            )
+        except (ValueError, OSError, TimeoutError, AmbiguousWriteOutcome) as exc:
+            raise LaunchSeedStagingFailure(record, seed_id, exc) from exc
 
     # Clone permissions
     if permissions.clone_permissions(repo.anchor, worktree_path):
@@ -862,20 +914,10 @@ def _create_worktree_core(
         profile=selection.profile,
         preflight=launch_preflight,
     )
-    # Durable seed delivery (resume-prompt-durable-seed-and-mux-fix): this
-    # plan's OWN `cmd` deliberately does NOT also embed `pending_seed` here
-    # -- `pending_seed` stays the single, unambiguous owner of "queued but
-    # not yet delivered." Embedding it in BOTH this plan's argv AND leaving
-    # it persisted would let a direct caller that execs this `cmd` deliver
-    # the prompt once, while the record still advertises it as
-    # undelivered -- a later `embody`/first real-launch fallback (or the
-    # Picker's own two-hop flow re-resolving by --worktree-id through
-    # `resolve_launch_cli._resolve_resume_context`, the mechanism's real
-    # delivery point) would then claim and redeliver the SAME prompt a
-    # second time. A direct caller that wants immediate, synchronous
-    # delivery should follow up with `resolve --worktree-id --seed` (or
-    # simply let the next real resume/attach claim it) rather than relying
-    # on this one-shot creation plan to also carry it.
+    if staged_seed is not None:
+        launch_cmd = deferred_command(
+            launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
+        )
     env = _apply_assignment_env(
         core._build_env(
             selection.profile,
@@ -893,6 +935,10 @@ def _create_worktree_core(
         "worktree_id": worktree_id,
         "post_exit": True,
         "no_mux": no_mux,
+        "seed_claimed": False,
+        "seed_pending": staged_seed is not None,
+        "seed_id": staged_seed.seed_id if staged_seed else None,
+        "seed_kind": staged_seed.kind if staged_seed else None,
         # Authoritative for downstream out-of-process calls (e.g. the
         # launcher's `execution-leg get`), which must scope to the
         # project that actually owns this worktree -- not whatever ambient
