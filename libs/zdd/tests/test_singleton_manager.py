@@ -513,3 +513,17 @@ def test_ownership_routes_never_coerce_malformed_fields(
     with pytest.raises(ValueError, match="field types"):
         world.manager().run()
     assert world.spawns == 0
+
+
+def test_empty_bind_is_accepted_as_a_valid_wildcard_route(tmp_path: Path) -> None:
+    # routing.Endpoint.client_host explicitly maps bind="" to the loopback
+    # wildcard form; the strict parser must keep accepting it rather than
+    # treating an empty string the same as a non-string bind.
+    world = World(tmp_path)
+    world.routing.joinpath("active.json").write_text(json.dumps({
+        "active": {"bind": "", "port": 1234, "pid": 20, "process_start_time": "200"},
+    }))
+    world.backend.live[20] = True
+    with pytest.raises(UnmanagedDaemonError, match="live route"):
+        world.manager().run()
+    assert world.spawns == 0

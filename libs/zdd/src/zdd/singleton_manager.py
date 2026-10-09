@@ -109,7 +109,7 @@ class SingletonManager:
         if (
             type(pid) is not int or pid <= 0
             or type(port) is not int or not 0 < port <= 65535
-            or not isinstance(bind, str) or not bind
+            or not isinstance(bind, str)
             or type(generation) is not int or generation < 0
             or (version is not None and not isinstance(version, str))
             or (token is not None and (
