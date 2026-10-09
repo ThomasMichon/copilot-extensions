@@ -56,7 +56,7 @@
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.36-dev1",
+      "version": "0.1.37-dev1",
       "source": "plugins/agent-ssh"
     },
     {
@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.13.2-dev1",
+      "version": "0.14.0-dev1",
       "source": "plugins/agent-dispatch"
     },
     {

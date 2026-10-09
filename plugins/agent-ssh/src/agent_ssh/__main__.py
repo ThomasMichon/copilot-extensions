@@ -92,6 +92,26 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return rc
 
 
+def _cmd_fleet_targets(args: argparse.Namespace) -> int:
+    from . import fleet
+
+    try:
+        snapshot = fleet.describe(
+            args.registry, args.module,
+            provider_instance=args.provider_instance, selected=args.target,
+        )
+        from fleet_contracts import encode_json
+
+        print(encode_json(snapshot.to_dict()).decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
+        print(f"[FAIL] cannot describe static fleet targets: {exc}", file=sys.stderr)
+        return 2
+    except fleet.yaml.YAMLError:
+        print("[FAIL] cannot describe static fleet targets: invalid source YAML", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _cmd_explore(args: argparse.Namespace) -> int:
     report = fragment_registry.FragmentRegistry(args.config_d).refresh()
     if not report.permits_probe(args.target):
@@ -237,6 +257,16 @@ def build_parser() -> argparse.ArgumentParser:
     emit.add_argument("--ssh-config", type=Path, default=None, help="Override ~/.ssh/config.")
     emit.add_argument("--print", action="store_true", help="Print the fragment; do not write.")
     emit.set_defaults(func=_cmd_emit_profile)
+
+    fleet = sub.add_parser(
+        "fleet-targets",
+        help="Describe explicitly selected static SSH targets without probing or enrolling.",
+    )
+    fleet.add_argument("registry", type=Path, help="The emitter's normalized machine registry.")
+    fleet.add_argument("--module", type=Path, required=True, help="Its owning transport module.")
+    fleet.add_argument("--provider-instance", required=True, help="Explicit static-driver identity.")
+    fleet.add_argument("--target", action="append", required=True, help="Exact target; repeatable.")
+    fleet.set_defaults(func=_cmd_fleet_targets)
 
     verify = sub.add_parser("verify", help="Probe SSH reachability by host alias.")
     verify.add_argument("--timeout", type=int, default=8, help="SSH ConnectTimeout seconds.")

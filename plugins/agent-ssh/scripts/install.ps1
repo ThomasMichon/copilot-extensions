@@ -308,6 +308,7 @@ function Resolve-AgentProcutil { return (Resolve-VendoredLib -LibName 'agent-pro
 function Resolve-VenueCopilot { return (Resolve-VendoredLib -LibName 'venue-copilot') }
 function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
 function Resolve-RemoteLoginShell { return (Resolve-VendoredLib -LibName 'remote-login-shell') }
+function Resolve-FleetContracts { return (Resolve-VendoredLib -LibName 'fleet-contracts') }
 
 function Ensure-UvIndex {
     if ($env:UV_INDEX_URL -or $env:UV_DEFAULT_INDEX) { return }
@@ -606,7 +607,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell')) {
+    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts')) {
         $source = Resolve-VendoredLib -LibName $lib
         if (-not $source) { throw "Cannot locate required snapshot library: $lib" }
         $destination = Join-Path $libsDir $lib
@@ -699,7 +700,8 @@ function Test-SnapshotReusable {
         'libs\ssh-manager\pyproject.toml',
         'libs\venue-copilot\pyproject.toml',
         'libs\zdd\pyproject.toml',
-        'libs\remote-login-shell\pyproject.toml'
+        'libs\remote-login-shell\pyproject.toml',
+        'libs\fleet-contracts\pyproject.toml'
     )) {
         if (-not (Test-Path (Join-Path $SnapshotDir $rel))) { return $false }
     }
@@ -927,13 +929,19 @@ if (-not $remoteLoginShellDir) {
     Write-Fail 'Cannot locate remote-login-shell library'
     exit 1
 }
+$fleetContractsDir = Resolve-FleetContracts
+if (-not $fleetContractsDir) {
+    Write-Fail 'Cannot locate fleet-contracts library'
+    exit 1
+}
 $vendoredDependencies = @(
     $agentProcutilDir,
     (Join-Path $PluginDir 'libs\dropin-registry'),
     $sshManagerDir,
     $venueCopilotDir,
     $zddDir,
-    $remoteLoginShellDir
+    $remoteLoginShellDir,
+    $fleetContractsDir
 )
 $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `
