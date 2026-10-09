@@ -335,6 +335,15 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
       - [ ] `visions/plugins/agent-worktrees/README.md` — remaining parent
             reconciliation beyond the account slice, including head/claims,
             contribution roles, daemon authority, and lifecycle coverage.
+      - [x] `visions/test-portfolio/README.md` — shared-host admission slice
+            reconciled across direct-host and devcontainer entry points. Folded back
+            protection of shared mutable test environments, explicit bounded
+            contention, and read-only inventory availability; corrected the
+            owning effort's stale guard/collection exemption. No tests were
+            removed or reclassified.
+      - [ ] `visions/test-portfolio/README.md` — remaining contract-map,
+            effectiveness, tier/effect, and portfolio-observability audit beyond
+            the completed admission slice.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -436,6 +445,36 @@ sibling plan proves that the sibling's materials have been refreshed.
   makes no fresh native integration, clean-room, or live-host proof claim.
   Those lanes require native mapping changes and contract evidence in the
   owning convergence effort, rather than being substitutes for this source audit.
+
+### 2026-10-09 — Test-portfolio shared-host admission slice
+- Audited source snapshot `8a64b81af867` against the existing test-portfolio
+  vision, `TESTING.md`, and owning effort `#1303`. Folded back the admission
+  contract, not implementation grammar or resource constants. Preserved every
+  existing positive, tier, and boundary; no negative requires removing a real
+  capability. Corrected the owning plan's obsolete implication that guards and
+  collection may bypass shared-environment protection.
+- Scoped source evidence: `tools/_admission_protocol.py` defines the shared
+  per-user host namespace; `run-plugin-tests.py` acquires before environment
+  preparation and releases in `finally`; `_devcontainer_host_admission.py` and
+  `run_tests_in_devcontainer.py` use that same host authority before container
+  work. Existing admission tests cover contention, bounded retry, all-target
+  lifetime, and guard/collection/preparation modes. Reading those tests is not
+  a fresh execution result.
+- Simple direct-host entry-point evidence: `run-plugin-tests.py --all --list`
+  returned its twenty-suite inventory successfully without requiring admission.
+  The prior focused run refused contention and its requested
+  180-second wait expired; neither result proves successful admitted execution,
+  stale-owner recovery, descendant cleanup, or full portfolio conformance.
+- This tooling leaf deploys no runtime of its own; installer/service invariants
+  are not newly scored here. Shared admission is embodied intent already using
+  the common lease primitive, not a new service authority or a missing
+  plugin-services invariant. No runtime gap was established or duplicate issue
+  filed; broader portfolio work remains under `#1303`.
+- The attempted focused contained-suite run was blocked by host admission.
+  Clean-room and live Linux devcontainer execution were not exercised for this
+  documentation-only slice; the present Windows host and source comparison do
+  not substitute for those lanes. Whole-leaf and global sweep validation remain
+  open.
 
 ### 2026-10-05 — Kickoff + Phase 1 slice
 - Effort created as the tracker for the operator's vision-backport +
