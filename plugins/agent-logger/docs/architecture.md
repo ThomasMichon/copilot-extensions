@@ -129,6 +129,16 @@ receiver-side atomic admission exists yet for the `ssh`/`ingest` transports
 either. The default `None` is unchanged legacy behavior for every ordinary
 sync caller.
 
+Marker publication is atomic and refuses to replace an existing file or link,
+including one created between the initial inspection and publication. Claim
+files are flushed before publication; POSIX uses a no-replace hard link and
+directory fsync, and Windows uses a write-through move without replacement.
+Only the temporary file created by the current attempt is cleaned up.
+Unowned content is never deleted or ignored merely because its filename
+resembles a stale claim artifact; such a leaf requires explicit recovery.
+The advisory admission lock coordinates cooperating publishers, not arbitrary
+ancestor-directory swaps or writers bypassing the admission API.
+
 **Post-push notify (target-independent).** A `sync.notify.url` fires a
 best-effort HTTP `POST` (JSON `{"machine": <machine>}`; `{machine}` in the URL
 is also substituted, optional bearer token) after **any** successful push,

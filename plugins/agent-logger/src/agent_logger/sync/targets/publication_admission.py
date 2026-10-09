@@ -20,9 +20,8 @@ from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
-    SHORT_ID_HEX_LENGTH,
-    durable_replace,
     ensure_real_directory,
+    fsync_directory,
     is_link_or_reparse,
     open_regular_no_follow,
     short_unique_id,
@@ -47,21 +46,6 @@ PUBLICATION_IDENTITY_MARKER = ".archive-source.json"
 #: pre-existing, destination-controlled marker read (the admission target is
 #: by definition one the caller does not yet own) and a new claim write.
 MAX_MARKER_BYTES = 64 * 1024
-
-_TEMP_MARKER_PREFIX = f".{PUBLICATION_IDENTITY_MARKER}."
-_TEMP_MARKER_SUFFIX = ".tmp"
-_TEMP_MARKER_ID_CHARS = frozenset("0123456789abcdef")
-
-
-def _is_stale_temp_marker(name: str) -> bool:
-    if not (name.startswith(_TEMP_MARKER_PREFIX) and name.endswith(_TEMP_MARKER_SUFFIX)):
-        return False
-    claim_id = name[len(_TEMP_MARKER_PREFIX) : -len(_TEMP_MARKER_SUFFIX)]
-    # Only our own short_unique_id() shape: anything else is an unrelated
-    # file that merely collides with the prefix/suffix, never ours to
-    # delete (an unowned nonempty leaf must still be refused outright).
-    return len(claim_id) == SHORT_ID_HEX_LENGTH and set(claim_id) <= _TEMP_MARKER_ID_CHARS
-
 
 def _unlink_if_exists(path: Path) -> None:
     try:
@@ -101,6 +85,49 @@ def _read_marker(marker_path: Path) -> dict | None:
     return json.loads(raw.decode("utf-8"))
 
 
+def _move_marker_no_replace_windows(temp_path: Path, marker_path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    move_file = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
+    move_file.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    move_file.restype = wintypes.BOOL
+    # WRITE_THROUGH only: deliberately omit REPLACE_EXISTING.
+    if not move_file(
+        windows_extended_path(temp_path), windows_extended_path(marker_path), 0x00000008
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _publish_marker_no_replace(temp_path: Path, marker_path: Path) -> None:
+    """Durably publish a new marker, never replacing an existing entry."""
+    if os.name == "nt":
+        _move_marker_no_replace_windows(temp_path, marker_path)
+    else:
+        os.link(
+            windows_extended_path(temp_path),
+            windows_extended_path(marker_path),
+            follow_symlinks=False,
+        )
+        fsync_directory(marker_path.parent)
+
+
+def _resolve_post_race_marker(marker_path: Path, incoming: dict) -> PushResult | None:
+    try:
+        existing = _read_marker(marker_path)
+    except (OSError, ValueError, RecursionError) as exc:
+        return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
+    if existing == incoming:
+        return None  # the race's winner happened to claim the same identity
+    return PushResult(
+        ok=False,
+        detail=(
+            f"publication identity mismatch at {marker_path}: "
+            f"destination already claimed by {existing}"
+        ),
+    )
+
+
 def check_publication_identity(
     dest: Path,
     identity: SourceIdentityLike | None,
@@ -122,10 +149,10 @@ def check_publication_identity(
 
     Comparison, any marker write, and the emptiness check all happen under
     one dedicated destination lock so two concurrent publishers on the same
-    host can never race past this gate -- the same check/use race already
-    tracked as a known gap for every *other* destination write in
-    ``targets/filesystem.py`` (see ``push_process_logs``'s docstring) is
-    exactly what owning the whole sequence under a single lock closes here.
+    host cannot race to claim different identities. Atomic no-replace
+    publication also refuses a marker created by a non-cooperating writer.
+    This advisory lock does not protect against ancestor-directory swaps;
+    that separate filesystem containment limitation remains unchanged.
     Never overwrites or guesses: a mismatched marker, or an existing
     nonempty leaf with no marker at all, is refused rather than silently
     adopted.
@@ -185,10 +212,7 @@ def _admit_under_lock(
         )
     try:
         names = _dest_entry_names(dest)
-        stale = [name for name in names if _is_stale_temp_marker(name)]
-        for name in stale:
-            _unlink_if_exists(dest / name)
-        has_content = any(name not in stale for name in names)
+        has_content = bool(names)
     except OSError as exc:
         return PushResult(ok=False, detail=f"cannot inspect destination: {exc}")
     if has_content:
@@ -200,32 +224,35 @@ def _admit_under_lock(
             ),
         )
     temp_path = dest / f".{PUBLICATION_IDENTITY_MARKER}.{short_unique_id()}.tmp"
+    created_temp = False
+    failure: PushResult | None = None
     try:
         ensure_real_directory(dest)
         # Write through an exclusively created, brand-new temp name (so
-        # there is nothing pre-existing to follow on any platform), then
-        # publish via durable_replace -- an atomic rename PLUS the
-        # directory-entry fsync barrier/Windows write-through move that a
-        # plain os.replace doesn't give: a power loss right after an
-        # unsynced rename could otherwise revert to no marker at all,
-        # leaving copied content stuck permanently "unowned" on retry.
-        # rename swaps the final path component itself rather than
-        # dereferencing it, so even a marker path raced into a symlink
-        # is safely overwritten in place rather than followed. Both the
-        # write and the replace are cleaned up together on any failure
-        # so an interrupted claim never leaves a temp artifact that
-        # would wrongly count as unowned nonempty content later.
+        # there is nothing pre-existing to follow on any platform), fsync
+        # its content, then publish no-replace: a race that beats us to
+        # marker_path is refused back up for re-resolution, never silently
+        # overwritten (see _publish_marker_no_replace).
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
         fd = os.open(windows_extended_path(temp_path), flags, 0o644)
+        created_temp = True
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            durable_replace(temp_path, marker_path)
-        except OSError:
-            _unlink_if_exists(temp_path)
-            raise
+            _publish_marker_no_replace(temp_path, marker_path)
+        except FileExistsError:
+            failure = _resolve_post_race_marker(marker_path, incoming)
     except OSError as exc:
-        return PushResult(ok=False, detail=f"cannot claim destination: {exc}")
-    return None
+        failure = PushResult(ok=False, detail=f"cannot claim destination: {exc}")
+    finally:
+        if created_temp:
+            try:
+                _unlink_if_exists(temp_path)
+            except OSError as exc:
+                detail = f"cannot remove owned claim temporary file: {exc}"
+                if failure is not None:
+                    detail = f"{failure.detail}; {detail}"
+                failure = PushResult(ok=False, detail=detail)
+    return failure
