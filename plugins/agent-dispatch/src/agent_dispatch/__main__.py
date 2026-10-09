@@ -165,6 +165,10 @@ from .execution_registration_cli import register_execution_commands
 from .declaration_loops_cli import register_declaration_loop_commands
 from .registrar_parser_cli import register_registrar_commands
 from .supervise_registration_cli import register_supervise_commands
+from .workers_config_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _cmd_workers_config_section,
+    register_workers_commands,
+)
 
 from .task_lifecycle_registration_cli import register_task_lifecycle_commands
 from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -917,6 +921,8 @@ def build_parser() -> argparse.ArgumentParser:
     register_webhook_command(sub)
 
     register_supervise_commands(sub)
+
+    register_workers_commands(sub)
 
     p = sub.add_parser(
         "_ensure-coordinator",
