@@ -84,12 +84,14 @@ def test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget(tmp_p
 
     The holder acquires and releases through the FULL real functions
     (never just the mkdir layer alone), so a broken release path would
-    fail this test too. The contender makes its own direct, one-shot
-    `_acquire_versioned_slot_lease` attempt FIRST and signals only once
-    that attempt has genuinely observed contention (failed with reason
-    'contention') -- the holder is never released before that signal, so
-    a slow-to-schedule contender can't silently pass this test without
-    ever actually overlapping the holder. Mirrors
+    fail this test too. `_wait_for_versioned_slot_lease` itself is
+    instrumented (its own `_acquire_versioned_slot_lease` call is
+    wrapped to signal on its first observed contention) so the holder is
+    never released before the wait function's OWN first internal attempt
+    has genuinely hit contention -- a slow-to-schedule contender, or a
+    regressed single-shot implementation, can't silently pass this test
+    without the wait function itself actually overlapping the holder.
+    Mirrors
     `test_installer_powershell51.py::test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget`."""
     install_dir = tmp_path / "install"
     install_dir.mkdir()
@@ -99,7 +101,6 @@ def test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget(tmp_p
     failed_marker = tmp_path / "holder-failed.txt"
     release_marker = tmp_path / "release-now.txt"
     contended_marker = tmp_path / "contended.txt"
-    unexpected_marker = tmp_path / "contender-unexpectedly-acquired.txt"
 
     holder_path = tmp_path / "holder.sh"
     holder_path.write_text(harness + f"""
@@ -134,23 +135,33 @@ fi
         contender_env["AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC"] = "20"
         contender_env["AGENT_WORKTREES_SLOT_LEASE_POLL_SEC"] = "1"
         contender_path = tmp_path / "contender.sh"
-        contender_path.write_text(harness + f"""
-# A fast, single-shot probe purely to synchronize this test: the real
-# _acquire_versioned_slot_lease would otherwise internally retry the
-# mkdir gate for up to ~10s before reporting contention, which is
-# correct default behavior for an ordinary caller but far too slow as a
-# synchronization signal here.
-_VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT=1
-if _acquire_versioned_slot_lease; then
-    touch "{_bash_path(unexpected_marker)}"
-    _release_versioned_slot_lease
-else
-    touch "{_bash_path(contended_marker)}"
-fi
-unset _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT
-_VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+        # Wrap the real _acquire_versioned_slot_lease (renaming it, then
+        # redefining the original name as a counting shim) so the signal
+        # comes from _wait_for_versioned_slot_lease's OWN first internal
+        # attempt -- not a separate probe call made before it. A separate
+        # probe only proves contention existed at some earlier moment;
+        # it does not prove the wait function's own polling loop is what
+        # actually observed and waited through it (the contender could be
+        # descheduled between the probe and the real call, letting the
+        # holder be released first and a regressed single-shot
+        # implementation pass anyway).
+        instrumented = harness.replace(
+            "_acquire_versioned_slot_lease() {", "_acquire_versioned_slot_lease_real() {", 1,
+        ) + f"""
+_acquire_versioned_slot_lease_attempt=0
+_acquire_versioned_slot_lease() {{
+    _acquire_versioned_slot_lease_attempt=$((_acquire_versioned_slot_lease_attempt + 1))
+    if _acquire_versioned_slot_lease_real; then
+        return 0
+    fi
+    if [[ "$_acquire_versioned_slot_lease_attempt" -eq 1 ]]; then
+        touch "{_bash_path(contended_marker)}"
+    fi
+    return 1
+}}
 if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False; fi
-""", encoding="utf-8")
+"""
+        contender_path.write_text(instrumented, encoding="utf-8")
         contender = subprocess.Popen(
             [_BASH, str(contender_path)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -158,17 +169,13 @@ if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False
         )
         try:
             for _ in range(100):  # up to ~10s
-                if contended_marker.exists() or unexpected_marker.exists() or contender.poll() is not None:
+                if contended_marker.exists() or contender.poll() is not None:
                     break
                 time.sleep(0.1)
-            assert not unexpected_marker.exists(), (
-                "the contender's own direct, one-shot acquisition attempt "
-                "unexpectedly succeeded while the holder was still alive -- "
-                "this test never actually exercised genuine overlap"
-            )
             assert contended_marker.exists(), (
-                "the contender never observed genuine lease contention "
-                "before this test released the holder"
+                "_wait_for_versioned_slot_lease's own first internal "
+                "acquisition attempt never observed genuine lease "
+                "contention before this test released the holder"
             )
             release_marker.write_text("go")
             out, err = contender.communicate(timeout=25)
