@@ -26,6 +26,8 @@ of the `worktree-manager-control-plane` effort.
   Both producers register handoffs in the runtime's dedicated `pane-args/` directory.
   Unconsumed files expire after 24 hours on the next resident-monitor sweep or
   Python pane-command generation, preserving delayed startup within that grace period.
+  Cleanup is limited to transport-named files directly in that directory and
+  refuses symlink/junction traversal.
 - `session-options.ps1` / `session-options.sh` — per-session status bar +
   behaviors that `launch-session.ps1`/`.sh` stamp onto each mux session.
   `launch-session.ps1` dot-sources `session-options.ps1` via a

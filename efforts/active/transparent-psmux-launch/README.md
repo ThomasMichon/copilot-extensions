@@ -145,3 +145,8 @@ encoded commands or initial-prompt transports.
   the same expiry owner; neither producer leaves its manifest in loose temp.
   Both delayed native consumers passed again, plus PowerShell retry/transport
   coverage (48 checks) and five exact expiry/registration checks.
+- Restricted rejected-command cleanup to the exact launcher basename and
+  transport-owned filenames directly under the registered directory.
+  Reused the existing cross-version link/junction guard for creation, expiry
+  and rejection cleanup. Real Windows junction and unowned-command regressions,
+  plus the handoff/lifecycle suite: 146 passed.

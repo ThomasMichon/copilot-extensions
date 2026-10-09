@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from . import config, output
+from ._installation_context_base import _is_link_or_junction
 
 PANE_ARGS_MAX_AGE = 24 * 60 * 60
 
@@ -15,8 +16,8 @@ PANE_ARGS_MAX_AGE = 24 * 60 * 60
 def sweep_mux_pane_args() -> None:
     """Expire unconsumed handoffs after a full day of startup grace."""
     root = config.install_dir() / "pane-args"
-    if root.is_symlink():
-        output.warn("Refusing pane argument cleanup through a symlink")
+    if _is_link_or_junction(root):
+        output.warn("Refusing pane argument cleanup through a link or junction")
         return
     if not root.exists():
         return
@@ -24,7 +25,7 @@ def sweep_mux_pane_args() -> None:
     try:
         for path in root.glob("aw-pane-*.json"):
             try:
-                if not path.is_symlink() and path.is_file() and path.stat().st_mtime < cutoff:
+                if not _is_link_or_junction(path) and path.is_file() and path.stat().st_mtime < cutoff:
                     path.unlink(missing_ok=True)
             except FileNotFoundError:
                 pass  # The consumer may have deleted it between inspection and stat.
@@ -37,8 +38,8 @@ def file_mux_pane_cmd(wrapper: str, wrapper_args: list[str]) -> list[str]:
     if not launcher.is_file():
         raise RuntimeError("file-based pane launcher is missing; update Worktree Manager")
     root = config.install_dir() / "pane-args"
-    if root.is_symlink():
-        raise RuntimeError("pane argument directory must not be a symlink")
+    if _is_link_or_junction(root):
+        raise RuntimeError("pane argument directory must not be a link or junction")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     sweep_mux_pane_args()
     with tempfile.NamedTemporaryFile(
@@ -63,6 +64,15 @@ def cleanup_mux_pane_args(argv: list[str]) -> None:
     if (
         argv[-7:-3] == ["pwsh.exe", "-NoProfile", "-NoLogo", "-File"]
         and argv[-2] == "-Manifest"
-        and argv[-3][1:-1].replace("''", "'").endswith("pane-launch.ps1")
+        and Path(argv[-3][1:-1].replace("''", "'")).name == "pane-launch.ps1"
     ):
-        Path(argv[-1][1:-1].replace("''", "'")).unlink(missing_ok=True)
+        path = Path(argv[-1][1:-1].replace("''", "'"))
+        root = config.install_dir() / "pane-args"
+        if (
+            path.parent.absolute() == root.absolute()
+            and path.name.startswith("aw-pane-")
+            and path.name.endswith(".json")
+            and not _is_link_or_junction(root)
+            and not _is_link_or_junction(path)
+        ):
+            path.unlink(missing_ok=True)
