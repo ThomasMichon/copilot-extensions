@@ -91,13 +91,14 @@ class Codec(ABC):
     #: File suffix for an archive produced by this codec (e.g. ``.tar.gz``).
     suffix: str = ""
 
-    @abstractmethod
     def archive_dir(self, src_dir: Path, dest: Path) -> None:
         """Bundle ``src_dir``'s contents into a single archive at ``dest``.
 
         Members are stored *relative to ``src_dir``* (no leading session-id
         component) so extraction reproduces the session directory directly.
+        Read-only codecs may omit this method; writes then fail explicitly.
         """
+        raise ValueError(f"codec {self.name!r} is read-only")
 
     @abstractmethod
     def read_member(self, archive: Path, member: str) -> bytes | None:

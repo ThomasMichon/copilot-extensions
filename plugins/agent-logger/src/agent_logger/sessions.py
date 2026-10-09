@@ -40,7 +40,7 @@ import tarfile
 import tempfile
 import zipfile
 import zlib
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -102,11 +102,27 @@ EVENTS_MEMBER = "events.jsonl"
 #: Registered codecs, keyed by config name. Add ``zstd`` here to enable it.
 CODECS: dict[str, Codec] = {c.name: c for c in (TarGzCodec(), ZipCodec())}
 
-#: Archive suffixes recognized during discovery, longest-first so ``.tar.gz``
-#: wins over any future ``.gz``.
-_ARCHIVE_SUFFIXES: tuple[str, ...] = tuple(
-    sorted((c.suffix for c in CODECS.values()), key=len, reverse=True)
-)
+
+def _codecs_longest_suffix_first() -> list[Codec]:
+    return sorted(
+        (codec for codec in CODECS.values() if codec.suffix),
+        key=lambda codec: (-len(codec.suffix), codec.suffix, codec.name),
+    )
+
+
+def archive_suffixes() -> tuple[str, ...]:
+    """Snapshot current registered nonempty suffixes, unique and longest-first."""
+    return tuple(dict.fromkeys(codec.suffix for codec in _codecs_longest_suffix_first()))
+
+
+class _ArchiveSuffixes:
+    """Keep legacy iteration callers responsive to registry changes."""
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(archive_suffixes())
+
+
+_ARCHIVE_SUFFIXES: Iterable[str] = _ArchiveSuffixes()
 
 
 def get_codec(name: str) -> Codec:
@@ -119,22 +135,31 @@ def get_codec(name: str) -> Codec:
         ) from None
 
 
-def _codec_for_archive(archive: Path) -> Codec:
-    """Pick the codec whose suffix matches ``archive``'s filename."""
+def codec_for_archive(archive: Path) -> Codec:
+    """Return the current codec with the longest matching filename suffix."""
     fname = archive.name
-    for codec in CODECS.values():
-        if codec.suffix and fname.endswith(codec.suffix):
+    for codec in _codecs_longest_suffix_first():
+        if fname.endswith(codec.suffix):
             return codec
     raise ValueError(f"no codec for archive: {archive.name}")
 
 
-def _archive_stem(archive: Path) -> str:
-    """Session id from an archive filename (strip the codec suffix)."""
+def archive_stem(archive: Path) -> str | None:
+    """Strip the longest registered suffix, or return ``None`` when unmatched."""
     fname = archive.name
-    for suffix in _ARCHIVE_SUFFIXES:
+    for suffix in archive_suffixes():
         if fname.endswith(suffix):
             return fname[: -len(suffix)]
-    return archive.stem
+    return None
+
+
+_codec_for_archive = codec_for_archive
+
+
+def _archive_stem(archive: Path) -> str:
+    """Retain the legacy unknown-format filename fallback."""
+    stem = archive_stem(archive)
+    return archive.stem if stem is None else stem
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +252,7 @@ def _archive_refs_for_id(session_id: str, store: Path) -> list[SessionRef]:
     return [
         SessionRef(id=session_id, kind="archive", path=path, store=store)
         for suffix in _ARCHIVE_SUFFIXES
-        if (path := store / f"{session_id}{suffix}").is_file()
+        if (path := store / f"{session_id}{suffix}").is_file() and archive_stem(path) == session_id
     ]
 
 

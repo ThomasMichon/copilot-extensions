@@ -51,6 +51,22 @@ uncompressed and use the same session ID. A session ID must be one safe path
 component; invalid archive stems fail instead of escaping sidecar, lookup, or
 materialization paths. Compression formats never create extra logical sessions.
 
+Library extensions register codecs in `sessions.CODECS`.
+`archive_suffixes()` returns a unique, longest-first snapshot of the current
+nonempty suffixes; `codec_for_archive(Path)` selects the longest matching
+registered suffix, and `archive_stem(Path)` strips it or returns `None` for an
+unrecognized filename. Registration, replacement, and removal affect subsequent
+discovery and reads without rebuilding an import-time cache. Equal-length
+matches are ordered by suffix and codec name. These helpers inspect filenames
+only and never decode an archive.
+
+A read-only `sessions.Codec` subclass implements `read_member`, `extract_all`,
+and `list_members`; its inherited `archive_dir` rejects writes explicitly.
+Comparing overlapping representations still requires `member_digests`:
+an extension without content-proof support cannot authorize de-duplication or
+retirement of an overlapping archive. A longer suffix cannot also resolve as
+a second session ID by treating part of that suffix as the ID.
+
 Both containers hold files relative to the session contents, without a leading
 session-ID directory. ZIP accepts stored and deflated files, benign root
 directory entries, and standard single-volume ZIP64 end records. Multi-volume,

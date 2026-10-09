@@ -132,11 +132,9 @@ def resolve_session_dir(spec: str) -> Path:
     if p.is_absolute():
         if p.is_dir():
             return p
-        if p.is_file() and any(
-            p.name.endswith(suffix) for suffix in sessions._ARCHIVE_SUFFIXES
-        ):
+        if p.is_file() and (session_id := sessions.archive_stem(p)) is not None:
             ref = sessions.SessionRef(
-                id=sessions._archive_stem(p),
+                id=session_id,
                 kind="archive",
                 path=p,
                 store=p.parent,

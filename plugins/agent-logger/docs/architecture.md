@@ -43,7 +43,8 @@ arbitrary path winner. Codec implementation is separated from session
 references, annotations, and lifecycle operations; existing `sessions.Codec`
 and `sessions.TarGzCodec` imports remain valid. See
 [session archive formats](archive-sources.md#session-archive-formats) for ZIP
-bounds, integrity, safe extraction, and unchanged live/store precedence.
+bounds, integrity, safe extraction, dynamic longest-suffix codec lookup,
+read-only extensions, and unchanged live/store precedence.
 
 ### Process-log evidence (`agent_logger.process_logs`)
 
