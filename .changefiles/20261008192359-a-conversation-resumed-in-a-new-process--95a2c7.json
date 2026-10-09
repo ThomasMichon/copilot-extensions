@@ -1,0 +1,21 @@
+{
+  "comment": "A conversation resumed in a new process registers again (the bridge revives its expired row instead of refusing it), and a detached resume whose session never registered fails instead of reporting the exited placeholder",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

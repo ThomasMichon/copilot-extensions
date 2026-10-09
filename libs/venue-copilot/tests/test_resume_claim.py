@@ -138,9 +138,20 @@ def test_a_dead_placeholder_row_counts_as_gone(bridge):
 
 
 def test_an_expired_resumed_row_is_not_live(bridge):
-    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "expired"}}
+    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "expired"},
+                   "placeholder": {"session_id": "placeholder"}}
     assert _settle(timeout=5.0) == ("placeholder", {"reservation_id": "r1"})
     assert bridge.reserved == []
+
+
+def test_neither_live_is_no_session_never_the_dead_placeholder(bridge):
+    """The placeholder exited and the resumed id never registered: the launch
+    has no session, and must not report the gone placeholder as one."""
+    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "expired"},
+                   "placeholder": {"session_id": "placeholder", "status": "expired"}}
+    assert _settle(timeout=5.0) == (None, {"reservation_id": "r1"})
+    bridge.live = {}
+    assert _settle(timeout=5.0) == (None, {"reservation_id": "r1"})
 
 
 @pytest.mark.parametrize("claimant", [None, "someone-else"])

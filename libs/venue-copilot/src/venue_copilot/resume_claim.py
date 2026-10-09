@@ -51,7 +51,7 @@ def settle_resumed_claim(
     ttl_seconds: float,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str | None, dict[str, Any]]:
     """``(session_id, reservation)`` once a resume of *expected* settles.
 
     Unchanged when nothing was resumed by id, or *expected* claimed directly.
@@ -61,9 +61,11 @@ def settle_resumed_claim(
     reservation is the one the caller must release -- ``{}`` when a renewal's
     claim isn't confirmed yet, so the caller leaves it for the resumed
     session's next heartbeat (it expires on its own TTL). A failed bridge read
-    only means "not known yet". Bounded by *timeout*: otherwise (a resume that
-    started a new conversation instead) the placeholder is the session, as
-    before."""
+    only means "not known yet". Bounded by *timeout*: then a placeholder that
+    is still live is the session (a resume that started a new conversation
+    instead), and ``None`` means neither is live -- the placeholder's process
+    exited and the resumed one never registered -- which the caller must
+    report as a failed launch, never as a session."""
     if not expected or claimed == expected:
         return claimed, reservation
     import venue_copilot as vc  # late: callers' test seams patch the package
@@ -93,5 +95,7 @@ def settle_resumed_claim(
                 return expected, {}  # live, maybe without CLI mode; nothing for the caller to release
             return expected, (renewed if claimant == expected else {})
         if clock() >= deadline:
-            return claimed, reservation
+            placeholder_live = (placeholder.get("session_id") == claimed
+                                and placeholder.get("status", "live") == "live")
+            return (claimed if placeholder_live else None), reservation
         sleep(_POLL_SECONDS)

@@ -1,0 +1,67 @@
+"""A conversation resumed in a new process keeps its session id: a dead row for
+that id (``expired``, or ``live`` past its heartbeat lease) is revived by the new
+incarnation, while a live row is never taken over by another process."""
+
+from __future__ import annotations
+
+import time
+
+from fastapi.testclient import TestClient
+
+from agent_bridge.app import create_app
+from agent_bridge.db import Database
+from agent_bridge.db_core import LIVE_SESSION_STALE_SECONDS
+from agent_bridge.models import ServiceConfig
+
+
+def _register(db: Database, sid: str, now: float, *, pid: int, started: float) -> str:
+    return db.register_live_session(
+        sid, machine="codespaces-1", cwd="/workspaces/repo", worktree_id="wt-1", repo="repo",
+        branch="main", pid=pid, role=None, now=now, process_started_at=started,
+    )
+
+
+def test_an_expired_row_is_revived_by_its_resumed_conversation(tmp_db: Database) -> None:
+    t0 = time.time() - 3600
+    assert _register(tmp_db, "conv-1", t0, pid=100, started=t0) == "live"
+    tmp_db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id=?", ("conv-1",))
+    now = time.time()
+    assert _register(tmp_db, "conv-1", now, pid=200, started=now) == "live"
+    row = tmp_db.get_live_session("conv-1")
+    assert (row["status"], row["pid"]) == ("live", 200)
+
+
+def test_a_live_row_past_its_lease_is_revived_before_the_sweep_marks_it(tmp_db: Database) -> None:
+    now = time.time()
+    lapsed = now - LIVE_SESSION_STALE_SECONDS - 5
+    assert _register(tmp_db, "conv-2", lapsed, pid=100, started=lapsed) == "live"
+    assert _register(tmp_db, "conv-2", now, pid=200, started=now) == "live"
+    assert tmp_db.get_live_session("conv-2")["pid"] == 200
+
+
+def test_a_fresh_live_row_is_never_taken_over_by_another_process(tmp_db: Database) -> None:
+    now = time.time()
+    assert _register(tmp_db, "conv-3", now, pid=100, started=now) == "live"
+    assert _register(tmp_db, "conv-3", now + 1, pid=200, started=now + 1) == "incarnation_mismatch"
+    assert _register(tmp_db, "conv-3", now + 2, pid=100, started=now) == "live"  # its own heartbeat
+    assert tmp_db.get_live_session("conv-3")["pid"] == 100
+
+
+def test_the_route_admits_a_resumed_process_for_an_expired_row(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(tmp_path / "none.yaml"))
+    app = create_app(config=ServiceConfig(port=0, bind="127.0.0.1", db_path=str(tmp_path / "t.db")),
+                     token="test-token")
+    with TestClient(app) as client:
+        client.headers["Authorization"] = "Bearer test-token"
+        body = {"session_id": "conv-4", "machine": "codespaces-1", "cwd": "/w", "worktree_id": "wt-4",
+                "repo": "repo", "branch": "main", "pid": 100, "process_started_at": time.time() - 600}
+        assert client.post("/api/v1/live-sessions", json=body).status_code == 200
+        app.state.db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id=?", ("conv-4",))
+        resumed = {**body, "pid": 200, "process_started_at": time.time()}
+        response = client.post("/api/v1/live-sessions", json=resumed)
+        assert response.status_code == 200, response.text
+        assert response.json()["pid"] == 200
+        # A second, different process while that one is live is still refused.
+        other = {**body, "pid": 300, "process_started_at": time.time() + 1}
+        refused = client.post("/api/v1/live-sessions", json=other)
+        assert refused.status_code == 409 and refused.json()["detail"]["reason"] == "incarnation_mismatch"
