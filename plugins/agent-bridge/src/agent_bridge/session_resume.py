@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from .acp_client import AcpClient
+from .session_preferences import client_preferences
 from .models import SessionStatus
 from .session_manager import (
     _MAX_RESUME_ROUNDS,
@@ -150,6 +151,7 @@ class _SessionResumeMixin:
                             on_permission=permission_callback,
                             model_override=session.model_override,
                             effort_override=session.effort_override,
+                            **client_preferences(session.target, self._db, session_id),
                         )
                         if permission_callback:
                             client.auto_approve = False
@@ -319,6 +321,7 @@ class _SessionResumeMixin:
                             on_permission=permission_callback,
                             model_override=session.model_override,
                             effort_override=session.effort_override,
+                            **client_preferences(session.target, self._db, session_id),
                         )
                         if permission_callback:
                             recreate_client.auto_approve = False
@@ -490,6 +493,7 @@ class _SessionResumeMixin:
                     on_event=on_capture,
                     model_override=session.model_override,
                     effort_override=session.effort_override,
+                    **client_preferences(session.target, self._db, session_id),
                 )
                 await client.start(agent_proc.proc)
                 # suppress_replay=False -> the replayed history is captured.
@@ -537,4 +541,3 @@ class _SessionResumeMixin:
 
         session.touch()
         return count
-

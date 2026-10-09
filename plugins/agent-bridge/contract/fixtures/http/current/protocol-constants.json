@@ -1,15 +1,15 @@
 {
   "captured_from": {
-    "commit": "c93f5e9780268d397e0a509e1ccb1d54ae395881",
+    "commit": "7ee6a643e3da36c91258ef7ed4ade7773bcf2db8",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 26,
+    "protocol_generation": 27,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-    "source_git_blob": "8cbabeb69cf6892ec55361923e9c15f15c33c74e",
-    "source_sha256": "a4b2b7bce385e687a91552e88d5970d80a8b07437b86df4bd0ad45186eff0a67"
+    "source_git_blob": "237f47b7cc756100efe68baab8538e8a5110dae7",
+    "source_sha256": "5fd5d07a42f0964ca9fa2d0b7103f128f76325b89def17d1540b658ab8e95780"
   },
   "declared_range": {
     "minimum": 1,
-    "current": 26
+    "current": 27
   },
   "capability_versions": {
     "relay_interrupt": 2,
@@ -35,6 +35,7 @@
     "events_before_paging": 23,
     "caller_session_id": 24,
     "cooperative_stop": 25,
-    "codespace_launch_policy": 26
+    "codespace_launch_policy": 26,
+    "target_preferences": 27
   }
 }

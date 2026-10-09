@@ -37,6 +37,7 @@ from .session_manager import (
     log,
 )
 from .transport import AgentProcess, SpawnTarget
+from .session_preferences import client_preferences
 from .venue_launch_policy import LaunchRefusedError
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
@@ -714,6 +715,7 @@ class _SessionStartMixin:
                         on_permission=permission_callback,
                         model_override=model,
                         effort_override=effort,
+                        **client_preferences(target),
                     )
                     if permission_callback:
                         client.auto_approve = False
@@ -991,4 +993,3 @@ class _SessionStartMixin:
             )
         )
         return result
-

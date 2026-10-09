@@ -405,11 +405,12 @@ class TestInRepoBridgeConfig:
         cfg = load_repo_bridge_config(tmp_path)
         assert cfg is not None and cfg.default_copilot_args == ["--model", "m"]
 
-    def test_bad_yaml_returns_none(self, tmp_path: Path):
+    def test_bad_yaml_refuses_unknown_authority(self, tmp_path: Path):
         cfg_dir = tmp_path / ".copilot-extensions" / "agent-bridge"
         cfg_dir.mkdir(parents=True)
         (cfg_dir / "config.yaml").write_text("{ not: valid: yaml:")
-        assert load_repo_bridge_config(tmp_path) is None
+        with pytest.raises(ValueError, match="refusing authority fallback"):
+            load_repo_bridge_config(tmp_path)
 
     def test_empty_file_is_defaults(self, tmp_path: Path):
         cfg_dir = tmp_path / ".copilot-extensions" / "agent-bridge"

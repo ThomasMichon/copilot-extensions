@@ -19,7 +19,9 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
+
+from ..session_preferences import MAX_RECEIPT_BYTES, validate_receipt
 
 from . import osutil
 from . import protocol as proto
@@ -74,8 +76,10 @@ class SessionHost:
     def __init__(self, child: ChildProcess, *, nonce: str = "",
                  unexpected_reap_seconds: float = 60.0,
                  active_reap_seconds: float = 0.0,
-                 on_child_exit: Callable[[int], None] | None = None) -> None:
+                 on_child_exit: Callable[[int], None] | None = None,
+                 preference_receipt: dict[str, Any] | None = None) -> None:
         self._child = child
+        self._preference_receipt = validate_receipt(preference_receipt, child.pid or 0)
         self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
         self._max_seq = 0
@@ -262,7 +266,9 @@ class SessionHost:
 
         await self._safe_send(
             front, proto.MsgType.HELLO,
-            proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0),
+            proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0)
+            + (json.dumps(self._preference_receipt).encode("utf-8")[:MAX_RECEIPT_BYTES]
+               if self._preference_receipt is not None else b""),
         )
         # Replay every buffered frame before the terminal liveness marker. The
         # client ends iteration on LIVENESS(dead), so sending it first would

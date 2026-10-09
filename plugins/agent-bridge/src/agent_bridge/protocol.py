@@ -162,7 +162,8 @@ CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION = 26
 
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 26
+TARGET_PREFERENCES_PROTOCOL_VERSION = 27
+HTTP_PROTOCOL_VERSION = 27
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

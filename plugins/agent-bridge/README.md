@@ -7,6 +7,10 @@ container venues.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+[Session preference authority](docs/session-preferences.md) documents optional
+execution-user defaults, the unchanged caller-settings default, and the
+execution/ACP capability limits.
+
 ## Responsibility boundary
 
 agent-bridge owns **live cross-boundary agent communication**: starting or
