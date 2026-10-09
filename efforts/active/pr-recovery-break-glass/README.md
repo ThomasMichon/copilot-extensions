@@ -78,6 +78,12 @@ agent-recommended details, not additional verbatim operator instructions.
 ### Phase 2 - Explicit recovery exception
 - [ ] Extend the existing publication command with an explicit per-operation
       break-glass choice and a non-empty reason; no ambient/global bypass.
+- [ ] Use the existing `pr-abandon`-style confirmation contract: an unconfirmed
+      call previews the exact PR, destination, source and expected remote head,
+      refuses, and mutates neither Git refs nor tracking nor the remote. Only
+      an explicitly confirmed call after real operator sign-off for that PR
+      and proposed rewrite proceeds. A reason, discovered flag, or prior guard
+      failure is not sign-off; agents must not add confirmation on their own.
 - [ ] Allow operator-authorized recovery despite missing original-worktree,
       suffix, ownership-attestation or replay bookkeeping. Prefer source CWD
       where available, but support an explicitly selected target from a
@@ -87,8 +93,11 @@ agent-recommended details, not additional verbatim operator instructions.
       hooks, protected/default/release-history restrictions, and normal PR
       review/merge gates. Do not refresh a stale lease to manufacture permission.
 - [ ] Report what was overridden and preserve a durable local audit of reason,
-      target and pinned source/expected head, without credential-bearing URLs
-      or automatically publishing private rationale.
+      target, pinned source/expected head, confirmation basis and the available
+      invocation/session attribution. Distinguish observed provenance from
+      authenticated identity, and record missing attribution as unknown rather
+      than inventing it. Do not store credential-bearing URLs or automatically
+      publish private rationale or invoker details.
 - [ ] Update authoritative CLI/help and worktree recovery guidance together;
       keep normal incremental publication and compatible legacy recovery intact.
 - [ ] Add the agent-worktrees changefile and drive the implementation PR to merge.
@@ -106,6 +115,9 @@ agent-recommended details, not additional verbatim operator instructions.
 
 - [ ] Normal incremental updates and source-owned rebase publication remain
       supported; a guard refusal never selects an exception on its own.
+- [ ] A break-glass request without per-PR confirmation changes no Git refs,
+      tracking or remote state; its explicit preview precedes operator sign-off.
+      An affirmatively confirmed invocation follows the same exact-head fence.
 - [ ] Real isolated Git transport proves reasoned recovery with incomplete
       historical source/ownership/replay evidence and an unchanged exact lease.
 - [ ] A moved or deleted remote head is refused even with break-glass selected;
@@ -115,7 +127,9 @@ agent-recommended details, not additional verbatim operator instructions.
 - [ ] CLI adapters select the same target from source CWD and explicit recovery
       context; empty reasons and inapplicable new-PR use fail before mutation.
 - [ ] Audit and diagnostics distinguish requested, attempted and successful
-      overrides; credential-bearing URLs and private reasons are not published.
+      overrides, preserve confirmation basis and available invoker/session
+      attribution, and disclose unknown provenance honestly. Credential-bearing
+      URLs, private reasons and invoker details are not published.
 - [ ] Targeted bounded tests, lint and source/install guards pass; required CI
       and release validation supply truthful platform coverage.
 - [ ] A released live recovery supplies provider-confirmed head evidence and
@@ -129,6 +143,12 @@ ownership heuristics: the operator can waive the latter deliberately, not the
 former accidentally. Final flag spelling and integration follow the current
 publisher implementation rather than introduce a second command family.
 
+The confirmation gate is the repository's existing procedural safeguard, not a
+claim of cryptographic operator identity. A real invoker-identity authorization
+primitive remains the separate #4411 work; this effort does not depend on it or
+pretend a CLI flag implements it. Keep the exception low-friction and explicit,
+without turning unavailable identity infrastructure into another recovery veto.
+
 ## Journal
 
 ### 2026-10-09 - Scope and coordination
@@ -137,3 +157,7 @@ publisher implementation rather than introduce a second command family.
 - Deduplicated against #5817 and its active publisher work in PR #5835.
   Recorded the distinct recovery-exception slice on the coordination issue;
   implementation has not started and awaits this plan's review gate.
+- Plan review identified that a choice plus reason did not establish sign-off
+  and that target-only audit data omitted the invoker. Specified the existing
+  no-mutation confirmation pattern and truthful invocation/session attribution,
+  without expanding this effort into the deferred identity service.
