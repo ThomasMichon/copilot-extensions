@@ -57,13 +57,22 @@ directory entries, and standard single-volume ZIP64 end records. Multi-volume,
 encrypted, unsupported compression, special/link members, unsafe paths,
 normalized duplicate names, and Windows case-fold collisions fail explicitly.
 ZIP extraction creates new files only, never overwriting existing destination
-evidence. If decoding fails, it removes only the member file created by that
-attempt after checking its identity; a replacement is retained and reported.
+evidence. Each member is decoded and verified in an exclusively owned, private
+staging directory on the destination filesystem, then published with an atomic,
+non-overwriting hard link. Failures remove only the staging directory, never
+unlinking a caller-owned destination path. A concurrently created destination
+is retained and reported as a conflict. Filesystems without hard-link support
+fail explicitly; extraction does not fall back to unsafe pathname cleanup.
 Previously completed members remain, so extraction is not an all-or-nothing
 restore transaction. New ZIP creation uses a unique temporary file, verifies
 file content and CRCs before replacement, rejects observed source changes, and leaves the
 source directory intact. Settled-source selection and any source retirement
 remain the caller's separately authorized responsibilities.
+
+The shared archive-member and session-ID validator rejects Windows-invalid
+characters, control characters, device basenames, and trailing dots/spaces on
+every platform. ZIP validates the original member name before the standard
+library can truncate a NUL-containing name.
 
 ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
 decoded file bytes. Creation also bounds inspected source entries and excludes

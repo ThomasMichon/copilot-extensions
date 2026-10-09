@@ -25,6 +25,7 @@ MAX_ZIP_DIRECTORY_BYTES = 16 * 1024 * 1024
 MAX_TAR_METADATA_BYTES = 16 * 1024 * 1024
 _CASE_INSENSITIVE = os.name == "nt"
 _RESERVED = re.compile(r"(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\Z", re.IGNORECASE)
+_INVALID_COMPONENT = re.compile(r'[\x00-\x1f\x7f-\x9f<>:"|?*]')
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,8 @@ def _validate_member_name(name: str) -> str:
             part == ".."
             or windows_normalized != part
             or windows_normalized in ("", ".", "..")
-            or ":" in part
+            or _INVALID_COMPONENT.search(part)
+            or _RESERVED.fullmatch(part.split(".")[0].rstrip(" "))
         ):
             raise ValueError(f"unsafe archive member path: {name!r}")
         parts.append(part)
@@ -250,9 +252,7 @@ def _zip_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     for index, info in enumerate(archive.infolist()):
         if index >= MAX_ARCHIVE_MEMBERS:
             raise ValueError("session ZIP exceeds its member budget")
-        name = _validate_member_name(info.filename)
-        if any(_RESERVED.fullmatch(part.split(".")[0]) for part in name.split("/")):
-            raise ValueError(f"unsafe session ZIP member: {info.filename!r}")
+        name = _validate_member_name(info.orig_filename)
         key = name.casefold() if _CASE_INSENSITIVE else name
         if key in names:
             raise ValueError(f"duplicate session ZIP member: {info.filename!r}")
@@ -453,7 +453,7 @@ class ZipCodec(Codec):
             return data
 
     def extract_all(self, archive: Path, dest_dir: Path) -> None:
-        from agent_logger.sync.provenance import ensure_real_directory, is_link_or_reparse
+        from agent_logger.sync.provenance import ensure_real_directory
 
         with _open_zip(archive) as opened:
             members = _zip_members(opened)
@@ -461,33 +461,18 @@ class ZipCodec(Codec):
             for name, info in members.items():
                 out = dest_dir / name
                 ensure_real_directory(out.parent)
-                created_id: tuple[int, int] | None = None
-                complete = False
-                try:
-                    with out.open("xb") as target:
-                        created = os.fstat(target.fileno())
-                        created_id = created.st_dev, created.st_ino
+                with tempfile.TemporaryDirectory(
+                    prefix=".session-zip-", dir=out.parent
+                ) as staging:
+                    staged = Path(staging) / "member"
+                    with staged.open("xb") as target:
                         with opened.open(info) as source:
                             copied = _copy_and_digest(source, target, info.file_size)
                         if copied.size != info.file_size:
                             raise ValueError(f"truncated session ZIP member: {info.filename!r}")
-                    complete = True
-                finally:
-                    if not complete and created_id is not None:
-                        try:
-                            current = out.lstat()
-                        except FileNotFoundError:
-                            current = None
-                        if current is not None:
-                            if (
-                                (current.st_dev, current.st_ino) != created_id
-                                or not stat.S_ISREG(current.st_mode)
-                                or is_link_or_reparse(out, current.st_mode)
-                            ):
-                                raise ValueError(
-                                    f"failed ZIP member identity changed; left untouched: {out}"
-                                )
-                            out.unlink()
+                    ensure_real_directory(out.parent)
+                    # link() publishes without replacement; cleanup never unlinks the caller's path.
+                    os.link(staged, out)
 
     def list_members(self, archive: Path) -> list[str]:
         with _open_zip(archive) as opened:

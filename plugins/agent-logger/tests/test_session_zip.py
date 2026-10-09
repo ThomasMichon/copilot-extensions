@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import stat
 import struct
 import tarfile
@@ -97,7 +98,30 @@ def test_zip_accepts_benign_root_directory_entries(tmp_path: Path) -> None:
         assert (directory / "events.jsonl").read_bytes() == b"{}\n"
 
 
-@pytest.mark.parametrize("session_id", ["", ".", "..", "../other", "a/b", r"a\b", r"C:\other"])
+@pytest.mark.parametrize(
+    "session_id",
+    [
+        "",
+        ".",
+        "..",
+        "../other",
+        "a/b",
+        r"a\b",
+        r"C:\other",
+        "a?.txt",
+        "a*.txt",
+        "a<.txt",
+        "a>.txt",
+        'a".txt',
+        "a|.txt",
+        "a\x00name",
+        "a\x1fname",
+        "a\x7fname",
+        "NUL.txt",
+        "CON .txt",
+        "COM9.log",
+    ],
+)
 def test_session_ids_cannot_escape_lookup_sidecars_or_materialization(
     tmp_path: Path, session_id: str
 ) -> None:
@@ -250,29 +274,78 @@ def test_truncated_zip_decode_returns_false_from_verification(
     assert not sessions.verify_archive(sessions.SessionRef("truncated", "archive", archive))
 
 
-def test_failed_zip_cleanup_preserves_a_replaced_member(
+def test_failed_zip_decode_never_unlinks_a_caller_created_member(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     archive = tmp_path / "replaced.zip"
     _zip(archive, [("events.jsonl", b"{}\n")])
     destination = tmp_path / "restore"
     out = destination / "events.jsonl"
-    original_lstat = Path.lstat
 
     def fail_copy(*args: object, **kwargs: object) -> None:
+        out.write_bytes(b"unrelated replacement")
         raise ValueError("interrupted decode")
 
-    def replace_before_cleanup(path: Path):
-        if path == out:
-            path.rename(tmp_path / "failed-owned-member")
-            path.write_bytes(b"unrelated replacement")
-        return original_lstat(path)
-
     monkeypatch.setattr(session_codecs, "_copy_and_digest", fail_copy)
-    monkeypatch.setattr(Path, "lstat", replace_before_cleanup)
-    with pytest.raises(ValueError, match="identity changed"):
+    with pytest.raises(ValueError, match="interrupted decode"):
         sessions.CODECS["zip"].extract_all(archive, destination)
     assert out.read_bytes() == b"unrelated replacement"
+    assert list(destination.iterdir()) == [out]
+
+
+def test_zip_publication_preserves_a_destination_created_after_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "racing.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    destination = tmp_path / "restore"
+    out = destination / "events.jsonl"
+    original_link = os.link
+
+    def racing_link(source: Path, target: Path) -> None:
+        assert source.read_bytes() == b"{}\n"
+        assert target == out
+        target.write_bytes(b"caller-owned")
+        original_link(source, target)
+
+    monkeypatch.setattr(os, "link", racing_link)
+    with pytest.raises(FileExistsError):
+        sessions.CODECS["zip"].extract_all(archive, destination)
+    assert out.read_bytes() == b"caller-owned"
+    assert list(destination.iterdir()) == [out]
+
+
+def test_zip_write_failure_never_publishes_partial_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "write-failure.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    destination = tmp_path / "restore"
+
+    def fail_write(source, target, maximum_bytes):
+        target.write(b"partial")
+        raise OSError("interrupted write")
+
+    monkeypatch.setattr(session_codecs, "_copy_and_digest", fail_write)
+    with pytest.raises(OSError, match="interrupted write"):
+        sessions.CODECS["zip"].extract_all(archive, destination)
+    assert list(destination.iterdir()) == []
+
+
+def test_zip_publication_requires_atomic_nonoverwriting_filesystem_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "unsupported.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    destination = tmp_path / "restore"
+
+    def unsupported_link(*args: object, **kwargs: object) -> None:
+        raise OSError("hard links unsupported")
+
+    monkeypatch.setattr(os, "link", unsupported_link)
+    with pytest.raises(OSError, match="hard links unsupported"):
+        sessions.CODECS["zip"].extract_all(archive, destination)
+    assert list(destination.iterdir()) == []
 
 
 @pytest.mark.parametrize("deflated", [False, True])
@@ -356,6 +429,37 @@ def test_unsafe_zip_members_are_rejected_before_extraction(tmp_path: Path, name:
     with pytest.raises(ValueError):
         sessions.CODECS["zip"].extract_all(archive, destination)
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("codec", ["targz", "zip"])
+@pytest.mark.parametrize("name", ["a?.txt", "a\x1fname", "NUL.txt", "CON .txt"])
+def test_shared_archive_path_policy_rejects_nonportable_components(
+    tmp_path: Path, codec: str, name: str
+) -> None:
+    archive = tmp_path / f"unsafe{sessions.CODECS[codec].suffix}"
+    if codec == "zip":
+        _zip(archive, [("events.jsonl", b"{}\n"), (name, b"unsafe")])
+    else:
+        with tarfile.open(archive, "w:gz") as output:
+            for member in ("events.jsonl", name):
+                info = tarfile.TarInfo(member)
+                info.size = 3
+                output.addfile(info, io.BytesIO(b"{}\n"))
+    ref = sessions.SessionRef("unsafe", "archive", archive, tmp_path)
+    assert not sessions.verify_archive(ref)
+    with pytest.raises(ValueError, match="unsafe archive member path"):
+        sessions.CODECS[codec].member_digests(archive)
+    with pytest.raises(ValueError, match="unsafe archive member path"), sessions.materialize(ref):
+        pass
+
+
+def test_zip_raw_nul_name_is_rejected_before_zipfile_truncation(tmp_path: Path) -> None:
+    archive = tmp_path / "nul-member.zip"
+    _zip(archive, [("events.jsonl", b"{}\n"), ("badXname", b"unsafe")])
+    archive.write_bytes(archive.read_bytes().replace(b"badXname", b"bad\x00name"))
+    assert not sessions.verify_archive(sessions.SessionRef("nul-member", "archive", archive))
+    with pytest.raises(ValueError, match="unsafe archive member path"):
+        sessions.CODECS["zip"].list_members(archive)
 
 
 @pytest.mark.parametrize("kind", [stat.S_IFLNK, stat.S_IFIFO, stat.S_IFCHR])
