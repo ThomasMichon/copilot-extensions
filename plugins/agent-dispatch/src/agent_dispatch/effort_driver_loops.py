@@ -370,6 +370,27 @@ def _coordination_refs_from_readme(text: str) -> tuple[str, ...]:
 
 
 def _discover_active_efforts(config: Mapping[str, Any]) -> tuple[list[ActiveEffort], list[str]]:
+    """Sweep ``<state_root>/efforts/active/`` for effort READMEs.
+
+    The glob is recursive (``**/README.md``, any depth under ``active/``),
+    not flat (``*/README.md``, exactly one level) -- a consumer's own
+    organizing convention between ``active/`` and the effort's own folder
+    (for example nesting one extra level by originating repo,
+    ``active/<repo>/<slug>/README.md``, when one state root serves several
+    repos) is this engine's business to tolerate, not something every
+    adopter must flatten away just to be discoverable. The effort's own
+    identity is always its immediate parent folder name (``slug``),
+    regardless of how deep that folder sits -- never a path segment this
+    engine would have to know the meaning of.
+
+    A slug is ambiguous, not merely a coincidence, if it is found at more
+    than one path: ``effort_slugs``/``exclusive_key``/dedup keys all key on
+    the bare slug, so two distinct effort folders sharing one name would
+    silently alias each other's task state. That is always a real
+    authoring conflict needing a rename, so it is raised here rather than
+    resolved by picking one match arbitrarily (`sorted()`'s own tie-break
+    would be stable but still semantically wrong).
+    """
     active_root = _active_efforts_root(config)
     if not active_root.is_dir():
         raise RuntimeError(
@@ -377,12 +398,30 @@ def _discover_active_efforts(config: Mapping[str, Any]) -> tuple[list[ActiveEffo
         )
     selected = tuple(str(slug) for slug in config.get("effort_slugs", ()))
     selected_set = set(selected)
-    efforts: list[ActiveEffort] = []
-    found_slugs: set[str] = set()
-    for readme in sorted(active_root.glob("*/README.md")):
+    by_slug: dict[str, list[Path]] = {}
+    for readme in sorted(active_root.glob("**/README.md")):
+        if readme.parent == active_root:
+            # A loose README.md directly under active/, with no effort
+            # folder of its own -- not an effort (every effort has its own
+            # named folder; this guards the degenerate `**` zero-levels
+            # match from being misread as an effort named "active").
+            continue
         slug = readme.parent.name
         if selected_set and slug not in selected_set:
             continue
+        by_slug.setdefault(slug, []).append(readme)
+    ambiguous = {slug: paths for slug, paths in by_slug.items() if len(paths) > 1}
+    if ambiguous:
+        detail = "; ".join(
+            f"{slug!r} at {[str(p) for p in paths]}" for slug, paths in sorted(ambiguous.items())
+        )
+        raise RuntimeError(
+            f"effort-driver-loop found more than one active effort folder sharing the same "
+            f"slug under {active_root} -- rename one so each slug is unique: {detail}"
+        )
+    efforts: list[ActiveEffort] = []
+    found_slugs: set[str] = set()
+    for slug, (readme,) in sorted(by_slug.items()):
         text = readme.read_text(encoding="utf-8")
         found_slugs.add(slug)
         efforts.append(
