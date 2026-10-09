@@ -1,0 +1,17 @@
+{
+  "comment": "attention: bridge and pr sources (agent-bridge --json attention reads a session's current attention reason, HTTP protocol 29; agent-worktrees claims find pr scans every repo with a versioned per-project envelope from any directory)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -7,6 +7,8 @@ from __future__ import annotations
 import argparse
 import json
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import claims_find_cli, tracking
 
@@ -34,7 +36,7 @@ def _seed_pr_record(
     tracking.save_record(rec, tdir / f"{worktree_id}.yaml")
     monkeypatch.setattr(
         "agent_worktrees.installer.read_projects_registry",
-        lambda: {"projects": {"proj-a": {}, "proj-b": {}}},
+        lambda **_kw: {"projects": {"proj-a": {}, "proj-b": {}}},
     )
     monkeypatch.setattr(
         "agent_worktrees.config.project_dir",
@@ -96,14 +98,165 @@ def test_find_repo_match_is_case_insensitive(monkeypatch, tmp_path):
     assert len(matches) == 1
 
 
-def test_cmd_claims_find_requires_repo(capfd):
+def test_cmd_claims_find_without_repo_lists_every_repo_per_project(monkeypatch, tmp_path, capfd):
+    _seed_pr_record(tmp_path, monkeypatch, "proj-a", "wt-a", repo="acme/widgets", pr_state="open", number=7)
+    _seed_pr_record(tmp_path, monkeypatch, "proj-b", "wt-b", repo="other/gadgets", pr_state="closed",
+                    number=None, url="https://gitea.example.com/other/gadgets/pulls/9")
+    monkeypatch.setattr(claims_find_cli, "_authority_resolver", lambda project: lambda slug, provider: "github.com")
     rc = claims_find_cli.cmd_claims_find(
-        argparse.Namespace(json=True, claim_repo=None, claim_state="open", claim_live=False),
-        ["pr"],
-    )
-    assert rc == 2
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == 0
     out = json.loads(capfd.readouterr().out)
-    assert "error" in out
+    assert (out["schema"], out["repo"]) == (1, None)
+    assert out["projects"] == [
+        {"project": "proj-a", "status": "ok", "prs": [
+            {"worktree_id": "wt-a", "authority": "github.com", "repo": "acme/widgets", "number": 7,
+             "state": "open"}]},
+        {"project": "proj-b", "status": "ok", "prs": [
+            {"worktree_id": "wt-b", "authority": "github.com", "repo": "other/gadgets", "number": 9,
+             "state": "closed"}]},
+    ]
+
+
+def test_the_authority_comes_from_the_slugs_own_binding_not_the_default_repo(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import pr_config
+
+    bindings = {
+        "acme/home": NS(resolved=True, repo_config=NS(pr=NS(provider="github", api_base=""))),
+        "forge/tool": NS(resolved=True, repo_config=NS(pr=NS(provider="gitea",
+                                                              api_base="https://forge.example.com/gitea/"))),
+        "nobody/knows": NS(resolved=False, repo_config=None),
+    }
+    monkeypatch.setattr(cfg, "load_project_config", lambda project: NS(default_repo=NS(pr=NS(provider="github"))))
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda config, slug: bindings[slug])
+    resolve = claims_find_cli._authority_resolver("proj-a")
+    assert resolve("acme/home", "") == "github.com"
+    assert resolve("forge/tool", "") == "forge.example.com/gitea"  # not the project's default github.com
+    assert resolve("nobody/knows", "") is None  # pr bar can't read it either
+    # A stale provider on the record never overrides the binding pr bar reads through.
+    assert claims_find_cli._authority_resolver("proj-a")("forge/tool", "github") == "forge.example.com/gitea"
+
+
+def test_repo_filter_matches_a_bare_legacy_record_by_its_url(monkeypatch, tmp_path, capfd):
+    _seed_pr_record(tmp_path, monkeypatch, "proj-a", "wt-legacy", repo="widgets", pr_state="open", number=8,
+                    url="https://github.com/acme/widgets/pull/8")
+    monkeypatch.setattr(claims_find_cli, "_authority_resolver", lambda project: lambda slug, provider: "github.com")
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo="acme/widgets", claim_state="open", claim_live=False), ["pr"])
+    out = json.loads(capfd.readouterr().out)
+    assert rc == 0 and [m["worktree_id"] for m in out["matches"]] == ["wt-legacy"]
+    assert [p["repo"] for e in out["projects"] for p in e["prs"]] == ["acme/widgets"]
+
+
+def test_claims_find_one_failing_project_does_not_hide_the_other(monkeypatch, tmp_path, capfd):
+    _seed_pr_record(tmp_path, monkeypatch, "proj-a", "wt-a", repo="acme/widgets", pr_state="open")
+
+    def project_dir(name=None):
+        if name == "proj-b":
+            raise OSError("proj-b's config is gone")
+        return tmp_path / name
+
+    monkeypatch.setattr("agent_worktrees.config.project_dir", project_dir)
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == 0
+    projects = {p["project"]: p for p in json.loads(capfd.readouterr().out)["projects"]}
+    assert projects["proj-a"]["status"] == "ok" and len(projects["proj-a"]["prs"]) == 1
+    assert projects["proj-b"]["status"] == "failed" and projects["proj-b"]["error"]
+    assert projects["proj-b"]["prs"] == []
+
+
+def test_claims_find_counts_a_tracking_record_it_cannot_load(monkeypatch, tmp_path):
+    _seed_pr_record(tmp_path, monkeypatch, "proj-a", "wt-a", repo="acme/widgets", pr_state="open")
+    (tmp_path / "proj-a" / "worktrees" / "broken.yaml").write_text("{not: [yaml", encoding="utf-8")
+    entry = next(p for p in claims_find_cli.scan_projects(None, "all") if p["project"] == "proj-a")
+    assert (entry["status"], entry["unreadable"], len(entry["prs"])) == ("ok", 1, 1)
+
+
+def test_claims_find_empty_registry_is_an_empty_ok_envelope(monkeypatch, capfd):
+    monkeypatch.setattr("agent_worktrees.installer.read_projects_registry", lambda **_kw: {"projects": {}})
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == 0
+    assert json.loads(capfd.readouterr().out)["projects"] == []
+
+
+def test_claims_find_unreadable_registry_exits_non_zero(monkeypatch, capfd):
+    def boom(**_kw):
+        raise OSError("projects.yaml: permission denied")
+
+    monkeypatch.setattr("agent_worktrees.installer.read_projects_registry", boom)
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == claims_find_cli.REGISTRY_UNREADABLE_EXIT
+    assert "registry" in json.loads(capfd.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("content", ["{not: [yaml", "- a list\n", "projects: [a, b]\n"])
+def test_claims_find_a_malformed_real_registry_is_unreadable_not_empty(monkeypatch, tmp_path, capfd, content):
+    """The production reader, not a mock: a malformed projects.yaml is no
+    project list, never an empty (all-clear) one."""
+    from agent_worktrees import installer
+
+    registry = tmp_path / "projects.yaml"
+    registry.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: registry)
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == claims_find_cli.REGISTRY_UNREADABLE_EXIT
+    assert installer.read_projects_registry()["projects"] == {}  # lenient callers keep their contract
+
+
+@pytest.mark.parametrize("content", [None, "", "projects:\n", "projects: {}\n"])
+def test_claims_find_a_missing_or_empty_real_registry_is_an_empty_ok_envelope(monkeypatch, tmp_path, capfd, content):
+    from agent_worktrees import installer
+
+    registry = tmp_path / "projects.yaml"
+    if content is not None:
+        registry.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: registry)
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == 0 and json.loads(capfd.readouterr().out)["projects"] == []
+
+
+def test_claims_find_live_needs_a_repo(capfd):
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="open", claim_live=True), ["pr"])
+    assert rc == 2
+
+
+@pytest.mark.parametrize("repo, url, expected", [
+    ("acme/widgets", "", "acme/widgets"),
+    ("widgets", "https://github.com/acme/widgets/pull/4", "acme/widgets"),
+    ("widgets", "https://gitea.example.com/acme/widgets/pulls/4", "acme/widgets"),
+    ("widgets", "https://dev.azure.com/org/proj/_git/widgets/pullrequest/4", "proj/widgets"),
+    ("widgets", "", ""),
+])
+def test_pr_repo_recovers_the_slug_from_the_url(repo, url, expected):
+    pr = tracking.PRRecord(state="open", repo=repo, number=4, url=url, branch="b")
+    assert claims_find_cli._pr_repo(pr) == expected
+
+
+def test_claims_find_pr_needs_no_project_context():
+    from agent_worktrees import front_door_cli
+
+    assert front_door_cli._is_no_project_invocation(["claims", "find", "pr", "--json"])
+    assert not front_door_cli._is_no_project_invocation(["claims", "owner", "x"])
+
+
+@pytest.mark.parametrize("endpoint, expected", [
+    ("github.com", "github.com"),
+    ("https://GHES.Example.com:443/", "ghes.example.com"),
+    ("https://user:pw@dev.azure.com/OrgA/", "dev.azure.com/OrgA"),
+    ("http://gitea.example.com:8080/api/v1/", "gitea.example.com:8080/api/v1"),
+    ("", None),
+])
+def test_canonical_authority(endpoint, expected):
+    assert claims_find_cli.canonical_authority(endpoint) == expected
 
 
 def test_cmd_claims_find_requires_pr_kind(capfd):
@@ -136,7 +289,7 @@ def test_cmd_claims_find_json_roundtrip(monkeypatch, tmp_path, capfd):
 def test_cmd_claims_find_no_matches_returns_1(monkeypatch, tmp_path, capfd):
     monkeypatch.setattr(
         "agent_worktrees.installer.read_projects_registry",
-        lambda: {"projects": {}},
+        lambda **_kw: {"projects": {}},
     )
     rc = claims_find_cli.cmd_claims_find(
         argparse.Namespace(json=True, claim_repo="acme/widgets", claim_state="open",
