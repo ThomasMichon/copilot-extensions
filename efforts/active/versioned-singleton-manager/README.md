@@ -66,9 +66,10 @@ are complete, rather than stopping after the design PR.
 - [x] Add backward-compatible publication-time identity. Landed in
   [PR #5803](https://github.com/ThomasMichon/copilot-extensions/pull/5803),
   including preservation through rollback/watchdog promotion.
-- [ ] Require the published baseline and proven ownership before adopting
+- [x] Require the published baseline and proven ownership before adopting
   successors; reject unverifiable candidates rather than sampling a new
-  identity from an already-reused PID.
+  identity from an already-reused PID. Implemented by the Linux library slice;
+  Windows custody and production launcher integration remain separate gates.
 - [ ] Implement distinct routing and manager-state paths, atomic versioned
   state, singleton ownership, ancestry checks, stable identity baselines,
   zombie reaping, bounded successor discovery, and crash cleanup.

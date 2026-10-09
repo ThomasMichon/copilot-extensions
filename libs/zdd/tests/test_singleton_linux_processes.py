@@ -148,6 +148,35 @@ print(json.dumps({"watched": result.last_watched_pid, "final": int(root.joinpath
                   "spawns": root.joinpath("spawns").read_text().splitlines()}))
 '''
 
+_HIGH_FD_DRIVER = r'''
+import fcntl, json, os, resource, subprocess, sys, time
+from zdd.singleton_linux import LinuxBackend, ProcessReference
+if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 1024:
+    print(json.dumps({"unsupported_limit": True}))
+    raise SystemExit(0)
+backend = LinuxBackend()
+child = subprocess.Popen([sys.executable, "-c", "import sys;sys.stdin.buffer.read(1)"],
+                         stdin=subprocess.PIPE)
+identity = backend.identify(child.pid)
+reference = backend.open_process(identity)
+if reference is None:
+    raise RuntimeError("test child exited before pidfd capture")
+high = None
+try:
+    high = ProcessReference(identity, fcntl.fcntl(reference.fd, fcntl.F_DUPFD_CLOEXEC, 1024))
+    initial = high.alive()
+    child.stdin.close()
+    child.wait(timeout=3)
+    terminal = high.alive()
+    print(json.dumps({"fd": high.fd, "initial": initial, "terminal": terminal}))
+finally:
+    reference.close()
+    if high is not None:
+        high.close()
+    child.stdin.close()
+    child.wait(timeout=3)
+'''
+
 
 def _run_driver(script: str, tmp_path: Path, *args: str) -> dict:
     driver = tmp_path / "manager_driver.py"
@@ -181,3 +210,12 @@ def test_real_exec_during_cutover_discovers_pending_successor(tmp_path: Path) ->
     assert result["managers"][0] == result["managers"][1]
     assert len(result["managers"]) == 2
     assert result["watched"] == result["final"]
+
+
+def test_high_numbered_pidfd_liveness_has_no_select_ceiling(tmp_path: Path) -> None:
+    result = _run_driver(_HIGH_FD_DRIVER, tmp_path)
+    if result.get("unsupported_limit"):
+        pytest.skip("host descriptor limit does not permit a descriptor above FD_SETSIZE")
+    assert result["fd"] >= 1024
+    assert result["initial"] is True
+    assert result["terminal"] is False

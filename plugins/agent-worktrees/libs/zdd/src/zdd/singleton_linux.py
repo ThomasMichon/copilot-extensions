@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import logging
 import os
 import select
@@ -70,7 +71,12 @@ class ProcessReference:
     fd: int
 
     def alive(self) -> bool:
-        return not select.select([self.fd], [], [], 0)[0]
+        poller = select.poll()
+        poller.register(self.fd, select.POLLIN)
+        events = poller.poll(0)
+        if any(flags & select.POLLNVAL for _, flags in events):
+            raise OSError(errno.EBADF, "invalid process pidfd")
+        return not events
 
     def send_signal(self, number: int) -> bool:
         try:
