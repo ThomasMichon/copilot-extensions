@@ -293,6 +293,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     all_machines: dict[str, MachineConfig] = {}
     all_agents: dict[str, AgentConfig] = {}
     topology_errors: list[str] = []
+    loaded_profiles = []
 
     for profile_name, profile in cfg.topologies.items():
         if not profile.machines_yaml:
@@ -312,7 +313,26 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         except TopologyLoadError as exc:
             topology_errors.append(f"{profile_name}: {exc}")
             continue
+        for key, entry in machines.items():
+            previous = all_machines.get(key)
+            if previous and previous.execution_platform != entry.execution_platform:
+                raise TopologyLoadError(
+                    f"{profile_name}: execution-space key {key!r} has conflicting platforms"
+                )
         all_machines.update(machines)
+        loaded_profiles.append((profile_name, profile, machines))
+
+    if any(entry.execution_platform for entry in all_machines.values()):
+        folded: dict[str, str] = {}
+        for key in all_machines:
+            previous = folded.setdefault(key.casefold(), key)
+            if previous != key:
+                raise TopologyLoadError(
+                    "execution-space keys must be unique without regard to case "
+                    f"across topology profiles: {previous!r}, {key!r}"
+                )
+
+    for profile_name, profile, machines in loaded_profiles:
         if profile.agents_config:
             agents_path = Path(profile.agents_config).expanduser()
             try:

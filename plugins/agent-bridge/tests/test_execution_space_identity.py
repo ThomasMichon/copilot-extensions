@@ -134,8 +134,60 @@ def test_worktree_routes_preserve_selected_space_without_hostname_loopback(platf
         agent_registry, "_detect_local_machine",
         side_effect=AssertionError("route must reuse the selected execution space"),
     ), patch("socket.gethostname", return_value="workstation"):
-        assert _is_local_target(f"workstation-{platform}-ssh", resolver)
-        assert _is_local_target(f"workstation-{platform}", resolver)
-        assert not _is_local_target(f"workstation-{other}-ssh", resolver)
-        assert not _is_local_target(f"workstation-{other}", resolver)
+        key = f"workstation-{platform}"
+        assert _is_local_target(f"workstation-{platform}-ssh", resolver, key)
+        assert _is_local_target(f"workstation-{platform}", resolver, key)
+        assert not _is_local_target(f"workstation-{other}-ssh", resolver, f"workstation-{other}")
+        assert not _is_local_target(f"workstation-{other}", resolver, f"workstation-{other}")
         assert not _is_local_target("workstation", resolver)
+
+
+def test_duplicate_ssh_alias_cannot_make_a_remote_key_local():
+    from agent_bridge.routes.worktrees import _is_local_target
+
+    spaces = _spaces()
+    for machine in spaces.values():
+        machine.ssh_environments[0].alias = "shared-transport"
+    agent = AgentConfig(
+        name="remote", host="workstation-wsl", project="project", ssh_environment="wsl",
+    )
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"):
+        resolver = AgentResolver(
+            {"remote": agent}, spaces, local_execution_space="workstation-windows",
+        )
+    resolver._own_plugin_args = lambda *args: []
+    resolver._related_plugin_args = lambda *args: []
+    target = resolver.resolve("remote")
+    assert target.host == "shared-transport"
+    assert target.execution_space_key == "workstation-wsl"
+    assert not _is_local_target(target.host, resolver, target.execution_space_key)
+    assert not _is_local_target(target.host, resolver)
+    assert _is_local_target(target.host, resolver, "workstation-windows")
+
+
+@pytest.mark.parametrize("other_key,other_platform", [("SPACE", "wsl"), ("space", "wsl")])
+def test_merged_profile_identity_collisions_reject_before_agent_derivation(
+    other_key, other_platform, tmp_path, monkeypatch,
+):
+    from types import SimpleNamespace
+    from agent_bridge import topology
+
+    files = []
+    for name, key, platform in (
+        ("first", "space", "windows"), ("second", other_key, other_platform),
+    ):
+        path = tmp_path / f"{name}.yaml"
+        path.write_text(
+            f"machines:\n  {key}:\n    execution_platform: {platform}\n",
+            encoding="utf-8",
+        )
+        files.append(SimpleNamespace(machines_yaml=str(path), agents_config=None))
+    config = SimpleNamespace(
+        topologies=dict(zip(["first", "second"], files)), local_execution_space="space",
+    )
+    monkeypatch.setattr(
+        agent_registry, "derive_topology_agents",
+        lambda *args, **kwargs: pytest.fail("ambiguous merged identity derived an agent"),
+    )
+    with pytest.raises(topology.TopologyLoadError, match="across topology profiles|conflicting platforms"):
+        agent_registry.build_resolver(config)
