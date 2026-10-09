@@ -1038,7 +1038,7 @@ appropriately larger/riskier for one sitting):
 - PowerShell snapshot creation materializes the engine pair and all declared
   local libraries before publishing the snapshot. Regression coverage proves
   that provisioning does not need the authoring checkout afterward.
-- Installer wrappers shrink by 71 lines; the canonical engine is unchanged.
+- Installer wrappers shrink by 69 lines; the canonical engine is unchanged.
 - Validation: isolated Codespaces suite 1653 passed / 56 skipped; host suite
   including available PowerShell coverage 1696 passed / 13 skipped; shared
   materialization and install-contract tooling 145 passed. Sync, install
@@ -1048,6 +1048,11 @@ appropriately larger/riskier for one sitting):
 - Review, merge and deployed verification are still required; this entry
   records implementation, not effort completion. Next requested adopter is
   `agent-dispatch`, after this slice lands. Public tracking: #5802.
+- Review identified a signed-Python exit-zero/unusable-venv recovery gap.
+  Health validation now gates accepting the signed result regardless of exit
+  code; an unusable result is discarded before the shared uv fallback.
+  The regression matrix covers usable/unusable results at both zero and
+  nonzero exit codes.
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-pull-requests --reinstall --admission-wait 540`
     -> PASS (`21 passed`) after the shared POSIX binstub helper picked up the
     same success-without-runtime exit fix this leg needed for agent-vault

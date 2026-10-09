@@ -501,15 +501,11 @@ if (-not $ok) {{ exit 1 }}
         assert not log.exists()
         if signed_rc:
             assert "after producing a usable venv" in result.stderr
-    elif signed_rc:
+    else:
         assert result.returncode == 0, result.stdout + result.stderr
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         assert calls == [["venv", str(slot), "--python", "3.11", "--allow-existing"]]
         assert "falling back to uv" in result.stderr
-    else:
-        assert result.returncode != 0
-        assert not log.exists()
-        assert "Venv validation failed" in result.stderr
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])

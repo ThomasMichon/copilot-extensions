@@ -873,18 +873,20 @@ function Deploy-Venv {
     if ($signedBase -and -not (Test-Path $VenvPython)) {
         & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
         $signedRc = $LASTEXITCODE
-        if ($signedRc -ne 0) {
-            if (Test-PythonVenv -Dir $VenvDir -Python $VenvPython) {
+        if (Test-PythonVenv -Dir $VenvDir -Python $VenvPython) {
+            if ($signedRc -ne 0) {
                 Write-ServiceWarn "Signed Python venv creation exited $signedRc after producing a usable venv"
-            } else {
-                Write-ServiceWarn "Signed Python venv creation failed (exit $signedRc) -- falling back to uv"
-                try {
+            }
+        } else {
+            Write-ServiceWarn "Signed Python venv creation failed validation (exit $signedRc) -- falling back to uv"
+            try {
+                if (Test-Path -LiteralPath $VenvDir) {
                     Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
-                } catch {
-                    $ErrorActionPreference = $prevEAP
-                    Write-ServiceErr "Could not discard failed signed-Python venv: $($_.Exception.Message)"
-                    return $false
                 }
+            } catch {
+                $ErrorActionPreference = $prevEAP
+                Write-ServiceErr "Could not discard failed signed-Python venv: $($_.Exception.Message)"
+                return $false
             }
         }
     }
