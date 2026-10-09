@@ -222,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     host_cleanup.add_argument("name", help="Container name")
     host_cleanup.add_argument("--expected-instance", default=None)
+    host_cleanup.add_argument("--expected-user", default=None)
     host_cleanup.add_argument("--remote-env", required=True)
 
     sub.add_parser("version", help="Show version")
@@ -543,9 +544,12 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
 
 def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     """Remove only a provider-created launch env path."""
-    _config, _fleet, user, _workspace = _trusted_session_host_context(
-        args.name, args.expected_instance,
-    )
+    if args.expected_instance:
+        from .session_host_context import cleanup_user
+
+        user = cleanup_user(args.expected_instance, args.expected_user)
+    else:
+        _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
     remote_env = PurePosixPath(args.remote_env)
     if (
         not remote_env.is_absolute()
@@ -557,7 +561,8 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
         raise RuntimeError(
             f"Refusing unsafe Session Host env cleanup path: {args.remote_env!r}"
         )
-    cleanup_remote_env(args.expected_instance or args.name, user, str(remote_env))
+    if cleanup_remote_env(args.expected_instance or args.name, user, str(remote_env)) is False:
+        raise RuntimeError("launch environment cleanup could not be confirmed")
     return 0
 
 

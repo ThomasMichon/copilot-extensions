@@ -768,6 +768,9 @@ class Session:
         self.caller_id = caller_id
         self.caller_session_id = caller_session_id
         self.target = target
+        from .container_preference_launch import migrate_selected_instance
+
+        migrate_selected_instance(target)
         self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before

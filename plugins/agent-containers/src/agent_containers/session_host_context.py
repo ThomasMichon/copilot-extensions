@@ -53,3 +53,15 @@ def resolve_context(
         fleet.workspace_folder or config.workspace_folder,
         str(inspection.get("Id") or ""),
     )
+
+
+def cleanup_user(instance_id: str, bound_user: str | None) -> str:
+    from .lifecycle import inspect_container
+
+    if not bound_user:
+        raise RuntimeError("immutable cleanup requires its bound execution user")
+    inspection = inspect_container(instance_id)
+    profile = ((inspection.get("Config") or {}).get("Labels") or {}).get(SECURITY_PROFILE_LABEL)
+    if inspection.get("Id") != instance_id or profile != TRUSTED_PROFILE:
+        raise RuntimeError("immutable cleanup target is not the prepared trusted instance")
+    return bound_user

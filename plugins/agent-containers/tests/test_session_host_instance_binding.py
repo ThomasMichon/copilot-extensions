@@ -99,3 +99,29 @@ def test_context_inspects_immutable_id_not_name(monkeypatch):
     monkeypatch.setattr("agent_containers.lifecycle.inspect_container", inspection)
     assert resolve_context("example-1", config, selected).instance_id == selected
     inspection.assert_called_once_with(selected)
+
+
+@pytest.mark.parametrize("removed", [True, False])
+def test_secret_cleanup_survives_name_replacement_and_uses_bound_user(monkeypatch, removed):
+    selected = "a" * 64
+    monkeypatch.setattr("agent_containers.lifecycle.get_container", lambda *args: pytest.fail(
+        "cleanup must not rediscover a mutable name",
+    ))
+    inspection = MagicMock(return_value={
+        "Id": selected, "Config": {"Labels": {"agent-containers.security-profile": "trusted"}},
+    })
+    monkeypatch.setattr("agent_containers.lifecycle.inspect_container", inspection)
+    cleanup = MagicMock(return_value=removed)
+    monkeypatch.setattr(cli, "cleanup_remote_env", cleanup)
+    path = "/home/your_user/.agent-containers/launch/" + "0" * 32 + ".env"
+    args = SimpleNamespace(
+        name="name-now-points-elsewhere", expected_instance=selected,
+        expected_user="runner", remote_env=path,
+    )
+    if removed:
+        assert cli._cmd_session_host_cleanup(args) == 0
+    else:
+        with pytest.raises(RuntimeError, match="could not be confirmed"):
+            cli._cmd_session_host_cleanup(args)
+    inspection.assert_called_once_with(selected)
+    cleanup.assert_called_once_with(selected, "runner", path)

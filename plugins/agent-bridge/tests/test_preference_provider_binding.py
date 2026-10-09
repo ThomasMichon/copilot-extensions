@@ -52,7 +52,35 @@ async def test_provider_cannot_return_a_replacement_instance(provider):
 async def test_cleanup_is_also_bound_to_prepared_instance(provider):
     assert await t.cleanup_container_session_host(
         {"name": "example", "provider_command": ["provider"]},
-        {"remote_env": "/home/your_user/.agent-containers/launch/example.env",
-         "execution_instance": "instance"},
+        {"remote_env": "/home/your_user/.agent-containers/launch/" + "0" * 32 + ".env",
+         "execution_instance": "instance", "user": "runner"},
     )
-    assert provider.call_args.args[0][-2:] == ["--expected-instance", "instance"]
+    assert provider.call_args.args[0][-4:] == [
+        "--expected-instance", "instance", "--expected-user", "runner",
+    ]
+
+
+def test_session_load_migrates_legacy_venue_id_without_changing_policy():
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command", container={"name": "example", "user": "runner"},
+        venue={"instance_id": "saved-instance"},
+        env={"AGENT_BRIDGE_PREFERENCE_SOURCE": "target-settings"},
+    )
+    session = Session("saved", "saved", target)
+    assert session.target.container["instance_id"] == "saved-instance"
+    assert session.target.env["AGENT_BRIDGE_PREFERENCE_SOURCE"] == "target-settings"
+    assert session.target.venue["instance_id"] == "saved-instance"
+
+
+def test_session_load_refuses_conflicting_selected_identity():
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    with pytest.raises(ValueError, match="selected instances disagree"):
+        Session("saved", "saved", SpawnTarget(
+            type="command", container={"instance_id": "other"},
+            venue={"instance_id": "saved"},
+        ))

@@ -285,6 +285,10 @@ async def cleanup_container_session_host(
                 ["--expected-instance", str(prepared["execution_instance"])]
                 if prepared.get("execution_instance") else []
             ),
+            *(
+                ["--expected-user", str(prepared["user"])]
+                if prepared.get("execution_instance") and prepared.get("user") else []
+            ),
         ],
         timeout=30.0,
     )

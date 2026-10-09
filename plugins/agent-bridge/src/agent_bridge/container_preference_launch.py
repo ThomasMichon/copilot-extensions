@@ -9,6 +9,19 @@ from typing import Any
 from .preference_attestation import LAUNCH_TOKEN, SHELL_MARKER, shell_request, target_digest
 
 
+def migrate_selected_instance(target: Any) -> None:
+    container, venue = getattr(target, "container", None), getattr(target, "venue", None)
+    if not isinstance(container, dict) or not isinstance(venue, dict):
+        return
+    selected = venue.get("instance_id")
+    if not isinstance(selected, str) or not selected:
+        return
+    existing = container.get("instance_id")
+    if existing and existing != selected:
+        raise ValueError("container and venue selected instances disagree")
+    container["instance_id"] = selected
+
+
 def container_child_argv(
     target: dict[str, Any], prepared: dict[str, Any], plugin_dirs: list[str],
     *, acp_command_override: str | None = None, copilot_args: list[str] | None = None,

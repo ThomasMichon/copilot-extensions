@@ -133,6 +133,10 @@ HOME, registrations, defaults or ownership merely because of a physical host.
 The launcher uses its explicitly selected container instance and target-local
 facts. It does not infer locality, allocate across registries, copy caller
 settings, or remap home-directory paths.
+Legacy persisted targets migrate their existing `venue.instance_id` into the
+container preparation metadata without changing policy or confirmed selections.
+Launch-only secret cleanup uses the prepared ID and bound user directly, even
+after name churn, and reports an unconfirmed removal rather than success.
 
 An intentionally selected provider (`COPILOT_PROVIDER_BASE_URL` or
 `COPILOT_OFFLINE`) does not inherit an unrelated settings-file model.
