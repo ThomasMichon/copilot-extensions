@@ -172,19 +172,29 @@ def _routing_lock(config_dir: str | os.PathLike[str]):
             yield
 
 
-def read_table(config_dir: str | os.PathLike[str]) -> dict | None:
-    """Read and parse the raw routing table, or ``None`` if absent/unreadable."""
+def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> dict | None:
+    """Read the table; strict ownership callers distinguish absence from damage."""
     path = routing_table_path(config_dir)
     try:
         raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
     except OSError:
+        if strict:
+            raise
         return None
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
+        if strict:
+            raise
         log.warning("Routing table at %s is corrupt -- ignoring", path)
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        if strict:
+            raise ValueError("routing table must be an object")
+        return None
+    return data
 
 
 def _pid_alive(pid: int | None) -> bool:

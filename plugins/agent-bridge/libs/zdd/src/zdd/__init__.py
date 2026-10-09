@@ -45,6 +45,8 @@ from .routing import (
     reap_stale_active,
     routing_table_path,
 )
+from .singleton_manager import ManagerResult, SingletonManager, UnmanagedDaemonError
+from .singleton_state import ManagerAlreadyRunning
 
 __all__ = [
     "Claimable",
@@ -57,6 +59,10 @@ __all__ = [
     "DaemonCandidate",
     "DiagnosticContext",
     "Endpoint",
+    "ManagerAlreadyRunning",
+    "ManagerResult",
+    "SingletonManager",
+    "UnmanagedDaemonError",
     "apply_daemon_health",
     "audit_daemon_health",
     "breadcrumb",
