@@ -1,7 +1,7 @@
 {
   "asset": "agent-bridge.json",
-  "measured_commit": "dba5c4a1d548e2b1420e4b3968854e6bcdc7538a",
+  "measured_commit": "7c74c90ab4f8b2c10cb35a5dec42a952646fd0d2",
   "plugin": "agent-bridge",
-  "release_tag": "coverage-baselines-dba5c4a1d548e2b1420e4b3968854e6bcdc7538a",
+  "release_tag": "coverage-baselines-7c74c90ab4f8b2c10cb35a5dec42a952646fd0d2",
   "schema": "copilot-extensions.coverage-baseline-pointer"
 }
