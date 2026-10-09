@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 27,
+        "current": 28,
         "minimum": 1,
-        "previous_generation": 26,
+        "previous_generation": 27,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -33,7 +33,8 @@
           24,
           25,
           26,
-          27
+          27,
+          28
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -77,13 +78,14 @@
         "caller_session_id": 24,
         "cooperative_stop": 25,
         "codespace_launch_policy": 26,
-        "target_preferences": 27
+        "target_preferences": 27,
+        "strict_resume": 28
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "5fd5d07a42f0964ca9fa2d0b7103f128f76325b89def17d1540b658ab8e95780",
+          "sha256": "edd45548bed10a639a5af0052518a57d4483e2c1bb8616eddc1f21f615295637",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -127,15 +129,15 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "5f0c9e43730692c0a7a690203ea2b859a8fa4b6a1637c7e1f59d05d140d203ad",
+          "sha256": "4b3e03acaa1cabea3ed45a1617aa0bb3adc8e864f33d2813aa34e936d4578c87",
           "role": "current health response",
-          "generation": 27
+          "generation": 28
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-response.json",
-          "sha256": "7526d87fd08c48e54fe6c351a9fd1e4f8b1a6f8b0524eb52ae819b9e22fbda3f",
+          "sha256": "204a00707c4e7c2b29c6866bd8dc18030a22a89b4917456c209eba02f23e9883",
           "role": "current agent-roster list response (force_refresh/require_complete, Phase 3b)",
-          "generation": 27
+          "generation": 28
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-21/health.json",
@@ -169,9 +171,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "736b919b87177f08965945f832ea57277417c6d5002ebcf8b6ba2618b6ebf3e8",
+          "sha256": "38fd85145cc147c2954bb910727ba265ab3d4202f11f66adbcfa03bf3faedfef",
           "role": "current session-create response",
-          "generation": 27
+          "generation": 28
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
@@ -199,9 +201,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "4ca40336700b4225e4c187b7d4709e8ae88d36edcb6e97590e364f078b786c63",
+          "sha256": "171c78ce41b2c9e5de485ddf16b4dbfe6d869863dc0bad79e7db5ae3f65af1ef",
           "role": "current HTTP range and capability constants",
-          "generation": 27
+          "generation": 28
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
@@ -274,6 +276,12 @@
           "sha256": "c57acadcc1fb593af1663c7880343c799437ce936180465dbcd342752b7fff2d",
           "role": "retained prior-runtime request evidence",
           "generation": 14
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-27/health.json",
+          "sha256": "5f0c9e43730692c0a7a690203ea2b859a8fa4b6a1637c7e1f59d05d140d203ad",
+          "role": "previous HTTP generation health evidence",
+          "generation": 27
         }
       ],
       "provenance": [
@@ -924,6 +932,38 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "0376764246259993a910c18c6fe386474ebefa45",
           "capture_method": "Re-attested for the generation-19 bump -- this file's own content is unchanged."
+        },
+        {
+          "commit": "65556708a8e5d368b56cfdb1a876bbdcd2f850eb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 28,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "691c9cf5d7f001c44e4f88efa345f0029e7834b0",
+          "capture_method": "Read production constants from the pushed head revision; HTTP_PROTOCOL_VERSION is 28 and strict_resume is introduced at generation 28 (copilot-extensions#5699, the identity-preserving no-fresh-fallback worktree-resume contract), one generation after target_preferences (27) landed independently on dev."
+        },
+        {
+          "commit": "65556708a8e5d368b56cfdb1a876bbdcd2f850eb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 28,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attested for the generation-28 bump (strict_resume) -- this file's own content is unchanged."
+        },
+        {
+          "commit": "65556708a8e5d368b56cfdb1a876bbdcd2f850eb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 28,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+          "capture_method": "Re-attested for the generation-28 bump (strict_resume) -- this file's own content is unchanged."
+        },
+        {
+          "commit": "65556708a8e5d368b56cfdb1a876bbdcd2f850eb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 28,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "1d5a042eda11f4875c080b1229cdb8f40bcedb7d",
+          "capture_method": "Re-attested for the generation-28 bump (strict_resume) -- this file's own content is unchanged."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",

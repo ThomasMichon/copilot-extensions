@@ -395,8 +395,9 @@ def diagnose(
                 return result(
                     "stale_lease",
                     f"lease expired {stale_for:.0f}s ago with no reported activity -- "
-                    "likely dead, but the worktree itself could not be confirmed gone; "
-                    "not auto-repaired (verify manually, e.g. `agent-bridge status`)",
+                    "the process may be normally parked; verify the persistent session "
+                    "and its wake path before diagnosing a failed assignment. "
+                    "The worktree was not confirmed gone; not auto-repaired.",
                 )
 
     if worktree_id is None:

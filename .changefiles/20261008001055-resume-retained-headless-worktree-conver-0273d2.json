@@ -1,0 +1,9 @@
+{
+  "comment": "Resume retained headless worktree conversations when bridge handles are missing, without taking over live holders",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

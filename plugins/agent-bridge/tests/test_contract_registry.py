@@ -115,6 +115,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         "cooperative_stop": bridge_protocol.COOPERATIVE_STOP_PROTOCOL_VERSION,
         "codespace_launch_policy": bridge_protocol.CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION,
         "target_preferences": bridge_protocol.TARGET_PREFERENCES_PROTOCOL_VERSION,
+        "strict_resume": bridge_protocol.STRICT_RESUME_PROTOCOL_VERSION,
     }
 
 
