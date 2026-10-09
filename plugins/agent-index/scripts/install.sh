@@ -427,7 +427,7 @@ if [[ "$ACTION" == "cell-provision" ||
         fi
     fi
     unset PYTHONPATH PYTHONHOME
-    cd "$PLUGIN_DIR" || exit 1
+    cd "$HOME" || exit 1
     exec "$CELL_PYTHON" -I -X utf8 "${CELL_ARGS[@]}"
 fi
 

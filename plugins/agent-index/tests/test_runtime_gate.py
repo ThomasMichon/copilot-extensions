@@ -695,9 +695,10 @@ def test_coordinator_python_invocations_force_utf8() -> None:
     assert '"-I",\n        "-X",\n        "utf8"' in coordinator
     assert 'exec "$CELL_PYTHON" -I -X utf8' in posix_installer
     assert "& $cellPython -I -X utf8 @cellArgs" in powershell_installer
-    assert 'unset PYTHONPATH PYTHONHOME\n    cd "$PLUGIN_DIR"' in posix_installer
+    assert 'unset PYTHONPATH PYTHONHOME\n    cd "$HOME"' in posix_installer
     assert "Remove-Item Env:PYTHONHOME" in powershell_installer
-    assert "Set-Location -LiteralPath $PluginDir" in powershell_installer
+    assert "Set-Location -LiteralPath $env:USERPROFILE" in powershell_installer
+    assert "[IO.Directory]::SetCurrentDirectory($PluginDir)" not in powershell_installer
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell 5 test")
