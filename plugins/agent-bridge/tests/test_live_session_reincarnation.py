@@ -74,17 +74,20 @@ def test_a_fresh_live_row_is_never_taken_over_by_another_process(tmp_db: Databas
     assert tmp_db.get_live_session("conv-3")["pid"] == 100
 
 
-def test_a_revived_row_is_the_worktrees_newest_incarnation(tmp_db: Database) -> None:
+@pytest.mark.parametrize("pid, started_offset", [(200, 0.0), (100, 30.0)], ids=["new-pid", "reused-pid"])
+def test_a_revived_row_is_the_worktrees_newest_incarnation(tmp_db: Database, pid, started_offset) -> None:
     """A resume first starts a provisional session, which the same launch
     registers in the worktree moments before the resumed conversation revives
     its own row. The revived row is the current incarnation (delivery goes to
-    the newest ``registered_at``), never superseded by that provisional one."""
+    the newest ``registered_at``), never superseded by that provisional one.
+    The new process is told apart by its pid alone, or, with a reused pid, by
+    its start time alone."""
     t0 = time.time() - 3600
     assert _register(tmp_db, "conv-7", t0, pid=100, started=t0) == "live"
     tmp_db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id=?", ("conv-7",))
     now = time.time()
     assert _register(tmp_db, "provisional", now - 3, pid=300, started=now - 3) == "live"
-    assert _register(tmp_db, "conv-7", now, pid=200, started=now) == "live"
+    assert _register(tmp_db, "conv-7", now, pid=pid, started=t0 + started_offset) == "live"
     assert tmp_db.get_live_session("conv-7")["registered_at"] == pytest.approx(now)
     assert tmp_db.current_live_session_for_worktree("wt-1", now=now) == "conv-7"
     message_id, reason = tmp_db.enqueue_live_message_if_fresh(
