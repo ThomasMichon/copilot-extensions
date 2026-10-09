@@ -106,6 +106,11 @@ def registered() -> dict[str, Any] | None:
         raise PolicyUnreadable(f"{POLICY_FILE} is a symlink")
     if not stat.S_ISREG(info.st_mode):  # a FIFO or device could block the read
         raise PolicyUnreadable(f"{POLICY_FILE} is not a regular file")
+    if os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+        # register() writes it owner-only: a file another user owns could have
+        # been planted while the directory was looser, and a group/other-readable
+        # one exposes arguments that may be secrets.
+        raise PolicyUnreadable(f"{POLICY_FILE} is not an owner-only file of this user's")
     if not _exclusive_dir(create=False):
         raise PolicyUnreadable(f"{POLICY_FILE.parent} is not a directory only this user controls")
     try:

@@ -25,9 +25,14 @@ def _core() -> Any:
 
 
 def _record_launch_refused(session: Any, exc: Any) -> None:
-    """The typed event for a host launch-policy refusal of a respawn."""
+    """The typed event for a host launch-policy refusal of a respawn, and the
+    durable stop it causes (``session_state_changed``, the authority attention
+    waits and other subscribers settle ``stopped`` on)."""
     if session.event_log:
         session.event_log.append("launch_refused", {"codespace": exc.codespace, "reason": exc.reason})
+        session.event_log.append("session_state_changed", {
+            "status": SessionStatus.STOPPED.value, "reason": "launch_refused",
+        })
 
 
 class _SessionResumeMixin:
@@ -523,6 +528,10 @@ class _SessionResumeMixin:
                 self._db.update_session_status(
                     session_id, SessionStatus.STOPPED.value, time.time()
                 )
+                from .venue_launch_policy import LaunchRefusedError
+
+                if isinstance(exc, LaunchRefusedError):  # a resync refused like a resume
+                    _record_launch_refused(session, exc)
                 log.error("Failed to resync session %s: %s", session_id, exc)
                 raise
 

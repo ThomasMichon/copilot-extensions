@@ -251,6 +251,29 @@ def test_set_and_show_never_echo_the_arguments(capsys):
     assert "s3cret" not in out and "+1 arguments" in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX owner and mode bits")
+@pytest.mark.parametrize("change", ["group-readable", "foreign-owner"])
+def test_a_registration_file_that_isnt_this_users_owner_only_file_is_refused(monkeypatch, change):
+    import os
+
+    lp.register([sys.executable])
+    if change == "group-readable":
+        os.chmod(lp.POLICY_FILE, 0o640)
+    else:
+        real_lstat = os.lstat
+
+        def foreign(path, *a, **k):
+            info = real_lstat(path, *a, **k)
+            if os.fspath(path) != os.fspath(lp.POLICY_FILE):
+                return info
+            fields = list(info)
+            fields[4] = info.st_uid + 1  # st_uid
+            return os.stat_result(fields)
+
+        monkeypatch.setattr(lp.os, "lstat", foreign)
+    assert "owner-only file" in lp.refusal("cs")
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
 def test_a_registration_in_a_directory_others_can_write_is_refused():
     import os

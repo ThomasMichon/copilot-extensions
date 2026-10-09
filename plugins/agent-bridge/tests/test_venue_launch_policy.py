@@ -179,6 +179,32 @@ async def test_a_refused_resume_is_terminal_never_retried_or_recreated(session_m
     assert session.status is SessionStatus.STOPPED
     events = [c.args[0] for c in session.event_log.append.call_args_list]
     assert "launch_refused" in events and "acp_resume_retry" not in events
+    # The durable stop that `wait --attention stopped` settles on.
+    assert ("session_state_changed", {"status": "stopped", "reason": "launch_refused"}) in [
+        c.args for c in session.event_log.append.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_resync_records_the_refusal_and_the_durable_stop(session_manager, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.session_manager import Session
+
+    target = SpawnTarget(type="command", spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
+                         codespace={"name": "cs-one", "repo": "org/repo"})
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.IDLE
+    session.event_log = MagicMock()
+    session_manager._sessions["s1"] = session
+    monkeypatch.setattr("agent_bridge.session_manager.spawn",
+                        AsyncMock(side_effect=vlp.LaunchRefusedError("cs-one", "paused")))
+    with pytest.raises(vlp.LaunchRefusedError):
+        await session_manager.resync_session("s1")
+    calls = [c.args for c in session.event_log.append.call_args_list]
+    assert ("launch_refused", {"codespace": "cs-one", "reason": "paused"}) in calls
+    assert ("session_state_changed", {"status": "stopped", "reason": "launch_refused"}) in calls
+    assert session.status is SessionStatus.STOPPED
 
 
 @pytest.mark.asyncio
