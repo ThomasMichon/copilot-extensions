@@ -17,6 +17,8 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from plugin_activation import ActivationReport, resolve_active_plugins
+
 from .recipes import EXTERNAL_AUTHOR_CLAUSE, RESOLUTION_CLAUSE, STAGNATION_CLAUSE, SUSPEND_CLAUSE
 from .registrar import RegistrarError
 
@@ -416,29 +418,52 @@ def substitute_placeholders(
     return value
 
 
-def _load_recipe_document(ref: str, *, base_dir: Path) -> Mapping[str, Any]:
-    """Read and decode a repo-local or cross-repo recipe file reference.
+def _safe_resolve_ref_path(path: Path, *, ref: str) -> Path:
+    """Canonicalize ``path`` (``Path.resolve()``), converting a resolution
+    failure into the same ``RegistrarError``/``RegistrarIndeterminateError``
+    classification every ``extends:`` ref-path resolution needs -- shared by
+    a repo-local/cross-repo file ref, a ``plugin:`` ref's named root, and
+    ``_ref_identity``'s own canonicalization of either."""
+    try:
+        return path.resolve()
+    except ValueError as exc:
+        raise RegistrarError(
+            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
+        ) from exc
+    except RuntimeError as exc:
+        # A symlink loop -- Path.resolve() raises RuntimeError for this on
+        # some Python versions (OSError on newer ones, handled below). A
+        # genuinely malformed ref, not a transient condition.
+        raise RegistrarError(
+            f"extends: recipe ref {ref!r} could not be resolved to a path "
+            f"(symlink loop?): {exc}"
+        ) from exc
+    except OSError as exc:
+        # Indeterminate, not invalid -- a transient permission/read race
+        # resolving the path must not be classified the same as a
+        # genuinely malformed ref, so a plugin declaration's last-known
+        # state is preserved rather than this one ref aborting the whole
+        # scan.
+        from .registrar_discovery import RegistrarIndeterminateError
 
-    ``ref`` is a plain filesystem path, relative (resolved against
-    ``base_dir``) or absolute -- both a repo-local ref (``./recipes/x.yaml``)
-    and a cross-repo one (``../other-repo/.../x.yaml``) are plain paths read
-    identically; the distinction is purely in what the author writes, not in
-    how this function treats it. A declaration author is already a trusted
-    party for the repo's own registrar declarations.
+        raise RegistrarIndeterminateError(
+            f"extends: could not resolve recipe ref {ref!r} to a path: {exc}"
+        ) from exc
+
+
+def _read_recipe_document(path: Path, *, ref: str) -> Mapping[str, Any]:
+    """Read and decode an already-resolved recipe file path.
+
+    Shared by every reference kind that ultimately resolves to an on-disk
+    file (a repo-local/cross-repo path, or a ``plugin:`` ref) -- the
+    suffix/encoding/read-error classification is identical regardless of
+    how ``path`` was derived.
     """
     from .registrar_discovery import (  # local import: avoid an import cycle
         RegistrarIndeterminateError,
         _decode,
     )
 
-    try:
-        path = Path(ref)
-        if not path.is_absolute():
-            path = (base_dir / path).resolve()
-    except ValueError as exc:
-        raise RegistrarError(
-            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
-        ) from exc
     if path.suffix not in _RECIPE_SUFFIXES:
         raise RegistrarError(
             f"extends: recipe file {ref!r} (resolved {path}) has unrecognized "
@@ -467,15 +492,152 @@ def _load_recipe_document(ref: str, *, base_dir: Path) -> Mapping[str, Any]:
     return _decode(text, path.suffix, where=str(path))
 
 
+def _load_recipe_document(ref: str, *, base_dir: Path) -> Mapping[str, Any]:
+    """Read and decode a repo-local or cross-repo recipe file reference.
+
+    ``ref`` is a plain filesystem path, relative (resolved against
+    ``base_dir``) or absolute -- both a repo-local ref (``./recipes/x.yaml``)
+    and a cross-repo one (``../other-repo/.../x.yaml``) are plain paths read
+    identically; the distinction is purely in what the author writes, not in
+    how this function treats it. A declaration author is already a trusted
+    party for the repo's own registrar declarations.
+    """
+    try:
+        path = Path(ref)
+        if not path.is_absolute():
+            path = (base_dir / path).resolve()
+    except ValueError as exc:
+        raise RegistrarError(
+            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
+        ) from exc
+    return _read_recipe_document(path, ref=ref)
+
+
+_PLUGIN_REF_PREFIX = "plugin:"
+
+#: Lazily computed, process-lifetime cache of the current plugin
+#: activation (populated by `_active_plugins`). `resolve_active_plugins()`
+#: walks the filesystem and probes git remotes (`registrar_registry.py`'s
+#: own `_git` helper) -- expensive enough that re-running it once per
+#: `plugin:` ref resolved during one `discover()` aggregation pass (which
+#: may process many declarations) would be wasteful, and activation does
+#: not change mid-process. `_reset_active_plugins_cache` (test-only)
+#: forces a fresh scan.
+_ACTIVE_PLUGINS_CACHE: ActivationReport | None = None
+
+
+def _reset_active_plugins_cache() -> None:
+    """Test-only: force the next `plugin:` ref resolution to re-scan."""
+    global _ACTIVE_PLUGINS_CACHE
+    _ACTIVE_PLUGINS_CACHE = None
+
+
+def _active_plugins() -> ActivationReport:
+    """Return the cached (or freshly resolved) current plugin activation."""
+    global _ACTIVE_PLUGINS_CACHE
+    if _ACTIVE_PLUGINS_CACHE is None:
+        _ACTIVE_PLUGINS_CACHE = resolve_active_plugins()
+    return _ACTIVE_PLUGINS_CACHE
+
+
+def _parse_plugin_ref(ref: str) -> tuple[str, str]:
+    """Split a ``plugin:<name>[@marketplace]:<relative-path>`` ref into its
+    (name-part, relative-path) pieces. ``name-part`` includes ``@marketplace``
+    verbatim when the author disambiguated explicitly (two active plugins
+    sharing the same bare name across different marketplaces)."""
+    rest = ref[len(_PLUGIN_REF_PREFIX):]
+    name_part, sep, relpath = rest.partition(":")
+    if not sep or not name_part or not relpath:
+        raise RegistrarError(
+            f"extends: malformed plugin: ref {ref!r}; expected "
+            "'plugin:<name>:<relative-path>' or "
+            "'plugin:<name>@<marketplace>:<relative-path>'"
+        )
+    return name_part, relpath
+
+
+def _resolve_plugin_root(name_part: str, *, ref: str) -> Path:
+    """Resolve ``name_part`` (a bare plugin name, or an explicit
+    ``name@marketplace``) to its currently active, identity-verified live
+    root -- the same resolution `registrar_registry.py` itself uses to
+    validate a `registrar.d` manifest's own `plugin_root` before trusting
+    anything it contributes."""
+    report = _active_plugins()
+    if "@" in name_part:
+        plugin = report.active.get(name_part)
+        if plugin is None:
+            raise RegistrarError(
+                f"extends: plugin: ref {ref!r} names {name_part!r}, which is "
+                "not an active plugin (check the consuming repo's/machine's "
+                "enabledPlugins)"
+            )
+        return plugin.root
+    matches = {p.root for p in report.active.values() if p.name == name_part}
+    if not matches:
+        raise RegistrarError(
+            f"extends: plugin: ref {ref!r} names {name_part!r}, which is not "
+            "an active plugin (check the consuming repo's/machine's "
+            "enabledPlugins)"
+        )
+    if len(matches) > 1:
+        sources = sorted(
+            p.source for p in report.active.values() if p.name == name_part
+        )
+        raise RegistrarError(
+            f"extends: plugin: ref {ref!r} names {name_part!r}, which is "
+            f"ambiguous across {len(matches)} active marketplaces "
+            f"({', '.join(sources)}) -- disambiguate with "
+            f"'plugin:{name_part}@<marketplace>:...'"
+        )
+    return next(iter(matches))
+
+
+def _resolve_plugin_ref_path(ref: str) -> Path:
+    """Resolve a ``plugin:<name>[@marketplace]:<relative-path>`` ref to its
+    absolute on-disk path, scoped to the named plugin's own live root.
+
+    The path must stay within that root -- a ref escaping it (via a ``..``
+    segment or an absolute path) defeats the entire point of naming a
+    specific plugin and fails loudly rather than silently reaching
+    unrelated content."""
+    name_part, relpath = _parse_plugin_ref(ref)
+    root = _safe_resolve_ref_path(_resolve_plugin_root(name_part, ref=ref), ref=ref)
+    candidate = Path(relpath)
+    if candidate.is_absolute():
+        raise RegistrarError(
+            f"extends: plugin: ref {ref!r}'s path must be relative to the "
+            "named plugin's own root, got an absolute path"
+        )
+    resolved = _safe_resolve_ref_path(root / candidate, ref=ref)
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise RegistrarError(
+            f"extends: plugin: ref {ref!r} resolves outside its named "
+            f"plugin's own root ({root}) -- a plugin: ref must stay scoped "
+            "to that plugin's own content"
+        ) from None
+    return resolved
+
+
+def _load_plugin_recipe_document(ref: str) -> Mapping[str, Any]:
+    """Read and decode a ``plugin:<name>:<relative-path>`` recipe reference."""
+    return _read_recipe_document(_resolve_plugin_ref_path(ref), ref=ref)
+
+
 def resolve_recipe_ref(ref: object, *, base_dir: Path) -> Mapping[str, Any]:
     """Resolve an ``extends:`` reference to its recipe template document.
 
-    Three reference kinds: ``global:<name>`` (plugin-shipped, looked up in
-    :data:`GLOBAL_RECIPES`), and a repo-local or cross-repo plain file path
-    (both resolved relative to ``base_dir`` when not absolute). ``ref`` is
-    typed ``object`` (not ``str``) deliberately: a malformed declaration may
-    set ``extends: null`` or some other non-string value, and that must
-    raise the same clear error here rather than crash a string-only caller.
+    Three reference kinds: ``global:<name>`` (looked up in this plugin's
+    own :data:`GLOBAL_RECIPES`), ``plugin:<name>[@marketplace]:<path>`` (a
+    file inside any other currently **active** plugin's own root, resolved
+    by name via ``plugin_activation.resolve_active_plugins`` -- the same
+    cross-plugin addressing a repo's declaration can use), and a
+    repo-local or cross-repo plain file path (resolved relative to
+    ``base_dir`` when not absolute). ``ref`` is typed ``object`` (not
+    ``str``) deliberately: a malformed declaration may set ``extends:
+    null`` or some other non-string value, and that must raise the same
+    clear error here rather than crash a string-only caller.
     """
     if not isinstance(ref, str) or not ref:
         raise RegistrarError(f"extends: expected a non-empty string ref, got {ref!r}")
@@ -488,6 +650,8 @@ def resolve_recipe_ref(ref: object, *, base_dir: Path) -> Mapping[str, Any]:
             raise RegistrarError(
                 f"extends: unknown global recipe {name!r}; known: {known}"
             ) from None
+    if ref.startswith(_PLUGIN_REF_PREFIX):
+        return _load_plugin_recipe_document(ref)
     return _load_recipe_document(ref, base_dir=base_dir)
 
 
@@ -566,34 +730,13 @@ def _ref_identity(ref: str, *, base_dir: Path) -> tuple[str, Path | None]:
     """
     if ref.startswith("global:"):
         return ref, None
+    if ref.startswith(_PLUGIN_REF_PREFIX):
+        path = _resolve_plugin_ref_path(ref)
+        return str(path), path
     path = Path(ref)
-    try:
-        if not path.is_absolute():
-            path = base_dir / path
-        path = path.resolve()
-    except ValueError as exc:
-        raise RegistrarError(
-            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
-        ) from exc
-    except RuntimeError as exc:
-        # A symlink loop -- Path.resolve() raises RuntimeError for this on
-        # some Python versions (OSError on newer ones, handled below). A
-        # genuinely malformed ref, not a transient condition.
-        raise RegistrarError(
-            f"extends: recipe ref {ref!r} could not be resolved to a path "
-            f"(symlink loop?): {exc}"
-        ) from exc
-    except OSError as exc:
-        # Indeterminate, not invalid -- mirrors _load_recipe_document's own
-        # OSError handling: a transient permission/read race resolving the
-        # path must not be classified the same as a genuinely malformed
-        # ref, so a plugin declaration's last-known state is preserved
-        # rather than this one ref aborting the whole scan.
-        from .registrar_discovery import RegistrarIndeterminateError
-
-        raise RegistrarIndeterminateError(
-            f"extends: could not resolve recipe ref {ref!r} to a path: {exc}"
-        ) from exc
+    if not path.is_absolute():
+        path = base_dir / path
+    path = _safe_resolve_ref_path(path, ref=ref)
     return str(path), path
 
 

@@ -1179,6 +1179,48 @@ at registration (a clear `RegistrarError`) rather than silently
 misresolving; declare the field directly, or with an absolute path, to
 work around it. Tracked as explicit follow-up work, not a silent gap.
 
+**Cross-origin addressing (`plugin:<name>:<path>`) -- any registrar can
+extend any other, regardless of where each lives.** A reference's *origin*
+(a repo checkout's own declarations, or a specific installed plugin's own
+bundled recipes) is independent of its *direction*: all four crossings
+work --
+
+| Extending declaration lives in... | ...extending a recipe in | Ref form |
+|---|---|---|
+| A repo | Another repo (cross-repo) | a plain path, e.g. `"../other-repo/.../recipe.yaml"` |
+| A repo | A plugin | `global:<name>` (this plugin's own built-ins) or `plugin:<name>:<path>` (**any** active plugin's own bundled recipes, addressed by name) |
+| A plugin | Another plugin | `plugin:<name>:<path>`, resolved against the named plugin's own live root |
+| A plugin | A repo | a plain path naming that specific repo's file (mechanically identical to the repo-to-repo case -- a plugin that needs to reach one known repo's file names it directly; there is no name-based "address a repo" ref, since a plugin generally should not know, or depend on, a specific consuming repo) |
+
+`plugin:<name>:<relative-path>` resolves `<name>` against every
+currently **active** plugin (`plugin_activation.resolve_active_plugins()`
+-- the same identity-verified live-root resolution a `registrar.d`
+manifest's own `plugin_root` is validated against), then reads
+`<relative-path>` relative to that plugin's root. Two active plugins
+sharing the same bare name across different marketplaces is ambiguous and
+rejected with a clear error naming every candidate source; disambiguate
+with `plugin:<name>@<marketplace>:<path>`. A `plugin:` ref's path must
+stay inside the named plugin's own root (no `..` escape, no absolute
+path) -- it exists specifically to scope a reference to *that plugin's
+own* content, and an escaping ref fails loudly rather than silently
+reaching unrelated content. A plugin-owned recipe reached this way is
+itself first-class in the chain: its own nested `extends:` ref (`global:`,
+another `plugin:`, or a plain path) resolves against *its own* root, the
+same per-hop directory-provenance guarantee repo-to-repo chaining already
+has -- a plugin-to-plugin-to-plugin chain is exactly as safe as a
+repo-to-repo-to-repo one.
+
+**Circular-dependency prevention is origin-agnostic.** The existing
+cycle/depth guard (`A -> B -> A` raises a clear `RegistrarError` naming the
+full chain; an excessively long acyclic chain raises once it exceeds a
+fixed maximum depth) tracks each ref's **resolved identity** -- a
+`global:<name>` string, or a fully-resolved absolute path -- regardless of
+whether that path was reached through a plain repo-local/cross-repo ref or
+through a `plugin:` ref's name-based lookup. A cycle that crosses between
+two plugins, between a plugin and a repo, or any mix of the four
+directions above, is caught exactly the same way a same-origin cycle is;
+there is no separate, origin-aware cycle rule to maintain.
+
 **`script` forge provider (a script-path hook inside `repository-issue-loop`'s
 own engine).** When no named recipe fits a domain's backlog source --
 nothing forge-shaped to poll -- `repository_issue_loop`'s `forge.provider`
