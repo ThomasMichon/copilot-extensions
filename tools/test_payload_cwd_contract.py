@@ -120,7 +120,7 @@ def test_inherited_stage_flag_cannot_pin_payload(
     # launchers must supply HOME up front; native POSIX exercises relocation.
     launch_cwd = home if os.name == "nt" and extension == "sh" else payload
     env = _env(home)
-    env.update({"TEMP": str(home), "TMP": str(home)})
+    env.update({"TEMP": str(home), "TMP": str(home), "TMPDIR": str(home)})
     env["COPILOT_PLUGIN_INSTALL_STAGED"] = stage_flag
     proc = subprocess.Popen(
         _command(entry, extension), cwd=launch_cwd, env=env,
