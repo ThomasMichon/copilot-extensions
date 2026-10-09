@@ -19,6 +19,11 @@ def test_pr_repo_copy_relocates_links_and_isolates_mutations(
     seed_tip = git_ops.git("rev-parse", "HEAD", cwd=seed_worktree).stdout
     seed_config = (seed_anchor / ".git" / "config").read_bytes()
     seed_link = (seed_worktree / ".git").read_bytes()
+    assert (anchor / ".git" / "hooks").is_dir()
+    assert (remote / "hooks").is_dir()
+    hook = anchor / ".git" / "hooks" / "fixture-only"
+    hook.write_text("independent hook state\n", encoding="utf-8")
+    assert not (seed_anchor / ".git" / "hooks" / hook.name).exists()
 
     listing = git_ops.git("worktree", "list", "--porcelain", cwd=anchor).stdout
     assert str(worktree).replace("\\", "/") in listing

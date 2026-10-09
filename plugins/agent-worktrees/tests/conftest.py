@@ -448,10 +448,12 @@ def _pr_repo_seed(tmp_path_factory):
     tracking_d.mkdir()
 
     git_ops.git("init", "--template=", "--bare", "-b", "master", str(remote_dir))
+    (remote_dir / "hooks").mkdir()
     _pr_git("--git-dir", str(remote_dir), "config", "maintenance.auto", "false",
             cwd=remote_dir)
 
     git_ops.git("init", "--template=", "-b", "master", str(anchor))
+    (anchor / ".git" / "hooks").mkdir()
     _pr_git("config", "maintenance.auto", "false", cwd=anchor)
     _pr_git("config", "user.email", "t@example.com", cwd=anchor)
     _pr_git("config", "user.name", "Test", cwd=anchor)

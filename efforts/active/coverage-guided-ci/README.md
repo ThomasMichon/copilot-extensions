@@ -772,6 +772,16 @@ _Pending review of this plan._
   The reconciled contract run passed 85 cases and exposed exactly these
   two seed-isolation failures; after the fixture correction all eight
   seed/real-launch/diagnostic cases pass, and touched Python lint is clean.
+- Normal current-head runs 37998223104 and 37998284414 both exposed
+  the same new incoming real pre-push rejection test: template-free seed
+  initialization had also omitted the conventional empty `hooks` directories.
+  Restored only those empty directories in the immutable seed (no sample
+  hooks or repeated Git initialization), with independent-copy hook-state
+  assertions. The real refspec pre-push rejection and all four Git-copy
+  regressions now pass. Both hosted runs remain failures, at 378.62 and
+  384.55 seconds including cleanup, until the corrected head completes
+  its full portfolio. All 139 directly affected guard/runner/rotation
+  regressions pass. No ceiling or behavioral assertion was relaxed.
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged
