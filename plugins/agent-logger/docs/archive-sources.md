@@ -9,6 +9,7 @@ under these layouts:
 <host>.containers/<container-name>/
 <short-repo>.codespaces/<codespace-name>/
 .codespaces/<legacy-codespace-name>/
+.codespaces-live/<live-mirror-codespace-name>/
 ```
 
 Each source leaf has the same optional `session-state/`, `archived/`,
@@ -102,7 +103,9 @@ slugged. Metadata reads and directory/source counts have explicit budgets.
 Permission errors propagate; unsafe evidence is not a successful empty result.
 Ordinary top-level hidden housekeeping directories are not source roots;
 declared provider groups are the exception, including legacy `.codespaces`
-and groups for dot-prefixed repositories such as `.github.codespaces`.
+and `.codespaces-live` and groups for dot-prefixed repositories such as
+`.github.codespaces`. Live mirrors remain distinct physical observations from
+close-out captures; source discovery does not silently merge them.
 
 A discovered source's directory identity and metadata file stamp are checked again before leaf reading,
 and the chronicler checks it again before retaining a scanned batch. These

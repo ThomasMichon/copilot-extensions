@@ -234,7 +234,7 @@ def test_scan_rejects_linked_session_directory(tmp_path: Path) -> None:
         settle_seconds=0,
     )
 
-    with pytest.raises(SourceLayoutError, match="unsafe archive directory"):
+    with pytest.raises(SourceLayoutError, match="linked session directory"):
         source.scan()
 
 

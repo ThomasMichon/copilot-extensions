@@ -26,6 +26,7 @@ MAX_SOURCE_ENTRIES = 10_000
 _CASE_INSENSITIVE = os.name == "nt"
 _COMPONENT = re.compile(r"[A-Za-z0-9_.-]+\Z")
 _RESERVED = re.compile(r"(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\Z", re.IGNORECASE)
+_LEGACY_CODESPACE_GROUPS = frozenset({".codespaces", ".codespaces-live"})
 VenueKind = Literal["machine", "container", "codespace"]
 LayoutKind = Literal["flat", "container", "codespace"]
 MarkerStamp = tuple[int, int, int, int]
@@ -69,7 +70,7 @@ def validate_source_key(value: str) -> str:
     elif len(parts) == 2:
         group, leaf = parts
         _component(leaf)
-        if group != ".codespaces":
+        if group not in _LEGACY_CODESPACE_GROUPS:
             _component(group)
             suffix = next(
                 (s for s in (".containers", ".codespaces") if group.endswith(s)),
@@ -179,6 +180,21 @@ def validate_session_ref(ref: sessions.SessionRef) -> None:
         _regular_member(sidecar, optional=True)
 
 
+def _validate_session_entries(path: Path, *, archived: bool) -> None:
+    """Check candidates the legacy reader's existence predicates would omit."""
+    for candidate in path.iterdir():
+        if archived:
+            if any(candidate.name.endswith(codec.suffix) for codec in sessions.CODECS.values()):
+                _regular_member(candidate)
+            continue
+        info = candidate.lstat()
+        if is_link_or_reparse(candidate, info.st_mode):
+            raise SourceLayoutError(f"linked session directory: {candidate}")
+        if stat.S_ISDIR(info.st_mode):
+            _directory(candidate)
+            _regular_member(candidate / sessions.EVENTS_MEMBER, optional=True)
+
+
 @dataclass(frozen=True)
 class ArchiveSource:
     """One physical source observation; aliases are never silently coalesced."""
@@ -208,6 +224,10 @@ class ArchiveSource:
         self.validate()
         live = _optional_directory(self.path / "session-state")
         archived = _optional_directory(self.path / "archived")
+        if live is not None:
+            _validate_session_entries(live, archived=False)
+        if archived is not None:
+            _validate_session_entries(archived, archived=True)
         for ref in sessions.iter_session_refs(
             live or self.path / ".absent-session-state",
             *((archived,) if archived is not None else ()),
@@ -315,7 +335,7 @@ def iter_archive_sources(root: Path) -> Iterator[ArchiveSource]:
     root = _directory(root)
     count = 0
     for entry in _entries(root):
-        grouped = entry.name == ".codespaces" or entry.name.endswith(
+        grouped = entry.name in _LEGACY_CODESPACE_GROUPS or entry.name.endswith(
             (".containers", ".codespaces")
         )
         if entry.name.startswith(".") and not grouped:
@@ -327,10 +347,10 @@ def iter_archive_sources(root: Path) -> Iterator[ArchiveSource]:
             "container"
             if entry.name.endswith(".containers")
             else "codespace"
-            if entry.name == ".codespaces" or entry.name.endswith(".codespaces")
+            if entry.name in _LEGACY_CODESPACE_GROUPS or entry.name.endswith(".codespaces")
             else "flat"
         )
-        if layout != "flat" and entry.name != ".codespaces":
+        if layout != "flat" and entry.name not in _LEGACY_CODESPACE_GROUPS:
             suffix = ".containers" if layout == "container" else ".codespaces"
             _component(entry.name.removesuffix(suffix))
         candidates = _entries(_directory(entry)) if layout != "flat" else [entry]

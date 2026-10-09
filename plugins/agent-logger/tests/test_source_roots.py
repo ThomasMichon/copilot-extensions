@@ -39,6 +39,7 @@ def test_flat_legacy_and_qualified_sources_share_leaf_readers(tmp_path):
         "desktop",
         "container-worker-1",
         ".codespaces/old-box",
+        ".codespaces-live/live-box",
         "host-a.containers/worker-1",
         "host-b.containers/worker-1",
         "repo.codespaces/new-box",
@@ -147,6 +148,7 @@ def test_chronicle_keeps_full_provider_source_keys(tmp_path):
         "host-a.containers/worker",
         "host-b.containers/worker",
         ".codespaces/old-box",
+        ".codespaces-live/live-box",
         "repo.codespaces/new-box",
         "desktop",
     )
@@ -196,6 +198,8 @@ def test_relative_root_does_not_follow_later_working_directory(tmp_path, monkeyp
         "host.containers/..",
         ".codespaces/.",
         ".codespaces/..",
+        ".codespaces-live/.",
+        ".codespaces-live/..",
         "repo.codespaces/.",
         "repo.codespaces/..",
         "..containers/worker",
@@ -344,6 +348,32 @@ def test_leaf_reader_rejects_linked_session_observations(tmp_path, representatio
     except OSError as exc:
         pytest.skip(f"native symlink creation unavailable: {exc}")
     source = next(iter_archive_sources(corpus))
+    with pytest.raises(SourceLayoutError):
+        list(source.iter_sessions())
+
+
+@pytest.mark.parametrize("representation", ["session", "events", "archive"])
+def test_leaf_reader_rejects_dangling_session_observations(
+    tmp_path: Path, representation: str
+) -> None:
+    root = tmp_path / "host"
+    state = root / "session-state"
+    state.mkdir(parents=True)
+    absent = tmp_path / "absent"
+    try:
+        if representation == "session":
+            (state / "session-1").symlink_to(absent, target_is_directory=True)
+        elif representation == "events":
+            directory = state / "session-1"
+            directory.mkdir()
+            (directory / "events.jsonl").symlink_to(absent)
+        else:
+            archived = root / "archived"
+            archived.mkdir()
+            (archived / "session-1.tar.gz").symlink_to(absent)
+    except OSError as exc:
+        pytest.skip(f"native symlink creation unavailable: {exc}")
+    source = next(iter_archive_sources(tmp_path))
     with pytest.raises(SourceLayoutError):
         list(source.iter_sessions())
 
