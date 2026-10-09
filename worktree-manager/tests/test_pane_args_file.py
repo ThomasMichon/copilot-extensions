@@ -95,11 +95,14 @@ def test_manifest_round_trip_and_fresh_retry(tmp_path):
 
 
 @pytest.mark.parametrize("nested", [False, True])
-def test_launch_plan_preserves_string_argv_before_manifest_creation(tmp_path, nested):
+@pytest.mark.parametrize("shell", [PWSH, shutil.which("powershell")])
+def test_launch_plan_preserves_string_argv_before_manifest_creation(tmp_path, nested, shell):
+    if not shell:
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
     start = source.index('$plan = ($jsonOutput -join "`n")')
     end = source.index("# Feed the crash-detector trap", start)
-    expected = ["program", "", "2026-10-08T12:00:00+05:30", "--allow-all"]
+    expected = ["program", "", "2026-10-08T12:00:00+05:30", "/Date(0)/", "--allow-all"]
     plan = {"action": "exec", "cmd": expected}
     payload = tmp_path / "plan.json"
     payload.write_text(json.dumps({"launch": plan} if nested else plan), encoding="utf-8")
@@ -111,7 +114,7 @@ def test_launch_plan_preserves_string_argv_before_manifest_creation(tmp_path, ne
         encoding="utf-8",
     )
     result = subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(script), str(payload)],
+        [shell, "-NoProfile", "-File", str(script), str(payload)],
         capture_output=True, text=True, timeout=15, env=_test_env(tmp_path),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )

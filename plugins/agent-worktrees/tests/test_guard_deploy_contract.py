@@ -18,6 +18,10 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.guard
+
 _PLUGIN = Path(__file__).resolve().parents[1]
 _HOOKS = _PLUGIN / "hooks.json"
 _SCRIPTS = _PLUGIN / "scripts"

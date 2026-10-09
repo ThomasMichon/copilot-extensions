@@ -68,3 +68,6 @@ files in `plugins/agent-worktrees/launch-wrapper-assets.json`, including
 `pane-launch.ps1`, into that plugin's packaged `bin/` directory.
 Python pane generation uses that fallback when an otherwise-usable older
 Worktree Manager bundle does not yet contain the dispatcher and wrapper pair.
+The outer launcher retains the cmd shim's Windows PowerShell 5.1 fallback:
+plan argv uses PowerShell's bundled Newtonsoft reader with date parsing
+disabled. The native pane dispatcher still runs through PowerShell 7.

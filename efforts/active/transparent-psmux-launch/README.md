@@ -163,3 +163,7 @@ encoded commands or initial-prompt transports.
   warning and retention for expiry. Python preserves its original structured
   failure; PowerShell continues its retry/failure path. Handoff/lifecycle tests:
   149 passed; real file-lock, retry and concurrent-consumer checks: three passed.
+- Marked the manifest/deployment structural contracts for the required guard
+  lane (five passed). Preserved the cmd shim's Windows PowerShell 5.1 fallback
+  using its bundled date-disabled Newtonsoft reader for raw plan argv.
+  Flat/nested date-shaped argv passed on actual PowerShell 5.1 and 7 (four checks).

@@ -835,17 +835,27 @@ if ($plan.PSObject.Properties.Name -contains 'launch') {
 }
 
 # Date-shaped argv values must stay strings on older PowerShell versions too.
-$argvDocument = [System.Text.Json.JsonDocument]::Parse(($jsonOutput -join "`n"))
+$argvText = [IO.StringReader]::new(($jsonOutput -join "`n"))
+$argvReader = [Newtonsoft.Json.JsonTextReader]::new($argvText)
+$argvReader.DateParseHandling = [Newtonsoft.Json.DateParseHandling]::None
 try {
-    $rawPlan = $argvDocument.RootElement
-    $rawLaunch = [System.Text.Json.JsonElement]::new()
-    if ($rawPlan.TryGetProperty('launch', [ref]$rawLaunch)) { $rawPlan = $rawLaunch }
-    $rawCommand = [System.Text.Json.JsonElement]::new()
-    if ($rawPlan.TryGetProperty('cmd', [ref]$rawCommand)) {
-        $plan.cmd = @($rawCommand.EnumerateArray() | ForEach-Object { $_.GetString() })
+    $rawPlan = [Newtonsoft.Json.Linq.JObject]::Load($argvReader)
+    if ($rawPlan.Property('launch')) { $rawPlan = $rawPlan.GetValue('launch') }
+    $rawCommand = $rawPlan.GetValue('cmd')
+    if ($null -ne $rawCommand) {
+        if ($rawCommand.Type -ne [Newtonsoft.Json.Linq.JTokenType]::Array) {
+            throw 'Launch command must be a string argv array.'
+        }
+        $plan.cmd = @($rawCommand.Children() | ForEach-Object {
+            if ($_.Type -ne [Newtonsoft.Json.Linq.JTokenType]::String) {
+                throw 'Launch command contains a non-string argument.'
+            }
+            [string]$_.Value
+        })
     }
 } finally {
-    $argvDocument.Dispose()
+    $argvReader.Close()
+    $argvText.Dispose()
 }
 
 # Feed the crash-detector trap a stable, cheap worktree-id reference so it
