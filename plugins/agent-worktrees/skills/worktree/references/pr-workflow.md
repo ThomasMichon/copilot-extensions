@@ -459,6 +459,9 @@ signed 32-bit millisecond wait limits are accepted—there is no unbounded
 setting. A timeout still kills the entire push/hook process tree. See the
 [configuration reference](../../../docs/config-reference.md#pr-workflow--reposnamepr-machine-local-or-in-repo).
 
+Config drop-ins validate the same deadline before activation; an invalid
+fragment is withdrawn independently without blocking valid peers.
+
 ```
 <agent-worktrees catalog argv[0]> create-pr --title "Concise PR title"
 ```

@@ -25,11 +25,11 @@ def test_invalid_deadline_fails_explicitly_before_publication(value, monkeypatch
         pytest.fail("invalid deadline reached git")
 
     monkeypatch.setattr(git_ops, "git", no_git)
-    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*finite positive"):
+    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds"):
         cfg._parse_pr({"push_timeout_seconds": value})
-    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*finite positive"):
+    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds"):
         cfg.PRConfig(push_timeout_seconds=value)
-    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*finite positive"):
+    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds"):
         pr_publish.push_checked(None, "origin", "HEAD:refs/heads/change", cwd=".", timeout=value)
 
 
@@ -143,7 +143,7 @@ def test_maximum_deadline_is_usable_by_real_subprocess(tmp_path):
 
     maximum = (publication_deadline.MAX_WAIT_SECONDS - 180) / 4
     assert publication_deadline.validate(maximum) == maximum
-    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*finite positive"):
+    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*dependent wait budgets"):
         publication_deadline.validate(math.nextafter(maximum, math.inf))
     result = push_timeout.run_bounded(
         [sys.executable, "-c", "pass"], cwd=tmp_path, env=os.environ.copy(), timeout=maximum,

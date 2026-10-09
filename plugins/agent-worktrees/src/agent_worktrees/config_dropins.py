@@ -29,6 +29,8 @@ from dropin_registry import (
 )
 from plugin_activation import ActivationReport, ActivePlugin, resolve_active_plugins
 
+from . import publication_deadline
+
 REGISTRY_NAME = "config.d"
 POINTER_SCHEMA_VERSION = 1
 _POINTER_KEYS = frozenset({"schema_version", "plugin", "plugin_root", "target"})
@@ -327,6 +329,13 @@ def _validate_codename(raw: object, *, location: str) -> str | None:
 def _validate_pr(raw: object, *, location: str) -> str | None:
     if not isinstance(raw, dict):
         return f"{location} must be a mapping"
+    if "push_timeout_seconds" in raw:
+        try:
+            publication_deadline.validate(
+                raw["push_timeout_seconds"], location=f"{location}.push_timeout_seconds",
+            )
+        except ValueError as exc:
+            return str(exc)
     boolean_fields = {
         "enabled",
         "required",
