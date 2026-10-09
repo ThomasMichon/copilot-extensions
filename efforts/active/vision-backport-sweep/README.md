@@ -125,7 +125,9 @@
   `ThomasMichon/copilot-extensions#5941` (Logger named configuration lookup
   at scheduled execution) ·
   `ThomasMichon/copilot-extensions#5942` (default archive exclusion with a
-  retained checkout)
+  retained checkout) ·
+  `ThomasMichon/copilot-extensions#5946` (PR-watch non-firing baseline
+  persistence and restart transition continuity)
 
 ## Guiding Intent
 
@@ -329,7 +331,10 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             itself needed no correction.
       - [x] PR capability current-stage watch-runtime comparison: folded back
             durable shared target observation, independent subscription
-            criteria/lifetimes and recovery after owner restart. Narrowed the
+            criteria/lifetimes and intended restart continuity. Pending
+            subscriber identity/filter/config restoration is implemented;
+            observed-baseline continuity remains partial under `#5946`.
+            Narrowed the
             notification-platform boundary rather than accidentally forbidding
             the real scoped watch capability. Durable subscription ownership
             is not merely an optional warm-cache process; no idle-exit or
@@ -704,7 +709,7 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       | agent-logger | C | V | N | P | V | P | C | P | V | `install.ps1:835-1017,1161-1300`; `install.sh:233,919-1152`; `chronicle/orchestrator.py:60-80,150-196`. POSIX stable supervision `#5938`, named scheduled config `#5941`, cell invocation `#2701`; manifest preparation is not log rendering. |
       | agent-index | P | V | V | P | V | P | V | V | P | `hooks.json:13-15`; admitted native installer `ensure`/`Ensure-Running`; `server.py:245-250,748-789`; `sources/providers.py:495-558`. Mode-qualified hook/authority reconciliation `#5768`, native tracking `#5938`, registry hygiene `#1043`, exposure `#54`. No Dispatch-companion violation inferred. |
       | agent-vault | C | V | V | P | V | V | C | N | N | `cli.py:328-415`; `service.py:968-1089,1327-1388`; `install.ps1:875-965`; `install.sh:615-703`. Admission `#5940`, POSIX update `#5938`, explicit-cell fallback `#5918`; warm-secret transfer is not complete ZDD. |
-      | agent-pull-requests | C | V | V | P | P | P | C | N | C | `install.ps1:525-540` preserves immutable-slot refusal; `__main__.py:54-85,446-588`; `watch_daemon.py:204-240,270-371`. Durable leased subscriptions require an owner after the submitting CLI exits; idle-exit/no-inline alone is not a violation. |
+      | agent-pull-requests | C | V | V | P | P | P | C | N | C | `install.ps1:525-540` preserves immutable-slot refusal; `__main__.py:54-85,446-588`; `watch_daemon.py:204-240,270-371`. Pending subscriber identity restores, but non-firing baseline persistence is partial (`#5946`). Durable ownership is not an idle-exit/no-inline violation. |
       | budget-guidance | C | P | N | N | P | N | C | N | N | Owning binstub `155-292`; `cli.py:55-93`; `resolve.py:35-107`; `posture.py:25-118`. Strict offline failure/freshness is real; later routing/adapters remain `#2137/#2014`, not a hidden network service. |
 
       All entries retain release-materialization, platform/cell and configured
@@ -884,8 +889,16 @@ sibling plan proves that the sibling's materials have been refreshed.
   PR-watch is a durable subscription service, not merely optional identical-work
   warmth: `on_idle=None` or absent inline subscription alone establishes no
   violation. Folded back its shared target observation, independent criteria/
-  lifetimes and restart restoration, narrowing only the unintended generic
+  lifetimes and intended restart continuity, narrowing only the unintended generic
   notification prohibition.
+- Review found a real limit to that foundation: registry polling advances
+  non-firing baselines in memory, while daemon polling persists only a fired
+  result and shutdown performs no final persistence. A restored review/check/
+  mergeability subscription can therefore silently seed a newer value after
+  downtime. Symbolic tracing confirmed this without executing a watch.
+  Classified pending identity/filter/config restoration separately from
+  transition continuity and carved `#5946`; closed `#5681` fixed a different
+  temp-file/predecessor test race. The desired vision remains intact.
 - Remaining UI/policy comparisons found existing vision intent sufficient:
   hosting title `#3588`, represented-human answerability `#2971`, generalized
   providers `#2062`; Manager readiness/adoption/presets and dependent restart
