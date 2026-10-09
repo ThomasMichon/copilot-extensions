@@ -31,6 +31,7 @@ def bridge(monkeypatch):
     b = types.SimpleNamespace(
         row={"reservation_id": "r1", "claimed_by_session_id": "placeholder"},
         live={}, released=[], reserved=[], reserve_error=False, renewal_claimant="sid-9", fail_reads=0,
+        fail_lookups=False, fail_lookup_for=set(),
     )
 
     def _reserve(scope, ttl_seconds, venue):
@@ -49,7 +50,14 @@ def bridge(monkeypatch):
         return dict(b.row)
 
     monkeypatch.setattr(venue_copilot, "get_cli_mode_reservation", _get)
-    monkeypatch.setattr(venue_copilot, "live_session_for", lambda h: b.live.get(h, {}))
+    def _lookup(h, strict=False):
+        if b.fail_lookups or h in b.fail_lookup_for:
+            if strict:
+                raise venue_copilot.VenueCopilotError("bridge timed out")
+            return {}
+        return b.live.get(h, {})
+
+    monkeypatch.setattr(venue_copilot, "live_session_for", _lookup)
     monkeypatch.setattr(venue_copilot, "reserve_cli_mode", _reserve)
     monkeypatch.setattr(venue_copilot, "release_cli_mode",
                         lambda scope, reservation_id=None: b.released.append(reservation_id) or 1)
@@ -138,8 +146,39 @@ def test_a_dead_placeholder_row_counts_as_gone(bridge):
 
 
 def test_an_expired_resumed_row_is_not_live(bridge):
-    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "expired"}}
+    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "expired"},
+                   "placeholder": {"session_id": "placeholder"}}
     assert _settle(timeout=5.0) == ("placeholder", {"reservation_id": "r1"})
+    assert bridge.reserved == []
+
+
+def test_neither_live_is_no_session_never_the_dead_placeholder(bridge):
+    """The placeholder exited and the resumed id never registered: the launch
+    has no session, and must not report the gone placeholder as one."""
+    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "expired"},
+                   "placeholder": {"session_id": "placeholder", "status": "expired"}}
+    assert _settle(timeout=5.0) == (None, {"reservation_id": "r1"})
+    bridge.live = {}
+    assert _settle(timeout=5.0) == (None, {"reservation_id": "r1"})
+
+
+def test_an_unanswered_lookup_is_never_proof_the_placeholder_is_gone(bridge):
+    """A bridge that can't answer at the deadline keeps the placeholder as the
+    session: a transient outage must not fail (and kill) a healthy launch."""
+    bridge.fail_lookups = True
+    assert _settle(timeout=5.0) == ("placeholder", {"reservation_id": "r1"})
+    assert bridge.reserved == []
+    # Only the resumed lookup unanswered, the placeholder confirmed gone: still not a failure.
+    bridge.fail_lookups, bridge.fail_lookup_for, bridge.live = False, {"sid-9"}, {}
+    assert _settle(timeout=5.0) == ("placeholder", {"reservation_id": "r1"})
+
+
+def test_a_live_resumed_session_is_the_session_even_when_its_claim_cant_be_renewed(bridge):
+    """Every reservation read fails (no renewal possible), but the resumed id is
+    confirmed live and the placeholder gone: that is the session, not a failure."""
+    bridge.live = {"sid-9": {"session_id": "sid-9", "status": "live"}}
+    bridge.fail_reads = 10**6
+    assert _settle(timeout=5.0) == ("sid-9", {})
     assert bridge.reserved == []
 
 

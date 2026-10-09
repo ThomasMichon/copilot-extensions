@@ -525,13 +525,19 @@ def live_session_for(
     *,
     bridge_bin: str = "agent-bridge",
     run: Callable[..., Any] = subprocess.run,
+    strict: bool = False,
 ) -> dict[str, Any]:
-    """The live session a session id or worktree handle resolves to (``{}`` when none). Never raises."""
+    """The live session a session id or worktree handle resolves to (``{}`` when none).
+
+    Never raises unless ``strict``: then a failed bridge read raises, so a
+    caller can tell "unavailable" from "confirmed absent"."""
     try:
         return _run_bridge(
             [bridge_bin, "--json", "live-sessions", "resolve", "--handle", handle], run=run,
         )
     except (VenueCopilotError, OSError):
+        if strict:
+            raise
         return {}
 
 

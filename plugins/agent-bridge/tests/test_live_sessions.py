@@ -435,15 +435,19 @@ def test_route_driven_by_surfaces(client: TestClient) -> None:
     assert client.get("/api/v1/live-sessions/cli-o").json()["driven_by"] is None
 
 
-def test_another_process_on_an_expired_row_gets_the_refusal_the_extension_reads(
+def test_a_resumed_process_revives_an_expired_row_but_never_a_live_one(
     client: TestClient, tmp_db: Database,
 ) -> None:
-    """A crashed process's expired row: a resumed process (other pid) is
-    refused with ``detail.reason == "incarnation_mismatch"``, which the
-    extension reads to keep serving under the id it already registered."""
+    """A crashed (or stopped) process's expired row belongs to no running
+    process: a resumed process (other pid) revives it, since a conversation
+    resumed in a new process keeps its id and has no other id to serve under.
+    A live row is still refused to another process with ``detail.reason ==
+    "incarnation_mismatch"``, which the extension reads to keep the id it has."""
     assert client.post("/api/v1/live-sessions", json={"session_id": "resumed", "pid": 11}).status_code == 200
     tmp_db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id='resumed'")
     r = client.post("/api/v1/live-sessions", json={"session_id": "resumed", "pid": 22})
+    assert r.status_code == 200 and r.json()["pid"] == 22
+    r = client.post("/api/v1/live-sessions", json={"session_id": "resumed", "pid": 33})
     assert r.status_code == 409
     assert r.json()["detail"]["reason"] == "incarnation_mismatch"
 
