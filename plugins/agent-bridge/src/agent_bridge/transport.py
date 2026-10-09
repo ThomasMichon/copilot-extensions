@@ -460,6 +460,7 @@ async def _resolve_worktree(
     if returncode != 0:
         detail = resolver_failure_detail(
             stdout.decode(errors="replace"), stderr.decode(errors="replace"),
+            environment=env,
         )
         raise RuntimeError(
             f"Worktree resolve failed (exit {returncode}): {detail}"
@@ -625,7 +626,7 @@ async def _resolve_worktree_remote(
             )
         raise RuntimeError(
             f"remote worktree resolve failed (exit {result.exit_code}): "
-            f"{resolver_failure_detail(stdout, stderr)}"
+            f"{resolver_failure_detail(stdout, stderr, environment=target.env)}"
         )
 
     plan = _extract_json_object(result.stdout)

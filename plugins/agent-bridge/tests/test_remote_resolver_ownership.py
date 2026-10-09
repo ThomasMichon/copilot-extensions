@@ -205,6 +205,43 @@ def test_known_value_replacement_cannot_destroy_credential_detection(known_value
 
 
 @pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
+def test_overlapping_credentials_are_replaced_longest_first_without_reprocessing_markers():
+    environment = {"SHORT_TOKEN": "abc", "LONG_TOKEN": "abcdef", "MARKER_TOKEN": "REDACTED"}
+    assert resolver_failure_detail(
+        json.dumps({"error": "abcdef abc"}), "", environment=environment,
+    ) == "[REDACTED] [REDACTED]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
+async def test_actual_resolver_environment_credentials_are_redacted_locally_and_remotely():
+    environment = {"EXAMPLE_API_TOKEN": "target-specific-credential"}
+    stdout = json.dumps({"error": "failure with bare target-specific-credential"})
+    stderr = "bare target-specific-credential from child"
+    process = SimpleNamespace(
+        returncode=7,
+        communicate=AsyncMock(return_value=(stdout.encode(), stderr.encode())),
+    )
+    with patch("agent_bridge.transport._agent_worktrees_python", return_value="python"), \
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        with pytest.raises(RuntimeError, match="exit 7") as local:
+            await _resolve_worktree(
+                SpawnTarget(type="local", project="project", env=environment), environment,
+            )
+    manager = SimpleNamespace(exec_command=AsyncMock(return_value=_result(
+        exit_code=7, stdout=stdout, stderr=stderr,
+    )))
+    with pytest.raises(RuntimeError, match="exit 7") as remote:
+        await _resolve_worktree_remote(
+            manager,
+            SpawnTarget(type="ssh", host="workstation", project="project", env=environment),
+        )
+    for caught in (local, remote):
+        assert "target-specific-credential" not in str(caught.value)
+        assert "[REDACTED]" in str(caught.value)
+
+
+@pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
 def test_cookie_and_multiword_assignment_values_are_fully_redacted():
     text = "Cookie: first=example-cookie-one; second=example-cookie-two"
     detail = resolver_failure_detail(json.dumps({"error": text}), text)

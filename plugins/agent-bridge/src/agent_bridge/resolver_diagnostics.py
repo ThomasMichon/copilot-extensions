@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 
 _INPUT_LIMIT = 65536
 _SECRET_KEY = r"[\w-]*(?:token|secret|password|passwd|api[_-]?key|authorization|cookie|credential)[\w-]*"
@@ -33,7 +34,9 @@ def _normalized_text(text: str) -> str:
     )
 
 
-def _safe_text(text: str, limit: int) -> str:
+def _safe_text(
+    text: str, limit: int, environment: Mapping[str, str] | None = None,
+) -> str:
     # Cleanup must precede matching: otherwise it can reconstruct a sensitive
     # key or value only after the redactors have already inspected the text.
     text = _normalized_text(text)
@@ -47,15 +50,21 @@ def _safe_text(text: str, limit: int) -> str:
     text = _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", text)
     # Literal values can overlap labels or schemes, so replace them only after
     # the structural redactors have inspected the complete diagnostic.
-    for name, value in os.environ.items():
-        if value and _SECRET_ENV.fullmatch(name):
-            normalized_value = _normalized_text(value)
-            if normalized_value:
-                text = text.replace(normalized_value, "[REDACTED]")
+    values = {
+        _normalized_text(value)
+        for source in (os.environ, environment or {})
+        for name, value in source.items()
+        if value and _SECRET_ENV.fullmatch(name)
+    } - {""}
+    if values:
+        pattern = "|".join(re.escape(value) for value in sorted(values, key=len, reverse=True))
+        text = re.sub(pattern, "[REDACTED]", text)
     return text[:limit] + ("..." if len(text) > limit else "")
 
 
-def structured_resolver_error(stdout: str) -> str | None:
+def structured_resolver_error(
+    stdout: str, *, environment: Mapping[str, str] | None = None,
+) -> str | None:
     """Read only error fields, never launch plans or environment dictionaries."""
     if len(stdout) > _INPUT_LIMIT:
         return None
@@ -87,9 +96,9 @@ def structured_resolver_error(stdout: str) -> str | None:
             error = error.get("message")
         if not isinstance(error, str) or not error.strip():
             continue
-        message = _safe_text(error, 800)
+        message = _safe_text(error, 800, environment)
         labels = [
-            f"{key}={_safe_text(fields[key], 80)}"
+            f"{key}={_safe_text(fields[key], 80, environment)}"
             for key in ("stage", "code")
             if isinstance(fields.get(key), str) and fields[key].strip()
         ]
@@ -97,10 +106,12 @@ def structured_resolver_error(stdout: str) -> str | None:
     return None
 
 
-def resolver_failure_detail(stdout: str, stderr: str) -> str:
+def resolver_failure_detail(
+    stdout: str, stderr: str, *, environment: Mapping[str, str] | None = None,
+) -> str:
     """Prefer a structured error and append a separately bounded stderr hint."""
-    error = structured_resolver_error(stdout)
-    diagnostics = _safe_text(stderr, 400)
+    error = structured_resolver_error(stdout, environment=environment)
+    diagnostics = _safe_text(stderr, 400, environment)
     if error:
         return error + (f"; stderr: {diagnostics}" if diagnostics else "")
     if diagnostics:

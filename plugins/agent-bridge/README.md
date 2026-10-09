@@ -319,6 +319,9 @@ stderr diagnostic.
 ANSI/control normalization precedes credential redaction. Launch-plan
 environment dictionaries, nested fields from malformed JSON, and opaque stdout
 are never echoed as failure diagnostics.
+Known-value filtering also uses the supplied local resolver environment or
+configured SSH target environment. Overlapping values are replaced longest-first
+in one pass; this does not fetch the target's full remote environment.
 
 Version-skew fallback never drops a supplied `--owner-ref` or
 `--caller-worktree`. Such requests fail closed when the resolver rejects their
