@@ -12,7 +12,14 @@ _SECRET_ASSIGNMENT = re.compile(
     rf"""(?i)(\b{_SECRET_KEY}["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)"""
 )
 _SECRET_ENV = re.compile(_SECRET_KEY, re.IGNORECASE)
-_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_ANSI = re.compile(
+    r"(?:\x1b\]|\x9d).*?(?:\x07|\x1b\\|\x9c|$)"
+    r"|(?:\x1b[PX^_]|[\x90\x98\x9e\x9f]).*?(?:\x1b\\|\x9c|$)"
+    r"|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]"
+    r"|\x1b[ -/]*[0-~]",
+    re.DOTALL,
+)
+_JSON_FRAME = re.compile(r'(?m)^[ \t]*(?=[{\["])')
 _UNKNOWN_OPTION = re.compile(
     r"(?:unrecognized arguments|no such option):[^\r\n]*--bridge\b",
     re.IGNORECASE,
@@ -48,18 +55,26 @@ def _safe_text(text: str, limit: int) -> str:
 
 def structured_resolver_error(stdout: str) -> str | None:
     """Read only error fields, never launch plans or environment dictionaries."""
-    text = stdout[-_INPUT_LIMIT:]
+    if len(stdout) > _INPUT_LIMIT:
+        return None
+    text = stdout
     decoder = json.JSONDecoder()
     cursor = 0
     for _ in range(32):
-        start = text.find("{", cursor)
-        if start < 0:
+        frame = _JSON_FRAME.search(text, cursor)
+        if frame is None:
             return None
+        start = frame.end()
         try:
             envelope, end = decoder.raw_decode(text, start)
         except (ValueError, RecursionError):
-            cursor = start + 1
-            continue
+            # A failed outer decode cannot authorize searching inside its
+            # nested objects, strings, or environment fields.
+            return None
+        line_end = text.find("\n", end)
+        suffix = text[end:line_end] if line_end >= 0 else text[end:]
+        if suffix.strip():
+            return None
         cursor = end
         if not isinstance(envelope, dict):
             continue

@@ -313,10 +313,12 @@ message}`. A host agent can surface the connection checkpoints with
 `agent-bridge read <session> --expand all`.
 
 Worktree resolver failures retain their nonzero exit code and connection stage.
-The bridge prefers a bounded `error` message from JSON stdout, including a
-string `stage` or `code` when supplied, and appends a short stderr diagnostic.
-Credential-shaped values are redacted; launch-plan environment dictionaries
-and opaque stdout are never echoed as failure diagnostics.
+The bridge prefers a bounded `error` message from independently framed JSON
+stdout, including a string `stage` or `code` when supplied, and appends a short
+stderr diagnostic.
+ANSI/control normalization precedes credential redaction. Launch-plan
+environment dictionaries, nested fields from malformed JSON, and opaque stdout
+are never echoed as failure diagnostics.
 
 Version-skew fallback never drops a supplied `--owner-ref` or
 `--caller-worktree`. Such requests fail closed when the resolver rejects their

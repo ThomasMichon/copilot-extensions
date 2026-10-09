@@ -104,6 +104,10 @@ async def test_skew_cannot_drop_either_caller_metadata(metadata, unknown_flag):
     ('{"error":null}', None),
     ('{"error":{"env":{"PASSWORD":"should-not-print"}}}', None),
     ('{"launch":{"env":{"PASSWORD":"should-not-print"}}}', None),
+    ('{"launch":{"env":{"error":"plain-launch-secret"}', None),
+    ('{"launch":\n{"env":\n{"error":"plain-launch-secret"}', None),
+    ('[\n{"error":"plain-array-secret"}', None),
+    ('"launch":\n{"error":"plain-field-secret"}', None),
     ('{malformed', None),
     ('', None),
 ])
@@ -154,6 +158,18 @@ def test_diagnostics_are_bounded_sanitized_and_do_not_echo_environments(monkeypa
 @pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
 @pytest.mark.parametrize(("text", "secret"), [
     ("TO\x1b[31mKEN=pattern-secret", "pattern-secret"),
+    ("TO\x1b7KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1b]0;title\x07KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1b]8;;https://example.com\x1b\\KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1bPstring\x1b\\KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1b^string\x1b\\KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1b_string\x1b\\KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1bXstring\x1b\\KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1b(0KEN=pattern-secret", "pattern-secret"),
+    ("TO\x1b#8KEN=pattern-secret", "pattern-secret"),
+    ("TO\x9b31mKEN=pattern-secret", "pattern-secret"),
+    ("TO\x9dtitle\x07KEN=pattern-secret", "pattern-secret"),
+    ("TO\x98string\x9cKEN=pattern-secret", "pattern-secret"),
     ("PASS\x00WORD=pattern-secret", "pattern-secret"),
     ("Bearer pat\x1b[31mtern-secret", "pattern-secret"),
     ("https://user:pat\x1b[31mtern-secret@host/repo", "pattern-secret"),
@@ -191,6 +207,7 @@ async def test_successful_exit_without_json_never_echoes_stdout(stdout):
 def test_oversized_or_deeply_nested_stdout_is_not_echoed():
     for stdout in (
         json.dumps({"error": "x" * 100000}),
+        "x" * 100000 + '\n{"error":"tail-must-not-be-reframed"}',
         '{"error":' + "[" * 2000 + '"secret"' + "]" * 2000 + "}",
     ):
         assert structured_resolver_error(stdout) is None
