@@ -102,7 +102,7 @@ def test_server_venv_provisioning_is_called_after_the_main_package_install():
     after_ps = ps_runtime.split("Write-Ok 'Package installed: agent-index'", 1)[1]
     after_sh = sh_runtime.split("_ok 'Package installed: agent-index'", 1)[1]
     assert "Install-ServerVenv -InstallRole $installRole" in after_ps
-    assert "Deploy-SetupGatedBinstub" in after_ps.split(
+    assert "Publish-IndexRuntime" in after_ps.split(
         "Install-ServerVenv -InstallRole $installRole", 1
     )[1]
     assert '_install_server_venv "$install_role"' in after_sh

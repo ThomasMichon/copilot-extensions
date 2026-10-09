@@ -2017,6 +2017,14 @@ every activation/service lifecycle remain local. Signed results are accepted
 only after checking the interpreter's venv prefix and `pyvenv.cfg`; an
 unusable result is removed before fallback, even when creation returned zero.
 An existing interpreter alone never proves the engine venv reusable.
+POSIX likewise executes an isolated interpreter probe and requires a distinct
+venv prefix matching the physical venv root before CLI, server or engine reuse
+and after creation. A corrupt, base-interpreter, wrong-prefix or failed-probe
+runtime is repaired or explicitly rejected. uv interpreter selection remains
+unpinned; Windows CLI/server retain signed-first and Python/pip fallback policy,
+while the independent embedding engine keeps its uv-first policy.
+An exception at the optional server repair boundary warns and retains the
+primary runtime's fallback, restoring the caller's error preference in `finally`.
 
 PowerShell Index stamps materialize both engine files and every declared local
 library (`zdd`, `agent-procutil`, `dropin-registry`), with snapshot-local
@@ -2026,7 +2034,16 @@ library bytes and case-distinct paths. Unchanged stamps reuse identical
 snapshots; existing corrupt snapshots fail without replacement. Snapshot
 production and marker/launcher publication use sequential locks, with a
 same-version candidate recheck before atomic marker publication. A delayed
-stamp cannot overwrite a newer candidate's markers or launchers. The POSIX
+stamp cannot overwrite a newer candidate's markers or launchers. The same
+installation-keyed publication mutex covers runtime preparation's marker
+removals, activation, payload/launcher publication, manifests and direct
+launcher repair. Runtime freshness is rechecked under that mutex, and activation
+plus related payload/launcher writes remain one publication transaction.
+Windows uses a global named mutex so separate logon sessions share the guard;
+equivalent trailing-separator paths resolve to one lock identity.
+Snapshot production releases its separate lock before publication; no
+publication holder acquires the snapshot lock. Namespaced cell adapters retain
+their independent receipt-lock contract. The POSIX
 stamp retains its owning-payload pointer, whose released payload is already
 self-contained. Neither stamp provisions the embedding stack.
 

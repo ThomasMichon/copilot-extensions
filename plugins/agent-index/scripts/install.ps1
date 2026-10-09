@@ -557,22 +557,11 @@ function Test-RuntimeOrigin {
 
 function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
-    # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
-    # An install/ensure run from a STALE payload (older than the active
-    # current-version marker -- e.g. a not-yet-reconciled marketplace snapshot, or a
-    # different local/worktree deploy that activated a newer slot) must not
-    # downgrade the running runtime. The current-version marker is authoritative
-    # (#1504); keep it and skip activating the older slot (it stays built-but-
-    # inactive) unless a downgrade is explicitly forced. This guards EVERY caller
-    # (install, update, ...), not just the `update` action's Invoke-DowngradeGuard,
-    # so a stale payload can't split-brain the service by re-activating an old slot.
-    if (-not $Force -and $SrcVersion) {
-        $curVer = ''
-        try { $curVer = ([IO.File]::ReadAllText((Join-Path $InstallDir 'current-version'))).Trim() } catch {}
-        if ($curVer -and (Test-VersionLt -A $SrcVersion -B $curVer)) {
-            Write-Skip "Keeping active runtime $curVer -- not activating older $SrcVersion (monotonic; dotfiles #1508)"
-            return $true
-        }
+    $publicationMutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+    if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+        Write-Skip 'Keeping newer runtime or stamp -- not activating an older slot'
+        return $true
     }
     if ((Test-Path $LegacyVenvDir) -and -not (Test-VenvIsLink $LegacyVenvDir)) {
         try { Invoke-Stop | Out-Null } catch {}
@@ -600,6 +589,9 @@ function Invoke-VersionedActivate {
     }
     Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
     return $true
+    } finally {
+        [void]$publicationMutex.ReleaseMutex(); $publicationMutex.Dispose()
+    }
 }
 
 function Get-VersionedCurrent {
@@ -1198,6 +1190,12 @@ function Get-SignedBasePython {
 
 function Deploy-SetupGatedBinstub {
     param([string]$PayloadRoot = '')
+    $publicationMutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+    if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+        Write-Skip 'Newer runtime or stamp superseded launcher publication'
+        return
+    }
     if (-not $PayloadRoot) {
         $snapshots = [IO.Path]::GetFullPath((Join-Path $InstallDir 'snapshots')).TrimEnd('/\') + [IO.Path]::DirectorySeparatorChar
         $comparison = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
@@ -1249,6 +1247,9 @@ exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
     Write-Ok "Binstub: $ps1Path (+ .cmd fallback, setup-gated)"
+    } finally {
+        [void]$publicationMutex.ReleaseMutex(); $publicationMutex.Dispose()
+    }
 }
 
 function Invoke-IndexUvPipInstall {
@@ -1323,11 +1324,15 @@ function Install-ServerVenv {
     $serverVenvPython = Join-Path $serverVenvDir 'Scripts\python.exe'
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-
+    try {
+    try {
     if (-not (New-IndexVenv -Dir $serverVenvDir -Python $serverVenvPython -PythonCmd $PythonCmd)) {
-            $ErrorActionPreference = $prevEAP
             Write-Warn "Server venv creation failed -- $serverVenvPython not found (spawn_passive falls back to the shared venv)"
             return
+    }
+    } catch {
+        Write-Warn "Server venv repair failed: $($_.Exception.Message) -- spawn_passive falls back to the shared venv"
+        return
     }
 
     $ZddDir = Resolve-Zdd
@@ -1338,7 +1343,6 @@ function Install-ServerVenv {
             & $serverVenvPython -m pip install "$ZddDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
-            $ErrorActionPreference = $prevEAP
             Write-Warn "Server venv zdd install failed (exit $LASTEXITCODE) -- spawn_passive falls back to the shared venv"
             return
         }
@@ -1352,14 +1356,15 @@ function Install-ServerVenv {
         $srvOut = & $serverVenvPython -m pip install $serverPkgSpec 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
         Write-Warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
         Write-Host $srvOut
         return
     }
-    $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $serverVenvDir
     Write-Ok "Server venv provisioned: $serverVenvDir"
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
 }
 
 function Install-Runtime {
@@ -1388,6 +1393,12 @@ function Install-Runtime {
     $script:UvCommand = Ensure-Uv -InstallRoot $InstallDir
     if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using Python venv/pip fallback' }
 
+    $preparationMutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+    if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+        Write-Skip 'Newer runtime or stamp superseded runtime preparation'
+        return
+    }
     # Detach an invalid active marker before any rebuild. If provisioning fails
     # later, no success-shaped current-version pointer remains.
     $activeMarker = Join-Path $InstallDir 'current-version'
@@ -1460,6 +1471,9 @@ function Install-Runtime {
             try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
             catch { Write-Fail "Could not remove the unsigned slot venv (in use?): $_ -- refusing to leave a non-SSH-invocable runtime in place"; exit 1 }
         }
+    }
+    } finally {
+        [void]$preparationMutex.ReleaseMutex(); $preparationMutex.Dispose()
     }
 
     if (-not (Test-Path -LiteralPath $VenvPython)) { Invoke-VersionedSlotClean }
@@ -1543,8 +1557,6 @@ function Install-Runtime {
 
     Install-ServerVenv -InstallRole $installRole -PythonCmd $pythonCmd
 
-    Deploy-SetupGatedBinstub
-
     $prevVersion = ''
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
@@ -1562,10 +1574,12 @@ function Install-Runtime {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
             exit 1
         }
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
     }
 
-    Write-Manifest
+    if (-not (Publish-IndexRuntime)) {
+        if ($script:RuntimePublicationSuperseded) { return }
+        exit 1
+    }
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -2329,8 +2343,8 @@ function Publish-FileAtomically {
 }
 
 function Enter-IndexStampLock {
-    param([string]$Scope)
-    $identity = [IO.Path]::GetFullPath($InstallDir)
+    param([string]$Scope, [int]$TimeoutSeconds = 20)
+    $identity = [IO.Path]::GetFullPath($InstallDir).TrimEnd('/\')
     if ($env:OS -eq 'Windows_NT') { $identity = $identity.ToLowerInvariant() }
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
@@ -2339,17 +2353,48 @@ function Enter-IndexStampLock {
     ).Replace('-', '').Substring(0, 24)
     } finally { $sha.Dispose() }
     $stampMutexName = if ($env:OS -eq 'Windows_NT') {
-        "Local\CopilotExtensions.AgentIndex.Stamp.$stampHash.$Scope"
+        "Global\CopilotExtensions.AgentIndex.Stamp.$stampHash.$Scope"
     } else {
         "CopilotExtensions.AgentIndex.Stamp.$stampHash.$Scope"
     }
     $stampMutex = New-Object Threading.Mutex($false, $stampMutexName)
     try {
-        try { $held = $stampMutex.WaitOne([TimeSpan]::FromSeconds(20)) }
+        try { $held = $stampMutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds)) }
         catch [Threading.AbandonedMutexException] { $held = $true }
         if (-not $held) { throw 'Timed out waiting for the agent-index stamp lock.' }
         return $stampMutex
     } catch { $stampMutex.Dispose(); throw }
+}
+
+function Test-IndexPublicationFresh {
+    param([Parameter(Mandatory)][string]$Version, [bool]$AllowDowngrade = $false)
+    if ($AllowDowngrade) { return $true }
+    foreach ($marker in @('current-version', 'stamped-version')) {
+        $path = Join-Path $InstallDir $marker
+        if ((Test-Path -LiteralPath $path) -and
+            (Test-VersionLt -A $Version -B ([IO.File]::ReadAllText($path).Trim()))) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Publish-IndexRuntime {
+    $mutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+        $script:RuntimePublicationSuperseded = $false
+        if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+            $script:RuntimePublicationSuperseded = $true
+            Write-Skip 'Newer runtime or stamp superseded runtime publication'
+            return $false
+        }
+        if (-not (Invoke-VersionedActivate)) { return $false }
+        Deploy-SetupGatedBinstub
+        Write-Manifest
+        return $true
+    } finally {
+        [void]$mutex.ReleaseMutex(); $mutex.Dispose()
+    }
 }
 
 function Materialize-IndexSnapshot {

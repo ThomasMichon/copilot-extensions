@@ -1078,6 +1078,40 @@ do_stamp() {
     _ok "Stamped: binstub on PATH; runtime provisions after explicit setup."
 }
 
+_test_index_venv() {
+    local dir="$1" python="$2" output prefix expected actual
+    [[ -x "$python" && -f "$dir/pyvenv.cfg" ]] || return 1
+    output="$("$python" -I -c 'import os, sys; print(os.path.abspath(sys.prefix)); print(int(sys.prefix != sys.base_prefix))' 2>/dev/null)" || return 1
+    [[ "$output" == *$'\n'* && "${output#*$'\n'}" == 1 ]] || return 1
+    prefix="${output%%$'\n'*}"
+    [[ "$prefix" == /* ]] || return 1
+    expected="$(cd "$dir" && pwd -P)" || return 1
+    actual="$(cd "$prefix" && pwd -P)" || return 1
+    [[ "$actual" == "$expected" ]]
+}
+
+_new_index_venv() {
+    local dir="$1" python="$2" base_python="$3" have_uv="$4" output rc=0
+    if _test_index_venv "$dir" "$python"; then return 0; fi
+    if [[ -e "$dir" ]]; then
+        _warn "Existing venv failed interpreter/prefix health validation -- rebuilding: $dir"
+        rm -rf -- "$dir" || return 1
+    fi
+    if [[ "$have_uv" == 1 ]]; then
+        output="$(invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$dir" --allow-existing 2>&1)" || rc=$?
+        if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
+        _warn "uv venv failed health validation (exit $rc): $output"
+    fi
+    if ! output="$("$base_python" -m venv --clear "$dir" 2>&1)"; then
+        _warn "Python venv fallback failed: $output"
+        return 1
+    fi
+    if ! _test_index_venv "$dir" "$python"; then
+        _warn "Created venv failed interpreter/prefix health validation: $dir"
+        return 1
+    fi
+}
+
 _install_server_venv() {
     # agent-index-server-venv-split: provision a sibling SERVER venv inside
     # the current runtime slot ($VENV_DIR/server), installing the full
@@ -1108,17 +1142,9 @@ _install_server_venv() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    if [[ ! -x "$server_venv_python" || ! -f "$server_venv_dir/pyvenv.cfg" ]]; then
-        if [[ "$have_uv" -eq 1 ]]; then
-            invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$server_venv_dir" --allow-existing \
-                || "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
-        else
-            "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
-        fi
-        if [[ ! -x "$server_venv_python" || ! -f "$server_venv_dir/pyvenv.cfg" ]]; then
+    if ! _new_index_venv "$server_venv_dir" "$server_venv_python" "$py" "$have_uv"; then
             _warn "Server venv creation failed -- $server_venv_python not found (spawn_passive falls back to the shared venv)"
             return 0
-        fi
     fi
 
     local zdd_dir
@@ -1142,6 +1168,10 @@ _install_server_venv() {
     if [[ "$srv_rc" -ne 0 ]]; then
         _warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
         printf '%s\n' "$srv_out" >&2
+        return 0
+    fi
+    if ! _test_index_venv "$server_venv_dir" "$server_venv_python"; then
+        _warn 'Server venv failed final interpreter/prefix health validation -- using the shared venv'
         return 0
     fi
     _ok "Server venv provisioned: $server_venv_dir"
@@ -1172,7 +1202,7 @@ _ensure_runtime() {
     if [[ "$VERSIONED_RUNTIME" == 1 && -n "$active_version" ]]; then
         active_python="$INSTALL_DIR/versions/$active_version/bin/python"
         [[ -x "$active_python" ]] || active_python="$INSTALL_DIR/versions/$active_version/Scripts/python.exe"
-        if [[ -x "$active_python" ]] \
+        if _test_index_venv "$INSTALL_DIR/versions/$active_version" "$active_python" \
             && "$active_python" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$active_version" >/dev/null 2>&1 \
             && _runtime_origin_under "$active_python" "$INSTALL_DIR/versions/$active_version"; then
             active_ready=1
@@ -1193,7 +1223,7 @@ _ensure_runtime() {
     # completion marker and an importable agent_index package.
     if [[ "$VERSIONED_RUNTIME" == 1 && -d "$VENV_DIR" ]]; then
         local slot_ready=0 vr="$SCRIPT_DIR/versioned_runtime.py"
-        if [[ -x "$VENV_PYTHON" ]] \
+        if _test_index_venv "$VENV_DIR" "$VENV_PYTHON" \
             && "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1 \
             && _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
             slot_ready=1
@@ -1215,20 +1245,10 @@ _ensure_runtime() {
         fi
     fi
 
-    if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
-        if [[ "$have_uv" -eq 1 ]]; then
-            _step 'Creating venv via uv...'
-            _versioned_slot_clean
-            invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$VENV_DIR" --allow-existing \
-                || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        else
-            _step 'Creating venv via python -m venv...'
-            "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        fi
-        [[ -x "$VENV_PYTHON" && -f "$VENV_DIR/pyvenv.cfg" ]] || { _fail "Venv creation failed -- interpreter or pyvenv.cfg missing"; exit 1; }
-        _ok 'Venv created'
-    else
-        _skip 'Venv already exists'
+    if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON"; then _versioned_slot_clean; fi
+    if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON" "$py" "$have_uv"; then
+        _fail "Runtime venv failed interpreter/prefix health validation: $VENV_DIR"
+        exit 1
     fi
 
 
@@ -1311,7 +1331,7 @@ _ensure_runtime() {
     local prev_version=""
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
+        if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON" || ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
@@ -1325,7 +1345,8 @@ _ensure_runtime() {
 
     _write_manifest
 
-    if _runtime_origin_under "$LINK_PYTHON" "$(dirname "$(dirname "$LINK_PYTHON")")"; then
+    if _test_index_venv "$(dirname "$(dirname "$LINK_PYTHON")")" "$LINK_PYTHON" \
+        && _runtime_origin_under "$LINK_PYTHON" "$(dirname "$(dirname "$LINK_PYTHON")")"; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'
@@ -1409,7 +1430,7 @@ _install_engine() {
         _skip "Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)"
         return 1
     fi
-    if [[ -x "$ENGINE_VENV_PYTHON" && -f "$ENGINE_VENV/pyvenv.cfg" && "$upgrade" -eq 0 ]]; then
+    if [[ "$upgrade" -eq 0 ]] && _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON"; then
         _skip "Engine runtime already provisioned (durable venv preserved): $ENGINE_VENV"
         return 0
     fi
@@ -1424,12 +1445,7 @@ _install_engine() {
     local have_uv=0
     if _ensure_uv; then have_uv=1; else _warn 'uv acquisition failed -- using the engine pip fallback'; fi
     _ensure_uv_index
-    if [[ "$have_uv" -eq 1 ]]; then
-        invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$ENGINE_VENV" --allow-existing || "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
-    else
-        "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
-    fi
-    [[ -x "$ENGINE_VENV_PYTHON" && -f "$ENGINE_VENV/pyvenv.cfg" ]] || { _warn "Engine venv creation failed -- interpreter or pyvenv.cfg missing"; return 1; }
+    _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" "$py" "$have_uv" || return 1
 
     # zdd is a declared dependency of agent-index but is not on PyPI -- install it
     # from the vendored lib first so pip can satisfy the requirement.
@@ -1508,8 +1524,9 @@ _install_engine() {
         _warn 'Engine runtime install failed (torch stack) -- light service unaffected; provision later with the "engine" action'
         return 1
     fi
-    if ! "$ENGINE_VENV_PYTHON" -c 'import torch' 2>/dev/null; then
-        _warn 'Engine venv built but torch import failed'
+    if ! _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" \
+        || ! "$ENGINE_VENV_PYTHON" -c 'import torch' 2>/dev/null; then
+        _warn 'Engine venv failed final interpreter/prefix or torch import validation'
         return 1
     fi
     if [[ "$upgrade" -eq 1 ]]; then

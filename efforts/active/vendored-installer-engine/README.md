@@ -524,6 +524,52 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-09 — Index publication and health boundaries hardened
+
+- Continued only the Index adopter from PR #5885's published head
+  `84b5889932b3fdf8ed4f76fc8ffeec47afd9004d`. Preserved unpinned uv selection,
+  Windows Python/pip fallback when acquisition fails, and the durable engine's
+  explicit uv-first policy; CLI/server remain signed-first. The existing
+  patch changefile is unchanged; canonical engine bytes are unchanged.
+- Reused one installation-keyed publication mutex across stamp, runtime marker
+  cleanup, activation, payload/launcher writes and manifests. Runtime builds
+  release preparation locks before provisioning and recheck freshness before
+  the complete publication transaction. Direct activation/launcher callers
+  enter the same reentrant guard. Snapshot and publication locks remain
+  sequential, with no publication-to-snapshot acquisition. Windows uses the
+  global namespace; path aliases with trailing separators share one identity.
+- A deterministic two-process fixture brings newer activation to the mutex
+  while an older stamp is inside its freshness check. The activation must
+  report blocked, then publish the newest current-version, payload, launcher
+  and manifest after stamp releases. Separate cases prove current/stamped
+  freshness prevents all older runtime writes and direct launcher repair.
+- Optional server repair catches only its venv repair/probe boundary, reports
+  the literal exception and restores ErrorActionPreference in `finally`.
+  Actual repair-helper tests inject filesystem and probe exceptions and prove
+  warning fallback plus primary continuation.
+- POSIX CLI/server/engine builds now share an isolated interpreter-prefix
+  health probe and local repair adapter around the unchanged engine helper.
+  Real Python venv cases cover healthy reuse, corrupt executables, base
+  interpreter wrappers, wrong prefixes and failed probes. Fake package-build
+  interpreters emit truthful physical prefixes instead of bypassing health.
+  No real models, services or scheduler operations are used.
+- Counts relative to the published head: shell 1958 -> 1975 (+17),
+  PowerShell 2579 -> 2624 (+45), wrappers 4537 -> 4599 (+62); canonical pair
+  remains 881 lines, combined corpus 5418 -> 5480 (+62). This is disclosed
+  temporary safety growth, not satisfaction of the effort's aggregate
+  shrinkage gate; the rollout must offset it before that gate closes.
+- Bounded validation (admission 120 seconds, timeout 600 seconds): focused
+  installer/stamp/activation matrix 96 passed; disconnected full plugin suite
+  737 passed / 93 skipped; full host suite 819 passed / 11 skipped.
+  Relevant engine-sync/materialization/install-contract tooling: 107 passed.
+  Contract, engine/library sync, version, module-size, docs, changefile,
+  F/E9 lint and both platform parsers passed without a flake exception.
+- Native Windows validation previously reported 56 passed / 26 skipped at
+  the published head, not this follow-up. The new global mutex/repair paths
+  need native revalidation; PS5.1, SAC and macOS remain unclaimed gaps.
+  Publication, review, merge, release and live verification remain owned by
+  the integration coordinator. The adopter and overall effort remain open.
+
 ### 2026-10-08 — Index adopter implementation prepared for integration
 
 - Public coordination: #5873. This Phase 2+ slice closes the reviewed
