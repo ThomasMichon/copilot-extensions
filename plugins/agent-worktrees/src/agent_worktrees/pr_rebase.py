@@ -11,7 +11,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from . import git_ops, hooks, push_timeout, tracking
+from . import git_ops, hooks, pr_recovery, push_timeout, tracking
 
 
 @dataclass(frozen=True)
@@ -201,77 +201,98 @@ def _conflict_lineage(
     return tuple(conflicts) if index == len(new_rows) and current == finished else None
 
 
-def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) -> RebaseProof | None:
+def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
+           reasons: list[str] | None = None) -> RebaseProof | None:
     """Fail closed unless a tracked private head proves its entire source replay."""
+    def refuse(message: str):
+        if reasons is not None:
+            reasons.append(message)
+        return None
+
     if record is None or repo is None or not repo.pr.enabled or not expected:
-        return None
+        return refuse("A tracked PR repository and its saved expected remote HEAD are required.")
     if Path(record.worktree_path).resolve() != Path(cwd).resolve():
-        return None
+        return refuse("The current checkout is not the owning worktree.")
     source, sep, dest = refspec.partition(":")
     dest = (dest if sep else source).removeprefix("refs/heads/")
     live = [p for p in record.prs if p.branch == dest and not tracking._pr_is_terminal(p)]
     if len(live) != 1:
-        return None
+        return refuse("The destination must match exactly one live PR in the owning record.")
     pr = live[0]
     suffixes = [git_ops.worktree_suffix(record.worktree_id), record.codename]
     protected = {"main", "master", "dev", repo.default_branch, *hooks._protected_branches(cwd)}
     if (
-        not pr.pr_id or pr.head_sha != expected or not pr.base_sha or not pr.patch_id
+        not pr.pr_id or pr.head_sha != expected
         or dest in protected or source in protected
-        or not dest.startswith(("pr/", "feature/"))
+        or not dest.startswith(("pr/", "feature/", "user/"))
         or not any(suffix and (
             dest.endswith("-" + suffix) or dest in (f"pr/{suffix}", f"feature/{suffix}")
         ) for suffix in suffixes)
-        or remote != (pr.remote or repo.remote)
     ):
-        return None
-    owner_branch = record.branch
+        return refuse("The saved PR identity/head or private suffix-bound destination is invalid.")
+    from . import pr_publish
+    if remote != (pr.remote or repo.remote) and (
+        pr.remote or remote != pr_publish.push_remote(repo, pr, cwd)
+    ):
+        return refuse("The destination is not the verified remote holding this PR's head.")
+    owner_branch = (
+        f"worktree/{record.worktree_id}" if record.branch == record.worktree_id else record.branch
+    )
     current = _git("symbolic-ref", "--short", "HEAD", cwd=cwd)
     if (
         owner_branch != f"worktree/{record.worktree_id}"
         or current not in (owner_branch, dest)
         or source not in (owner_branch, dest)
     ):
-        return None
+        return refuse("The source must be the canonical owning worktree branch or its tracked private head.")
     head = _git("rev-parse", "--verify", f"{source}^{{commit}}", cwd=cwd)
     if not head or head != _git("rev-parse", "HEAD", cwd=cwd):
-        return None
-    replay = _replay(current, head, cwd)
+        return refuse("The source ref does not identify the current checked-out commit.")
+    recovery = pr_recovery.synced(record, pr, expected, head, cwd=cwd)
+    replay = (
+        (recovery.local_head, recovery.target_head, recovery.synced_head, [])
+        if recovery is not None else _replay(current, head, cwd)
+    )
     if replay is None:
-        return None
+        return refuse(
+            "No completed backed sync or intact source-owned rebase journals. "
+            "Run git sync to preserve recovery refs and checkpoint the supported operation."
+        )
     original, onto, finished, steps = replay
+    base = pr.base_sha or _git("merge-base", expected, onto, cwd=cwd)
     upstream = _git("rev-parse", f"{repo.remote}/{repo.default_branch}", cwd=cwd)
     if not (
-        _ancestor(pr.base_sha, expected, cwd) and _ancestor(expected, original, cwd)
-        and pr.base_sha != onto and _ancestor(pr.base_sha, onto, cwd)
+        _ancestor(base, expected, cwd)
+        and (recovery is not None or _ancestor(expected, original, cwd))
+        and base != onto and _ancestor(base, onto, cwd)
         and _ancestor(onto, upstream, cwd) and _ancestor(onto, finished, cwd)
     ):
-        return None
+        return refuse("The recorded published/base objects do not connect to the newer upstream base.")
     # Older push-changes updated head_sha without refreshing its cached patch_id.
     # Reconstruct that head's actual patch from the pinned objects, and prove its
     # entire source replay below; the stale cache must never authorize a rewrite.
     published_diff = _git_bytes(
-        "diff", "--no-ext-diff", "--no-textconv", f"{pr.base_sha}..{expected}", cwd=cwd,
+        "diff", "--no-ext-diff", "--no-textconv", f"{base}..{expected}", cwd=cwd,
     )
     published_ids = _git_bytes("patch-id", "--stable", cwd=cwd, stdin=published_diff).split()
     if not published_ids or not re.fullmatch(rb"[0-9a-f]{40,64}", published_ids[0]):
-        return None
+        return refuse("The saved published head has no reconstructible patch against its base.")
     published_patch = published_ids[0].decode("ascii")
-    old = _series(pr.base_sha, original, cwd)
+    old = _series(base, original, cwd)
     new = _series(onto, finished, cwd)
     if old is None or new is None or not old:
-        return None
-    conflicts = _conflict_lineage(
-        pr.base_sha, original, onto, finished, old, new, steps, cwd,
+        return refuse("The source series is empty, unreadable, or contains unsupported merge commits.")
+    conflicts = () if recovery is not None else _conflict_lineage(
+        base, original, onto, finished, old, new, steps, cwd,
     )
     if conflicts is None:
-        return None
+        return refuse("The manual replay did not preserve source trees and commit identity.")
     url = _git("remote", "get-url", "--push", remote, cwd=cwd)
     if not url:
-        return None
+        return refuse("The verified destination has no readable push URL.")
     return RebaseProof(
         record.worktree_id, pr.pr_id, dest, hashlib.sha256(url.encode("utf-8")).hexdigest(),
-        expected, published_patch, pr.patch_id, pr.base_sha,
+        expected, published_patch, pr.patch_id, base,
         original, onto, finished, head, tuple(old), conflicts,
     )
 
@@ -310,13 +331,11 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
          timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT) -> git_ops.PushResult:
     """The only non-ancestral publish path: a freshly verified owned-PR replay."""
     try:
-        proof = verify(record, repo, remote, refspec, expected, cwd=cwd)
+        reasons: list[str] = []
+        proof = verify(record, repo, remote, refspec, expected, cwd=cwd, reasons=reasons)
         if proof is None:
             return git_ops.PushResult(
-                ok=False, stderr="Refusing unproved PR rewrite: source-owned rebase and "
-                "preserved patch/base lineage are required. Inspect the PR and rebase journals; "
-                "resets, dropped or unexplained changed patches, shared heads and arbitrary refs "
-                "are not authorized.",
+                ok=False, stderr="Refusing unproved PR rewrite: " + reasons[0],
             )
         _save(proof, cwd)
         # Pin the verified source object; never race a moving local branch.
@@ -329,5 +348,5 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
             result.rebase_base_sha = proof.new_base
             result.published_head_sha = proof.source_head
         return result
-    except (OSError, git_ops.GitError) as exc:
+    except (OSError, ValueError, git_ops.GitError) as exc:
         return git_ops.PushResult(ok=False, stderr=f"Refusing unproved PR rewrite: {exc}")

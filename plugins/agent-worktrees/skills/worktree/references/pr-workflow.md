@@ -580,9 +580,29 @@ publish with `push-changes` (or repeat `create-pr`). Inspect and validate the
 resolution before publishing.
 
 A non-ancestral update is authorized only for a unique, live, tracked private
-`pr/` or legacy `feature/` head carrying this worktree's suffix or codename.
+`pr/`, legacy `feature/`, or contributor `user/` head carrying this worktree's suffix or codename.
 The current checkout must be its recorded `worktree/<id>` branch (or that
-same tracked private head in the legacy checked-out-feature flow). Both Git
+same tracked private head in the legacy checked-out-feature flow). An exact
+legacy bare-id record resolves to its canonical `worktree/<id>` branch.
+
+Before `git sync` changes HEAD, it preserves the committed local tip and the
+recorded published tip under unique worktree-scoped
+`refs/agent-worktrees/recovery/...` refs. These keep the objects alive even
+after reflog expiry or garbage collection. The command prints the original
+full commit id and `git switch --detach <id>` to revisit it without resetting
+uncommitted work. Repeated syncs retain separate refs, not a shared stash or a
+single overwritten backup. If preservation fails, nothing is rebased.
+
+The worktree's `agent-worktrees-pr-recovery.json` binds those retained objects
+and the completed supported sync to its original PR association. That explicit
+operation checkpoint permits publication of its result and ordinary feedback
+commits without requiring intact rebase journals. Missing legacy base/patch
+metadata is reconstructed from the pinned commit graph, not manually edited.
+Changing the PR association or resetting to an unrelated tip invalidates the
+checkpoint. A backup is recovery, not authority to change a destination or
+replace somebody else's remote work.
+
+For a manual rebase without a supported-operation checkpoint, both Git
 rebase journals must bind the original source tip, completed replay, and newer
 default-branch base. The published patch is reconstructed from the recorded
 base/head objects, and every source patch must remain in order or already exist on the
@@ -620,9 +640,11 @@ push; recovery records both that cache and the reconstructed published patch,
 but authorizes only the freshly verified full source replay, never the cache.
 
 Generic pushes remain ancestry-guarded. Shared/default/protected heads,
-arbitrary refspecs, resets (even to the same tree), amends, unexplained changed
-patches, dropped work, merge-heavy or missing/expired replay evidence, and
-untracked/custom non-private heads fail closed. Do not bypass the refusal:
+arbitrary refspecs and untracked/custom non-private heads fail closed.
+Without a completed backed sync, resets, amends, unexplained changed patches,
+dropped work and missing/expired replay journals still fail closed. A backed
+operation authorizes its recorded result, not a later unrelated rewrite.
+Refusals identify the actual failed condition. Do not bypass the refusal:
 inspect the original source and remote history, recover a verifiable replay,
 and re-run validation. There is no blanket rewrite flag.
 
