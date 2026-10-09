@@ -1,0 +1,9 @@
+{
+  "comment": "Track Windows reconcile workers and their process trees, fence attempt completion, and clear inherited staging flags so stalled installs remain bounded.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -50,7 +50,6 @@ FAMILIES: dict[str, list[str]] = {
     "versioned-venv/psscriptroot": [
         "agent-codespaces",
         "agent-containers",
-        "agent-dispatch",
         "agent-logger",
         "agent-pull-requests",
         "agent-vault",
@@ -72,6 +71,9 @@ FAMILIES: dict[str, list[str]] = {
     # stable link is 'venv', not '.venv'). Kept distinct until the observability
     # is propagated to the shared template.
     "versioned-venv/agent-bridge-reference": ["agent-bridge"],
+    # Dispatch tracks the actual worker and its process tree, fences completion
+    # by attempt, and permits its longer graceful-cutover installer deadline.
+    "versioned-venv/agent-dispatch-worker": ["agent-dispatch"],
     # Versioned-venv reconcile that reads the deploy manifest's source.path
     # instead of $PSScriptRoot. Two members that differ from each other in their
     # readiness gate (binstub vs .venv), so each is its own family for now.
