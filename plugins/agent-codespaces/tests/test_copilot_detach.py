@@ -35,7 +35,8 @@ def _args(**kw):
 def seams(monkeypatch):
     calls = types.SimpleNamespace(
         holds=[], releases=[], reserve=[], release_res=[], remote=[], ssh=[], deregistered=[], ref_payloads=[],
-        live_rows={"anchor-example-web@cs-1": {"session_id": "sid-42", "venue": {"target": "cs-1"}}},
+        live_rows={"anchor-example-web@cs-1": {"session_id": "sid-42", "venue": {"target": "cs-1"}},
+                   "sid-42": {"session_id": "sid-42", "venue": {"target": "cs-1"}}},
         claim_rows=[{"reservation_id": "r1", "claimed_by_session_id": "sid-42"}],
     )
     monkeypatch.setattr(
@@ -99,7 +100,8 @@ def seams(monkeypatch):
         venue_copilot, "deregister_live_session",
         lambda sid: calls.deregistered.append(sid) or True,
     )
-    monkeypatch.setattr(venue_copilot, "live_session_for", lambda handle: calls.live_rows.get(handle, {}))
+    monkeypatch.setattr(venue_copilot, "live_session_for",
+                        lambda handle, strict=False: calls.live_rows.get(handle, {}))
     return calls
 
 
@@ -245,6 +247,20 @@ def test_a_resumed_seed_needs_a_daemon_that_follows_renames(
     assert out["seed_delivery"] == ("bridge" if daemon_has_aliases else "failed")
     assert out["seeded"] is daemon_has_aliases
     assert out["session_id"] == "sid-42" and seams.releases == []  # the session is kept
+
+
+def test_a_resume_whose_placeholder_exited_and_resumed_id_never_registered_fails(seams, capsys):
+    """The placeholder that claimed exited and the resumed id never registered
+    (seen live: a bridge that refused the resumed id's new process): there is no
+    session, so the launch fails rather than report the gone placeholder."""
+    seams.live_rows = {}
+    resumed = json.dumps({"ok": True, "created": True, "seed_submitted": True})
+    rc = detach.cmd_detach(_args(copilot_args=["--resume=sid-9"], seed=None),
+                           ssh_session=_ssh(seams, stdout=resumed))
+    assert rc != 0
+    text = capsys.readouterr().out
+    out = json.loads(text[text.index("{"):])
+    assert out["ok"] is False and "never registered" in out["error"]
 
 
 def test_a_resume_from_a_new_process_keeps_its_venue_and_reports_the_resumed_id(seams, capsys):

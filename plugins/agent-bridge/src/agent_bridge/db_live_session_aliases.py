@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any
 
-from .db_core import LIVE_SESSION_STALE_SECONDS
+from .db_core import LIVE_SESSION_STALE_SECONDS, local_pid_alive
 
 log = logging.getLogger("agent-bridge")
 
@@ -94,23 +94,37 @@ _REGISTER_SQL = (
 
 def _incarnation_mismatch(
     conn: Any, session_id: str, *, machine: str | None, pid: int | None,
-    process_started_at: float | None, aliased: bool,
+    process_started_at: float | None, aliased: bool, now: float,
 ) -> bool:
     """Whether a registration's own identity contradicts the canonical row it
     would update (inside the caller's transaction, after alias resolution).
 
     Another process (pid, or a known start time outside the tolerance) never
-    updates a row. Through an alias -- a heartbeat for a renamed id, landing
-    on its successor's row -- another machine doesn't either (a direct
+    updates a *live* row. Through an alias -- a heartbeat for a renamed id,
+    landing on its successor's row -- another machine doesn't either (a direct
     re-registration may still move machines, as before). Omitted fields never
     conflict -- an id-only heartbeat keeps the row's metadata -- and a
-    taken-over row is left to the write's own rejection."""
+    taken-over row is left to the write's own rejection. A dead row -- ``expired``,
+    or still ``live`` but past its heartbeat lease and not provably running
+    here (the reaper's own rule: a lapsed row whose local pid is alive is
+    ``wedged``, never dead) -- belongs to no running process, so the new
+    incarnation revives it: that is a conversation resumed in a new process
+    (after a restart, or its CodeSpace stopping), which keeps its session id."""
     row = conn.execute(
-        "SELECT machine, pid, process_started_at, status FROM live_sessions WHERE session_id=?",
+        "SELECT machine, pid, process_started_at, status, updated_at, venue "
+        "FROM live_sessions WHERE session_id=?",
         (session_id,),
     ).fetchone()
-    if row is None or (row["status"] or "live") == "taken-over":
+    if row is None:
         return False
+    status = row["status"] or "live"
+    if status in ("taken-over", "expired"):
+        return False
+    if (status == "live" and (row["updated_at"] or 0) < now - LIVE_SESSION_STALE_SECONDS
+            and (row["venue"] or local_pid_alive(row["pid"]) is not True)):
+        return False
+    if status == "wedged" and not row["venue"] and local_pid_alive(row["pid"]) is False:
+        return False  # its process was alive when the sweep looked, and is provably gone now
     if (aliased and machine and row["machine"]
             and machine.casefold() != str(row["machine"]).casefold()):
         return True
@@ -141,7 +155,7 @@ def register_live_session_atomic(
             session_id = db.resolve_live_session_id(session_id)
             mismatch = _incarnation_mismatch(
                 conn, session_id, machine=machine, pid=pid, process_started_at=process_started_at,
-                aliased=session_id != requested)
+                aliased=session_id != requested, now=now)
             if mismatch:
                 conn.rollback()
                 return "incarnation_mismatch"

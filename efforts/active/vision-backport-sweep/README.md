@@ -64,7 +64,11 @@
   `ThomasMichon/copilot-extensions#5853` (installation overrides explicit
   Copilot experimental preference) ·
   `ThomasMichon/copilot-extensions#5855` (semantic config migration overrides
-  an explicitly disabled idle reaper)
+  an explicitly disabled idle reaper) ·
+  `ThomasMichon/copilot-extensions#5861` (fleet named deployment/config
+  reconciliation follow-on) ·
+  `ThomasMichon/copilot-extensions#5862` (fleet subscribed observation/recovery
+  follow-on)
 
 ## Guiding Intent
 
@@ -396,6 +400,15 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       - [ ] `visions/plugin-services/installation-cells/README.md` — remaining
             endpoint discovery, POSIX invocation, all-plugin lifecycle and
             cleanup/rollback coverage.
+      - [x] `visions/machine-fleet/README.md` — current-stage vision/proposal
+            ownership reconciliation. The owning foundation explicitly claims
+            a proposed fixed-service route, not implemented runtime; preserved
+            static-driver/service/credential/lifecycle authorities and optional
+            standalone/direct operation. No missing embodied intent was found.
+            Kept `#5789` intact and carved its excluded named reconciliation
+            and subscribed-observation vision scope as `#5861`/`#5862`.
+            Runtime realization and its acceptance proofs stay with those
+            objectives; no global runtime absence or conformance is inferred.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -508,6 +521,34 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Machine-fleet current-stage ownership and excluded scope
+- Compared the complete machine-fleet vision with the owning
+  `machine-fleet-routing-foundation` README/architecture and current tracker
+  `#5789`. The proposal explicitly makes no implemented-runtime claim and
+  gates code behind plan review; source searches and catalog absence were not
+  used as proof that no controller exists anywhere.
+- Existing intent covers the inspected driver, service, credential, role,
+  bounded-resource and lifecycle boundaries. No capability was removed and no
+  spec-level wire/package choice was promoted into the vision. Controller/
+  connector execution conformance is not established by a proposed contract;
+  standalone, process, clean-room and live proofs remain in the foundation.
+- Carved only genuinely untracked scope expressly excluded by that campaign:
+  named deployment/config reconciliation (`#5861`) and subscribed coherent
+  observation/recovery (`#5862`). Snapshot and replay are both valid recovery
+  shapes; no replay-only requirement or rival task/worktree/session ledger was
+  invented. Provider-specific enrollment, credentials and live migration stay
+  adopter-owned, not new public implementation scope.
+- Verified `#5771` is the provider-confirmed merged vision-authoring artifact
+  for `#5767`; authoring is distinct from foundation/runtime delivery.
+  Reported incorrect source-relative vision/lifecycle links cooperatively on
+  `#5789`, then corrected only those paths and added the vision's realization
+  planning link. The Draft plan's scope, status and review gates are unchanged.
+- No runtime code, service, enrollment or venue was changed by this slice.
+  Documentation structure, relative-target checks and whitespace are the
+  applicable validation here, not a claimed Gateway process or deployment test.
+  The original sweep's remaining indexed/source/service coverage and global
+  Validation Plan remain open.
 
 ### 2026-10-09 — Installation boundary intent and thirteen-runtime matrix
 - The source-effect comparison exposed a genuine scope question: source
