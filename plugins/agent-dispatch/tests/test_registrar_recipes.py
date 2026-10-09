@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 
 import pytest
+from dropin_registry import EntryDecision, ScanAuthority
+from plugin_activation import ActivationReport, ActivePlugin
 
 from agent_dispatch.registrar import RegistrarError
 from agent_dispatch.registrar_recipes import (
@@ -18,6 +20,39 @@ from agent_dispatch.registrar_recipes import (
     resolve_recipe_ref,
     substitute_placeholders,
 )
+
+
+def _activation(roots: dict[str, Path]) -> ActivationReport:
+    """Build a minimal `ActivationReport` naming each `name@marketplace` ->
+    live root pair as an active plugin -- mirrors
+    `test_registrar_registry.py`'s own fixture helper."""
+    decisions: dict[str, EntryDecision[ActivePlugin]] = {}
+    for source, root in roots.items():
+        name, marketplace = source.split("@", 1)
+        decisions[source] = EntryDecision.active(
+            ActivePlugin(
+                source=source,
+                name=name,
+                marketplace=marketplace,
+                root=root.resolve(),
+                scopes=("global",),
+            )
+        )
+    return ActivationReport(authority=ScanAuthority.COMPLETE, decisions=decisions)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_active_plugins_cache(monkeypatch):
+    """`registrar_recipes` caches plugin activation for the process
+    lifetime (`_active_plugins`) -- reset it before and after every test so
+    one test's `monkeypatch.setattr("agent_dispatch.registrar_recipes.resolve_active_plugins", ...)
+    (indirectly, via the cache) never leaks into another."""
+    from agent_dispatch import registrar_recipes as rr
+
+    rr._reset_active_plugins_cache()
+    yield
+    rr._reset_active_plugins_cache()
+
 
 # -- deep_merge ---------------------------------------------------------------
 
@@ -119,6 +154,113 @@ def test_resolve_recipe_ref_rejects_an_unsupported_suffix(tmp_path):
     (tmp_path / "recipe.txt").write_text("not a declaration document", encoding="utf-8")
     with pytest.raises(RegistrarError, match="unrecognized suffix"):
         resolve_recipe_ref("./recipe.txt", base_dir=tmp_path)
+
+
+# -- resolve_recipe_ref: plugin: (cross-plugin, addressed by name) -----------
+
+
+def test_resolve_recipe_ref_plugin_resolves_by_bare_name(tmp_path, monkeypatch):
+    plugin_root = tmp_path / "plugin-b-root"
+    plugin_root.mkdir()
+    (plugin_root / "recipes" / "base.yaml").parent.mkdir(parents=True)
+    (plugin_root / "recipes" / "base.yaml").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "plugin-b-owner"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({"plugin-b@copilot-extensions": plugin_root}),
+    )
+    assert resolve_recipe_ref(
+        "plugin:plugin-b:recipes/base.yaml", base_dir=tmp_path
+    ) == {"kind": "supervised-lane", "owner": "plugin-b-owner"}
+
+
+def test_resolve_recipe_ref_plugin_disambiguates_with_explicit_marketplace(
+    tmp_path, monkeypatch
+):
+    root_a = tmp_path / "root-a"
+    root_b = tmp_path / "root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    (root_a / "base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "marketplace-a"}),
+        encoding="utf-8",
+    )
+    (root_b / "base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "marketplace-b"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation(
+            {"shared-name@marketplace-a": root_a, "shared-name@marketplace-b": root_b}
+        ),
+    )
+    assert resolve_recipe_ref(
+        "plugin:shared-name@marketplace-b:base.json", base_dir=tmp_path
+    ) == {"kind": "supervised-lane", "owner": "marketplace-b"}
+
+
+def test_resolve_recipe_ref_plugin_ambiguous_bare_name_fails_loud(tmp_path, monkeypatch):
+    root_a = tmp_path / "root-a"
+    root_b = tmp_path / "root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation(
+            {"shared-name@marketplace-a": root_a, "shared-name@marketplace-b": root_b}
+        ),
+    )
+    with pytest.raises(RegistrarError, match="ambiguous across 2 active marketplaces"):
+        resolve_recipe_ref("plugin:shared-name:base.json", base_dir=tmp_path)
+
+
+def test_resolve_recipe_ref_plugin_unknown_name_fails_loud(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({}),
+    )
+    with pytest.raises(RegistrarError, match="not an active plugin"):
+        resolve_recipe_ref("plugin:nope:base.json", base_dir=tmp_path)
+
+
+def test_resolve_recipe_ref_plugin_rejects_malformed_ref(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({}),
+    )
+    with pytest.raises(RegistrarError, match="malformed plugin: ref"):
+        resolve_recipe_ref("plugin:no-colon-path", base_dir=tmp_path)
+
+
+def test_resolve_recipe_ref_plugin_rejects_an_absolute_relpath(tmp_path, monkeypatch):
+    plugin_root = tmp_path / "plugin-root"
+    plugin_root.mkdir()
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({"some-plugin@mp": plugin_root}),
+    )
+    absolute = str(tmp_path / "elsewhere.json")
+    with pytest.raises(RegistrarError, match="must be relative"):
+        resolve_recipe_ref(f"plugin:some-plugin:{absolute}", base_dir=tmp_path)
+
+
+def test_resolve_recipe_ref_plugin_rejects_a_path_escaping_the_plugin_root(
+    tmp_path, monkeypatch
+):
+    plugin_root = tmp_path / "plugin-root"
+    plugin_root.mkdir()
+    (tmp_path / "outside.json").write_text(
+        json.dumps({"kind": "supervised-lane"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({"some-plugin@mp": plugin_root}),
+    )
+    with pytest.raises(RegistrarError, match="resolves outside its named plugin"):
+        resolve_recipe_ref("plugin:some-plugin:../outside.json", base_dir=tmp_path)
 
 
 # -- resolve_extends ------------------------------------------------------------
@@ -474,6 +616,216 @@ def test_resolve_extends_global_chain_hop_resolves_against_plugin_payload_root(
         "owner": "plugin-root-owner",
         "labels": ["from-global"],
     }
+
+
+# -- resolve_extends: cross-origin chaining (plugin<->plugin, plugin<->repo) --
+#
+# These four tests are the literal acceptance criteria for cross-registrar
+# `extends:` addressing: a declaration/recipe owned by one origin (a repo
+# checkout, or a specific installed plugin's own root) must be able to
+# extend a declaration owned by any of the other three origin kinds, with
+# each hop's own further nested refs resolving against *that hop's own*
+# directory (never the original caller's), exactly like the existing
+# same-kind (repo<->repo) chaining above.
+
+
+def test_resolve_extends_plugin_to_plugin(tmp_path, monkeypatch):
+    """A declaration living inside one active plugin's own root extends a
+    recipe living inside a *different* active plugin's own root."""
+    plugin_a_root = tmp_path / "plugin-a"
+    plugin_b_root = tmp_path / "plugin-b"
+    plugin_a_root.mkdir()
+    plugin_b_root.mkdir()
+    (plugin_b_root / "base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "plugin-b-owner"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation(
+            {"plugin-a@mp": plugin_a_root, "plugin-b@mp": plugin_b_root}
+        ),
+    )
+    # The extending declaration lives inside plugin A's own root (base_dir
+    # reflects that -- exactly how a registrar.d-sourced declaration's
+    # own `plugin_root` is threaded as `base_dir` in production).
+    data = {"extends": "plugin:plugin-b:base.json", "labels": ["from-plugin-a"]}
+
+    resolved = resolve_extends(data, base_dir=plugin_a_root)
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "plugin-b-owner",
+        "labels": ["from-plugin-a"],
+    }
+
+
+def test_resolve_extends_plugin_to_plugin_nested_ref_resolves_against_its_own_root(
+    tmp_path, monkeypatch
+):
+    """Plugin B's own recipe, reached via a `plugin:` ref from plugin A,
+    carries its own repo-relative-style `extends:` ref -- that must resolve
+    against plugin B's own root, never plugin A's (the same per-hop
+    directory-provenance guarantee already proven for repo<->repo
+    chaining, now proven across the `plugin:` address space)."""
+    plugin_a_root = tmp_path / "plugin-a"
+    plugin_b_root = tmp_path / "plugin-b"
+    plugin_a_root.mkdir()
+    plugin_b_root.mkdir()
+    (plugin_b_root / "inner-base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "plugin-b-inner-owner"}),
+        encoding="utf-8",
+    )
+    (plugin_b_root / "mid.json").write_text(
+        json.dumps({"extends": "./inner-base.json", "labels": ["from-plugin-b-mid"]}),
+        encoding="utf-8",
+    )
+    # A same-named decoy in plugin A: proves the nested ref resolved
+    # against plugin B's own root, not plugin A's (the extending caller).
+    (plugin_a_root / "inner-base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "WRONG-plugin-a-decoy"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation(
+            {"plugin-a@mp": plugin_a_root, "plugin-b@mp": plugin_b_root}
+        ),
+    )
+    data = {"extends": "plugin:plugin-b:mid.json"}
+
+    resolved = resolve_extends(data, base_dir=plugin_a_root)
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "plugin-b-inner-owner",
+        "labels": ["from-plugin-b-mid"],
+    }
+
+
+def test_resolve_extends_repo_to_plugin(tmp_path, monkeypatch):
+    """An ordinary repo-local declaration extends a recipe shipped by an
+    installed plugin, addressed by name -- the generalization of today's
+    `global:` (which only ever reaches *this* plugin's own hardcoded
+    recipes) to *any* active plugin."""
+    repo_root = tmp_path / "consuming-repo"
+    plugin_root = tmp_path / "some-plugin"
+    repo_root.mkdir()
+    plugin_root.mkdir()
+    (plugin_root / "recipes" / "shared.yaml").parent.mkdir(parents=True)
+    (plugin_root / "recipes" / "shared.yaml").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "some-plugin-owner"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({"some-plugin@mp": plugin_root}),
+    )
+    data = {
+        "extends": "plugin:some-plugin:recipes/shared.yaml",
+        "repo": "owner/name",
+    }
+
+    resolved = resolve_extends(data, base_dir=repo_root)
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "some-plugin-owner",
+        "repo": "owner/name",
+    }
+
+
+def test_resolve_extends_plugin_to_repo(tmp_path, monkeypatch):
+    """A plugin-owned recipe's own nested ref reaches into a specific
+    repo's file by a plain cross-repo path -- mechanically identical to
+    the existing repo<->repo path-ref mechanism; a `plugin:` ref is not
+    required in this direction since the plugin already knows exactly
+    which file it names."""
+    plugin_root = tmp_path / "some-plugin"
+    repo_root = tmp_path / "a-specific-repo"
+    plugin_root.mkdir()
+    repo_root.mkdir()
+    (repo_root / "repo-base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "repo-owner"}),
+        encoding="utf-8",
+    )
+    (plugin_root / "plugin-recipe.json").write_text(
+        json.dumps(
+            {
+                "extends": str(repo_root / "repo-base.json"),
+                "labels": ["from-plugin-recipe"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({"some-plugin@mp": plugin_root}),
+    )
+    data = {"extends": "plugin:some-plugin:plugin-recipe.json"}
+
+    resolved = resolve_extends(data, base_dir=tmp_path / "unrelated")
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "repo-owner",
+        "labels": ["from-plugin-recipe"],
+    }
+
+
+def test_resolve_extends_rejects_a_cyclic_chain_across_plugin_refs(tmp_path, monkeypatch):
+    """A → B → A must raise a clear cyclic-chain error even when the chain
+    crosses between two different plugins' own roots via `plugin:` refs,
+    not just within one repo's own file-path refs."""
+    plugin_a_root = tmp_path / "plugin-a"
+    plugin_b_root = tmp_path / "plugin-b"
+    plugin_a_root.mkdir()
+    plugin_b_root.mkdir()
+    (plugin_a_root / "a.json").write_text(
+        json.dumps({"extends": "plugin:plugin-b:b.json"}), encoding="utf-8"
+    )
+    (plugin_b_root / "b.json").write_text(
+        json.dumps({"extends": "plugin:plugin-a:a.json"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation(
+            {"plugin-a@mp": plugin_a_root, "plugin-b@mp": plugin_b_root}
+        ),
+    )
+
+    with pytest.raises(RegistrarError, match="cyclic reference chain") as excinfo:
+        resolve_extends({"extends": "plugin:plugin-a:a.json"}, base_dir=tmp_path)
+
+    message = str(excinfo.value)
+    a_path = str((plugin_a_root / "a.json").resolve())
+    assert a_path in message
+    assert message.count(a_path) == 2
+
+
+def test_resolve_extends_rejects_a_cyclic_chain_mixing_plugin_and_repo_refs(
+    tmp_path, monkeypatch
+):
+    """The same cyclic guard applies to a chain that mixes a `plugin:` ref
+    with an ordinary repo file-path ref (A, a plugin recipe, extends B, a
+    repo file, which extends back to A)."""
+    plugin_root = tmp_path / "some-plugin"
+    repo_root = tmp_path / "some-repo"
+    plugin_root.mkdir()
+    repo_root.mkdir()
+    (plugin_root / "a.json").write_text(
+        json.dumps({"extends": str(repo_root / "b.json")}), encoding="utf-8"
+    )
+    (repo_root / "b.json").write_text(
+        json.dumps({"extends": "plugin:some-plugin:a.json"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.registrar_recipes.resolve_active_plugins",
+        lambda: _activation({"some-plugin@mp": plugin_root}),
+    )
+
+    with pytest.raises(RegistrarError, match="cyclic reference chain"):
+        resolve_extends({"extends": "plugin:some-plugin:a.json"}, base_dir=tmp_path)
 
 
 def test_resolve_extends_rejects_a_cyclic_chain(tmp_path):
