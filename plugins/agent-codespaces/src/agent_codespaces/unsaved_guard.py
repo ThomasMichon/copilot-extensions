@@ -129,7 +129,7 @@ wl=$(mktemp) && cf=$(mktemp) && fe=$(mktemp) || exit 1
 trap 'rm -f "$wl" "$cf" "$fe"' EXIT
 err() { printf 'CHECKOUT_ERR\t%s\n' "$1"; }
 add() {
-  case "$1" in *$'\n'*|*$'\t'*) err unsafe-path; return 0;; esac
+  case "$1" in *$'\n'*|*$'\t'*|*$'\r'*) err unsafe-path; return 0;; esac
   # A listed checkout that is missing or inaccessible cannot be audited:
   # fail closed (a stale entry blocks until `git worktree prune`).
   [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ] || { err "$1"; return 0; }
@@ -224,23 +224,32 @@ def _int(value: str) -> int:
 
 
 def parse_audit(output: str | None) -> CheckoutAudit:
-    """Parse :func:`audit_command` output. Never raises; incomplete -> unknown."""
-    lines = [ln for ln in (output or "").splitlines() if ln.strip()]
-    if not lines or lines[-1].strip() != _MARK_DONE:
+    """Parse :func:`audit_command` output. Never raises; incomplete -> unknown.
+
+    Records are split only on the protocol's ``\\n`` delimiter (never
+    ``str.splitlines``, which also splits on ``\\r`` and other characters a
+    path may contain), and merging is conservative: a later record never
+    clears an earlier error or dirty state for the same checkout.
+    """
+    lines = (output or "").split("\n")
+    nonempty = [ln for ln in lines if ln.strip()]
+    if not nonempty or nonempty[-1].strip() != _MARK_DONE:
         return CheckoutAudit(known=False, error="audit did not complete")
     checkouts: dict[str, CheckoutState] = {}
-    for line in output.splitlines():
+    for line in lines:
         parts = line.split("\t")
         if parts[0] == "CHECKOUT" and len(parts) >= 5:
             path = "\t".join(parts[4:])
-            if path in checkouts and checkouts[path].error:
-                continue  # an error for this checkout always takes precedence
-            checkouts[path] = CheckoutState(
+            new = CheckoutState(
                 path=path, dirty=parts[1].strip() != "0", ahead=_int(parts[2]),
                 unpushed_branches=_int(parts[3]),
             )
+            existing = checkouts.get(path)
+            if existing is None or existing.clean:
+                checkouts[path] = new
         elif parts[0] == "CHECKOUT_ERR" and len(parts) >= 2:
-            checkouts.setdefault(parts[1], CheckoutState(path=parts[1], error=True))
+            path = "\t".join(parts[1:])
+            checkouts.setdefault(path, CheckoutState(path=path)).error = True
         elif parts[0] == "SAMPLE" and len(parts) >= 3 and parts[1] in checkouts:
             checkouts[parts[1]].sample.append("\t".join(parts[2:]))
     return CheckoutAudit(known=True, checkouts=list(checkouts.values()))

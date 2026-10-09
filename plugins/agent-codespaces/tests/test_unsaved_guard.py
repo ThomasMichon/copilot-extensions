@@ -74,6 +74,22 @@ def test_checkout_error_is_never_overwritten_by_a_clean_record():
     assert [c.path for c in audit.dirty_checkouts] == ["/workspaces/a"]
 
 
+def test_parser_splits_only_on_newline_and_never_clears_bad_states():
+    out = "\n".join([
+        "CHECKOUT\t1\t0\t0\t/workspaces/a\rhidden",   # dirty, CR in path
+        "CHECKOUT\t0\t0\t0\t/workspaces/a",
+        "CHECKOUT\t0\t0\t0\t/workspaces/b",
+        "CHECKOUT_ERR\t/workspaces/b",                  # error AFTER a clean record
+        "CHECKOUT\t1\t0\t0\t/workspaces/c",
+        "CHECKOUT\t0\t0\t0\t/workspaces/c",          # clean never replaces dirty
+        "CHECKOUT_AUDIT=1",
+    ])
+    audit = unsaved_guard.parse_audit(out)
+    bad = {c.path for c in audit.dirty_checkouts}
+    assert bad == {"/workspaces/a\rhidden", "/workspaces/b", "/workspaces/c"}
+    assert not audit.all_clean
+
+
 def test_empty_audit_is_not_clean():
     assert not CheckoutAudit(known=True, checkouts=[]).all_clean
 
