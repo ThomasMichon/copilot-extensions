@@ -292,6 +292,7 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
 
+. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
 if ($env:AGENT_DISPATCH_ALLOW_DOWNGRADE -eq '1') { $Force = $true }
 
@@ -1122,6 +1123,53 @@ function Enter-PluginSnapshotLock {
     return $mutex
 }
 
+function Materialize-DispatchSnapshot {
+    param([string]$SnapshotDir, [string]$PluginDir)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $libraries = [ordered]@{
+        'agent-zdd' = 'zdd'
+        'agent-procutil' = 'agent-procutil'
+        'agent-dropin-registry' = 'dropin-registry'
+        'agent-plugin-resolve' = 'plugin-resolve'
+        'agent-single-instance-lease' = 'single-instance-lease'
+        'agent-plugin-activation' = 'plugin-activation'
+    }
+    $libsDir = Join-Path $SnapshotDir 'libs'
+    New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
+    $project = Join-Path $SnapshotDir 'pyproject.toml'
+    $text = [IO.File]::ReadAllText($project)
+    foreach ($entry in $libraries.GetEnumerator()) {
+        $destination = Join-Path $libsDir $entry.Value
+        if (-not (Test-Path -LiteralPath (Join-Path $destination 'pyproject.toml'))) {
+            $source = Resolve-VendoredLib -LibName $entry.Value -LibRoot $PluginDir
+            if (-not $source) { throw "Cannot locate required snapshot library: $($entry.Value)" }
+            Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        }
+        $old = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
+        $new = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value
+        $text = $text.Replace($old, $new)
+        $nested = Join-Path $destination 'pyproject.toml'
+        [IO.File]::WriteAllText($nested, [IO.File]::ReadAllText($nested).Replace(', editable = true }', ' }'), $utf8)
+    }
+    [IO.File]::WriteAllText($project, $text, $utf8)
+    foreach ($ext in @('ps1', 'sh')) {
+        $name = "installer-engine.$ext"
+        $source = Join-Path (Join-Path $PluginDir 'scripts') $name
+        if (-not (Test-Path -LiteralPath $source)) {
+            $source = Join-Path (Join-Path $PluginDir '..\..\libs\installer-engine') $name
+        }
+        Copy-Item -LiteralPath $source -Destination (Join-Path (Join-Path $SnapshotDir 'scripts') $name) -Force
+    }
+    $sh = Join-Path $SnapshotDir 'scripts\install.sh'
+    [IO.File]::WriteAllText($sh, [IO.File]::ReadAllText($sh).Replace(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"',
+        '. "$SCRIPT_DIR/installer-engine.sh"'), $utf8)
+    $ps1 = Join-Path $SnapshotDir 'scripts\install.ps1'
+    [IO.File]::WriteAllText($ps1, [IO.File]::ReadAllText($ps1).Replace(
+        '. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')',
+        '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')'), $utf8)
+}
+
 function New-PluginBuildSnapshot {
     <# Copy $PluginDir into a durable, version-pinned snapshot under
        $InstallDir/snapshots/<ver>/ and return that path -- so every build
@@ -1130,30 +1178,14 @@ function New-PluginBuildSnapshot {
        An update only ever deletes/replaces the live, swappable marketplace
        payload (~/.copilot/installed-plugins/.../agent-dispatch); a snapshot
        under $InstallDir is immutable once written and is removed only once
-       nothing references it. Confirmed live -- a stuck `uv pip install` build (its PEP 517 backend
-       cwd'd into libs/agent-procutil, directly inside the live payload) and
-       the init.ps1 installer process that spawned it both sat there for
-       hours, and `copilot plugin update agent-dispatch@copilot-extensions`
-       failed outright with os error 32 (ERROR_SHARING_VIOLATION) the entire
-       time.
+       nothing references it. Build subprocesses must not hold the swappable
+       payload open and block an update with ERROR_SHARING_VIOLATION.
 
-       A no-op (returns $PluginDir unchanged) when $PluginDir is ALREADY
-       under $InstallDir -- e.g. this install.ps1 is itself running from a
-       previously-made snapshot, as the self-provisioning binstub's
-       first-use `provision` dispatch does -- avoiding a redundant
-       copy-of-a-copy on the already-safe path.
-
-       Also a no-op for a LOCAL dev checkout (Get-SourceKind returns
-       anything other than 'marketplace'): a checkout's pyproject.toml
-       declares its `[tool.uv.sources]` workspace path deps relative to the
-       monorepo root (e.g. `../../libs/zdd`), which only resolves from the
-       checkout's own location -- copying just $PluginDir's own tree into a
-       flat snapshot would orphan those relative paths, breaking the
-       documented direct-from-worktree install path local testing relies
-       on. Only a marketplace payload (whose packaged pyproject.toml
-       already references its OWN co-located `libs/`) is both safe to
-       snapshot and actually exposed to `copilot plugin update`'s locking
-       hazard -- a local checkout is subject to neither.
+       Existing snapshots are reused without a copy-of-a-copy. Direct local
+       builds retain checkout-relative dependencies and skip snapshotting.
+       -ForStamp materializes a local checkout's dependencies into a unique
+       standalone snapshot too; an unchanged dev version is not an immutable
+       snapshot identity.
 
        -BestEffort (Install-Runtime's own call site): on ANY copy failure
        (disk full, permissions) logs a warning and returns $PluginDir
@@ -1172,9 +1204,11 @@ function New-PluginBuildSnapshot {
         [Parameter(Mandatory)][string]$PluginDir,
         [Parameter(Mandatory)][string]$InstallDir,
         [string]$Version,
-        [switch]$BestEffort
+        [switch]$BestEffort,
+        [switch]$ForStamp
     )
-    if ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
+    $localStamp = $ForStamp -and ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace')
+    if (-not $ForStamp -and (Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
         return $PluginDir
     }
     # Containment root is $InstallDir/snapshots specifically, NOT $InstallDir
@@ -1210,6 +1244,7 @@ function New-PluginBuildSnapshot {
         Write-Skip 'No source version resolved -- building from the live payload (snapshot skipped)'
         return $PluginDir
     }
+    if ($localStamp) { $Version = "$Version-$([Guid]::NewGuid().ToString('N'))" }
     # Lock-free fast path, BEFORE acquiring any mutex: a published snapshot is
     # immutable (see the rename-aside/immutable-publish comment below), so
     # reading it needs no lock at all -- exactly how the binstub's own
@@ -1264,6 +1299,7 @@ function New-PluginBuildSnapshot {
             Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
                 Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
             }
+            Materialize-DispatchSnapshot -SnapshotDir $snapTmp -PluginDir $PluginDir
             # A published snapshot is immutable: Invoke-Stamp's payload-dir
             # marker, and this function's own return value, can be read by a
             # CONCURRENT first-use binstub invocation outside this mutex (the
@@ -1451,6 +1487,21 @@ exit /b %ERRORLEVEL%
     Write-Ok "Fast board binstub: $boardStubPath"
 }
 
+function Test-DispatchVenv {
+    param([string]$Dir, [string]$Python)
+    if (-not (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg') -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $Python -PathType Leaf)) { return $false }
+    $result = Invoke-NativeCapture {
+        & $Python -c 'import os, sys; print(os.path.normcase(os.path.abspath(sys.prefix))); print("1" if sys.prefix != sys.base_prefix else "0")'
+    }
+    $probe = @($result.Output -split '\r?\n')
+    if ($result.ExitCode -ne 0 -or $probe.Count -lt 2 -or $probe[1].Trim() -ne '1') { return $false }
+    $actual = [IO.Path]::GetFullPath($probe[0].Trim()).TrimEnd('\', '/')
+    $expected = [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/')
+    $comparison = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    return [string]::Equals($actual, $expected, $comparison)
+}
+
 function Install-Runtime {
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
@@ -1483,20 +1534,13 @@ function Install-Runtime {
     try {
     $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -BestEffort
 
-    $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-
     # Find a Python interpreter (skip Windows Store aliases that aren't real)
     $pythonCmd = $null
     foreach ($candidate in @('python', 'python3', 'py')) {
         $found = Get-Command $candidate -ErrorAction SilentlyContinue
         if ($found) {
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                $testOut = & $found.Source --version 2>&1
-                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') { $pythonCmd = $found.Source }
-            } catch { }
-            $ErrorActionPreference = $prevEAP
+            $probe = Invoke-NativeCapture { & $found.Source --version }
+            if ($probe.ExitCode -eq 0 -and $probe.Output -match 'Python') { $pythonCmd = $found.Source }
             if ($pythonCmd) { break }
         }
     }
@@ -1507,16 +1551,9 @@ function Install-Runtime {
     }
     Write-Ok "Python: $pythonCmd"
 
-    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        if ($hasWinget) {
-            Write-Step 'uv not found -- installing via winget...'
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            & winget install --id astral-sh.uv --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-            $ErrorActionPreference = $prevEAP
-            $env:PATH = (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine') + ';' + (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User')
-            if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Ok 'uv installed' }
-        }
+    $UvCommand = Ensure-Uv -InstallRoot $InstallDir
+    if (-not $UvCommand) {
+        Write-Warn 'uv acquisition failed -- using Python venv/pip fallback'
     }
 
     foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -1525,7 +1562,7 @@ function Install-Runtime {
     Write-Ok "Directories: $InstallDir"
 
     # -- venv (SAC-trusted signed base python preferred; then uv; then venv) --
-    if (-not (Test-Path $VenvPython)) {
+    if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         $signedBase = $null
@@ -1538,14 +1575,22 @@ function Install-Runtime {
             }
         }
         if ($signedBase -and -not (Test-Path $VenvPython)) {
-            & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+            $signedResult = Invoke-NativeCapture { & $signedBase -m venv --copies $VenvDir }
+            if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
+                Write-Warn "Signed Python venv failed validation (exit $($signedResult.ExitCode)) -- falling back"
+                if (Test-Path -LiteralPath $VenvDir) {
+                    Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
+                }
+            } elseif ($signedResult.ExitCode -ne 0) {
+                Write-Warn "Signed Python exited $($signedResult.ExitCode) after producing a usable venv"
+            }
         }
-        if (-not (Test-Path $VenvPython)) {
-            if (Get-Command uv -ErrorAction SilentlyContinue) {
+        if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
+            if ($UvCommand) {
                 Write-Step 'Creating venv via uv...'
                 Invoke-VersionedSlotClean
-                & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) {
+                $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--allow-existing') -UvCommand $UvCommand
+                if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
                     Write-Step 'uv venv failed -- falling back to python -m venv'
                     & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
                 }
@@ -1555,8 +1600,8 @@ function Install-Runtime {
             }
         }
         $ErrorActionPreference = $prevEAP
-        if (-not (Test-Path $VenvPython)) {
-            Write-Fail "Venv creation failed -- $VenvPython not found"
+        if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
+            Write-Fail "Venv creation failed validation at $VenvDir"
             exit 1
         }
         Write-Ok 'Venv created'
@@ -1590,15 +1635,18 @@ function Install-Runtime {
         # change if it runs first without this -- pass $ZddDir explicitly
         # so an external resolved path is reached too, not just libs/*.
         Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $ZddDir
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
+        if ($UvCommand) {
+            $zddResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $VenvPython, "$ZddDir", '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', '--quiet')
+            $zddOut = $zddResult.Output
+            $zddCode = $zddResult.ExitCode
         } else {
             $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
+            $zddCode = $LASTEXITCODE
         }
         Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $ZddDir
-        if ($LASTEXITCODE -ne 0) {
+        if ($zddCode -ne 0) {
             $ErrorActionPreference = $prevEAP
-            Write-Fail "zdd install failed (exit $LASTEXITCODE)"
+            Write-Fail "zdd install failed (exit $zddCode)"
             if ($zddOut) { Write-Host ($zddOut | Out-String) }
             exit 1
         }
@@ -1633,15 +1681,18 @@ function Install-Runtime {
             exit 1
         }
         Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $libDir
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $libOut = & uv pip install --python $VenvPython "$libDir" --reinstall-package $lib.Pkg --refresh-package $lib.Pkg --quiet 2>&1
+        if ($UvCommand) {
+            $libResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $VenvPython, "$libDir", '--reinstall-package', $lib.Pkg, '--refresh-package', $lib.Pkg, '--quiet')
+            $libOut = $libResult.Output
+            $libCode = $libResult.ExitCode
         } else {
             $libOut = & $VenvPython -m pip install "$libDir" 2>&1
+            $libCode = $LASTEXITCODE
         }
         Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $libDir
-        if ($LASTEXITCODE -ne 0) {
+        if ($libCode -ne 0) {
             $ErrorActionPreference = $prevEAP
-            Write-Fail "$($lib.Display) install failed (exit $LASTEXITCODE)"
+            Write-Fail "$($lib.Display) install failed (exit $libCode)"
             if ($libOut) { Write-Host ($libOut | Out-String) }
             exit 1
         }
@@ -1704,12 +1755,13 @@ function Install-Runtime {
         # Windows path had the identical gap.
         & $scrubArtifacts
         try {
-            if (Get-Command uv -ErrorAction SilentlyContinue) {
+            if ($UvCommand) {
                 $refreshFlags = @()
                 foreach ($pkg in $StaleCacheRefreshPackages) {
                     $refreshFlags += @('--reinstall-package', $pkg, '--refresh-package', $pkg)
                 }
-                $out = & uv pip install --python $VenvPython @refreshFlags $Spec 2>&1 | Out-String
+                $result = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments (@('--python', $VenvPython) + $refreshFlags + @($Spec))
+                return [pscustomobject]@{ Code = $result.ExitCode; Output = $result.Output }
             } else {
                 # The refresh pre-pass's own exit status must gate the real
                 # install: if it fails, letting the plain install below run
@@ -1930,42 +1982,12 @@ function Install-Runtime {
 }
 
 function Write-Manifest {
-    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-    $kind = Get-SourceKind -PluginPath $PluginDir
-    $ver = '0.0.0'
-    $pyproj = Join-Path $PluginDir 'pyproject.toml'
-    if (Test-Path $pyproj) {
-        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
-    }
-    $commit = $null; $branch = $null; $dirty = $false
-    if ($kind -eq 'local') {
-        $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
-        $git = Get-GitInfo -Path $repoRoot
-        $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
-    }
-    $manifest = [ordered]@{
-        schema_version = 3
-        service        = 'agent-dispatch'
-        deployed_at    = (Get-Date -Format 'o')
-        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
-        source         = [ordered]@{
-            kind    = $kind
-            path    = ($PluginDir -replace '\\', '/')
-            repo    = 'copilot-extensions'
-            plugin  = 'agent-dispatch'
-            version = $ver
-            commit  = $commit
-            branch  = $branch
-            dirty   = $dirty
-        }
-        venv           = ($LinkDir -replace '\\', '/')
-        runtime        = 'python'
-    }
-    $tmp = "$manifestPath.tmp"
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
-    Write-Ok "Deploy manifest written (source: $kind)"
+    $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    Write-DeployManifest -Service 'agent-dispatch' -Plugin 'agent-dispatch' `
+        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
+        -GetSourceKind { param($Path) Get-SourceKind -PluginPath $Path } `
+        -GetGitInfo { param($Path) Get-GitInfo -Path (Split-Path -Parent $Path) } `
+        -SourcePathOverride $sourcePath -VersionOverride $SrcVersion
 }
 
 function Register-PickerPivot {
@@ -3549,7 +3571,7 @@ function Invoke-Stamp {
     # and waiting on global. Keeping the two acquisitions here strictly
     # SEQUENTIAL (never nested) makes that AB-BA cycle impossible, regardless
     # of which lock Install-Runtime nests inside the other.
-    $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
+    $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -ForStamp
 
     # Hold ONE lock across the version-ordering guard AND both marker writes
     # (not narrower, independent acquisitions for each): two overlapping

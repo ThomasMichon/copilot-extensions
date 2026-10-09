@@ -1968,6 +1968,16 @@ libraries into the snapshot, rewriting canonical references to snapshot-local
 paths before publishing it. POSIX `stamp` retains its owning-payload pointer;
 release materialization makes that payload self-contained before staging.
 
+`agent-dispatch` uses the same canonical-reference form. Its PowerShell
+snapshots materialize both engine files and all six declared local libraries,
+including snapshot-local, non-editable dependency references. Local-checkout
+`stamp` uses a unique snapshot identity; direct local builds retain their
+checkout paths. The POSIX stamp remains an owning-payload pointer. Dispatch
+owns signed-Python validation/recovery, pre/post-build artifact scrubbing,
+dependency order, optional MCP-extra fallback, launchers and its complete
+coordinator/supervisor lifecycle; only shared acquisition, retry and manifest
+mechanics move into the engine.
+
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine
 files; this is a phased rollout, not a blanket requirement for every runtime

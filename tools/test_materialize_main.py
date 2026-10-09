@@ -1278,13 +1278,15 @@ def test_materialize_nested_uv_editable_refs_refuses_stale_mismatched_content(tm
     assert (stale_dir / "__init__.py").read_text() == "stale = True\n"
 
 
-def test_materialize_installer_engine_ref_into_copies_and_rewrites(tmp_path: Path):
+@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-dispatch"])
+def test_materialize_installer_engine_ref_into_copies_and_rewrites(tmp_path: Path, plugin: str):
+    assert plugin in ier.ADOPTERS
     root = tmp_path / "repo"
     engine = root / "libs" / "installer-engine"
     engine.mkdir(parents=True)
     (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
     (engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
-    consumer = root / "plugins" / "agent-pull-requests"
+    consumer = root / "plugins" / plugin
     (consumer / "scripts").mkdir(parents=True)
     (consumer / "scripts" / "install.sh").write_text(
         '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
