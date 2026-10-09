@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse canonical installer helpers while preserving dispatch lifecycle and standalone snapshots",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
