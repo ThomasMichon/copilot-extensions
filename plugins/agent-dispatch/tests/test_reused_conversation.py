@@ -129,3 +129,31 @@ def test_retired_conversation_never_recovers_via_worktree_resume(monkeypatch):
     assert not any(
         call[1:3] == ["--json", "resume"] for call in calls
     )
+
+
+def test_missing_conversation_retired_marker_fails_closed(monkeypatch):
+    """Coordinator/client version-skew hazard: an older coordinator's
+    reservation response predates ``conversation_retired`` entirely, so the
+    reused-allocation task payload the supervisor builds carries no
+    ``spawn_conversation_retired`` key at all. This must fail CLOSED (treat
+    as retired, create a genuinely fresh conversation) rather than coercing
+    the missing/unknown marker to "not retired" and strict-resuming
+    whatever session is latest in the worktree directory -- which could be
+    the exact conversation an operator rearm just retired."""
+    calls = _transport(monkeypatch)
+    task = {
+        "id": "review-task",
+        "repo": TEST_REPO,
+        "spawn_worktree": "review-worktree",
+        "spawn_worktree_path": "/example/review-worktree",
+        "spawn_worktree_ownership": "reused",
+        "spawn_session_handle": None,
+        # spawn_conversation_retired deliberately absent -- the pre-field
+        # coordinator shape.
+    }
+    ok, handle = make_headless_spawn()(task)
+    assert ok is True
+    assert handle["session"] == "local-body:replacement-conversation"
+    assert any("create" in call for call in calls)
+    assert not any(call[1:3] == ["--json", "resume"] for call in calls)
+

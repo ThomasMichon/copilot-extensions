@@ -591,10 +591,18 @@ def resume_worktree_eligible(task: dict) -> bool:
     letting it proceed would silently resurrect the exact conversation the
     rearm retired instead of starting a genuinely fresh one. Shared by every
     spawn entry point (CLI one-shot ``create --spawn`` and the supervisor's
-    headless factory) so this decision is made exactly once."""
+    headless factory) so this decision is made exactly once.
+
+    ``spawn_conversation_retired`` must be explicitly ``False`` to proceed --
+    a MISSING marker (``None``, from an older coordinator whose reservation
+    response predates this field) is treated as unknown and fails closed
+    (not eligible), the same as an explicit ``True``. Coercing a missing
+    marker to "not retired" would silently re-open the exact resurrection
+    bug this contract exists to close during a coordinator/client version
+    skew window."""
     return (
         task.get("spawn_worktree_ownership") == "reused"
-        and not task.get("spawn_conversation_retired")
+        and task.get("spawn_conversation_retired") is False
     )
 
 
