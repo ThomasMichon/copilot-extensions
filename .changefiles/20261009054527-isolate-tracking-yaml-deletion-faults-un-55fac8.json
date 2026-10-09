@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate tracking YAML deletion faults under the serialized launch-seed removal contract.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

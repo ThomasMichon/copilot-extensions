@@ -221,3 +221,11 @@ encoded commands or initial-prompt transports.
   assertions. All 21 paired-carve tests passed locally.
 - The reporter could not dispatch a fix agent because that workflow is
   disabled (HTTP 422). Claimed the unowned repair rather than enabling it.
+- Repair PR #5920 received approval, passed all required checks, and merged.
+  Pulled forward and continued with its new `dev` CI/full promotion gate.
+- The next full run passed that repaired batch and exposed a removal fixture
+  that still expected the old direct tracking-delete diagnostic (#5923).
+  Narrowed its fault injection to the actual YAML path and verified that
+  deletion was attempted, the record remains, and the serialized launch-seed
+  removal diagnostic preserves the original lock error. Production ordering
+  and safety gates are unchanged; all 33 managed-removal tests passed locally.
