@@ -169,7 +169,7 @@ if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False
             pytest.fail("contender's bounded wait did not return within its own budget")
         assert contender.returncode == 0, err
         assert "RESULT=True" in out, (
-            f"a bounded-wait contender must acquire the lease once the "
+            "a bounded-wait contender must acquire the lease once the "
             f"holder releases it within budget; stdout={out!r} stderr={err!r}"
         )
     finally:
@@ -233,13 +233,17 @@ if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False
         elapsed = time.monotonic() - started
         assert contender.returncode == 0, contender.stderr
         assert "RESULT=False" in contender.stdout, (
-            f"a bounded-wait contender must give up, not hang, once its "
-            f"configured budget elapses while the holder never releases; "
+            "a bounded-wait contender must give up, not hang, once its "
+            "configured budget elapses while the holder never releases; "
             f"stdout={contender.stdout!r} stderr={contender.stderr!r}"
         )
-        assert elapsed < 15, (
+        assert elapsed < 8, (
             f"bounded wait took {elapsed:.1f}s against a 2s budget -- "
-            "the timeout is not actually bounding the wait"
+            "the timeout is not actually bounding the wait (a value this "
+            "high suggests _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT "
+            "stopped reaching the mkdir fallback, which would otherwise "
+            "fall back to its own ~10s internal retry before reporting "
+            "contention)"
         )
         assert elapsed >= 1.5, (
             f"bounded wait took only {elapsed:.1f}s against a 2s budget -- "
