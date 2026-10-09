@@ -70,6 +70,7 @@ def test_direct_same_version_installs_serialize_cleanup_build_and_publication(tm
         pytest.skip("PowerShell is unavailable")
     definitions, root = publication_fixture(tmp_path)
     started = tmp_path / "started"
+    ready = tmp_path / "worker-ready"
     blocked = tmp_path / "blocked"
     attempted = tmp_path / "attempted"
     finished = tmp_path / "finished"
@@ -130,7 +131,8 @@ function Invoke-IndexUvPipInstall {{
     worker = tmp_path / "second.ps1"
     worker.write_text(definitions + f"""
 $Actor = 'second'
-$deadline = [DateTime]::UtcNow.AddSeconds(10)
+[IO.File]::WriteAllText('{ready}', 'ready')
+$deadline = [DateTime]::UtcNow.AddSeconds(30)
 while (-not (Test-Path '{started}')) {{
     if ([DateTime]::UtcNow -gt $deadline) {{ throw 'first installer did not start' }}
     Start-Sleep -Milliseconds 20
@@ -163,6 +165,14 @@ Install-Runtime
         [pwsh, "-NoProfile", "-File", str(worker)], env=environment(tmp_path),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     ) as child:
+        deadline = time.monotonic() + 30
+        while not ready.exists():
+            if child.poll() is not None:
+                stdout, stderr = child.communicate(timeout=5)
+                pytest.fail(f"admission worker exited before readiness:\n{stdout}\n{stderr}")
+            if time.monotonic() >= deadline:
+                pytest.fail("admission worker did not finish startup within 30 seconds")
+            time.sleep(0.02)
         result = run_ps(tmp_path, definitions + f"""
 $Actor = 'first'
 $expectedFailure = $false
@@ -178,7 +188,10 @@ while (-not (Test-Path '{finished}')) {{
 if ($expectedFailure) {{ exit 1 }}
 """)
         stdout, stderr = child.communicate(timeout=25)
-    assert result.returncode == (1 if outcome == "failed" else 0), result.stderr
+    assert result.returncode == (1 if outcome == "failed" else 0), (
+        f"first process:\n{result.stdout}\n{result.stderr}\n"
+        f"second process ({child.returncode}):\n{stdout}\n{stderr}"
+    )
     assert child.returncode == 0, stdout + stderr
     events = (tmp_path / "events").read_text().splitlines()
     if outcome == "superseded":
