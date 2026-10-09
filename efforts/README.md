@@ -12,7 +12,7 @@ that pattern to this repository.
 |--------|--------|--------------|
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
 | [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Draft; independent planning proposal | #5799 |
-| [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Draft; operator-approved scope | #5789 |
+| [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Draft | #5737, #5738, #5740, #5741 |
 | [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; proposal reviewed | #5768, #5769 |
 | [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Active | #5707 |

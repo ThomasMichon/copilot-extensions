@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serially landed per-slice PRs against `dev`
 - **Created:** 2026-10-08
-- **Status:** Draft; operator-approved scope, architecture review pending
+- **Status:** Active; architecture reviewed, runtime implementation pending
 - **Vision:** [machine-fleet](../../../../visions/machine-fleet/README.md):
   `driver-based-fleet-adoption`, `shell-independent-service-control`,
   `discoverable-service-routing`, `standalone-service-installation`
@@ -81,14 +81,18 @@ The detailed sequencing and validation below are agent-recommended.
 ## Plan
 
 ### Phase 1 - Reviewed contract and ownership
-- [ ] Land this effort and [architecture proposal](architecture.md) through
+- [x] Land this effort and [architecture proposal](architecture.md) through
   actual upstream review before runtime implementation.
 - [ ] Confirm package/executable placement against existing shared libraries,
   service authorities and the standalone-index contract. Add no marketplace
   plugin merely to supervise the services.
+  Shared contracts and the static adapter now have their canonical locations;
+  standalone controller/connector distribution placement remains Phase 2 work.
 - [ ] Define versioned driver, connector registration, service offer and routing
   schemas, including capability-honest unavailable/unsupported outcomes.
-- [ ] Bind the static driver to an explicit `agent-ssh` target selection with
+  Driver/registration/offer/request records are implemented in this slice;
+  response adapters and their operation-specific schemas remain Phase 3 work.
+- [x] Bind the static driver to an explicit `agent-ssh` target selection with
   canonical identities and provenance; preserve provider-owned reachability.
 
 ### Phase 2 - Standalone controller and connector
@@ -174,3 +178,67 @@ They remain vision deltas, not features claimed by this routing foundation.
 - Verified target effort adoption and created an isolated upstream worktree.
 - No portable runtime, live enrollment, provider lease or service migration was
   performed by this plan-authoring slice.
+
+### 2026-10-08 - Architecture gate passed
+- #5792 received an actual Copilot APPROVED verdict for head `eb1113ba0`.
+  The first provider merge was refused while the required
+  `workflow-lockdown-guard` was queued; it was not bypassed.
+- After the required check passed, #5792 squash-merged into `dev`. Verified
+  provider state is MERGED at `2026-10-08T23:39:36Z`.
+- Only the plan-publication item is closed. Package placement, schemas, static
+  driver integration and every runtime/validation item remain actionable.
+  The implementation umbrella #5789 stays open.
+
+### 2026-10-08 - Contract implementation started
+- Campaign owner transferred the remaining Phase 1 contract slice to
+  Implementation owner under #5789, in a separate managed implementation
+  worktree. The post-merge approval journal was carried into that worktree.
+- Selected a standard-library-only `agent-fleet-contracts` shared package.
+  The static driver remains owned by `agent-ssh`: it describes explicit
+  selections from the profile emitter's normalized source records and never
+  imports another provider, probes SSH, enrolls or offers managed lifecycle.
+- Request envelopes retain the existing index search parameters; response
+  adapters, authentication and resident controller/connector lifecycle remain
+  later implementation work, not implied by this contract slice.
+- Implemented immutable, bounded records with strict schema/version/type/key
+  checks, duplicate rejection, UTF-8/JSON/query limits, expiry and current-offer
+  identity/generation matching. Parsing does not authenticate or authorize.
+- Added a real `fleet-targets` CLI roundtrip and no-probe/no-profile/no-process
+  checks. Canonical library tests are collected in the consumer's CI lane.
+- Validation so far: 86 pure contract tests and 14 targeted static-driver tests
+  pass; standalone stdlib-only import and self-contained release materialization
+  pass. Lint, install-contract, headless-launch, changefile and vendoring guards
+  pass.
+- Broader SSH validation exposed the new dependency missing from first-use
+  snapshot staging; wired it through both installers, snapshot completeness and
+  fixtures. Waited behind other live host-admitted test runs rather than clearing
+  their locks or processes. The repaired first-use/contract selection passes
+  (103 passed, 2 platform skips).
+- The full suite exposed two POSIX manifest harnesses selecting Windows'
+  WSL launcher with unconverted native paths. Kept these shell-specific cases
+  on native POSIX and retained their real PowerShell counterparts on Windows.
+  First-use snapshot builds now carry an explicit 120-second test budget instead
+  of being killed by the unrelated 30-second default.
+- Final full SSH suite: 304 passed, 31 expected platform/optional skips using
+  freshly installed shared-library code and normal default test budgets.
+  Opaque source labels retain spaces; route checks accept the same explicitly
+  configured TTL policy as registration acceptance.
+- Validation tiers: pure unit, actual CLI roundtrip, self-contained release
+  materialization and Windows snapshot-only first-touch install exercised.
+  Live external-venue tests are not applicable to this no-network description
+  command; CDE/provider admission and migration remain separately blocked.
+  Native POSIX installer execution remains the Linux CI lane's obligation,
+  not a claim made from the Windows run.
+- Implementation PR #5824 review identified two real integration gaps: raw-byte
+  YAML decoding could admit a different source encoding than the emitter, and
+  the projected fast suite lacked guard-lane attribution. Decode both bounded
+  sources as UTF-8 before YAML parsing; add UTF-16/32 rejection regressions for
+  both files and guard markers to the projection and static-driver contract tests.
+- Fresh guard-lane verification: 116 passed, 4 native-platform skips. This
+  collects the canonical pure suite as well as static-driver/CLI contracts.
+- Copilot APPROVED the corrected production head. Linux CI then exposed two
+  isolated pip-fallback fixtures still omitting the newly required library
+  resolver and source directory (330 passed, 7 skips, 2 fixture failures).
+  Update both local-vendored and canonical-source harnesses and assert that
+  `fleet-contracts` reaches pip's arguments. Do not merge around this failed CI.
+  Local supported fallback checks pass; native shell proof is the next CI gate.

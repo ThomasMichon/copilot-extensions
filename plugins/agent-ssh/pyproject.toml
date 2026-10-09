@@ -20,9 +20,11 @@ dependencies = [
     "agent-procutil",
     "agent-dropin-registry",
     "agent-remote-login-shell",
+    "agent-fleet-contracts",
 ]
 
 [tool.uv.sources]
+agent-fleet-contracts = { path = "../../libs/fleet-contracts", editable = true }
 # Shared Windows-headless / detached process-spawn kwargs. This is a
 # `uv`-editable canonical reference (vendor-pointer-generalization effort,
 # Phase 1 -- converted early as a prerequisite for `ssh-manager`'s own
