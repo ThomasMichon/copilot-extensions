@@ -1917,6 +1917,16 @@ if (-not $noMux) {
     $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
+    function Remove-AwPaneArgsFile([string]$Path) {
+        try {
+            [IO.File]::Delete($Path)
+        } catch [IO.IOException], [UnauthorizedAccessException] {
+            Write-SetupLog (
+                "Could not remove pane argument handoff; retained for expiry: " +
+                $_.Exception.Message
+            ) 'WARN'
+        }
+    }
     $maxCreateAttempts = 3
     $retryDelayMs = 1000
     $totalCreateAttempts = 0
@@ -2003,7 +2013,7 @@ if (-not $noMux) {
 
             Stop-AwOwnedPsmuxSession $sessName
             if ($paneArgsFile) {
-                [IO.File]::Delete($paneArgsFile)
+                Remove-AwPaneArgsFile $paneArgsFile
             }
             $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
             Write-SetupLog (
@@ -2063,7 +2073,7 @@ if (-not $noMux) {
             }
             if (Test-Path -LiteralPath $paneArgsFile) {
                 Stop-AwOwnedPsmuxSession $sessName
-                [IO.File]::Delete($paneArgsFile)
+                Remove-AwPaneArgsFile $paneArgsFile
                 if ($ahpTokenFile) { [IO.File]::Delete($ahpTokenFile) }
                 Write-AwMuxFailure -Reason 'pane_args_handoff_failed' -ExitCode 3
                 Write-Error 'Pane did not consume its argument handoff.' -ErrorAction Continue

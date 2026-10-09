@@ -75,4 +75,7 @@ def cleanup_mux_pane_args(argv: list[str]) -> None:
             and not _is_link_or_junction(root)
             and not _is_link_or_junction(path)
         ):
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                output.warn(f"Could not remove pane argument handoff; retained for expiry: {exc}")

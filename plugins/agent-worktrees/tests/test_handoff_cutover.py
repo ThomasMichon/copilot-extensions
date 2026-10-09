@@ -366,8 +366,8 @@ class TestBuildMuxNewWindowArgv:
 # â”€â”€ mux_new_window / mux_retire_pane (subprocess mocked) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestMuxNewWindow:
     @pytest.mark.parametrize("launch", [sessions.mux_new_window, sessions.mux_new_session])
-    @pytest.mark.parametrize("failure", ["rejected", "missing_binary", "timeout"])
-    def test_failed_manifest_ownership(self, tmp_path, monkeypatch, launch, failure):
+    @pytest.mark.parametrize("failure", ["rejected", "missing_binary", "timeout", "locked_manifest"])
+    def test_failed_manifest_ownership(self, tmp_path, monkeypatch, capsys, launch, failure):
         wrapper = tmp_path / "pane-wrapper.ps1"
         wrapper.write_text("# test\n")
         wrapper.with_name("pane-launch.ps1").write_text("# test launcher\n")
@@ -386,11 +386,23 @@ class TestMuxNewWindow:
             return subprocess.CompletedProcess(argv, 1, "", "rejected")
 
         monkeypatch.setattr(subprocess, "run", spawn)
+        original_unlink = Path.unlink
+        if failure == "locked_manifest":
+            def unlink(path, *args, **kwargs):
+                if path == manifest:
+                    raise PermissionError("sharing violation")
+                return original_unlink(path, *args, **kwargs)
+
+            monkeypatch.setattr(Path, "unlink", unlink)
         try:
             result = launch("id", str(tmp_path), ["program"], mux="psmux")
             assert not result["ok"]
-            assert manifest.exists() == (failure == "timeout")
+            assert manifest.exists() == (failure in {"timeout", "locked_manifest"})
+            if failure == "locked_manifest":
+                assert result["error"] == "rejected"
+                assert "retained for expiry" in capsys.readouterr().out
         finally:
+            monkeypatch.setattr(Path, "unlink", original_unlink)
             sessions.cleanup_mux_pane_args(argv)
 
     def test_success_returns_new_pane(self, monkeypatch):

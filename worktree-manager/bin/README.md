@@ -30,6 +30,8 @@ of the `worktree-manager-control-plane` effort.
   Python pane-command generation, preserving delayed startup within that grace period.
   Cleanup is limited to transport-named files directly in that directory and
   refuses symlink/junction traversal.
+  A cleanup sharing violation logs a warning and retains the file for expiry
+  rather than replacing the original launch failure or interrupting retries.
 - `session-options.ps1` / `session-options.sh` — per-session status bar +
   behaviors that `launch-session.ps1`/`.sh` stamp onto each mux session.
   `launch-session.ps1` dot-sources `session-options.ps1` via a

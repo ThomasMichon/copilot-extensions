@@ -268,6 +268,39 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
     assert all(not Path(path).exists() for path in paths)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows file sharing contract")
+def test_launcher_locked_cleanup_logs_and_preserves_failure_path(tmp_path):
+    source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
+    start = source.index("    function Remove-AwPaneArgsFile")
+    end = source.index("    $maxCreateAttempts", start)
+    script = tmp_path / "locked-cleanup.ps1"
+    script.write_text(
+        "$script:warnings=@()\n"
+        "function Write-SetupLog($message,$level) { $script:warnings+=@($message) }\n"
+        + source[start:end]
+        + "\n$stream=[IO.File]::Open($args[0],[IO.FileMode]::Open,"
+        "[IO.FileAccess]::Read,[IO.FileShare]::None)\n"
+        "try { Remove-AwPaneArgsFile $args[0]; $retained=Test-Path -LiteralPath $args[0] }"
+        " finally { $stream.Dispose() }\n"
+        "Remove-AwPaneArgsFile $args[0]\n"
+        "[pscustomobject]@{retained=$retained; removed=(-not (Test-Path -LiteralPath $args[0]));"
+        " warnings=@($script:warnings)} | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "locked.json"
+    manifest.write_text("{}")
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script), str(manifest)],
+        capture_output=True, text=True, timeout=15, env=_test_env(tmp_path),
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    state = json.loads(result.stdout)
+    assert state["retained"] and state["removed"]
+    assert len(state["warnings"]) == 1
+    assert "retained for expiry" in state["warnings"][0]
+
+
 @pytest.mark.skipif(
     os.name != "nt" or os.environ.get("PSMUX_FILE_LAUNCH_E2E") != "1",
     reason="opt-in real Windows PSMux consumer check",

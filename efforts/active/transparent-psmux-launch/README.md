@@ -159,3 +159,7 @@ encoded commands or initial-prompt transports.
 - Added a real resident-loop regression: one eligible loop iteration invokes
   expiry before mux reconciliation, removes an expired orphan and preserves a
   pending manifest. The isolated loop test passed.
+- Made rejection cleanup tolerate Windows sharing violations with an explicit
+  warning and retention for expiry. Python preserves its original structured
+  failure; PowerShell continues its retry/failure path. Handoff/lifecycle tests:
+  149 passed; real file-lock, retry and concurrent-consumer checks: three passed.
