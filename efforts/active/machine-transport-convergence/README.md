@@ -238,7 +238,7 @@ identity authority: reconcile `machine-transport` with #5689's
 - The #5689 owner had paused in draft because rebasing exposed the duplicate
   identity library and they believed Phase 2 had to land first. Explicit
   prerequisite comments corrected the order before implementation resumed.
-  Negotiation as **ThomasMichon (MSFT)** with **ThomasMichon (Home)** agreed
+  Negotiation between the campaign owner and the identity-PR owner agreed
   direction (1): retire the standalone duplicate and compose the host/WSL
   execution contract with the existing `machine-transport` identity primitives.
   No separate #5741 design PR blocks #5689. Actual WSL evidence, native-host
@@ -310,8 +310,10 @@ identity authority: reconcile `machine-transport` with #5689's
 - Harness projection reconciliation is in `gim-home/odsp-web-harness#845`.
   Its fifteen-file diff changes only projection provenance versions and their
   derived hashes; installed templates and guidance behavior remain unchanged.
-  Local synchronization and harness lint passed; review recommends approval
-  with zero findings. Required CI and merge remain pending.
+  Local synchronization and harness lint passed; review recommended approval
+  with zero findings. Required CI passed, #845 merged as
+  `99c6f69839a2deb8d0904063149dde0c6c605663`, and its dedicated worktree
+  finalized through the normal lifecycle.
 - The new exhaustive workflow's first live run, `37914963861`, failed on both
   platforms during action setup, before running tests: `setup-uv@v9` does not
   resolve. Follow-up #5905 uses the verified `v9.0.0` tag already used by the
@@ -320,3 +322,24 @@ identity authority: reconcile `machine-transport` with #5689's
 - No broader completion is claimed. Bridge review/merge, the exhaustive lane,
   dependent identity consumers, remaining inventory and deployment evidence
   remain campaign gates.
+
+### 2026-10-09 - Bridge current-head review corrections
+- Remote operations now require one case-insensitive exact SSH-environment
+  alias for every multi-environment machine, including uppercase keys,
+  machine aliases and hostnames. No machine-identity spelling silently chooses
+  a default environment for these operations. Real-resolver regressions prove
+  rejection and exact-alias acceptance; legacy key-as-environment-alias
+  precedence remains covered in both cases.
+- Local project coverage now selects the same default environment as spawning.
+  Loopback metadata uses that same selection too. Merge-path regressions cover
+  omitted environments, while native Linux versus default WSL checks prove
+  that remote execution does not incorrectly suppress a local project.
+- Removed unnecessary account-profile qualifiers from the earlier public
+  journal entry; coordination records identify participants by campaign roles.
+- Targeted remote-operation and convergence contracts: **91 passed, 1 skipped**
+  before the final additional default-WSL and uppercase-key assertions.
+  The subsequent full Bridge run passed all eight contained sub-suites,
+  including those assertions, with platform skips reported by the runner.
+  Touched-code lint, exact module ceilings and whitespace checks passed.
+- #5905 merged as `867cc20eaa8faad3c6be62e80a144f29372f172b`.
+  The follow-up promotion and corrected exhaustive live run remain outstanding.

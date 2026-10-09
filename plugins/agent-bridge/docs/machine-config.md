@@ -180,6 +180,12 @@ Windows and WSL on the same machine are not collapsed into one execution venue.
 Legacy missing SSH aliases still default to the machine key, missing shells to
 `bash`; explicit empty values are not rewritten.
 
+Remote Bridge operations require a unique SSH-environment alias whenever a
+machine has multiple environments. A machine key, alias or hostname does not
+choose an environment implicitly, regardless of casing; exact SSH aliases are
+matched case-insensitively. Static agents retain the defaults above, and local
+registry coverage uses the same selected environment as actual spawning.
+
 ### SSH Alias Convention
 
 The `alias` field must match an entry in `~/.ssh/config`. Agent-bridge

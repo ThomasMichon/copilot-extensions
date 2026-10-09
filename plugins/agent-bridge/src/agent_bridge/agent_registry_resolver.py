@@ -719,9 +719,15 @@ class AgentResolver(_ProviderDiscoveryMixin):
             machine, forced_env = self._resolve_machine(config.host, config.ssh_environment)
         except ValueError:
             return False
+        environment = forced_env or (
+            machine.get_ssh_env(config.ssh_environment)
+            if config.project
+            else machine.get_spawnable_ssh_env(config.ssh_environment)
+        )
         return bool(
             machine.key == self._local_machine.key
-            and (forced_env.name if forced_env else config.ssh_environment) == self._local_platform
+            and environment
+            and environment.name == self._local_platform
         )
 
     def _agent_to_dict(self, config: AgentConfig) -> dict[str, Any]:

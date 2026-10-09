@@ -248,8 +248,8 @@ def _find_covering_agent(
             log.warning("Cannot determine local coverage for agent '%s': %s", name, exc)
             continue
         if target_machine and target_machine.key == machine.key:
-            agent_env = (forced_env.name if forced_env else agent.ssh_environment or "").lower()
-            if agent_env == env_name:
+            environment = forced_env or target_machine.get_ssh_env(agent.ssh_environment)
+            if environment and environment.name.lower() == env_name:
                 return name
     return None
 

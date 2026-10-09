@@ -124,15 +124,20 @@ def test_duplicate_local_hostnames_do_not_select_a_machine(monkeypatch, caplog):
 
 
 @pytest.mark.parametrize("host", ["FRIENDLY", "OS-BOX", "Build Box", "BOX-LINUX"])
-def test_registry_assembly_suppresses_equivalent_local_project(monkeypatch, host):
+@pytest.mark.parametrize("ssh_environment", ["linux", None])
+def test_registry_assembly_suppresses_equivalent_local_project(monkeypatch, host, ssh_environment):
     from types import SimpleNamespace
 
     from agent_bridge import agent_registry
     from agent_bridge.agent_registry_common import AgentConfig
 
     machines = _machines()
+    if ssh_environment is None:
+        machines["box"].ssh_environments = [
+            env for env in machines["box"].ssh_environments if env.name != "wsl"
+        ]
     agents = parse_agent_registry({"explicit-worker": {
-        "host": host, "project": "example-project", "ssh_environment": "linux",
+        "host": host, "project": "example-project", "ssh_environment": ssh_environment,
     }})
     monkeypatch.setattr("socket.gethostname", lambda: "os-box")
     monkeypatch.setattr(agent_registry, "_detect_platform", lambda: "linux")
@@ -157,3 +162,60 @@ def test_registry_assembly_suppresses_equivalent_local_project(monkeypatch, host
     assert resolver is not None
     assert list(resolver.agents) == ["explicit-worker"]
     assert resolver.resolve("explicit-worker").type == "local"
+    assert resolver._is_local_loopback_agent(resolver.agents["explicit-worker"])
+
+
+@pytest.mark.parametrize("platform,target_type,covering_agent", [
+    ("linux", "ssh", None), ("wsl", "local", "explicit-worker"),
+])
+def test_registry_coverage_uses_actual_default_environment(monkeypatch, platform, target_type, covering_agent):
+    from agent_bridge import agent_registry
+    from agent_bridge.agent_registry_common import AgentConfig
+    from agent_bridge.agent_registry_topology import _find_covering_agent
+
+    machines = _machines()
+    monkeypatch.setattr("socket.gethostname", lambda: "os-box")
+    monkeypatch.setattr(agent_registry, "_detect_platform", lambda: platform)
+    agents = parse_agent_registry({"explicit-worker": {
+        "host": "FRIENDLY", "project": "example-project",
+    }})
+    local_agent = AgentConfig(name="example-project", project="example-project")
+    assert _find_covering_agent(local_agent, agents, machines) == covering_agent
+    resolver = AgentResolver(agents, machines)
+    assert resolver.resolve("explicit-worker").type == target_type
+    assert resolver._is_local_loopback_agent(agents["explicit-worker"]) == (target_type == "local")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["box", "BOX", "friendly", "FRIENDLY", "OS-BOX"])
+async def test_remote_operations_require_environment_alias_for_every_machine_identity(monkeypatch, host):
+    from agent_bridge.remote_errors import RemoteBridgeError
+    from agent_bridge.remote_operations import RemoteOperationService
+
+    monkeypatch.setattr("socket.gethostname", lambda: "elsewhere")
+    service = RemoteOperationService(AgentResolver({}, _machines()))
+    with pytest.raises(RemoteBridgeError) as exc:
+        await service._lease(host)
+    assert (exc.value.status, exc.value.code) == (400, "ambiguous_host")
+    assert exc.value.details["ssh_aliases"] == ["box-win", "box-linux", "box-wsl"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host,platform", [
+    ("BOX-WIN", "windows"), ("BOX-LINUX", "linux"), ("BOX-WSL", "linux"),
+])
+async def test_remote_operations_accept_case_insensitive_exact_environment_alias(monkeypatch, host, platform):
+    from agent_bridge.remote_operations import RemoteOperationService
+
+    monkeypatch.setattr("socket.gethostname", lambda: "elsewhere")
+    captured = {}
+    lease = object()
+
+    async def acquire(alias, remote_platform, **kwargs):
+        captured.update(alias=alias, remote_platform=remote_platform)
+        return lease
+
+    monkeypatch.setattr("agent_bridge.carrier.acquire_remote_carrier", acquire)
+    service = RemoteOperationService(AgentResolver({}, _machines()))
+    assert await service._lease(host) is lease
+    assert captured == {"alias": f"carrier:{host.lower()}", "remote_platform": platform}
