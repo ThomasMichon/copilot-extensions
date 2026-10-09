@@ -84,10 +84,10 @@ def test_cleanup_ownership_probe_failure_closes_unclaimed_pidfd(
 def test_cleanup_timeout_is_enforced_during_a_no_add_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Neither candidate is owned, so no descendant is ever added to `frozen`
-    # -- before the fix, a slow scan like this could run arbitrarily far past
-    # the requested cleanup deadline without ever raising, because the
-    # deadline was only checked after a pass that added something.
+    # Neither candidate is owned, so no descendant is ever added to `frozen`;
+    # the deadline must still be checked per /proc entry during this no-add
+    # scan, not only after a pass that added something, so a slow or large
+    # scan can never silently run past the requested cleanup deadline.
     backend = LinuxBackend.__new__(LinuxBackend)
     backend.manager_pid = 999
     references = {pid: Reference(pid, []) for pid in (100, 101, 102)}
