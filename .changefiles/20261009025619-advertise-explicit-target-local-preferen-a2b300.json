@@ -1,0 +1,9 @@
+{
+  "comment": "Advertise explicit target-local preference launcher templates with discovered execution-instance binding",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

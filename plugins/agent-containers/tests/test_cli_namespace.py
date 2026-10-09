@@ -120,11 +120,15 @@ def test_namespace_recreate_reports_post_removal_failure(capsys):
     }
 
 
-def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
+@pytest.mark.parametrize("wrapper", [False, True])
+def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrapper):
+    from agent_containers.session_host_context import TrustedContext
+
+    command = ("{{target_preference_launcher}} " if wrapper else "") + "copilot --acp --stdio"
     config = types.SimpleNamespace(
         relay_port=9857,
         credentials_for=lambda fleet: (True, True),
-        acp_command_for=lambda fleet: "copilot --acp --stdio",
+        acp_command_for=lambda fleet: command,
     )
     fleet = types.SimpleNamespace(security_profile="trusted")
     ssh = SSHConfig(
@@ -136,7 +140,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
     with (
         patch(
             "agent_containers.__main__._trusted_session_host_context",
-            return_value=(config, fleet, "vscode", "/workspaces/example"),
+            return_value=TrustedContext(config, fleet, "vscode", "/workspaces/example", "instance-fixture"),
         ),
         patch("agent_containers.__main__.prepare_ssh_config", return_value=ssh),
         patch("agent_containers.__main__.cleanup_remote_envs"),
@@ -168,7 +172,11 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["reverse_forwards"] == ["9857:127.0.0.1:61234"]
     assert result["remote_command"].startswith("source /tmp/")
-    assert result["acp_command"] == "copilot --acp --stdio"
+    assert result["acp_command"] == command
+    assert result["execution_instance"] == "instance-fixture"
+    assert result["preference_wrapper"] == (
+        {"version": 1, "launcher": "{{target_preference_launcher}}"} if wrapper else None
+    )
     assert "github-secret" not in json.dumps(result)
     assert "relay-secret" not in json.dumps(result)
     staged = write_env.call_args.args[2]

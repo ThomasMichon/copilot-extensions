@@ -1,0 +1,48 @@
+{
+  "captured_from": {
+    "commit": "d834b9f4dbaf250f349fde3bf878836402f8b5cc",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 1,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_preferences.py",
+    "source_git_blob": "56533e7a93af7a6ced8e3bdc145b95fb0d5c46bd",
+    "source_sha256": "69563733d2af36b8153c1227f9d96a53180919f4e4f67cc9369c481fe0d6581c"
+  },
+  "keys": {"model": "model", "effortLevel": "reasoning_effort", "contextTier": "context"},
+  "flags": {"--model": "model", "--reasoning-effort": "reasoning_effort", "--context": "context"},
+  "source_policies": ["caller-settings", "target-settings"],
+  "cases": [
+    {
+      "name": "executing-user",
+      "settings": {"model": "target", "effortLevel": "medium", "contextTier": "long_context"},
+      "argv": ["copilot"],
+      "env": {},
+      "status": "resolved",
+      "values": {"model": "target", "reasoning_effort": "medium", "context": "long_context"}
+    },
+    {
+      "name": "missing-is-not-caller-fallback",
+      "settings": null,
+      "argv": ["copilot"],
+      "env": {},
+      "status": "missing",
+      "values": {}
+    },
+    {
+      "name": "explicit-profile",
+      "settings": {"model": "target", "effortLevel": "medium"},
+      "argv": ["copilot", "--model", "local"],
+      "env": {},
+      "status": "resolved",
+      "values": {"model": "local", "reasoning_effort": "medium"}
+    },
+    {
+      "name": "intentional-native-provider",
+      "settings": {"model": "target", "effortLevel": "medium"},
+      "argv": ["copilot"],
+      "env": {"COPILOT_OFFLINE": "1"},
+      "status": "resolved",
+      "values": {"reasoning_effort": "medium"},
+      "provider_selected": true
+    }
+  ]
+}

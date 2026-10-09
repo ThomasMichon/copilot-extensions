@@ -36,7 +36,6 @@ from . import claim_provider_cli, rescue_capture_cli
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
-    TRUSTED_PROFILE,
     ContainersConfig,
     FleetConfig,
     load_config,
@@ -429,39 +428,9 @@ def _cmd_installer_readiness() -> int:
 
 def _trusted_session_host_context(name: str):
     """Resolve a trusted fleet member without launching its Session Host."""
-    from .lifecycle import get_container, inspect_container
+    from .session_host_context import resolve_context
 
-    config = load_config()
-    info = get_container(config, name)
-    if info is None:
-        raise RuntimeError(
-            f"Container '{name}' is not a discovered fleet member"
-        )
-    if info.state != "running":
-        raise RuntimeError(
-            f"Container '{name}' is not running (state={info.state!r})"
-        )
-    fleet = config.fleets.get(info.fleet or "")
-    if fleet is None:
-        raise RuntimeError(
-            f"Container '{name}' has no matching fleet configuration"
-        )
-    actual_profile = (
-        ((inspect_container(name).get("Config") or {}).get("Labels") or {})
-        .get(SECURITY_PROFILE_LABEL)
-    )
-    if (
-        fleet.security_profile != TRUSTED_PROFILE
-        or actual_profile != TRUSTED_PROFILE
-    ):
-        raise RuntimeError(
-            f"Container '{name}' is not exact trusted/trusted posture "
-            f"(configured={fleet.security_profile!r}, live={actual_profile!r}); "
-            "Session Host projection is trusted-fleet only"
-        )
-    user = fleet.exec_user or config.exec_user
-    workspace = fleet.workspace_folder or config.workspace_folder
-    return config, fleet, user, workspace
+    return resolve_context(name, load_config())
 
 
 def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
@@ -475,7 +444,16 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     )
     from .relay_provider import token_for
 
-    config, fleet, user, workspace = _trusted_session_host_context(args.name)
+    context = _trusted_session_host_context(args.name)
+    config, fleet, user, workspace = context
+    acp_command = config.acp_command_for(fleet)
+    launcher_token = "{{target_preference_launcher}}"
+    token_count = acp_command.count(launcher_token)
+    if token_count > 1:
+        raise ValueError("target preference template requires exactly one launcher token")
+    instance_id = getattr(context, "instance_id", "")
+    if token_count and not instance_id:
+        raise ValueError("target preference launcher requires a discovered execution instance")
     ssh_config = prepare_ssh_config(args.name, user)
     cleanup_remote_envs(args.name, user)
     launch_env = container_environment(args.name, user)
@@ -511,7 +489,6 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         )
 
     remote_env = write_remote_env(args.name, user, launch_env)
-    acp_command = config.acp_command_for(fleet)
     remote_command = build_remote_command(
         acp_command,
         remote_env,
@@ -525,6 +502,10 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         "acp_command": acp_command,
         "remote_command": remote_command,
         "remote_env": remote_env,
+        "execution_instance": instance_id or None,
+        "preference_wrapper": (
+            {"version": 1, "launcher": launcher_token} if token_count else None
+        ),
         "reverse_forwards": reverse_forwards,
         "state_command": [*payload_command_argv(), "session-host-state", args.name],
     }))

@@ -52,15 +52,77 @@ prefix. Legacy clients still read that prefix. New clients validate version,
 shape, size and child binding; a legacy host or invalid receipt is an
 unavailable capability, **never permission to use caller settings**.
 
-Target-default inheritance remains held until a target-local attestor supplies
-verified execution-context authority; this is a separate wrapper-authority
-follow-up, not a guessed path/name mapping. Configured executables, shell
+Target-default inheritance requires a target-local attestor, not a guessed
+path/name mapping. Unattested configured executables, shell
 commands, `.cmd` wrappers and custom scripts report `unsupported`. Their
 explicit request/profile selections still
 work when ACP verifies them; target-settings inheritance itself is not claimed.
 Without a resolvable model intent, a new target-mode session fails rather than
 becoming ready on an unrelated agent default. No transport is
 converted to another hosting architecture by this feature.
+
+## Target-local container launcher
+
+Wrapper-authority **v1** is an explicit option for an exact trusted/trusted
+Linux container using the existing SSH Session Host route. Place
+`{{target_preference_launcher}}` at the **final direct execution point** in
+the operator-owned `acp_command`, before the Copilot program:
+
+```yaml
+acp_command: >-
+  export PROXY_MODE=configured;
+  {{target_preference_launcher}} copilot --acp --stdio
+```
+
+The token is a declaration that the prefix and final program are trusted
+target-local code, and that the final program preserves the declared execution
+context. It is not recognition of a basename, a shell parser, sandbox expansion,
+or hardware attestation. Do not put it in a pipe, subshell, quoted argument, or
+another identity-changing wrapper. Keep authentication/proxy/workspace setup
+**before** the token. Appended caller flags cannot opt a command into authority.
+Legacy commands and the public caller-settings default remain unchanged.
+Restricted provider-exec, native Windows, and opaque launchers do not gain this
+capability.
+
+`session-host-prepare` advertises `preference_wrapper` with `version: 1` and
+`launcher: "{{target_preference_launcher}}"`, together with its discovered
+`execution_instance` and configured execution user. Missing, mismatched, or
+unadvertised bindings refuse an attested launch. The bridge stages its
+content-addressed stdlib-only Host bundle through the existing transport;
+there is no live installation or settings provisioning.
+
+At the terminal token, an isolated `python -I -S` component reads the final
+execution user's effective HOME/settings, UID, working directory, and Linux
+namespace facts. The Host owns a private inherited socket and per-launch nonce.
+It verifies component digest, selected instance/user, child PID/start identity,
+namespace and workspace binding before consenting to PID-preserving exec.
+Binding variables and the socket are removed before the agent starts. A
+timeout, malformed receipt, binding mismatch or missing inherited model/effort
+defaults refuses startup; no caller settings are substituted.
+
+The optional HELLO tail carries **receipt v2**: candidate status/values/sources,
+intentional-provider selection, and `authority` (`kind: wrapper-v1`, component
+`digest`, `mode`, hashed selected `target`, process `start`, and `space`).
+`space` contains Linux platform/UID and hashes of namespace, effective HOME and
+cwd, not raw paths, user names, credentials or the nonce. The 16-byte legacy
+HELLO prefix/envelope is unchanged. The frontend requires the matching v2
+capability for an attested launch and checks the selected instance binding.
+HTTP protocol 27 alone does not prove wrapper availability.
+
+Fresh inherited defaults require a readable settings file with model/effort
+intent. Explicit model requests or declared local/native profiles can instead
+provide their own intent; missing settings then remain visibly missing, not
+claimed defaults. Caller-mode and confirmed resume/load use proof-only
+`selection` authority, so deleted/changed settings cannot override a confirmed
+selection. All required choices still need actual offered ACP current/readback
+values; the wrapper receipt does not make ignored CLI flags effective.
+Context has the same advertised-option limitation described below.
+
+Execution namespaces are independent: Windows, WSL and containers never share
+HOME, registrations, defaults or ownership merely because of a physical host.
+The launcher uses its explicitly selected container instance and target-local
+facts. It does not infer locality, allocate across registries, copy caller
+settings, or remap home-directory paths.
 
 An intentionally selected provider (`COPILOT_PROVIDER_BASE_URL` or
 `COPILOT_OFFLINE`) does not inherit an unrelated settings-file model.

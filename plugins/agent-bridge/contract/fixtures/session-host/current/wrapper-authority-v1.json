@@ -1,0 +1,53 @@
+{
+  "captured_from": {
+    "commit": "d834b9f4dbaf250f349fde3bf878836402f8b5cc",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 1,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+    "source_git_blob": "78d3e7df09ec70f880cbf689a09ae9f461154cc0",
+    "source_sha256": "c7bf80c08ca633fabd9d0ceb21450d7fd0ab13aa0a51c7c51c4730f6a8e77d2e"
+  },
+  "wrapper_version": 1,
+  "receipt_version": 2,
+  "hello_prefix_bytes": 16,
+  "maximum_private_frame_bytes": 8192,
+  "token": "{{target_preference_launcher}}",
+  "selected_target": {"user": "runner", "instance": "instance"},
+  "receipt": {
+    "version": 2,
+    "child_pid": 321,
+    "status": "resolved",
+    "values": {"model": "target", "reasoning_effort": "medium", "context": "long_context"},
+    "sources": {
+      "model": "target-settings",
+      "reasoning_effort": "target-settings",
+      "context": "target-settings"
+    },
+    "authority": {
+      "kind": "wrapper-v1",
+      "digest": "42c72452e124ccf8c5b482b372d3c5932a6f7251e57a3b4031a579e002a40584",
+      "mode": "defaults",
+      "target": "9032997c94da9512223bde48704c19c2d587c4ff4f1105f61204524b68662819",
+      "start": "99",
+      "space": {
+        "platform": "linux",
+        "uid": 1000,
+        "namespace": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "home": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "cwd": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    }
+  },
+  "invalid_vectors": [
+    {"path": ["version"], "value": 1},
+    {"path": ["version"], "value": 2.0},
+    {"path": ["child_pid"], "value": 322},
+    {"path": ["authority", "kind"], "value": "caller"},
+    {"path": ["authority", "digest"], "value": "unattributed"},
+    {"path": ["authority", "space", "platform"], "value": "windows"},
+    {"path": ["authority", "space", "uid"], "value": true},
+    {"path": ["authority", "space", "namespace"], "value": "hostname"},
+    {"path": ["sources", "model"], "value": "caller-settings"},
+    {"path": ["nonce"], "value": "must-not-travel"}
+  ]
+}
