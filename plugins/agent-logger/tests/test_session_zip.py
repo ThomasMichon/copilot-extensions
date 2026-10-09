@@ -538,6 +538,43 @@ def test_failed_zip_creation_preserves_existing_archive_and_source(
     assert not list(tmp_path.glob(".archive.zip.*.tmp"))
 
 
+@pytest.mark.parametrize("codec", ["targz", "zip"])
+def test_archive_writers_apply_shared_path_policy_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codec: str
+) -> None:
+    source = _session(tmp_path / "live")
+    implementation = sessions.CODECS[codec]
+    destination = tmp_path / f"prior{implementation.suffix}"
+    destination.write_bytes(b"prior evidence")
+    original_validate = session_codecs._validate_member_name
+
+    def reject_member(name: str) -> str:
+        if name == "checkpoints/index.md":
+            raise ValueError("unsafe archive member path")
+        return original_validate(name)
+
+    monkeypatch.setattr(session_codecs, "_validate_member_name", reject_member)
+    with pytest.raises(ValueError, match="unsafe archive member path"):
+        implementation.archive_dir(source, destination)
+    assert destination.read_bytes() == b"prior evidence"
+    assert (source / "checkpoints" / "index.md").read_bytes() == b"# checkpoint\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["live", destination.name]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows cannot create these POSIX source names")
+@pytest.mark.parametrize("name", ["NUL.txt", "a?.txt", "a\x1fname"])
+def test_tar_writer_rejects_nonportable_posix_source_names(tmp_path: Path, name: str) -> None:
+    source = _session(tmp_path / "live")
+    (source / name).write_bytes(b"retained source")
+    destination = tmp_path / "prior.tar.gz"
+    destination.write_bytes(b"prior evidence")
+    with pytest.raises(ValueError, match="unsafe archive member path"):
+        sessions.CODECS["targz"].archive_dir(source, destination)
+    assert destination.read_bytes() == b"prior evidence"
+    assert (source / name).read_bytes() == b"retained source"
+    assert not destination.with_name(destination.name + ".tmp").exists()
+
+
 def test_zip_central_directory_budget_precedes_zipfile_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

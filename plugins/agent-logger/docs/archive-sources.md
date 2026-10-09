@@ -73,6 +73,8 @@ The shared archive-member and session-ID validator rejects Windows-invalid
 characters, control characters, device basenames, and trailing dots/spaces on
 every platform. ZIP validates the original member name before the standard
 library can truncate a NUL-containing name.
+Both archive writers validate generated member names before publication;
+unsupported source filenames leave the source and any prior archive intact.
 
 ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
 decoded file bytes. Creation also bounds inspected source entries and excludes

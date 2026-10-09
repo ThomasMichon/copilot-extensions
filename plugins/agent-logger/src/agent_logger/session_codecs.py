@@ -138,7 +138,7 @@ class TarGzCodec(Codec):
                 for path in sorted(src_dir.rglob("*")):
                     if path.is_symlink() or not path.is_file():
                         continue
-                    arcname = path.relative_to(src_dir).as_posix()
+                    arcname = _validate_member_name(path.relative_to(src_dir).as_posix())
                     tar.add(path, arcname=arcname, recursive=False)
             os.replace(tmp, dest)
         finally:
