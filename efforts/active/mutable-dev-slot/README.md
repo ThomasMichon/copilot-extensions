@@ -142,6 +142,13 @@ operator directive to remove the explicit claimed-dev exception.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
+- [ ] Finish publisher prerequisite #5817 before runtime-admission implementation:
+      an updated, legitimately owned existing PR must publish through one
+      supported command, including compatible legacy evidence reconciliation.
+      Internal ownership bookkeeping must not require a manual old-tip,
+      re-publish, restore-tip sequence. Preserve exact saved leases, destination
+      and worktree/ref authority, real concurrency refusal, and normal hooks.
+
 - [ ] Review the shared
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
       before per-plugin code changes, then execute it through the shared core
@@ -214,6 +221,28 @@ operator directive to remove the explicit claimed-dev exception.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-09 — Reviewed runtime plan and publisher continuation
+
+The Phase 3 execution plan landed through #5788. Its approval is planning
+progress, not runtime implementation or parent completion. Publisher prerequisite
+#5835 remains open and unmerged at this journal entry. Current review corrections
+cover project-local legacy destination resolution, provider credential isolation,
+generation-protected provider identity, attribution-only revision races,
+provisional first-push retry, native provider lifecycle states, and authority
+acquired before every external publication and retained through fresh tracking
+persistence. The combined contained authority/provider/publication selection
+passed 60 cases, including real child-process contention and I/O probes.
+
+An explicitly authorized source-CLI bootstrap exercised a real exact-lease rewrite
+of the existing publisher PR and incremental follow-ups without editing or
+installing a deployed runtime. That bootstrap exposed an additional requirement:
+valid existing-PR publication must be a straightforward one-command operation,
+not a manual ownership-migration obstacle course. #5817 remains open for that
+usability continuation. The prior planned live validation target #5788 is already
+merged and is no longer a pending rewrite target. Current-head review, required
+checks, merge, release promotion and unified deployment still precede the runtime
+implementation stretch.
 
 ### 2026-10-08 — Durable admission and coalesced-build continuation
 
