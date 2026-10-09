@@ -85,10 +85,10 @@
   an explicitly excluded follow-up, not a new relocation regression) ·
   `ThomasMichon/copilot-extensions#5900` (optional process-spawn provenance
   realization through existing telemetry seams) ·
-  `ThomasMichon/copilot-extensions#5903` (endpoint owner-check/unlink publication
-  race after the completed PID-guard slice) ·
-  `ThomasMichon/copilot-extensions#5904` (tolerant endpoint JSON-shape access
+  `ThomasMichon/copilot-extensions#5903` (tolerant endpoint JSON-shape access
   raises outside its declared unavailable outcome) ·
+  `ThomasMichon/copilot-extensions#5904` (endpoint owner-check/unlink publication
+  race after the completed PID-guard slice) ·
   `ThomasMichon/copilot-extensions#5908` (Sessions overlay loses provider failure
   and renders empty history) ·
   `ThomasMichon/copilot-extensions#5909` (unknown execution observation becomes
@@ -554,8 +554,8 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       consumers inspected. Shared transport/alternate/override/legacy metadata
       and conservative PID/probe evidence are real foundations, not whole-cell
       or all-plugin conformance. In-memory use of actual APIs reproduced
-      malformed-object access (`#5904`) and a publication after the final owner
-      read being deleted by cleanup (`#5903`). No endpoint, PID, socket, service
+      malformed-object access (`#5903`) and a publication after the final owner
+      read being deleted by cleanup (`#5904`). No endpoint, PID, socket, service
       or live cutover was used for either proof.
 - [ ] Remaining endpoint scopes, cross-cell legacy fallback, native permissions,
       exposure and consumer lifecycle ordering beyond this library/Dispatch/
@@ -693,7 +693,7 @@ sibling plan proves that the sibling's materials have been refreshed.
   | Venue presentation/ownership | Both providers really declare grouped columns, subtitles, session/activity joins, claims/navigation and lifecycle gates. Generic enrichment supplies a separate task column, not the required subtitle title; Container supervisor-derived navigation and original-lease claims/session paths can diverge. | Corrected stale vision framing without weakening durable intent. Title precedence `#5912`; effort/supervision/action paths remain under `#3657`. Different provider lifecycle verbs are legitimate, not parity violations. |
   | Worker action capability | IDLE may mean holder-only; Send then explicitly rejects missing binding, Watch opens general UI, and unsupported-new-window Inspect falls back to ordinary Open. | Advertisement/binding mismatch is not silent delivery success. Existing `#3657` retains binding-aware actions and non-displacing Inspect; no live worker control. |
   | Declared creation | Generic row-independent create prompting/execution/refresh exists; venue manifests do not declare it. The archived campaign and closed `#3258` explicitly delivered design only. | Carved per-venue wiring as `#5913`, not missing schema/global creation. `#3507` retains real Docker-host validation and the archived original campaign remains Done for its transferred scope. |
-  | Endpoint error/ownership fidelity | Shared and Dispatch tolerant readers access decoded JSON before object validation. Cleanup checks owner twice then unlinks by path, allowing a successor publication after the final read. Current shutdown consumers call that helper. | Actual API proofs were fully mocked and process-free: array JSON raised `AttributeError`; owner A was checked twice while synthetic B was deleted at final unlink. Carved `#5904`/`#5903`; closed strict-readiness `#1284` and PID-check `#1424` remain completed narrower slices, not full-contract proof. |
+  | Endpoint error/ownership fidelity | Shared and Dispatch tolerant readers access decoded JSON before object validation. Cleanup checks owner twice then unlinks by path, allowing a successor publication after the final read. Current shutdown consumers call that helper. | Actual API proofs were fully mocked and process-free: array JSON raised `AttributeError` (`#5903`); owner A was checked twice while synthetic B was deleted at final unlink (`#5904`). Closed strict-readiness `#1284` and PID-check `#1424` remain completed narrower slices, not full-contract proof. |
 
 - Checked the newer cold-prompt source/vision amendment: local New retains a
   seed with No Mux and Resume prompt eligibility is cold-only. Picker already
