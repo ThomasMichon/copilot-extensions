@@ -1439,17 +1439,28 @@ function Wait-ForVersionedSlotLease {
     $pollRaw = $env:AGENT_WORKTREES_SLOT_LEASE_POLL_MS
     if ($pollRaw) {
         $parsedPoll = 0
-        if ([int]::TryParse([string]$pollRaw, [ref]$parsedPoll)) { $pollMs = $parsedPoll }
+        if ([int]::TryParse([string]$pollRaw, [ref]$parsedPoll) -and $parsedPoll -gt 0) {
+            $pollMs = $parsedPoll
+        }
+        # A non-positive or unparseable override is ignored (keeps the
+        # 1000ms default) rather than passed through: 0 would busy-spin
+        # this loop, and a negative value makes Start-Sleep throw.
     }
     if ($waitSeconds -le 0) { return $false }
 
     $deadline = [Diagnostics.Stopwatch]::StartNew()
-    while ($deadline.Elapsed.TotalSeconds -lt $waitSeconds) {
-        Start-Sleep -Milliseconds $pollMs
+    while ($true) {
+        $remainingMs = ($waitSeconds * 1000) - $deadline.Elapsed.TotalMilliseconds
+        if ($remainingMs -le 0) { return $false }
+        # Cap this poll's sleep to whatever budget remains, so the final
+        # iteration can never itself overshoot the configured deadline
+        # (a large AGENT_WORKTREES_SLOT_LEASE_POLL_MS must not silently
+        # turn a short wait budget into a much longer actual wait).
+        $sleepMs = [Math]::Min($pollMs, $remainingMs)
+        Start-Sleep -Milliseconds ([Math]::Max(1, [int]$sleepMs))
         if (Enter-VersionedSlotLease) { return $true }
         if ($script:VersionedSlotLeaseFailureReason -ne 'contention') { return $false }
     }
-    return $false
 }
 
 function Invoke-VersionedSlotClean {

@@ -954,7 +954,20 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
     local lock_file="$1"
     local lock_dir="${lock_file}.d" attempt holder_pid
     local reclaim_dir="${lock_file}.reclaiming"
-    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    # _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT (set only by
+    # _wait_for_versioned_slot_lease, via bash's dynamic scoping of `local`
+    # across callees) collapses this to exactly one attempt with no
+    # internal sleep: the normal 10-attempt/~10s-worst-case retry below is
+    # itself an UNBOUNDED nested wait from a caller that is ALREADY polling
+    # on its own bounded deadline -- without this, a short caller-configured
+    # budget (e.g. 2s) could take ~10s or more per poll, blowing well past
+    # the configured wait before the caller's own deadline check ever runs
+    # again.
+    local attempts="1 2 3 4 5 6 7 8 9 10"
+    if [[ -n "${_VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT:-}" ]]; then
+        attempts="1"
+    fi
+    for attempt in $attempts; do
         if mkdir "$lock_dir" 2>/dev/null; then
             printf '%s' "$$" > "$lock_dir/pid" 2>/dev/null || true
             _VERSIONED_SLOT_LEASE_MKDIR_DIR="$lock_dir"
@@ -1023,7 +1036,9 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
             fi
             continue
         fi
-        sleep 1
+        if [[ -z "${_VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT:-}" ]]; then
+            sleep 1
+        fi
     done
     _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
     return 1
@@ -1302,6 +1317,17 @@ _wait_for_versioned_slot_lease() {
     # returns immediately, since waiting out a persistent, non-transient
     # failure would just convert a fast, actionable error into a slow,
     # identical one. Returns 0 iff the lease was ultimately acquired.
+    #
+    # Every _acquire_versioned_slot_lease call below forces
+    # _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT (visible to the mkdir
+    # fallback via bash's dynamic scoping of `local` across callees): the
+    # mkdir fallback's OWN default retry loop is itself up to ~10 nested
+    # one-second sleeps, which would silently let a single poll iteration
+    # here blow straight through a short caller-configured budget (e.g.
+    # AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC=2) before this function's own
+    # deadline check ever runs again. Collapsing each attempt to a single,
+    # near-instant check keeps the caller's wall-clock budget authoritative.
+    local _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT=1
     if _acquire_versioned_slot_lease; then return 0; fi
     [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
 
@@ -1309,18 +1335,27 @@ _wait_for_versioned_slot_lease() {
     local poll_seconds="${AGENT_WORKTREES_SLOT_LEASE_POLL_SEC:-1}"
     case "$wait_seconds" in (*[!0-9]*|'') wait_seconds=180 ;; esac
     case "$poll_seconds" in (*[!0-9]*|'') poll_seconds=1 ;; esac
+    [[ "$poll_seconds" -gt 0 ]] || poll_seconds=1
     [[ "$wait_seconds" -gt 0 ]] || return 1
 
-    local start_epoch now_epoch
+    local start_epoch now_epoch elapsed remaining sleep_for
     start_epoch="$(date +%s)"
     while :; do
-        sleep "$poll_seconds"
-        if _acquire_versioned_slot_lease; then return 0; fi
-        [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
         now_epoch="$(date +%s)"
-        if [[ $((now_epoch - start_epoch)) -ge "$wait_seconds" ]]; then
+        elapsed=$((now_epoch - start_epoch))
+        if [[ "$elapsed" -ge "$wait_seconds" ]]; then
             return 1
         fi
+        # Cap this poll's sleep to whatever budget remains, so the final
+        # iteration can never itself overshoot the configured deadline.
+        remaining=$((wait_seconds - elapsed))
+        sleep_for="$poll_seconds"
+        if [[ "$sleep_for" -gt "$remaining" ]]; then
+            sleep_for="$remaining"
+        fi
+        sleep "$sleep_for"
+        if _acquire_versioned_slot_lease; then return 0; fi
+        [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
     done
 }
 
