@@ -5,7 +5,7 @@
   picker-support plugins)
 - **Branch(es):** per-slice worktrees
 - **Created:** 2026-10-06
-- **Status:** Active <!-- Phase 1 landed (status + local toggle glue); Phase 2 (native --machine) next -->
+- **Status:** Active <!-- Phase 1 landed (status + local toggle glue); Phase 2 landed (native --machine); Phase 3 (config_sections manifest entry + Picker confirmation gap) next -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md)'s
   plugin-pivot-extensibility behavior (a plugin's own pivot manifest
   contributes Picker surface without Picker-side code) and
@@ -191,14 +191,36 @@ Intent).
       the status-line truncation budget.
 
 ### Phase 2 — Native `--machine` on `supervise override`
-- [ ] Add `--machine <name>` to `agent-dispatch supervise override
+- [x] Add `--machine <name>` to `agent-dispatch supervise override
       enable|disable`, reusing `remote_dispatch.py`'s existing
       `dispatch_to_remote`/`build_remote_create_argv` mutating SSH path
       (the same one `agent-dispatch create --machine` already uses) rather
-      than a new transport.
-- [ ] Unit/contract tests: local (no `--machine`) behavior is byte-for-byte
+      than a new transport. **Landed, with a refinement:** rather than
+      reusing `build_remote_create_argv` (tightly coupled to `create`'s own
+      argument model), added a new `build_remote_override_argv(action,
+      unit_id, *, reason=None)` builder and reused the already-generic
+      `browse_remote`/`diagnose_remote_failure` transport
+      `list`/`inbox --machine`'s own peer-queue-browse path already uses
+      (`task_query_cli.py`'s `_browse_peer`) -- the SSH mechanics
+      (`run_ssh_command`, `BatchMode`, alias lowercasing) were already
+      shared infrastructure; only the argv shape is new. `supervise
+      override`'s own `_cmd_supervise_override` checks
+      `remote_dispatch.is_peer_machine(machine)` and dispatches remotely
+      for `disable`/`enable` only (`list` has no `--machine`, unchanged).
+- [x] Unit/contract tests: local (no `--machine`) behavior is byte-for-byte
       unchanged; remote behavior round-trips against a test double of the
       SSH transport the way `remote_dispatch.py`'s own existing tests do.
+      **Landed:** 12 new tests -- 2 in `test_remote_dispatch.py`
+      (`build_remote_override_argv` with/without `--reason`) and 10 in
+      `test_cli.py` (parser shape including `list`'s own missing
+      `--machine` flag; `--machine` naming the local machine is a no-op
+      change in behavior; `--machine <peer>` dispatches `disable`/`enable`
+      remotely and streams the peer's JSON through unchanged; a failed
+      remote mutation surfaces the same diagnosed error peer-queue browse
+      already produces; an unavailable `ssh` client is reported the same
+      way). Full `test_cli.py` (259 passed, 1 skipped) and
+      `test_remote_dispatch.py` re-confirmed green;
+      `check-module-size.py` clean.
 
 ### Phase 3 — `config_sections` manifest entry
 - [ ] Add a `config_sections` entry to `agent-dispatch`'s own pivot manifest:
@@ -238,15 +260,57 @@ Intent).
 - [ ] Toggling disable/enable from the Picker round-trips to
       `agent-dispatch supervise override list` reflecting the change.
 - [ ] A `--machine`-targeted toggle round-trips against a second real or
-      test machine over `remote_dispatch.py`'s SSH transport.
-- [ ] Existing `supervise override` unit tests remain green; new tests cover
-      the `--machine` path explicitly.
+      test machine over `remote_dispatch.py`'s SSH transport. **Partially
+      covered:** proven against a mocked SSH transport (the same style
+      `remote_dispatch.py`'s own existing tests use) -- a live second
+      machine was not available this session; deferred to whoever next
+      has one, or to the Phase 3 config-section's own live validation.
+- [x] Existing `supervise override` unit tests remain green; new tests cover
+      the `--machine` path explicitly. **Landed:** 12 new tests (2 in
+      `test_remote_dispatch.py`, 10 in `test_cli.py`); full `test_cli.py`
+      (259 passed, 1 skipped) and `test_remote_dispatch.py` green.
 
 ## Proposal
 
 _Pending — Phase 1's exact query/glue shape firms this up._
 
 ## Journal
+
+### 2026-10-08 — Phase 2 landed: native `--machine` on `supervise override`
+- Added `--machine <name>` to `supervise override disable|enable` (not
+  `list`, unchanged per scope). Reused the already-generic
+  `browse_remote`/`diagnose_remote_failure` SSH transport
+  `list`/`inbox --machine`'s own peer-queue-browse path
+  (`task_query_cli.py`'s `_browse_peer`) already provides, adding only a
+  new `build_remote_override_argv(action, unit_id, *, reason=None)` argv
+  builder -- `dispatch_to_remote`/`build_remote_create_argv` turned out to
+  be too tightly coupled to `create`'s own argument model to reuse
+  directly, so this phase reused the transport layer underneath both
+  (`run_ssh_command`, `BatchMode`, alias lowercasing) instead of literally
+  calling the `create`-specific builder the Plan item named.
+- `_cmd_supervise_override` checks `remote_dispatch.is_peer_machine(machine)`
+  up front: unset, or naming this machine, falls through to the existing
+  local code path completely unchanged (byte-for-byte, confirmed by the
+  pre-existing tests still passing verbatim); naming a different machine
+  builds the remote argv, runs it over SSH, and streams the peer's JSON
+  straight through, mirroring `_browse_peer`'s own shape for errors
+  (unavailable `ssh` client, a failed remote exit) exactly.
+- 12 new tests (2 in `test_remote_dispatch.py`, 10 in `test_cli.py`):
+  parser shape (including confirming `list` carries no `--machine` flag at
+  all), the local-machine-named-explicitly no-op case, remote dispatch for
+  both `disable` and `enable` (argv shape + JSON passthrough), remote
+  failure diagnosis, and an unavailable-SSH report. Full `test_cli.py`
+  (259 passed, 1 skipped), `test_remote_dispatch.py`, and
+  `check-module-size.py` all green.
+- Docs: `plugins/agent-dispatch/README.md`'s emitter-override paragraph
+  gained a `--machine` explainer.
+- A live second-machine round-trip (this effort's own Validation Plan)
+  was not available this session -- deferred, proven against a mocked SSH
+  transport instead (the same style `remote_dispatch.py`'s own tests use).
+- Next: Phase 3 (the `config_sections` pivot-manifest entry itself, which
+  needs the separate Worktree Manager app repo's own Picker-side
+  conditional-confirmation gap closed first -- not buildable from existing
+  primitives alone, per that phase's own Plan item).
 
 ### 2026-10-08 — Phase 1 landed: status/toggle CLI glue
 - Investigated the exact contract (see Phase 1's own checked-off items for

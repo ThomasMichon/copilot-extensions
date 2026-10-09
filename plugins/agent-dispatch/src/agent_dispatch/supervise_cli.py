@@ -555,6 +555,14 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
     daemon subtracts overridden-off ids from its desired set on the next reconcile,
     so a disabled unit winds down and stays down until re-enabled -- even across a
     repo re-sync of its declaration.
+
+    ``disable``/``enable`` accept ``--machine <name>`` to apply the override on a
+    **different** machine's own store instead: the override store is genuinely
+    per-machine (``~/.agent-dispatch/overrides.json`` on whichever host the
+    daemon runs), so a cross-machine toggle must run the mutation *on* that
+    machine, over SSH, rather than editing a local file that machine never
+    reads. ``list`` has no ``--machine`` (Phase 2 scope); it always reports this
+    machine's own store.
     """
     from .config import overrides_path
     from .overrides import (
@@ -565,6 +573,31 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
     )
 
     action = getattr(args, "override_command", None)
+    machine = getattr(args, "machine", None)
+    if action in ("disable", "enable"):
+        from . import remote_dispatch
+
+        if remote_dispatch.is_peer_machine(machine):
+            argv = remote_dispatch.build_remote_override_argv(
+                action, args.id, reason=getattr(args, "reason", None)
+            )
+            try:
+                result = remote_dispatch.browse_remote(machine, argv)
+            except remote_dispatch.RemoteDispatchUnavailable as exc:
+                print(
+                    f"agent-dispatch: supervise override {action} on "
+                    f"{machine!r} unavailable ({exc})",
+                    file=sys.stderr,
+                )
+                return 2
+            if result.stdout:
+                sys.stdout.write(result.stdout)
+            if result.returncode != 0:
+                diagnosis = remote_dispatch.diagnose_remote_failure(
+                    machine, result.returncode, result.stderr
+                )
+                print(f"agent-dispatch: {diagnosis}", file=sys.stderr)
+            return result.returncode
     path = overrides_path()
     if action == "disable":
         record = set_override(path, args.id, disabled=True, reason=getattr(args, "reason", None))
