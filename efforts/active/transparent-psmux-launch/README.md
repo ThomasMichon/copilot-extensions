@@ -156,3 +156,6 @@ encoded commands or initial-prompt transports.
   handle; a coordinated two-consumer regression proves exactly one child runs.
   Handoff/lifecycle tests: 147 passed; all transport and both native producer
   tests, including concurrent consumption: 21 passed.
+- Added a real resident-loop regression: one eligible loop iteration invokes
+  expiry before mux reconciliation, removes an expired orphan and preserves a
+  pending manifest. The isolated loop test passed.
