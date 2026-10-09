@@ -86,6 +86,10 @@ def _run_harness(plugin_dir: Path, stub_body: str, extra_script: str) -> subproc
         f'$BuildSrcDir = "{plugin_dir}"\n'
         '$VenvPython = "python3"\n'
         + stub_body
+        + "\n$UvCommand = if (Get-Command uv -ErrorAction SilentlyContinue) { 'uv' } else { $null }\n"
+        + f". '{_PLUGIN_ROOT.parents[1] / 'libs/installer-engine/installer-engine.ps1'}'\n"
+        + "function Write-Warn { param($Message) Write-Host $Message }\n"
+        + "function Start-Sleep { param($Seconds) }\n"
         + "\n\n"
         + _extract_install_pkg_block()
         + "\n\n"

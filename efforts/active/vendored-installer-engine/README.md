@@ -398,9 +398,9 @@ engine under this effort.
       good second-mover to prove the engine covers a second plugin's needs).
 - [x] `agent-vault` (smaller installer, low risk).
 - [x] `agent-ssh` (smaller installer, low risk).
-- [ ] `agent-codespaces` — implementation and isolated regression coverage
-      complete; review, merge and deployed verification remain. See the
-      2026-10-08 journal entry and issue #5802.
+- [x] `agent-codespaces` — PR #5804 merged after current-head approval and
+      green CI; released payload and runtime verified through the supported
+      update flow. See the 2026-10-08 journal entry and issue #5802.
 - [ ] `agent-index` (separate engine venv — prove the config schema handles
       this before completing the remaining adopters).
 - [ ] `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-machines`.
@@ -520,6 +520,104 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-08 — `agent-dispatch` adopter prepared for integration
+
+- Public coordination: #5826. This is a vision-closing Phase 2+ slice of the
+  reviewed installer effort, not a new staging or daemon architecture.
+- Both wrappers source canonical installer-engine files on `dev`; the adopter
+  registry makes release/preview tooling materialize standalone copies.
+  Shared uv acquisition, native capture, transient venv/package retries and
+  deploy-manifest writing replace local mechanics. No canonical engine change
+  was needed.
+- Dispatch retains artifact scrubbing, dependency order, optional MCP-extra
+  fallback, signed-Python preference/recovery, launchers, supervisor/coordinator
+  lifecycle, update markers, activation/publication locks and ZDD cutover.
+  Captured package result codes survive post-install cleanup. Signed-Python
+  results are accepted only after venv validation, including a usable result
+  produced with a nonzero exit code.
+- PowerShell snapshots materialize both engine files and all six declared
+  libraries before publication. Local-checkout `stamp` uses content-addressed
+  standalone snapshots so unchanged stamps reuse one immutable tree, while
+  source, engine or library edits create a new identity. Direct local builds
+  and the POSIX owning-payload stamp stay unchanged.
+- Installer line counts: `install.sh` 2295 -> 2250 (-45), `install.ps1`
+  3993 -> 4015 (+22), combined wrappers 6288 -> 6265 (-23).
+  Engine remains 403 shell + 478 PowerShell lines; combined corpus
+  7169 -> 7146 (-23). Required snapshot materialization and signed-result
+  health validation account for the PowerShell growth. These were the initial
+  implementation counts; review-fix measurements supersede them below.
+- Validation:
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run_tests_in_devcontainer.py agent-dispatch --admission-wait 120 -k 'install or installer'`:
+    120 passed, 74 skipped, 4362 deselected.
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run_tests_in_devcontainer.py agent-dispatch --admission-wait 120`:
+    all seven sub-suites passed; 4470 passed, 86 skipped. Dependency preparation
+    precedes the network-disconnected test pass.
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-dispatch --admission-wait 120 -k 'install or installer'`:
+    189 passed, 5 skipped, 4362 deselected, including available PowerShell
+    execution. Initial fixture failures were corrected: the simulated Python
+    launcher must set its exit code, and snapshot assertions inspect operative
+    source lines rather than inert rewrite strings.
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- .test-venvs/linux/agent-dispatch/bin/python -m pytest -q tools/test_sync_installer_engine.py tools/test_materialize_main.py tools/test_check_install_contract.py tools/test_install_contract_guard.py tools/test_preview_release.py`:
+    120 passed.
+  - Shell syntax, PowerShell parsing, install-contract, engine-sync and touched
+    Python F/E9 lint checks passed.
+- The requested 1200-second outer test bound is unsupported by the installed
+  supervisor (`timeout must be 60-600 seconds`); all runs used its supported,
+  tighter 600-second bound.
+- Native Windows SAC/signature enforcement and scheduled-task behavior, native
+  macOS behavior, and a real first-use network/package install remain untested.
+  Safe standalone proof uses fixture uv after the authoring tree becomes
+  unavailable; it is not a deployed-service verification.
+- Issues #5820, #5356, #5066 and #5529 remain separate tracked staging,
+  live-slot, marker and lock work. Open PR #5567 touches adjacent POSIX service
+  unit configuration, which this slice does not edit. Neither their fixes nor
+  a staging-lifecycle redesign is included here.
+- Implementation is local and prepared for coordinator inspection. Review,
+  merge, release and deployed verification remain outstanding; the adopter
+  checkbox and overall effort stay open.
+
+### 2026-10-08 — Dispatch review fixes and native validation
+
+- The first reviewed head passed a native Windows PowerShell 7 focused
+  installer/snapshot/artifact-scrub selection: 42 passed, 10 skipped (eight
+  POSIX cases and two opt-in mutex races). Actual SAC enforcement, scheduler
+  registration and PowerShell 5.1 remain unproved; signatures are simulated.
+- Fixed both Medium review findings: local stamps now derive their snapshot
+  identity from the complete materialized file/directory tree, reusing
+  unchanged content rather than leaking GUID copies; an existing invalid
+  Python executable no longer bypasses an available signed interpreter.
+- Regression coverage includes unchanged repeated stamps, independent plugin,
+  engine and library edits, preservation of prior snapshots, and signed
+  recovery from missing-config and wrong-prefix existing slots.
+- Revised wrapper counts: shell 2295 -> 2250 (-45), PowerShell 3993 -> 4044
+  (+51); combined wrappers 6288 -> 6294 (+6). Canonical engine remains
+  881 lines, so combined corpus 7169 -> 7175 (+6). This leg's small growth
+  buys content identity and repair correctness; the Validation Plan's
+  materially-smaller aggregate rollout gate remains open and must offset
+  this growth through subsequent adopters before closure.
+- Review-fix validation: all seven network-disconnected plugin sub-suites
+  passed (4470 passed, 94 skipped); the contained installer selection with
+  available PowerShell execution passed (197 passed, 5 skipped).
+  Install-contract, engine-sync, documentation and touched Python lint
+  checks passed. The wrong-prefix fixture was corrected to keep rejecting
+  its stale config after a simulated failed signed rebuild.
+- The second review found PowerShell's default case-insensitive map could
+  collapse case-distinct snapshot paths on POSIX. The snapshot digest now
+  uses ordinal keys, with a real case-sensitive filesystem regression.
+  A guard-blocking private identifier in existing install-contract prose
+  was removed without changing the documented marker behavior.
+- The third review identified a same-version local stamp publication race.
+  Snapshot creation now records its latest content candidate under the
+  version-scoped lock; publication rechecks that candidate under the global
+  lock and rejects superseded markers and launchers. Existing sequential
+  lock acquisition is preserved to avoid runtime-install AB-BA deadlock.
+  The deterministic interleaving regression constructs and publishes newer
+  content between an older stamp's snapshot creation and publication lock.
+- This follow-up's installer/snapshot/stamp/activation selection passed:
+  75 passed, 4 skipped. Final wrapper counts are shell 2250 and PowerShell
+  4058, for 6308 total versus the 6288 baseline (+20); the canonical engine
+  remains 881 lines. The aggregate rollout shrinkage gate remains open.
 
 ### 2026-09-12 — Kickoff
 - Effort created directly off the operator's request, immediately following
@@ -1058,6 +1156,13 @@ appropriately larger/riskier for one sitting):
   bootstrap/service/process effects. The corrected native installer/recovery
   and launch-memory selection passes: 52 passed / 15 skipped, including a
   native signed-venv health matrix. Deployment remains outstanding.
+- PR #5804 subsequently merged, with current-head approval and green CI.
+  Release promotion included the conversion. The supported unified update
+  completed on a real host: the released Codespaces wrapper sources its
+  payload-local engine, engine bytes match the canonical source, and
+  `agent-codespaces version` reports `0.5.41-dev1`. Codespaces adoption is
+  complete; next requested adopter is `agent-dispatch`. The overall effort
+  remains Active with the other adopter and Validation Plan gates open.
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-pull-requests --reinstall --admission-wait 540`
     -> PASS (`21 passed`) after the shared POSIX binstub helper picked up the
     same success-without-runtime exit fix this leg needed for agent-vault

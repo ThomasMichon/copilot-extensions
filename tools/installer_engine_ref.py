@@ -29,6 +29,7 @@ ADOPTERS = (
     "agent-ssh",
     "agent-bridge",
     "agent-codespaces",
+    "agent-dispatch",
 )
 
 _LOCAL_LINES = {

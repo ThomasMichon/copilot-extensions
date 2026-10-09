@@ -93,6 +93,7 @@ def _harness_script(extra_script: str) -> str:
         "function Write-Ok { param($m) Write-Host \"OK: $m\" }\n"
         "function Write-Warn { param($m) Write-Host \"WARN: $m\" }\n"
         "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
+        "function Materialize-DispatchSnapshot { param($SnapshotDir, $PluginDir) }\n"
         + _extract_function_block("Get-SourceKind")
         + "\n\n"
         + _extract_function_block("Enter-PluginSnapshotLock")
@@ -638,4 +639,3 @@ Write-Output "ELAPSED_MS:$($sw.ElapsedMilliseconds)"
     # Comfortably under the holder's 25s sleep and under the 20s default
     # lock timeout -- proves the lock was never actually acquired for this.
     assert elapsed_ms < 10_000, f"took {elapsed_ms}ms -- blocked behind the held lock"
-
