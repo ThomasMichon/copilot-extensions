@@ -162,6 +162,9 @@ def test_new_exec_failure_restores_creation_prompt(tmp_path, monkeypatch):
         "windows", tmp_path, pending_seed="New task",
     )
     monkeypatch.setattr(
+        new_seed_launch.sessions, "verify_worktree_active", lambda *a: LiveVerdict(),
+    )
+    monkeypatch.setattr(
         new_seed_launch.subprocess, "Popen",
         lambda *_a, **_k: (_ for _ in ()).throw(FileNotFoundError("missing executable")),
     )

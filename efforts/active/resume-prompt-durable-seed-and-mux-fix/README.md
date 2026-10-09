@@ -1106,3 +1106,15 @@ _Pending._
   213 focused state/reap/recovery/setup cases pass (2 platform skips).
   Complete current-head review/CI and merge before the requested pause;
   the broader effort's release/live-observation/closure gates remain open.
+- **2026-10-08** -- Explicitly requested a fresh review after the automatic
+  request job failed to attach Copilot. Review of `403f07468` confirmed the
+  prior recovery/reap/tombstone findings resolved and identified a final
+  direct-plan TOCTOU gap. The cooperative backend boundary now rechecks
+  authoritative liveness immediately before reservation/start for all plan
+  consumers. Live bound/bare Copilot, unknown probes and an unrelated mux
+  reject with the seed retained. A newly-created owned mux shell is allowed
+  only when its current pane matches this worktree and no bound Copilot is
+  live. Added New/Resume late-mux, bare, unknown and owned-shell regressions.
+  60 focused state/resolve/setup cases pass (2 platform skips). Publish,
+  resolve the implemented finding and obtain current-head review/CI before
+  merging and honoring the requested pause.

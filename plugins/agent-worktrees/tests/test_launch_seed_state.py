@@ -14,6 +14,15 @@ import pytest
 from agent_worktrees import launch_seed_exec, launch_seed_state as state, tracking, tracking_write
 
 
+@pytest.fixture(autouse=True)
+def _cold_probe_boundary(monkeypatch):
+    from agent_worktrees.sessions import LiveVerdict
+
+    monkeypatch.setattr(
+        launch_seed_exec.sessions, "verify_worktree_active", lambda *a: LiveVerdict(),
+    )
+
+
 def _record(tmp_path):
     return tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "checkout"), "demo", "test",
@@ -246,3 +255,45 @@ def test_gh_intermediary_does_not_acknowledge_or_consume_seed(tmp_path, monkeypa
         path, ["gh", "copilot"], invoke=True, seed_id=seed.seed_id,
     ) == 3
     assert state.peek(path) == seed
+
+
+@pytest.mark.parametrize("case", ["mux", "bare", "unknown"])
+@pytest.mark.parametrize("kind", ["new", "resume"])
+def test_direct_handoff_rechecks_liveness_and_retains_seed(tmp_path, monkeypatch, kind, case):
+    from agent_worktrees.sessions import LiveVerdict
+
+    path = _record(tmp_path)
+    seed = state.stage(path, kind=kind, text="do not inject live")
+    verdict = (
+        LiveVerdict(active=True, mux_live=True) if case == "mux"
+        else LiveVerdict(active=True, bare=True, live_session_ids=["other"]) if case == "bare"
+        else LiveVerdict(probes_ok=False)
+    )
+    monkeypatch.setattr(launch_seed_exec.sessions, "verify_worktree_active", lambda *a: verdict)
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.delenv("PSMUX_PANE", raising=False)
+    monkeypatch.setattr(
+        launch_seed_exec.subprocess, "Popen",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not start a live target")),
+    )
+    assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 3
+    assert state.peek(path) == seed
+
+
+def test_newly_created_owned_mux_shell_is_not_a_live_copilot(tmp_path, monkeypatch):
+    from agent_worktrees.sessions import LiveVerdict
+
+    path = _record(tmp_path)
+    seed = state.stage(path, kind="new", text="first turn")
+    monkeypatch.setattr(
+        launch_seed_exec.sessions, "verify_worktree_active",
+        lambda *a: LiveVerdict(active=True, mux_live=True),
+    )
+    monkeypatch.setenv("TMUX_PANE", "%owned")
+    monkeypatch.setattr(launch_seed_exec.sessions, "mux_active_pane", lambda *a: "%owned")
+    monkeypatch.setattr(
+        launch_seed_exec.subprocess, "Popen",
+        lambda *a, **k: SimpleNamespace(wait=lambda: 0),
+    )
+    assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 0
+    assert state.peek(path) is None

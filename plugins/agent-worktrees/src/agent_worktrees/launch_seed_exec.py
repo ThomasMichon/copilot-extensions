@@ -10,9 +10,27 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from . import embody_resume, installer, launch_seed_state, tracking, tracking_write
+from . import embody_resume, installer, launch_seed_state, sessions, tracking, tracking_write
 
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
+
+
+def _final_cold_error(record) -> str | None:
+    verdict = sessions.verify_worktree_active(record)
+    if verdict is None or not verdict.probes_ok or not verdict.mux_probe_ok:
+        return "Could not verify cold Copilot handoff; the seed remains staged."
+    if verdict.live_session_ids or verdict.bare:
+        return "A Copilot became live before handoff; the seed remains staged."
+    if verdict.mux_live:
+        own_pane = os.environ.get("TMUX_PANE") or os.environ.get("PSMUX_PANE")
+        if not own_pane or sessions.mux_active_pane(record.worktree_id) != own_pane:
+            return "Another mux became live before handoff; the seed remains staged."
+        # The current setup may own a newly-created mux shell, but no bound
+        # Copilot may already occupy this worktree.
+        return None
+    if verdict.active:
+        return "The worktree became live before handoff; the seed remains staged."
+    return None
 
 
 def deferred_command(
@@ -116,6 +134,10 @@ def launch(
                 "Copilot executable before retrying.",
                 file=sys.stderr,
             )
+            return 3
+        cold_error = _final_cold_error(record)
+        if cold_error:
+            print(cold_error, file=sys.stderr)
             return 3
         receipt = launch_seed_state.take(record_path, seed_id=current.seed_id)
         if receipt["seed"] is None:
