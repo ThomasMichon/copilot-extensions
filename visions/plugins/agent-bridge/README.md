@@ -655,12 +655,15 @@ agent, and session combination proves serviceable. If a peer path, live
 injection, or namespace route is unavailable, the bridge falls back to a safe
 simpler path or refuses clearly.
 
-### fallback-does-not-repeat-uncertain-effects
+### uncertain-effects-are-not-blindly-replayed
 
 Unavailable capability and an operation failing after admission are different
 outcomes. An alternate route may be selected when absence or an explicit
-pre-admission incompatibility is established; it never blindly repeats
-potentially admitted work through a second channel. Compatibility is assessed
+pre-admission incompatibility is established. Neither a same-route retry nor a
+second channel blindly repeats potentially admitted work: recovery establishes
+the authoritative outcome or proves safe idempotency or deduplication before
+reissuing it. Safe retries and replayable observation remain available.
+Compatibility is assessed
 for the semantics actually requested, without needlessly requiring newer
 semantics for an otherwise supported operation.
 
@@ -753,8 +756,8 @@ authoritative log rather than silently diverging.
 
 Forwarding an event does not acknowledge it for the consumer. Remote delivery
 retains the hosting bridge's ordered history and caller-specific position until
-the intended consumer acknowledges delivery. Reconnects resume from that durable authority;
-changed history, replay gaps, or exhausted delivery capacity require an explicit
+the intended consumer acknowledges delivery. Reconnects resume from that durable
+authority; changed history, replay gaps, or exhausted delivery capacity require an explicit
 reconciliation outcome rather than silent loss or a second local event ledger.
 
 ### eventual-terminal-reconciliation

@@ -52,7 +52,11 @@
   `ThomasMichon/copilot-extensions#5791` (explicit scoped gh identity degrades
   to ambient execution after token minting fails) ·
   `ThomasMichon/copilot-extensions#5833` (distinct attributed raw head override
-  is not surfaced by the inspected Mux Companion UI)
+  is not surfaced by the inspected Mux Companion UI) ·
+  `ThomasMichon/copilot-extensions#5842` (claim acceptance releases source
+  responsibility before consumer commit) ·
+  `ThomasMichon/copilot-extensions#5843` (lost carrier responses can repeat
+  admitted mutating operations)
 
 ## Guiding Intent
 
@@ -302,7 +306,9 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
             cooperative stop/confirmation. The carrier slice additionally
             reconciles shared remote-control
             reach, isolated logical subscriptions, hosting-owned replay/cursor
-            acknowledgement, and safe compatibility fallback.
+            acknowledgement, and explicit unsupported-capability fallback.
+            Uncertain mutating retries remain a source-proven violation
+            (`#5843`), not a realized no-repeat guarantee.
       - [ ] `visions/plugins/agent-bridge/README.md` — remaining hosting,
             routing, and protocol surfaces beyond the completed scoped slices;
             the full-leaf sweep is still open.
@@ -341,6 +347,11 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
       - [ ] `visions/plugins/agent-worktrees/README.md` — remaining parent
             reconciliation beyond the account slice, including head/claims,
             contribution roles, daemon authority, and lifecycle coverage.
+      - [x] `visions/plugins/agent-worktrees/README.md` and
+            `visions/agent-fabric/README.md` — scoped finalization/claim-bundle
+            acceptance audit. Existing intent already states atomic accepted
+            transfer; source releases responsibility before consumer completion,
+            carved as `#5842`. This does not complete either parent vision.
       - [x] `visions/test-portfolio/README.md` — shared-host admission slice
             reconciled across direct-host and devcontainer entry points. Folded back
             protection of shared mutable test environments, explicit bounded
@@ -453,6 +464,36 @@ sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
 
+### 2026-10-09 — Claim acceptance atomicity and carrier retry corrections
+- Traced the actual finalization gate through nonterminal handoff bundles,
+  pending creation identities, offered reservations, and explicit transfer.
+  Rejected a candidate based on the legacy `obligations.gate_mode` helper:
+  the actual gate no longer lets that legacy mode release creator obligations.
+- The acceptance path does violate existing `agent-fabric` resource-claims
+  intent: `claim_handoffs.accept` calls `accept_source` before
+  `_finish_accept_consumer_side`; source claims are removed and terminal
+  accepted is persisted before consumer existence/conflict, resource ownership,
+  lease transfer, and record-save checks can fail. Accepted is excluded from
+  `active_bundle_ids_for_source`, so this can open source finalization without
+  consumer responsibility being committed. Carved `#5842` after dedup and
+  cross-linked closed contract `#1090` and distinct readiness gate `#1602`.
+  No vision weakening, live claim manipulation, or implementation PR occurred.
+- Review of `#5840` identified a separate carrier effect-admission gap.
+  Confirmed `RemoteOperationService._request` retries reconnectable failures for
+  mutating operations; `carrier_transport.py` marks lost pending responses
+  reconnectable, while `carrier_requests.py` assigns fresh request IDs.
+  A remote create or unkeyed live message may have completed before its response
+  is lost, so bounded reconnection is not no-duplicate proof. Carved `#5843`
+  rather than treating the new intent as realized.
+- Kept the uncertainty-preserving vision guarantee and clarified that it covers
+  same-route retry as well as alternate channels, while retaining safe proven
+  idempotent/deduplicated retries and replayable observation. The inspected
+  unsupported-capability fallback remains distinct from this retry violation.
+- These are concrete source-effect paths, unchanged in freshly fetched trunk,
+  not fresh live reproductions. Existing synthetic acceptance fixtures were
+  inspected, not presented as fault-injection passes. Broader head, role,
+  daemon, hosting, and service audits remain open.
+
 ### 2026-10-09 — Bounded evidence cohorts and accepted source coverage
 - Three read-only evidence tracks mapped twelve indexed visions, then compared
   owning surfaces. The initial reports were partial: document contracts,
@@ -503,7 +544,7 @@ sibling plan proves that the sibling's materials have been refreshed.
 - Folded back shared transport over equivalent connection/access contexts,
   independently identified logical observations, hosting-owned durable replay,
   consumer acknowledgement, explicit reconciliation on continuity loss, and
-  absence versus uncertain admitted effects. Retained the compatibility path
+  absence versus uncertain admitted effects as standing intent. Retained the compatibility path
   for explicit pre-admission refusal, including an older carrier rejecting a
   requested charter before creating work. No existing positive or intended
   provider, relay, hosting, or protocol capability was removed.
@@ -520,6 +561,7 @@ sibling plan proves that the sibling's materials have been refreshed.
   | `a-la-carte-installability` / `graceful-composition` | Conforms in the inspected carrier/consumer boundary | Bridge owns transport through the shared connectivity library; Dispatch uses its public service boundary and preserves unsupported-capability fallback, not sibling runtime imports. |
   | `work-coalescing-singleton` / `process-count-scales-with-services-not-sessions` | Conforms in the inspected transport-sharing path only | The connection manager pools under complete transport identity and a lock; logical subscriptions retain leases and release them. This does not score all Bridge processes or service leases. |
   | `version-skew-tolerant-contracts` / `interoperate-across-version-skew` | Partial runtime audit | Request-specific versions reject unsupported semantics before admission and preserve older supported operations; this is not proof of every session-envelope/recovery/writer-fence path under `#1460`/`#1468`. |
+  | Bridge `single-stream-message-admission` / uncertainty-preserving control | Violates in the mutating retry path | Lost responses are retried with fresh carrier request IDs even after possible effects; tracked as `#5843`. Safe unsupported-capability fallback is not proof of safe in-route retry. |
   | `endpoint-discovered-not-assumed` | Conforms in the inspected consumer boundary | The client resolves the active authenticated local endpoint; explicit endpoints must be loopback. Transport does not add a public prompt socket. |
   | `minimal-network-exposure` | Partial Bridge audit | Ephemeral authenticated loopback is not proof of the invariant's preference for a native local endpoint. The inspected carrier adds no new listener; native-endpoint conformance for the existing HTTP control plane remains under the broader transport audit (`#54`). |
 
