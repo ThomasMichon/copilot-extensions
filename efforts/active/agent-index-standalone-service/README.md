@@ -244,3 +244,18 @@ boundaries from implementation decisions and deployment-specific policy.
   sources; a successor incremental worker is active. A short warm-engine query
   remains responsive. Live rollout changes are paused while that CPU/batch
   timeout risk is classified; no worker is cancelled or engine cold-restarted.
+
+### 2026-10-09 - Merge-only pause boundary
+- Operator narrowed the current objective to landing existing PR #5863, then
+  pausing. No additional implementation, native canary migration or deployment
+  is authorized by this slice; the development health-check schedule is stopped.
+- The first review identified unconditional exhaustive PR CI and a stale
+  documentation limitation. Required Linux/Windows CI now path-gates the
+  controller contract smoke; full hosted/deployment coverage remains in
+  promotion and manual execution. CI integration is no longer documented as
+  deferred. The contained smoke passed 62 tests in 4.27 seconds; runner/workflow
+  policy regressions passed 30 tests.
+- Phases 2 and 3 remain open under #5768. This API/controller composition is
+  not the version-slot installer, a separated database/execution adapter, a
+  release reconciler or an authorized live service migration. Resume those
+  tracked slices only after the operator lifts the pause.

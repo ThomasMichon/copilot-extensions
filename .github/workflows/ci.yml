@@ -809,9 +809,10 @@ jobs:
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -819,13 +820,18 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test standalone controller with installed core and host containment
-        run: python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60
+        shell: bash
+        run: |
+          MODE="--smoke"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
 
   agent-index-service-windows:
     name: agent-index-service (windows-latest, out-of-plugin)
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -833,7 +839,11 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test standalone controller with installed core and host containment
-        run: python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60
+        shell: bash
+        run: |
+          MODE="--smoke"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
 
   test-runner-windows:
     name: test runner (windows-latest)
@@ -880,6 +890,7 @@ jobs:
     outputs:
       smoke: ${{ steps.set.outputs.smoke }}
       heavy: ${{ steps.set.outputs.heavy }}
+      standalone_service: ${{ steps.set.outputs.standalone_service }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -892,8 +903,16 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             MODE="--changed --base ${{ github.event.pull_request.base.sha }}"
+            if git diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              agent-index-service/ plugins/agent-index/ libs/ tools/ \
+              .github/workflows/ci.yml .github/workflows/validate-and-promote.yml; then
+              echo "standalone_service=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "standalone_service=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             MODE="--all"
+            echo "standalone_service=true" >> "$GITHUB_OUTPUT"
           fi
           FULL=$(python tools/run-plugin-tests.py $MODE --list)
           SMOKE=$(python tools/run-plugin-tests.py $MODE --exclude "$HEAVY_PLUGIN" --list)

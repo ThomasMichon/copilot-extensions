@@ -116,7 +116,7 @@ assignment/progress/cancellation and query embedding/storage composition.
 Future authenticated remote adapters need identity/role/job/source authorization
 tests; a shared SQLite mount is not such an adapter.
 
-Version-slot installation, release descriptors/provenance, CI integration,
+Version-slot installation, release descriptors/provenance,
 candidate validation, durable supervision and rollback/schema policy belong to
 the coordinator's next lifecycle/release slice. `deploy` is not an installer
 or continuous restart authority. Never infer rollback safety from executable
@@ -124,7 +124,16 @@ version slots alone.
 
 ## Focused tests
 
-In the coordinator-provisioned test environment:
+Required PR CI path-gates the Linux/Windows controller contract smoke to service,
+core, shared-library, runner/release-tool or CI changes. Real hosted/deployment
+cycles stay in the exhaustive promotion and manual lanes:
+
+```console
+python tools/run-standalone-tests.py agent-index-service --prepare --smoke
+python tools/run-standalone-tests.py agent-index-service --prepare
+```
+
+In an already provisioned test environment:
 
 ```console
 python -m pytest agent-index-service/tests plugins/agent-index/tests/test_standalone_explicit_sources.py -q

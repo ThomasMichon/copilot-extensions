@@ -50,9 +50,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("component", choices=STANDALONE_CONSUMERS)
     parser.add_argument("--python", type=Path, help="test interpreter (default: managed venv)")
     parser.add_argument("--prepare", action="store_true", help="provision declared test dependencies")
+    parser.add_argument("--smoke", action="store_true", help="run controller contracts without real deployment cycles")
     parser.add_argument("--admission-wait", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=600.0)
     args = parser.parse_args(argv)
+    if args.smoke and args.component != "agent-index-service":
+        parser.error("--smoke is only defined for agent-index-service")
     python = (args.python or default_python(args.component)).resolve()
     root = REPO / args.component
     if args.prepare and not python.is_relative_to((REPO / ".test-venvs").resolve()):
@@ -71,8 +74,12 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(prefix=f"{args.component}-tests-") as temporary:
             sandbox = Path(temporary)
             env = isolated_environment(os.environ, sandbox)
+            tests = (
+                [root / "tests" / "test_cli.py", root / "tests" / "test_config.py"]
+                if args.smoke else [root / "tests"]
+            )
             return run_contained(
-                [str(python), "-I", "-m", "pytest", "-q", str(root / "tests"),
+                [str(python), "-I", "-m", "pytest", "-q", *map(str, tests),
                  "--basetemp", str(sandbox / "pytest")],
                 cwd=root,
                 env=env,
