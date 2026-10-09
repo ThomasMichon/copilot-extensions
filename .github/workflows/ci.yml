@@ -557,6 +557,53 @@ jobs:
           python -m pytest -q libs/plugin-activation/tests &&
           python -m pytest -q libs/session-liveness-probe/tests &&
           python -m pytest -q libs/venue-copilot/tests
+      - id: zdd-singleton
+        name: Detect zdd singleton changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+            head="HEAD"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Pin the real PR head sha, not the checkout's synthetic
+          # refs/pull/<n>/merge commit, so once dev advances past this PR's
+          # recorded base, an unrelated commit that lands on dev meanwhile
+          # can't wrongly trigger this subprocess-heavy suite on every other
+          # open PR (same reasoning as the version-bump-engine step above).
+          if git diff --name-only "$base...$head" | grep -Eq \
+            '^(libs/zdd/|docs/patterns/versioned-singleton-manager\.md$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: zdd singleton smoke tests
+        # libs/zdd/tests is a shared library's own suite (never collected by
+        # tools/run-plugin-tests.py; see TESTING.md), so it needs its own
+        # explicit step here, path-gated the same way as the
+        # installation-context step above. ZDD_SINGLETON_SMOKE_ONLY=1 skips
+        # the four real fork/exec/signal process-tree regressions in
+        # test_singleton_linux_processes.py -- repeated detached cutovers, a
+        # real same-process exec preserving the manager pid/lease, a real
+        # exec during a pending successor discovery, and a pidfd opened
+        # above FD_SETSIZE -- those stay off every PR and run instead via
+        # the scheduled/manual zdd-singleton-stress workflow, the same split
+        # crash-diagnostics-stress.yml already uses for real-process
+        # regressions that are not safe to gate every PR on. This job only
+        # installs bare pytest/pyyaml/ruff (no uv, no editable libs/zdd
+        # install), so the src/-layout package needs PYTHONPATH to be
+        # importable at all; real child processes this suite spawns inherit
+        # it automatically.
+        if: steps.zdd-singleton.outputs.run == 'true'
+        env:
+          ZDD_SINGLETON_SMOKE_ONLY: "1"
+          PYTHONPATH: ${{ github.workspace }}/libs/zdd/src
+        run: python -m pytest -q libs/zdd/tests
       - name: Vendored library synchronization
         run: >-
           python tools/check-vendored-libs-sync.py &&
