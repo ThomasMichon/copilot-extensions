@@ -1151,8 +1151,17 @@ parallel contract.
   `command:`-backed emitter with no shared loop contract. Tracked by
   `efforts/active/agent-dispatch-recipe-composability` (issue #4959);
   builds on, rather than replaces, `agent-dispatch-recipe-library`'s
-  `extends:` resolution mechanism. Implementation not yet landed by this
-  revision.
+  `extends:` resolution mechanism. **Implementation landed:** recursive
+  multi-hop `extends:` resolution with a per-hop cycle/depth guard
+  (`ThomasMichon/copilot-extensions#4968`) and the first concrete
+  script-path-hook realization, a `script` forge provider for
+  `repository_issue_loop` (`ThomasMichon/copilot-extensions#4993`); both
+  documented in `plugins/agent-dispatch/README.md`'s *Registrar `extends:`*
+  section. One known, narrower gap remains open (per-hop provenance for a
+  few path-dependent declared fields outside `kind: emitter`'s own
+  `spec.cwd`, tracked by `ThomasMichon/copilot-extensions#5174`) and
+  validating the motivating consumer's own emitter need is deferred to
+  that consumer's own effort.
 - **2026-09-30** — Added *emitter-command-receipts*: a command-emitter that
   authors tasks via `task_output=json` already computes the created-task
   list (dedup_key -> real task id) every tick, but it was never durably
