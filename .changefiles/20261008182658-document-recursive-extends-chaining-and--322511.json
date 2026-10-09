@@ -1,0 +1,9 @@
+{
+  "comment": "Document recursive extends: chaining and the script forge provider in plugins/agent-dispatch/README.md, with a worked emitter-to-script-provider migration example.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

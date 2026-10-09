@@ -1117,6 +1117,154 @@ evaluator registration, worker agent name, and any lane-specific
 concurrency/filtering), but the shared standing-reviewer charter and headless
 body type are no longer a repo-local copy.
 
+**Chaining `extends:` (any already-resolved declaration is a valid base).**
+`extends:` is not fenced to the eight named `global:` recipes above -- any
+ref (`global:<name>`, a repo-local path, or a cross-repo path) may itself
+point at a document that carries its *own* `extends:` key, and that is
+resolved recursively before merging. A declaration can chain through
+several hops:
+
+```yaml
+# recipes/review-loop.yaml (repo-local, itself extends a global recipe)
+extends: "global:reviewer"
+stale_after_days: 7
+
+# the concrete declaration:
+name: external-review
+extends: "./recipes/review-loop.yaml"
+repo: github.com/example/project
+```
+
+resolves the same as writing out `global:reviewer`'s own fields, then
+`review-loop.yaml`'s overrides (`stale_after_days: 7`), then the concrete
+declaration's own overrides (`repo: ...`) -- each hop's overrides deep-merge
+over the previous hop's resolved result, closest override wins, same rule
+as a single-hop `extends:`. Each hop's own nested `extends:` ref resolves
+against *that hop's own* file's directory (or the plugin root for a
+`global:` ref) -- never the original declaration's directory -- so a
+cross-repo base's own repo-relative ref still resolves correctly against
+its own repository rather than the consuming repo. A chain that revisits
+the same resolved ref (`A` extends `B` extends `A`) raises a clear
+`RegistrarError` naming the full chain (`A -> B -> A`), never a
+`RecursionError`; an excessively long (but non-cyclic) chain raises the
+same way once it exceeds a fixed maximum depth. Placeholder substitution
+and the override deep-merge both apply correctly at every hop, in order.
+
+One known, narrower gap: per-hop directory tracking for *resolving a
+chain's own nested `extends:` refs* is unconditional, but per-hop
+provenance for a few **path-dependent declared fields** is not yet
+generalized beyond `kind: emitter`'s own `spec.cwd`. A `reviewer-loop`'s
+`emitter.cwd` and a `repository-issue-loop`'s `worker_identity`/
+`forge.command`/`forge.cwd` resolve against the chain's outermost leaf
+file, not the specific hop that actually supplied the field -- extending a
+cross-repo `reviewer-loop`/`repository-issue-loop` base through a chain
+and inheriting one of those fields *as a relative path* is refused outright
+at registration (a clear `RegistrarError`) rather than silently
+misresolving; declare the field directly, or with an absolute path, to
+work around it. Tracked as explicit follow-up work, not a silent gap.
+
+**`script` forge provider (a script-path hook inside `repository-issue-loop`'s
+own engine).** When no named recipe fits a domain's backlog source --
+nothing forge-shaped to poll -- `repository_issue_loop`'s `forge.provider`
+may be `script` instead of `github`/`azure-devops`/`gitea`. The declaration
+names a script; `repository_issue_loop` keeps owning the loop (scheduling,
+leasing, quiet-period, dedup) and invokes that script once per backlog
+operation -- the script supplies only the domain-specific decision, never
+the loop shape:
+
+```yaml
+name: internal-health-queue
+extends: "global:repository-issue-loop"
+repo: internal-health-queue          # the script's own backlog label -- not `owner/name`
+source: internal-health-queue
+task_label: internal-health-queue-work
+cadence_seconds: 300
+forge:
+  provider: script
+  command: ["python", "scripts/health_queue_backlog.py"]
+  # cwd and timeout_seconds are optional -- cwd defaults to the declaring
+  # repo root, timeout_seconds defaults to 30s (matching ScriptEvaluator).
+reservation: {label: agent-reserved}
+pool:
+  max_active_processes: 1
+  body: {agent: health-worker}
+```
+
+The script is invoked once per operation, named via a trailing
+`--op <name>` argument (`list_open_issues` / `reserve` / `claim` /
+`release`), with a structured JSON request object on stdin and expected to
+print a structured JSON response object on stdout:
+
+| Op | Request (stdin) | Response (stdout) |
+|---|---|---|
+| `list_open_issues` | `{"repo": "<repo>"}` | `{"issues": [{"number": int, "title": str, "url": str, "labels": [str, ...], "created_at": number, "updated_at": number, "reservations": [...]}]}` |
+| `reserve` | `{"repo", "issue", "reservation"}` | (ignored) |
+| `claim` | `{"repo", "issue", "reservation", "task_id"}` | (ignored) |
+| `release` | `{"repo", "issue", "reservation", "reason"}` | (ignored) |
+
+Every request also carries `producer_login` when the declaration sets one.
+A non-zero exit is always a real error (the script's stderr is surfaced,
+truncated, in the raised exception); a timeout, a start failure, or a
+malformed/non-JSON/wrongly-shaped stdout are equally real errors -- never
+silently treated as an empty success. `forge.command`'s first element (the
+script path) and `forge.cwd`, when relative, resolve against the declaring
+repo root, never the daemon's own incidental working directory; a `.py`/
+`.sh`/`.ps1` script is automatically prefixed with the interpreter/shell its
+suffix requires so it runs on Windows too. An optional `forge.namespace`
+pins the coordinator resource-key identity explicitly (recommended for a
+redundant/failover deployment); absent one, it is derived from the
+declaration's own as-declared command/cwd/repo-identity. An optional
+`forge.backlog` decouples the label the script sees from `repo`, which
+otherwise also doubles as the task's own routing lane.
+
+**Worked migration example: a hand-written `command:`-backed emitter
+becomes a `script`-provider `repository_issue_loop`.** A bespoke emitter
+polling an internal API directly, reimplementing scheduling and dedup
+itself:
+
+```yaml
+name: internal-health-queue
+kind: emitter
+spec:
+  command: ["python", "scripts/poll_health_queue.py"]
+  interval_seconds: 300
+  cwd: "."
+  task_output: json
+pool:
+  max_active_processes: 1
+  body: {type: headless, agent: health-worker}
+```
+
+Its own `poll_health_queue.py` owns everything: polling cadence, which
+items are already claimed, leasing, and producing one task per eligible
+item -- all logic this package's `repository_issue_loop` engine already
+provides generically. Migrated to a `script`-provider
+`repository_issue_loop`, the engine takes over scheduling/leasing/dedup and
+the script shrinks to the four backlog operations above:
+
+```yaml
+name: internal-health-queue
+extends: "global:repository-issue-loop"
+repo: internal-health-queue
+source: internal-health-queue
+task_label: internal-health-queue-work
+cadence_seconds: 300
+forge:
+  provider: script
+  command: ["python", "scripts/health_queue_backlog.py"]
+reservation: {label: agent-reserved}
+pool:
+  max_active_processes: 1
+  body: {agent: health-worker}
+```
+
+`scripts/health_queue_backlog.py` replaces `poll_health_queue.py`'s mixed
+polling-and-leasing logic with four small, stateless operations (read the
+queue and report open items; mark one reserved; mark one claimed once a
+task starts; mark one released on abandonment) -- the reusable
+`repository_issue_loop` engine now owns the scheduling, leasing, and dedup
+that the bespoke emitter previously had to reimplement itself.
+
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
 A small HTTP app that maps three generic, forge-neutral event shapes onto tasks:
