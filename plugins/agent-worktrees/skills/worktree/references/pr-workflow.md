@@ -853,6 +853,10 @@ against each owning project's remote configuration, not the caller's remote
 name. A tracked provider/configuration mismatch is refused before credentials
 are resolved. An installation-scoped authority guard
 excludes reassignment and new ledger registration until the push finishes.
+First/incremental pushes and provider creation acquire that same authority
+before external mutation and retain it through the fresh tracking transaction.
+When finalization is also needed, its lock is acquired first and released last;
+authority contention therefore fails before a remote head or provider PR changes.
 Manual `set-pr` corrections wait for that guard; other association writers
 already holding a record lock fail immediately and must retry, never deadlock
 against publication. Ordinary Picker stamps with unchanged PR authority do not

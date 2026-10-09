@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, output, pr_publication_state, pr_publish, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, output, pr_authority, pr_publication_state, pr_publish, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
@@ -333,6 +333,7 @@ def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
     return subject or None
 
 
+@pr_authority.publication
 def create_pr(
     worktree_id: str,
     config: Config,
@@ -1149,6 +1150,7 @@ def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | Non
     return ref if settled is not None else None
 
 
+@pr_authority.publication
 def _open_via_provider(
     result: dict,
     config: Config,
@@ -1264,6 +1266,8 @@ def _open_via_provider(
     if draft:
         scope.draft = True
     try:
+        if record is not None:
+            pr_publication_state.require_current(record, target_pr)
         provider = providers.get_provider(prcfg.provider)
         token = providers.account_token_for_slug(scope.repo, prcfg)
         pull = provider.create_pull(scope, token=token)
@@ -2339,6 +2343,7 @@ def _pr_to_dict(pr: PRRecord) -> dict:
     }
 
 
+@pr_authority.publication
 def _push_existing_feature(
     worktree_path: str,
     feature_branch: str,

@@ -1,12 +1,18 @@
 """Regressions for provider identity, attribution-only races, and first-push retry."""
 
 from dataclasses import replace
+from contextlib import contextmanager
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, finalize_cli, git_ops, pr_ops, pr_publish, pr_rewrite, providers, tracking
+from agent_worktrees import finalize, finalize_cli, git_ops, pr_authority, pr_ops, pr_publish, pr_rewrite, providers, tracking
 from agent_worktrees import __main__ as cli
 from agent_worktrees.providers.base import PullResult
 
@@ -147,3 +153,132 @@ def test_title_only_rewrite_uses_selected_ledger(pr_repo, monkeypatch, tmp_path)
     assert finalize_cli.cmd_push_changes(args) == 0
     assert tracking.load_record(selected / f"{wid}.yaml").title == "Selected"
     assert tracking.load_record(shadow_path).title == "Ambient"
+
+
+def authority_process(root, ready, *, probe=False):
+    script = """
+import sys
+from pathlib import Path
+from agent_worktrees import config as cfg,pr_authority
+cfg.install_dir=lambda:Path(sys.argv[1])
+try:
+    with pr_authority.guard(timeout=0.1):
+        Path(sys.argv[2]).write_text('held')
+        if sys.argv[3]=='hold': sys.stdin.read()
+except TimeoutError:
+    raise SystemExit(3)
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(pr_authority.__file__).parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
+    return subprocess.Popen(
+        [sys.executable, "-c", script, str(root), str(ready), "probe" if probe else "hold"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+
+
+@pytest.mark.parametrize("operation", ["first", "ordinary", "provider"])
+def test_publication_contention_precedes_external_mutation(pr_repo, monkeypatch, tmp_path, operation):
+    config, wid, wt, remote = pr_repo
+    record = None
+    if operation != "first":
+        result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+        assert result["success"], result
+        record = load(wid)
+    ready = tmp_path / "authority-ready"
+    holder = authority_process(cfg.install_dir(), ready)
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and holder.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ready.exists(), holder.poll()
+        monkeypatch.setattr(pr_publish, "PUBLISH_LOCK_ACQUIRE_TIMEOUT_S", 0.1)
+        monkeypatch.setattr(git_ops, "push", lambda *a, **k: pytest.fail("push before authority admission"))
+        monkeypatch.setattr(providers, "get_provider", lambda *a: pytest.fail("provider call before authority admission"))
+        if operation == "ordinary":
+            assert not finalize.push_changes(wid, config)
+            assert not (Path(config.default_repo.worktree_root) / ".finalize.lock").exists()
+        else:
+            with pytest.raises(TimeoutError, match="PR rewrite authority"):
+                if operation == "first":
+                    pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+                else:
+                    pr_ops._open_via_provider(
+                        result, config, record, record.pr, "Feature", "", wid, record.pr.head_sha,
+                        prcfg=config.default_repo.pr, draft=True,
+                    )
+    finally:
+        holder.communicate(input=b"", timeout=10)
+
+
+@pytest.mark.parametrize("operation", ["first", "ordinary", "provider"])
+def test_publication_holds_authority_through_io_and_persistence(pr_repo, monkeypatch, tmp_path, operation):
+    config, wid, wt, remote = pr_repo
+    if operation != "first":
+        result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+        assert result["success"], result
+    record = load(wid)
+    real_push = git_ops.push
+    probes = []
+
+    def probe():
+        child = authority_process(cfg.install_dir(), tmp_path / "probe-ready", probe=True)
+        _, stderr = child.communicate(timeout=10)
+        assert child.returncode == 3, stderr.decode()
+        probes.append(True)
+
+    def push(*args, **kwargs):
+        probe()
+        return real_push(*args, **kwargs)
+
+    if operation == "provider":
+        def create(*args, **kwargs):
+            probe()
+            return PullResult(number=42, url="https://example.test/org/repo/pull/42", state="open")
+        monkeypatch.setattr(providers, "get_provider", lambda *a: SimpleNamespace(create_pull=create))
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda *a: "")
+        pr_ops._open_via_provider(
+            result, config, record, record.pr, "Feature", "", wid, record.pr.head_sha,
+            prcfg=config.default_repo.pr, draft=True,
+        )
+        assert load(wid).pr.number == 42
+    else:
+        monkeypatch.setattr(git_ops, "push", push)
+        if operation == "first":
+            result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+            assert result["success"], result
+        else:
+            (wt / "followup.txt").write_text("followup\n")
+            git("add", "-A", cwd=wt)
+            git("commit", "-m", "followup", cwd=wt)
+            assert finalize.push_changes(wid, config)
+        current = load(wid)
+        assert current.pr.head_sha == pr_publish._tip("origin", current.pr.branch, str(wt))
+    assert probes
+
+
+def test_ordinary_publication_rechecks_authority_after_admission_wait(pr_repo, monkeypatch):
+    config, wid, wt, remote = pr_repo
+    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+    assert result["success"], result
+    before = load(wid).pr.head_sha
+    original = pr_authority.guard
+    changed = False
+
+    @contextmanager
+    def changed_before_admission(*args, **kwargs):
+        nonlocal changed
+        with original():
+            if not changed:
+                changed = True
+                current = load(wid)
+                current.pr.branch = "feature/changed-aaaa"
+                current.pr.pr_revision += 1
+                tracking.save_record(current)
+            yield
+
+    monkeypatch.setattr(pr_authority, "guard", changed_before_admission)
+    monkeypatch.setattr(git_ops, "push", lambda *a, **k: pytest.fail("stale authority reached push"))
+    assert not finalize.push_changes(wid, config)
+    assert load(wid).pr.head_sha == before
+    assert not (Path(config.default_repo.worktree_root) / ".finalize.lock").exists()

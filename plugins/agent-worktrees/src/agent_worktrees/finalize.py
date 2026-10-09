@@ -48,7 +48,7 @@ from . import (
     hooks,
     obligations,
     output,
-    permissions,
+    permissions, pr_authority,
     push_diagnostics,
     procs,
     sessions,
@@ -835,11 +835,11 @@ def _push_changes_pr(
             )
         return True
 
-    lock = FinalizeLock(lock_path)
+    lock = pr_authority.PublicationLock(FinalizeLock(lock_path), record)
     try:
         lock.acquire()
-    except TimeoutError:
-        output.err("Timed out waiting for finalization lock.")
+    except (TimeoutError, ValueError) as exc:
+        output.err(str(exc))
         return False
 
     try:
@@ -978,11 +978,11 @@ def _push_changes_pr_refspec(
         )
         return True
 
-    lock = FinalizeLock(lock_path)
+    lock = pr_authority.PublicationLock(FinalizeLock(lock_path), record)
     try:
         lock.acquire()
-    except TimeoutError:
-        output.err("Timed out waiting for finalization lock.")
+    except (TimeoutError, ValueError) as exc:
+        output.err(str(exc))
         return False
 
     try:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import threading
+from functools import wraps
 from pathlib import Path
 
 import yaml
@@ -12,6 +13,42 @@ import yaml
 from . import config as cfg, pr_publication_state, pr_publish, tracking
 
 _held = threading.local()
+
+
+def publication(function):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        with guard():
+            return function(*args, **kwargs)
+    return guarded
+
+
+class PublicationLock:
+    """Acquire finalization before authority and release in reverse order."""
+
+    def __init__(self, finalization, record):
+        self.finalization = finalization
+        self.record = record
+        self.authority = None
+
+    def acquire(self) -> None:
+        self.finalization.acquire()
+        authority = guard()
+        try:
+            authority.__enter__()
+            self.authority = authority
+            pr_publication_state.require_current(self.record, self.record.active_pr())
+        except BaseException:
+            self.release()
+            raise
+
+    def release(self) -> None:
+        try:
+            if self.authority is not None:
+                authority, self.authority = self.authority, None
+                authority.__exit__(None, None, None)
+        finally:
+            self.finalization.release()
 
 
 @contextlib.contextmanager

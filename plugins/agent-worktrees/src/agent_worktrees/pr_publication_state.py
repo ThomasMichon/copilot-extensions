@@ -24,6 +24,17 @@ def copy_pr(destination: tracking.PRRecord, source: tracking.PRRecord) -> None:
         setattr(destination, field.name, getattr(source, field.name))
 
 
+def require_current(record: tracking.WorktreeRecord, expected: tracking.PRRecord | None) -> None:
+    from . import pr_publish
+
+    if expected is None:
+        raise ValueError("No live tracked PR remains; reload the publication target before retrying.")
+    with tracking._RecordLock(record.yaml_path, require_sidecar=True):
+        fresh = tracking.load_record(record.yaml_path)
+        if not matches(pr_publish._publication_pr(fresh, expected), expected):
+            raise ValueError("Tracked PR authority changed before publication; reload it before retrying.")
+
+
 def persist_pull(config, record, target, pull, *, head_sha: str, marker_published: bool, session: str):
     from . import pr_ops, pr_publish
 
