@@ -1476,7 +1476,8 @@ copy, never the whole (possibly-wedged) install. Guards:
 - Structured worktrees installs retain their context-owned staging path even
   with inherited flags; they never fall through into legacy staging. Read-only
   index status and dependency-light cell-slot actions remain exempt from legacy
-  staging and its filesystem writes.
+  staging and its filesystem writes. Index cell coordinators and their context
+  helper children keep HOME as CWD even while waiting on installation locks.
 - POSIX watchdogs re-exec as a command rather than retaining the original payload
   script as their input. On Windows, MSYS/Cygwin emulated exec additionally keeps
   the original launch process and its native CWD alive: launch those scripts from
@@ -1493,6 +1494,8 @@ inherited flags, failed relocation, and directory rename/replacement while the
 installer/watchdog is still alive. Generated Windows command shims check both
 logical and native CWD before redirecting off a payload, including when a caller
 has already used `Set-Location` without releasing its native directory handle.
+When that logical location is already a safe workspace, only the native CWD is
+updated; the caller's workspace is preserved rather than replaced by HOME.
 The path-gated `Payload CWD contract` workflow runs a focused Linux/Windows smoke
 on relevant PRs; its scheduled/manual lane runs the full inherited-flag matrix.
 

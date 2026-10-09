@@ -453,8 +453,8 @@ if ($Action -in @('cell-provision', 'cell-recover', 'slot-cutover')) {
     }
     Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
     Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
-    Set-Location -LiteralPath $PluginDir
-    [IO.Directory]::SetCurrentDirectory($PluginDir)
+    Set-Location -LiteralPath $env:USERPROFILE
+    [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
     & $cellPython -I -X utf8 @cellArgs
     exit $LASTEXITCODE
 }
