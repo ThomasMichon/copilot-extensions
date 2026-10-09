@@ -113,8 +113,8 @@ never assume any remote HTTP listener is an interchangeable service.
 
 ## Lifecycle and failure boundary
 
-Use [immutable runtime slots](../../../../docs/patterns/durable-vs-versioned-runtime.md)
-and [graceful cutover](../../../../docs/patterns/graceful-daemon-cutover.md).
+Use [immutable runtime slots](../../../docs/patterns/durable-vs-versioned-runtime.md)
+and [graceful cutover](../../../docs/patterns/graceful-daemon-cutover.md).
 Controller and connector are resident daemons and have no blanket exemption.
 Validate a passive replacement before activation, transfer registration/routing
 ownership explicitly, stop new requests on the predecessor, drain accepted
