@@ -23,7 +23,7 @@ def default_python(component: str) -> Path:
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
-def prepare(component: str, python: Path) -> None:
+def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     root = python.parent.parent
     if not python.is_file():
@@ -37,9 +37,9 @@ def prepare(component: str, python: Path) -> None:
             str(REPO / "libs" / "zdd"),
             str(REPO / "libs" / "agent-procutil"),
             str(REPO / "plugins" / "agent-index" / "libs" / "dropin-registry"),
-            str(REPO / "plugins" / "agent-index") + "[store,server]",
+            str(REPO / "plugins" / "agent-index") + ("" if smoke else "[store,server]"),
         ]
-    extra = "native,test" if component == "agent-index-service" else "dev"
+    extra = ("test" if smoke else "native,test") if component == "agent-index-service" else "dev"
     sources.append(str(REPO / component) + f"[{extra}]")
     with tempfile.TemporaryDirectory(prefix="standalone-dependencies-") as temporary:
         overrides: list[str] = []
@@ -48,7 +48,8 @@ def prepare(component: str, python: Path) -> None:
             # not an unrelated released wheel chosen to satisfy that floor.
             override = Path(temporary) / "overrides.txt"
             core = (REPO / "plugins" / "agent-index").resolve().as_uri()
-            override.write_text(f"agent-index[store,server] @ {core}\n", encoding="utf-8")
+            core_extra = "" if smoke else "[store,server]"
+            override.write_text(f"agent-index{core_extra} @ {core}\n", encoding="utf-8")
             overrides = ["--override", str(override)]
         subprocess.run(
             ["uv", "pip", "install", "--python", str(python), *overrides, *sources],
@@ -87,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     lease = acquire(args.admission_wait)
     try:
         if args.prepare:
-            prepare(args.component, python)
+            prepare(args.component, python, smoke=args.smoke)
         with tempfile.TemporaryDirectory(prefix=f"{args.component}-tests-") as temporary:
             sandbox = Path(temporary)
             env = isolated_environment(os.environ, sandbox)

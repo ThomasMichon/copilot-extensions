@@ -54,19 +54,22 @@ def test_config_does_not_load_core(config_file, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["valid"] is True
 
 
-def test_missing_native_is_error(config_file, monkeypatch, capsys):
+@pytest.mark.parametrize("missing_name", ["fastapi", "lancedb"])
+def test_missing_native_is_error(config_file, monkeypatch, capsys, missing_name):
     real_import = importlib.import_module
 
     def missing(name):
-        if name == "lancedb":
-            raise ModuleNotFoundError("fixture missing lancedb", name="lancedb")
+        if name == missing_name:
+            raise ModuleNotFoundError(f"fixture missing {missing_name}", name=missing_name)
+        if name in {"fastapi", "uvicorn", "pydantic", "numpy", "pyarrow", "lancedb"}:
+            return SimpleNamespace()
         return real_import(name)
 
     monkeypatch.setattr(composition, "importlib", SimpleNamespace(import_module=missing))
     assert main(["serve", "--config", str(config_file)]) == 2
     output = capsys.readouterr()
     assert "agent-index-service[native]" in output.err
-    assert "lancedb" in output.err
+    assert missing_name in output.err
     assert not output.out
 
 

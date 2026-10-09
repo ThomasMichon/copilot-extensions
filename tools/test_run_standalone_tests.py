@@ -15,7 +15,8 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
-def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monkeypatch):
+@pytest.mark.parametrize("smoke", [False, True])
+def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monkeypatch, smoke):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     metadata = tmp_path / "plugins" / "agent-index" / "pyproject.toml"
@@ -26,19 +27,20 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
         calls.append(command)
         if "--override" in command:
             override = Path(command[command.index("--override") + 1])
-            assert override.read_text() == (
-                f"agent-index[store,server] @ {metadata.parent.as_uri()}\n"
-            )
+            core_extra = "" if smoke else "[store,server]"
+            assert override.read_text() == f"agent-index{core_extra} @ {metadata.parent.as_uri()}\n"
 
     monkeypatch.setattr(runner.subprocess, "run", install)
     python = tmp_path / ".test-venvs" / "service" / "bin" / "python"
 
-    runner.prepare("agent-index-service", python)
+    runner.prepare("agent-index-service", python, smoke=smoke)
 
     assert calls[0] == ["uv", "venv", str(python.parent.parent)]
     assert calls[1][:5] == ["uv", "pip", "install", "--python", str(python)]
-    assert str(tmp_path / "plugins" / "agent-index") + "[store,server]" in calls[1]
-    assert calls[1][-1] == str(tmp_path / "agent-index-service") + "[native,test]"
+    core_extra = "" if smoke else "[store,server]"
+    service_extra = "[test]" if smoke else "[native,test]"
+    assert str(tmp_path / "plugins" / "agent-index") + core_extra in calls[1]
+    assert calls[1][-1] == str(tmp_path / "agent-index-service") + service_extra
     assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
 

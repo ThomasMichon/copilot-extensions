@@ -274,3 +274,8 @@ boundaries from implementation decisions and deployment-specific policy.
   extras) because `dev` freezes its source version. Actual preparation plus the
   full contained suite passed 68 tests; wheel assertions reject the old core.
   Registry-only changes now trigger the existing version-bump-engine suite.
+- Review also required smoke preparation itself to stay lightweight, not just
+  test selection. A genuinely fresh smoke environment passed 63 contracts in
+  2.32 seconds and contains no FastAPI/uvicorn/NumPy/pyarrow/LanceDB/tree-sitter
+  packages. Full preparation retains native extras. Runner/workflow regressions
+  passed 36 tests with one Linux-only process-group regression deferred to CI.
