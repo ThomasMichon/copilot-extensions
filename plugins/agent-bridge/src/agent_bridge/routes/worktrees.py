@@ -415,7 +415,7 @@ class WorktreeDiscoveryCache:
                 return []
             # If the resolved target is the local machine, run locally
             # instead of SSH (avoids loopback SSH failures)
-            if _is_local_target(target.host, resolver):
+            if _is_local_target(target.host, resolver, target.execution_space_key):
                 is_local = True
             else:
                 host = target.host or config.host
@@ -518,9 +518,11 @@ async def _run_local_ex(
     return await _exec_ex(cmd, timeout=timeout)
 
 
-def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
+def _is_local_target(
+    ssh_host: str | None, resolver: AgentResolver, execution_space_key: str | None = None,
+) -> bool:
     """Use the resolver's selected identity for transport loopback."""
-    return resolver.is_local_transport(ssh_host)
+    return resolver.is_local_transport(ssh_host, execution_space_key=execution_space_key)
 
 
 async def _run_ssh(
@@ -1307,7 +1309,7 @@ async def _run_for_agent(
         log.warning("Cannot resolve agent %s for session read: %s", agent_name, exc)
         return None
 
-    if _is_local_target(target.host, resolver):
+    if _is_local_target(target.host, resolver, target.execution_space_key):
         return await _run_local(config.project, args)
 
     return await _run_ssh(
