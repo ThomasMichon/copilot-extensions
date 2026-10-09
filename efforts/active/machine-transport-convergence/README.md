@@ -75,6 +75,10 @@ The operator selected a read-only agent-worktrees transport-resolution command
 backed by the shared library. Dispatch consumes it when available and preserves
 raw SSH-alias operation only when the optional provider is unavailable.
 
+Publication-blocker decision:
+
+> "Fix the tooling blocker, then continue"
+
 ## Plan
 
 ### Phase 1 - Review the campaign boundary
@@ -82,6 +86,8 @@ raw SSH-alias operation only when the optional provider is unavailable.
 - [x] Coordinate with #5689 on shared identity ownership and avoid overlapping edits.
 
 ### Phase 2 - Named-machine consumers
+- [ ] Repair the owned-PR publication blocker #5796, then resume the original
+  consumer work. _(operator-approved prerequisite)_
 - [ ] Resolve #5737 by migrating Bridge registry and named-machine resolution;
   preserve ACP launch construction and compatibility metadata.
 - [ ] Resolve #5738 by migrating Dispatch named-machine SSH resolution; preserve
@@ -90,7 +96,7 @@ raw SSH-alias operation only when the optional provider is unavailable.
   transport identity, or record a justified distinct contract.
 
 ### Phase 3 - Provider boundary and completion
-- [ ] Resolve #5740 with a documented dynamic-venue boundary, or migrate only
+- [x] Resolve #5740 with a documented dynamic-venue boundary, or migrate only
   independently proven named-machine overlap.
 - [ ] Inventory other agent-* named-machine operation paths for remaining
   duplicated identity/transport resolution. _(agent-recommended verification
@@ -196,3 +202,30 @@ identity authority: reconcile `machine-transport` with #5689's
   remaining local-machine matching overlap. Its transport-specific projection
   remains outside the shared resolver; the dtssh alias default and mesh-status
   projection require boundary checks, not indiscriminate migration.
+
+### 2026-10-08 - Provider boundary landed; publication repair
+- #5834 merged into `dev` and #5740 was explicitly closed. Codespace discovery
+  and `_ssh_namespace()` are a dynamic venue/options contract, not a static
+  machine resolver. The clarification preserves existing behavior without a
+  redundant dependency; all provider checks and automated review passed.
+- Bridge's subsequent review corrections reject ambiguous local hostnames and
+  decouple parser defaults from field normalization. Shared regressions:
+  **76 passed**; Bridge coverage: **60 passed, 1 skipped**.
+- Supported rebase reconciliation exposed #5796: publication rejects a rebased
+  owned PR despite an exact remote-head lease. The operator authorized a
+  separate source repair, which remains in review as #5825. Bridge publication
+  is blocked on that repair; no guard bypass or deployed-code edit was used.
+- The repair's actual blocked-branch lineage verified read-only, including the
+  explicit conflict continuation. Real-Git tests cover leases, lost-work
+  refusals and hooks; review added raw-byte patch/message preservation and an
+  opt-in exhaustive lane. Default smoke measured **6 passed in 70.81 seconds**
+  on Windows. A fresh consoleless-parent observation exposed an unguarded core
+  Git spawn; the corrected path completed two cycles with zero newly visible
+  windows and foreground transitions. Combined changed contracts:
+  **127 passed, 15 skipped**.
+- Dispatch's optional resolver CLI remains unimplemented until ambiguity and
+  native/WSL execution locality are reconciled with #5689. Its still-open review
+  findings are not superseded by this campaign.
+- Further evidence shows the mesh parser also feeds operational refresh:
+  #5375 already tracks agent-ssh's self-SSH probe loop. Include that path in the
+  remaining inventory rather than treating the mesh parser as read-only only.
