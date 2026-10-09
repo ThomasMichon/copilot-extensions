@@ -96,7 +96,7 @@ The operator approved the slug and two-slice scope.
 - [x] Preserve `auto`, `manual-only`, and `off` behavior, cancellation,
   successor readiness, and safe predecessor identity/ownership checks.
   (Unaffected -- see Journal: the wake adds no new mode-gated behavior.)
-- [ ] Land code, tests, documentation, and required changefiles; update this
+- [x] Land code, tests, documentation, and required changefiles; update this
   effort with the merged outcome.
 
 ### Phase 3 - Remove wait-only launch layers
@@ -258,3 +258,31 @@ two measured forwarding roles, with live process-tree evidence.)_
   PR (applying the lesson above).
 - Only Phase 2's third Plan item (bounded-retry/pending-work processing,
   independent of the already-resolved history-scan half) remains open.
+- Landed as PR #5849 after 6 review rounds. Rounds 1-5 each caught a
+  genuine, distinct bug (never a restated/duplicate finding), consistent
+  with this effort's earlier #5739 experience: a cross-caller
+  snapshot-bounding-style class of issue recurred in miniature (a
+  stale/mismatched installation-context lock accepted as reachable), plus
+  a test that passed for the wrong reason (a double-started real server
+  silently swallowed by production's own startup guard, masked because the
+  test's dial happened to race ahead of that failure), a
+  persist-before-notify test that only checked the call happened rather
+  than the ordering, a test that only covered the legacy-mode branch of a
+  new validation function, and two narrow never-raises gaps (a port outside
+  1-65535 and an overflowing timeout each raising `OverflowError`, not
+  `OSError`). Round 6 added no new finding -- it repeated the
+  already-addressed oversized-port comment's wording in its summary while
+  listing only the persistent cutover-statement thread below, confirming
+  the fixes had converged. One review thread (a required **Graceful
+  cutover impact** PR-description statement) stayed marked "active" across
+  every round despite the statement being verified present
+  in the live PR body each time (`gh pr view --json body`) -- treated as a
+  non-blocking tooling artifact per the repo's own commented-verdict
+  fallback policy, not a genuine gap, after independently confirming
+  compliance with `CONTRIBUTING.md`'s actual requirement text. Merged via
+  `pr-merge --now`; worktree reconciled via `pr-complete`.
+- Also filed #5856 (tracked, not fixed -- out of this effort's scope): an
+  unrelated, confirmed-pre-existing `dev` test failure
+  (`resolve_active_plugins()` lost its `include_projects` kwarg, breaking
+  `local_cache_refresh.py`), discovered incidentally while validating this
+  slice and verified via `git stash` against plain `dev` before filing.
