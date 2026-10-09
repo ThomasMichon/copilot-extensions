@@ -107,6 +107,14 @@ if _acquire_versioned_slot_lease; then
     touch "{_bash_path(ready_marker)}"
     while [[ ! -f "{_bash_path(release_marker)}" ]]; do sleep 0.05; done
     _release_versioned_slot_lease
+    # Stay alive, still holding nothing, for a bit after releasing: if
+    # release were a no-op, this process's PID would still be alive and
+    # the contender's mkdir-fallback stale-PID reclaim path (which only
+    # ever triggers once `kill -0` on the recorded holder proves it
+    # dead) could NOT kick in -- so a RESULT=True from the contender
+    # while this process is still running can only mean the explicit
+    # release genuinely cleared the lock, never stale-PID recovery.
+    sleep 5
 else
     touch "{_bash_path(failed_marker)}"
 fi
