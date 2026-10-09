@@ -13,6 +13,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from agent_logger.sync.targets.filesystem import LocalTarget
 from agent_logger.sync.targets.ingest import IngestTarget
 from agent_logger.sync.targets.publication_admission import (
@@ -176,23 +178,53 @@ def test_publication_marker_refuses_a_symlink_at_the_marker_path(
 ) -> None:
     """A symlink sitting at the marker path is never legitimate ownership
     state -- admission must refuse outright (never follow it to read/write
-    through to wherever it points), so a race that plants a symlink there
-    can't redirect the claim write to an arbitrary file."""
+    through to wherever it points, even when the linked file holds valid,
+    matching identity JSON), so a race that plants a symlink there can't
+    redirect the claim write to an arbitrary file."""
     dest = tmp_path / "dest" / "m1"
     dest.mkdir(parents=True)
-    outside_target = tmp_path / "outside-secret.json"
-    outside_target.write_text("do-not-touch", encoding="utf-8")
-    (dest / PUBLICATION_IDENTITY_MARKER).symlink_to(outside_target)
-
     identity = _Identity(
         provider="github", host="lambda-core", repository="example", venue="codespace"
     )
+    outside_target = tmp_path / "outside-secret.json"
+    outside_target.write_text(
+        json.dumps(
+            {
+                "provider": identity.provider,
+                "host": identity.host,
+                "repository": identity.repository,
+                "venue": identity.venue,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    try:
+        (dest / PUBLICATION_IDENTITY_MARKER).symlink_to(outside_target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
     result = check_publication_identity(dest, identity)
     assert result is not None and not result.ok
 
     marker = dest / PUBLICATION_IDENTITY_MARKER
     assert marker.is_symlink()  # untouched -- never followed or replaced
-    assert outside_target.read_text(encoding="utf-8") == "do-not-touch"
+    assert json.loads(outside_target.read_text(encoding="utf-8"))["host"] == "lambda-core"
+
+
+def test_check_publication_identity_handles_lock_setup_errors(tmp_path: Path) -> None:
+    """A lock-acquisition failure (e.g. an unsafe/unopenable lock path) must
+    surface as a failing ``PushResult``, never an uncaught exception --
+    ``FilesystemTarget.push`` promises ``PushResult`` on every path."""
+    dest = tmp_path / "dest" / "m1"
+    dest.mkdir(parents=True)
+    lock_path = dest.parent / f".{dest.name}.publication-admission.lock"
+    lock_path.mkdir()  # forces sync_lock's open to fail: not a regular file
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = check_publication_identity(dest, identity)
+    assert result is not None and not result.ok
 
 
 def test_check_publication_identity_fails_closed_when_unsupported(

@@ -112,72 +112,84 @@ def check_publication_identity(
             ),
         )
     lock_file = dest.parent / f".{dest.name}.publication-admission.lock"
-    with sync_lock(lock_file, timeout=30) as acquired:
-        if not acquired:
-            return PushResult(
-                ok=False,
-                detail=f"publication admission lock is busy: {lock_file}",
-            )
-        incoming = {
-            "provider": identity.provider,
-            "host": identity.host,
-            "repository": identity.repository,
-            "venue": identity.venue,
-        }
-        marker_path = dest / PUBLICATION_IDENTITY_MARKER
+    try:
+        with sync_lock(lock_file, timeout=30) as acquired:
+            return _admit_under_lock(dest, identity, lock_file, acquired)
+    except OSError as exc:
+        return PushResult(ok=False, detail=f"publication admission lock failed: {exc}")
+
+
+def _admit_under_lock(
+    dest: Path,
+    identity: SourceIdentityLike,
+    lock_file: Path,
+    acquired: bool,
+) -> PushResult | None:
+    if not acquired:
+        return PushResult(
+            ok=False,
+            detail=f"publication admission lock is busy: {lock_file}",
+        )
+    incoming = {
+        "provider": identity.provider,
+        "host": identity.host,
+        "repository": identity.repository,
+        "venue": identity.venue,
+    }
+    marker_path = dest / PUBLICATION_IDENTITY_MARKER
+    try:
+        existing = _read_marker(marker_path)
+    except (OSError, ValueError) as exc:
+        return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
+    if existing is not None:
+        if existing == incoming:
+            return None  # idempotent re-push of the same identity
+        return PushResult(
+            ok=False,
+            detail=(
+                f"publication identity mismatch at {marker_path}: "
+                f"destination already claimed by {existing}"
+            ),
+        )
+    try:
+        if dest.exists():
+            _clear_stale_temp_markers(dest)
+        has_content = dest.exists() and any(dest.iterdir())
+    except OSError as exc:
+        return PushResult(ok=False, detail=f"cannot inspect destination: {exc}")
+    if has_content:
+        return PushResult(
+            ok=False,
+            detail=(
+                f"destination {dest} has existing content with no "
+                "publication marker; refusing to claim an unowned leaf"
+            ),
+        )
+    temp_path = dest / f".{PUBLICATION_IDENTITY_MARKER}.{short_unique_id()}.tmp"
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        # Write through an exclusively created, brand-new temp name (so
+        # there is nothing pre-existing to follow on any platform), then
+        # publish via os.replace -- rename(2) (and its Windows
+        # equivalent) swaps the final path component itself rather than
+        # dereferencing it, so even a marker path raced into a symlink
+        # is safely overwritten in place rather than followed. Both the
+        # write and the replace are cleaned up together on any failure
+        # so an interrupted claim never leaves a temp artifact that
+        # would wrongly count as unowned nonempty content later.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
+        fd = os.open(windows_extended_path(temp_path), flags, 0o644)
         try:
-            existing = _read_marker(marker_path)
-        except (OSError, ValueError) as exc:
-            return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
-        if existing is not None:
-            if existing == incoming:
-                return None  # idempotent re-push of the same identity
-            return PushResult(
-                ok=False,
-                detail=(
-                    f"publication identity mismatch at {marker_path}: "
-                    f"destination already claimed by {existing}"
-                ),
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(incoming, sort_keys=True))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(
+                windows_extended_path(temp_path), windows_extended_path(marker_path)
             )
-        try:
-            if dest.exists():
-                _clear_stale_temp_markers(dest)
-            has_content = dest.exists() and any(dest.iterdir())
-        except OSError as exc:
-            return PushResult(ok=False, detail=f"cannot inspect destination: {exc}")
-        if has_content:
-            return PushResult(
-                ok=False,
-                detail=(
-                    f"destination {dest} has existing content with no "
-                    "publication marker; refusing to claim an unowned leaf"
-                ),
-            )
-        temp_path = dest / f".{PUBLICATION_IDENTITY_MARKER}.{short_unique_id()}.tmp"
-        try:
-            dest.mkdir(parents=True, exist_ok=True)
-            # Write through an exclusively created, brand-new temp name (so
-            # there is nothing pre-existing to follow on any platform), then
-            # publish via os.replace -- rename(2) (and its Windows
-            # equivalent) swaps the final path component itself rather than
-            # dereferencing it, so even a marker path raced into a symlink
-            # is safely overwritten in place rather than followed. Both the
-            # write and the replace are cleaned up together on any failure
-            # so an interrupted claim never leaves a temp artifact that
-            # would wrongly count as unowned nonempty content later.
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
-            fd = os.open(windows_extended_path(temp_path), flags, 0o644)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    handle.write(json.dumps(incoming, sort_keys=True))
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(
-                    windows_extended_path(temp_path), windows_extended_path(marker_path)
-                )
-            except OSError:
-                temp_path.unlink(missing_ok=True)
-                raise
-        except OSError as exc:
-            return PushResult(ok=False, detail=f"cannot claim destination: {exc}")
-        return None
+        except OSError:
+            temp_path.unlink(missing_ok=True)
+            raise
+    except OSError as exc:
+        return PushResult(ok=False, detail=f"cannot claim destination: {exc}")
+    return None
