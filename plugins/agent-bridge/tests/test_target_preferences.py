@@ -515,6 +515,38 @@ def test_invalid_target_configuration_does_not_fall_back(monkeypatch, tmp_path, 
         config.load_config()
 
 
+@pytest.mark.parametrize("text", [
+    "preference_source: target-settings\nport: [",
+    "preference_source: target-settings\nbad: 'unterminated",
+    "- preference_source: target-settings\n",
+])
+def test_unparseable_authority_configuration_refuses_startup(monkeypatch, tmp_path, text):
+    from agent_bridge import config
+
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    (tmp_path / "config.yaml").write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="refusing caller-settings fallback"):
+        config.load_config()
+
+
+def test_unreadable_authority_configuration_refuses_startup(monkeypatch, tmp_path):
+    from agent_bridge import config
+
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    path = tmp_path / "config.yaml"
+    path.write_text("preference_source: target-settings", encoding="utf-8")
+    original = Path.read_text
+
+    def read(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError("test read failure")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(ValueError, match="refusing caller-settings fallback"):
+        config.load_config()
+
+
 def test_affinity_reuse_cannot_ignore_explicit_preferences_or_provider():
     from agent_bridge.preference_requests import reused_preference_source
 

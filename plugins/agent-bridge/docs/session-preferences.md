@@ -85,7 +85,10 @@ or lower-precedence compatibility model environment variable.
 `AGENT_CODESPACES_ACP_*` aliases are intentional overrides, not inferred caller
 defaults. Bridge-native names win. `AGENT_BRIDGE_MODEL_PROPAGATE=0` (or its
 historical alias) disables inherited defaults, not explicit requests/profiles.
-Caller-settings behavior remains unchanged.
+Valid caller-settings selection behavior remains unchanged.
+Unreadable, unparseable or non-mapping configuration refuses startup because
+its authority cannot be established. Legacy fallback remains only when a
+parsed caller-settings configuration is known.
 Compatibility variables are bridge-process globals; use the request
 `model`/`effort`/`context` fields for per-session choices, not those variables
 inside a request's child environment.

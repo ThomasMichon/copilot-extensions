@@ -132,7 +132,10 @@ def load_config() -> ServiceConfig:
     if cfg_path.exists():
         data = None
         try:
-            data = yaml.safe_load(cfg_path.read_text()) or {}
+            data = yaml.safe_load(cfg_path.read_text())
+            data = {} if data is None else data
+            if not isinstance(data, dict):
+                raise ValueError("agent-bridge configuration must be a mapping")
             # Lazy schema migration (in memory, never persists / never raises) so
             # a still-old config.yaml loads at the current shape before an
             # install/update has rewritten it on disk.
@@ -142,10 +145,15 @@ def load_config() -> ServiceConfig:
             if isinstance(data, dict):
                 data = _normalize_service_config(data, root=root)
             return ServiceConfig(**data)
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(
+                "Cannot establish preference authority from configuration; "
+                "refusing caller-settings fallback"
+            ) from exc
         except Exception as exc:
             if (
-                isinstance(data, dict) and "preference_source" in data
-                and data["preference_source"] != "caller-settings"
+                not isinstance(data, dict)
+                or ("preference_source" in data and data["preference_source"] != "caller-settings")
             ):
                 raise ValueError(
                     "Invalid explicit preference policy; refusing caller-settings fallback"
