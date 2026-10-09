@@ -37,4 +37,14 @@ jobs:
       - name: Install pytest
         run: python -m pip install "pytest>=8.0"
       - name: Run the full zdd singleton-manager suite
+        # src/-layout package, not installed (editable or otherwise) in
+        # this minimal job -- expose it on PYTHONPATH so collection can
+        # import zdd at all. The real-process tests in
+        # test_singleton_linux_processes.py spawn their own child Python
+        # processes via subprocess.Popen; those inherit PYTHONPATH from
+        # this step's environment automatically (os.environ propagates to
+        # a child unless explicitly stripped), so no extra child-side
+        # wiring is needed.
+        env:
+          PYTHONPATH: ${{ github.workspace }}/libs/zdd/src
         run: python -m pytest -q libs/zdd/tests
