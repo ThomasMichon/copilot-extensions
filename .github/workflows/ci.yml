@@ -451,7 +451,7 @@ jobs:
         # promotion-failure-reactive-fix-agent effort, Phase 1: the
         # detect+dedup reporting logic validate-and-promote.yml's own
         # report-failure job depends on.
-        run: python -m pytest -q tools/test_ci_failure_watchdog.py
+        run: python -m pytest -q tools/test_ci_failure_watchdog.py tools/test_ci_failure_fix_dispatch.py
       - name: Install contract
         run: python tools/check-install-contract.py
       - name: Install contract guard tests
