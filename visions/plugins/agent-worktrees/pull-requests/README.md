@@ -9,7 +9,7 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-09
 - **Reality docs:** the agent-worktrees plugin `docs/`;
   `skills/worktree/references/pr-workflow.md` (the "Addressing a foreign
   repo" section is the authoritative, maintained description of
@@ -112,6 +112,16 @@ is held to, so a consumer can exercise realistic PR-shaped interaction —
 diff review, commenting, labeling, merging — without a live forge, sanctioned
 credentials, or a real PR.
 
+### durable-shared-pr-transition-subscriptions
+
+Callers can subscribe to a named PR's supported transitions without keeping
+their submitting process alive. Independent subscribers retain their own
+transition criteria and lifetimes while sharing one target observation stream.
+Pending subscriptions survive the watch owner's restart and recover without
+losing their target or confusing one subscriber's outcome with another's.
+This complements ordinary status queries and synchronous waits; it does not
+make a durable subscription service a prerequisite for every PR operation.
+
 ### provenance-attribution-without-identifier-leakage
 
 Opening a PR through this capability may attribute it to the originating
@@ -174,9 +184,10 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
 
 ## Non-Goals / Boundaries
 
-- **Not a forge UI, notification system, or webhook receiver.** This
-  capability is a command/query surface, not an interactive review
-  experience or an event pipeline.
+- **Not a forge UI or general-purpose notification/webhook platform.**
+  Scoped PR-transition subscriptions belong to this command/query capability;
+  an interactive review experience, arbitrary notification routing and inbound
+  webhook brokering do not.
 - **Not a replacement for a repository's own review policy or rubric.**
   Provider-neutral operations execute policy; they do not define what a
   repository requires to approve or land a change.
@@ -197,9 +208,17 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
   have re-implemented beside it.
 - Reality docs: the agent-worktrees plugin `docs/`;
   `skills/worktree/references/pr-workflow.md`; `providers/base.py`;
-  `tests/test_pr_*.py`, `tests/test_providers.py`
+  `tests/test_pr_*.py`, `tests/test_providers.py` ·
+  [PR watch runtime](../../../../plugins/agent-pull-requests/README.md)
 
 ## Provenance
+
+- **2026-10-09** — Folded back durable, shared PR-transition subscriptions:
+  independent subscriber criteria/lifetimes, target observation sharing and
+  recovery of pending subscriptions after owner restart. Narrowed the
+  notification-platform boundary so it does not accidentally forbid that
+  intended watch capability; generic routing/webhook brokering remains out
+  of scope. No packaging or status decision changed.
 
 - **2026-10-07** — Fold-back confirmation slice (`vision-backport-sweep`
   Phase 2): reconciled against 372 commits of drift in the plugin's PR
