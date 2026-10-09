@@ -260,13 +260,14 @@ def _run_context(
     ]
     result = subprocess.run(
         command,
-        cwd=payload_root,
+        cwd=Path.home(),
         env=_isolated_environment(),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -1361,6 +1362,7 @@ def _git_source(path: Path) -> tuple[str | None, str | None, bool]:
             encoding="utf-8",
             errors="replace",
             check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         ).stdout.strip()
         branch = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
@@ -1369,6 +1371,7 @@ def _git_source(path: Path) -> tuple[str | None, str | None, bool]:
             encoding="utf-8",
             errors="replace",
             check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         ).stdout.strip()
         dirty = bool(
             subprocess.run(
@@ -1378,6 +1381,7 @@ def _git_source(path: Path) -> tuple[str | None, str | None, bool]:
                 encoding="utf-8",
                 errors="replace",
                 check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             ).stdout
         )
         return commit, branch, dirty

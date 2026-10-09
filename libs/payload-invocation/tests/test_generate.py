@@ -2710,7 +2710,7 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
         split_location_command, cwd=plugin, env=env,
         capture_output=True, text=True, check=True,
     )
-    assert split_result.stdout.strip() == f"{project}|status"
+    assert split_result.stdout.strip() == f"{sibling}|status"
     for unsafe_project in (plugin, plugin / "scripts"):
         env["COPILOT_PROJECT_DIR"] = str(unsafe_project)
         fallback_result = subprocess.run(

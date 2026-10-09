@@ -180,8 +180,13 @@ def test_unavailable_home_refuses_in_place_install(tmp_path: Path, extension: st
     home = tmp_path / "not-a-directory"
     home.write_text("file", encoding="utf-8")
     kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    environment = _env(home)
+    if extension == "ps1":
+        # PowerShell on POSIX needs a real HOME just to initialize. Its installer
+        # relocates using USERPROFILE, which remains the invalid target here.
+        environment["HOME"] = str(tmp_path)
     proc = subprocess.run(
-        _command(entry, extension), cwd=payload, env=_env(home),
+        _command(entry, extension), cwd=payload, env=environment,
         capture_output=True, text=True, timeout=20, **kwargs,
     )
     assert proc.returncode != 0

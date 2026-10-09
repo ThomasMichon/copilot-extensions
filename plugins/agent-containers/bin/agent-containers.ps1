@@ -53,12 +53,18 @@ $_separators = [char[]]@(
     [IO.Path]::AltDirectorySeparatorChar
 )
 $_payloadPrefix = $_payloadRoot.TrimEnd($_separators) + [IO.Path]::DirectorySeparatorChar
-if (
+$_logicalInPayload = (
     [StringComparer]::OrdinalIgnoreCase.Equals($_cwd, $_payloadRoot) -or
-    $_cwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+    $_cwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
+)
+$_nativeInPayload = (
     [StringComparer]::OrdinalIgnoreCase.Equals($_nativeCwd, $_payloadRoot) -or
     $_nativeCwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
-) {
+)
+if ($_nativeInPayload -and -not $_logicalInPayload -and
+    (Test-Path -LiteralPath $_cwd -PathType Container)) {
+    [IO.Directory]::SetCurrentDirectory($_cwd)
+} elseif ($_logicalInPayload -or $_nativeInPayload) {
     $_outside = if ($env:COPILOT_PROJECT_DIR) { $env:COPILOT_PROJECT_DIR } else { $HOME }
     if (Test-Path -LiteralPath $_outside -PathType Container) {
         $_outside = (Resolve-Path -LiteralPath $_outside).Path
