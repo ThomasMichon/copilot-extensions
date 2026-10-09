@@ -1,4 +1,4 @@
-"""Both installer adapters preinstall the portable identity dependency."""
+"""Both installer adapters preinstall the portable transport dependency."""
 
 from __future__ import annotations
 
@@ -16,20 +16,20 @@ PLUGIN = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize("suffix", ["sh", "ps1"])
 @pytest.mark.parametrize("layout", ["payload", "canonical"])
-def test_machine_identity_preinstall(tmp_path, suffix, layout):
+def test_machine_transport_preinstall(tmp_path, suffix, layout):
     executable = shutil.which("bash" if suffix == "sh" else "pwsh")
     if executable is None or (suffix == "sh" and os.name == "nt"):
         pytest.skip(f"{suffix} interpreter is unavailable")
     plugin = tmp_path / "plugins" / "agent-worktrees"
     dependency = (
-        plugin / "libs" / "machine-identity" if layout == "payload"
-        else tmp_path / "libs" / "machine-identity"
+        plugin / "libs" / "machine-transport" if layout == "payload"
+        else tmp_path / "libs" / "machine-transport"
     )
     dependency.mkdir(parents=True)
     plugin.mkdir(parents=True, exist_ok=True)
     (dependency / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     source = (PLUGIN / "scripts" / f"install.{suffix}").read_text(encoding="utf-8")
-    start = source.index("    # Vendored machine-identity lib;")
+    start = source.index("    # Vendored machine-transport lib")
     end = source.index(
         "    if ! uv pip install" if suffix == "sh" else "    $installRes =",
         source.index("\n\n", start) + 2,

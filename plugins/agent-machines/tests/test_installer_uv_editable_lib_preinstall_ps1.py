@@ -1,6 +1,6 @@
 """Guard for init.ps1's non-uv (bare-pip) preinstall loop covering the
 uv-editable canonical-reference libs (vendor-pointer-generalization effort):
-dropin-registry, plugin-resolve, agent-procutil, machine-identity, plugin-activation.
+dropin-registry, plugin-resolve, agent-procutil, machine-transport, plugin-activation.
 Exercises the loop via real pwsh execution for both the uv path and the
 bare-pip fallback path,
 confirming plugin-local/repo-root-canonical resolution and the required
@@ -62,7 +62,7 @@ $haveUv = ${str(have_uv).lower()}
 
 def _make_libs(root: Path) -> None:
     for lib in (
-        "dropin-registry", "plugin-resolve", "agent-procutil", "machine-identity", "plugin-activation",
+        "dropin-registry", "plugin-resolve", "agent-procutil", "machine-transport", "plugin-activation",
     ):
         lib_dir = root / lib
         lib_dir.mkdir(parents=True)
@@ -89,7 +89,7 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
     ]
     assert len(installs) == 5
     order = [Path(p).name for p in installs]
-    assert "machine-identity" in order
+    assert "machine-transport" in order
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
 

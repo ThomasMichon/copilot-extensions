@@ -14,8 +14,6 @@ authors = [{ name = "Thomas Michon" }]
 # now so the packaging/venv is validated against the real dependency, even
 # though the Phase 0 skeleton does not yet import it.
 dependencies = [
-    # Shared identity imported by the selected engine compatibility modules.
-    "agent-machine-identity",
     "textual>=8.2.8",
     # Read the installer-owned catalog (data/plugins.toml). tomllib is stdlib on
     # 3.11+; tomli backports it for 3.10.
@@ -71,7 +69,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-agent-machine-identity = { path = "../libs/machine-identity", editable = true }
 # Always resolve the vendored lib from the local path, never an index.
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Vendored per the harness's shared-lib convention

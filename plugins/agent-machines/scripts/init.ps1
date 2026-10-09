@@ -2195,7 +2195,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 
 # -- 2b. Preinstall uv-editable canonical libs (non-uv fallback) -------
 # `agent-dropin-registry`/`agent-plugin-resolve`/`agent-plugin-activation`/
-# `agent-procutil`/`agent-machine-identity` are `uv`-editable canonical references (vendor-pointer-
+# `agent-procutil`/`agent-machine-transport` are `uv`-editable canonical references (vendor-pointer-
 # generalization effort, Phase 1: no local copy in a dev checkout at all).
 # When `uv` is unavailable, the fallback below uses bare `python -m pip
 # install`, which does NOT honor `[tool.uv.sources]` -- without a
@@ -2208,7 +2208,7 @@ foreach ($lib in @(
     @{ Dir = 'dropin-registry'; Pkg = 'agent-dropin-registry' },
     @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve' },
     @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil' },
-    @{ Dir = 'machine-identity'; Pkg = 'agent-machine-identity' },
+    @{ Dir = 'machine-transport'; Pkg = 'agent-machine-transport' },
     @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation' }
 )) {
     $libDir = Join-Path $PluginDir "libs\$($lib.Dir)"

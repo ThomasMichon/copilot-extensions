@@ -140,7 +140,7 @@ def test_execution_platform_ignores_inherited_environment(monkeypatch, system, r
 @pytest.mark.parametrize("inherited_wsl_tags", [False, True])
 def test_container_marker_distinguishes_shared_wsl_kernel(monkeypatch, marker, inherited_wsl_tags):
     import io
-    from machine_identity import detect_platform
+    from machine_transport import detect_platform
 
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("platform.release", lambda: "6.6-microsoft-standard-WSL2")
@@ -163,7 +163,7 @@ def test_container_marker_distinguishes_shared_wsl_kernel(monkeypatch, marker, i
 
 def test_actual_container_is_linux_execution():
     import platform
-    from machine_identity import detect_platform
+    from machine_transport import detect_platform
 
     if platform.system() != "Linux" or not any(
         Path(marker).is_file() for marker in ("/.dockerenv", "/run/.containerenv")
@@ -174,7 +174,7 @@ def test_actual_container_is_linux_execution():
 
 def test_headless_wsl_proc_fallback_without_container_marker(monkeypatch):
     import io
-    from machine_identity import detect_platform
+    from machine_transport import detect_platform
 
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("platform.release", lambda: "generic-kernel")
