@@ -686,6 +686,16 @@ adds string-valued environment variables. `lease_scope` defaults to
 `emitter:<id>` and can be supplied explicitly when several declarations share
 one producer election.
 
+`supervise override disable|enable` also accepts `--machine <name>`: the
+override store is per-machine (`~/.agent-dispatch/overrides.json` on whichever
+host the daemon actually runs), so naming a different machine (its SSH alias)
+runs the mutation *there* over SSH -- the same `ssh <alias> <remote argv>`
+transport `agent-dispatch create --machine` already uses, reusing `list`/
+`inbox --machine`'s own peer-queue-browse plumbing rather than a second one.
+Naming this machine itself (or omitting `--machine`) is unaffected and edits
+the local store directly, no SSH involved. `supervise override list` has no
+`--machine` -- it always reports this machine's own store.
+
 `agent-dispatch emitter tick|serve SPEC --holder HOST` is the diagnostic/direct
 surface used by the supervised child. Normal deployments declare the emitter
 rather than wiring cron, a Scheduled Task, or another external timer.

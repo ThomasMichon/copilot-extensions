@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import socket
 import socketserver
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 Decision = Callable[[str, dict, float], dict]
 _READ_TIMEOUT_S = 1.0
@@ -187,3 +189,152 @@ class HookIpcServer:
     def active_handler_count(self) -> int:
         with self._active_handlers_lock:
             return self._active_handlers
+
+
+_DEFAULT_CLIENT_TIMEOUT_S = 1.0
+
+
+def _lock_matches_installation_context(lock: dict) -> bool:
+    """Whether ``lock``'s installation-context fields match THIS process's
+    own selected cell -- mirrors ``scripts/hook_client.py``'s
+    ``_lock_matches_context`` (that script re-derives the context itself
+    since it cannot import this package; here ``registry_paths.
+    installation_context()`` already resolves the identical value for an
+    in-package caller).
+
+    Without this check, a stale rendezvous lock belonging to a DIFFERENT,
+    still-live installation (a different marketplace install, a different
+    plugin root under an explicit registry context) could be read as
+    "reachable" and accept the connection, returning ``True`` while the
+    monitor actually intended to be woken is never touched.
+    """
+    from . import registry_paths
+
+    context = registry_paths.installation_context()
+    if context is None:
+        return not (
+            str(lock.get("installReceipt") or "").strip()
+            or str(lock.get("marketplaceId") or "").strip()
+        )
+    return (
+        str(lock.get("installReceipt") or "").strip()
+        == str(context.get("installReceipt") or "").strip()
+        and str(lock.get("marketplaceId") or "").strip()
+        == str(context.get("marketplaceId") or "").strip()
+        and str(lock.get("pluginRoot") or "").strip()
+        == str(context.get("pluginRoot") or "").strip()
+    )
+
+
+def send_best_effort(
+    kind: str,
+    payload: dict,
+    *,
+    lock_path: Path | None = None,
+    timeout: float = _DEFAULT_CLIENT_TIMEOUT_S,
+) -> bool:
+    """Send a fire-and-forget hook-ipc request to the resident monitor, if
+    one is running and reachable through the current install's rendezvous
+    lock (``status-monitor.lock`` by default -- the SAME file
+    :meth:`HookIpcServer.rendezvous` publishes into via the monitor's own
+    ``_lock_extra``).
+
+    Returns whether the resident accepted the request (not whether it did
+    anything useful with it -- ``kind`` handlers that only need to cause an
+    early wake, like ``"handoffWake"``, return an empty result either way).
+    Never raises: every failure mode (no resident running, a stale/
+    mismatched lock, a connection error, a malformed response, a resident
+    that explicitly declines via ``fallback``) is swallowed and reported as
+    ``False``, identically to how a missed :func:`resident_push.notify`
+    costs only latency, never correctness -- the periodic sweep interval
+    remains the backstop. This is the counterpart, for a caller OUTSIDE the
+    resident process, to that same in-process notify: this performs the
+    actual bytes-on-the-wire half a cross-process caller (e.g. a short-lived
+    ``note-handoff`` CLI invocation) needs that an in-process
+    ``threading.Event`` cannot provide by itself.
+
+    This duplicates (deliberately, not by oversight) some wire-protocol
+    logic already present in ``scripts/hook_client.py``'s own ``_request()``:
+    that script is intentionally import-free of this package (it runs as a
+    standalone hook subprocess, sometimes before the package itself is even
+    installed), so it cannot depend on this function, and this function is
+    not reachable from that bootstrap-sensitive context either. Both sides
+    implement the same small wire format described in this module's server
+    classes above.
+    """
+    try:
+        from . import config as cfg
+
+        resolved_lock_path = lock_path if lock_path is not None else cfg.install_dir() / "status-monitor.lock"
+        endpoint = json.loads(resolved_lock_path.read_text("utf-8"))
+    except Exception:
+        return False
+    if not isinstance(endpoint, dict) or endpoint.get("hook_transport") != "tcp":
+        return False
+    try:
+        if not _lock_matches_installation_context(endpoint):
+            return False
+    except Exception:
+        # registry_paths.installation_context() can raise (e.g.
+        # RegistryRootError) for a malformed/unavailable explicit context --
+        # never let that escape into the caller; an unverifiable context is
+        # just another unreachable-endpoint outcome for this best-effort call.
+        return False
+    address = str(endpoint.get("hook_endpoint") or "")
+    host, sep, port_text = address.rpartition(":")
+    token = endpoint.get("hook_token")
+    if not sep or host != "127.0.0.1" or not port_text.isdigit():
+        return False
+    port = int(port_text)
+    if not (0 < port <= 65535):
+        # isdigit() alone accepts any non-negative integer string, but
+        # socket.create_connection raises OverflowError (not OSError) for a
+        # port outside the valid 1..65535 range -- uncaught, that would
+        # violate this function's never-raises contract and could turn an
+        # already-persisted handoff's best-effort wake into a failed CLI
+        # invocation. Treat an invalid port the same as any other
+        # unreachable endpoint.
+        return False
+    if not isinstance(token, str) or not token:
+        return False
+    try:
+        request = json.dumps(
+            {
+                "version": 1,
+                "token": token,
+                "kind": kind,
+                "payload": payload,
+                "deadline": time.time() + timeout,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+    except (TypeError, ValueError):
+        # A non-JSON-serializable payload or an invalid timeout must not
+        # propagate into the caller -- an already-persisted handoff's
+        # best-effort wake can never turn into a failed CLI invocation.
+        return False
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as conn:
+            conn.settimeout(timeout)
+            conn.sendall(request)
+            raw = b""
+            while b"\n" not in raw and len(raw) < 2 * 1024 * 1024:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                raw += chunk
+    except OSError:
+        return False
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: socket.create_connection/settimeout raise it for
+        # float('inf') or another too-large finite timeout -- not an
+        # OSError, but just as much an "unreachable" outcome for this
+        # never-raises, best-effort call.
+        return False
+    try:
+        value = json.loads(raw.split(b"\n", 1)[0].decode("utf-8"))
+    except Exception:
+        return False
+    if not isinstance(value, dict) or value.get("version") != 1 or value.get("fallback") is True:
+        return False
+    return True

@@ -336,6 +336,27 @@ def build_remote_browse_argv(
     return argv
 
 
+def build_remote_override_argv(
+    action: str, unit_id: str, *, reason: str | None = None
+) -> list[str]:
+    """Build the ``agent-dispatch supervise override <action> <unit_id>`` argv
+    to run **on the target machine** (Phase 2, ``agent-dispatch-workers-config-section``).
+
+    ``action`` is ``"enable"`` or ``"disable"`` -- a mutation, not a read, but
+    it reuses the exact same SSH transport :func:`browse_remote` already
+    provides (``run_ssh_command`` under ``BatchMode``/a short
+    ``ConnectTimeout``) rather than introducing a second one: the override
+    store this mutates is **local to the target machine**
+    (``~/.agent-dispatch/overrides.json`` there), so the mutation must
+    genuinely run on that machine, exactly like a peer-queue browse's read
+    does -- only the verb differs.
+    """
+    argv = ["agent-dispatch", "supervise", "override", action, unit_id]
+    if reason:
+        argv += ["--reason", reason]
+    return argv
+
+
 def browse_remote(
     machine: str, argv: list[str], *, timeout: float | None = None
 ) -> subprocess.CompletedProcess:

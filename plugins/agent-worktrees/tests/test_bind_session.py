@@ -549,6 +549,69 @@ class TestNoteHandoff:
         assert rc == 0
         assert captured["noted"] is False
 
+    def test_sends_an_affirmative_wake_to_the_resident_monitor(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """note-handoff persists durably FIRST, then wakes -- never the
+        other order -- and a wake failure (no resident running, in this
+        test) must never break the command's own success."""
+        from agent_worktrees import hook_ipc
+
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        monkeypatch.setattr(output, "_json_output", lambda o: None)
+        calls = []
+        seen_handoff_tokens_at_wake_time = []
+
+        def _fake_send(kind, payload, **kw):
+            # Enforce the ordering claim for real: read the record back
+            # from disk INSIDE the wake callback. If send_best_effort were
+            # ever moved before the persist, this would observe an empty
+            # pending_handoffs list -- a mere call-recorded spy could not
+            # tell the two orderings apart.
+            record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+            seen_handoff_tokens_at_wake_time.append(
+                [h.token for h in record.pending_handoffs]
+            )
+            calls.append((kind, payload))
+            return False
+
+        monkeypatch.setattr(hook_ipc, "send_best_effort", _fake_send)
+
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="t1", title=None, worktree_dir="/tmp/src/wt-hd",
+            worktree_id=None, session_id="s"))
+
+        assert rc == 0, "a False/failed wake must never fail the command itself"
+        assert calls == [("handoffWake", {"worktree_id": "wt-hd"})]
+        assert seen_handoff_tokens_at_wake_time == [["t1"]], (
+            "the persisted handoff must already be readable from disk at "
+            "the moment of the wake call -- persist, then notify, never "
+            "the reverse"
+        )
+
+    def test_untracked_worktree_never_sends_a_wake(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        from agent_worktrees import hook_ipc
+
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
+        monkeypatch.setattr(output, "_json_output", lambda o: None)
+        calls = []
+        monkeypatch.setattr(
+            hook_ipc, "send_best_effort",
+            lambda kind, payload, **kw: calls.append((kind, payload)),
+        )
+
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="t", title=None, worktree_dir="/tmp/nope",
+            worktree_id=None, session_id="s"))
+
+        assert rc == 0
+        assert calls == [], "nothing to wake the monitor about for an untracked path"
+
 
 class TestCancelHandoff:
     def test_cancels_the_one_matching_pending_entry(
