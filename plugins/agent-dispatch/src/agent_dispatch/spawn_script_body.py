@@ -7,8 +7,13 @@ invariant these functions serve) purely for module size: the script-body
 family is a cohesive, self-contained concern (a plain deterministic
 subprocess embodiment, distinct from the embody/headless agent-session
 factories) with no shared mutable state. Every name here is re-exported
-unchanged from ``spawn_factories.py`` so existing call sites and tests
-(which patch ``agent_dispatch.spawn_factories.<name>``) are unaffected.
+unchanged from ``spawn_factories.py``, so a plain *import* of any of them
+through ``agent_dispatch.spawn_factories.<name>`` is unaffected -- but
+re-exporting a function does not change its own defining module's globals,
+so a test that *monkeypatches* one of this module's globals (e.g.
+``subprocess``, used by ``make_script_spawn``'s own ``Popen`` call) must
+patch it on ``agent_dispatch.spawn_script_body`` directly, not on
+``spawn_factories``.
 """
 
 from __future__ import annotations

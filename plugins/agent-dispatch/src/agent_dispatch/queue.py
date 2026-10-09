@@ -645,6 +645,7 @@ class TaskQueue(
                     except sqlite3.OperationalError as exc:
                         if "duplicate column name" not in str(exc).lower():
                             raise
+            conversation_retired_newly_added = False
             if "conversation_retired" not in reservation_columns:
                 try:
                     conn.execute(
@@ -654,6 +655,12 @@ class TaskQueue(
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
+                else:
+                    # Backfill deferred until after exclusive_key/
+                    # release_requested are guaranteed to exist (and
+                    # exclusive_key backfilled) further below -- a
+                    # sufficiently old database predates those columns too.
+                    conversation_retired_newly_added = True
             reservation_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(spawn_reservations)").fetchall()
@@ -753,6 +760,35 @@ class TaskQueue(
                 " WHERE tasks.id = spawn_reservations.task_id"
                 ") WHERE exclusive_key IS NULL"
             )
+            if conversation_retired_newly_added:
+                # A pre-upgrade database can already contain a handle-less
+                # retry after a retired session (attempt 1 retired a
+                # handle; attempt 2 dropped it and failed before recording
+                # a replacement) -- the column's own DEFAULT 0 would
+                # otherwise silently assert "known, not retired" for those
+                # legacy rows, and reserve_spawn's handle-less inheritance
+                # would then enable worktree resume and resurrect the
+                # retired conversation. Mark a handle-less retry
+                # (session_handle IS NULL, attempt > 1) retired whenever an
+                # EARLIER reservation in the same exclusive_key carried a
+                # session_handle that was ever itself dropped as retired
+                # (the identical release_requested + terminal-state
+                # condition reserve_spawn's own retired-detection query
+                # uses). Run only now that exclusive_key/release_requested
+                # are guaranteed to exist and exclusive_key is backfilled.
+                conn.execute(
+                    "UPDATE spawn_reservations SET conversation_retired = 1 "
+                    "WHERE session_handle IS NULL AND attempt > 1 "
+                    "AND exclusive_key IS NOT NULL AND EXISTS ("
+                    "  SELECT 1 FROM spawn_reservations AS earlier "
+                    "  WHERE earlier.exclusive_key = spawn_reservations.exclusive_key "
+                    "  AND earlier.session_handle IS NOT NULL "
+                    "  AND earlier.release_requested = 1 "
+                    "  AND earlier.state IN (?, ?, ?) "
+                    "  AND earlier.reserved_at < spawn_reservations.reserved_at"
+                    ")",
+                    (SpawnState.SETTLED, SpawnState.FAILED, SpawnState.REARMED),
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_spawn_res_task ON spawn_reservations(task_id)"
             )

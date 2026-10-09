@@ -1726,6 +1726,105 @@ def test_migration_adds_require_verification_with_false_default(tmp_path):
     assert applied_again == 1
 
 
+def test_migration_backfills_conversation_retired_for_legacy_handle_less_retry(tmp_path):
+    """copilot-extensions#5699 review: a pre-upgrade database can already
+    contain a handle-less retry after a retired session (attempt 1 retired
+    a handle; attempt 2 dropped it and failed before recording a
+    replacement) -- the new ``conversation_retired`` column's own
+    ``DEFAULT 0`` would otherwise silently assert "known, not retired" for
+    that legacy row, and ``reserve_spawn``'s handle-less inheritance would
+    then enable the worktree-resume fallback and resurrect the retired
+    conversation. The migration must backfill it to retired instead,
+    derived from the earlier reservation's own retired-handle evidence --
+    and must NOT do so for an unrelated, genuinely-never-retired
+    handle-less row."""
+    db = tmp_path / "legacy-spawn-reservations.db"
+    now = 1_700_000_000.0
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY)")
+        conn.execute(
+            "CREATE TABLE spawn_reservations ("
+            "  key TEXT PRIMARY KEY,"
+            "  task_id TEXT NOT NULL,"
+            "  exclusive_key TEXT,"
+            "  attempt INTEGER NOT NULL,"
+            "  state TEXT NOT NULL,"
+            "  reserved_by TEXT,"
+            "  session_handle TEXT,"
+            "  worktree TEXT,"
+            "  inherited_worktree TEXT,"
+            "  worktree_ownership TEXT,"
+            "  creating_host TEXT,"
+            "  driver TEXT,"
+            "  release_requested INTEGER NOT NULL DEFAULT 0,"
+            "  release_disposition TEXT,"
+            "  exclusive_released INTEGER NOT NULL DEFAULT 0,"
+            "  detail TEXT,"
+            "  conclusion_state TEXT,"
+            "  conclusion_detail TEXT,"
+            "  cleanup_claim_token TEXT,"
+            "  cleanup_claim_expires_at REAL,"
+            "  reserved_at REAL NOT NULL,"
+            "  updated_at REAL NOT NULL"
+            ")"
+        )
+        # Scenario A (must backfill retired=1): attempt 1 carried a session
+        # that was later retired (release_requested + settled); attempt 2 is
+        # the handle-less retry that failed before recording a replacement.
+        conn.execute(
+            "INSERT INTO spawn_reservations (key, task_id, exclusive_key, "
+            "attempt, state, session_handle, worktree, release_requested, "
+            "reserved_at, updated_at) VALUES "
+            "('dispatch-task:legacy-a:1', 'legacy-a', 'review:repo:legacy-a', "
+            "1, 'settled', 'local-body:retired-handle', 'wt-legacy-a', 1, "
+            "?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO spawn_reservations (key, task_id, exclusive_key, "
+            "attempt, state, session_handle, worktree, release_requested, "
+            "reserved_at, updated_at) VALUES "
+            "('dispatch-task:legacy-a:2', 'legacy-a', 'review:repo:legacy-a', "
+            "2, 'failed', NULL, 'wt-legacy-a', 0, ?, ?)",
+            (now + 10, now + 10),
+        )
+        # Scenario B (must NOT backfill): attempt 1's session was never
+        # retired (no release_requested); attempt 2 is a plain handle-less
+        # retry with no retirement history at all.
+        conn.execute(
+            "INSERT INTO spawn_reservations (key, task_id, exclusive_key, "
+            "attempt, state, session_handle, worktree, release_requested, "
+            "reserved_at, updated_at) VALUES "
+            "('dispatch-task:legacy-b:1', 'legacy-b', 'review:repo:legacy-b', "
+            "1, 'spawned', 'local-body:live-handle', 'wt-legacy-b', 0, "
+            "?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO spawn_reservations (key, task_id, exclusive_key, "
+            "attempt, state, session_handle, worktree, release_requested, "
+            "reserved_at, updated_at) VALUES "
+            "('dispatch-task:legacy-b:2', 'legacy-b', 'review:repo:legacy-b', "
+            "2, 'failed', NULL, 'wt-legacy-b', 0, ?, ?)",
+            (now + 10, now + 10),
+        )
+
+    RealTaskQueue(db)
+
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = {
+            row["key"]: row["conversation_retired"]
+            for row in conn.execute(
+                "SELECT key, conversation_retired FROM spawn_reservations"
+            )
+        }
+    assert rows["dispatch-task:legacy-a:1"] == 0
+    assert rows["dispatch-task:legacy-a:2"] == 1
+    assert rows["dispatch-task:legacy-b:1"] == 0
+    assert rows["dispatch-task:legacy-b:2"] == 0
+
+
 def test_migration_renames_legacy_completed_and_confirmed_statuses(tmp_path):
     db = tmp_path / "legacy-statuses.db"
     with sqlite3.connect(db) as conn:
