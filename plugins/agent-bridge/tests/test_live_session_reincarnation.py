@@ -74,6 +74,31 @@ def test_a_fresh_live_row_is_never_taken_over_by_another_process(tmp_db: Databas
     assert tmp_db.get_live_session("conv-3")["pid"] == 100
 
 
+def test_a_revived_row_is_the_worktrees_newest_incarnation(tmp_db: Database) -> None:
+    """A resume first starts a provisional session, which the same launch
+    registers in the worktree moments before the resumed conversation revives
+    its own row. The revived row is the current incarnation (delivery goes to
+    the newest ``registered_at``), never superseded by that provisional one."""
+    t0 = time.time() - 3600
+    assert _register(tmp_db, "conv-7", t0, pid=100, started=t0) == "live"
+    tmp_db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id=?", ("conv-7",))
+    now = time.time()
+    assert _register(tmp_db, "provisional", now - 3, pid=300, started=now - 3) == "live"
+    assert _register(tmp_db, "conv-7", now, pid=200, started=now) == "live"
+    assert tmp_db.get_live_session("conv-7")["registered_at"] == pytest.approx(now)
+    assert tmp_db.current_live_session_for_worktree("wt-1", now=now) == "conv-7"
+    message_id, reason = tmp_db.enqueue_live_message_if_fresh(
+        "conv-7", sender="board", body="hi", now=now, expected_session_id="conv-7")
+    assert reason is None and message_id
+
+
+def test_a_heartbeat_keeps_the_rows_registration_time(tmp_db: Database) -> None:
+    now = time.time()
+    assert _register(tmp_db, "conv-8", now - 60, pid=100, started=now - 60) == "live"
+    assert _register(tmp_db, "conv-8", now, pid=100, started=now - 60) == "live"
+    assert tmp_db.get_live_session("conv-8")["registered_at"] == pytest.approx(now - 60)
+
+
 def test_the_route_admits_a_resumed_process_for_an_expired_row(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(tmp_path / "none.yaml"))
     app = create_app(config=ServiceConfig(port=0, bind="127.0.0.1", db_path=str(tmp_path / "t.db")),
