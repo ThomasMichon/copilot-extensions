@@ -128,6 +128,13 @@ def _validate_member_name(name: str) -> str:
     return "/".join(parts)
 
 
+def _validate_source_member_name(name: str) -> str:
+    normalized = _validate_member_name(name)
+    if normalized != name:
+        raise ValueError(f"noncanonical archive source member: {name!r}")
+    return name
+
+
 class TarGzCodec(Codec):
     """``tar`` + ``gzip`` bundling, standard-library only (default codec)."""
 
@@ -142,7 +149,7 @@ class TarGzCodec(Codec):
                 for path in sorted(src_dir.rglob("*")):
                     if path.is_symlink() or not path.is_file():
                         continue
-                    arcname = _validate_member_name(path.relative_to(src_dir).as_posix())
+                    arcname = _validate_source_member_name(path.relative_to(src_dir).as_posix())
                     tar.add(path, arcname=arcname, recursive=False)
             os.replace(tmp, dest)
         finally:
@@ -317,6 +324,7 @@ def _preflight_zip(raw: BinaryIO) -> None:
     if position + 22 + comment_size != len(tail):
         raise zipfile.BadZipFile("invalid session ZIP end record")
     end_offset = size - len(tail) + position
+    directory_end = end_offset
     locator = b""
     if end_offset >= 20:
         raw.seek(end_offset - 20)
@@ -343,6 +351,7 @@ def _preflight_zip(raw: BinaryIO) -> None:
         ) = struct.unpack("<4sQ2H2L4Q", record)
         if signature != b"PK\x06\x06" or record_size != 44:
             raise zipfile.BadZipFile("invalid session ZIP64 end record")
+        directory_end = record_offset
     elif count == 0xFFFF or directory_size == 0xFFFFFFFF or directory_offset == 0xFFFFFFFF:
         raise zipfile.BadZipFile("missing session ZIP64 locator")
     if disk or directory_disk or local_count != count:
@@ -351,6 +360,27 @@ def _preflight_zip(raw: BinaryIO) -> None:
         raise ValueError("session ZIP exceeds its member budget")
     if directory_size > MAX_ZIP_DIRECTORY_BYTES:
         raise ValueError("session ZIP exceeds its central-directory byte budget")
+    directory_start = directory_end - directory_size
+    if directory_start < 0:
+        raise zipfile.BadZipFile("invalid session ZIP central-directory offset")
+    raw.seek(directory_start)
+    remaining = directory_size
+    observed = 0
+    while remaining:
+        header = raw.read(min(46, remaining))
+        if len(header) != 46 or header[:4] != b"PK\x01\x02":
+            raise zipfile.BadZipFile("invalid session ZIP central-directory record")
+        observed += 1
+        if observed > MAX_ARCHIVE_MEMBERS:
+            raise ValueError("session ZIP exceeds its member budget")
+        name_size, extra_size, entry_comment_size = struct.unpack_from("<3H", header, 28)
+        record_size = 46 + name_size + extra_size + entry_comment_size
+        if record_size > remaining:
+            raise zipfile.BadZipFile("truncated session ZIP central-directory record")
+        raw.seek(record_size - 46, os.SEEK_CUR)
+        remaining -= record_size
+    if observed != count:
+        raise zipfile.BadZipFile("inconsistent session ZIP central-directory entry count")
     raw.seek(0)
 
 
@@ -433,7 +463,7 @@ class ZipCodec(Codec):
                         count += 1
                         if count > MAX_ARCHIVE_MEMBERS:
                             raise ValueError("session ZIP exceeds its member budget")
-                        name = _validate_member_name(path.relative_to(src_dir).as_posix())
+                        name = _validate_source_member_name(path.relative_to(src_dir).as_posix())
                         with open_regular_no_follow(path) as source:
                             before = os.fstat(source.fileno())
                             if before.st_size > MAX_ARCHIVE_MEMBER_BYTES:

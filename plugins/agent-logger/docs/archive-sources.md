@@ -75,7 +75,9 @@ every platform, including `CONIN$`, `CONOUT$`, and superscript-digit `COM`/`LPT`
 devices. ZIP validates the original member name before the standard
 library can truncate a NUL-containing name.
 Both archive writers validate generated member names before publication;
-unsupported source filenames leave the source and any prior archive intact.
+generated names must already be canonical, so literal POSIX backslashes cannot
+silently become path separators. Unsupported source filenames leave the source
+and any prior archive intact.
 
 Session archive publication checks every existing same-ID format before
 updating selector sidecars or returning a reference to reclamation callers.
@@ -99,7 +101,10 @@ are admitted incrementally before retention, rather than allocating an entire
 directory listing before checking the limit; admitted batches are sorted for
 deterministic traversal. The central
 directory has a 16 MiB budget checked before the standard ZIP parser allocates
-its index. File/directory conflict checks search sorted names by descendant
+its index. Preflight scans and bounds the actual directory records, rejects
+malformed framing and inconsistent counts, and does not trust the end record's
+advertised entry count as an allocation limit.
+File/directory conflict checks search sorted names by descendant
 prefix rather than rebuilding every ancestor of deeply nested names; cost is
 linear in name length and logarithmic in the bounded member count.
 Equality comparison uses the same decoded-content budgets.

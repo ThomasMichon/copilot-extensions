@@ -40,6 +40,20 @@ def _zip(path: Path, members: list[tuple[str | zipfile.ZipInfo, bytes]]) -> None
             archive.writestr(name, data)
 
 
+def _zip64_end(data: bytes, *, count: int | None = None, sentinels: bool = False) -> bytes:
+    end = list(struct.unpack("<4s4H2LH", data[-22:]))
+    record_offset = len(data) - 22
+    local_count, total_count = (end[3], end[4]) if count is None else (count, count)
+    record = struct.pack(
+        "<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0, local_count, total_count, end[5], end[6]
+    )
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, record_offset, 1)
+    if sentinels:
+        end[3] = end[4] = 0xFFFF
+        end[5] = end[6] = 0xFFFFFFFF
+    return data[:-22] + record + locator + struct.pack("<4s4H2LH", *end)
+
+
 @pytest.mark.parametrize("checkpoint", [b"# checkpoint\n", b"# checkpoint\r\n"])
 def test_zip_roundtrip_uses_registered_reader_without_changing_default(
     tmp_path: Path, checkpoint: bytes
@@ -908,6 +922,29 @@ def test_tar_writer_rejects_nonportable_posix_source_names(tmp_path: Path, name:
     assert not destination.with_name(destination.name + ".tmp").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows interprets backslashes as separators")
+@pytest.mark.parametrize("codec", ["targz", "zip"])
+@pytest.mark.parametrize("colliding_member", [False, True])
+def test_archive_writers_reject_literal_posix_backslashes_without_rewriting_evidence(
+    tmp_path: Path, codec: str, colliding_member: bool
+) -> None:
+    source = _session(tmp_path / "live")
+    literal = source / r"a\b"
+    literal.write_bytes(b"literal backslash evidence")
+    if colliding_member:
+        (source / "a").mkdir()
+        (source / "a" / "b").write_bytes(b"distinct nested evidence")
+    destination = tmp_path / f"prior{sessions.CODECS[codec].suffix}"
+    destination.write_bytes(b"prior evidence")
+    with pytest.raises(ValueError, match="noncanonical archive source member"):
+        sessions.CODECS[codec].archive_dir(source, destination)
+    assert destination.read_bytes() == b"prior evidence"
+    assert literal.read_bytes() == b"literal backslash evidence"
+    if colliding_member:
+        assert (source / "a" / "b").read_bytes() == b"distinct nested evidence"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["live", destination.name]
+
+
 def test_zip_central_directory_budget_precedes_zipfile_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -926,23 +963,75 @@ def test_zip_central_directory_budget_precedes_zipfile_allocation(
         sessions.CODECS["zip"].list_members(archive)
 
 
+@pytest.mark.parametrize("zip64", [False, True])
+@pytest.mark.parametrize("budget", [2, 10_000])
+def test_zip_actual_entry_count_is_bounded_before_index_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, zip64: bool, budget: int
+) -> None:
+    archive = tmp_path / "forged-count.zip"
+    _zip(archive, [(str(index), b"x") for index in range(budget + 1)])
+    data = archive.read_bytes()
+    if zip64:
+        data = _zip64_end(data, count=1)
+    else:
+        end = list(struct.unpack("<4s4H2LH", data[-22:]))
+        end[3] = end[4] = 1
+        data = data[:-22] + struct.pack("<4s4H2LH", *end)
+    archive.write_bytes(data)
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_MEMBERS", budget)
+
+    def forbidden_parse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("forged count must not reach ZIP index allocation")
+
+    monkeypatch.setattr(zipfile, "ZipFile", forbidden_parse)
+    with pytest.raises(ValueError, match="member budget"):
+        sessions.CODECS["zip"].list_members(archive)
+
+
+@pytest.mark.parametrize("damage", ["signature", "length", "truncated", "count"])
+def test_zip_malformed_directory_records_fail_before_index_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    archive = tmp_path / "malformed-directory.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    data = bytearray(archive.read_bytes())
+    end = list(struct.unpack("<4s4H2LH", data[-22:]))
+    offset = end[6]
+    if damage == "signature":
+        data[offset : offset + 4] = b"BAD!"
+    elif damage == "length":
+        struct.pack_into("<H", data, offset + 28, 0xFFFF)
+    elif damage == "truncated":
+        data = data[:-23] + data[-22:]
+        end[5] -= 1
+    else:
+        end[3] = end[4] = 2
+    data[-22:] = struct.pack("<4s4H2LH", *end)
+    archive.write_bytes(data)
+
+    def forbidden_parse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("invalid directory must not reach ZIP index allocation")
+
+    monkeypatch.setattr(zipfile, "ZipFile", forbidden_parse)
+    with pytest.raises(zipfile.BadZipFile, match="central-directory"):
+        sessions.CODECS["zip"].list_members(archive)
+
+
+def test_zip_directory_preflight_matches_reader_with_prepended_bytes(tmp_path: Path) -> None:
+    archive = tmp_path / "prepended.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    archive.write_bytes(b"prepended non-ZIP bytes\n" + archive.read_bytes())
+    assert sessions.CODECS["zip"].list_members(archive) == ["events.jsonl"]
+    assert sessions.CODECS["zip"].read_member(archive, "events.jsonl") == b"{}\n"
+
+
 @pytest.mark.parametrize("sentinels", [False, True])
 def test_zip64_directory_is_preflighted_even_without_legacy_sentinels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sentinels: bool
 ) -> None:
     archive = tmp_path / "zip64.zip"
     _zip(archive, [("events.jsonl", b"{}\n")])
-    data = archive.read_bytes()
-    end = list(struct.unpack("<4s4H2LH", data[-22:]))
-    record_offset = len(data) - 22
-    record = struct.pack(
-        "<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0, end[3], end[4], end[5], end[6]
-    )
-    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, record_offset, 1)
-    if sentinels:
-        end[3] = end[4] = 0xFFFF
-        end[5] = end[6] = 0xFFFFFFFF
-    archive.write_bytes(data[:-22] + record + locator + struct.pack("<4s4H2LH", *end))
+    archive.write_bytes(_zip64_end(archive.read_bytes(), sentinels=sentinels))
     ref = sessions.SessionRef("zip64", "archive", archive, tmp_path)
     assert sessions.verify_archive(ref)
     monkeypatch.setattr(session_codecs, "MAX_ZIP_DIRECTORY_BYTES", 1)
