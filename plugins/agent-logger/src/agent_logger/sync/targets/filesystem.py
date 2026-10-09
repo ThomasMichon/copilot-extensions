@@ -45,6 +45,12 @@ from agent_logger.sync.provenance import (
     short_unique_id,
 )
 from agent_logger.sync.provenance import (
+    durable_replace as _durable_replace,
+)
+from agent_logger.sync.provenance import (
+    fsync_directory as _fsync_directory,
+)
+from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
 )
 from agent_logger.sync.targets import publication_admission
@@ -132,51 +138,6 @@ def _unlink_replace_target(path: Path) -> None:
             os.unlink(io_path)
         except FileNotFoundError:
             return
-
-
-def _fsync_directory(path: Path) -> None:
-    """Persist directory-entry changes where the platform exposes that barrier."""
-    if os.name == "nt":
-        return
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    fd = os.open(path, flags)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def _durable_replace(source: Path, destination: Path) -> None:
-    """Rename with a durable directory-entry barrier."""
-    if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
-
-        movefile_replace_existing = 0x00000001
-        movefile_write_through = 0x00000008
-        move_file = ctypes.WinDLL(
-            "kernel32",
-            use_last_error=True,
-        ).MoveFileExW
-        move_file.argtypes = [
-            wintypes.LPCWSTR,
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-        ]
-        move_file.restype = wintypes.BOOL
-        if not move_file(
-            _windows_extended_path(source),
-            _windows_extended_path(destination),
-            movefile_replace_existing | movefile_write_through,
-        ):
-            raise ctypes.WinError(ctypes.get_last_error())
-        return
-    source_parent = source.parent
-    destination_parent = destination.parent
-    os.replace(source, destination)
-    _fsync_directory(source_parent)
-    if destination_parent != source_parent:
-        _fsync_directory(destination_parent)
 
 
 def _write_bytes_fsync(path: Path, payload: bytes) -> None:

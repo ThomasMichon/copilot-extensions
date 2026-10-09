@@ -21,6 +21,7 @@ from pathlib import Path
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
     SHORT_ID_HEX_LENGTH,
+    durable_replace,
     ensure_real_directory,
     is_link_or_reparse,
     open_regular_no_follow,
@@ -203,8 +204,12 @@ def _admit_under_lock(
         ensure_real_directory(dest)
         # Write through an exclusively created, brand-new temp name (so
         # there is nothing pre-existing to follow on any platform), then
-        # publish via os.replace -- rename(2) (and its Windows
-        # equivalent) swaps the final path component itself rather than
+        # publish via durable_replace -- an atomic rename PLUS the
+        # directory-entry fsync barrier/Windows write-through move that a
+        # plain os.replace doesn't give: a power loss right after an
+        # unsynced rename could otherwise revert to no marker at all,
+        # leaving copied content stuck permanently "unowned" on retry.
+        # rename swaps the final path component itself rather than
         # dereferencing it, so even a marker path raced into a symlink
         # is safely overwritten in place rather than followed. Both the
         # write and the replace are cleaned up together on any failure
@@ -217,9 +222,7 @@ def _admit_under_lock(
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(
-                windows_extended_path(temp_path), windows_extended_path(marker_path)
-            )
+            durable_replace(temp_path, marker_path)
         except OSError:
             _unlink_if_exists(temp_path)
             raise

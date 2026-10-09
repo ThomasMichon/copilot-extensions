@@ -38,6 +38,25 @@ class _Identity:
     venue: str
 
 
+def _claim_worker(dest_str: str, host: str, barrier, queue) -> None:
+    """Module-level (picklable) worker for a real cross-process claim race.
+
+    Runs in a genuinely separate OS process -- fcntl/msvcrt advisory locks
+    (``sync_lock``) are per-process, so a same-process thread-only test
+    would not exercise the actual contention this gate serializes.
+    """
+    from agent_logger.sync.targets.publication_admission import (
+        check_publication_identity,
+    )
+
+    identity = _Identity(
+        provider="github", host=host, repository="example", venue="codespace"
+    )
+    barrier.wait(timeout=30)
+    result = check_publication_identity(Path(dest_str), identity)
+    queue.put((host, result is None, None if result is None else result.detail))
+
+
 def _make_source(root: Path) -> Path:
     src = root / "copilot"
     sess = src / "session-state" / "abc-123"
@@ -398,3 +417,38 @@ def test_ingest_target_rejects_identity_admission() -> None:
     )
     assert not result.ok
     assert "unsupported" in result.detail
+
+
+def test_check_publication_identity_serializes_across_processes(
+    tmp_path: Path,
+) -> None:
+    """Two real OS processes racing different identities against the same
+    empty leaf must produce exactly one winner, with the marker matching
+    that winner -- proving the OS-level lock contract, not just sequential
+    in-process calls."""
+    import multiprocessing
+
+    dest = tmp_path / "dest" / "m1"
+    ctx = multiprocessing.get_context("spawn")
+    barrier = ctx.Barrier(2)
+    queue: multiprocessing.Queue = ctx.Queue()
+    procs = [
+        ctx.Process(target=_claim_worker, args=(str(dest), host, barrier, queue))
+        for host in ("host-a", "host-b")
+    ]
+    for proc in procs:
+        proc.start()
+    for proc in procs:
+        proc.join(timeout=60)
+        assert proc.exitcode == 0
+
+    outcomes = [queue.get(timeout=5) for _ in range(2)]
+    winners = [host for host, ok, _ in outcomes if ok]
+    losers = [(host, detail) for host, ok, detail in outcomes if not ok]
+    assert len(winners) == 1, outcomes
+    assert len(losers) == 1, outcomes
+    assert "mismatch" in losers[0][1]
+
+    marker = dest / PUBLICATION_IDENTITY_MARKER
+    assert marker.is_file()
+    assert json.loads(marker.read_text(encoding="utf-8"))["host"] == winners[0]
