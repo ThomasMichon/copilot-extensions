@@ -33,6 +33,19 @@ keys and its existing admission/replacement gates. See
 [archive source discovery](archive-sources.md) for the identity, failure,
 compatibility, and platform contracts.
 
+### Session archives (`agent_logger.sessions`, `agent_logger.session_codecs`)
+
+The common live/archive reference API registers tar.gz and ZIP session
+containers while retaining tar.gz as the default. Selector sidecars stay
+uncompressed. Same-store format overlaps are de-duplicated only after
+content equality is proven; divergent or unsafe evidence is explicit, not an
+arbitrary path winner. Codec implementation is separated from session
+references, annotations, and lifecycle operations; existing `sessions.Codec`
+and `sessions.TarGzCodec` imports remain valid. See
+[session archive formats](archive-sources.md#session-archive-formats) for ZIP
+bounds, integrity, safe extraction, dynamic longest-suffix codec lookup,
+read-only extensions, and unchanged live/store precedence.
+
 ### Process-log evidence (`agent_logger.process_logs`)
 
 A library reader enumerates live, gzip, and flat ZIP process-log observations
@@ -241,11 +254,11 @@ archive-aware seam every other consumer (`collate-session`,
 `ramp-up-session`, the chronicler) already goes through:
 
 1. **Local live directory** — `~/.copilot/session-state/<id>/`.
-2. **On-device compact archive** — `<home>/archived-sessions/<id>.tar.gz`
+2. **On-device compact archive** — `<home>/archived-sessions/<id>.tar.gz` or `.zip`
    (a session compacted before ever being pushed off this machine).
 3. **The locally synced corpus** — `session-sync`'s local target root,
    scanned per `<machine>/session-state/<id>/` (synced but not yet
-   compacted) and `<machine>/archived/<id>.tar.gz` (packed at the sync
+   compacted) and `<machine>/archived/<id>.tar.gz` or `.zip` (packed at the sync
    destination), across every machine subtree, exactly as
    `SyncedSessionSource` does for the chronicler's settle-gated scan.
 

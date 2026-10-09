@@ -269,5 +269,5 @@ schema.
   it, stated here as pure should-be across every board path. The PR's own
   documented delegated-cross-machine/relay-subscribe implementation gap is
   tracked as an additive delta in
-  [`efforts/active/vision-backport-sweep/README.md`](../../../../efforts/active/vision-backport-sweep/README.md),
+  [archived vision-backport sweep](../../../../efforts/2026/10/09%20vision-backport-sweep/README.md),
   not enumerated in this vision.

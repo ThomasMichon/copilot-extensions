@@ -2046,15 +2046,8 @@ def _set_pr_locked(
     )
     if url is not None:
         pr.url = url
-        # `set-pr --url ...` is the documented manual-registration path for
-        # a PR opened outside create-pr's own flow (e.g. via a provider's
-        # own CLI/API directly) -- without this, `pr.repo` is left unset and
-        # every downstream operation needing the hosting `owner/repo` slug
-        # (pr-nudge's requested_reviewers call, among others) silently falls
-        # back to the worktree's generic local project name instead, which
-        # is wrong whenever the PR's actual host repo has a different name
-        # or owner than the local project (real failure: a 404 from GitHub's
-        # API against a nonexistent `repos/<project-name>/pulls/<n>` path).
+        # Manual registration needs the provider's owner/repo slug, not the
+        # local project label, for subsequent provider calls.
         if parsed_repo:
             pr.repo = parsed_repo
     if number is not None:
@@ -2063,6 +2056,9 @@ def _set_pr_locked(
         pr.provider = provider
     if reassigned:  # its old fork target isn't this PR's; the revision outranks stale snapshots
         pr.remote = pr.head_repo = pr.head_identity = pr.head_owner = ""
+        pr.base_sha = pr.head_sha = pr.patch_id = ""
+        pr.opened_at = pr.closed_at = ""
+        pr.state = "open"
         pr.pr_revision += 1
     if identity_changed:
         pr.attribution_head = ""

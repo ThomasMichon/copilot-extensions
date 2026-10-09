@@ -1278,7 +1278,7 @@ def test_materialize_nested_uv_editable_refs_refuses_stale_mismatched_content(tm
     assert (stale_dir / "__init__.py").read_text() == "stale = True\n"
 
 
-@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-dispatch"])
+@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-dispatch", "agent-index"])
 def test_materialize_installer_engine_ref_into_copies_and_rewrites(tmp_path: Path, plugin: str):
     assert plugin in ier.ADOPTERS
     root = tmp_path / "repo"

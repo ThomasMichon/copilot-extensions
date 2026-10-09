@@ -43,7 +43,7 @@ is not sufficient evidence for a present-tense capability claim.
 ## Context
 
 - Seed: the operator's original material concern in
-  [`vision-backport-sweep`](../vision-backport-sweep/README.md), umbrella
+  [archived `vision-backport-sweep`](../../2026/10/09%20vision-backport-sweep/README.md), umbrella
   `ThomasMichon/copilot-extensions#5456`.
 - Decision: the operator selected a separate sibling and confirmed this slug.
   The current planning slice does not capture screenshots, rewrite a material

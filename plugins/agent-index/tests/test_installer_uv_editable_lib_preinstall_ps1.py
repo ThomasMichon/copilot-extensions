@@ -42,7 +42,7 @@ _BLOCKS = {
 # `agent-procutil` preinstall actually SKIPS the main install rather than
 # merely being logged (PR #4465 review).
 _ENGINE_WITH_GATE_START = _BLOCKS["engine"][0]
-_ENGINE_WITH_GATE_END = "\n            $srvOut = & uv @pipArgs 2>&1"
+_ENGINE_WITH_GATE_END = "\n            $srvOut = Invoke-IndexUvPipInstall @pipArgs"
 
 
 def _extract(text: str, start: str, end: str) -> str:
@@ -75,6 +75,7 @@ function uv {{
     Add-Content -Path '{marker}' -Value ("UV_INSTALL_ARGS:" + ($args -join ' '))
     $global:LASTEXITCODE = 0
 }}
+function Invoke-IndexUvPipInstall {{ uv pip install @args }}
 """ if have_uv else ""
     script = f"""
 function Write-Fail {{ param([string]$Message) }}
@@ -85,6 +86,7 @@ function Invoke-StubVenvPython {{
     $global:LASTEXITCODE = 0
 }}
 $TheVenvPython = 'Invoke-StubVenvPython'
+$script:UvCommand = {"'uv'" if have_uv else "$null"}
 $PluginDir = '{plugin_dir}'
 $prevEAP = 'Continue'
 $ErrorActionPreference = 'Continue'
@@ -236,6 +238,7 @@ function uv {{
         $global:LASTEXITCODE = 0
     }}
 }}
+function Invoke-IndexUvPipInstall {{ uv pip install @args }}
 function Resolve-VendoredLib {{
     param([string]$LibName)
     $candidate = Join-Path $PluginDir "libs\\$LibName"
@@ -244,6 +247,7 @@ function Resolve-VendoredLib {{
 }}
 function Invoke-StubVenvPython {{ $global:LASTEXITCODE = 0 }}
 $TheVenvPython = 'Invoke-StubVenvPython'
+$script:UvCommand = 'uv'
 $PluginDir = '{plugin_dir}'
 $Upgrade = $false
 $prevEAP = 'Continue'

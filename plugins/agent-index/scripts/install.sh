@@ -17,6 +17,8 @@ _step() { printf '  ...    %s\n' "$1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+unset __index_publication_root
+. "$SCRIPT_DIR/installer-engine.sh"
 
 # Refuse every mutating lifecycle action before self-staging touches the legacy
 # runtime. Parse only the action and install-dir override here; the canonical
@@ -436,7 +438,9 @@ if [[ "$ACTION" == "slot-provision" ||
 fi
 
 _versioned_activate() {
+    _activate_index_runtime() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    _index_publication_fresh || { _skip 'Newer runtime or stamp superseded activation'; return 0; }
     # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
     # An install/ensure run from a STALE payload (older than the active
     # current-version marker) must not downgrade the running runtime; the marker is
@@ -469,6 +473,8 @@ _versioned_activate() {
         return 1
     fi
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
+    }
+    _with_index_publication_lock _activate_index_runtime
 }
 
 _versioned_current() {
@@ -1014,27 +1020,12 @@ _find_python() {
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
 # governed box) instead of dead-ending; add it to PATH for this run.
 _ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
-    _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
-    return 1
+    UV_COMMAND="$(_with_index_advisory_lock "$INSTALL_DIR/uv-acquisition" 7 180 ensure_uv "$INSTALL_DIR")" || return $?
+    export PATH="$(dirname "$UV_COMMAND"):$PATH"
+}
+
+_uv_pip_install() {
+    invoke_uv_pip_install_resilient "${UV_COMMAND:-uv}" "$@"
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
@@ -1060,6 +1051,8 @@ _ensure_uv_index() {
 # Deploy a stable machine-global redirector to the payload-owned lifecycle gate.
 # The gate owns setup consent, runtime readiness, and provisioning.
 deploy_binstub() {
+    _deploy_index_binstub() {
+    _index_publication_fresh || { _skip 'Newer runtime or stamp superseded launcher publication'; return 0; }
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
@@ -1080,16 +1073,56 @@ exec "$_gate" "$@"
 STUBEOF
     chmod +x "$STUB"
     _ok "Binstub: $STUB (setup-gated)"
+    }
+    _with_index_publication_lock _deploy_index_binstub
 }
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build until
 # explicit setup (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
+    _stamp_index_payload() {
+    _index_publication_fresh || { _skip 'Newer runtime or stamp superseded stamp'; return 0; }
     echo ''; echo '=== agent-index stamp (defer runtime to explicit setup) ==='; echo ''
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
+    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
     _ok "Stamped: binstub on PATH; runtime provisions after explicit setup."
+    }
+    _with_index_publication_lock _stamp_index_payload
+}
+
+_test_index_venv() {
+    local dir="$1" python="$2" output prefix expected actual
+    [[ -x "$python" && -f "$dir/pyvenv.cfg" ]] || return 1
+    output="$("$python" -I -c 'import os, sys; print(os.path.abspath(sys.prefix)); print(int(sys.prefix != sys.base_prefix))' 2>/dev/null)" || return 1
+    [[ "$output" == *$'\n'* && "${output#*$'\n'}" == 1 ]] || return 1
+    prefix="${output%%$'\n'*}"
+    [[ "$prefix" == /* ]] || return 1
+    expected="$(cd "$dir" && pwd -P)" || return 1
+    actual="$(cd "$prefix" && pwd -P)" || return 1
+    [[ "$actual" == "$expected" ]]
+}
+
+_new_index_venv() {
+    local dir="$1" python="$2" base_python="$3" have_uv="$4" output rc=0
+    if _test_index_venv "$dir" "$python"; then return 0; fi
+    if [[ -e "$dir" ]]; then
+        _warn "Existing venv failed interpreter/prefix health validation -- rebuilding: $dir"
+        rm -rf -- "$dir" || return 1
+    fi
+    if [[ "$have_uv" == 1 ]]; then
+        output="$(invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$dir" --allow-existing 2>&1)" || rc=$?
+        if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
+        _warn "uv venv failed health validation (exit $rc): $output"
+    fi
+    if ! output="$("$base_python" -m venv --clear "$dir" 2>&1)"; then
+        _warn "Python venv fallback failed: $output"
+        return 1
+    fi
+    if ! _test_index_venv "$dir" "$python"; then
+        _warn "Created venv failed interpreter/prefix health validation: $dir"
+        return 1
+    fi
 }
 
 _install_server_venv() {
@@ -1122,23 +1155,15 @@ _install_server_venv() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    if [[ ! -x "$server_venv_python" ]]; then
-        if [[ "$have_uv" -eq 1 ]]; then
-            uv venv "$server_venv_dir" --allow-existing >/dev/null 2>&1 \
-                || "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
-        else
-            "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
-        fi
-        if [[ ! -x "$server_venv_python" ]]; then
+    if ! _new_index_venv "$server_venv_dir" "$server_venv_python" "$py" "$have_uv"; then
             _warn "Server venv creation failed -- $server_venv_python not found (spawn_passive falls back to the shared venv)"
             return 0
-        fi
     fi
 
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$server_venv_python" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1
+            _uv_pip_install --python "$server_venv_python" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1
         else
             "$server_venv_python" -m pip install "$zdd_dir" >/dev/null 2>&1
         fi || {
@@ -1147,21 +1172,146 @@ _install_server_venv() {
         }
     fi
 
-    local srv_out
+    local srv_out srv_rc=0
     if [[ "$have_uv" -eq 1 ]]; then
-        srv_out="$(uv pip install --python "$server_venv_python" "${PLUGIN_DIR}[store,server]" 2>&1)"
+        srv_out="$(_uv_pip_install --python "$server_venv_python" "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
     else
-        srv_out="$("$server_venv_python" -m pip install "${PLUGIN_DIR}[store,server]" 2>&1)"
+        srv_out="$("$server_venv_python" -m pip install "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
     fi
-    if [[ $? -ne 0 ]]; then
+    if [[ "$srv_rc" -ne 0 ]]; then
         _warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
         printf '%s\n' "$srv_out" >&2
+        return 0
+    fi
+    if ! _test_index_venv "$server_venv_dir" "$server_venv_python"; then
+        _warn 'Server venv failed final interpreter/prefix health validation -- using the shared venv'
         return 0
     fi
     _ok "Server venv provisioned: $server_venv_dir"
 }
 
+_with_index_advisory_lock() (
+    local target="$1" descriptor="$2" timeout="$3"
+    shift 3
+    if [[ ! "$timeout" =~ ^[0-9]{1,3}$ ]] || ((10#$timeout > 180)); then
+        _warn 'Invalid runtime build admission timeout (expected 0-180 seconds)'
+        return 1
+    fi
+    timeout=$((10#$timeout))
+    local parent lock lock_python="" use_flock=0
+    parent="$(dirname "$target")"
+    mkdir -p "$parent" || return 1
+    lock="$parent/.$(basename "$target").lock"
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        use_flock=1
+    else
+        lock_python="$(_bootstrap_python)" || lock_python=""
+        if [[ -n "$lock_python" ]]; then
+            lock_python="$("$lock_python" -I -c 'import fcntl, sys; print(sys._base_executable)' 2>/dev/null)" || lock_python=""
+        fi
+        if [[ -z "$lock_python" ]] || [[ "$("$lock_python" -I -c 'import fcntl; print("index-advisory-lock")' 2>/dev/null)" != index-advisory-lock ]]; then
+            lock_python="$(_find_python)" || {
+                _warn 'Runtime build admission requires a bootstrap Python with stdlib fcntl'
+                return 1
+            }
+            [[ "$("$lock_python" -I -c 'import fcntl; print("index-advisory-lock")' 2>/dev/null)" == index-advisory-lock ]] || {
+                _warn 'Bootstrap Python cannot provide stdlib fcntl build admission'
+                return 1
+            }
+        fi
+    fi
+    _python_index_build_lock() {
+        "$lock_python" -I - "$1" "$timeout" "$target" "$descriptor" <<'PY'
+import fcntl
+import sys
+import time
+
+try:
+    if sys.argv[1] == "unlock":
+        fcntl.flock(int(sys.argv[4]), fcntl.LOCK_UN)
+    else:
+        deadline = time.monotonic() + int(sys.argv[2])
+        while True:
+            try:
+                fcntl.flock(int(sys.argv[4]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for runtime build admission: {sys.argv[3]}")
+                time.sleep(0.05)
+except OSError as error:
+    print(f"Runtime build advisory lock failed: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+    }
+    if [[ "$descriptor" == 7 ]]; then
+        exec 7>"$lock" || return 1
+    elif [[ "$descriptor" == 8 ]]; then
+        exec 8>"$lock" || return 1
+    elif [[ "$descriptor" == 9 ]]; then
+        exec 9>"$lock" || return 1
+    else
+        _warn 'Invalid installer lock descriptor'
+        return 1
+    fi
+    _release_index_build_lock() {
+        local rc=$?
+        trap - EXIT
+        if [[ "$use_flock" == 1 ]]; then
+            if ! flock -u "$descriptor"; then _warn "Cannot unlock installer admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
+        else
+            if ! _python_index_build_lock unlock; then _warn "Cannot unlock runtime build admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
+        fi
+        if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+        exit "$rc"
+    }
+    if [[ "$use_flock" == 1 ]]; then
+        if ! flock -w "$timeout" "$descriptor"; then
+            _warn "Timed out waiting for runtime build admission: $target"
+            if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+            return 1
+        fi
+    else
+        if ! _python_index_build_lock lock; then
+            if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+            return 1
+        fi
+    fi
+    trap '_release_index_build_lock' EXIT
+    "$@"
+)
+
+_with_index_build_lock() {
+    local target="$1"
+    shift
+    _with_index_advisory_lock "$target.build" 8 "${INDEX_BUILD_LOCK_TIMEOUT_SECONDS:-180}" "$@"
+}
+
+_with_index_publication_lock() {
+    if [[ "${__index_publication_root:-}" == "$INSTALL_DIR" ]]; then
+        "$@"
+    else
+        _index_publication_callback() {
+            local __index_publication_root="$INSTALL_DIR"
+            "$@"
+        }
+        _with_index_advisory_lock "$INSTALL_DIR/publication" 9 20 _index_publication_callback "$@"
+    fi
+}
+
+_index_publication_fresh() {
+    [[ "${FORCE:-0}" == 1 ]] && return 0
+    local marker version
+    for marker in current-version stamped-version; do
+        if [[ -f "$INSTALL_DIR/$marker" ]]; then
+            version="$(tr -d ' \t\r\n' < "$INSTALL_DIR/$marker")" || return 1
+            if [[ -n "$version" ]] && _version_lt "$SRC_VERSION" "$version"; then return 1; fi
+        fi
+    done
+}
+
 _ensure_runtime() {
+    _ensure_runtime_build() {
     if [[ ! -d "$PKG_SRC_DIR" ]]; then
         _fail "Package source not found at $PKG_SRC_DIR"
         exit 1
@@ -1171,7 +1321,6 @@ _ensure_runtime() {
     _ok "Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
-    _ensure_uv || exit 1
     _ensure_uv_index
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
@@ -1179,6 +1328,8 @@ _ensure_runtime() {
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
 
+    _prepare_index_runtime() {
+    _index_publication_fresh || return 3
     # Detach an invalid active marker before any rebuild. If provisioning fails
     # later, no success-shaped current-version pointer remains.
     local active_version="" active_ready=0 active_python=""
@@ -1186,7 +1337,7 @@ _ensure_runtime() {
     if [[ "$VERSIONED_RUNTIME" == 1 && -n "$active_version" ]]; then
         active_python="$INSTALL_DIR/versions/$active_version/bin/python"
         [[ -x "$active_python" ]] || active_python="$INSTALL_DIR/versions/$active_version/Scripts/python.exe"
-        if [[ -x "$active_python" ]] \
+        if _test_index_venv "$INSTALL_DIR/versions/$active_version" "$active_python" \
             && "$active_python" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$active_version" >/dev/null 2>&1 \
             && _runtime_origin_under "$active_python" "$INSTALL_DIR/versions/$active_version"; then
             active_ready=1
@@ -1207,7 +1358,7 @@ _ensure_runtime() {
     # completion marker and an importable agent_index package.
     if [[ "$VERSIONED_RUNTIME" == 1 && -d "$VENV_DIR" ]]; then
         local slot_ready=0 vr="$SCRIPT_DIR/versioned_runtime.py"
-        if [[ -x "$VENV_PYTHON" ]] \
+        if _test_index_venv "$VENV_DIR" "$VENV_PYTHON" \
             && "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1 \
             && _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
             slot_ready=1
@@ -1229,20 +1380,15 @@ _ensure_runtime() {
         fi
     fi
 
-    if [[ ! -x "$VENV_PYTHON" ]]; then
-        if [[ "$have_uv" -eq 1 ]]; then
-            _step 'Creating venv via uv...'
-            _versioned_slot_clean
-            uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
-                || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        else
-            _step 'Creating venv via python -m venv...'
-            "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        fi
-        [[ -x "$VENV_PYTHON" ]] || { _fail "Venv creation failed -- $VENV_PYTHON not found"; exit 1; }
-        _ok 'Venv created'
-    else
-        _skip 'Venv already exists'
+    }
+    local preparation_rc=0
+    _with_index_publication_lock _prepare_index_runtime || preparation_rc=$?
+    if [[ "$preparation_rc" == 3 ]]; then _skip 'Runtime preparation superseded'; return 0; fi
+    [[ "$preparation_rc" == 0 ]] || return "$preparation_rc"
+    if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON"; then _versioned_slot_clean; fi
+    if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON" "$py" "$have_uv"; then
+        _fail "Runtime venv failed interpreter/prefix health validation: $VENV_DIR"
+        exit 1
     fi
 
 
@@ -1250,7 +1396,7 @@ _ensure_runtime() {
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
+            _uv_pip_install --python "$VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
         else
             "$VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null
         fi || {
@@ -1271,7 +1417,7 @@ _ensure_runtime() {
     local procutil_dir
     if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
+            _uv_pip_install --python "$VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
         else
             "$VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null
         fi || {
@@ -1300,7 +1446,7 @@ _ensure_runtime() {
         local pkg="$PLUGIN_DIR"
         [[ "$install_role" == "host" ]] && pkg="${PLUGIN_DIR}[store,server]"
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$pkg"
+            _uv_pip_install --python "$VENV_PYTHON" "$pkg"
         else
             "$VENV_PYTHON" -m pip install "$pkg"
         fi
@@ -1320,12 +1466,10 @@ _ensure_runtime() {
 
     _install_server_venv "$install_role" "$py"
 
-    deploy_binstub
-
     local prev_version=""
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
+        if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON" || ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
@@ -1334,12 +1478,21 @@ _ensure_runtime() {
             _fail "Runtime completion marker was not published for versions/$SRC_VERSION -- not activating"
             exit 1
         fi
-        _versioned_activate || exit 1
     fi
 
-    _write_manifest
+    _publish_index_runtime() {
+        _index_publication_fresh || return 3
+        _versioned_activate || return $?
+        deploy_binstub || return $?
+        _write_manifest
+    }
+    local publication_rc=0
+    _with_index_publication_lock _publish_index_runtime || publication_rc=$?
+    if [[ "$publication_rc" == 3 ]]; then _skip 'Runtime publication superseded'; return 0; fi
+    [[ "$publication_rc" == 0 ]] || return "$publication_rc"
 
-    if _runtime_origin_under "$LINK_PYTHON" "$(dirname "$(dirname "$LINK_PYTHON")")"; then
+    if _test_index_venv "$(dirname "$(dirname "$LINK_PYTHON")")" "$LINK_PYTHON" \
+        && _runtime_origin_under "$LINK_PYTHON" "$(dirname "$(dirname "$LINK_PYTHON")")"; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'
@@ -1354,9 +1507,14 @@ _ensure_runtime() {
         *":$LOCAL_BIN:"*) _ok "PATH: $LOCAL_BIN is on PATH" ;;
         *) _step "Add $LOCAL_BIN to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
     esac
+    }
+    _ensure_uv || return 1
+    _with_index_build_lock "$VENV_DIR" _ensure_runtime_build
 }
 
 _write_manifest() {
+    _write_index_manifest() {
+    _index_publication_fresh || return 0
     _git_info() {
         local path="$1" commit branch dirty
         commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -1365,40 +1523,9 @@ _write_manifest() {
         [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
         echo "$commit $branch $dirty"
     }
-    local manifest="$INSTALL_DIR/deploy-manifest.json"
-    local kind ver commit branch dirty
-    kind="$(_source_kind "$PLUGIN_DIR")"
-    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-    commit="null"; branch="null"; dirty="false"
-    if [[ "$kind" == "local" ]]; then
-        local repo_root _c _b _d
-        repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
-        read -r _c _b _d <<< "$(_git_info "$repo_root")"
-        commit="\"$_c\""; branch="\"$_b\""; dirty="$_d"
-    fi
-    local tmp="$manifest.tmp"
-    cat > "$tmp" << EOF
-{
-  "schema_version": 3,
-  "service": "agent-index",
-  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$kind",
-    "path": "$PLUGIN_DIR",
-    "repo": "copilot-extensions",
-    "plugin": "agent-index",
-    "version": "$ver",
-    "commit": $commit,
-    "branch": $branch,
-    "dirty": $dirty
-  },
-  "venv": "$VENV_DIR",
-  "runtime": "python"
-}
-EOF
-    mv -f "$tmp" "$manifest"
-    _ok "Deploy manifest written (source: $kind)"
+    write_deploy_manifest agent-index agent-index "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-}"
+    }
+    _with_index_publication_lock _write_index_manifest
 }
 
 _machine_role() {
@@ -1444,6 +1571,11 @@ _activation_role() {
 }
 
 _install_engine() {
+    if [[ "${AGENT_INDEX_NO_ENGINE_DEPS:-}" == 1 ]]; then
+        _skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
+        return 1
+    fi
+    _install_engine_build() {
     # Provision the DURABLE engine venv (agent-index-engine, the torch stack) at
     # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
     # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
@@ -1456,7 +1588,7 @@ _install_engine() {
         _skip "Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)"
         return 1
     fi
-    if [[ -x "$ENGINE_VENV_PYTHON" && "$upgrade" -eq 0 ]]; then
+    if [[ "$upgrade" -eq 0 ]] && _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON"; then
         _skip "Engine runtime already provisioned (durable venv preserved): $ENGINE_VENV"
         return 0
     fi
@@ -1468,23 +1600,17 @@ _install_engine() {
         _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
     fi
     mkdir -p "$ENGINE_HOME"
-    local have_uv=0
-    command -v uv >/dev/null 2>&1 && have_uv=1
-    if [[ "$have_uv" -eq 1 ]]; then
-        uv venv "$ENGINE_VENV" --allow-existing >/dev/null 2>&1 || "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
-    else
-        "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
-    fi
-    [[ -x "$ENGINE_VENV_PYTHON" ]] || { _warn "Engine venv creation failed -- $ENGINE_VENV_PYTHON not found"; return 1; }
+    _ensure_uv_index
+    _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" "$py" "$have_uv" || return 1
 
     # zdd is a declared dependency of agent-index but is not on PyPI -- install it
     # from the vendored lib first so pip can satisfy the requirement.
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$ENGINE_VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1 || true
+            _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1 || { _warn 'Engine zdd install failed'; return 1; }
         else
-            "$ENGINE_VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null 2>&1 || true
+            "$ENGINE_VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null 2>&1 || { _warn 'Engine zdd install failed'; return 1; }
         fi
     fi
 
@@ -1500,7 +1626,7 @@ _install_engine() {
     local procutil_dir
     if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || rc=$?
+            _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || rc=$?
         else
             "$ENGINE_VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null 2>&1 || rc=$?
         fi
@@ -1528,15 +1654,15 @@ _install_engine() {
     if [[ "$rc" -ne 0 ]]; then
         :
     elif [[ "$have_uv" -eq 1 ]]; then
-        uv pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
+        _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
+            local uv_args=(--python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
             [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
-            uv "${uv_args[@]}" || rc=$?
+            _uv_pip_install "${uv_args[@]}" || rc=$?
         fi
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
             _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
-            uv pip install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
+            _uv_pip_install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
         fi
     else
         "$ENGINE_VENV_PYTHON" -m pip install "$PLUGIN_DIR" || rc=$?
@@ -1554,8 +1680,9 @@ _install_engine() {
         _warn 'Engine runtime install failed (torch stack) -- light service unaffected; provision later with the "engine" action'
         return 1
     fi
-    if ! "$ENGINE_VENV_PYTHON" -c 'import torch' 2>/dev/null; then
-        _warn 'Engine venv built but torch import failed'
+    if ! _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" \
+        || ! "$ENGINE_VENV_PYTHON" -c 'import torch' 2>/dev/null; then
+        _warn 'Engine venv failed final interpreter/prefix or torch import validation'
         return 1
     fi
     if [[ "$upgrade" -eq 1 ]]; then
@@ -1564,6 +1691,18 @@ _install_engine() {
         _ok "Engine runtime provisioned (durable venv): $ENGINE_VENV"
     fi
     return 0
+    }
+    _engine_cached() {
+        if [[ "${1:-}" != upgrade ]] && _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON"; then return 0; fi
+        return 3
+    }
+    local cached_rc=0
+    _with_index_build_lock "$ENGINE_VENV" _engine_cached "$@" || cached_rc=$?
+    [[ "$cached_rc" != 0 ]] || return 0
+    [[ "$cached_rc" == 3 ]] || return "$cached_rc"
+    local have_uv=0
+    if _ensure_uv; then have_uv=1; else _warn 'uv acquisition failed -- using the engine pip fallback'; fi
+    _with_index_build_lock "$ENGINE_VENV" _install_engine_build "$@"
 }
 
 _restart_engine_daemon() {
@@ -1981,7 +2120,6 @@ case "$ACTION" in
              # hook's grace window -- no venv, no uv, no heavy runtime build here)
         [ -x "$STUB" ] || {
             mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-            printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
             deploy_binstub
         }
         _ensure_running

@@ -102,7 +102,7 @@ def test_server_venv_provisioning_is_called_after_the_main_package_install():
     after_ps = ps_runtime.split("Write-Ok 'Package installed: agent-index'", 1)[1]
     after_sh = sh_runtime.split("_ok 'Package installed: agent-index'", 1)[1]
     assert "Install-ServerVenv -InstallRole $installRole" in after_ps
-    assert "Deploy-SetupGatedBinstub" in after_ps.split(
+    assert "Publish-IndexRuntime" in after_ps.split(
         "Install-ServerVenv -InstallRole $installRole", 1
     )[1]
     assert '_install_server_venv "$install_role"' in after_sh
@@ -122,9 +122,13 @@ def test_server_venv_prefers_signed_python_copies_mode_before_uv_fallback():
     ps_fn = ps.split("function Install-ServerVenv {", 1)[1].split(
         "\nfunction Install-Runtime {", 1
     )[0]
-    signed_idx = ps_fn.index("Get-SignedBasePython")
-    copies_idx = ps_fn.index("-m venv --copies --clear $serverVenvDir")
-    uv_idx = ps_fn.index("uv venv $serverVenvDir")
+    assert "New-IndexVenv -Dir $serverVenvDir -Python $serverVenvPython" in ps_fn
+    shared = ps.split("function New-IndexVenv {", 1)[1].split(
+        "\nfunction Install-ServerVenv {", 1
+    )[0]
+    signed_idx = shared.index("Get-SignedBasePython")
+    copies_idx = shared.index("-m venv --copies $Dir")
+    uv_idx = shared.index("Invoke-UvVenvResilient")
     assert signed_idx < copies_idx < uv_idx
-    assert "Server venv created from signed Python" in ps_fn
-    assert "falling back to uv" in ps_fn
+    assert "Test-IndexVenv -Dir $Dir -Python $Python" in shared
+    assert "retrying with uv" in shared

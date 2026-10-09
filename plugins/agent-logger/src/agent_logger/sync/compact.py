@@ -447,7 +447,7 @@ def compact_session(
 
     Returns the bytes reclaimed from the live tree (0 if not reclaimed). The
     archive is verified before the live directory is removed; the local
-    ``.tar.gz`` is always kept.
+    selected registered-format archive (tar.gz by default, or ZIP) is retained.
     """
     size = _dir_size(ref.path)
     archived = sessions.archive_session(ref.path, archive_root, codec=codec)
