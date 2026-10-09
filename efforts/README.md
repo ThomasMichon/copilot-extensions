@@ -15,7 +15,7 @@ that pattern to this repository.
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Draft; operator-approved scope | #5789 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Draft | #5737, #5738, #5740, #5741 |
 | [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; proposal reviewed | #5768, #5769 |
-| [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Draft | #5707 |
+| [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Active | #5707 |
 | [Dispatch Task Lifecycle and Conversations](active/agent-dispatch-monitor-and-confirmed-state/README.md) | Active; submission/output/delivery amendment proposed | #3681 |
 | [Dispatch Tasks-Pane UX](active/agent-dispatch-tasks-pane-ux-overhaul/README.md) | Active; review/history/follow-up amendment proposed | #3681 (backend dependency) |
 | [Lean Session Lifecycle](active/lean-session-lifecycle/README.md) | Draft | #5579, #5664, #2619 |

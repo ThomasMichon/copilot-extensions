@@ -5,7 +5,7 @@
   picker-support plugins)
 - **Branch(es):** per-slice worktrees
 - **Created:** 2026-10-06
-- **Status:** Draft
+- **Status:** Active <!-- Phase 1 landed (status + local toggle glue); Phase 2 (native --machine) next -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md)'s
   plugin-pivot-extensibility behavior (a plugin's own pivot manifest
   contributes Picker surface without Picker-side code) and
@@ -141,17 +141,54 @@ Intent).
 ## Plan
 
 ### Phase 1 — Confirm the exact status/toggle contract
-- [ ] Confirm `agent-dispatch registrar discover --json` (or an equivalent
+- [x] Confirm `agent-dispatch registrar discover --json` (or an equivalent
       narrower query) gives enough per-pool data — name, `max_active_processes`
       or lane count, current override state — to render a `ConfigSection`
       status line within the 200-char budget without a new query surface.
-- [ ] Confirm `agent-dispatch supervise override list --json` reports enough
+      **Confirmed, with a nuance:** `registrar discover`'s own
+      `_declaration_summary` already reports `name`/`owner`/`concurrency`/
+      `max_active_processes`/`body`/`filters` for a `supervised-lane`
+      declaration, and discovery already rejects duplicate names across
+      sources — a bare pool name is enough to identify one pool
+      unambiguously. It carries **no** override state, though (discovery
+      and the override store are genuinely separate concerns); that half
+      comes from the override store directly (see next item).
+- [x] Confirm `agent-dispatch supervise override list --json` reports enough
       to distinguish "active, not overridden" / "active, overridden off" /
-      "no declaration found" for a given pool name.
-- [ ] Write the thin CLI glue (a small script or a new `agent-dispatch`
+      "no declaration found" for a given pool name. **Confirmed, with a
+      correction:** `override list` alone reports only the raw override
+      store (`path`/`overridden_off` ids/`overrides` records with reasons)
+      — it has no notion of "active" or "declared" at all, since it never
+      reads `registrar discover`. The glue therefore reads both: a pool's
+      declared state from `registrar discover`, and its override state by
+      checking whether `logical:<owner>:<name>` (the override store's own
+      **logical** override token — `overrides.logical_override_id`, no
+      concrete registration id needed) is in `overridden_off_ids`. This
+      combination gives exactly the three states the item asks for.
+- [x] Write the thin CLI glue (a small script or a new `agent-dispatch`
       subcommand, whichever this phase finds is the better fit) that
       `config_sections[].run` invokes: given a pool key, print a ≤200-char
-      status line and accept a toggle argument.
+      status line and accept a toggle argument. **Landed:** a new
+      `agent-dispatch workers config-section <name> [--toggle
+      enable|disable] [--reason R] [--owner O] [--json]` subcommand
+      (`workers_config_cli.py`). Default output is a single ≤200-char line
+      (`"<name>: <N> lane(s) declared -- active"` / `"-- overridden off
+      (<reason>)"` / `"<name>: no declaration found"`, truncated with an
+      ellipsis if a long reason would overflow the budget); `--json` emits
+      the full structured detail for debugging/future callers. `--toggle`
+      applies the override via the existing `set_override`/`clear_override`
+      primitives *before* reporting status, addressed by the pool's logical
+      override id — this works even for a not-yet-synced declaration (the
+      override is independent of a live registration), and the command's
+      own exit code (0 found / 1 not found) is consistent across both the
+      text and `--json` output paths. 12 new unit tests
+      (`tests/test_workers_config_cli.py`): parser shape, status line for
+      singular/plural lane counts, not-found and non-`supervised-lane`-kind
+      declarations, the toggle round-trip (disable→status reflects it,
+      enable clears it, a toggle on an unknown pool still applies via its
+      logical id), JSON shape (found and not-found), `--owner`
+      disambiguation when two declarations share a name across owners, and
+      the status-line truncation budget.
 
 ### Phase 2 — Native `--machine` on `supervise override`
 - [ ] Add `--machine <name>` to `agent-dispatch supervise override
@@ -210,6 +247,27 @@ Intent).
 _Pending — Phase 1's exact query/glue shape firms this up._
 
 ## Journal
+
+### 2026-10-08 — Phase 1 landed: status/toggle CLI glue
+- Investigated the exact contract (see Phase 1's own checked-off items for
+  the detailed findings): `registrar discover` supplies declared per-pool
+  data (name/owner/concurrency), `supervise override`'s store supplies
+  override state keyed by a **logical** override id
+  (`logical:<owner>:<name>`) independent of any live registration; neither
+  alone is sufficient, so the new glue reads both.
+- New `agent-dispatch workers config-section <name>` subcommand
+  (`workers_config_cli.py`, wired into `__main__.py` alongside the other
+  command-family registrations): default output is a single ≤200-char
+  status line; `--toggle enable|disable` applies the local override first;
+  `--json` emits full structured detail. 12 new unit tests, all green;
+  full `test_cli.py` (210 passed) and `check-module-size.py` re-confirmed
+  clean.
+- Next: Phase 2 (native `--machine` on `supervise override`), then Phase 3
+  (the actual `config_sections` pivot-manifest entry + the Picker-side
+  conditional-confirmation gap, which lives in the separate Worktree
+  Manager app repo, not this one — Phase 3's own Plan item already flags
+  this as "not yet buildable from existing primitives" until that UI gap
+  closes).
 
 ### 2026-10-06 — Kickoff
 - Effort opened from a private operator peer effort's Phase 2 items 4-5,

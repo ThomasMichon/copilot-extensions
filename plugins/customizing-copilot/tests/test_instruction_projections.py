@@ -430,6 +430,8 @@ def test_render_local_cache_reconciles_stale_siblings_when_source_disabled(
     first = projections.render_local_cache(repo, lambda: [source])
     assert first.blocking == 0
     assert local_path.exists()
+    assert first.written == first.changed
+    assert first.removed == []
 
     # The source is now disabled/removed -- an ordinary sighted user file
     # that happens to share the naming convention must never be touched,
@@ -772,6 +774,9 @@ def test_render_local_cache_reconciles_stale_siblings_even_when_budget_config_fa
 
     assert any(finding.check == "projection-config" for finding in result.findings)
     assert not local_path.exists()
+    assert result.written == []
+    assert result.removed == result.changed
+    assert result.to_dict()["removed"] == [local_path.relative_to(repo).as_posix()]
 
 
 def test_render_local_cache_never_writes_the_wrong_destination_or_loads_it_unbounded(

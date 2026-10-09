@@ -105,8 +105,10 @@ class _SessionHostConnectionMixin:
             if work_dir and os.path.isdir(work_dir):
                 from .local_cache_refresh import refresh_local_cache
 
-                with contextlib.suppress(Exception):
+                try:
                     await refresh_local_cache(work_dir)
+                except Exception:
+                    log.warning("Local guidance refresh failed before spawn", exc_info=True)
 
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
@@ -894,4 +896,3 @@ class _SessionHostConnectionMixin:
                 self._release_container_lock(rec.session_id)
                 self._release_codespace_lock(rec.session_id)
         return confirmed_dead
-

@@ -32,6 +32,10 @@ an installed payload to shadow a project-local directory that the host loads
 live. It retains prior values when registry or source evidence is indeterminate
 and returns structured findings for missing, mismatched, or ambiguous evidence.
 Consumers decide how often to refresh and how to render findings.
+Callers needing only machine-global scope can pass
+`resolve_active_plugins(include_projects=False)`: this preserves global
+identity verification but skips registered-project discovery and Git checks.
+The default still aggregates all scopes.
 
 **In dev**, most consumers' `pyproject.toml` reference this library through a
 `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
