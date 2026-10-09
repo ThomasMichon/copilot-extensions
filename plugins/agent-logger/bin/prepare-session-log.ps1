@@ -74,8 +74,15 @@ if ($_nativeInPayload -and -not $_logicalInPayload -and
         [StringComparer]::OrdinalIgnoreCase.Equals($_outside, $_payloadRoot) -or
         $_outside.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
     ) { $_outside = $HOME }
-    if (-not (Test-Path -LiteralPath $_outside -PathType Container)) {
-        [Console]::Error.WriteLine("[$_command] cannot leave the payload: HOME is unavailable.")
+    if (Test-Path -LiteralPath $_outside -PathType Container) {
+        $_outside = (Resolve-Path -LiteralPath $_outside).Path
+    }
+    if (
+        -not (Test-Path -LiteralPath $_outside -PathType Container) -or
+        [StringComparer]::OrdinalIgnoreCase.Equals($_outside, $_payloadRoot) -or
+        $_outside.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
+    ) {
+        [Console]::Error.WriteLine("[$_command] cannot leave the payload: HOME is unavailable or inside the payload.")
         exit 1
     }
     Set-Location -LiteralPath $_outside

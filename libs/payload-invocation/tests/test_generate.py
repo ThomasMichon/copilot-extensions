@@ -2718,6 +2718,12 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
             capture_output=True, text=True, check=True,
         )
         assert fallback_result.stdout.strip() == f"{home}|status"
+    env.update({"HOME": str(plugin), "USERPROFILE": str(plugin)})
+    unsafe_home = subprocess.run(
+        command, cwd=plugin, env=env, capture_output=True, text=True,
+    )
+    assert unsafe_home.returncode == 1
+    assert "HOME is unavailable or inside the payload" in unsafe_home.stderr
 
 
 @pytest.mark.skipif(
