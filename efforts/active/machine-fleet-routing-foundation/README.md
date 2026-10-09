@@ -5,7 +5,7 @@
 - **Branch(es):** Independent, serially landed per-slice PRs against `dev`
 - **Created:** 2026-10-08
 - **Status:** Active; architecture reviewed, runtime implementation pending
-- **Vision:** [machine-fleet](../../../../visions/machine-fleet/README.md):
+- **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `driver-based-fleet-adoption`, `shell-independent-service-control`,
   `discoverable-service-routing`, `standalone-service-installation`
 - **Umbrella issue:** #5789
@@ -49,7 +49,7 @@ automatically enrolls machines.
 
 ## Context
 
-The [machine-fleet vision](../../../../visions/machine-fleet/README.md) landed in
+The [machine-fleet vision](../../../visions/machine-fleet/README.md) landed in
 #5771 after the vision-only claim #5767. It establishes the controller/driver
 ownership boundary, not a runtime implementation.
 
