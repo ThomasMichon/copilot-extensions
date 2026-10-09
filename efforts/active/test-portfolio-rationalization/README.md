@@ -105,9 +105,12 @@ suites first.
 
 ### Phase 1 — Containment before measurement
 
-- [x] Serialize potentially heavy local runner invocations behind one
-  host-wide, liveness-reconciled admission lease while leaving guards and
-  collection smoke available as cheap concurrent feedback.
+- [x] Serialize runner invocations that prepare or use shared mutable test
+  environments behind one host/operator-scoped, liveness-reconciled admission
+  lease. Guards, collection, and preparation remain cheap feedback modes but
+  are not exempt when they can rebuild a shared environment; read-only listing
+  remains independent. Direct-host and devcontainer entry points use the same
+  host-side admission protocol.
 - [ ] Make the test runner own the complete descendant process tree on Windows
   and POSIX, including cleanup after interruption and timeout.
 - [x] Enforce individual-test, sequential sub-suite, and plugin-aggregate
