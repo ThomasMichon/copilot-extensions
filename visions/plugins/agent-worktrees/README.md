@@ -62,9 +62,11 @@ an operator actually intends for the repo in play: the `gh`/git identity
 own inference identity (the account Copilot itself authenticates its own
 requests as, tracked independently of `gh`). agent-worktrees is the durable
 owner of both resolutions. The `gh` identity resolves through an explicit
-per-repo `account` override, or the decoupled owner-keyed `account_map`, so
-git/PR operations for a repo never depend on whichever account happens to be
-globally active. The Copilot identity resolves separately and is
+per-repo `account` override or the decoupled owner-keyed `account_map` where
+policy declares one. Operations governed by that explicit choice never depend
+on whichever account happens to be globally active. Without an explicit
+preference, ambient authentication remains a supported default, visibly
+distinct from a pinned identity. The Copilot identity resolves separately and is
 **repo-keyed, not owner-keyed** — a repo has no GitHub owner to derive an
 identity from at all when hosted somewhere other than GitHub, yet an operator
 can still need a specific Copilot identity pinned for it — falling back to a
@@ -75,8 +77,8 @@ declares a Copilot-identity preference sees no change in behavior.
 Account identity and repository routing are separate concerns. The identity
 catalog describes which accounts exist and their authentication expectations;
 repository policy decides where each identity is intended. Neither becomes a
-second credential store. Git/gh operations use the selected account through a
-scoped credential boundary rather than switching machine-global gh authentication.
+second credential store. An explicit Git/gh identity choice is applied through
+a scoped credential boundary rather than switching machine-global gh authentication.
 Repository-local credential pinning can also align ordinary Git clients with
 that intent without changing other repositories' identity choices.
 

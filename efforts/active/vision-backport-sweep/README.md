@@ -71,9 +71,9 @@ coherent slice per session (one vision reconciled + its deltas carved) and
 hand off the rest.
 
 A companion, independent concern — refreshing stale user-facing docs,
-README capability claims, and Picker preview screenshots/images — is not yet
-tracked anywhere; whether it becomes its own effort or a later phase of this
-one is still undecided (see Phase 4 and Proposal below).
+README capability claims, and Picker preview screenshots/images — is tracked
+separately as `adopter-material-refresh` (`#5799`), per the operator's Phase 4
+decision. Its implementation does not expand this sweep's completion gate.
 
 ## Participants
 
@@ -120,6 +120,12 @@ Operator, end of a long multi-repo session:
 > strong adherence, and so we'll need to do some adaptation. The docs,
 > preview images, and other user-facing materials are also getting out of
 > date with all the new improvements, enforcements, and capabilities."
+
+Follow-up decisions, 2026-10-08 (verbatim selections):
+- Material-refresh relationship: **"Separate sibling effort"**
+- Confirmed sibling slug: **"adopter-material-refresh"**
+- Repository identity contract: **"Strict for explicit choices; preserve
+  unconfigured ambient defaults"**
 
 ## Plan
 
@@ -380,9 +386,11 @@ Operator, end of a long multi-repo session:
       not assumed complete.
 
 ### Phase 4 — Decide the material-refresh relationship
-- [ ] Decide whether user-facing material refresh (docs, Picker preview
+- [x] Decide whether user-facing material refresh (docs, Picker preview
       screenshots, README capability claims) becomes a sub-stream of this
-      effort or its own sibling effort. Not yet decided — see Open Questions.
+      effort or its own sibling effort. Operator chose a separate sibling,
+      confirmed `adopter-material-refresh`, and its independently reviewed
+      planning/execution is tracked by `#5799`.
 
 ## Validation Plan
 - [ ] Every vision file touched passes the superset check (no unintended
@@ -395,13 +403,11 @@ Operator, end of a long multi-repo session:
 
 ## Proposal
 
-**Open question — not yet decided:** should the user-facing material refresh
-(docs, Picker preview screenshots, README capability claims) fold into this
-effort as a later phase, or become its own sibling effort? Both streams are
-"reality has outpaced the standing record," but they have different
-audiences (vision = contributor-facing design intent; materials =
-adopter-facing). Deferred to Phase 4 — ask the operator if it comes up before
-then rather than assuming either answer.
+**Settled:** user-facing material refresh is the independent
+`adopter-material-refresh` sibling (`#5799`). This sweep owns vision
+reconciliation and invariant-audit evidence; the sibling owns adopter-facing
+documentation and assets. Neither closing a sweep slice nor publishing the
+sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
 
@@ -1205,3 +1211,20 @@ then rather than assuming either answer.
   pinning is source-inspection evidence only in this slice. The new issue owns
   the missing no-subprocess regression. No live auth switch, public mutation
   probe, clean-room install, or provider credential experiment was performed.
+- PR `#5793` review exposed an existing-contract ambiguity: the old universal
+  no-global-account wording conflicted with the preserved unconfigured ambient
+  default. Asked the operator before qualifying it. The explicit decision
+  above scopes the strict guarantee to declared repository/account-map choices
+  while retaining ordinary unconfigured ambient behavior. Qualified both
+  affected paragraphs; independent Copilot inference identity is unchanged.
+
+### 2026-10-08 — Phase 4 material-refresh relationship decided
+- Operator selected **"Separate sibling effort"** and confirmed
+  **"adopter-material-refresh"**. Created independent umbrella `#5799` after
+  tracker/active-effort dedup and verified target effort adoption with the
+  exact read-only probe. The new plan clears its own repository review gate
+  before execution; no README rewrite or preview capture occurred here.
+- Decision capture was checked against the literal selections before updating
+  Request, Guiding Intent, Proposal, and Plan. No firm choice remains phrased
+  as an open question. Material execution is not silently added to the vision
+  sweep's remaining Phase 2/3 or Validation Plan.
