@@ -310,6 +310,7 @@ def _publish_active_unlocked(
     generation: int | None = None,
     demote_existing: bool = False,
     process_start_time: str | None = None,
+    capture_process_identity: bool = True,
 ) -> tuple[Endpoint, Endpoint | None]:
     # diagnostics also imports routing; resolve the shared primitive at call time.
     from .diagnostics import process_start_time as read_process_start_time
@@ -321,7 +322,7 @@ def _publish_active_unlocked(
             raise ValueError("process_start_time requires a positive pid")
         if read_process_start_time(pid) != process_start_time:
             raise ActivePublicationRefused("process identity changed before publication")
-    elif pid is not None and pid > 0:
+    elif capture_process_identity and pid is not None and pid > 0:
         process_start_time = read_process_start_time(pid)
         if process_start_time is None:
             log.warning(
@@ -535,6 +536,7 @@ def restore_previous_if_owner(
                 pid=previous.pid,
                 version=previous.version,
                 generation=_next_generation(data),
+                process_start_time=previous.process_start_time,
             )
             table["active"] = restored.to_dict()
         _atomic_write(routing_table_path(config_dir), table)
@@ -675,6 +677,8 @@ def _reap_stale_active_unlocked(
                 _publish_active_unlocked(
                     config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                     version=prev.version, demote_existing=False,
+                    process_start_time=prev.process_start_time,
+                    capture_process_identity=False,
                 )
                 result["promoted_port"] = prev.port
                 result["reason"] = (
@@ -721,6 +725,8 @@ def _reap_stale_active_unlocked(
             _publish_active_unlocked(
                 config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                 version=prev.version, demote_existing=False,
+                process_start_time=prev.process_start_time,
+                capture_process_identity=False,
             )
             promoted = True
             result["promoted_port"] = prev.port

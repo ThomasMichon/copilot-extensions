@@ -146,3 +146,69 @@ def test_real_current_process_identity_is_published(tmp_path: Path) -> None:
         pytest.skip("process identity backend unavailable on this platform")
     endpoint = routing.publish_active(tmp_path, bind="127.0.0.1", port=1234, pid=os.getpid())
     assert endpoint.process_start_time == token
+
+
+def test_rollback_preserves_predecessor_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: str(pid))
+    predecessor = routing.publish_active(tmp_path, bind="127.0.0.1", port=1234, pid=42)
+    candidate = routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=5678, pid=43, demote_existing=True,
+    )
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "999")
+    assert routing.restore_previous_if_owner(
+        tmp_path, pid=43, generation=candidate.generation,
+    )
+    restored = routing.read_active_endpoint(tmp_path, verify_listener=False)
+    assert restored is not None
+    assert restored.pid == predecessor.pid
+    assert restored.process_start_time == predecessor.process_start_time
+
+
+@pytest.mark.parametrize("missing_active", [True, False])
+@pytest.mark.parametrize("baseline", [None, "12345"])
+def test_watchdog_promotion_preserves_identity_without_minting_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    missing_active: bool, baseline: str | None,
+) -> None:
+    previous = routing.Endpoint("127.0.0.1", 1234, pid=42, process_start_time=baseline)
+    table = {"previous": previous.to_dict()}
+    if not missing_active:
+        table["active"] = routing.Endpoint("127.0.0.1", 5678, pid=43).to_dict()
+    routing.routing_table_path(tmp_path).write_text(json.dumps(table), encoding="utf-8")
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "12345")
+    result = routing.reap_stale_active(
+        tmp_path, listening=lambda host, port: port == 1234,
+        pid_alive=lambda pid: pid == 42,
+    )
+    assert result["promoted_port"] == 1234
+    active = routing.read_active_endpoint(tmp_path, verify_listener=False)
+    assert active is not None
+    assert active.process_start_time == baseline
+    if baseline is None:
+        assert "process_start_time" not in active.to_dict()
+
+
+@pytest.mark.parametrize("missing_active", [True, False])
+@pytest.mark.parametrize("current", [None, "999"])
+def test_watchdog_does_not_promote_reused_or_unverifiable_predecessor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    missing_active: bool, current: str | None,
+) -> None:
+    previous = routing.Endpoint("127.0.0.1", 1234, pid=42, process_start_time="12345")
+    table = {"previous": previous.to_dict()}
+    if not missing_active:
+        table["active"] = routing.Endpoint("127.0.0.1", 5678, pid=43).to_dict()
+    path = routing.routing_table_path(tmp_path)
+    path.write_text(json.dumps(table), encoding="utf-8")
+    original = path.read_bytes()
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: current)
+    result = routing.reap_stale_active(
+        tmp_path, listening=lambda host, port: port == 1234,
+        pid_alive=lambda pid: pid == 42,
+    )
+    assert result["promoted_port"] is None
+    assert result["reaped"] is False
+    assert "process identity changed" in result["reason"]
+    assert path.read_bytes() == original
