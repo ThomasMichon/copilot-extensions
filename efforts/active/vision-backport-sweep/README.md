@@ -72,7 +72,11 @@
   `ThomasMichon/copilot-extensions#5868` (test-environment preparation precedes
   containment and aggregate budgets) ·
   `ThomasMichon/copilot-extensions#5869` (ignored sandbox cleanup failures can
-  preserve a successful result)
+  preserve a successful result) ·
+  `ThomasMichon/copilot-extensions#5877` (named scoped noncredential
+  host-resource realization) ·
+  `ThomasMichon/copilot-extensions#580` (pre-existing relay stability tracker;
+  source-proven pinned-port eviction without occupant ownership/staleness proof)
 
 ## Guiding Intent
 
@@ -420,6 +424,16 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             and subscribed-observation vision scope as `#5861`/`#5862`.
             Runtime realization and its acceptance proofs stay with those
             objectives; no global runtime absence or conformance is inferred.
+      - [x] `visions/host-resource-providers/README.md` — current-stage
+            reconciliation of the complete vision against the credential-source,
+            provider-profile and relay endpoint seams. Existing intent already
+            covers the inspected capabilities; no new vision prose was needed.
+            The supported credential shape is narrower than a general named
+            resource catalog or ensure/release contract (`#5877`). Added the
+            concrete pinned-port occupant-eviction violation to existing `#580`,
+            preserving dynamic-port startup and verified owned recovery.
+            General resource realization and full credential/session lifecycle
+            proof are not claimed by this source audit.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -533,6 +547,43 @@ sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
 
+### 2026-10-09 — Host-resource current-stage and relay ownership reconciliation
+- Read the complete host-resource vision against the credential relay README,
+  `CredentialSource`, `RelayBuilder`, server actions and startup, and Bridge's
+  provider-profile process boundary. Source snapshot `fca474463dcf` retained
+  the inspected effect-producing files from the preceding slice. The vision
+  already preserves provider independence, one authorized shared channel,
+  session-neutral reach, bounded public surfaces and provider lifecycle
+  ownership; no unsupported capability was promoted into a realized claim.
+
+  | Vision / applicable service contract | Scoped result | Evidence / delta |
+  |---|---|---|
+  | Named pluggable capabilities | Partial: concrete credential-source foundation | `sources/__init__.py` defines credential supports/resolve and a source name; `registry.py:add_source` deduplicates that internal name. This is not a remotely discoverable noncredential capability catalog. `#5877` owns generalization. |
+  | Shared channel and session-neutral reach | Credential foundation retained; generic acceptance unproved | Bridge's provider-profile CLI seam registers sources without importing provider packages on the primary path; relay actions and advertised capabilities remain credential-specific. The general resource contract must reuse the selected authorized channel without requiring a particular session-host mode (`#5877`). |
+  | Provider-owned lifecycle and scoped public surface | General realization remains ahead | Credential policy, request-scoped token authorizers and provider-owned issuance are not a generic resource ensure/idempotency/release protocol. `#5877` preserves those authorities and requires synthetic-provider acceptance; `#5775` retains its distinct session-retirement work. |
+  | Discoverable endpoint and collision-free live-owner preservation | Partial; pinned-port reclaim violates ownership | Server startup publishes the actually-bound endpoint and supports dynamic binding/fallback. But `server.py:100-120,288-335` calls PID termination after pinned-port contention without proving relay identity, staleness or yielded authority; only the current PID is excluded. Added this evidence to existing `#580`, whose expected live-occupant fallback already covers it. |
+
+- The pinned-port defect is a reachable source branch, not an observed foreign
+  process termination. Existing `test_port_reclaim.py` labels a generic
+  listening child stale without an ownership proof. The requested fix must
+  preserve live unrelated non-self listeners, verify any owned stale recovery,
+  and retain safe fallback/actual-endpoint publication. No host service was
+  evicted and no credential or noncredential provider was deployed for this
+  comparison.
+- Dedup retained `#580` for its explicit live-occupant fallback requirement;
+  `#4011` remote-forward cleanup and `#4309` connection-owner architecture
+  remain separate. `#5877` is north-star realization, not global absence
+  inferred from search or an order to extend credential wire framing per
+  capability. No custody policy or standalone operation was removed.
+- Corrected the previous preparation table's citation from `88-181` to
+  `88-170`, addressing the low finding on merged `#5875`; the source file has
+  170 lines. Its substantive source-effect findings and open whole-leaf gate
+  are unchanged. Preparation reconciliation merged and its child finalized;
+  neither it nor this reconciliation completes the Active parent sweep.
+- This slice changes audit documentation only. No new runtime unit/component,
+  clean-room or live-provider proof is claimed; those obligations remain with
+  the identified implementation owners.
+
 ### 2026-10-09 — Preparation, collection and assurance boundaries
 - Traced current `pytest_portfolio_guard.py` declarations into
   `run-plugin-tests.py:run_plugin` and `plugin_test_containment.py`.
@@ -548,7 +599,7 @@ sibling plan proves that the sibling's materials have been refreshed.
 
   | Inspected contract | Scoped result | Evidence / delta |
   |---|---|---|
-  | Declared tier/effect validation | Embodied, bounded to declarations | `pytest_portfolio_guard.py:88-181` rejects malformed/forbidden declarations and gates T3/T4; it does not prove actual effects or unique family value. |
+  | Declared tier/effect validation | Embodied, bounded to declarations | `pytest_portfolio_guard.py:88-170` rejects malformed/forbidden declarations and gates T3/T4; it does not prove actual effects or unique family value. |
   | Separable preparation | Embodied capability; ownership/budget violation | `_ensure_venv` uses direct unbounded `subprocess.run`; `run_plugin` calls it before sandbox, isolated environment, contained process and aggregate clock. `#5868` owns the gap. |
   | Contained execution/collection | Scoped source support, not whole-host proof | `run_plugin` loads the policy plugin inside `run_contained`; the worker waits for assignment, Windows uses Job ownership, POSIX uses group accounting/termination, and registry drift is detected without rolling back another actor's state. |
   | Cleanup-result fidelity | Violates on the suppression path | `TemporaryDirectory(ignore_cleanup_errors=True)` can suppress failed sandbox removal while pytest success survives; no subsequent cleanup verification establishes a clean host. `#5869` owns the gap. |
