@@ -233,6 +233,7 @@ class SpawnReservation:
     worktree_ownership: str | None = None
     creating_host: str | None = None
     driver: str | None = None
+    conversation_retired: bool = False
     release_requested: bool = False
     release_disposition: str | None = None
     exclusive_released: bool = False
@@ -259,6 +260,8 @@ class SpawnReservation:
             worktree_ownership=row["worktree_ownership"],
             creating_host=row["creating_host"],
             driver=row["driver"],
+            conversation_retired=bool(row["conversation_retired"])
+            if "conversation_retired" in row.keys() else False,
             release_requested=bool(row["release_requested"]),
             release_disposition=row["release_disposition"],
             exclusive_released=bool(row["exclusive_released"]),

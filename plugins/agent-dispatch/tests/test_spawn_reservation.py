@@ -423,6 +423,11 @@ def test_retired_session_is_not_recarried_from_legacy_failed_attempt(q):
     assert fresh.worktree_ownership == "reused"
     assert fresh.session_handle is None
     assert fresh.exclusive_key == "review:repo:42"
+    # copilot-extensions#5699 review: distinct from "never had a carried
+    # session" -- consumers must be able to tell a deliberately retired
+    # conversation apart from a plain worktree reuse, so they refuse the
+    # worktree-resume recovery fallback too (not just the session_handle one).
+    assert fresh.conversation_retired is True
 
 
 def test_exclusive_key_can_take_affinity_as_initial_resume_target(q):

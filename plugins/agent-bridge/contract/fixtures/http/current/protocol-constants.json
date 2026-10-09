@@ -36,6 +36,7 @@
     "caller_session_id": 24,
     "cooperative_stop": 25,
     "codespace_launch_policy": 26,
-    "target_preferences": 27
+    "target_preferences": 27,
+    "strict_resume": 28
   }
 }

@@ -163,7 +163,22 @@ CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION = 26
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
 TARGET_PREFERENCES_PROTOCOL_VERSION = 27
-HTTP_PROTOCOL_VERSION = 27
+
+# First version whose ``POST /worktrees/{id}/resume`` honors ``strict=true``
+# (the identity-preserving no-fresh-fallback contract, copilot-extensions#5699):
+# a missing bridge session record or a failed resume each refuse (409) instead
+# of silently starting a brand-new replacement conversation. This is a real
+# behaviorful request parameter, not an additive/tolerant-reader field -- an
+# older daemon simply ignores an unrecognized ``strict`` query parameter and
+# falls through to its own pre-existing fresh-session-fallback behavior,
+# silently defeating the exact history-loss guarantee this flag promises. A
+# caller gates sending ``strict=true`` on this rather than risk that silent
+# downgrade against an older, independently-installed daemon.
+STRICT_RESUME_PROTOCOL_VERSION = 28
+
+# Current HTTP wire-contract version this build speaks -- bumped alongside the
+# constant just above it.
+HTTP_PROTOCOL_VERSION = 28
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

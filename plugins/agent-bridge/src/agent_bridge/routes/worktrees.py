@@ -1043,8 +1043,11 @@ async def resume_worktree(
     preserves today's behavior (a taken-over or resume-exhausted worktree
     stays usable via a fresh session).
 
-    Returns 404 if the worktree has no session at all (non-strict) or has
-    literally never had one (strict, same case, different status).
+    Returns 404 if the worktree has no session at all and ``strict`` is
+    False. Under ``strict=true`` that same case returns **409**
+    (``reason: resume_requires_existing_session``), never 404 -- the
+    identity-preserving contract's refusal status, not the non-strict
+    not-found status.
     """
     from .sessions import _session_info
 

@@ -328,6 +328,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             "spawn_session_handle": (
                 None if prepared.get("replaced") else reservation.get("session_handle")
             ),
+            "spawn_conversation_retired": bool(reservation.get("conversation_retired")),
         }
     except (DispatchError, embody.EmbodyUnavailable) as exc:
         if prepared is None or ownership != "created":

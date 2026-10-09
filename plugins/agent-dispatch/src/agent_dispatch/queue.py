@@ -564,6 +564,7 @@ class TaskQueue(
                 "  worktree_ownership TEXT,"
                 "  creating_host TEXT,"
                 "  driver TEXT,"
+                "  conversation_retired INTEGER NOT NULL DEFAULT 0,"
                 "  release_requested INTEGER NOT NULL DEFAULT 0,"
                 "  release_disposition TEXT,"
                 "  exclusive_released INTEGER NOT NULL DEFAULT 0,"
@@ -642,6 +643,15 @@ class TaskQueue(
                     except sqlite3.OperationalError as exc:
                         if "duplicate column name" not in str(exc).lower():
                             raise
+            if "conversation_retired" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations ADD COLUMN "
+                        "conversation_retired INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
             reservation_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(spawn_reservations)").fetchall()

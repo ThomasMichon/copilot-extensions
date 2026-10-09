@@ -610,6 +610,7 @@ class Supervisor:
             "spawn_worktree_path": prepared["path"],
             "spawn_worktree_ownership": ownership,
             "spawn_session_handle": (None if replaced else reservation.get("session_handle")),
+            "spawn_conversation_retired": bool(reservation.get("conversation_retired")),
         }
 
     def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:

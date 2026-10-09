@@ -191,6 +191,7 @@ class SpawnReservationMixin:
             carried_worktree = task.affinity.get("worktree")
             worktree_ownership = "targeted" if carried_worktree else None
             carried_session = None
+            conversation_retired = False
             if (
                 carried_worktree is None
                 and task.status == Status.SUSPENDED
@@ -238,6 +239,16 @@ class SpawnReservationMixin:
                                 carried_session, task.exclusive_key, task_id, attempt,
                             )
                             carried_session = None
+                            # Distinct from "never had a carried session" --
+                            # a retired conversation must not be recovered via
+                            # the bridge's worktree-level resume fallback
+                            # either (copilot-extensions#5699 review): that
+                            # fallback resumes whatever session is latest in
+                            # the worktree DIRECTORY, independent of this
+                            # table's own session_handle bookkeeping, so it
+                            # would silently resurrect the very conversation
+                            # just dropped above.
+                            conversation_retired = True
                         else:
                             log.info(
                                 "reserve_spawn: carrying session %r forward for %r "
@@ -261,13 +272,14 @@ class SpawnReservationMixin:
                     carried_worktree = None
                     carried_session = None
                     worktree_ownership = None
+                    conversation_retired = False
                     break
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
                 "session_handle, worktree, inherited_worktree, "
-                "worktree_ownership, reserved_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "worktree_ownership, conversation_retired, reserved_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     key,
                     task_id,
@@ -279,6 +291,7 @@ class SpawnReservationMixin:
                     carried_worktree,
                     carried_worktree,
                     worktree_ownership,
+                    int(conversation_retired),
                     ts,
                     ts,
                 ),

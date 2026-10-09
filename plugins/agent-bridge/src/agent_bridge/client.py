@@ -1189,11 +1189,30 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         ``strict`` is the identity-preserving contract: never a silent fresh
         replacement conversation. Either the existing session resumes, or the
         call raises a 409 (``reason: resume_requires_existing_session``).
+
+        Gated on ``STRICT_RESUME_PROTOCOL_VERSION`` -- unlike most gated
+        fields, this one **fails closed** rather than degrading: ``strict`` is
+        a behaviorful request parameter an older daemon's ``/resume`` handler
+        would silently ignore, falling through to its own pre-existing
+        fresh-session fallback and defeating the exact history-loss guarantee
+        the caller explicitly asked for. Silently sending a non-strict
+        request in that case would be worse than refusing outright, so an
+        unsupported daemon raises instead of quietly downgrading.
         """
         params = {}
         if reclaim:
             params["reclaim"] = "true"
         if strict:
+            from .protocol import STRICT_RESUME_PROTOCOL_VERSION
+
+            if not self.daemon_supports(STRICT_RESUME_PROTOCOL_VERSION):
+                raise BridgeClientError(
+                    426,
+                    f"the bridge daemon at {self._base} predates protocol "
+                    f"{STRICT_RESUME_PROTOCOL_VERSION} (strict resume); refusing "
+                    "to send a request that daemon would silently honor "
+                    "non-strictly",
+                )
             params["strict"] = "true"
         return (
             self._request(

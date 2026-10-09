@@ -10,7 +10,7 @@ from agent_dispatch.spawn_factories import make_headless_spawn
 from tests._helpers import TEST_REPO
 
 
-def _task(ownership="reused"):
+def _task(ownership="reused", *, conversation_retired=False):
     return {
         "id": "review-task",
         "repo": TEST_REPO,
@@ -18,6 +18,7 @@ def _task(ownership="reused"):
         "spawn_worktree_path": "/example/review-worktree",
         "spawn_worktree_ownership": ownership,
         "spawn_session_handle": None,
+        "spawn_conversation_retired": conversation_retired,
     }
 
 
@@ -110,3 +111,21 @@ def test_gone_carried_body_falls_back_to_worktree_resume_not_create(monkeypatch)
     assert ok is True
     assert handle["session"] == "local-body:existing-conversation"
     assert not any("create" in call for call in calls)
+
+
+def test_retired_conversation_never_recovers_via_worktree_resume(monkeypatch):
+    """copilot-extensions#5699 review: ``worktree_ownership == "reused"`` alone
+    also matches a worktree whose carried session was deliberately retired
+    (an operator rearm) -- the worktree-resume fallback resumes whatever
+    session is latest in that directory, independent of the dropped
+    ``spawn_session_handle``, so it would silently resurrect the exact
+    conversation the rearm retired. A genuinely fresh conversation must be
+    created instead -- never ``--strict resume``."""
+    calls = _transport(monkeypatch)
+    ok, handle = make_headless_spawn()(_task(conversation_retired=True))
+    assert ok is True
+    assert handle["session"] == "local-body:replacement-conversation"
+    assert any("create" in call for call in calls)
+    assert not any(
+        call[1:3] == ["--json", "resume"] for call in calls
+    )
