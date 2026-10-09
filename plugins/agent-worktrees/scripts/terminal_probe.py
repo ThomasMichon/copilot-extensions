@@ -152,21 +152,31 @@ def _probe_windows() -> dict:
         return (int(owner.value) or None, name.value if length else None)
 
     root = user32.GetAncestor(console_hwnd, 3)  # GA_ROOTOWNER
-    console_class = _window_facts(console_hwnd)[1]
-    result["console_hwnd"] = int(console_hwnd)
-    result["console_class"] = console_class
+    result.update(_host_record(
+        int(console_hwnd), _window_facts(console_hwnd),
+        int(root) if root else None,
+        _window_facts(root) if root and root != console_hwnd else (None, None),
+        table,
+    ))
+    return result
+
+
+def _host_record(console_hwnd: int, console_facts, root: int | None, root_facts,
+                 table: dict[int, tuple[int, str]]) -> dict:
+    """Classify the terminal host from the console window and its root owner."""
+    console_pid, console_class = console_facts
+    result: dict = {"console_hwnd": console_hwnd, "console_class": console_class}
     if root and root != console_hwnd:
-        host_pid, host_class = _window_facts(root)
-        result["host_hwnd"] = int(root)
-        result["host_pid"] = host_pid
-        result["host_class"] = host_class
+        host_pid, host_class = root_facts
+        result.update(host_hwnd=root, host_pid=host_pid, host_class=host_class)
         if host_pid in table:
             result["host_exe"] = table[host_pid][1]
     elif console_class == "ConsoleWindowClass":
         # A classic conhost window is itself the top-level terminal window.
-        result["host_hwnd"] = int(console_hwnd)
-        result["host_class"] = console_class
-        result["host_exe"] = "conhost.exe"
+        result.update(
+            host_hwnd=console_hwnd, host_pid=console_pid, host_class=console_class,
+            host_exe=table[console_pid][1] if console_pid in table else "conhost.exe",
+        )
     return result
 
 
@@ -181,6 +191,9 @@ def _attached_console_window(kernel32, candidates: list[int], *, deadline: float
             if not kernel32.AttachConsole(pid):
                 continue
             try:
+                # Attaching re-establishes default Ctrl+C handling for the new
+                # console; re-arm the ignore flag before touching it.
+                kernel32.SetConsoleCtrlHandler(None, True)
                 hwnd = kernel32.GetConsoleWindow()
             finally:
                 kernel32.FreeConsole()
@@ -199,8 +212,10 @@ from ctypes import wintypes
 k = ctypes.WinDLL("kernel32")
 k.GetConsoleWindow.restype = wintypes.HWND
 k.AttachConsole.argtypes = [wintypes.DWORD]
+k.SetConsoleCtrlHandler.argtypes = [ctypes.c_void_p, wintypes.BOOL]
 for pid in sys.argv[1:]:
     if k.AttachConsole(int(pid)):
+        k.SetConsoleCtrlHandler(None, 1)
         hwnd = k.GetConsoleWindow()
         k.FreeConsole()
         if hwnd:

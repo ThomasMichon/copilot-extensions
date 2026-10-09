@@ -78,6 +78,10 @@ def test_attached_console_window_detaches_and_restores_std_handles():
     ]
     assert kernel32.events[0] == ("ctrl", True)
     assert kernel32.events[-1] == ("ctrl", False)
+    # Ctrl+C ignore is re-armed after each successful attach, before any use.
+    for index, event in enumerate(kernel32.events):
+        if event[0] == "attach":
+            assert kernel32.events[index + 1] == ("ctrl", True)
     assert len(kernel32.std) == 3
     assert all(handle == f"orig-{std_id}" for std_id, handle in kernel32.std.items())
 
@@ -122,3 +126,22 @@ def test_detached_console_window_parses_helper_and_fails_soft(monkeypatch):
     assert terminal_probe._detached_console_window([30], deadline=deadline) is None
     assert terminal_probe._detached_console_window([30], deadline=time.monotonic() - 1) is None
     assert terminal_probe._detached_console_window([], deadline=deadline) is None
+
+def test_host_record_classifies_conpty_and_classic_console_hosts():
+    table = {77: (1, "WindowsTerminal.exe"), 88: (1, "conhost.exe")}
+    conpty = terminal_probe._host_record(
+        1001, (88, "PseudoConsoleWindow"), 2002, (77, "CASCADIA_HOSTING_WINDOW_CLASS"), table,
+    )
+    assert conpty == {
+        "console_hwnd": 1001, "console_class": "PseudoConsoleWindow",
+        "host_hwnd": 2002, "host_pid": 77,
+        "host_class": "CASCADIA_HOSTING_WINDOW_CLASS", "host_exe": "WindowsTerminal.exe",
+    }
+    classic = terminal_probe._host_record(
+        3003, (88, "ConsoleWindowClass"), 3003, (None, None), table,
+    )
+    assert classic["host_hwnd"] == 3003
+    assert classic["host_pid"] == 88
+    assert classic["host_exe"] == "conhost.exe"
+    unknown = terminal_probe._host_record(4004, (99, "Other"), None, (None, None), {})
+    assert "host_hwnd" not in unknown and unknown["console_hwnd"] == 4004
