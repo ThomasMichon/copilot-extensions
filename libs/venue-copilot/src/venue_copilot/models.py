@@ -148,7 +148,7 @@ def resolve_model_config(
         raise InvalidPreferenceSource("Unsupported preference source; refusing default fallback")
     try:
         opt_out = os.environ.get(_OPT_OUT_ENV, "").strip().lower()
-        if opt_out in _OPT_OUT_VALUES:
+        if source == "caller-settings" and opt_out in _OPT_OUT_VALUES:
             return {}
 
         cfg = _host_settings_config() if source == "caller-settings" else {}

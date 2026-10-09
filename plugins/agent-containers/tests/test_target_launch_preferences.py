@@ -40,3 +40,15 @@ def test_invalid_explicit_policy_refuses_launch_default_fallback(monkeypatch, po
 def test_invalid_policy_type_is_not_swallowed_as_native_default():
     with pytest.raises(models.InvalidPreferenceSource):
         models.model_copilot_args([], preference_source={})
+
+
+def test_target_propagation_off_preserves_explicit_environment(monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_PREFERENCE_SOURCE", "target-settings")
+    monkeypatch.setenv("AGENT_CODESPACES_MODEL_PROPAGATE", "0")
+    monkeypatch.setenv("AGENT_CODESPACES_ACP_MODEL", "explicit-environment")
+    for key in ("COPILOT_PROVIDER_BASE_URL", "COPILOT_OFFLINE",
+                "AGENT_CODESPACES_ACP_EFFORT", "AGENT_CODESPACES_ACP_CONTEXT"):
+        monkeypatch.delenv(key, raising=False)
+    assert _with_caller_model([]) == ["--model=explicit-environment"]
+    monkeypatch.setenv("AGENT_BRIDGE_PREFERENCE_SOURCE", "caller-settings")
+    assert _with_caller_model([]) == []

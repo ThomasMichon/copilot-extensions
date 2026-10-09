@@ -104,15 +104,14 @@ class AcpPreferencesMixin:
                         key: value for key, value in desired.items()
                         if sources.get(key) == "launch-profile"
                     }
-                else:
-                    for key, names in (
-                        ("model", _ACP_MODEL_ENV),
-                        ("reasoning_effort", _ACP_EFFORT_ENV),
-                        ("context", ("AGENT_BRIDGE_ACP_CONTEXT", "AGENT_CODESPACES_ACP_CONTEXT")),
-                    ):
-                        if value := _first_env(names):
-                            if sources.get(key) != "launch-profile":
-                                desired[key] = value
+                for key, names in (
+                    ("model", _ACP_MODEL_ENV),
+                    ("reasoning_effort", _ACP_EFFORT_ENV),
+                    ("context", ("AGENT_BRIDGE_ACP_CONTEXT", "AGENT_CODESPACES_ACP_CONTEXT")),
+                ):
+                    if value := _first_env(names):
+                        if sources.get(key) != "launch-profile":
+                            desired[key] = value
                 desired.update(self.launch_preferences)
         else:
             try:

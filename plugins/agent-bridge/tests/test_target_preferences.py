@@ -21,7 +21,7 @@ from agent_bridge.session_host import protocol
 from agent_bridge.session_host.client import SessionHostClient
 from agent_bridge.session_host.host import SessionHost
 from agent_bridge.session_preferences import (
-    PreferenceApplicationError, SOURCE_ENV, client_preferences, execution_receipt,
+    CONTEXT_ENV, PreferenceApplicationError, SOURCE_ENV, client_preferences, execution_receipt,
     execution_settings, validate_receipt,
 )
 
@@ -540,6 +540,23 @@ def test_affinity_reuse_cannot_ignore_explicit_preferences_or_provider():
     assert reused_preference_source(
         StartSessionRequest(model="requested"), existing,
     ) == "caller-settings"
+    for request in (
+        StartSessionRequest(context="long_context"),
+        StartSessionRequest(env={CONTEXT_ENV: "long_context"}),
+    ):
+        with pytest.raises(HTTPException) as error:
+            reused_preference_source(request, existing)
+        assert error.value.status_code == 422
+
+
+def test_target_propagation_off_keeps_explicit_environment_choices(monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_MODEL_PROPAGATE", "0")
+    monkeypatch.setenv("AGENT_BRIDGE_ACP_MODEL", "target")
+    monkeypatch.setenv("AGENT_BRIDGE_ACP_EFFORT", "medium")
+    instance, _ = client()
+    asyncio.run(instance._apply_model_config(options()))
+    assert calls(instance) == {"model": "target", "reasoning_effort": "medium"}
+    assert instance.confirmed_preferences["model"] == "target"
 
 
 @pytest.mark.parametrize("policy", ["", "target-setting"])

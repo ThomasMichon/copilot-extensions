@@ -21,6 +21,8 @@ def reused_preference_source(req: Any, existing: Any) -> str:
             status_code=409,
             detail="reused session has another preference_source; use force_new",
         )
+    if (req.context is not None or CONTEXT_ENV in (req.env or {})) and source != "target-settings":
+        raise HTTPException(status_code=422, detail="context requires target-settings mode")
     if source == "target-settings":
         wanted = launch_preferences(req.copilot_args or [], req.env or {})
         if (req.env or {}).get(CONTEXT_ENV):
@@ -62,11 +64,11 @@ def apply_request_preferences(
         source = getattr(config, "preference_source", "caller-settings")
     if source not in SOURCES:
         raise HTTPException(status_code=422, detail="unsupported preference_source")
+    if (req.context is not None or CONTEXT_ENV in request_env) and source != "target-settings":
+        raise HTTPException(status_code=422, detail="context requires target-settings mode")
     if req.preference_source is not None or source != "caller-settings":
         request_env[SOURCE_ENV] = source
     if req.context is not None:
-        if source != "target-settings":
-            raise HTTPException(status_code=422, detail="context requires target-settings mode")
         request_env[CONTEXT_ENV] = req.context
     if request_env:
         target.env = {**target_env, **request_env}
