@@ -291,49 +291,12 @@ def test_publication_identity_failed_write_cleans_created_temp(tmp_path: Path, m
     assert not any(dest.iterdir())
 
 
-def test_publication_identity_exclusive_collision_preserved(tmp_path: Path, monkeypatch) -> None:
-    original_open = admission.os.open
-    collided = []
+def test_publication_identity_never_uses_pathname_cleanup(tmp_path: Path, monkeypatch) -> None:
+    def forbidden(path, *args, **kwargs):
+        raise AssertionError("claim cleanup must not unlink a pathname")
 
-    def race(path, flags, mode=0o777, *, dir_fd=None):
-        if flags & os.O_EXCL:
-            entry = Path(path)
-            entry.write_bytes(b"another writer")
-            collided.append(entry)
-        return original_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(admission.os, "open", race)
-    result = _claim(tmp_path / "m1")
-    assert result is not None and not result.ok
-    assert len(collided) == 1
-    assert collided[0].read_bytes() == b"another writer"
-
-
-@pytest.mark.parametrize("replacement", ["regular", "symlink"])
-def test_publication_identity_post_creation_replacement_preserved(
-    tmp_path: Path, monkeypatch, replacement,
-) -> None:
-    outside = tmp_path / "replacement"
-    outside.write_bytes(b"another writer")
-    swapped = []
-
-    def race(temp, final):
-        if replacement == "regular":
-            os.replace(outside, temp)
-        else:
-            temp.unlink()
-            try:
-                temp.symlink_to(outside)
-            except OSError:
-                pytest.skip("symlinks unavailable")
-        swapped.append(temp)
-        raise OSError("injected replacement")
-
-    monkeypatch.setattr(admission, "_publish_marker_no_replace", race)
-    result = _claim(tmp_path / "m1")
-    assert result is not None and not result.ok
-    assert "identity changed" in result.detail
-    assert swapped[0].read_bytes() == b"another writer"
+    monkeypatch.setattr(os, "unlink", forbidden)
+    assert _claim(tmp_path / "m1") is None
 
 
 @pytest.mark.parametrize("replacement", ["matching", "different", "symlink"])
@@ -344,18 +307,14 @@ def test_publication_identity_replaced_temp_cannot_admit_payload(
     provider = "other" if replacement == "different" else "copilot"
     payload = _metadata(_identity(provider))
     outside.write_bytes(payload)
-    original_publish = admission._publish_marker_no_replace
-
-    def race(temp, final):
+    def race(claim, final):
         if replacement == "symlink":
-            temp.unlink()
             try:
-                temp.symlink_to(outside)
+                final.symlink_to(outside)
             except OSError:
                 pytest.skip("symlinks unavailable")
         else:
-            os.replace(outside, temp)
-        original_publish(temp, final)
+            os.replace(outside, final)
 
     monkeypatch.setattr(admission, "_publish_marker_no_replace", race)
     root = tmp_path / "archives"
@@ -554,23 +513,33 @@ def test_publication_identity_lock_covers_unfiltered_payload_writes(tmp_path: Pa
     assert (session / "workspace.yaml").read_text() == "second"
 
 
-def test_publication_identity_windows_move_flags(tmp_path: Path, monkeypatch) -> None:
-    import ctypes
-    from types import SimpleNamespace
+@pytest.mark.skipif(os.name == "nt", reason="Linux anonymous-file backend")
+def test_publication_identity_anonymous_file_has_no_temporary_name(tmp_path: Path) -> None:
+    from agent_logger.sync.targets.claim_file import create_claim_file
 
-    calls = []
+    with create_claim_file(tmp_path) as claim:
+        claim.stream.write(b"kernel-owned")
+        claim.stream.flush()
+        assert not any(tmp_path.iterdir())
+        marker = tmp_path / "marker"
+        expected = claim.file_id
+        claim.publish(marker)
+        info = marker.stat()
+        assert (info.st_dev, info.st_ino) == expected
+    assert marker.read_bytes() == b"kernel-owned"
+    assert [path.name for path in tmp_path.iterdir()] == ["marker"]
 
-    def move(source, destination, flags):
-        calls.append((source, destination, flags))
-        return True
 
-    monkeypatch.setattr(
-        ctypes, "WinDLL", lambda name, **kwargs: SimpleNamespace(MoveFileExW=move), raising=False
-    )
-    monkeypatch.setattr(admission, "windows_extended_path", lambda path: f"extended:{path}")
-    source, destination = tmp_path / "temp", tmp_path / "marker"
-    admission._move_marker_no_replace_windows(source, destination)
-    assert calls == [(f"extended:{source}", f"extended:{destination}", 0x00000008)]
+@pytest.mark.skipif(os.name == "nt", reason="Linux anonymous-file backend")
+def test_publication_identity_unsupported_anonymous_files_fail_closed(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from agent_logger.sync.targets import claim_file
+
+    monkeypatch.setattr(claim_file.os, "O_TMPFILE", 0)
+    result = _claim(tmp_path / "m1")
+    assert result is not None and not result.ok
+    assert "unsupported" in result.detail
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows lock opener")

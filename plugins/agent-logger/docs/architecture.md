@@ -141,14 +141,22 @@ only its canonical key or a declared legacy alias, never an inferred one.
 
 Marker publication is atomic and refuses to replace an existing file or link,
 including one created between the initial inspection and publication. Claim
-files are flushed before publication; POSIX uses a no-replace hard link and
-directory fsync, and Windows uses a write-through move without replacement.
+files stay kernel-owned until publication and verification finish: Linux uses
+an unnamed `O_TMPFILE` inode, descriptor-based linking and directory fsync;
+Windows uses a protected original handle, no-replace handle rename and
+cancellable deletion disposition. No pathname check-then-unlink cleanup occurs.
+Linux identity admission requires `O_TMPFILE`, `/proc/self/fd` and filesystem
+support for anonymous-file publication; unsupported systems fail explicitly
+without falling back to a racy named temporary file.
 Identified publications require POSIX directory durability barriers; an
 unsupported barrier fails explicitly rather than silently claiming durability.
 Ordinary directory creation does not opt into that additional requirement.
-Only the temporary file created by the current attempt is cleaned up.
-Unowned content is never deleted or ignored merely because its filename
-resembles a stale claim artifact; such a leaf requires explicit recovery.
+Closing an unpublished claim cleans up the kernel-owned file object, not
+whatever a pathname happens to reference. Unowned content is never deleted or
+ignored merely because its filename resembles a stale claim artifact; such a
+leaf requires explicit recovery. Abrupt Windows process termination in the
+disposition-cancellation/rename interval can still leave a named artifact;
+normal context cleanup does not guess its ownership after restart.
 The advisory admission lock coordinates cooperating publishers, not arbitrary
 ancestor-directory swaps or writers bypassing the admission API.
 

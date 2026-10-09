@@ -17,7 +17,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import stat
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -26,42 +25,20 @@ from typing import TYPE_CHECKING
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
     ensure_real_directory,
-    fsync_directory,
-    short_unique_id,
     windows_extended_path,
 )
 from agent_logger.sync.targets.base import PushResult, SourceIdentityLike
+from agent_logger.sync.targets.claim_file import ClaimFile, create_claim_file
 
 if TYPE_CHECKING:
     from agent_logger.source_roots import MarkerStamp, SourceIdentity
-
-#: ``O_NOFOLLOW`` has no Windows equivalent; the temp-write path below still
-#: gets Windows-safe no-follow semantics for free because it only ever opens
-#: a brand-new, exclusively created name (nothing pre-existing to follow).
-_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 #: Persisted at a claimed destination root once a ``source_identity`` push
 #: admits it, using source_roots' schema-v1 metadata contract.
 PUBLICATION_IDENTITY_MARKER = ".archive-source.json"
 
-#: The marker only ever holds four short identity strings -- bounds both a
-#: pre-existing, destination-controlled marker read (the admission target is
-#: by definition one the caller does not yet own) and a new claim write.
+#: Matches the shared metadata reader's bounded schema-v1 contract.
 MAX_MARKER_BYTES = 1024 * 1024
-
-def _unlink_owned_temp(path: Path, file_id: tuple[int, int]) -> bool:
-    try:
-        info = os.stat(windows_extended_path(path), follow_symlinks=False)
-    except FileNotFoundError:
-        return True
-    if (
-        (info.st_dev, info.st_ino) != file_id
-        or not stat.S_ISREG(info.st_mode)
-        or getattr(info, "st_file_attributes", 0) & 0x00000400
-    ):
-        return False
-    os.unlink(windows_extended_path(path))
-    return True
 
 
 def _destination_has_content(dest: Path) -> bool:
@@ -92,31 +69,8 @@ def _read_marker(
     return read_source_metadata(io_path)
 
 
-def _move_marker_no_replace_windows(temp_path: Path, marker_path: Path) -> None:
-    import ctypes
-    from ctypes import wintypes
-
-    move_file = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
-    move_file.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
-    move_file.restype = wintypes.BOOL
-    # WRITE_THROUGH only: deliberately omit REPLACE_EXISTING.
-    if not move_file(
-        windows_extended_path(temp_path), windows_extended_path(marker_path), 0x00000008
-    ):
-        raise ctypes.WinError(ctypes.get_last_error())
-
-
-def _publish_marker_no_replace(temp_path: Path, marker_path: Path) -> None:
-    """Durably publish a new marker, never replacing an existing entry."""
-    if os.name == "nt":
-        _move_marker_no_replace_windows(temp_path, marker_path)
-    else:
-        os.link(
-            windows_extended_path(temp_path),
-            windows_extended_path(marker_path),
-            follow_symlinks=False,
-        )
-        fsync_directory(marker_path.parent)
+def _publish_marker_no_replace(claim: ClaimFile, marker_path: Path) -> None:
+    claim.publish(marker_path)
 
 
 def _check_existing_claim(
@@ -279,45 +233,19 @@ def _admit_under_lock(
                 "publication marker; refusing to claim an unowned leaf"
             ),
         )
-    temp_path = dest / f".{PUBLICATION_IDENTITY_MARKER}.{short_unique_id()}.tmp"
-    created_file_id: tuple[int, int] | None = None
-    failure: PushResult | None = None
     try:
         ensure_real_directory(dest, durable=True)
-        # Write through an exclusively created, brand-new temp name (so
-        # there is nothing pre-existing to follow on any platform), fsync
-        # its content, then publish no-replace: a race that beats us to
-        # marker_path is refused back up for re-resolution, never silently
-        # overwritten (see _publish_marker_no_replace).
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
-        fd = os.open(windows_extended_path(temp_path), flags, 0o644)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            created = os.fstat(handle.fileno())
-            created_file_id = created.st_dev, created.st_ino
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            _publish_marker_no_replace(temp_path, marker_path)
-        except FileExistsError:
-            failure = _resolve_post_race_marker(marker_path, incoming, publication_key)
-        else:
-            failure = _verify_published_marker(
-                marker_path, created_file_id, incoming, publication_key
+        with create_claim_file(dest) as claim:
+            claim.stream.write(payload.encode("utf-8"))
+            claim.stream.flush()
+            os.fsync(claim.stream.fileno())
+            created_file_id = claim.file_id
+            try:
+                _publish_marker_no_replace(claim, marker_path)
+            except FileExistsError:
+                return _resolve_post_race_marker(marker_path, incoming, publication_key)
+            return _verify_published_marker(
+                marker_path, created_file_id, incoming, publication_key,
             )
     except OSError as exc:
-        failure = PushResult(ok=False, detail=f"cannot claim destination: {exc}")
-    finally:
-        if created_file_id is not None:
-            try:
-                if not _unlink_owned_temp(temp_path, created_file_id):
-                    detail = "claim temporary file identity changed; replacement left untouched"
-                    if failure is not None:
-                        detail = f"{failure.detail}; {detail}"
-                    failure = PushResult(ok=False, detail=detail)
-            except OSError as exc:
-                detail = f"cannot remove owned claim temporary file: {exc}"
-                if failure is not None:
-                    detail = f"{failure.detail}; {detail}"
-                failure = PushResult(ok=False, detail=detail)
-    return failure
+        return PushResult(ok=False, detail=f"cannot claim destination: {exc}")
