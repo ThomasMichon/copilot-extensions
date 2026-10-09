@@ -26,6 +26,8 @@ class RecoveryPoint:
     pr_repo: str = ""
     pr_provider: str = ""
     association: str = ""
+    lineage_head: str = ""
+    lineage_ref: str = ""
     synced_head: str = ""
 
 
@@ -57,6 +59,10 @@ def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> 
     onto = _rev(target, cwd)
     pr = record.active_pr() if record is not None else None
     published = _rev(pr.head_sha, cwd) if pr is not None and pr.head_sha else ""
+    lineage = local
+    if published and not git_ops.is_commit_ancestor(published, local, cwd=cwd):
+        previous = synced(record, pr, published, local, cwd=cwd)
+        lineage = previous.lineage_head if previous is not None else ""
     namespace = hashlib.sha256(worktree_id.encode("utf-8")).hexdigest()[:24]
     root = f"refs/agent-worktrees/recovery/{namespace}/{uuid.uuid4().hex}"
     point = RecoveryPoint(
@@ -68,11 +74,21 @@ def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> 
         pr_repo=pr.repo if pr is not None else "",
         pr_provider=pr.provider if pr is not None else "",
         association=_association(pr) if pr is not None else "",
+        lineage_head=lineage, lineage_ref=f"{root}/lineage" if lineage else "",
     )
     git_ops.git("update-ref", point.local_ref, local, "0" * len(local), cwd=cwd)
     if published:
         git_ops.git("update-ref", point.published_ref, published, "0" * len(published), cwd=cwd)
+    if lineage:
+        git_ops.git("update-ref", point.lineage_ref, lineage, "0" * len(lineage), cwd=cwd)
     tracking._atomic_write(_path(cwd), json.dumps(asdict(point), sort_keys=True) + "\n")
+    if published and not lineage:
+        raise ValueError(
+            "Pre-sync source does not contain the saved published work or a completed backed sync. "
+            f"Original HEAD is retained at {point.local_ref}; "
+            f"revisit it with git switch --detach {point.local_head}. "
+            "An arbitrary rewrite requires the explicit owned-PR rewrite flow."
+        )
     return point
 
 
@@ -105,6 +121,8 @@ def synced(record, pr, expected: str, head: str, *, cwd: str) -> RecoveryPoint |
         != (pr.pr_id, pr.branch, pr.repo, pr.provider)
         or point.association != _association(pr)
         or point.published_head != expected
+        or not point.lineage_head or not point.lineage_ref
+        or not git_ops.is_commit_ancestor(expected, point.lineage_head, cwd=cwd)
         or not git_ops.is_commit_ancestor(point.synced_head, head, cwd=cwd)
         or not git_ops.is_commit_ancestor(point.target_head, point.synced_head, cwd=cwd)
     ):
@@ -112,6 +130,7 @@ def synced(record, pr, expected: str, head: str, *, cwd: str) -> RecoveryPoint |
     if (
         _rev(point.local_ref, cwd) != point.local_head
         or _rev(point.published_ref, cwd) != expected
+        or _rev(point.lineage_ref, cwd) != point.lineage_head
     ):
         return None
     return point

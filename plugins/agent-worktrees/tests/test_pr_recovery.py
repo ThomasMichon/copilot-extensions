@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_rebase, pr_recovery, tracking
 
-pytestmark = [pytest.mark.guard, pytest.mark.timeout(180)]
+pytestmark = pytest.mark.timeout(180)
 
 
 def _git(*args, cwd):
@@ -41,6 +42,28 @@ def _prepare(pr_repo, *, legacy=False):
 
 def _point(path):
     return json.loads(pr_recovery._path(str(path)).read_text(encoding="utf-8"))
+
+
+@pytest.mark.guard
+def test_backup_failure_prevents_rebase_contract(tmp_path, monkeypatch, capsys):
+    config = SimpleNamespace(default_repo=SimpleNamespace(
+        remote="origin", default_branch="main", worktree_root=str(tmp_path),
+    ))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(tracking, "load_record", lambda *_: None)
+    monkeypatch.setattr(tracking, "resolve_worktree_path", lambda *_: str(tmp_path))
+    monkeypatch.setattr(git_ops, "_get_current_branch_safe", lambda *_: "worktree/task")
+    monkeypatch.setattr(git_ops, "is_clean", lambda **_: True)
+    monkeypatch.setattr(git_ops, "fetch", lambda *_, **__: None)
+    monkeypatch.setattr(git_ops, "ref_exists", lambda *_, **__: True)
+    monkeypatch.setattr(git_ops, "rebase", lambda *_, **__: pytest.fail("must not rebase"))
+
+    def fail(*_, **__):
+        raise OSError("backup unavailable")
+
+    monkeypatch.setattr(pr_recovery, "prepare", fail)
+    assert not git_collab.sync_forward("task", config)
+    assert "nothing rebased: backup unavailable" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("checkout_head", [False, True], ids=["worktree", "private-head"])
@@ -130,6 +153,22 @@ def test_backup_never_refreshes_concurrent_remote_lease(pr_repo):
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == concurrent
     assert _record(wid).pr.head_sha == old
     assert _point(path)["published_head"] == old
+
+
+def test_pre_sync_reset_cannot_launder_unrelated_source_into_rewrite_authority(pr_repo):
+    config, wid, path, remote, branch, old = _prepare(pr_repo)
+    _git("reset", "--hard", _record(wid).pr.base_sha, cwd=path)
+    (path / "unrelated.txt").write_text("unrelated replacement\n")
+    _git("add", "unrelated.txt", cwd=path)
+    _git("commit", "-m", "unrelated replacement", cwd=path)
+    unrelated = _git("rev-parse", "HEAD", cwd=path)
+    assert not git_collab.sync_forward(wid, config)
+    point = _point(path)
+    assert _git("rev-parse", "HEAD", cwd=path) == unrelated
+    assert _git("rev-parse", point["local_ref"], cwd=path) == unrelated
+    assert _git("rev-parse", point["published_ref"], cwd=path) == old
+    assert not finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
 
 
 def test_backup_is_not_authority_for_another_association_or_unrelated_tip(pr_repo):

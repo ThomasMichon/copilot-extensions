@@ -86,7 +86,7 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
             worktree_id, branch, upstream, record, cwd=worktree_path,
         )
     except (OSError, ValueError, git_ops.GitError) as exc:
-        output.err(f"Could not preserve pre-sync HEAD; nothing rebased: {exc}")
+        output.err(f"Could not prepare backed sync; nothing rebased: {exc}")
         return False
     print(f"Pre-sync HEAD retained at {recovery.local_ref}.")
     print(f"Revisit it with: git switch --detach {recovery.local_head}")

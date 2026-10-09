@@ -250,7 +250,7 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
         return refuse("The source ref does not identify the current checked-out commit.")
     recovery = pr_recovery.synced(record, pr, expected, head, cwd=cwd)
     replay = (
-        (recovery.local_head, recovery.target_head, recovery.synced_head, [])
+        (recovery.lineage_head, recovery.target_head, recovery.synced_head, [])
         if recovery is not None else _replay(current, head, cwd)
     )
     if replay is None:
@@ -262,8 +262,7 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
     base = pr.base_sha or _git("merge-base", expected, onto, cwd=cwd)
     upstream = _git("rev-parse", f"{repo.remote}/{repo.default_branch}", cwd=cwd)
     if not (
-        _ancestor(base, expected, cwd)
-        and (recovery is not None or _ancestor(expected, original, cwd))
+        _ancestor(base, expected, cwd) and _ancestor(expected, original, cwd)
         and base != onto and _ancestor(base, onto, cwd)
         and _ancestor(onto, upstream, cwd) and _ancestor(onto, finished, cwd)
     ):
