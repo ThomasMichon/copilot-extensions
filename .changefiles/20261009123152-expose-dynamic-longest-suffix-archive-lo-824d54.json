@@ -1,0 +1,9 @@
+{
+  "comment": "Expose dynamic longest-suffix archive lookup and read-only codec extensions",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
