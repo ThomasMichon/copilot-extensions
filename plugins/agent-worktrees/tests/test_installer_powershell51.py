@@ -841,7 +841,8 @@ Exit-VersionedSlotLease
     "native_code,platform,contention",
     [(11, "Linux", True), (35, "OSX", True), (35, "Linux", False),
      (11, "OSX", False), (11, "Windows", False), (32, "Windows", True),
-     (33, "Windows", True), (13, "Linux", False)],
+     (33, "Windows", True), (13, "Linux", False), (32, "Linux", False),
+     (33, "Linux", False), (32, "OSX", False), (33, "OSX", False)],
 )
 def test_wrapped_slot_lease_io_errors_keep_platform_specific_reasons(
     tmp_path: Path, native_code: int, platform: str, contention: bool,

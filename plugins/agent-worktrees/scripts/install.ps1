@@ -1394,7 +1394,8 @@ function Enter-VersionedSlotLease {
                 ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX) -and $nativeCode -eq 35)
             )
         }
-        if ($nativeCode -eq $ERROR_SHARING_VIOLATION -or $nativeCode -eq $ERROR_LOCK_VIOLATION -or $posixWouldBlock) {
+        $windowsContention = $env:OS -eq 'Windows_NT' -and ($nativeCode -eq $ERROR_SHARING_VIOLATION -or $nativeCode -eq $ERROR_LOCK_VIOLATION)
+        if ($windowsContention -or $posixWouldBlock) {
             $script:VersionedSlotLeaseFailureReason = 'contention'
         } else {
             $script:VersionedSlotLeaseFailureReason = $_.Exception.Message
