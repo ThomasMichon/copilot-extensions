@@ -378,27 +378,29 @@ def _open_zip(path: Path) -> Iterator[zipfile.ZipFile]:
 def _source_files(root: Path) -> Iterator[Path]:
     from agent_logger.sync.provenance import existing_real_directory, is_link_or_reparse
 
-    def walk_error(error: OSError) -> None:
-        raise error
-
     count = 0
-    for directory, directories, files in os.walk(root, onerror=walk_error, followlinks=False):
-        parent = Path(directory)
+    pending = [root]
+    while pending:
+        parent = pending.pop()
         if existing_real_directory(parent) is None:
             raise ValueError(f"unsafe session ZIP source directory: {parent}")
-        count += len(directories) + len(files)
-        if count > MAX_ARCHIVE_MEMBERS:
-            raise ValueError("session ZIP source exceeds its entry budget")
-        directories[:] = [
-            name
-            for name in sorted(directories)
-            if not is_link_or_reparse(parent / name, (parent / name).lstat().st_mode)
-        ]
-        for name in sorted(files):
-            path = parent / name
-            mode = path.lstat().st_mode
-            if stat.S_ISREG(mode) and not is_link_or_reparse(path, mode):
-                yield path
+        directories: list[Path] = []
+        files: list[Path] = []
+        with os.scandir(parent) as entries:
+            for entry in entries:
+                count += 1
+                if count > MAX_ARCHIVE_MEMBERS:
+                    raise ValueError("session ZIP source exceeds its entry budget")
+                path = parent / entry.name
+                mode = entry.stat(follow_symlinks=False).st_mode
+                if is_link_or_reparse(path, mode):
+                    continue
+                if stat.S_ISDIR(mode):
+                    directories.append(path)
+                elif stat.S_ISREG(mode):
+                    files.append(path)
+        yield from sorted(files, key=lambda path: path.name)
+        pending.extend(sorted(directories, key=lambda path: path.name, reverse=True))
 
 
 class ZipCodec(Codec):

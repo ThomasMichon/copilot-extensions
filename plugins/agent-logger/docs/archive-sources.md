@@ -94,7 +94,10 @@ do not freeze concurrent writers or continuously pin mutable directory ancestors
 
 ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
 decoded file bytes. Creation also bounds inspected source entries and excludes
-linked/name-surrogate directories without descending into them. The central
+linked/name-surrogate directories without descending into them. Source entries
+are admitted incrementally before retention, rather than allocating an entire
+directory listing before checking the limit; admitted batches are sorted for
+deterministic traversal. The central
 directory has a 16 MiB budget checked before the standard ZIP parser allocates
 its index. Equality comparison uses the same decoded-content budgets.
 Tar comparison streams at most 10,000 raw headers,

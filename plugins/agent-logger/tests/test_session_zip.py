@@ -11,6 +11,7 @@ import struct
 import tarfile
 import zipfile
 import zlib
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -727,6 +728,111 @@ def test_failed_zip_creation_preserves_existing_archive_and_source(
     assert dest.read_bytes() == b"prior archive"
     assert (source / "events.jsonl").is_file()
     assert not list(tmp_path.glob(".archive.zip.*.tmp"))
+
+
+def test_zip_source_entry_budget_stops_incremental_scanning_before_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    for index in range(6):
+        (source / f"entry-{index}").write_bytes(b"retained source")
+    destination = tmp_path / "prior.zip"
+    destination.write_bytes(b"prior evidence")
+    original_scandir = os.scandir
+    inspected = 0
+    closed = False
+
+    @contextmanager
+    def bounded_scandir(path: Path) -> Iterator[Iterator[os.DirEntry[str]]]:
+        nonlocal closed
+        with original_scandir(path) as entries:
+
+            def incremental() -> Iterator[os.DirEntry[str]]:
+                nonlocal inspected
+                for entry in entries:
+                    inspected += 1
+                    assert inspected <= 4, "source scanner consumed past its admission budget"
+                    yield entry
+
+            try:
+                yield incremental()
+            finally:
+                closed = True
+
+    with monkeypatch.context() as patch:
+        patch.setattr(session_codecs, "MAX_ARCHIVE_MEMBERS", 3)
+        patch.setattr(os, "scandir", bounded_scandir)
+        with pytest.raises(ValueError, match="source exceeds its entry budget"):
+            sessions.CODECS["zip"].archive_dir(source, destination)
+    assert inspected == 4
+    assert closed
+    assert destination.read_bytes() == b"prior evidence"
+    assert all(path.read_bytes() == b"retained source" for path in source.iterdir())
+    assert not list(tmp_path.glob(".prior.zip.*.tmp"))
+
+
+def test_zip_source_walk_has_a_global_budget_and_deterministic_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    (source / "b").mkdir(parents=True)
+    (source / "a").mkdir()
+    for name in ("z", "m", "b/b-file", "a/a-file"):
+        (source / name).write_bytes(b"source")
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_MEMBERS", 6)
+    assert [
+        path.relative_to(source).as_posix() for path in session_codecs._source_files(source)
+    ] == [
+        "m",
+        "z",
+        "a/a-file",
+        "b/b-file",
+    ]
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_MEMBERS", 5)
+    with pytest.raises(ValueError, match="source exceeds its entry budget"):
+        list(session_codecs._source_files(source))
+
+
+def test_zip_source_walk_excludes_links_but_counts_their_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "events.jsonl").write_bytes(b"{}\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret").write_bytes(b"not source evidence")
+    try:
+        (source / "directory-link").symlink_to(outside, target_is_directory=True)
+        (source / "file-link").symlink_to(outside / "secret")
+        (source / "dangling-link").symlink_to(outside / "absent")
+    except OSError as exc:
+        pytest.skip(f"native symlink creation unavailable: {exc}")
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_MEMBERS", 4)
+    assert list(session_codecs._source_files(source)) == [source / "events.jsonl"]
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_MEMBERS", 3)
+    with pytest.raises(ValueError, match="source exceeds its entry budget"):
+        list(session_codecs._source_files(source))
+
+
+def test_zip_source_scan_errors_preserve_source_and_existing_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _session(tmp_path / "live")
+    destination = tmp_path / "prior.zip"
+    destination.write_bytes(b"prior evidence")
+
+    def denied_scan(path: Path) -> None:
+        raise PermissionError("source enumeration denied")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", denied_scan)
+        with pytest.raises(PermissionError, match="source enumeration denied"):
+            sessions.CODECS["zip"].archive_dir(source, destination)
+    assert destination.read_bytes() == b"prior evidence"
+    assert (source / "events.jsonl").is_file()
+    assert not list(tmp_path.glob(".prior.zip.*.tmp"))
 
 
 @pytest.mark.parametrize("codec", ["targz", "zip"])
