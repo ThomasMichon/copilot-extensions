@@ -1,4 +1,4 @@
-"""Native Windows contracts for handle-owned claim-file publication."""
+"""Native source-publication contracts for handle-owned Windows claim files."""
 
 from __future__ import annotations
 

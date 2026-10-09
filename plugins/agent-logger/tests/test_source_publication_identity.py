@@ -1,4 +1,4 @@
-"""Admission contracts using real producer identities and archive metadata."""
+"""Source-publication admission using real producer identities and metadata."""
 
 from __future__ import annotations
 
