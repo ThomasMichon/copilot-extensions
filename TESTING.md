@@ -52,6 +52,15 @@ key back because another process may have made a legitimate concurrent edit.
 Installer subprocesses launched by a direct pytest invocation receive the same
 prevention through pytest's inherited `PYTEST_CURRENT_TEST` marker.
 
+Codespaces PowerShell installer regressions additionally use a fixture-only
+executable search path and explicit batch exit-code forwarding. Temporary
+payloads carry test guards through self-staging and first-use provisioning:
+they require the fake uv resolver, reject uv network bootstrap and service
+mutations, and expose attempted forbidden effects as assertion failures.
+User-root redirection alone does not isolate executable discovery or scheduled
+tasks. The signed-venv health/exit-code matrix uses simulated signatures on both
+platforms; native signature-policy behavior still requires Windows validation.
+
 ```bash
 python tools/run-plugin-tests.py agent-dispatch \
   --test-timeout 20 --subsuite-timeout 180 --plugin-timeout 600 \

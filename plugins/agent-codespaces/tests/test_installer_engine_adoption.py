@@ -13,6 +13,11 @@ from pathlib import Path
 
 import pytest
 
+from .installer_test_support import (
+    assert_installer_isolated,
+    guard_installer_payload,
+    isolate_installer_environment,
+)
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
@@ -129,7 +134,7 @@ with log.open("a") as stream:
     stream.write(json.dumps(args) + "\\n")
 if args == ["--version"]:
     print("uv test")
-    raise SystemExit(0)
+    raise SystemExit(int(os.environ.get("TEST_UV_VERSION_EXIT", "0")))
 mode = os.environ.get("TEST_UV_MODE", "ok")
 if mode == "fatal":
     print("permanent failure")
@@ -166,7 +171,10 @@ raise SystemExit(2)
     )
     if os.name == "nt":
         uv = tmp_path / "uv.cmd"
-        uv.write_text(f'@"{sys.executable}" "{driver}" %*\n', encoding="utf-8")
+        uv.write_text(
+            f'@"{sys.executable}" "{driver}" %*\n@exit /b %ERRORLEVEL%\n',
+            encoding="utf-8",
+        )
     else:
         uv = tmp_path / "uv"
         uv.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{driver}" "$@"\n', encoding="utf-8")
@@ -346,6 +354,12 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
         ):
             shutil.copytree(REPO / "libs" / lib, stage / "libs" / lib)
     env = _env(tmp_path)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    _fake_uv(fake_bin)
+    isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
+    env["TEST_UV_MODE"] = "fatal"
+    guard_installer_payload(payload)
     root = tmp_path / "home" / ".agent-codespaces"
     stamp = subprocess.run(
         [
@@ -426,15 +440,6 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
             check=False,
         )
         assert status_sh.returncode == 0, status_sh.stdout + status_sh.stderr
-    uv = _fake_uv(tmp_path)
-    env["PATH"] = str(uv.parent) + os.pathsep + env["PATH"]
-    env["TEST_UV_MODE"] = "fatal"
-    if os.name != "nt":
-        # The nested snap-packaged pwsh host can sanitize PATH; exercise the
-        # engine's plugin-owned tool fallback without any network acquisition.
-        tool = root / "tool"
-        tool.mkdir()
-        shutil.copy2(uv, tool / "uv.exe")
     first_use = subprocess.run(
         [
             PWSH,
@@ -455,22 +460,43 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
         first_use.stdout + first_use.stderr
     )
     assert "provisioning failed" in first_use.stdout + first_use.stderr
+    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    assert calls[0] == ["--version"], first_use.stdout + first_use.stderr
+    assert any(call[0] == "venv" for call in calls)
+    assert_installer_isolated(fake_bin)
 
 
-@pytest.mark.skipif(PWSH is None or os.name == "nt", reason="POSIX pwsh signed-flow simulation")
+@pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")
 @pytest.mark.parametrize("usable", [False, True])
 @pytest.mark.parametrize("signed_rc", [0, 23])
 def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, usable, signed_rc):
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     slot = tmp_path / "slot"
-    signed = tmp_path / "signed-python"
-    signed.write_text(
-        '#!/bin/sh\nmkdir -p "$4/Scripts"\ntouch "$4/Scripts/python.exe" "$4/pyvenv.cfg"\n'
-        f"exit {signed_rc}\n",
-        encoding="utf-8",
-    )
-    signed.chmod(0o755)
+    if os.name == "nt":
+        driver = tmp_path / "signed-python.py"
+        driver.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "root = Path(sys.argv[-1])\n"
+            "(root / 'Scripts').mkdir(parents=True)\n"
+            "(root / 'Scripts' / 'python.exe').touch()\n"
+            "(root / 'pyvenv.cfg').touch()\n"
+            f"raise SystemExit({signed_rc})\n",
+            encoding="utf-8",
+        )
+        signed = tmp_path / "signed-python.cmd"
+        signed.write_text(
+            f'@"{sys.executable}" "{driver}" %*\n@exit /b %ERRORLEVEL%\n',
+            encoding="utf-8",
+        )
+    else:
+        signed = tmp_path / "signed-python"
+        signed.write_text(
+            '#!/bin/sh\nmkdir -p "$4/Scripts"\ntouch "$4/Scripts/python.exe" "$4/pyvenv.cfg"\n'
+            f"exit {signed_rc}\n",
+            encoding="utf-8",
+        )
+        signed.chmod(0o755)
     # Signed invocation is: -m venv --copies <slot>.
     script = (
         _prelude("ps1")
@@ -720,3 +746,96 @@ if ($script:UvCommand -ne 'resolved-uv') {{ throw 'lost uv command' }}
     assert bool(result.returncode) == (not available)
     if not available:
         assert "uv is required but acquisition failed" in result.stderr
+
+
+def test_installer_engine_adoption_environment_excludes_host_tools(tmp_path):
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    env = {
+        "PATH": "host-uv-and-gh",
+        "PYTHONHOME": "host-python",
+        "PYTHONPATH": "host-package",
+        "VIRTUAL_ENV": "host-venv",
+        "COPILOT_EXTENSIONS_CONTEXT": "host-context",
+    }
+    home = tmp_path / "home"
+    isolate_installer_environment(env, home, fake_bin, PWSH or "unused-pwsh")
+    assert env["PATH"] == str(fake_bin)
+    assert not any(key in env for key in (
+        "PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "COPILOT_EXTENSIONS_CONTEXT",
+    ))
+    for key in ("HOME", "USERPROFILE", "APPDATA", "COPILOT_HOME", "TEMP"):
+        assert Path(env[key]).is_relative_to(home)
+    assert env["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+
+
+@pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")
+@pytest.mark.parametrize(
+    ("command", "effect"),
+    [
+        ("Register-ScheduledTask", "register scheduled task"),
+        ("Start-ScheduledTask", "start scheduled task"),
+        ("Start-Process -FilePath 'host.exe' -ArgumentList 'owner'", "start host process"),
+    ],
+)
+def test_installer_engine_adoption_guards_reject_host_effects(tmp_path, command, effect):
+    env = _env(tmp_path)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    _fake_uv(fake_bin)
+    isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    installer = scripts / "install.ps1"
+    installer.write_text(
+        "Set-StrictMode -Version Latest\n$ErrorActionPreference = 'Stop'\n"
+        "foreach ($name in 'gh', 'py', 'ssh', 'schtasks.exe', 'conhost.exe') {\n"
+        "    if (Get-Command $name -ErrorAction SilentlyContinue) { throw \"Host tool: $name\" }\n"
+        "}\n" + command + "\n",
+        encoding="utf-8",
+    )
+    guard_installer_payload(payload)
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(installer)],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert f"Forbidden installer test effect: {effect}" in result.stdout + result.stderr
+    assert (fake_bin / "forbidden-effects").read_text().splitlines() == [effect]
+
+
+@pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="native Windows uv resolver")
+@pytest.mark.parametrize("version_exit", [0, 31])
+def test_installer_engine_adoption_native_fake_uv_selection_is_fail_closed(tmp_path, version_exit):
+    env = _env(tmp_path)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    uv = _fake_uv(fake_bin)
+    isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
+    env["TEST_UV_VERSION_EXIT"] = str(version_exit)
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    installer = scripts / "install.ps1"
+    installer.write_text(
+        "Set-StrictMode -Version Latest\n" + _prelude("ps1")
+        + "function Write-Fail { param($Msg) Write-Host $Msg }\n"
+        + f"$resolved = Ensure-Uv -InstallRoot '{tmp_path / 'runtime'}'\n"
+        + f"if ($resolved -ne '{uv}') {{ exit 1 }}\n",
+        encoding="utf-8",
+    )
+    guard_installer_payload(payload)
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(installer)],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=30, check=False,
+    )
+    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    assert calls == [["--version"]], result.stdout + result.stderr
+    assert bool(result.returncode) == bool(version_exit), result.stdout + result.stderr
+    if version_exit:
+        assert "Forbidden installer test effect: uv bootstrap" in result.stdout + result.stderr
+        assert (fake_bin / "forbidden-effects").read_text().splitlines() == ["uv bootstrap"]
+        assert not list(tmp_path.rglob("tool/uv.exe"))
+    else:
+        assert_installer_isolated(fake_bin)
