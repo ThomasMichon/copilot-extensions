@@ -105,8 +105,9 @@ do not load hooks, and adopters should not create a duplicate marked block.
 (`init.{sh,ps1}` is a thin alias for `install`). `stamp` publishes the
 self-provisioning binstub + payload marker without building a venv. PowerShell
 materializes a standalone snapshot with both installer-engine files and all
-declared local libraries; local-checkout stamps use unique snapshot identities
-because an unchanged development version can contain changed source. POSIX
+declared local libraries; local-checkout stamps use content-addressed snapshot
+identities over the materialized tree. Unchanged stamps reuse one snapshot,
+while source, engine or library edits publish a new immutable identity. POSIX
 retains its owning-payload pointer. `provision`/`install`/`update` build
 a versioned runtime under `~/.agent-dispatch/versions/<v>/` (published by the
 `current-version` marker), an `agent-dispatch` binstub in `~/.local/bin`, a

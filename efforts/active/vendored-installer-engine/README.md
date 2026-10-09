@@ -537,14 +537,16 @@ installs, no service-specific config needed for this class of plugin.
   results are accepted only after venv validation, including a usable result
   produced with a nonzero exit code.
 - PowerShell snapshots materialize both engine files and all six declared
-  libraries before publication. Local-checkout `stamp` now uses unique
-  standalone snapshots so an unchanged development version cannot reuse stale
-  source; direct local builds and the POSIX owning-payload stamp stay unchanged.
+  libraries before publication. Local-checkout `stamp` uses content-addressed
+  standalone snapshots so unchanged stamps reuse one immutable tree, while
+  source, engine or library edits create a new identity. Direct local builds
+  and the POSIX owning-payload stamp stay unchanged.
 - Installer line counts: `install.sh` 2295 -> 2250 (-45), `install.ps1`
   3993 -> 4015 (+22), combined wrappers 6288 -> 6265 (-23).
   Engine remains 403 shell + 478 PowerShell lines; combined corpus
   7169 -> 7146 (-23). Required snapshot materialization and signed-result
-  health validation account for the PowerShell growth.
+  health validation account for the PowerShell growth. These were the initial
+  implementation counts; review-fix measurements supersede them below.
 - Validation:
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run_tests_in_devcontainer.py agent-dispatch --admission-wait 120 -k 'install or installer'`:
     120 passed, 74 skipped, 4362 deselected.
@@ -574,6 +576,32 @@ installs, no service-specific config needed for this class of plugin.
 - Implementation is local and prepared for coordinator inspection. Review,
   merge, release and deployed verification remain outstanding; the adopter
   checkbox and overall effort stay open.
+
+### 2026-10-08 — Dispatch review fixes and native validation
+
+- The first reviewed head passed a native Windows PowerShell 7 focused
+  installer/snapshot/artifact-scrub selection: 42 passed, 10 skipped (eight
+  POSIX cases and two opt-in mutex races). Actual SAC enforcement, scheduler
+  registration and PowerShell 5.1 remain unproved; signatures are simulated.
+- Fixed both Medium review findings: local stamps now derive their snapshot
+  identity from the complete materialized file/directory tree, reusing
+  unchanged content rather than leaking GUID copies; an existing invalid
+  Python executable no longer bypasses an available signed interpreter.
+- Regression coverage includes unchanged repeated stamps, independent plugin,
+  engine and library edits, preservation of prior snapshots, and signed
+  recovery from missing-config and wrong-prefix existing slots.
+- Revised wrapper counts: shell 2295 -> 2250 (-45), PowerShell 3993 -> 4044
+  (+51); combined wrappers 6288 -> 6294 (+6). Canonical engine remains
+  881 lines, so combined corpus 7169 -> 7175 (+6). This leg's small growth
+  buys content identity and repair correctness; the Validation Plan's
+  materially-smaller aggregate rollout gate remains open and must offset
+  this growth through subsequent adopters before closure.
+- Review-fix validation: all seven network-disconnected plugin sub-suites
+  passed (4470 passed, 94 skipped); the contained installer selection with
+  available PowerShell execution passed (197 passed, 5 skipped).
+  Install-contract, engine-sync, documentation and touched Python lint
+  checks passed. The wrong-prefix fixture was corrected to keep rejecting
+  its stale config after a simulated failed signed rebuild.
 
 ### 2026-09-12 — Kickoff
 - Effort created directly off the operator's request, immediately following

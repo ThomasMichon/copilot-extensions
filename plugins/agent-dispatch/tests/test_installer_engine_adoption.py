@@ -269,10 +269,18 @@ if ($uv -ne '{uv}') {{ throw 'fixture uv not selected' }}
 
 
 @pytest.mark.parametrize("signed_exit,usable", [(0, True), (7, True), (0, False), (7, False)])
-def test_signed_python_result_is_accepted_only_when_healthy(tmp_path, signed_exit, usable):
+@pytest.mark.parametrize("existing_invalid", ["none", "missing-cfg", "wrong-prefix"])
+def test_signed_python_result_is_accepted_only_when_healthy(
+    tmp_path, signed_exit, usable, existing_invalid
+):
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     slot = tmp_path / "slot"
+    if existing_invalid != "none":
+        (slot / "Scripts").mkdir(parents=True)
+        (slot / "Scripts/python.exe").write_text("invalid existing Python")
+        if existing_invalid == "wrong-prefix":
+            (slot / "pyvenv.cfg").write_text("wrong prefix")
     signed = tmp_path / "signed-python.ps1"
     signed.write_text(
         f"""
@@ -300,7 +308,9 @@ function Get-AuthenticodeSignature {{ param($Path) return @{{ Status='Valid' }} 
 function Invoke-VersionedSlotClean {{}}
 function Test-DispatchVenv {{
     param($Dir, $Python)
-    return ((Test-Path -LiteralPath $Python) -and (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg')))
+    if ((Test-Path -LiteralPath $Python) -and [IO.File]::ReadAllText($Python) -eq 'invalid existing Python') {{ return $false }}
+    $cfg = Join-Path $Dir 'pyvenv.cfg'
+    return ((Test-Path -LiteralPath $Python) -and (Test-Path -LiteralPath $cfg) -and [IO.File]::ReadAllText($cfg) -ne 'wrong prefix')
 }}
 {block}
 if ($ErrorActionPreference -ne 'Stop') {{ throw 'error preference leaked' }}
@@ -430,6 +440,7 @@ def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path):
     for name in (
         "Resolve-VendoredLib",
         "Materialize-DispatchSnapshot",
+        "Get-DispatchSnapshotHash",
         "Get-SourceKind",
         "Enter-PluginSnapshotLock",
         "New-PluginBuildSnapshot",
@@ -451,14 +462,30 @@ Invoke-Stamp
 $first = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
 Invoke-Stamp
 $second = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
-if ($first -eq $second) {{ throw 'local dev stamps reused a mutable version identity' }}
+if ($first -ne $second) {{ throw 'identical local stamps did not reuse their snapshot' }}
+if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 1) {{ throw 'identical stamps leaked snapshots' }}
+[IO.File]::WriteAllText((Join-Path $PluginDir 'new-source.py'), 'changed plugin source')
+Invoke-Stamp
+$third = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
+if ($third -eq $second) {{ throw 'plugin edit did not change snapshot identity' }}
+[IO.File]::AppendAllText((Join-Path $PluginDir '../../libs/installer-engine/installer-engine.sh'), "`n# fixture edit")
+Invoke-Stamp
+$fourth = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
+if ($fourth -eq $third) {{ throw 'engine edit did not change snapshot identity' }}
+[IO.File]::WriteAllText((Join-Path $PluginDir '../../libs/agent-procutil/new-lib.py'), 'changed library source')
+Invoke-Stamp
+$fifth = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
+if ($fifth -eq $fourth) {{ throw 'library edit did not change snapshot identity' }}
+if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 4) {{ throw 'unexpected snapshot count' }}
 """
     result = _run("ps1", script, tmp_path, env)
     assert result.returncode == 0, result.stdout + result.stderr
-    snapshot = Path((runtime / "payload-dir").read_text())
+    snapshots = sorted((runtime / "snapshots").iterdir())
+    snapshot = next(path for path in snapshots if not (path / "new-source.py").exists())
     assert snapshot.parent == runtime / "snapshots"
     assert (runtime / "stamped-version").read_text() == "1.2.3"
     assert not (runtime / "current-version").exists()
+    assert len(snapshots) == 4
     for ext in ("sh", "ps1"):
         assert (snapshot / "scripts" / f"installer-engine.{ext}").read_bytes() == (
             ENGINE / f"installer-engine.{ext}"

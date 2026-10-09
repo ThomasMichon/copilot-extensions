@@ -1170,6 +1170,27 @@ function Materialize-DispatchSnapshot {
         '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')'), $utf8)
 }
 
+function Get-DispatchSnapshotHash {
+    param([string]$SnapshotDir)
+    $root = [IO.Path]::GetFullPath($SnapshotDir).TrimEnd('/\') + [IO.Path]::DirectorySeparatorChar
+    $entries = @{}
+    foreach ($item in Get-ChildItem -LiteralPath $SnapshotDir -Recurse -Force) {
+        $relative = $item.FullName.Substring($root.Length).Replace('\', '/')
+        $entries[$relative] = if ($item.PSIsContainer) { 'D' } else { 'F' + (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash }
+    }
+    $names = [string[]]@($entries.Keys)
+    [Array]::Sort($names, [StringComparer]::Ordinal)
+    $records = foreach ($name in $names) { "$($name.Length):$name$($entries[$name])" }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(
+            [string]::Join("`n", [string[]]@($records))
+        ))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function New-PluginBuildSnapshot {
     <# Copy $PluginDir into a durable, version-pinned snapshot under
        $InstallDir/snapshots/<ver>/ and return that path -- so every build
@@ -1183,9 +1204,9 @@ function New-PluginBuildSnapshot {
 
        Existing snapshots are reused without a copy-of-a-copy. Direct local
        builds retain checkout-relative dependencies and skip snapshotting.
-       -ForStamp materializes a local checkout's dependencies into a unique
-       standalone snapshot too; an unchanged dev version is not an immutable
-       snapshot identity.
+       -ForStamp materializes a local checkout's dependencies into a
+       content-addressed standalone snapshot too. Identical material reuses
+       its snapshot; source, engine or library edits publish a new identity.
 
        -BestEffort (Install-Runtime's own call site): on ANY copy failure
        (disk full, permissions) logs a warning and returns $PluginDir
@@ -1244,7 +1265,6 @@ function New-PluginBuildSnapshot {
         Write-Skip 'No source version resolved -- building from the live payload (snapshot skipped)'
         return $PluginDir
     }
-    if ($localStamp) { $Version = "$Version-$([Guid]::NewGuid().ToString('N'))" }
     # Lock-free fast path, BEFORE acquiring any mutex: a published snapshot is
     # immutable (see the rename-aside/immutable-publish comment below), so
     # reading it needs no lock at all -- exactly how the binstub's own
@@ -1260,7 +1280,7 @@ function New-PluginBuildSnapshot {
     # now, so this early check is a (correct, since immutable) optimization,
     # never a substitute for the authoritative check.
     $snapDirFast = Join-Path (Join-Path $InstallDir 'snapshots') $Version
-    if (Test-Path (Join-Path $snapDirFast 'pyproject.toml')) {
+    if (-not $localStamp -and (Test-Path (Join-Path $snapDirFast 'pyproject.toml'))) {
         Write-Ok "Reusing existing build snapshot: $snapDirFast"
         return $snapDirFast
     }
@@ -1285,7 +1305,7 @@ function New-PluginBuildSnapshot {
             # so skip the whole copy -- also closes the replacement race below
             # for the common case (nothing to publish means nothing to race).
             $snapValid = Test-Path (Join-Path $snapDir 'pyproject.toml')
-            if ($snapValid) {
+            if (-not $localStamp -and $snapValid) {
                 Write-Ok "Reusing existing build snapshot: $snapDir"
                 return $snapDir
             }
@@ -1300,6 +1320,15 @@ function New-PluginBuildSnapshot {
                 Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
             }
             Materialize-DispatchSnapshot -SnapshotDir $snapTmp -PluginDir $PluginDir
+            if ($localStamp) {
+                $snapDir = Join-Path $snapshotsRoot "$Version-$(Get-DispatchSnapshotHash -SnapshotDir $snapTmp)"
+                if (Test-Path -LiteralPath (Join-Path $snapDir 'pyproject.toml')) {
+                    Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction Stop
+                    $snapTmp = $null
+                    Write-Ok "Reusing content-addressed build snapshot: $snapDir"
+                    return $snapDir
+                }
+            }
             # A published snapshot is immutable: Invoke-Stamp's payload-dir
             # marker, and this function's own return value, can be read by a
             # CONCURRENT first-use binstub invocation outside this mutex (the
@@ -1574,7 +1603,7 @@ function Install-Runtime {
                 }
             }
         }
-        if ($signedBase -and -not (Test-Path $VenvPython)) {
+        if ($signedBase) {
             $signedResult = Invoke-NativeCapture { & $signedBase -m venv --copies $VenvDir }
             if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
                 Write-Warn "Signed Python venv failed validation (exit $($signedResult.ExitCode)) -- falling back"

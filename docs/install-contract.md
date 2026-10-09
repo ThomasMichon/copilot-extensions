@@ -1971,8 +1971,10 @@ release materialization makes that payload self-contained before staging.
 `agent-dispatch` uses the same canonical-reference form. Its PowerShell
 snapshots materialize both engine files and all six declared local libraries,
 including snapshot-local, non-editable dependency references. Local-checkout
-`stamp` uses a unique snapshot identity; direct local builds retain their
-checkout paths. The POSIX stamp remains an owning-payload pointer. Dispatch
+`stamp` uses a content-addressed identity over the complete materialized tree:
+unchanged stamps reuse one snapshot, while plugin, engine or library edits
+publish a new immutable identity. Direct local builds retain their checkout
+paths. The POSIX stamp remains an owning-payload pointer. Dispatch
 owns signed-Python validation/recovery, pre/post-build artifact scrubbing,
 dependency order, optional MCP-extra fallback, launchers and its complete
 coordinator/supervisor lifecycle; only shared acquisition, retry and manifest
