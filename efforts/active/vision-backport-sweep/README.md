@@ -97,7 +97,21 @@
   after installed invocation/self-update) ·
   `ThomasMichon/copilot-extensions#5912` (venue subtitle durable-title authority) ·
   `ThomasMichon/copilot-extensions#5913` (declared New-venue provision/embody
-  bindings, beyond the completed design-only handoff)
+  bindings, beyond the completed design-only handoff) ·
+  `ThomasMichon/copilot-extensions#5918` (explicit-cell Vault WSL endpoint
+  fallback accepts unattributed legacy provenance) ·
+  `ThomasMichon/copilot-extensions#5921` (empty clean-room outcome report
+  accepted as green) ·
+  `ThomasMichon/copilot-extensions#5922` (Bridge solo absent-base witness
+  declared but not enforced) ·
+  `ThomasMichon/copilot-extensions#5924` (model-dependent subject witnesses
+  versus the agent-free Tier P contract) ·
+  `ThomasMichon/copilot-extensions#5926` (attached Container launch loses
+  accepted seed-file input) ·
+  `ThomasMichon/copilot-extensions#5927` (remote repo-plugin resolution
+  failure erased into supported-empty discovery) ·
+  `ThomasMichon/copilot-extensions#5930` (remote-driver exclusive,
+  generation-fenced mutation ownership)
 
 ## Guiding Intent
 
@@ -548,8 +562,39 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       - [ ] Venue remaining exact session/mux reattachment, title-preserving
             truncation, complete claim-contribution admission and live parity
             beyond the inspected source; shared labels are not full conformance.
+      - [x] `visions/clean-room-validation/README.md` — scoped runner,
+            report-admission, Bridge-solo and judge-contract source comparison.
+            Existing vision intent covers the inspected guarantees. Carved
+            empty-report admission (`#5921`), absent-base enforcement (`#5922`)
+            and model-dependent Tier P witnesses (`#5924`); retained useful
+            subject coverage and the declared no-model lane.
+      - [ ] Clean-room remaining scenario admission and judgment-consumer
+            source reconciliation; fresh sessions are not fresh machines, but
+            no accepted contaminated verdict was established in this slice.
+      - [x] `visions/venue-parity/README.md` — scoped shared launch, seed
+            forwarding, plugin composition, preference and detach comparison.
+            Existing intent already covers those capabilities. Carved attached
+            Container seed-file loss (`#5926`) and remote plugin-discovery
+            false-empty (`#5927`); distinct detach implementations alone are
+            not proof of a parity violation.
+      - [ ] Venue-parity remaining source routes and preference-failure
+            authority semantics; no blanket target-authority or resume-failure
+            claim was established by the inspected paths.
+      - [x] `visions/cli-default-bridging/README.md` — current-stage Draft,
+            prototype and existing ACP lifecycle comparison. Corrected native
+            close-method attribution and distinguished SDK-extension proof
+            from plugin/skill/MCP composition. Retained every promotion gate,
+            the existing default and sibling opt-in scope; `#5930` links the
+            required mutation arbitration to its existing Phase 2 owner.
+            Native callback support was not freshly proved from this checkout.
 
 ### Phase 3 — Full design/service-invariant audit
+- [x] Explicit-cell Vault WSL fallback source audit. The scoped launch gate
+      carries identity/run-root/port-zero policy, but Windows-profile fallback
+      accepts an unattributed legacy record even with an expected installation
+      identity. An entirely synthetic use of the actual discovery body selected
+      that record (`#5918`); preserve unconfigured legacy discovery and explicit
+      recovery rather than globally removing them.
 - [x] Scoped endpoint discovery/publication/cleanup API and two shutdown
       consumers inspected. Shared transport/alternate/override/legacy metadata
       and conservative PID/probe evidence are real foundations, not whole-cell
@@ -671,6 +716,45 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Clean-room, venue-parity, Draft and explicit-cell proof boundaries
+- UI/endpoint reconciliation merged as `#5914` with current-head Copilot
+  approval, zero findings and actual required CI, then finalized. Fixed the
+  reviewer-identified reversed endpoint IDs (`#5903` JSON shape, `#5904`
+  cleanup race) and removed a newly invented unavailable UI category rather
+  than changing the existing LIVE/IDLE/blank grammar without reviewed design.
+- Compared three bounded read-only source tracks against the current leaf
+  visions; integration base `077ef9d6b2ec` retains the source evidence and
+  existing Draft/default boundaries. The separate Vault fallback proof used
+  synthetic records only, without a file, network, secret or live service.
+
+  | Inspected contract | Scoped source evidence | Decision / owner |
+  |---|---|---|
+  | Clean-room verdict admission | `tools/clean-room/verdict.sh`'s embedded reducer defaults missing failed-count evidence to zero. Actual reduction of `{}` returned `ok: true` and exit zero, while valid success/failure controls remained distinct. | Carved `#5921`; report existence/parsing is not sufficient outcome evidence. |
+  | Solo composition witness | Bridge-solo declares without-base coverage, but `scenario.sh` emits INFO when the base is present and does not later reject that admission. | Carved `#5922`. Rejected the separate allegation that every read verb must return zero; that is not the scenario's contract. |
+  | Programmatic lane | Tier P invokes Copilot as the subject rather than an agentic judge, but those witnesses still depend on model execution. | Carved `#5924` against the declared no-model lane; preserve useful subject coverage under a truthful lane rather than weaken the invariant. |
+  | Repetition / judging | Runner setup occurs once and repetitions create fresh sessions, not independent fresh machines. The judge is an instruction contract; runner output reports `judged: false`. | Shared state is established, an accepted contaminated false pass is not. No live judge artifacts were examined; no blanket contamination or judge-compliance finding. |
+  | Attached venue seed | Container accepts `--seed-file` but the attached caller forwards `args.seed` without reading that file; CodeSpace and detached routes do read it. | Actual parser/caller proof carved `#5926`; retain shared launch and detached behavior. |
+  | Plugin-discovery fidelity | Shared remote repo-plugin resolution turns failure into empty composition and feeds the same ACP arguments as supported-empty discovery. | Carved `#5927`; caller recovery must preserve the distinction. Preference-read failure needs narrower authority analysis; no speculative target-authority violation. |
+  | CLI default / prototype | ACP + Session Host remains the headless default; CLI is explicit. The default-disabled remote-driver prototype supports authenticated send/steer/abort/events, but the bearer token does not arbitrate exclusive mutation generation. | Carved `#5930`, linked to existing Phase 2. Separate detach orchestration is partial symmetry, not universal failure. No default promotion or sibling status change. |
+  | Lifecycle / native proof | Existing downstream creation is ACP; termination is owned Host/process-tree lifecycle. `acp_agent.close_session` is an upstream adapter, not proof of a downstream native close. Repo-plugin staging and SDK-extension loading are distinct. | Corrected Draft and owning plan in place. Current native callback/extension support was not independently revalidated; retain launch-time and lifecycle proof gates, not unsupported absolute capability claims. |
+  | Cell provenance | Namespaced Vault gate supplies explicit identity/scoped roots/port zero. `_discover_endpoint`'s WSL Windows fallback accepts missing installation identity from unscoped legacy locations despite the expected identity. | Pure actual-body selection of an unattributed synthetic record carved `#5918`; preserve ambient legacy behavior when no explicit cell was selected. |
+
+- Superset review retains creation/fresh context, owned termination, driver
+  fencing, every escalation rung, narrow TTY scope, independent launch-time
+  extension proof and all default-promotion gates. No additional positive
+  clean-room or venue-parity intent was missing; their violations are additive
+  implementation work, not permission to weaken the visions.
+- Review identified that the supported native-version floor was stated but
+  not explicit in promotion track (a). Added functional launch-time proof at
+  the selected minimum supported version to the vision gate, owner Phase 1
+  and matching Validation Plan. No particular version was chosen or claimed
+  validated; current-client coverage alone cannot close that gate.
+- Publication changes documentation only. Source counterexamples are not fixes
+  or fresh runtime/unit, clean-room, model, native-host or live-venue acceptance.
+  Those obligations remain with the named implementation owners. Whole-index,
+  remaining service invariants and this sweep's global Validation Plan remain
+  open; the independent material-refresh objective is unchanged.
 
 ### 2026-10-09 — UI ownership/fidelity and endpoint discovery source reconciliation
 - Guidance/provider-proof slice merged as `#5902`, current-head Copilot
