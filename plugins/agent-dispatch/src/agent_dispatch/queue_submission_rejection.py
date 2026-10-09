@@ -6,7 +6,7 @@ import json
 
 from .producers.evaluator import Reject
 from .queue_common import CompletionOutcome, _task_transition_spec
-from .queue_records import Status, TaskError
+from .queue_records import SpawnState, Status, TaskError
 
 
 class QueueSubmissionRejectionMixin:
@@ -66,7 +66,7 @@ class QueueSubmissionRejectionMixin:
             if task.hold_reason is not None:
                 raise TaskError(f"task {task_id!r} is held; cannot recover its submission")
             retiring = conn.execute(
-                "SELECT release_requested, conclusion_state FROM spawn_reservations"
+                "SELECT state, release_requested, conclusion_state FROM spawn_reservations"
                 " WHERE task_id = ? ORDER BY attempt DESC LIMIT 1",
                 (task_id,),
             ).fetchone()
@@ -74,6 +74,8 @@ class QueueSubmissionRejectionMixin:
                 retiring["release_requested"] or retiring["conclusion_state"] is not None
             ):
                 raise TaskError("submitting session retirement already began; cannot recover it safely")
+            if retiring is not None and retiring["state"] != SpawnState.SPAWNED:
+                raise TaskError("submitting reservation is not spawned; same-session recovery unavailable")
             collision = conn.execute(
                 "SELECT id FROM tasks WHERE id <> ? AND status IN (?, ?, ?)"
                 " AND (owner = ? OR owner_session_id = ?) LIMIT 1",

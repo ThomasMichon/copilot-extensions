@@ -276,3 +276,28 @@ def test_submission_rejection_respects_operator_hold_and_refreshed_recovery(tmp_
     assert outcome.task.hold_reason is None
     assert q.steer_log(task.id)[0]["fields"]["verification_rejection"]["submission"]["result"] == task.result
     assert len(q.list_wakes(task.id)) == 1
+
+
+@pytest.mark.parametrize("cold", [False, True])
+def test_submission_rejection_spawned_and_cold_reservation_boundary(tmp_path, cold):
+    q = TaskQueue(tmp_path / "tasks.db")
+    task = _submitted(q, reserve=True)
+    [reservation] = q.list_reservations()
+    q.record_spawn(reservation.key, session_handle="local-body:session-1")
+    q.reopen_completed(task.id, reason="prepare a dormant submission")
+    q.claim_one(task.completed_by, task_id=task.id)
+    q.start(task.id, task.completed_by, owner_session_id=task.owner_session_id)
+    q.suspend(task.id, task.completed_by, reason="external wait")
+    if cold:
+        q.record_cold(reservation.key)
+    submitted = q.complete(task.id, task.completed_by, result={"outcome": "premature"})
+    before = q.events(task.id)
+    if cold:
+        with pytest.raises(TaskError, match="not spawned"):
+            _reject(q, submitted)
+        assert q.get(task.id) == submitted and q.events(task.id) == before
+        assert q.steer_log(task.id) == q.list_wakes(task.id) == []
+        assert q.list_reservations()[0].state == "cold"
+    else:
+        assert _reject(q, submitted).task.status == Status.STARTED
+        assert q.list_reservations()[0].state == "spawned"

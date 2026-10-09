@@ -1461,7 +1461,8 @@ adds neither another steer nor another wake.
 
 Generation, submitting owner/session, `submitted` status, and `updated_at`
 fence the decision. Missing exact owner/session identity, other held work under
-that owner or session, an operator hold, or already-begun session retirement
+that owner or session, an operator hold, a latest reservation that is not
+`spawned` (including a stopped `cold` body), or already-begun session retirement
 fails explicitly and leaves the submission pending. There is no replacement
 task, owner reassignment, new conversation, or unsafe repair of a retirement
 already in flight. The supervisor preserves verification-gated submitted
