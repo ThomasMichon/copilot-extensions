@@ -50,7 +50,9 @@
   to stop/start) · `ThomasMichon/copilot-extensions#5754` (recovery runs before
   acquiring lifecycle-transition authority) ·
   `ThomasMichon/copilot-extensions#5791` (explicit scoped gh identity degrades
-  to ambient execution after token minting fails)
+  to ambient execution after token minting fails) ·
+  `ThomasMichon/copilot-extensions#5833` (distinct attributed raw head override
+  is not surfaced by the inspected Mux Companion UI)
 
 ## Guiding Intent
 
@@ -286,8 +288,8 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
             Closed stale feature-delivery issues `#2595` and `#2596` with
             direct source/owning-effort evidence; their umbrella `#2594`
             remains open, not inferred complete from these two closures.
-      - [ ] `visions/plugins/agent-bridge/README.md` — observation and
-            attribution slice reconciled: evidence-backed presence, reported
+      - [x] `visions/plugins/agent-bridge/README.md` — scoped observation,
+            attribution, generation, control, and carrier slices: evidence-backed presence, reported
             consumption with per-figure provenance and rollup coverage,
             conservative sub-agent attribution, creator identity distinct
             from caller affinity, and continuity-aware backward history
@@ -297,9 +299,13 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
             recovery before serialization is `#5754`; native supervisor
             binding/coherence remains under `#4022`/`#5225`. The control
             slice additionally covers delivery decisions and
-            cooperative stop/confirmation. The rest of hosting, routing, and
-            protocol contracts remain to be reconciled;
-            this is not a completed full-leaf sweep.
+            cooperative stop/confirmation. The carrier slice additionally
+            reconciles shared remote-control
+            reach, isolated logical subscriptions, hosting-owned replay/cursor
+            acknowledgement, and safe compatibility fallback.
+      - [ ] `visions/plugins/agent-bridge/README.md` — remaining hosting,
+            routing, and protocol surfaces beyond the completed scoped slices;
+            the full-leaf sweep is still open.
       - [ ] `visions/agent-fabric/README.md` — layer/venue/memory seam slice
             reconciled: attended and unattended session peers, shared
             coordination versus provider-owned lifecycle, capability-honest
@@ -344,6 +350,29 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
       - [ ] `visions/test-portfolio/README.md` — remaining contract-map,
             effectiveness, tier/effect, and portfolio-observability audit beyond
             the completed admission slice.
+      - [x] `visions/coverage-guided-ci/README.md` — scoped source reconciliation of
+            baseline collection, promoted pointer correlation, ancestor/source
+            coordinates, debt, selection, and tier-restricted fallback. Existing
+            vision passages already cover the observed intent; no new fold-back
+            or source-proven deviation was established. Real artifact and
+            consumer acceptance remain with the owning `coverage-guided-ci`
+            effort, not inferred complete from this reconciliation.
+      - [ ] `visions/coverage-guided-ci/README.md` — remaining concrete
+            ordinary-CI consumer invocation and activation audit beyond the
+            inspected baseline/promotion and selection-helper foundations.
+      - [x] `visions/mux-companion/README.md` — scoped normal explicit cutover,
+            read-only status/lineage boundaries, and refresh source trace
+            inspected. No new fold-back was established.
+      - [ ] `visions/mux-companion/README.md` — remaining raw force-head
+            capability/attribution (`#5833`), missing-data presentation,
+            live summon, and other-provider paths.
+      - [x] `visions/plugin-services/installation-cells/README.md` — scoped explicit
+            context resolution, canonical receipts, activation generation,
+            ambiguous legacy refusal, and Windows payload invocation traced.
+            No new intent or source-proven cross-cell violation was established.
+      - [ ] `visions/plugin-services/installation-cells/README.md` — remaining
+            endpoint discovery, POSIX invocation, all-plugin lifecycle and
+            cleanup/rollback coverage.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -423,6 +452,91 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Bounded evidence cohorts and accepted source coverage
+- Three read-only evidence tracks mapped twelve indexed visions, then compared
+  owning surfaces. The initial reports were partial: document contracts,
+  legacy path names, design-only proposals, search absence, and effort checkboxes
+  were not accepted as implementation conformance or gap proof. Proposed
+  fold-backs that merely repeated existing vision promises were rejected.
+- A narrower source follow-up established the coverage-guided CI foundations:
+  `baseline.py` and `validate-and-promote.yml` measure pinned source form;
+  `correlation.py` and `promote_release.py` validate and publish correlated
+  pointers; `ancestor_resolution.py` preserves or invalidates source coordinates;
+  `debt.py`, `decide.py`, `selection.py`, and `fallback.py` retain explicit
+  eligibility, uncertainty, and tier-restricted fallback at the orchestration
+  boundary. These are already covered by the vision's baseline correlation,
+  source-form attribution, debt, graceful degradation, and auditable-fallback
+  passages. No vision edit or duplicate runtime issue was warranted from this
+  scoped comparison. The actual ordinary-CI consumer activation/invocation
+  source path remains to be audited separately.
+- That source audit is not proof of a fresh all-plugin promotion artifact, an
+  actual ancestor/asset consumer run, or measured production fallback cost and
+  coverage. Those acceptance obligations stay in the owning
+  `coverage-guided-ci` effort. A design or pointer present in source is not
+  itself a successfully published baseline.
+- Mux Companion source follow-up traced read-only engine/handoff observations,
+  the explicit normal Cut over handler, the engine trigger, and refresh. The
+  inspected UI has no distinct raw force-head handler or action; carved the
+  additive UI feature delta as `#5833` after issue/PR dedup. `#4369` owns normal
+  manual-only cutover and `#84` owns ground-layer lifecycle, not this UI action.
+  Missing
+  enumeration/parse results may be omitted, which does not by itself prove
+  uncertainty is sufficiently visible. Live summon, raw attribution, and
+  other-provider validation remain open; no whole-leaf completion is claimed.
+- Installation-cell source follow-up traced `resolve_context`, canonical
+  receipt validators, `_activation_result`, `attribute_legacy_state`, and
+  `invoke-payload-runtime.ps1`. Foreign, stale-generation, and ambiguous
+  contexts have concrete refusal paths. Endpoint selection, POSIX dispatch,
+  uninstall/rollback and every runtime remain unscored. Documented legacy roots
+  alone were not accepted as a cross-cell violation.
+- The other nine cohort visions retain incomplete source reconciliation. No
+  source was edited by evidence agents; the coordinator owns integration,
+  issue decisions, review gates, and the original sweep completion judgment.
+
+### 2026-10-09 — Bridge shared-carrier routing/protocol slice
+- Traced source snapshot `389b55303a67` from the public local remote-operation
+  surface through bridge-owned carrier acquisition, connectivity-layer
+  connection identity/pooling, far-side request gates and hosting-owned
+  replay/cursor acknowledgement. Checked aggregate observation and a concrete
+  Dispatch consumer without inferring conformance from archived effort status.
+- Folded back shared transport over equivalent connection/access contexts,
+  independently identified logical observations, hosting-owned durable replay,
+  consumer acknowledgement, explicit reconciliation on continuity loss, and
+  absence versus uncertain admitted effects. Retained the compatibility path
+  for explicit pre-admission refusal, including an older carrier rejecting a
+  requested charter before creating work. No existing positive or intended
+  provider, relay, hosting, or protocol capability was removed.
+- Evidence anchors: `agent_bridge/carrier.py:acquire_remote_carrier`,
+  `ssh_manager/manager.py:_carrier_transport_identity` and `acquire_carrier`,
+  `agent_bridge/remote_operations.py:CarrierRequestRouter` and
+  `RemoteOperationService`, `routes/remote.py:multiplex_remote_session_events`,
+  and `agent_dispatch/bridge_remote.py` with `bridge.py`/`embody.py` consumers.
+  The archived `persistent-ssh-carrier` effort (`#1763`) remains provenance,
+  not fresh all-venue proof.
+
+  | Applicable invariant | Scoped status | Evidence and retained delta |
+  |---|---|---|
+  | `a-la-carte-installability` / `graceful-composition` | Conforms in the inspected carrier/consumer boundary | Bridge owns transport through the shared connectivity library; Dispatch uses its public service boundary and preserves unsupported-capability fallback, not sibling runtime imports. |
+  | `work-coalescing-singleton` / `process-count-scales-with-services-not-sessions` | Conforms in the inspected transport-sharing path only | The connection manager pools under complete transport identity and a lock; logical subscriptions retain leases and release them. This does not score all Bridge processes or service leases. |
+  | `version-skew-tolerant-contracts` / `interoperate-across-version-skew` | Partial runtime audit | Request-specific versions reject unsupported semantics before admission and preserve older supported operations; this is not proof of every session-envelope/recovery/writer-fence path under `#1460`/`#1468`. |
+  | `endpoint-discovered-not-assumed` | Conforms in the inspected consumer boundary | The client resolves the active authenticated local endpoint; explicit endpoints must be loopback. Transport does not add a public prompt socket. |
+  | `minimal-network-exposure` | Partial Bridge audit | Ephemeral authenticated loopback is not proof of the invariant's preference for a native local endpoint. The inspected carrier adds no new listener; native-endpoint conformance for the existing HTTP control plane remains under the broader transport audit (`#54`). |
+
+- Broader bridge hosting/protocol and global service audits remain open.
+  Existing cutover gaps `#5750`/`#5754` and mixed-contract work retain their
+  ownership; this transport slice does not close them or file duplicate gaps.
+- Native mapping reconciliation merged in `#5814`, after corrected canonical
+  sections, resolved review feedback, current-head approval and actual required
+  CI/PR gates. The sweep remains Active. Consumer refresh was attempted and
+  ended nonzero; projection synchronization still refused local ownership
+  conflicts without changing tracked files. No private deployment data is
+  used as public conformance proof here.
+- Focused contained carrier/remote-operation verification was attempted but
+  refused a live host-admission holder. No lease was cleared. Source and
+  documentation gates do not constitute fresh mixed-version, clean-room, or
+  live SSH/venue execution; those proof tiers remain with the implementation
+  and broader service-audit owners.
 
 ### 2026-10-09 — Remaining native mapping audit and sibling publication
 - Finished native root/catalog/working-boundary source reconciliation against
