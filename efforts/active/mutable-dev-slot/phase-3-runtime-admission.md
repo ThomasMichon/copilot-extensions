@@ -41,6 +41,18 @@ governance lock order also remains binding; allocation/completion callbacks must
 not invert it against these guards. Prove the combined ordering with concurrent
 ordinary-build, repair, and cutover tests before adoption is complete.
 
+Completed candidates also need retention protection until selection/cutover is
+settled: releasing construction ownership must not expose an unselected ready
+generation to GC. Register that protection atomically with the GC admission/
+recheck protocol before handing off the candidate or dropping construction
+protection. A completed-slot reuse caller must acquire equivalent protection
+before trusting the selected candidate. Keep candidate and rollback-generation
+references through their actual promotion/drain or rollback outcome, and release
+them through their owning lifecycle. This protects identity without touching
+immutable slot files or relying on a directory-mtime grace period. All legacy
+and installation-cell cleanup paths must respect these references, with the
+same consistent lock ordering as construction/cutover governance.
+
 ## Existing home and evidence
 
 The parent already requires ordinary refusal, claimed dev iteration, and
@@ -92,6 +104,10 @@ each adopter is already safe.
       Preserve separate activation/cutover serialization and governance checks.
       A repair's outer cutover guard retains the whole-operation lifetime above;
       releasing the inner construction lease does not release repair authority.
+- [ ] Protect ready candidates and rollback generations through the owning GC
+      retention protocol across construction release, cutover waits, concurrent
+      cleanup, promotion, and drain. Matching-slot reuse needs the same atomic
+      retention admission. Do not use immutable-slot mtime mutation as a pin.
 - [ ] Surface timeout and actual storage/permission failures distinctly.
       Diagnostic owner evidence is attributable to the actual lease holder,
       not a completion helper's PID or a mere lock-file timestamp. A surviving
@@ -158,6 +174,10 @@ each adopter is already safe.
   Concurrent repair versus ordinary build/cutover proves the required outer
   guard, promotion-before-retirement, and absence of lock-order inversion,
   including installation-cell governance callbacks.
+- Pause a real build/reuse caller after immutable completion but before cutover,
+  run concurrent GC, and prove candidate/rollback retention and successful later
+  activation. Prove retention admission cannot race an already-admitted deletion,
+  and that terminal ownership release restores legitimate collection eligibility.
 - Claimed dev/release preserves the original restore target, refuses a competing
   owner, and does not silently activate dev mode for ordinary install/update.
 - Windows, Linux, and macOS behavior is accounted for separately. Record explicit,

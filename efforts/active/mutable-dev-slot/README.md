@@ -23,20 +23,20 @@ that has repeatedly cost real diagnosis time this repo's own contributors
 have hit (most recently: diagnosing/fixing
 ThomasMichon/copilot-extensions#3323 -> #3340).
 
-## Request
+## Participants
 
-Operator ask, paraphrased: add a `dev` version slot per plugin with a
-mutable venv; a config flag (or worktree-default detection) selects it; a
-worktree "claims" dev mode for a plugin so two worktrees can't clobber each
-other; `agent-worktrees finalize` must force worktrees to release/disable
-dev mode on finalization; none of this may break real deployments.
+| Participant | Role | Reached via |
+|-------------|------|-------------|
+| Slot-admission coordinator | Owns the Phase 3 shared contract, reviewed implementation slices, and adopter sequencing | Normal managed worktree and PR flow |
 
-Operator follow-on, verbatim (2026-10-08):
-> Help build out durable fixes and guidance for the correct flow
+## Coordination
 
-The runtime-admission/coalescing execution detail below is agent-recommended
-under that request and the existing immutability contract; it is not a new
-operator directive to remove the explicit claimed-dev exception.
+The Slot-admission coordinator drives #5472 through the existing Phase 3,
+starting with [runtime admission and build coalescing](phase-3-runtime-admission.md).
+Runtime code stays installer-owned and independently vendored. Evidence tracks
+are read-only; implementation slices receive exclusive file ownership, and the
+coordinator integrates and publishes the combined change. Phased adopters do
+not imply that the portfolio or another concurrently owned effort is complete.
 
 ## Context
 
@@ -58,20 +58,20 @@ ThomasMichon/copilot-extensions#3323 -> #3340 this same session). See
 [`docs/patterns/mutable-dev-slot.md`](../../../docs/patterns/mutable-dev-slot.md)
 for the full design.
 
-## Participants
+## Request
 
-| Participant | Role | Reached via |
-|-------------|------|-------------|
-| Slot-admission coordinator | Owns the Phase 3 shared contract, reviewed implementation slices, and adopter sequencing | Normal managed worktree and PR flow |
+Operator ask, paraphrased: add a `dev` version slot per plugin with a
+mutable venv; a config flag (or worktree-default detection) selects it; a
+worktree "claims" dev mode for a plugin so two worktrees can't clobber each
+other; `agent-worktrees finalize` must force worktrees to release/disable
+dev mode on finalization; none of this may break real deployments.
 
-## Coordination
+Operator follow-on, verbatim (2026-10-08):
+> Help build out durable fixes and guidance for the correct flow
 
-The Slot-admission coordinator drives #5472 through the existing Phase 3,
-starting with [runtime admission and build coalescing](phase-3-runtime-admission.md).
-Runtime code stays installer-owned and independently vendored. Evidence tracks
-are read-only; implementation slices receive exclusive file ownership, and the
-coordinator integrates and publishes the combined change. Phased adopters do
-not imply that the portfolio or another concurrently owned effort is complete.
+The runtime-admission/coalescing execution detail below is agent-recommended
+under that request and the existing immutability contract; it is not a new
+operator directive to remove the explicit claimed-dev exception.
 
 ## Plan
 
