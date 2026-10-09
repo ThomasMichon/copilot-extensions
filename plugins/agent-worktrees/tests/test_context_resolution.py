@@ -635,6 +635,40 @@ def test_get_worktree_state_dir_resolves_anchor_from_session_cwd(
     assert Path(out).is_dir()
 
 
+def test_get_worktree_state_dir_falls_back_to_the_callers_project(
+    adopted_repo, monkeypatch, tmp_path, capsys,
+):
+    """A session started outside any adopted repo (its recorded cwd names no
+    project) resolves from where the caller runs, as every project-scoped
+    command does: here, the worktree it is invoked from."""
+    _anchor, _wt_root, wt_path, wt_id, _conf = adopted_repo
+    unadopted = tmp_path / "not-adopted"
+    unadopted.mkdir()
+    git_ops.git("init", "-q", cwd=str(unadopted))  # a checkout, just not an adopted one
+    project_dir = tmp_path / "machine-state" / "myproj"
+    cfg.set_active_project(None)
+    monkeypatch.chdir(wt_path)
+
+    def machine_project_dir(name=None):
+        if (name or cfg.active_project()) != "myproj":  # as the real one: no project, no directory
+            raise RuntimeError("No active project could be resolved.")
+        return project_dir
+
+    monkeypatch.setattr(cfg, "project_dir", machine_project_dir)
+    monkeypatch.setattr(m, "_activate_session_binding", lambda sid: None)
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_session", lambda sid: None)
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda cwd: None)
+    monkeypatch.setattr(m.sessions, "session_cwd", lambda sid: unadopted)
+    try:
+        rc = m.main(["get", "worktree-state-dir", "--session-id", "outside-session"])
+    finally:
+        cfg.set_active_project(None)
+    out = capsys.readouterr().out.strip()
+
+    assert rc == 0
+    assert Path(out) == project_dir / "worktrees" / wt_id
+
+
 def test_get_worktree_state_dir_rejects_unknown_session(
     adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
 ):

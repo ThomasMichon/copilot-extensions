@@ -1,0 +1,9 @@
+{
+  "comment": "get --session-id: a session started outside any adopted repo resolves from the caller's directory instead of failing with no active project",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
