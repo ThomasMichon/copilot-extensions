@@ -192,11 +192,42 @@ def test_relative_root_does_not_follow_later_working_directory(tmp_path, monkeyp
         "host.containers",
         "repo.codespaces",
         ".hidden",
+        "host.containers/.",
+        "host.containers/..",
+        ".codespaces/.",
+        ".codespaces/..",
+        "repo.codespaces/.",
+        "repo.codespaces/..",
+        "..containers/worker",
+        "...containers/worker",
     ],
 )
 def test_unsafe_or_ambiguous_namespace_is_rejected(key):
     with pytest.raises(SourceLayoutError):
         validate_source_key(key)
+
+
+@pytest.mark.parametrize("dot", [".", ".."])
+@pytest.mark.parametrize(
+    "field", ["provider", "host", "venue_name", "repository_owner", "repository_name"]
+)
+def test_dot_components_are_rejected_in_source_identities(dot: str, field: str) -> None:
+    with pytest.raises(SourceLayoutError):
+        if field == "host":
+            SourceIdentity("container", "p", host=dot, venue_name="worker")
+        else:
+            SourceIdentity(
+                "codespace",
+                dot if field == "provider" else "p",
+                repository=(
+                    f"{dot}/repo"
+                    if field == "repository_owner"
+                    else f"owner/{dot}"
+                    if field == "repository_name"
+                    else "owner/repo"
+                ),
+                venue_name=dot if field == "venue_name" else "box",
+            )
 
 
 @pytest.mark.parametrize(
