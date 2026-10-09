@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 
 from agent_codespaces import launch_memory as lm
 
 TENANT = "cli:anchor-example-web@cs-1"
 D = lm.DEFAULT_DRIVER
+
+
+def _write_record(path, payload) -> None:
+    assert lm._record_dir(path, create=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
 
 
 def test_a_bare_resume_of_the_recorded_session_gets_its_flags_and_driver_back():
@@ -68,10 +76,12 @@ def test_two_tenants_recording_at_once_keep_both_records():
 
 def test_a_corrupt_or_foreign_record_is_ignored():
     path = lm._path("cs-1", TENANT)
-    path.parent.mkdir(parents=True)
+    assert lm._record_dir(path, create=True)
     path.write_text("{nope", encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], None) == (["--resume=s1"], D, [])
-    path.write_text(json.dumps({"tenant": "cli:else", "session_id": "s1", "copilot_args": ["--x"]}), encoding="utf-8")
+    _write_record(path, {"tenant": "cli:else", "session_id": "s1", "copilot_args": ["--x"]})
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == []
 
 
@@ -86,8 +96,7 @@ def test_a_schema_corrupt_record_is_ignored_whole():
     base = {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--no-ask-user"], "driver": "o"}
     for bad in ({**base, "copilot_args": ["--x", 7]}, {**base, "copilot_args": "--x"},
                 {**base, "driver": None}, {**base, "session_id": 1}):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(bad), encoding="utf-8")
+        _write_record(path, bad)
         assert lm.apply("cs-1", TENANT, ["--resume=s1"], None) == (["--resume=s1"], D, []), bad
 
 
@@ -128,8 +137,10 @@ def test_records_under_an_unsafe_directory_are_never_trusted(tmp_path):
     # A codespace directory that's a symlink to somewhere else is refused.
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir(mode=0o700)
-    (elsewhere / lm._path("cs-2", TENANT).name).write_text(json.dumps(
-        {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--allow-all", "--experimental"], "driver": "o"}))
+    _write_record(
+        elsewhere / lm._path("cs-2", TENANT).name,
+        {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--allow-all", "--experimental"], "driver": "o"},
+    )
     (lm.LAUNCHES_DIR / "cs-2").symlink_to(elsewhere, target_is_directory=True)
     assert lm.apply("cs-2", TENANT, ["--resume=s1"], None) == (["--resume=s1"], D, [])
     lm.remember("cs-2", TENANT, ["--x"], "o", "s1")
@@ -157,13 +168,7 @@ def test_a_rejoin_updates_only_its_own_sessions_forwards():
 
 def test_a_record_from_before_forwards_were_kept_still_recalls_its_flags():
     path = lm._path("cs-1", TENANT)
-    # Lay the record down the way remember() would (private dirs, 0600 file), so
-    # _load's ownership checks pass under any umask -- e.g. 002, where a plain
-    # write_text leaves the file group-writable and _load rightly rejects it.
-    assert lm._record_dir(path, create=True)
-    path.write_text(json.dumps({"tenant": TENANT, "session_id": "s1", "copilot_args": ["--x"], "driver": "o"}),
-                    encoding="utf-8")
-    path.chmod(0o600)
+    _write_record(path, {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--x"], "driver": "o"})
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == ["copilot_args", "driver"]
     assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], []) == ([], False)
 
@@ -173,7 +178,6 @@ def test_malformed_recorded_forwards_void_the_whole_record():
     base = {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--x"], "driver": "o"}
     for bad in (["4322"], ["a:b"], "4322:4322", [4322], ["4322:4322;rm"],
                 ["70000:1"], ["1:0"], ["1:70000"], ["4322:1", "4322:2"]):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({**base, "local_forwards": bad}), encoding="utf-8")
+        _write_record(path, {**base, "local_forwards": bad})
         assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == [], bad
         assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], []) == ([], False), bad

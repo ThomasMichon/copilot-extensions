@@ -290,10 +290,13 @@ class TestFinalize:
     def test_finalize_sync_only(self, capsys):
         with patch("agent_codespaces.__main__.sync_codespace_sessions",
                    return_value={"ok": True, "session_count": 5, "detail": "-> hub"}) as sync, \
+             patch("agent_codespaces.__main__.stop_codespace",
+                   return_value=True) as stop, \
              patch("agent_codespaces.__main__.delete_codespace") as delete:
             rc = main(["finalize", "cs-1"])
         assert rc == 0
         sync.assert_called_once()
+        stop.assert_called_once_with("cs-1")
         delete.assert_not_called()
         assert "Recovered 5 session(s)" in capsys.readouterr().out
 

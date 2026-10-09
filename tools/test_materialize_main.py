@@ -190,7 +190,7 @@ def test_build_materializes_file_pointers_end_to_end(tmp_path: Path):
 def test_main_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     source = tmp_path / "source"
     _canonical_lib(source, "zdd", version="0.1.0-dev1", content="x\n")
-    _uv_editable_consumer(source, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+    _uv_editable_consumer(source, "plugins/agent-example", "agent-zdd", "../../libs/zdd")
     monkeypatch.setattr(mm, "REPO", source)
 
     dest = tmp_path / "dest"
@@ -642,6 +642,12 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
             pyproject_text,
             encoding="utf-8",
         )
+        for ext in ("sh", "ps1"):
+            installer = consumer_dir / "scripts" / f"install.{ext}"
+            if installer.is_file():
+                scripts = actual_consumer_dir / "scripts"
+                scripts.mkdir(exist_ok=True)
+                shutil.copy2(installer, scripts / installer.name)
         for name, raw_path, lib, editable in refs:
             assert editable, f"{consumer}: expected editable ref for {name}"
             _rewrite_to_local_path(

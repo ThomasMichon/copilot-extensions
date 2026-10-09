@@ -6,6 +6,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _mock_gh_presence(monkeypatch):
+    """Mock tool presence for CLI units that already mock GitHub operations.
+
+    Missing-tool tests override this seam explicitly; no unit needs a live,
+    authenticated host gh installation just to reach its mocked command.
+    """
+    monkeypatch.setattr("agent_codespaces.__main__._gh_binary_available", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _disable_codespace_claim(monkeypatch):
     """Disable the #897 exclusive-claim enforcement by default in unit tests.
 
