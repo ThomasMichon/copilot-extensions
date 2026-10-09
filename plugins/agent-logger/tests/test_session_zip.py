@@ -467,6 +467,87 @@ def test_zip_declared_compressed_input_has_per_member_and_total_budgets(
             session_codecs._zip_members(opened)
 
 
+def _damage_gzip_trailer(data: bytes, damage: str) -> bytes:
+    altered = bytearray(data)
+    if damage == "crc":
+        altered[-8] ^= 1
+    elif damage == "isize":
+        altered[-4] ^= 1
+    elif damage == "truncated":
+        return data[:-4]
+    else:
+        return data + b"invalid trailing gzip member"
+    return bytes(altered)
+
+
+@pytest.mark.parametrize("damage", ["crc", "isize", "truncated", "trailing-member"])
+def test_tar_comparison_validates_gzip_trailer_before_accepting_overlap(
+    tmp_path: Path, damage: str
+) -> None:
+    source = _session(tmp_path / "live")
+    store = tmp_path / "store"
+    tar_ref = sessions.archive_session(source, store)
+    zip_ref = sessions.archive_session(source, store, codec="zip")
+    assert sessions.verify_archive(tar_ref) and sessions.verify_archive(zip_ref)
+    damaged = _damage_gzip_trailer(tar_ref.path.read_bytes(), damage)
+    tar_ref.path.write_bytes(damaged)
+    with pytest.raises((OSError, EOFError)):
+        sessions.CODECS["targz"].member_digests(tar_ref.path)
+    with pytest.raises((OSError, EOFError)):
+        next(sessions.iter_session_refs(None, store))
+    with pytest.raises((OSError, EOFError)):
+        sessions.resolve_ref(source.name, tmp_path / "absent", store)
+    assert not sessions.verify_archive(tar_ref)
+    assert not sessions.verify_archive(zip_ref)
+    assert tar_ref.path.read_bytes() == damaged
+    assert zip_ref.path.is_file()
+    assert (source / "events.jsonl").is_file()
+
+
+@pytest.mark.parametrize("retirement", ["local", "hub"])
+@pytest.mark.parametrize("damage", ["crc", "truncated"])
+def test_bad_gzip_overlap_prevents_actual_live_retirement(
+    tmp_path: Path, retirement: str, damage: str
+) -> None:
+    from agent_logger.sync.compact import compact_session
+    from agent_logger.sync.targets.filesystem import LocalTarget
+
+    hub = tmp_path / "hub"
+    source = _session(hub / "box" / "session-state")
+    store = hub / "box" / "archived"
+    tar_ref = sessions.archive_session(source, store)
+    zip_ref = sessions.archive_session(source, store, codec="zip")
+    damaged = _damage_gzip_trailer(tar_ref.path.read_bytes(), damage)
+    tar_ref.path.write_bytes(damaged)
+    sidecars = {
+        path: path.read_bytes()
+        for path in store.iterdir()
+        if path not in (tar_ref.path, zip_ref.path)
+    }
+    if retirement == "local":
+        with pytest.raises((OSError, EOFError)):
+            compact_session(sessions.SessionRef(source.name, "live", source), store, codec="zip")
+    else:
+        assert LocalTarget({"path": str(hub)}).reconcile_hub("box") == 0
+    assert (source / "events.jsonl").is_file()
+    assert tar_ref.path.read_bytes() == damaged
+    assert sessions.read_member(zip_ref, "events.jsonl") == (source / "events.jsonl").read_bytes()
+    for path, content in sidecars.items():
+        assert path.read_bytes() == content
+
+
+def test_tar_trailer_validation_bounds_decoded_padding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "padding.tar.gz"
+    archive.write_bytes(gzip.compress(b"\0" * 4096))
+    monkeypatch.setattr(session_codecs, "MAX_TAR_CONTAINER_BYTES", 4096)
+    assert sessions.CODECS["targz"].member_digests(archive) == {}
+    monkeypatch.setattr(session_codecs, "MAX_TAR_CONTAINER_BYTES", 4095)
+    with pytest.raises(ValueError, match="decoded-container byte budget"):
+        sessions.CODECS["targz"].member_digests(archive)
+
+
 def _corrupt_payload(archive: Path, *, deflated: bool) -> None:
     with zipfile.ZipFile(archive) as opened:
         info = opened.getinfo("events.jsonl")

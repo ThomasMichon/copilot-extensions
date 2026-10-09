@@ -78,6 +78,8 @@ Both archive writers validate generated member names before publication;
 generated names must already be canonical, so literal POSIX backslashes cannot
 silently become path separators. Unsupported source filenames leave the source
 and any prior archive intact.
+ZIP readers still normalize benign names such as `./events.jsonl`; writer
+canonicality does not prohibit content-equal reader-compatible representations.
 
 Session archive publication checks every existing same-ID format before
 updating selector sidecars or returning a reference to reclamation callers.
@@ -101,6 +103,9 @@ bytes consumed by its sequential compressed reader even if the file grows
 after the size check; ZIP admission caps each member's declared compressed size
 and their total before content decoding. This bounds input work even for streams
 that produce no decoded bytes. Ordinary single-format tar reads remain unchanged.
+Tar comparison also consumes through gzip EOF to validate its trailer before
+returning digests, with a separate 2 GiB + 64 MiB decoded-container budget for
+members, metadata, and trailing padding.
 Creation also bounds inspected source entries and excludes
 linked/name-surrogate directories without descending into them. Source entries
 are admitted incrementally before retention, rather than allocating an entire
@@ -128,7 +133,7 @@ claim a continuous descriptor-pinned transaction over mutable ancestor paths.
 When two archive formats exist for one ID in one store, the reader compares
 every regular member's size and SHA-256 before yielding an archive observation.
 Identical readable contents produce one reference, preferring the legacy
-tar.gz representation; divergent, corrupt, noncanonical, or unprovable contents
+tar.gz representation; divergent, corrupt, unsafe, or unprovable contents
 raise while retaining both files. A valid live session still takes precedence,
 and explicitly ordered archive stores retain their existing precedence.
 Across different source roots, provenance-based reconciliation and accounting

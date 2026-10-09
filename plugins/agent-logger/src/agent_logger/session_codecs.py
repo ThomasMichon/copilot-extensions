@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import os
@@ -24,6 +25,7 @@ MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_MEMBER_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_INPUT_BYTES = MAX_ARCHIVE_BYTES + 64 * 1024 * 1024
+MAX_TAR_CONTAINER_BYTES = MAX_ARCHIVE_BYTES + 64 * 1024 * 1024
 MAX_ZIP_DIRECTORY_BYTES = 16 * 1024 * 1024
 MAX_TAR_METADATA_BYTES = 16 * 1024 * 1024
 _CASE_INSENSITIVE = os.name == "nt"
@@ -265,7 +267,8 @@ class TarGzCodec(Codec):
                 raise ValueError("session archive exceeds its compressed-input byte budget")
             with (
                 _LimitedTarInput(raw.fileno()) as limited,
-                tarfile.open(fileobj=limited, mode="r|gz", tarinfo=BoundedTarInfo) as tar,
+                gzip.GzipFile(fileobj=limited, mode="rb") as decoded,
+                tarfile.open(fileobj=decoded, mode="r|", tarinfo=BoundedTarInfo) as tar,
             ):
                 for info in tar:
                     if info.isdir():
@@ -293,6 +296,15 @@ class TarGzCodec(Codec):
                     if result[name].size != info.size:
                         raise ValueError(f"truncated session archive member: {info.name!r}")
                     total += result[name].size
+                container_bytes = tar.fileobj.tell()
+                if container_bytes > MAX_TAR_CONTAINER_BYTES:
+                    raise ValueError("session tar exceeds its decoded-container byte budget")
+                while trailing := tar.fileobj.read(
+                    min(1024 * 1024, MAX_TAR_CONTAINER_BYTES - container_bytes + 1)
+                ):
+                    container_bytes += len(trailing)
+                    if container_bytes > MAX_TAR_CONTAINER_BYTES:
+                        raise ValueError("session tar exceeds its decoded-container byte budget")
         return result
 
 
