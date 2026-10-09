@@ -140,7 +140,7 @@ def add_parsers(sub) -> None:
         "--repo",
         default=None,
         dest="claim_repo",
-        help="with find pr: the target repo (owner/name) to search PR claims for",
+        help="with find pr: only PR claims in this repo (owner/name); omitted, every repo",
     )
     p.add_argument(
         "--state",

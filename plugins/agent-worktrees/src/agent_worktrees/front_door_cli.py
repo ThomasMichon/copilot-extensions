@@ -370,6 +370,10 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         return True
     if command == "list-sessions" and "--all-projects" in args_list[1:]:
         return True
+    if command == "claims" and args_list[1:3] == ["find", "pr"]:
+        # Scans every adopted project's tracking store, never the CWD's own:
+        # it must give the same answer from any directory.
+        return True
     if command == "get" and any(
         arg == "--session-id" or arg.startswith("--session-id=") for arg in args_list[1:]
     ):

@@ -49,12 +49,15 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
     longer than a configured threshold (an open question below; no bridge
     `stalled` items until it's decided).
 
-  Local reads only by default; remote venues opt in (`--include-remote`), since
-  each is an SSH read.
+  Local reads only by default: every registered session's attention is a read
+  of this machine's daemon, and a bridge-managed session's transcript presence
+  is read when its transcript is local. A transcript on a remote target (a
+  CodeSpace or container) is an SSH read, so it opts in (`--include-remote`).
 
   **Candidates:** the union of agent-bridge's two session registries, read
   through its own API (never its database): **bridge-managed sessions**
-  (`agent-bridge --json sessions`, the sessions it spawned and drives) and
+  (`agent-bridge --json sessions`, the sessions it spawned and drives, except
+  stopped or ended ones, which are parked on nothing) and
   **registered interactive CLI sessions** (`agent-bridge --json live-sessions
   list`, live rows only; `--json` is the bridge's global option, so it comes first). Candidates
   are keyed by their logical delegate reference (see `entity_ref`), so a session
@@ -76,13 +79,12 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
   command gates on `BridgeClient.daemon_supports()`. Against an older daemon it
   reports represented sessions as `unsupported` rather than sending the request,
   and the adapter counts those candidates toward `uncertain`, so a version skew
-  reads as `partial`, never as `clear` or as every session failing. A candidate whose attention can't be read
+  reads as `partial`, never as `clear` or as every session failing.   A candidate whose attention can't be read
   counts toward `uncertain`. If either listing fails or
   times out, the bridge source is `failed`, never `ok` on the other alone: a
   parked session in the registry that wasn't read must not read as `clear`.
-  With `--include-remote`, each remote venue's registry is a further candidate
-  set under the same rule, and a venue that can't be read makes the source
-  `failed` too.
+  Transcript presence is read for bridge-managed sessions (a registered
+  interactive session's represented event tail already carries its asks).
 - **pr** (`pr bar`, on `dev` since #5566): a PR whose `pr bar` JSON reports it
   **`OPEN`** with verdict `failed` (exit 11) → `failed` (the author has something
   to do). The live state decides, never the tracked record's: a closed or merged
@@ -90,7 +92,9 @@ Part of the [Operator Attention Contract](README.md) effort: the built-in adapte
   candidate even when its record says `closed`. Exit 12 (`unknown`)
   counts toward the source's status, not as an item. **Candidates:** every
   PR tracked by agent-worktrees, whatever its local state, across **every project registered on this
-  machine**, not just the one the caller's CWD belongs to. They're enumerated
+  machine**, not just the one the caller's CWD belongs to -- except a record
+  whose PR merged, which is skipped unread: a merge is terminal on every
+  provider, so it can never need its author again. They're enumerated
   through agent-worktrees' own CLI (never by reading its files), and each PR is
   read by its own repository and number, with explicit project context
   (`agent-worktrees -p <project> pr bar <owner/name> <number> --json`), so the
