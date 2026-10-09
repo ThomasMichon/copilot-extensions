@@ -781,8 +781,19 @@ class _SessionHostConnectionMixin:
             self._release_codespace_lock(session_id)
 
     def _kill_relays_sync(self, session_id: str) -> None:
-        """Best-effort synchronous teardown of relay supervisors."""
+        """Best-effort synchronous teardown of relay supervisors.
+
+        Stops each supervisor's reconnect monitor and kills its whole SSH
+        process tree (including a ``gh codespace ssh`` ProxyCommand child), so
+        an ended or failed session's relay can never reconnect and re-wake a
+        stopped CodeSpace. Other sessions' relays are untouched.
+        """
         for relay in self._relays.pop(session_id, []):
+            stop_nowait = getattr(relay, "stop_nowait", None)
+            if callable(stop_nowait):
+                with contextlib.suppress(Exception):
+                    stop_nowait()
+                continue
             task = getattr(relay, "_monitor_task", None)
             if task is not None and not getattr(task, "done", lambda: True)():
                 with contextlib.suppress(Exception):

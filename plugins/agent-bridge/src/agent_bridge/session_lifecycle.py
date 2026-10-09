@@ -215,6 +215,13 @@ class _SessionLifecycleMixin:
         # live client after stop already persisted dormancy (review of #3058).
         async with session._lifecycle_lock:
             await self._quiesce_session(session, cancel_turn=cancel_turn)
+            # An explicit (dormant) stop has no turn left that needs the
+            # credential relay; retire its supervisor so it cannot re-wake a
+            # stopped CodeSpace. A resume re-supervises it from the endpoint.
+            # Redeploy detaches keep it: their turn survives for reattach.
+            if not allow_background_recovery:
+                with contextlib.suppress(Exception):
+                    await self._stop_relays(session_id)
 
             # Idle-reaper only: free the Session Host child (a plain stop
             # detaches to keep it reattachable, safe since the session is idle).
@@ -356,6 +363,12 @@ class _SessionLifecycleMixin:
                 )
 
         await self._quiesce_session(session)
+        # Ending a session always retires its credential-relay supervisors,
+        # even when no Session Host record remains (e.g. a failed session):
+        # left running, they reconnect via ``gh codespace ssh`` and re-wake a
+        # stopped CodeSpace.
+        with contextlib.suppress(Exception):
+            await self._stop_relays(session_id)
 
         # Session-Host mode: an explicit end is a *sanctioned terminate*, so it
         # must REAP the child -- unlike stop, whose host-mode shutdown only

@@ -121,6 +121,8 @@ def _write_host_install(
 def test_provider_is_inactive_without_config(tmp_path: Path, monkeypatch) -> None:
     module = _module(PROVIDER, "agent_ssh_companion_provider_inactive")
     monkeypatch.setattr(module.platform, "system", lambda: "Windows")
+    # The pwsh prerequisite is host-dependent; this test pins the config logic.
+    monkeypatch.setattr(module.shutil, "which", lambda name: f"/fake/{name}")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
     assert module._active_environment({"machine": "primary"}) is None
@@ -131,6 +133,8 @@ def test_provider_activates_for_windows_install(tmp_path: Path, monkeypatch) -> 
     install_root = tmp_path / "agent-ssh-dtssh"
     config, _state = _write_host_install(install_root)
     monkeypatch.setattr(module.platform, "system", lambda: "Windows")
+    # The pwsh prerequisite is host-dependent; this test pins the config logic.
+    monkeypatch.setattr(module.shutil, "which", lambda name: f"/fake/{name}")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
     assert module._active_environment({"machine": "primary"}) == {
@@ -146,6 +150,8 @@ def test_provider_reports_malformed_config_as_indeterminate(
     install_root.mkdir(parents=True)
     (install_root / "dispatch-companion.json").write_text("[]", encoding="utf-8")
     monkeypatch.setattr(module.platform, "system", lambda: "Windows")
+    # The pwsh prerequisite is host-dependent; this test pins the config logic.
+    monkeypatch.setattr(module.shutil, "which", lambda name: f"/fake/{name}")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"schema_version": 1, "machine": "primary"})))
 

@@ -505,3 +505,30 @@ def test_claim_reclaim_real_failure(monkeypatch, capsys):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["reclaimed"] is False and "exploded" in out["detail"]
+
+
+@pytest.mark.parametrize("table, why", [
+    (lambda: [__import__("agent_codespaces.live_users", fromlist=["x"]).ProcInfo(
+        4242, 1, ("ssh", "-F", str(__import__("pathlib").Path.home() / ".ssh-manager"
+                                    / "codespace-config" / "cs-a.config"),
+                  "-o", "ControlMaster=yes", "-N", "h"))], "in use"),
+    (lambda: None, "could not be confirmed idle"),
+])
+def test_claim_reclaim_defers_while_codespace_in_use_or_unknown(monkeypatch, capsys, table, why):
+    """Under the held target lock, a live local user (e.g. a detached
+    ControlMaster that outlived the lock writer) -- or an unreadable process
+    census -- defers the unattended reclaim instead of deleting."""
+    from agent_codespaces import live_users
+
+    calls = []
+    monkeypatch.setattr(live_users, "process_table", table)
+    monkeypatch.setattr(live_users, "lock_holder", lambda name, table=None: None)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda name, **k: calls.append("sync") or {"ok": True})
+    monkeypatch.setattr(cpc, "delete_codespace", lambda name, **k: calls.append("delete"))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False and "deferring reclaim" in out["detail"]
+    assert why in out["detail"]
+    assert calls == []
