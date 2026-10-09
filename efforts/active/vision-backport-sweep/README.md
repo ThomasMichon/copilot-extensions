@@ -56,7 +56,15 @@
   `ThomasMichon/copilot-extensions#5842` (claim acceptance releases source
   responsibility before consumer commit) ·
   `ThomasMichon/copilot-extensions#5843` (lost carrier responses can repeat
-  admitted mutating operations)
+  admitted mutating operations) ·
+  `ThomasMichon/copilot-extensions#5851` (source build/cleanup stages mutate
+  repository checkouts) ·
+  `ThomasMichon/copilot-extensions#5852` (ambient installer project inference
+  changes repository hooksPath) ·
+  `ThomasMichon/copilot-extensions#5853` (installation overrides explicit
+  Copilot experimental preference) ·
+  `ThomasMichon/copilot-extensions#5855` (semantic config migration overrides
+  an explicitly disabled idle reaper)
 
 ## Guiding Intent
 
@@ -132,6 +140,10 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
 - Confirmed sibling slug: **"adopter-material-refresh"**
 - Repository identity contract: **"Strict for explicit choices; preserve
   unconfigured ambient defaults"**
+
+Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
+- Source artifacts: **"Strict: stage builds and cleanup outside the source checkout"**
+- Updater orchestration: **"Keep installer phases machine-local; allow intentional higher-level source-sync orchestration"**
 
 ## Plan
 
@@ -431,12 +443,45 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
       the correct contract precisely ("once a version's venv is built it is
       never edited in place"); the gap is conformance across nearly every
       plugin, not a missing or imprecise invariant.
-- [ ] The *rest* of the `plugin-services` behaviors list (self-contained-
-      runtime, single-instance-lease, work-coalescing-singleton, discoverable-
-      local-endpoint, and the remaining ~20 invariants) is **not yet audited**
-      — this slice covered only the cutover/immutable-runtime angle `#5356`
-      originally surfaced. Tracked as a follow-up stretch of this same Phase,
-      not assumed complete.
+- [x] Scoped `install-adopt-boundary` source-effect matrix across thirteen
+      installer-bearing runtimes, including `budget-guidance`, against snapshot
+      `3ea7d5844d61`. Inspected Windows/POSIX entry dispatch and reachable
+      mutation bodies; no installer was executed by the evidence agents.
+      The cited violation-producing files remained unchanged when pulled
+      forward for integration. This is a scoped matrix, not whole-runtime
+      conformance or a fresh all-venue execution result.
+
+      | Runtime | Scoped status | Concrete source effect / coverage | Delta |
+      |---|---|---|---|
+      | agent-worktrees | Violates | `install.ps1:566-627` / `install.sh:438-516` can infer a project from CWD; update reaches `Deploy-GitHooksPath`, whose bodies change repository-local `core.hooksPath` (`3475-3503` / `2413-2428`). Experimental-setting helpers (`3440-3473` / `2529-2561`) overwrite a known false preference. | `#5852`, `#5853`; explicit integration remains supported. |
+      | agent-dispatch | Violates | POSIX install/provision reaches `_pip_install` and `_scrub_payload_build_artifacts` (`install.sh:927-1099`); `1000-1044` deletes source build/egg-info, including src/vendored artifacts. This establishes source-tree deletion, not observed tracked-file deletion. | `#5851`; preserve clean package output in an owned stage. |
+      | agent-vault | Violates | Install/update/provision passes the original plugin source to shared installer-engine cleanup (`install.ps1:737-874`, `install.sh:501-614`); the helper deletes source build/root egg-info after packaging. | `#5851`; source installation stays supported. |
+      | agent-pull-requests | Violates | A build-triggering install passes the source cleanup target (`install.ps1:578-579`, `install.sh:450-459`). A matching completed slot skips the build; no integration action is needed for the source cleanup path. | `#5851`; keep immutable-slot and no-op guarantees. |
+      | agent-codespaces | Partial | Host install/provision writes runtime/adoption-schema/service state; explicit config init/migrate has separate repo effects (`config.py:2176-2220`). Source backend writes and full integration authority were not closed. | No proven new gap; remaining coverage stays open. |
+      | agent-containers | Partial | Runtime/container-schema migration and provider/SSH/source projections target machine state; explicit remote workspace provisioning is a separate capability. Source backend and custom-root/helper effects remain unclosed. | No inferred conformance or missing capability. |
+      | agent-ssh | Violates | Direct source install passes `PluginDir` as `PayloadDirToScrub` (`install.ps1:239-240,938-942`, `install.sh:131`), reaching shared source artifact deletion. Snapshot first-use is a different path. | `#5851`; retain SSH/user-level projection and source install. |
+      | agent-machines | Partial | Host runtime installation differs from explicit `migrate --repo --apply` and default-preview restore (`layout.py:403-470`, CLI dispatch). Cell helpers/backend and full explicit migration authority remain unclosed. | No blanket install-versus-restore equivalence. |
+      | agent-bridge | Violates | Cold deployment/start reaches `migrate_config` (`service_start_cli.py:118-120`); `config.py:252-267` changes an unmarked zero idle TTL to 600. POSIX local package install also scrubs source artifacts (`install.sh:406-436,1411-1420`). | `#5855`, `#5851`; preserve configured cleanup and unconfigured-default handling. |
+      | agent-index | Partial | Service/engine state and user-level registration are distinct from explicit `setup` repo designation (`config.py:625-659`). Cell recovery/cutover and configured source descendants remain unclosed. | No inference from a named repository or contract doc. |
+      | agent-logger | Violates | Local source install/update/provision passes the source cleanup target (`install.ps1:1113`, `install.sh:865-872`) to shared artifact deletion. Configured sync/prune is separately declared source policy, not proof of incidental installer mutation. | `#5851`; retain configured source capability. |
+      | agent-mcp | Partial | Host package/lifecycle work differs from caller-selected `materialize` projection (`materialize.py:372-449`). Cutover/reaper, cell and bridge descendants remain unclosed. | Explicit projection is not ambient adoption. |
+      | budget-guidance | Partial | Host slots/markers/binstubs/user PATH are concrete; shared installer/prerequisite descendants were not exhaustively traced. No register/adopt writer appeared in the inspected CLI. | Search absence is not whole-runtime conformance. |
+
+      Shared artifact deletion is in
+      `libs/installer-engine/installer-engine.ps1:63-69` and `.sh:29-47`;
+      local custom scrubs are listed separately above. Machine snapshots and
+      marketplace staging are not confused with original checkout mutation.
+      Only this invariant was scored. The matrix does not score every package
+      backend, arbitrary configured callback, or lifecycle descendant.
+- [ ] Complete the remaining install/adopt source coverage: namespaced
+      lifecycle helpers, package-backend/prerequisite effects, and
+      ownership/contribution enforcement for explicit integration/projection
+      routes identified as partial above.
+- [ ] Audit the remaining `plugin-services` contracts beyond the completed
+      cutover/immutable-runtime and scoped installation-boundary stretches,
+      including self-contained runtime, all lease/coalescing paths,
+      discovery/exposure, lifecycle registration, and other applicable
+      invariants. Neither table is full Phase 3 completion.
 
 ### Phase 4 — Decide the material-refresh relationship
 - [x] Decide whether user-facing material refresh (docs, Picker preview
@@ -463,6 +508,36 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Installation boundary intent and thirteen-runtime matrix
+- The source-effect comparison exposed a genuine scope question: source
+  packaging cleanup versus higher-level declared anchor synchronization.
+  The operator chose the two literal boundaries recorded in Request.
+  Clarified the standing service vision without removing source installation,
+  clean packaging, explicit integration, or source synchronization.
+- Accepted concrete checkout cleanup, ambient hooksPath, and chosen-setting
+  effects as `#5851`, `#5852`, `#5853`, and `#5855`. Rejected the higher-level
+  updater's separate source-sync stage as an automatic installer violation.
+  Generated-artifact deletion was not represented as observed tracked-file
+  deletion; partial helper/backend routes were not marked conforming.
+- Source citations are pinned and the effect-producing files were unchanged
+  after pull-forward. Historical comment-only issue numbers were not accepted
+  as ownership proof; an apparent migration reference resolved to an unrelated
+  PR. Dedup used current trackers. Existing `#3444` packaging-fidelity work is
+  preserved by staging, not superseded or weakened.
+- Evidence agents executed no installers, tests, live configuration, or remote
+  venue operations. Separate required consumer deployment follow-through is not
+  a conformance test. Documentation structure/whitespace gates are appropriate
+  here; real source-install, configuration, clean-room, and live platform
+  acceptance remains required for the eventual implementation fixes.
+- One fourth-issue posting command stalled without an acknowledgement. Stopped
+  only that owned CLI process, verified non-creation through the authoritative
+  unindexed issue listing, then performed one successful retry (`#5855`);
+  no blind duplicate write or shared-service reset occurred.
+- The original sweep remains Active, with the partial paths, every other
+  applicable service invariant, remaining indexed visions, and global
+  Validation Plan still open. The independent material effort remains Draft
+  and execution-unassigned.
 
 ### 2026-10-09 — Claim acceptance atomicity and carrier retry corrections
 - Traced the actual finalization gate through nonterminal handoff bundles,
