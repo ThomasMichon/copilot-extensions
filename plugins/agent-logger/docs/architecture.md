@@ -118,7 +118,8 @@ caller publishing into a namespaced destination it doesn't already own (e.g.
 rescue/CodeSpace publication, not ordinary machine-rooted session sync) may
 pass the canonical `source_roots.SourceIdentity` (venue kind, provider,
 optional host/repository, and venue name) to `push`. `local`
-enforces it under a dedicated destination lock before any write: a first
+enforces it under a dedicated destination lock held through session, sidecar,
+index and health-metadata writes: a first
 push to an empty leaf claims it (writes a `.archive-source.json` marker), a
 re-push matching that marker is idempotent, and a mismatched marker or an
 existing nonempty leaf with no marker at all is refused rather than silently
@@ -135,6 +136,8 @@ and bounded metadata reader as source discovery, not a separate four-field
 format. Matching claims compare the complete canonical identity and preserve
 existing `legacy_aliases` metadata without rewriting the marker. The resulting
 publication can be read by `load_source_identity_file` and `iter_archive_sources`.
+New claims require the canonical publication key; an existing claim accepts
+only its canonical key or a declared legacy alias, never an inferred one.
 
 Marker publication is atomic and refuses to replace an existing file or link,
 including one created between the initial inspection and publication. Claim

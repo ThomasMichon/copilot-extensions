@@ -1635,72 +1635,197 @@ class FilesystemTarget(Target):
                 ok=False,
                 detail=f"cannot create safe destination for {machine}: {exc}",
             )
-        if (admitted := publication_admission.check_publication_identity(
-            dest, source_identity, supports_identity_admission=self.rescue_compare_and_set
-        )) is not None:
-            return admitted
+        with publication_admission.publication_transaction(
+            dest, source_identity, publication_key=machine,
+            supports_identity_admission=self.rescue_compare_and_set
+        ) as admitted:
+            if admitted is not None:
+                return admitted
 
-        copied = 0
-        nbytes = 0
-        locked_paths: list[Path] = []
-        # batch_mode falls through to the plain copy-with-defer loop below
-        # like an unfiltered push; real repo-scope filtering takes the
-        # atomic rescue path.
-        if include_sessions is not None and not batch_mode:
-            lock_file = dest / ".session-sync-rescue.lock"
-            cleanup_warnings = []
-            try:
-                with sync_lock(lock_file, timeout=30) as acquired:
-                    if not acquired:
-                        return PushResult(
-                            ok=False,
-                            detail=f"destination rescue lock is busy: {lock_file}",
-                        )
-                    for _ in range(2):
-                        pass_copied, pass_bytes, cleanup_warning = (
-                            _replace_selected_sessions(
-                                source,
-                                dest,
-                                include_sessions,
-                                detritus,
+            copied = 0
+            nbytes = 0
+            locked_paths: list[Path] = []
+            # batch_mode falls through to the plain copy-with-defer loop below
+            # like an unfiltered push; real repo-scope filtering takes the
+            # atomic rescue path.
+            if include_sessions is not None and not batch_mode:
+                lock_file = dest / ".session-sync-rescue.lock"
+                cleanup_warnings = []
+                try:
+                    with sync_lock(lock_file, timeout=30) as acquired:
+                        if not acquired:
+                            return PushResult(
+                                ok=False,
+                                detail=f"destination rescue lock is busy: {lock_file}",
                             )
-                        )
-                        copied += pass_copied
-                        nbytes += pass_bytes
-                        if cleanup_warning:
-                            cleanup_warnings.append(cleanup_warning)
-                        latest_detritus = discover_session_detritus(
-                            source,
-                            include_sessions,
-                        )
-                        if latest_detritus.roots == detritus.roots:
+                        for _ in range(2):
+                            pass_copied, pass_bytes, cleanup_warning = (
+                                _replace_selected_sessions(
+                                    source,
+                                    dest,
+                                    include_sessions,
+                                    detritus,
+                                )
+                            )
+                            copied += pass_copied
+                            nbytes += pass_bytes
+                            if cleanup_warning:
+                                cleanup_warnings.append(cleanup_warning)
+                            latest_detritus = discover_session_detritus(
+                                source,
+                                include_sessions,
+                            )
+                            if latest_detritus.roots == detritus.roots:
+                                detritus = latest_detritus
+                                break
                             detritus = latest_detritus
-                            break
-                        detritus = latest_detritus
-                    else:
-                        return PushResult(
-                            ok=False,
-                            detail="source detritus changed during publication; retry",
-                        )
+                        else:
+                            return PushResult(
+                                ok=False,
+                                detail="source detritus changed during publication; retry",
+                            )
+                except OSError as exc:
+                    return PushResult(ok=False, detail=f"session replace failed: {exc}")
+                session_count = _count_sessions(dest)
+                write_sync_meta(
+                    dest,
+                    machine,
+                    self.name,
+                    "ok",
+                    session_count,
+                    excluded_roots=(str(root) for root in detritus.roots),
+                    excluded_file_count=detritus.file_count,
+                    excluded_byte_count=detritus.byte_count,
+                    excluded_measurement_complete=detritus.measurement_complete,
+                )
+                detail = f"-> {dest}"
+                if cleanup_warnings:
+                    detail += (
+                        " (replacement cleanup deferred: "
+                        f"{'; '.join(cleanup_warnings)})"
+                    )
+                return PushResult(
+                    ok=True,
+                    detail=detail,
+                    file_count=copied,
+                    byte_count=nbytes,
+                    excluded_file_count=detritus.file_count,
+                    excluded_byte_count=detritus.byte_count,
+                    excluded_roots=tuple(str(root) for root in detritus.roots),
+                    excluded_measurement_complete=detritus.measurement_complete,
+                )
+            try:
+                destination_detritus = discover_session_detritus(dest, include_sessions)
             except OSError as exc:
-                return PushResult(ok=False, detail=f"session replace failed: {exc}")
+                return PushResult(
+                    ok=False,
+                    detail=f"destination detritus discovery failed: {exc}",
+                )
+            try:
+                cleanup_roots = sorted(
+                    set(detritus.roots) | set(destination_detritus.roots)
+                )
+                for relative in cleanup_roots:
+                    stale = _existing_relative_directory(dest, relative)
+                    if stale is not None:
+                        _remove_path_checked(stale)
+            except OSError as exc:
+                return PushResult(
+                    ok=False,
+                    detail=f"detritus cleanup failed for {relative}: {exc}",
+                )
+            try:
+                marker_name_casefold = publication_admission.PUBLICATION_IDENTITY_MARKER.casefold()
+                source_files = _iter_regular_source_files(source, detritus.roots)
+                for src_file in source_files:
+                    rel = src_file.relative_to(source)
+                    # Marker reserved at the publication root only (see
+                    # publication_admission.check_publication_identity).
+                    # Case-insensitive: a case-insensitive destination
+                    # filesystem resolves any differently-cased spelling to
+                    # the same real marker path.
+                    is_root_marker = (
+                        rel.parent == Path(".")
+                        and src_file.name.casefold() == marker_name_casefold
+                    )
+                    if _is_excluded_name(src_file.name) or is_root_marker:
+                        continue
+                    if not is_session_path_included(rel, include_sessions, batch_mode=batch_mode):
+                        continue
+                    dst_file = dest / rel
+                    try:
+                        _ensure_relative_directory(dest, rel.parent)
+                    except OSError as exc:
+                        return PushResult(ok=False, detail=f"unsafe destination: {exc}")
+                    if _needs_copy(src_file, dst_file):
+                        try:
+                            # Replace by unlink-then-copy, never truncate-in-place. A
+                            # destination written read-only by another syncer (e.g. the
+                            # legacy session-sync's ``.session-origin.json`` provenance
+                            # markers, chmod'd 0444 and surfaced as the DOS read-only
+                            # attribute over CIFS) cannot be truncate-opened, so a plain
+                            # ``copy2`` would raise EPERM and abort the entire push --
+                            # and with it the post-push notify. Unlinking needs only
+                            # write permission on the parent directory, which we have,
+                            # so it succeeds regardless of the file's own mode.
+                            _copy_replace(src_file, dst_file)
+                        except OSError as exc:
+                            if isinstance(exc, (_LockedSourceFile, _SourceChangedDuringCopy)):
+                                locked_paths.append(rel)
+                                continue
+                            return PushResult(
+                                ok=False,
+                                detail=f"copy failed for {rel}: {exc}",
+                            )
+                        copied += 1
+                        nbytes += os.stat(_windows_extended_path(src_file)).st_size
+            except OSError as exc:
+                return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
+
+            try:
+                latest_detritus = discover_session_detritus(source, include_sessions)
+            except OSError as exc:
+                return PushResult(
+                    ok=False,
+                    detail=f"detritus revalidation failed: {exc}",
+                )
+            if latest_detritus.roots != detritus.roots:
+                new_roots = set(latest_detritus.roots) - set(detritus.roots)
+                try:
+                    for relative in sorted(new_roots):
+                        stale = _existing_relative_directory(dest, relative)
+                        if stale is not None:
+                            _remove_path_checked(stale)
+                except OSError as exc:
+                    return PushResult(
+                        ok=False,
+                        detail=f"new detritus cleanup failed for {relative}: {exc}",
+                    )
+                return PushResult(
+                    ok=False,
+                    detail="source detritus changed during publication; retry",
+                )
+
             session_count = _count_sessions(dest)
+            status = "partial" if locked_paths else "ok"
             write_sync_meta(
                 dest,
                 machine,
                 self.name,
-                "ok",
+                status,
                 session_count,
+                deferred_files=(str(path) for path in locked_paths),
                 excluded_roots=(str(root) for root in detritus.roots),
                 excluded_file_count=detritus.file_count,
                 excluded_byte_count=detritus.byte_count,
                 excluded_measurement_complete=detritus.measurement_complete,
             )
             detail = f"-> {dest}"
-            if cleanup_warnings:
+            if locked_paths:
+                examples = ", ".join(str(path) for path in locked_paths[:3])
                 detail += (
-                    " (replacement cleanup deferred: "
-                    f"{'; '.join(cleanup_warnings)})"
+                    f" (skipped {len(locked_paths)} locked file(s), will retry: "
+                    f"{examples})"
                 )
             return PushResult(
                 ok=True,
@@ -1711,132 +1836,9 @@ class FilesystemTarget(Target):
                 excluded_byte_count=detritus.byte_count,
                 excluded_roots=tuple(str(root) for root in detritus.roots),
                 excluded_measurement_complete=detritus.measurement_complete,
+                deferred_sessions=_deferred_session_ids(locked_paths),
+                index_deferred=_index_deferred(locked_paths),
             )
-        try:
-            destination_detritus = discover_session_detritus(dest, include_sessions)
-        except OSError as exc:
-            return PushResult(
-                ok=False,
-                detail=f"destination detritus discovery failed: {exc}",
-            )
-        try:
-            cleanup_roots = sorted(
-                set(detritus.roots) | set(destination_detritus.roots)
-            )
-            for relative in cleanup_roots:
-                stale = _existing_relative_directory(dest, relative)
-                if stale is not None:
-                    _remove_path_checked(stale)
-        except OSError as exc:
-            return PushResult(
-                ok=False,
-                detail=f"detritus cleanup failed for {relative}: {exc}",
-            )
-        try:
-            marker_name_casefold = publication_admission.PUBLICATION_IDENTITY_MARKER.casefold()
-            source_files = _iter_regular_source_files(source, detritus.roots)
-            for src_file in source_files:
-                rel = src_file.relative_to(source)
-                # Marker reserved at the publication root only (see
-                # publication_admission.check_publication_identity).
-                # Case-insensitive: a case-insensitive destination
-                # filesystem resolves any differently-cased spelling to
-                # the same real marker path.
-                is_root_marker = (
-                    rel.parent == Path(".")
-                    and src_file.name.casefold() == marker_name_casefold
-                )
-                if _is_excluded_name(src_file.name) or is_root_marker:
-                    continue
-                if not is_session_path_included(rel, include_sessions, batch_mode=batch_mode):
-                    continue
-                dst_file = dest / rel
-                try:
-                    _ensure_relative_directory(dest, rel.parent)
-                except OSError as exc:
-                    return PushResult(ok=False, detail=f"unsafe destination: {exc}")
-                if _needs_copy(src_file, dst_file):
-                    try:
-                        # Replace by unlink-then-copy, never truncate-in-place. A
-                        # destination written read-only by another syncer (e.g. the
-                        # legacy session-sync's ``.session-origin.json`` provenance
-                        # markers, chmod'd 0444 and surfaced as the DOS read-only
-                        # attribute over CIFS) cannot be truncate-opened, so a plain
-                        # ``copy2`` would raise EPERM and abort the entire push --
-                        # and with it the post-push notify. Unlinking needs only
-                        # write permission on the parent directory, which we have,
-                        # so it succeeds regardless of the file's own mode.
-                        _copy_replace(src_file, dst_file)
-                    except OSError as exc:
-                        if isinstance(exc, (_LockedSourceFile, _SourceChangedDuringCopy)):
-                            locked_paths.append(rel)
-                            continue
-                        return PushResult(
-                            ok=False,
-                            detail=f"copy failed for {rel}: {exc}",
-                        )
-                    copied += 1
-                    nbytes += os.stat(_windows_extended_path(src_file)).st_size
-        except OSError as exc:
-            return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
-
-        try:
-            latest_detritus = discover_session_detritus(source, include_sessions)
-        except OSError as exc:
-            return PushResult(
-                ok=False,
-                detail=f"detritus revalidation failed: {exc}",
-            )
-        if latest_detritus.roots != detritus.roots:
-            new_roots = set(latest_detritus.roots) - set(detritus.roots)
-            try:
-                for relative in sorted(new_roots):
-                    stale = _existing_relative_directory(dest, relative)
-                    if stale is not None:
-                        _remove_path_checked(stale)
-            except OSError as exc:
-                return PushResult(
-                    ok=False,
-                    detail=f"new detritus cleanup failed for {relative}: {exc}",
-                )
-            return PushResult(
-                ok=False,
-                detail="source detritus changed during publication; retry",
-            )
-
-        session_count = _count_sessions(dest)
-        status = "partial" if locked_paths else "ok"
-        write_sync_meta(
-            dest,
-            machine,
-            self.name,
-            status,
-            session_count,
-            deferred_files=(str(path) for path in locked_paths),
-            excluded_roots=(str(root) for root in detritus.roots),
-            excluded_file_count=detritus.file_count,
-            excluded_byte_count=detritus.byte_count,
-            excluded_measurement_complete=detritus.measurement_complete,
-        )
-        detail = f"-> {dest}"
-        if locked_paths:
-            examples = ", ".join(str(path) for path in locked_paths[:3])
-            detail += (
-                f" (skipped {len(locked_paths)} locked file(s), will retry: "
-                f"{examples})"
-            )
-        return PushResult(
-            ok=True,
-            detail=detail,
-            file_count=copied,
-            byte_count=nbytes,
-            excluded_file_count=detritus.file_count,
-            excluded_byte_count=detritus.byte_count,
-            excluded_roots=tuple(str(root) for root in detritus.roots),
-            excluded_measurement_complete=detritus.measurement_complete,
-            deferred_sessions=_deferred_session_ids(locked_paths),
-            index_deferred=_index_deferred(locked_paths),
-        )
 
     def _mark_sync_meta_partial(self, machine: str, reason: str) -> None:
         """Best-effort: downgrade this machine's persisted ``sync-meta.json``

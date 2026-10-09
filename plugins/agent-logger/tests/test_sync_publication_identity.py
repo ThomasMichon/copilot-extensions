@@ -1,623 +1,356 @@
-"""Tests for ``Target.push``'s optional ``source_identity`` admission gate.
-
-See the ``session-intelligence-and-accounting`` effort's identity-admission
-interface: a ``source_identity`` argument requests destination
-identity-admission; the default ``None`` preserves every existing caller's
-behavior unchanged (covered by ``test_sync.py``'s existing push tests, none
-of which pass this argument).
-"""
+"""Admission contracts using real producer identities and archive metadata."""
 
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from agent_logger.sync.targets.filesystem import LocalTarget
-from agent_logger.sync.targets.ingest import IngestTarget
-from agent_logger.sync.targets.publication_admission import (
-    MAX_MARKER_BYTES,
-    PUBLICATION_IDENTITY_MARKER,
-    check_publication_identity,
-    _publication_lock_path,
-)
-from agent_logger.sync.targets.ssh import SshTarget
 from agent_logger.source_publication import load_source_identity_file
 from agent_logger.source_roots import SourceIdentity, iter_archive_sources
+from agent_logger.sync.targets import publication_admission as admission
+from agent_logger.sync.targets.filesystem import LocalTarget, OneDriveTarget
+from agent_logger.sync.targets.ingest import IngestTarget
+from agent_logger.sync.targets.ssh import SshTarget
 
 
-@dataclass
-class _Identity:
-    """Retain earlier regression inputs, serialized by the canonical model."""
-
-    provider: str
-    host: str
-    repository: str
-    venue: str
-
-    def to_dict(self) -> dict[str, str | None]:
-        return SourceIdentity(
-            "container", self.provider, host=self.host, venue_name=self.venue
-        ).to_dict()
+def _identity(provider: str = "copilot") -> SourceIdentity:
+    return SourceIdentity("machine", provider, host="m1")
 
 
-def _claim_worker(dest_str: str, host: str, barrier, queue) -> None:
-    """Module-level (picklable) worker for a real cross-process claim race.
+def _source(root: Path) -> Path:
+    source = root / "copilot"
+    session = source / "session-state" / "abc-123"
+    session.mkdir(parents=True)
+    (session / "events.jsonl").write_text('{"ts":1}\n', encoding="utf-8")
+    return source
 
-    Runs in a genuinely separate OS process -- fcntl/msvcrt advisory locks
-    (``sync_lock``) are per-process, so a same-process thread-only test
-    would not exercise the actual contention this gate serializes.
-    """
-    from agent_logger.sync.targets.publication_admission import (
-        check_publication_identity,
+
+def _metadata(identity: SourceIdentity, aliases=()) -> bytes:
+    return json.dumps({
+        "schema_version": 1, **identity.to_dict(), "legacy_aliases": list(aliases),
+    }).encode()
+
+
+def _claim(dest: Path, identity: SourceIdentity | None = None, **kwargs):
+    identity = _identity() if identity is None else identity
+    return admission.check_publication_identity(
+        dest, identity, publication_key=identity.namespace, **kwargs
     )
 
-    identity = _Identity(
-        provider="github", host=host, repository="example", venue="codespace"
-    )
+
+def _push_worker(source: str, root: str, provider: str, barrier, queue, full: bool) -> None:
+    identity = _identity(provider)
     barrier.wait(timeout=30)
-    result = check_publication_identity(Path(dest_str), identity)
-    queue.put((host, result is None, None if result is None else result.detail))
+    if full:
+        result = LocalTarget({"path": root}).push(
+            Path(source), identity.namespace, {"abc-123"}, source_identity=identity
+        )
+        queue.put((provider, result.ok, result.detail))
+    else:
+        result = _claim(Path(root) / identity.namespace, identity)
+        queue.put((provider, result is None, None if result is None else result.detail))
 
 
-def _make_source(root: Path) -> Path:
-    src = root / "copilot"
-    sess = src / "session-state" / "abc-123"
-    sess.mkdir(parents=True)
-    (sess / "events.jsonl").write_text('{"ts": 1}\n', encoding="utf-8")
-    return src
-
-
-def _push_worker(source: str, root: str, host: str, barrier, queue) -> None:
-    barrier.wait(timeout=30)
-    result = LocalTarget({"path": root}).push(
-        Path(source), "m1", {"abc-123"},
-        source_identity=_Identity("github", host, "example", "codespace"),
-    )
-    queue.put((host, result.ok, result.detail))
-
-
-def test_push_tolerates_destination_created_after_missing_leaf_check(
-    tmp_path: Path, monkeypatch,
-) -> None:
+def _unfiltered_worker(source: str, root: str, paused, release, queue) -> None:
     from agent_logger.sync.targets import filesystem
 
-    source = _make_source(tmp_path)
-    root = tmp_path / "dest"
-    root.mkdir()
-    leaf = root / "m1"
-    original_lstat = filesystem._lstat
-    injected = False
+    original_copy = filesystem._copy_replace
+    stopped = False
 
-    def lstat_with_concurrent_creator(path):
-        nonlocal injected
-        try:
-            return original_lstat(path)
-        except FileNotFoundError:
-            if path == leaf and not injected:
-                leaf.mkdir()
-                injected = True
-            raise
+    def copy_then_pause(src, dst):
+        nonlocal stopped
+        original_copy(src, dst)
+        if paused is not None and "session-state" in dst.parts and not stopped:
+            stopped = True
+            paused.set()
+            if not release.wait(timeout=15):
+                raise OSError("test publisher was not released")
 
-    monkeypatch.setattr(filesystem, "_lstat", lstat_with_concurrent_creator)
-    result = LocalTarget({"path": str(root)}).push(
-        source, "m1", source_identity=_Identity("github", "host-a", "example", "codespace")
+    filesystem._copy_replace = copy_then_pause
+    result = LocalTarget({"path": root}).push(
+        Path(source), "m1", source_identity=_identity()
     )
-    assert injected
-    assert result.ok, result.detail
-    assert (leaf / "session-state" / "abc-123" / "events.jsonl").is_file()
-
-
-@pytest.mark.parametrize("same_identity", [True, False])
-def test_concurrent_end_to_end_pushes_admit_only_matching_identities(
-    tmp_path: Path, same_identity: bool,
-) -> None:
-    import multiprocessing
-
-    source = _make_source(tmp_path)
-    root = tmp_path / "dest"
-    ctx = multiprocessing.get_context("spawn")
-    barrier, queue = ctx.Barrier(2), ctx.Queue()
-    hosts = ("host-a", "host-a" if same_identity else "host-b")
-    processes = [
-        ctx.Process(target=_push_worker, args=(str(source), str(root), host, barrier, queue))
-        for host in hosts
-    ]
-    for process in processes:
-        process.start()
-    for process in processes:
-        process.join(timeout=60)
-        assert process.exitcode == 0
-    outcomes = [queue.get(timeout=5) for _ in processes]
-    winners = [host for host, ok, _ in outcomes if ok]
-    assert len(winners) == (2 if same_identity else 1), outcomes
-    if not same_identity:
-        assert "mismatch" in next(detail for _, ok, detail in outcomes if not ok)
-    marker = json.loads((root / "m1" / PUBLICATION_IDENTITY_MARKER).read_text())
-    assert marker["host"] in winners
-    assert (root / "m1" / "session-state" / "abc-123" / "events.jsonl").is_file()
-
-
-def test_filesystem_push_claims_empty_destination_and_writes_marker(
-    tmp_path: Path,
-) -> None:
-    src = _make_source(tmp_path)
-    dest_root = tmp_path / "dest"
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = LocalTarget({"path": str(dest_root)}).push(
-        src, "m1", source_identity=identity
-    )
-    assert result.ok
-    marker = dest_root / "m1" / ".archive-source.json"
-    assert marker.is_file()
-
-
-def test_filesystem_push_is_idempotent_for_matching_identity(tmp_path: Path) -> None:
-    src = _make_source(tmp_path)
-    dest_root = tmp_path / "dest"
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    target = LocalTarget({"path": str(dest_root)})
-    first = target.push(src, "m1", source_identity=identity)
-    second = target.push(src, "m1", source_identity=identity)
-    assert first.ok
-    assert second.ok
-
-
-def test_filesystem_push_rejects_mismatched_identity(tmp_path: Path) -> None:
-    src = _make_source(tmp_path)
-    dest_root = tmp_path / "dest"
-    target = LocalTarget({"path": str(dest_root)})
-    first = target.push(
-        src,
-        "m1",
-        source_identity=_Identity(
-            provider="github", host="a", repository="r1", venue="codespace"
-        ),
-    )
-    assert first.ok
-    second = target.push(
-        src,
-        "m1",
-        source_identity=_Identity(
-            provider="github", host="b", repository="r1", venue="codespace"
-        ),
-    )
-    assert not second.ok
-    assert "mismatch" in second.detail
-
-
-def test_filesystem_push_rejects_unowned_nonempty_leaf(tmp_path: Path) -> None:
-    src = _make_source(tmp_path)
-    dest_root = tmp_path / "dest"
-    # First push with no identity -- ordinary legacy publication, no marker.
-    target = LocalTarget({"path": str(dest_root)})
-    legacy = target.push(src, "m1")
-    assert legacy.ok
-    # A later identity-admitted push to the same, now-nonempty destination
-    # must refuse rather than silently adopt it.
-    result = target.push(
-        src,
-        "m1",
-        source_identity=_Identity(
-            provider="github", host="a", repository="r1", venue="codespace"
-        ),
-    )
-    assert not result.ok
-    assert "unowned" in result.detail
-
-
-def test_filesystem_push_with_no_identity_is_unaffected(tmp_path: Path) -> None:
-    """``source_identity=None`` (the default) never touches the new marker."""
-    src = _make_source(tmp_path)
-    dest_root = tmp_path / "dest"
-    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
-    assert result.ok
-    assert not (dest_root / "m1" / ".archive-source.json").exists()
-
-
-def test_filesystem_push_never_copies_source_marker_over_ownership_claim(
-    tmp_path: Path,
-) -> None:
-    """A source tree that itself contains a file named like the ownership
-    marker must never overwrite the destination's real claim once admitted
-    -- the marker name is reserved and excluded from the copy loop."""
-    src = _make_source(tmp_path)
-    # Forged/incidental marker-named file sitting in the source root.
-    (src / ".archive-source.json").write_text(
-        '{"provider": "forged", "host": "x", "repository": "y", "venue": "z"}',
-        encoding="utf-8",
-    )
-    dest_root = tmp_path / "dest"
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = LocalTarget({"path": str(dest_root)}).push(
-        src, "m1", source_identity=identity
-    )
-    assert result.ok
-    marker = dest_root / "m1" / ".archive-source.json"
-    recorded = json.loads(marker.read_text(encoding="utf-8"))
-    assert recorded["host"] == "source-host"
-    assert recorded["provider"] == "github"
-
-
-def test_filesystem_push_excludes_a_differently_cased_root_marker(
-    tmp_path: Path,
-) -> None:
-    """A case-insensitive destination filesystem resolves any differently
-    cased spelling of the marker name to the same real path -- the
-    root-marker exclusion must match case-insensitively, not just the
-    exact-case spelling."""
-    src = _make_source(tmp_path)
-    (src / ".ARCHIVE-SOURCE.JSON").write_text(
-        '{"provider": "forged", "host": "x", "repository": "y", "venue": "z"}',
-        encoding="utf-8",
-    )
-    dest_root = tmp_path / "dest"
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = LocalTarget({"path": str(dest_root)}).push(
-        src, "m1", source_identity=identity
-    )
-    assert result.ok
-    marker = dest_root / "m1" / ".archive-source.json"
-    recorded = json.loads(marker.read_text(encoding="utf-8"))
-    assert recorded["host"] == "source-host"
-    assert recorded["provider"] == "github"
-    assert not (dest_root / "m1" / ".ARCHIVE-SOURCE.JSON").is_file()
-
-
-def test_filesystem_push_preserves_a_nested_legitimately_named_file(
-    tmp_path: Path,
-) -> None:
-    """The marker name is reserved only at the publication root -- a
-    legitimately nested file sharing that basename (e.g. captured session
-    content) must still be copied normally."""
-    src = _make_source(tmp_path)
-    nested = src / "session-state" / "abc-123" / ".archive-source.json"
-    nested.write_text('{"captured": true}', encoding="utf-8")
-    dest_root = tmp_path / "dest"
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = LocalTarget({"path": str(dest_root)}).push(
-        src, "m1", source_identity=identity
-    )
-    assert result.ok
-    copied_nested = dest_root / "m1" / "session-state" / "abc-123" / ".archive-source.json"
-    assert copied_nested.is_file()
-    assert copied_nested.read_text(encoding="utf-8") == '{"captured": true}'
-
-
-def test_publication_marker_refuses_a_symlink_at_the_marker_path(
-    tmp_path: Path,
-) -> None:
-    """A symlink sitting at the marker path is never legitimate ownership
-    state -- admission must refuse outright (never follow it to read/write
-    through to wherever it points, even when the linked file holds valid,
-    matching identity JSON), so a race that plants a symlink there can't
-    redirect the claim write to an arbitrary file."""
-    dest = tmp_path / "dest" / "m1"
-    dest.mkdir(parents=True)
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    outside_target = tmp_path / "outside-secret.json"
-    outside_target.write_text(
-        json.dumps(
-            {"schema_version": 1, **identity.to_dict()},
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-    try:
-        (dest / PUBLICATION_IDENTITY_MARKER).symlink_to(outside_target)
-    except OSError:
-        pytest.skip("symlink creation is unavailable")
-
-    result = check_publication_identity(dest, identity)
-    assert result is not None and not result.ok
-
-    marker = dest / PUBLICATION_IDENTITY_MARKER
-    assert marker.is_symlink()  # untouched -- never followed or replaced
-    assert json.loads(outside_target.read_text(encoding="utf-8"))["host"] == "source-host"
-
-
-def test_check_publication_identity_handles_lock_setup_errors(tmp_path: Path) -> None:
-    """A lock-acquisition failure (e.g. an unsafe/unopenable lock path) must
-    surface as a failing ``PushResult``, never an uncaught exception --
-    ``FilesystemTarget.push`` promises ``PushResult`` on every path."""
-    dest = tmp_path / "dest" / "m1"
-    dest.mkdir(parents=True)
-    lock_path = _publication_lock_path(dest)
-    lock_path.mkdir()  # forces sync_lock's open to fail: not a regular file
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = check_publication_identity(dest, identity)
-    assert result is not None and not result.ok
-
-
-def test_check_publication_identity_fails_closed_when_unsupported(
-    tmp_path: Path,
-) -> None:
-    """A target with no cross-writer admission control (e.g. a cloud-synced
-    OneDrive replica) must refuse a ``source_identity`` push outright rather
-    than enforcing a lock that only ever coordinates writers on this host."""
-    dest = tmp_path / "dest" / "m1"
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = check_publication_identity(
-        dest, identity, supports_identity_admission=False
-    )
-    assert result is not None and not result.ok
-    assert not dest.exists()  # never even attempted a claim
-
-
-def test_check_publication_identity_refuses_a_stale_looking_unowned_file(
-    tmp_path: Path,
-) -> None:
-    """A filename pattern alone never establishes ownership."""
-    dest = tmp_path / "dest" / "m1"
-    dest.mkdir(parents=True)
-    stale = dest / f".{PUBLICATION_IDENTITY_MARKER}.deadbeefdeadbeef.tmp"
-    stale.write_text('{"provider": "orphaned"}', encoding="utf-8")
-
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = check_publication_identity(dest, identity)
-    assert result is not None and not result.ok
-    assert "unowned" in result.detail
-    assert stale.read_text(encoding="utf-8") == '{"provider": "orphaned"}'
-    marker = dest / PUBLICATION_IDENTITY_MARKER
-    assert not marker.exists()
-
-
-def test_check_publication_identity_preserves_a_lookalike_unowned_file(
-    tmp_path: Path,
-) -> None:
-    """Lookalike files must be preserved, and the leaf refused as unowned."""
-    dest = tmp_path / "dest" / "m1"
-    dest.mkdir(parents=True)
-    lookalike = dest / f".{PUBLICATION_IDENTITY_MARKER}.notes.tmp"
-    lookalike.write_text("someone else's file", encoding="utf-8")
-
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = check_publication_identity(dest, identity)
-    assert result is not None and not result.ok
-    assert "unowned" in result.detail
-    assert lookalike.is_file()
-    assert lookalike.read_text(encoding="utf-8") == "someone else's file"
-
-
-def test_matching_claim_does_not_authorize_deleting_stale_looking_files(
-    tmp_path: Path,
-) -> None:
-    dest = tmp_path / "dest"
-    identity = _Identity("github", "host-a", "example", "codespace")
-    assert check_publication_identity(dest, identity) is None
-    artifact = dest / f".{PUBLICATION_IDENTITY_MARKER}.deadbeefdeadbeef.tmp"
-    artifact.write_bytes(b"unrelated preserved content")
-
-    assert check_publication_identity(dest, identity) is None
-    assert artifact.read_bytes() == b"unrelated preserved content"
-
-
-@pytest.mark.parametrize("winner", ["different", "matching", "symlink"])
-def test_marker_created_during_publication_is_never_replaced(
-    tmp_path: Path, monkeypatch, winner: str,
-) -> None:
-    from agent_logger.sync.targets import publication_admission as admission
-
-    dest = tmp_path / "dest"
-    identity = _Identity("github", "host-a", "example", "codespace")
-    marker = dest / PUBLICATION_IDENTITY_MARKER
-    outside = tmp_path / "outside.json"
-    recorded = {
-        "schema_version": 1,
-        **identity.to_dict(),
-        "host": "host-a" if winner != "different" else "host-b",
-    }
-    payload = json.dumps(recorded).encode()
-    original_publish = admission._publish_marker_no_replace
-
-    def publish_after_racing_writer(temp_path: Path, marker_path: Path) -> None:
-        if winner == "symlink":
-            outside.write_bytes(payload)
-            try:
-                marker_path.symlink_to(outside)
-            except OSError:
-                pytest.skip("symlink creation is unavailable")
-        else:
-            marker_path.write_bytes(payload)
-        original_publish(temp_path, marker_path)
-
-    monkeypatch.setattr(admission, "_publish_marker_no_replace", publish_after_racing_writer)
-    result = check_publication_identity(dest, identity)
-    if winner == "matching":
-        assert result is None
-    else:
-        assert result is not None and not result.ok
-    assert marker.read_bytes() == payload
-    assert marker.is_symlink() == (winner == "symlink")
-    assert sorted(path.name for path in dest.iterdir()) == [PUBLICATION_IDENTITY_MARKER]
-
-
-def test_claim_failure_cleans_only_its_own_temp_file(tmp_path: Path, monkeypatch) -> None:
-    from agent_logger.sync.targets import publication_admission as admission
-
-    dest = tmp_path / "dest"
-
-    def fail_publish(temp_path: Path, marker_path: Path) -> None:
-        assert temp_path.is_file()
-        raise OSError("injected publication failure")
-
-    monkeypatch.setattr(admission, "_publish_marker_no_replace", fail_publish)
-    result = check_publication_identity(
-        dest, _Identity("github", "host-a", "example", "codespace")
-    )
-    assert result is not None and not result.ok
-    assert "injected publication failure" in result.detail
-    assert not any(dest.iterdir())
-
-
-def test_exclusive_temp_collision_never_deletes_preexisting_file(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    from agent_logger.sync.targets import publication_admission as admission
-
-    dest = tmp_path / "dest"
-    original_open = admission.os.open
-    collided: list[Path] = []
-
-    def open_after_collision(path, flags, mode=0o777, *, dir_fd=None):
-        if flags & os.O_EXCL:
-            entry = Path(path)
-            entry.write_bytes(b"another writer's content")
-            collided.append(entry)
-        return original_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(admission.os, "open", open_after_collision)
-    result = check_publication_identity(
-        dest, _Identity("github", "host-a", "example", "codespace")
-    )
-    assert result is not None and not result.ok
-    assert len(collided) == 1
-    assert collided[0].read_bytes() == b"another writer's content"
-
-
-@pytest.mark.parametrize("replacement", ["regular", "symlink"])
-def test_post_creation_temp_replacement_is_preserved(
-    tmp_path: Path, monkeypatch, replacement: str,
-) -> None:
-    from agent_logger.sync.targets import publication_admission as admission
-
-    dest = tmp_path / "dest"
-    replacement_path = tmp_path / "replacement"
-    replacement_path.write_bytes(b"another writer's content")
-    swapped = []
-
-    def replace_created_temp(temp_path: Path, marker_path: Path) -> None:
-        if replacement == "regular":
-            os.replace(replacement_path, temp_path)
-        else:
-            temp_path.unlink()
-            try:
-                temp_path.symlink_to(replacement_path)
-            except OSError:
-                pytest.skip("symlink creation is unavailable")
-        swapped.append(temp_path)
-        raise OSError("injected replacement after creation")
-
-    monkeypatch.setattr(admission, "_publish_marker_no_replace", replace_created_temp)
-    result = check_publication_identity(
-        dest, SourceIdentity("machine", "copilot", host="source-host")
-    )
-    assert result is not None and not result.ok
-    assert "identity changed" in result.detail
-    assert swapped[0].read_bytes() == b"another writer's content"
-    assert swapped[0].is_symlink() == (replacement == "symlink")
-
-
-def test_windows_marker_move_is_write_through_without_replacement(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    import ctypes
-    from types import SimpleNamespace
-
-    from agent_logger.sync.targets import publication_admission as admission
-
-    calls = []
-
-    def move_file(source, destination, flags):
-        calls.append((source, destination, flags))
-        return True
-
-    monkeypatch.setattr(
-        ctypes, "WinDLL",
-        lambda name, **kwargs: SimpleNamespace(MoveFileExW=move_file),
-        raising=False,
-    )
-    monkeypatch.setattr(admission, "windows_extended_path", lambda path: f"extended:{path}")
-    source, destination = tmp_path / "temp", tmp_path / "marker"
-    admission._move_marker_no_replace_windows(source, destination)
-    assert calls == [(f"extended:{source}", f"extended:{destination}", 0x00000008)]
-
-
-@pytest.mark.parametrize(
-    "identity",
-    [
-        SourceIdentity("machine", "copilot", host="source-host"),
-        SourceIdentity("container", "containers", host="source-host", venue_name="worker"),
-        SourceIdentity("codespace", "github", repository="owner/repo", venue_name="box"),
-    ],
-)
-def test_real_identity_push_round_trips_through_archive_discovery(
-    tmp_path: Path, identity: SourceIdentity,
-) -> None:
-    source = _make_source(tmp_path)
-    root = tmp_path / "archives"
-    result = LocalTarget({"path": str(root)}).push(
-        source, identity.namespace, source_identity=identity
-    )
-    assert result.ok, result.detail
-    marker = root / identity.namespace / PUBLICATION_IDENTITY_MARKER
+    queue.put((result.ok, result.detail))
+
+
+@pytest.mark.parametrize("identity", [
+    _identity(),
+    SourceIdentity("container", "containers", host="source-host", venue_name="worker"),
+    SourceIdentity("codespace", "github", repository="owner/repo", venue_name="box"),
+])
+def test_publication_identity_round_trip(tmp_path: Path, identity: SourceIdentity) -> None:
+    source, root = _source(tmp_path), tmp_path / "archives"
+    target = LocalTarget({"path": str(root)})
+    first = target.push(source, identity.namespace, source_identity=identity)
+    assert first.ok, first.detail
+    marker = root / identity.namespace / admission.PUBLICATION_IDENTITY_MARKER
     assert load_source_identity_file(marker) == identity
+    recorded = marker.read_bytes()
+    assert target.push(source, identity.namespace, source_identity=identity).ok
+    assert marker.read_bytes() == recorded
     discovered = list(iter_archive_sources(root))
     assert len(discovered) == 1
     assert discovered[0].key == identity.namespace
     assert discovered[0].identity == identity
 
 
-def test_matching_canonical_marker_preserves_legacy_aliases(tmp_path: Path) -> None:
-    identity = SourceIdentity("container", "containers", host="source-host", venue_name="worker")
-    source = _make_source(tmp_path)
+@pytest.mark.parametrize("key", ["m1", "other.containers/worker"])
+def test_publication_identity_rejects_new_noncanonical_key(tmp_path: Path, key: str) -> None:
+    identity = SourceIdentity("container", "containers", host="host", venue_name="worker")
     root = tmp_path / "archives"
-    target = LocalTarget({"path": str(root)})
-    first = target.push(source, identity.namespace, source_identity=identity)
-    assert first.ok, first.detail
-    marker = root / identity.namespace / PUBLICATION_IDENTITY_MARKER
-    data = {"schema_version": 1, **identity.to_dict(), "legacy_aliases": ["old-worker"]}
-    encoded = json.dumps(data).encode()
-    marker.write_bytes(encoded)
+    result = LocalTarget({"path": str(root)}).push(
+        _source(tmp_path), key, source_identity=identity
+    )
+    assert not result.ok
+    assert "publication key" in result.detail
+    assert not (root / key / admission.PUBLICATION_IDENTITY_MARKER).exists()
 
-    result = target.push(source, identity.namespace, source_identity=identity)
+
+@pytest.mark.parametrize("key", ["m1", "legacy-host"])
+def test_publication_identity_preserves_declared_aliases(tmp_path: Path, key: str) -> None:
+    identity = _identity()
+    root = tmp_path / "archives"
+    dest = root / key
+    dest.mkdir(parents=True)
+    marker = dest / admission.PUBLICATION_IDENTITY_MARKER
+    encoded = _metadata(identity, ["legacy-host"])
+    marker.write_bytes(encoded)
+    result = LocalTarget({"path": str(root)}).push(
+        _source(tmp_path), key, source_identity=identity
+    )
     assert result.ok, result.detail
     assert marker.read_bytes() == encoded
-    assert list(iter_archive_sources(root))[0].legacy_aliases == ("old-worker",)
+    source = list(iter_archive_sources(root))[0]
+    assert source.identity == identity
+    assert source.legacy_aliases == ("legacy-host",)
 
 
-def test_same_short_repository_cannot_claim_another_full_repository(
-    tmp_path: Path,
-) -> None:
+def test_publication_identity_rejects_undeclared_existing_alias(tmp_path: Path) -> None:
+    dest = tmp_path / "wrong"
+    dest.mkdir()
+    marker = dest / admission.PUBLICATION_IDENTITY_MARKER
+    encoded = _metadata(_identity(), ["legacy-host"])
+    marker.write_bytes(encoded)
+    result = admission.check_publication_identity(dest, _identity(), publication_key="wrong")
+    assert result is not None and not result.ok
+    assert "namespace/aliases" in result.detail
+    assert marker.read_bytes() == encoded
+
+
+def test_publication_identity_full_repository_collision(tmp_path: Path) -> None:
     first = SourceIdentity("codespace", "github", repository="owner-a/repo", venue_name="box")
     second = SourceIdentity("codespace", "github", repository="owner-b/repo", venue_name="box")
     assert first.namespace == second.namespace
-    source = _make_source(tmp_path)
-    root = tmp_path / "archives"
-    target = LocalTarget({"path": str(root)})
+    target = LocalTarget({"path": str(tmp_path / "archives")})
+    source = _source(tmp_path)
     assert target.push(source, first.namespace, source_identity=first).ok
     result = target.push(source, second.namespace, source_identity=second)
     assert not result.ok
     assert "mismatch" in result.detail
-    assert load_source_identity_file(root / first.namespace / PUBLICATION_IDENTITY_MARKER) == first
 
 
-def test_empty_leaf_check_stops_after_first_child(tmp_path: Path, monkeypatch) -> None:
-    from agent_logger.sync.targets import publication_admission as admission
+def test_publication_identity_legacy_none_unchanged(tmp_path: Path) -> None:
+    root = tmp_path / "archives"
+    result = LocalTarget({"path": str(root)}).push(_source(tmp_path), "m1")
+    assert result.ok
+    assert not (root / "m1" / admission.PUBLICATION_IDENTITY_MARKER).exists()
 
+
+@pytest.mark.parametrize("name", [
+    "existing.txt",
+    f".{admission.PUBLICATION_IDENTITY_MARKER}.deadbeefdeadbeef.tmp",
+    f".{admission.PUBLICATION_IDENTITY_MARKER}.notes.tmp",
+])
+def test_publication_identity_refuses_unowned_content(tmp_path: Path, name: str) -> None:
+    dest = tmp_path / "m1"
+    dest.mkdir()
+    content = dest / name
+    content.write_bytes(b"not owned")
+    result = _claim(dest)
+    assert result is not None and not result.ok
+    assert "unowned" in result.detail
+    assert content.read_bytes() == b"not owned"
+    assert not (dest / admission.PUBLICATION_IDENTITY_MARKER).exists()
+
+
+def test_publication_identity_does_not_clean_unknown_claim_artifacts(tmp_path: Path) -> None:
+    dest = tmp_path / "m1"
+    assert _claim(dest) is None
+    content = dest / f".{admission.PUBLICATION_IDENTITY_MARKER}.deadbeefdeadbeef.tmp"
+    content.write_bytes(b"preserved")
+    assert _claim(dest) is None
+    assert content.read_bytes() == b"preserved"
+
+
+@pytest.mark.parametrize("name", [".archive-source.json", ".ARCHIVE-SOURCE.JSON"])
+def test_publication_identity_root_marker_excluded_but_nested_file_copied(
+    tmp_path: Path, name: str,
+) -> None:
+    source, root = _source(tmp_path), tmp_path / "archives"
+    (source / name).write_bytes(b"forged root marker")
+    nested = source / "session-state" / "abc-123" / name
+    nested.write_bytes(b"legitimate nested content")
+    result = LocalTarget({"path": str(root)}).push(
+        source, "m1", source_identity=_identity()
+    )
+    assert result.ok, result.detail
+    assert load_source_identity_file(root / "m1" / admission.PUBLICATION_IDENTITY_MARKER) == _identity()
+    assert (root / "m1" / "session-state" / "abc-123" / name).read_bytes() == nested.read_bytes()
+
+
+@pytest.mark.parametrize("payload", [
+    b"{}",
+    b"null",
+    b'{"schema_version":true}',
+    b'{"schema_version":2}',
+    b"[" * 10_000 + b"]" * 10_000,
+    b"x" * (admission.MAX_MARKER_BYTES + 1),
+    _metadata(_identity(), ["../escape"]),
+])
+def test_publication_identity_refuses_invalid_marker(tmp_path: Path, payload: bytes) -> None:
+    dest = tmp_path / "m1"
+    dest.mkdir()
+    marker = dest / admission.PUBLICATION_IDENTITY_MARKER
+    marker.write_bytes(payload)
+    result = _claim(dest)
+    assert result is not None and not result.ok
+    assert marker.read_bytes() == payload
+
+
+def test_publication_identity_refuses_marker_symlink(tmp_path: Path) -> None:
+    dest = tmp_path / "m1"
+    dest.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_bytes(_metadata(_identity()))
+    marker = dest / admission.PUBLICATION_IDENTITY_MARKER
+    try:
+        marker.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    result = _claim(dest)
+    assert result is not None and not result.ok
+    assert marker.is_symlink()
+    assert outside.read_bytes() == _metadata(_identity())
+
+
+@pytest.mark.parametrize("winner", ["matching", "different", "symlink"])
+def test_publication_identity_never_replaces_raced_marker(tmp_path: Path, monkeypatch, winner) -> None:
+    dest = tmp_path / "m1"
+    marker = dest / admission.PUBLICATION_IDENTITY_MARKER
+    identity = _identity("other" if winner == "different" else "copilot")
+    payload = _metadata(identity)
+    outside = tmp_path / "outside"
+    original_publish = admission._publish_marker_no_replace
+
+    def race(temp, final):
+        if winner == "symlink":
+            outside.write_bytes(payload)
+            try:
+                final.symlink_to(outside)
+            except OSError:
+                pytest.skip("symlinks unavailable")
+        else:
+            final.write_bytes(payload)
+        original_publish(temp, final)
+
+    monkeypatch.setattr(admission, "_publish_marker_no_replace", race)
+    result = _claim(dest)
+    assert (result is None) == (winner == "matching")
+    assert marker.read_bytes() == payload
+    assert marker.is_symlink() == (winner == "symlink")
+    assert sorted(path.name for path in dest.iterdir()) == [admission.PUBLICATION_IDENTITY_MARKER]
+
+
+def test_publication_identity_failed_write_cleans_created_temp(tmp_path: Path, monkeypatch) -> None:
+    dest = tmp_path / "m1"
+
+    def fail(temp, final):
+        raise OSError("injected publication failure")
+
+    monkeypatch.setattr(admission, "_publish_marker_no_replace", fail)
+    result = _claim(dest)
+    assert result is not None and not result.ok
+    assert "injected publication failure" in result.detail
+    assert not any(dest.iterdir())
+
+
+def test_publication_identity_exclusive_collision_preserved(tmp_path: Path, monkeypatch) -> None:
+    original_open = admission.os.open
+    collided = []
+
+    def race(path, flags, mode=0o777, *, dir_fd=None):
+        if flags & os.O_EXCL:
+            entry = Path(path)
+            entry.write_bytes(b"another writer")
+            collided.append(entry)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(admission.os, "open", race)
+    result = _claim(tmp_path / "m1")
+    assert result is not None and not result.ok
+    assert len(collided) == 1
+    assert collided[0].read_bytes() == b"another writer"
+
+
+@pytest.mark.parametrize("replacement", ["regular", "symlink"])
+def test_publication_identity_post_creation_replacement_preserved(
+    tmp_path: Path, monkeypatch, replacement,
+) -> None:
+    outside = tmp_path / "replacement"
+    outside.write_bytes(b"another writer")
+    swapped = []
+
+    def race(temp, final):
+        if replacement == "regular":
+            os.replace(outside, temp)
+        else:
+            temp.unlink()
+            try:
+                temp.symlink_to(outside)
+            except OSError:
+                pytest.skip("symlinks unavailable")
+        swapped.append(temp)
+        raise OSError("injected replacement")
+
+    monkeypatch.setattr(admission, "_publish_marker_no_replace", race)
+    result = _claim(tmp_path / "m1")
+    assert result is not None and not result.ok
+    assert "identity changed" in result.detail
+    assert swapped[0].read_bytes() == b"another writer"
+
+
+def test_publication_identity_lock_setup_failure(tmp_path: Path) -> None:
+    dest = tmp_path / "m1"
+    admission._publication_lock_path(dest).mkdir()
+    result = _claim(dest)
+    assert result is not None and not result.ok
+    assert "lock failed" in result.detail
+
+
+def test_publication_identity_unsupported_helper_no_write(tmp_path: Path) -> None:
+    dest = tmp_path / "m1"
+    result = _claim(dest, supports_identity_admission=False)
+    assert result is not None and not result.ok
+    assert not dest.exists()
+
+
+@pytest.mark.parametrize("target", [
+    OneDriveTarget({"root": "/unused"}),
+    SshTarget({"host": "example.com", "remote_path": "/unused"}),
+    IngestTarget({"url": "rsync://example.com/module"}),
+])
+def test_publication_identity_unsupported_transport(tmp_path: Path, target, monkeypatch) -> None:
+    if isinstance(target, OneDriveTarget):
+        monkeypatch.setattr(target, "_root", lambda: tmp_path / "onedrive")
+    result = target.push(_source(tmp_path), "m1", source_identity=_identity())
+    assert not result.ok
+
+
+def test_publication_identity_empty_scan_is_bounded(tmp_path: Path, monkeypatch) -> None:
     class Entries:
         def __enter__(self):
             return self
@@ -630,7 +363,7 @@ def test_empty_leaf_check_stops_after_first_child(tmp_path: Path, monkeypatch) -
 
         def __next__(self):
             if getattr(self, "visited", False):
-                raise AssertionError("emptiness check enumerated more than one child")
+                raise AssertionError("enumerated more than one child")
             self.visited = True
             return object()
 
@@ -638,51 +371,154 @@ def test_empty_leaf_check_stops_after_first_child(tmp_path: Path, monkeypatch) -
     assert admission._destination_has_content(tmp_path)
 
 
-def test_maximum_length_identity_uses_bounded_lock_name(tmp_path: Path) -> None:
+def test_publication_identity_maximum_component(tmp_path: Path) -> None:
+    from agent_logger.sync.provenance import windows_extended_path
+
     identity = SourceIdentity("machine", "copilot", host="m" * 255)
-    source = _make_source(tmp_path)
     root = tmp_path / "archives"
     result = LocalTarget({"path": str(root)}).push(
-        source, identity.namespace, source_identity=identity
+        _source(tmp_path), identity.namespace, source_identity=identity
     )
     assert result.ok, result.detail
-    lock_path = _publication_lock_path(root / identity.namespace)
-    assert len(lock_path.name.encode()) < 255
-    assert load_source_identity_file(
-        root / identity.namespace / PUBLICATION_IDENTITY_MARKER
-    ) == identity
+    assert len(admission._publication_lock_path(root / identity.namespace).name.encode()) < 255
+    marker = Path(windows_extended_path(root / identity.namespace / admission.PUBLICATION_IDENTITY_MARKER))
+    assert load_source_identity_file(marker) == identity
 
 
-def test_new_claim_directory_chain_flushes_each_parent(tmp_path: Path, monkeypatch) -> None:
+def test_publication_identity_new_parents_flushed(tmp_path: Path, monkeypatch) -> None:
     from agent_logger.sync import provenance
 
     flushed = []
-    original_fsync = provenance.fsync_directory
+    original = provenance.fsync_directory
 
-    def recording_fsync(path):
+    def record(path):
         flushed.append(path)
-        original_fsync(path)
+        original(path)
 
-    monkeypatch.setattr(provenance, "fsync_directory", recording_fsync)
-    root = tmp_path / "archives"
-    group = root / "source-host.containers"
-    dest = group / "worker"
+    monkeypatch.setattr(provenance, "fsync_directory", record)
     identity = SourceIdentity("container", "containers", host="source-host", venue_name="worker")
-    assert check_publication_identity(dest, identity) is None
+    root = tmp_path / "archives"
+    assert _claim(root / identity.namespace, identity) is None
     assert tmp_path in flushed
     assert root in flushed
-    assert group in flushed
+    assert root / "source-host.containers" in flushed
+
+
+def test_publication_identity_creation_interleaving(tmp_path: Path, monkeypatch) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    root = tmp_path / "archives"
+    root.mkdir()
+    leaf = root / "m1"
+    original = filesystem._lstat
+    injected = []
+
+    def race(path):
+        try:
+            return original(path)
+        except FileNotFoundError:
+            if path == leaf and not injected:
+                leaf.mkdir()
+                injected.append(path)
+            raise
+
+    monkeypatch.setattr(filesystem, "_lstat", race)
+    result = LocalTarget({"path": str(root)}).push(
+        _source(tmp_path), "m1", source_identity=_identity()
+    )
+    assert injected
+    assert result.ok, result.detail
+
+
+@pytest.mark.parametrize("full,same", [(False, False), (True, False), (True, True)])
+def test_publication_identity_cross_process_serialization(tmp_path: Path, full, same) -> None:
+    root, source = tmp_path / "archives", _source(tmp_path)
+    ctx = multiprocessing.get_context("spawn")
+    barrier, queue = ctx.Barrier(2), ctx.Queue()
+    providers = ("copilot-a", "copilot-a" if same else "copilot-b")
+    processes = [
+        ctx.Process(target=_push_worker, args=(str(source), str(root), p, barrier, queue, full))
+        for p in providers
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=60)
+        assert process.exitcode == 0
+    outcomes = [queue.get(timeout=5) for _ in processes]
+    winners = [provider for provider, ok, _ in outcomes if ok]
+    assert len(winners) == (2 if same else 1), outcomes
+    if not same:
+        assert "mismatch" in next(detail for _, ok, detail in outcomes if not ok)
+    marker = root / "m1" / admission.PUBLICATION_IDENTITY_MARKER
+    assert load_source_identity_file(marker).provider in winners
+
+
+def test_publication_identity_lock_covers_unfiltered_payload_writes(tmp_path: Path) -> None:
+    from agent_logger.sync.lock import sync_lock
+
+    first, second = _source(tmp_path / "first"), _source(tmp_path / "second")
+    for source, label, timestamp in ((first, "first", 100), (second, "second", 200)):
+        session = source / "session-state" / "abc-123"
+        (session / "events.jsonl").write_text(json.dumps({"snapshot": label}) + "\n")
+        (session / "workspace.yaml").write_text(label)
+        for path in session.iterdir():
+            os.utime(path, (timestamp, timestamp))
+    root = tmp_path / "archives"
+    ctx = multiprocessing.get_context("spawn")
+    paused, release, queue = ctx.Event(), ctx.Event(), ctx.Queue()
+    publisher = ctx.Process(
+        target=_unfiltered_worker, args=(str(first), str(root), paused, release, queue)
+    )
+    follower = ctx.Process(
+        target=_unfiltered_worker, args=(str(second), str(root), None, release, queue)
+    )
+    publisher.start()
+    try:
+        assert paused.wait(timeout=15)
+        with sync_lock(admission._publication_lock_path(root / "m1"), wait=False) as acquired:
+            assert not acquired, "payload writer released its identity lock too early"
+        follower.start()
+    finally:
+        release.set()
+        publisher.join(timeout=15)
+        if follower.pid is not None:
+            follower.join(timeout=15)
+    assert publisher.exitcode == follower.exitcode == 0
+    outcomes = [queue.get(timeout=5) for _ in range(2)]
+    assert all(ok for ok, _ in outcomes), outcomes
+    session = root / "m1" / "session-state" / "abc-123"
+    assert json.loads((session / "events.jsonl").read_text())["snapshot"] == "second"
+    assert (session / "workspace.yaml").read_text() == "second"
+
+
+def test_publication_identity_windows_move_flags(tmp_path: Path, monkeypatch) -> None:
+    import ctypes
+    from types import SimpleNamespace
+
+    calls = []
+
+    def move(source, destination, flags):
+        calls.append((source, destination, flags))
+        return True
+
+    monkeypatch.setattr(
+        ctypes, "WinDLL", lambda name, **kwargs: SimpleNamespace(MoveFileExW=move), raising=False
+    )
+    monkeypatch.setattr(admission, "windows_extended_path", lambda path: f"extended:{path}")
+    source, destination = tmp_path / "temp", tmp_path / "marker"
+    admission._move_marker_no_replace_windows(source, destination)
+    assert calls == [(f"extended:{source}", f"extended:{destination}", 0x00000008)]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows lock opener")
-def test_windows_lock_opener_uses_extended_path(tmp_path: Path, monkeypatch) -> None:
+def test_publication_identity_windows_lock_path(tmp_path: Path, monkeypatch) -> None:
     import ctypes
 
     from agent_logger.sync import lock
     from agent_logger.sync.provenance import windows_extended_path
 
-    original_dll = ctypes.WinDLL
-    paths = []
+    original_dll, paths = ctypes.WinDLL, []
 
     class KernelProxy:
         def __init__(self, kernel):
@@ -700,158 +536,20 @@ def test_windows_lock_opener_uses_extended_path(tmp_path: Path, monkeypatch) -> 
             return getattr(self.kernel, name)
 
     monkeypatch.setattr(
-        ctypes, "WinDLL",
-        lambda name, **kwargs: KernelProxy(original_dll(name, **kwargs)),
+        ctypes, "WinDLL", lambda name, **kwargs: KernelProxy(original_dll(name, **kwargs))
     )
-    target = tmp_path / "lock"
-    with lock._open_lock_file(target):
+    path = tmp_path / "lock"
+    with lock._open_lock_file(path):
         pass
-    assert paths == [windows_extended_path(target)]
+    assert paths == [windows_extended_path(path)]
 
 
-def test_onedrive_target_fails_closed_for_identity_admission(tmp_path: Path) -> None:
-    """``OneDriveTarget`` inherits the filesystem admission gate but cannot
-    serialize cross-writer publication (cloud sync, not this process) --
-    ``Target.push`` must fail closed end-to-end, not just the helper."""
-    from agent_logger.sync.targets.filesystem import OneDriveTarget
-
-    src = _make_source(tmp_path)
-    onedrive_root = tmp_path / "OneDrive"
-    onedrive_root.mkdir()
-    target = OneDriveTarget({"root": str(onedrive_root)})
-    result = target.push(
-        src,
-        "m1",
-        source_identity=_Identity(
-            provider="github", host="a", repository="r1", venue="codespace"
-        ),
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows MAX_PATH contract")
+def test_publication_identity_windows_long_path(tmp_path: Path) -> None:
+    identity = SourceIdentity("machine", "copilot", host="m" * 220)
+    root = tmp_path / ("d" * 48)
+    result = LocalTarget({"path": str(root)}).push(
+        _source(tmp_path), identity.namespace, source_identity=identity
     )
-    assert not result.ok
-    dest = onedrive_root / "Apps" / "agent-logger" / "sessions" / "m1"
-    assert not (dest / ".archive-source.json").exists()
-    if dest.exists():
-        assert not any(dest.iterdir())  # empty: never copied, never claimed
-
-
-def test_check_publication_identity_rejects_an_oversized_existing_marker(
-    tmp_path: Path,
-) -> None:
-    """A pre-existing, destination-controlled marker larger than the bound
-    must fail closed, never be read to EOF (the admission target is by
-    definition a destination the caller does not yet own)."""
-    dest = tmp_path / "dest" / "m1"
-    dest.mkdir(parents=True)
-    oversized = "x" * (MAX_MARKER_BYTES + 1)
-    (dest / PUBLICATION_IDENTITY_MARKER).write_text(oversized, encoding="utf-8")
-
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = check_publication_identity(dest, identity)
-    assert result is not None and not result.ok
-    assert "exceeds" in result.detail
-
-
-def test_check_publication_identity_fails_closed_on_deeply_nested_marker(
-    tmp_path: Path,
-) -> None:
-    """A destination-controlled marker can be deeply nested JSON within the
-    size bound -- ``json.loads`` can raise ``RecursionError`` for that, which
-    must still fail closed with a ``PushResult``, never escape as an
-    uncaught exception."""
-    dest = tmp_path / "dest" / "m1"
-    dest.mkdir(parents=True)
-    depth = 10_000
-    nested = "[" * depth + "]" * depth
-    assert len(nested) <= MAX_MARKER_BYTES
-    (dest / PUBLICATION_IDENTITY_MARKER).write_text(nested, encoding="utf-8")
-
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = check_publication_identity(dest, identity)
-    assert result is not None and not result.ok
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
-def test_filesystem_push_claims_a_long_destination_path_with_identity(
-    tmp_path: Path,
-) -> None:
-    """Admission's own filesystem operations (mkdir/scan/unlink/replace)
-    must go through the same extended-path handling as the rest of the
-    filesystem target, so a claim past Windows' MAX_PATH still lands."""
-    src = _make_source(tmp_path)
-    dest_root = tmp_path / ("d" * 48)
-    machine_dir = "m" + ("x" * 220)
-    identity = _Identity(
-        provider="github", host="source-host", repository="example", venue="codespace"
-    )
-    result = LocalTarget({"path": str(dest_root)}).push(
-        src, machine_dir, source_identity=identity
-    )
+    assert len(str(root / identity.namespace)) > 260
     assert result.ok, result.detail
-    assert len(str(dest_root / machine_dir)) >= 260
-    from agent_logger.sync import provenance
-
-    marker = dest_root / machine_dir / PUBLICATION_IDENTITY_MARKER
-    with open(provenance._windows_extended_path(marker), encoding="utf-8") as f:
-        assert json.loads(f.read())["host"] == "source-host"
-
-
-def test_ssh_target_rejects_identity_admission() -> None:
-    result = SshTarget({"host": "example.com", "remote_path": "/x"}).push(
-        Path("/tmp/nonexistent-src"),
-        "m1",
-        source_identity=_Identity(
-            provider="github", host="a", repository="r1", venue="codespace"
-        ),
-    )
-    assert not result.ok
-    assert "unsupported" in result.detail
-
-
-def test_ingest_target_rejects_identity_admission() -> None:
-    result = IngestTarget({"url": "rsync://example.com/mod"}).push(
-        Path("/tmp/nonexistent-src"),
-        "m1",
-        source_identity=_Identity(
-            provider="github", host="a", repository="r1", venue="codespace"
-        ),
-    )
-    assert not result.ok
-    assert "unsupported" in result.detail
-
-
-def test_check_publication_identity_serializes_across_processes(
-    tmp_path: Path,
-) -> None:
-    """Two real OS processes racing different identities against the same
-    empty leaf must produce exactly one winner, with the marker matching
-    that winner -- proving the OS-level lock contract, not just sequential
-    in-process calls."""
-    import multiprocessing
-
-    dest = tmp_path / "dest" / "m1"
-    ctx = multiprocessing.get_context("spawn")
-    barrier = ctx.Barrier(2)
-    queue: multiprocessing.Queue = ctx.Queue()
-    procs = [
-        ctx.Process(target=_claim_worker, args=(str(dest), host, barrier, queue))
-        for host in ("host-a", "host-b")
-    ]
-    for proc in procs:
-        proc.start()
-    for proc in procs:
-        proc.join(timeout=60)
-        assert proc.exitcode == 0
-
-    outcomes = [queue.get(timeout=5) for _ in range(2)]
-    winners = [host for host, ok, _ in outcomes if ok]
-    losers = [(host, detail) for host, ok, detail in outcomes if not ok]
-    assert len(winners) == 1, outcomes
-    assert len(losers) == 1, outcomes
-    assert "mismatch" in losers[0][1]
-
-    marker = dest / PUBLICATION_IDENTITY_MARKER
-    assert marker.is_file()
-    assert json.loads(marker.read_text(encoding="utf-8"))["host"] == winners[0]

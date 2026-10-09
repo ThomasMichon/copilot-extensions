@@ -18,7 +18,10 @@ import hashlib
 import json
 import os
 import stat
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
@@ -28,6 +31,9 @@ from agent_logger.sync.provenance import (
     windows_extended_path,
 )
 from agent_logger.sync.targets.base import PushResult, SourceIdentityLike
+
+if TYPE_CHECKING:
+    from agent_logger.source_roots import SourceIdentity
 
 #: ``O_NOFOLLOW`` has no Windows equivalent; the temp-write path below still
 #: gets Windows-safe no-follow semantics for free because it only ever opens
@@ -72,7 +78,7 @@ def _publication_lock_path(dest: Path) -> Path:
     return dest.parent / f".publication-admission-{hashlib.sha256(key).hexdigest()}.lock"
 
 
-def _read_marker(marker_path: Path) -> dict[str, str | None] | None:
+def _read_marker(marker_path: Path) -> tuple[SourceIdentity, tuple[str, ...]] | None:
     """Read through the canonical bounded, schema-validating no-link reader."""
     from agent_logger.source_roots import read_source_metadata
 
@@ -81,8 +87,8 @@ def _read_marker(marker_path: Path) -> dict[str, str | None] | None:
         io_path.lstat()
     except FileNotFoundError:
         return None
-    identity, _, _ = read_source_metadata(io_path)
-    return identity.to_dict()
+    identity, aliases, _ = read_source_metadata(io_path)
+    return identity, aliases
 
 
 def _move_marker_no_replace_windows(temp_path: Path, marker_path: Path) -> None:
@@ -112,29 +118,43 @@ def _publish_marker_no_replace(temp_path: Path, marker_path: Path) -> None:
         fsync_directory(marker_path.parent)
 
 
-def _resolve_post_race_marker(marker_path: Path, incoming: dict) -> PushResult | None:
+def _check_existing_claim(
+    existing: tuple[SourceIdentity, tuple[str, ...]] | None,
+    incoming: SourceIdentity,
+    publication_key: str,
+    marker_path: Path,
+) -> PushResult | None:
+    if existing is None:
+        return PushResult(ok=False, detail=f"publication marker disappeared: {marker_path}")
+    recorded, aliases = existing
+    normalize = str.casefold if os.name == "nt" else str
+    allowed = {normalize(key) for key in (recorded.namespace, *aliases)}
+    if normalize(publication_key) not in allowed:
+        return PushResult(ok=False, detail="publication key disagrees with recorded namespace/aliases")
+    if recorded == incoming:
+        return None
+    return PushResult(ok=False, detail=f"publication identity mismatch at {marker_path}")
+
+
+def _resolve_post_race_marker(
+    marker_path: Path, incoming: SourceIdentity, publication_key: str,
+) -> PushResult | None:
     try:
         existing = _read_marker(marker_path)
     except (OSError, ValueError, RecursionError) as exc:
         return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
-    if existing == incoming:
-        return None  # the race's winner happened to claim the same identity
-    return PushResult(
-        ok=False,
-        detail=(
-            f"publication identity mismatch at {marker_path}: "
-            f"destination already claimed by {existing}"
-        ),
-    )
+    return _check_existing_claim(existing, incoming, publication_key, marker_path)
 
 
-def check_publication_identity(
+@contextmanager
+def publication_transaction(
     dest: Path,
     identity: SourceIdentityLike | None,
     *,
+    publication_key: str,
     supports_identity_admission: bool = True,
-) -> PushResult | None:
-    """Enforce destination identity-admission before any write under *dest*.
+) -> Iterator[PushResult | None]:
+    """Hold destination admission and payload publication under one lock.
 
     Returns ``None`` when the push may proceed: legacy ``identity=None``
     behavior, a first claim of an empty destination leaf, or an idempotent
@@ -158,26 +178,46 @@ def check_publication_identity(
     adopted.
     """
     if identity is None:
-        return None
+        yield None
+        return
     if not supports_identity_admission:
-        return PushResult(
+        yield PushResult(
             ok=False,
             detail=(
                 f"{dest} target cannot enforce cross-writer identity admission "
                 "(no receiver/cloud-side atomic admission for this transport yet)"
             ),
         )
+        return
     lock_file = _publication_lock_path(dest)
-    try:
-        with sync_lock(lock_file, timeout=30) as acquired:
-            return _admit_under_lock(dest, identity, lock_file, acquired)
-    except OSError as exc:
-        return PushResult(ok=False, detail=f"publication admission lock failed: {exc}")
+    with ExitStack() as stack:
+        try:
+            acquired = stack.enter_context(sync_lock(lock_file, timeout=30))
+            failure = _admit_under_lock(dest, identity, publication_key, lock_file, acquired)
+        except OSError as exc:
+            failure = PushResult(ok=False, detail=f"publication admission lock failed: {exc}")
+        yield failure
+
+
+def check_publication_identity(
+    dest: Path,
+    identity: SourceIdentityLike | None,
+    *,
+    publication_key: str,
+    supports_identity_admission: bool = True,
+) -> PushResult | None:
+    """Admit a marker only; payload writers must use publication_transaction."""
+    with publication_transaction(
+        dest, identity, publication_key=publication_key,
+        supports_identity_admission=supports_identity_admission,
+    ) as failure:
+        return failure
 
 
 def _admit_under_lock(
     dest: Path,
     identity: SourceIdentityLike,
+    publication_key: str,
     lock_file: Path,
     acquired: bool,
 ) -> PushResult | None:
@@ -186,13 +226,15 @@ def _admit_under_lock(
             ok=False,
             detail=f"publication admission lock is busy: {lock_file}",
         )
-    from agent_logger.source_roots import SourceIdentity
+    from agent_logger.source_publication import validate_publication_key
+    from agent_logger.source_roots import SourceIdentity, validate_source_key
 
     try:
-        incoming = SourceIdentity(**identity.to_dict()).to_dict()
+        incoming = SourceIdentity(**identity.to_dict())
+        validate_source_key(publication_key)
     except (TypeError, ValueError) as exc:
         return PushResult(ok=False, detail=f"invalid publication identity: {exc}")
-    payload = json.dumps({"schema_version": 1, **incoming}, sort_keys=True)
+    payload = json.dumps({"schema_version": 1, **incoming.to_dict()}, sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_MARKER_BYTES:
         return PushResult(ok=False, detail="publication identity payload too large")
     marker_path = dest / PUBLICATION_IDENTITY_MARKER
@@ -201,15 +243,11 @@ def _admit_under_lock(
     except (OSError, ValueError, RecursionError) as exc:
         return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
     if existing is not None:
-        if existing == incoming:
-            return None  # idempotent re-push of the same identity
-        return PushResult(
-            ok=False,
-            detail=(
-                f"publication identity mismatch at {marker_path}: "
-                f"destination already claimed by {existing}"
-            ),
-        )
+        return _check_existing_claim(existing, incoming, publication_key, marker_path)
+    try:
+        validate_publication_key(publication_key, incoming)
+    except ValueError as exc:
+        return PushResult(ok=False, detail=f"invalid publication key: {exc}")
     try:
         has_content = _destination_has_content(dest)
     except OSError as exc:
@@ -243,7 +281,7 @@ def _admit_under_lock(
         try:
             _publish_marker_no_replace(temp_path, marker_path)
         except FileExistsError:
-            failure = _resolve_post_race_marker(marker_path, incoming)
+            failure = _resolve_post_race_marker(marker_path, incoming, publication_key)
     except OSError as exc:
         failure = PushResult(ok=False, detail=f"cannot claim destination: {exc}")
     finally:
