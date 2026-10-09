@@ -19,23 +19,34 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
+import sys
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
 from .locks import process_identity
-from .process import terminate_ssh_process_tree
+from .process import run_process_cleanup, terminate_ssh_process_tree
 from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager.relay")
 
 _ESTABLISH_ATTEMPTS = 4
+# Inherited by the ssh root and every ProxyCommand descendant it starts, so
+# teardown can prove which processes this supervisor owns (Linux).
+_OWNER_ENV = "SSH_MANAGER_RELAY_OWNER"
 _READY_SETTLE_MAX = 0.25
 _REMOTE_FORWARD_FAILURE_MARKERS = (
     "remote port forwarding failed",
     "warning: remote port forwarding failed for listen port",
 )
+
+
+class _VenueStopped(ConnectionError):
+    """A reconnect gate definitively reported the remote venue as stopped."""
 
 
 @dataclass(frozen=True)
@@ -71,6 +82,13 @@ class SupervisedRelayForward:
     connection the CodeSpace hasn't reaped yet) lets go of the port.
     ``establish()`` still watches stderr during the readiness window and
     retries a bind failure it sees there.
+
+    ``reconnect_gate`` (optional) is consulted before every monitor-driven
+    re-establish. Reconnecting through a ProxyCommand such as ``gh codespace
+    ssh`` can start a stopped venue, so a gate that returns ``False`` (the
+    venue is stopped) retires the supervisor instead of reconnecting; a gate
+    that raises is inconclusive and the attempt is skipped (no connect) and
+    retried after backoff. The initial ``start()`` is never gated.
     """
 
     def __init__(
@@ -85,6 +103,7 @@ class SupervisedRelayForward:
         serving_probe: Callable[[], Awaitable[bool]] | None = None,
         host_port_resolver: Callable[[], int] | None = None,
         on_pid_change: Callable[[], None] | None = None,
+        reconnect_gate: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
         self._config = config
         self._relay_port = int(relay_port)
@@ -96,13 +115,24 @@ class SupervisedRelayForward:
         self._ready_timeout = float(ready_timeout)
         self._serving_probe = serving_probe
         self._on_pid_change = on_pid_change
+        self._reconnect_gate = reconnect_gate
         self._proc: asyncio.subprocess.Process | None = None
         self._monitor_task: asyncio.Task[None] | None = None
+        self._stopped = False
+        self._retired = False
+        self._gated_establish = False
+        self._owner_token = uuid.uuid4().hex
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def is_alive(self) -> bool:
         """Whether the supervised ``ssh -N -R`` process is currently running."""
         return self._proc is not None and self._proc.returncode is None
+
+    @property
+    def retired(self) -> bool:
+        """Whether the monitor gave up because the reconnect gate said stop."""
+        return self._retired
 
     @property
     def process_pid(self) -> int | None:
@@ -165,6 +195,15 @@ class SupervisedRelayForward:
         spec = f"{self._relay_port}:127.0.0.1:{host_port}"
         last_err = ""
         for attempt in range(1, _ESTABLISH_ATTEMPTS + 1):
+            # A monitor-driven reconnect re-checks the gate before every spawn:
+            # the venue may have been stopped during the backoff below.
+            if self._gated_establish and attempt > 1:
+                allowed = await self._reconnect_allowed()
+                if allowed is not True:
+                    raise (_VenueStopped if allowed is False else ConnectionError)(
+                        "credential relay reconnect to "
+                        f"{self._config.ssh_target} declined by its reconnect gate"
+                    )
             args = build_forward_ssh_args(
                 self._config,
                 None,
@@ -182,6 +221,7 @@ class SupervisedRelayForward:
             proc = await create_ssh_subprocess(
                 *args,
                 config=self._config,
+                env={**os.environ, _OWNER_ENV: self._owner_token},
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
@@ -191,7 +231,7 @@ class SupervisedRelayForward:
             try:
                 settled = await self._wait_settled(proc)
             except asyncio.CancelledError:
-                await self._kill(proc)
+                await self._terminate(proc)
                 if self._proc is proc:
                     self._proc = None
                 raise
@@ -210,7 +250,7 @@ class SupervisedRelayForward:
             stderr = settled.stderr or await self._drain_stderr(proc)
             last_err = stderr or last_err or "ssh exited"
             exited_early = proc.returncode is not None
-            await self._kill(proc)
+            await self._terminate(proc)
             if self._proc is proc:
                 self._proc = None
 
@@ -243,6 +283,8 @@ class SupervisedRelayForward:
 
     async def start(self) -> None:
         """Establish the relay channel and start the self-healing monitor."""
+        self._stopped = False
+        self._retired = False
         await self.establish()
         if self._monitor_task is None or self._monitor_task.done():
             self._monitor_task = asyncio.create_task(
@@ -251,6 +293,7 @@ class SupervisedRelayForward:
 
     async def stop(self) -> None:
         """Stop monitoring and tear down the relay process (idempotent)."""
+        self._stopped = True
         task = self._monitor_task
         self._monitor_task = None
         if task is not None and not task.done():
@@ -261,20 +304,154 @@ class SupervisedRelayForward:
                 pass
         await self._cancel_process()
 
+    def stop_nowait(self) -> None:
+        """Synchronously stop monitoring and kill the relay's process tree.
+
+        For teardown paths that cannot await. Cancels the monitor (so it can
+        never reconnect), kills the ``ssh`` root together with its
+        ProxyCommand descendants (e.g. ``gh codespace ssh``), and -- when an
+        event loop is running -- schedules the full async cleanup as well.
+        Idempotent.
+        """
+        self._stopped = True
+        task = self._monitor_task
+        self._monitor_task = None
+        if task is not None and not task.done():
+            task.cancel()
+        proc = self._proc
+        self._proc = None
+        if proc is None:
+            return
+        self._kill_tree_nowait(proc)
+        self._notify_pid_change()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        cleanup = loop.create_task(self._terminate(proc))
+        self._cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._cleanup_tasks.discard)
+
+    def _kill_owned_descendants(self) -> int:
+        """SIGKILL surviving processes this supervisor spawned (Linux only).
+
+        A ProxyCommand child (e.g. ``gh codespace ssh``) can outlive its ssh
+        root, after which the root's process group id is no longer provably
+        ours. Ownership is proven instead by the per-supervisor token in each
+        process's inherited environment, re-checked after pinning the process
+        with a pidfd so a reused PID is never signalled. Returns the count.
+
+        Other platforms cannot prove ownership of an orphan this way and skip
+        the sweep: Windows releases its registered ProxyCommand owner instead
+        (``_terminate``), and elsewhere a stdio ProxyCommand exits on EOF once
+        its ssh root's pipes close.
+        """
+        if not (
+            sys.platform.startswith("linux")
+            and hasattr(os, "pidfd_open")
+            and hasattr(signal, "pidfd_send_signal")
+        ):
+            return 0
+        marker = f"{_OWNER_ENV}={self._owner_token}".encode()
+
+        def owned(pid: int) -> bool:
+            try:
+                with open(f"/proc/{pid}/environ", "rb") as fh:
+                    return marker in fh.read().split(b"\0")
+            except OSError:
+                return False
+
+        killed = 0
+        try:
+            pids = [int(e.name) for e in os.scandir("/proc") if e.name.isdigit()]
+        except OSError:
+            return 0
+        for pid in pids:
+            if pid == os.getpid() or not owned(pid):
+                continue
+            try:
+                fd = os.pidfd_open(pid)
+            except OSError:
+                continue
+            try:
+                if owned(pid):  # still the same process: the pidfd pins its PID
+                    signal.pidfd_send_signal(fd, signal.SIGKILL)
+                    killed += 1
+            except OSError:
+                pass
+            finally:
+                os.close(fd)
+        return killed
+
+    def _kill_tree_nowait(self, proc: asyncio.subprocess.Process) -> None:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+        try:
+            self._kill_owned_descendants()
+        except Exception as exc:  # noqa: BLE001 - best-effort sync teardown
+            log.warning("Credential relay descendant sweep failed: %s", exc)
+
+    async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
+        """Kill ``proc`` and any owned descendants that outlived the root."""
+        await self._kill(proc)
+        try:
+            self._kill_owned_descendants()
+        except Exception as exc:  # noqa: BLE001 - never skip the owner release
+            log.warning("Credential relay descendant sweep failed: %s", exc)
+        # Releases a Windows ProxyCommand owner even when the root had already
+        # exited (``terminate_ssh_process_tree`` only runs for a live root).
+        await run_process_cleanup(proc)
+
     async def _monitor(self) -> None:
         try:
-            while True:
+            while not self._stopped:
                 try:
                     await self._sleep(self._monitor_interval)
                     reason = await self._restart_reason()
                     if reason is not None:
-                        await self._restart_with_backoff(reason)
+                        if not await self._restart_with_backoff(reason):
+                            return
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     log.warning("Credential relay monitor iteration failed: %s", exc)
         except asyncio.CancelledError:
             raise
+
+    def _retire(self, reason: str) -> bool:
+        """End supervision because the venue is stopped; returns ``False``."""
+        if not self._stopped:
+            self._retired = True
+            log.info(
+                "Credential relay to %s retired (%s): the remote venue "
+                "is stopped, so reconnecting would restart it",
+                self._config.ssh_target,
+                reason,
+            )
+        return False
+
+    async def _reconnect_allowed(self) -> bool | None:
+        """Consult the reconnect gate: True=go, False=retire, None=unknown."""
+        if self._stopped:
+            return False
+        gate = self._reconnect_gate
+        if gate is None:
+            return True
+        try:
+            return bool(await gate())
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning(
+                "Credential relay reconnect gate for %s was inconclusive; "
+                "not reconnecting this attempt: %s",
+                self._config.ssh_target,
+                exc,
+            )
+            return None
 
     async def _restart_reason(self) -> str | None:
         if not self.is_alive:
@@ -298,19 +475,38 @@ class SupervisedRelayForward:
             log.warning("Credential relay serving probe failed: %s", exc)
             return "serving probe raised"
 
-    async def _restart_with_backoff(self, reason: str) -> None:
+    async def _restart_with_backoff(self, reason: str) -> bool:
+        """Re-establish the relay; return ``False`` when the monitor should end."""
         failures = 0
         while True:
             await self._cancel_process()
+            allowed = await self._reconnect_allowed()
+            if allowed is False:
+                return self._retire(reason)
+            if allowed is None:
+                failures += 1
+                await self._sleep(min(
+                    self._backoff_max,
+                    self._backoff_base * (2 ** (failures - 1)),
+                ))
+                continue
             try:
                 log.warning(
                     "Credential relay reverse-forward unhealthy (%s); re-establishing",
                     reason,
                 )
-                await self.establish()
-                return
+                self._gated_establish = self._reconnect_gate is not None
+                try:
+                    await self.establish()
+                finally:
+                    self._gated_establish = False
+                return True
             except asyncio.CancelledError:
                 raise
+            except _VenueStopped:
+                # A definitive "stopped" from a retry's gate check is final.
+                await self._cancel_process()
+                return self._retire(reason)
             except Exception as exc:
                 failures += 1
                 delay = min(
@@ -374,7 +570,7 @@ class SupervisedRelayForward:
     async def _cancel_process(self) -> None:
         proc = self._proc
         if proc is not None:
-            await self._kill(proc)
+            await self._terminate(proc)
             self._proc = None
             self._notify_pid_change()
 

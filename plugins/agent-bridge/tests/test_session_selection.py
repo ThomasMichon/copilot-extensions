@@ -9,6 +9,8 @@ is already busy.
 from __future__ import annotations
 
 import argparse
+import threading
+import time
 
 import pytest
 
@@ -1038,11 +1040,17 @@ def test_resolve_target_unmatched_handle_still_spawns_fresh_without_waiting(
     # A target that matches no session id, no worktree id, and no registered
     # agent must still fall through to a fresh spawn -- and must do so
     # instantly (no retry/grace wait), unlike `read`'s streaming-reconnect
-    # race. Fail the test if anything sleeps.
-    monkeypatch.setattr(
-        "time.sleep",
-        lambda *_a, **_k: pytest.fail("_resolve_target must not sleep/wait"),
-    )
+    # race. Fail the test if anything sleeps. Only this (main) thread is
+    # checked: the patch is process-global, and a background thread left by
+    # an earlier test in the same run may legitimately sleep meanwhile.
+    real_sleep = time.sleep
+
+    def _no_sleep(*args, **kwargs):
+        if threading.current_thread() is not threading.main_thread():
+            return real_sleep(*args, **kwargs)
+        pytest.fail("_resolve_target must not sleep/wait")
+
+    monkeypatch.setattr("time.sleep", _no_sleep)
     client = FakeClient(sessions=[])
     sid = m._resolve_target(client, "some-fresh-agent-name")
     assert sid == "fresh-sid"

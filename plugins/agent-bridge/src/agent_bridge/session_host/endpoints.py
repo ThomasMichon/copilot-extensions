@@ -153,12 +153,15 @@ def relay_forwards_from_ssh_config(
     serving_probe_for_port: Callable[[int], Callable[[], Awaitable[bool]] | None]
     | None = None,
     host_port_resolver: Callable[[], int] | None = None,
+    reconnect_gate: Callable[[], Awaitable[bool]] | None = None,
 ) -> list[SupervisedRelayForward]:
     """Build dedicated credential-relay supervisors from persisted ``-R`` specs.
 
     ``host_port_resolver`` (when given) is passed to each supervisor so the
     host-side ``-R`` target follows a relay that rebinds a new port across a
     daemon restart, while the CodeSpace-listen port stays stable (#855).
+    ``reconnect_gate`` (when given) stops a supervisor from reconnecting --
+    and so re-waking -- a venue that has been stopped.
     """
     relays: list[SupervisedRelayForward] = []
     for relay_port in relay_ports_from_reverse_forwards(reverse_forwards):
@@ -171,9 +174,28 @@ def relay_forwards_from_ssh_config(
                 relay_port,
                 serving_probe=serving_probe,
                 host_port_resolver=host_port_resolver,
+                reconnect_gate=reconnect_gate,
             )
         )
     return relays
+
+
+def codespace_reconnect_gate(
+    endpoint: dict[str, Any],
+) -> Callable[[], Awaitable[bool]] | None:
+    """Return a no-wake relay reconnect gate for a CodeSpace ``endpoint``.
+
+    ``None`` for a non-CodeSpace endpoint. The gate reads the CodeSpace state
+    from the GitHub API (never over SSH, which would start a stopped one); see
+    ``CodeSpaceTransport.reconnect_allowed``.
+    """
+    name = endpoint.get("codespace")
+    if endpoint.get("kind") != "codespace" or not isinstance(name, str) or not name:
+        return None
+    from .codespace_transport import CodeSpaceTransport
+
+    transport = CodeSpaceTransport(name, str(endpoint.get("repo") or ""))
+    return transport.reconnect_allowed
 
 
 def relay_forwards_from_endpoint(
@@ -189,6 +211,7 @@ def relay_forwards_from_endpoint(
         list(endpoint.get("reverse_forwards") or []),
         serving_probe_for_port=serving_probe_for_port,
         host_port_resolver=host_port_resolver,
+        reconnect_gate=codespace_reconnect_gate(endpoint),
     )
 
 
