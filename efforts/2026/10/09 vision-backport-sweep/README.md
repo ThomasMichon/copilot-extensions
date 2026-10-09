@@ -1225,6 +1225,10 @@ sibling plan proves that the sibling's materials have been refreshed.
 - Status is Done for source reconciliation. The independent
   `adopter-material-refresh` remains separate under `#5799`, and all carved
   implementation/decision owners remain open on their own merits.
+- Archive review caught a sibling-relative backlink not covered by the
+  full-path search. Updated that link as well and checked every repository
+  reference containing the effort slug, including short sibling-relative
+  targets; the material sibling's Draft status and scope are unchanged.
 
 ### 2026-10-09 — Individual-disposition publication and finite residual audit
 - Individual-anchor/preference/publication slice merged as `#5950` at
