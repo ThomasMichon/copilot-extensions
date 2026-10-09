@@ -24,6 +24,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           -k owned_pr_rebase
+          --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800
   windows:
     name: owned PR replay (Windows)
@@ -42,4 +43,5 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           -k owned_pr_rebase
+          --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800

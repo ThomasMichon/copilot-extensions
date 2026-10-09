@@ -380,7 +380,7 @@ manually dispatched `PR rebase full` workflow on Linux and Windows:
 
 ```powershell
 $env:AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE = '1'
-python tools\run-plugin-tests.py agent-worktrees -k owned_pr_rebase --subsuite-timeout 1800 --plugin-timeout 1800
+python tools\run-plugin-tests.py agent-worktrees -k owned_pr_rebase --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
 ```
 
 Use the exhaustive mode when changing replay authorization or its publication
