@@ -328,6 +328,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             "spawn_session_handle": (
                 None if prepared.get("replaced") else reservation.get("session_handle")
             ),
+            "spawn_conversation_retired": reservation.get("conversation_retired"),
         }
     except (DispatchError, embody.EmbodyUnavailable) as exc:
         if prepared is None or ownership != "created":
@@ -543,7 +544,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
             file=sys.stderr,
         )
 
-    from . import bridge, embody
+    from . import bridge, embody, spawn_factories
 
     worker_id = f"spawn-{uuid.uuid4().hex[:8]}"
     prompt = bridge.worker_prompt(
@@ -566,6 +567,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
             project=embody.project_for_task(task),
             target_dir=task.get("spawn_worktree_path"),
             worktree_id=task.get("spawn_worktree"),
+            resume_worktree=spawn_factories.resume_worktree_eligible(task),
             wait=not args.run_async,
             json_output=bool(task.get("spawn_worktree")),
         )

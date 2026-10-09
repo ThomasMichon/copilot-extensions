@@ -46,6 +46,7 @@ from agent_procutil import (
 )
 
 from .. import winjob
+from ..session_preferences import execution_receipt
 from . import protocol as proto
 from .host import SessionHost
 from .osutil import child_preexec
@@ -467,7 +468,10 @@ async def run_host(
     host = SessionHost(child, nonce=nonce,
                        unexpected_reap_seconds=unexpected_reap_seconds,
                        active_reap_seconds=active_reap_seconds,
-                       on_child_exit=_publish_child_exit)
+                       on_child_exit=_publish_child_exit,
+                       preference_receipt=execution_receipt(
+                           child_argv, env, child.pid or 0,
+                       ))
     bound_port = await host.serve(port=port)
     state.update({
         "version": 2,

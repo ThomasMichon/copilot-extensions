@@ -346,7 +346,7 @@ jobs:
           # intervening dev commit too, so an unrelated change to any listed
           # file could wrongly trigger this subprocess-heavy suite.
           if git diff --name-only "$base...$head" | grep -Eq \
-            '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
+            '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|standalone_consumers\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -802,10 +802,49 @@ jobs:
         env:
           PYTHONPATH: libs/single-instance-lease/src
         run: >-
-          uv run --with pytest python -m pytest -q
+          uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_run_plugin_tests.py
+          tools/test_run_standalone_tests.py
           tools/test_run_tests_in_devcontainer.py
+
+  agent-index-service-linux:
+    name: agent-index-service (ubuntu-latest, out-of-plugin)
+    needs: discover
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test standalone controller with installed core and host containment
+        shell: bash
+        run: |
+          MODE="--smoke"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
+
+  agent-index-service-windows:
+    name: agent-index-service (windows-latest, out-of-plugin)
+    needs: discover
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
+    runs-on: windows-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test standalone controller with installed core and host containment
+        shell: bash
+        run: |
+          MODE="--smoke"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
 
   test-runner-windows:
     name: test runner (windows-latest)
@@ -822,9 +861,10 @@ jobs:
         env:
           PYTHONPATH: libs/single-instance-lease/src
         run: >-
-          uv run --with pytest python -m pytest -q
+          uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_run_plugin_tests.py
+          tools/test_run_standalone_tests.py
 
   archive-sources-windows:
     name: archive sources (windows-latest)
@@ -852,6 +892,7 @@ jobs:
     outputs:
       smoke: ${{ steps.set.outputs.smoke }}
       heavy: ${{ steps.set.outputs.heavy }}
+      standalone_service: ${{ steps.set.outputs.standalone_service }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -864,8 +905,16 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             MODE="--changed --base ${{ github.event.pull_request.base.sha }}"
+            if git diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              agent-index-service/ plugins/agent-index/ libs/ tools/ \
+              .github/workflows/ci.yml .github/workflows/validate-and-promote.yml; then
+              echo "standalone_service=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "standalone_service=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             MODE="--all"
+            echo "standalone_service=true" >> "$GITHUB_OUTPUT"
           fi
           FULL=$(python tools/run-plugin-tests.py $MODE --list)
           SMOKE=$(python tools/run-plugin-tests.py $MODE --exclude "$HEAVY_PLUGIN" --list)
@@ -1124,6 +1173,8 @@ jobs:
       - windows-python-artifact-builder
       - windows-hooks
       - worktree-manager
+      - agent-index-service-linux
+      - agent-index-service-windows
       - test-runner-linux
       - test-runner-windows
       - archive-sources-windows

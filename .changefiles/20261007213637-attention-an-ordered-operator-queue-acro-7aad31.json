@@ -1,9 +1,0 @@
-{
-  "comment": "attention: an ordered operator queue across sources (dispatch tasks + registered command sources) with a degraded status, attention next cursor, and per-source first-observed times",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

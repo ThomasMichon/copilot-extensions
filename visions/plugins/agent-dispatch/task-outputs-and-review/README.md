@@ -3,7 +3,7 @@
 - **Subject:** Durable, contract-bearing task conversations and outcomes.
 - **Scope:** leaf (child of [agent-dispatch](../README.md)).
 - **Status:** Draft
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-09
 - **Reality docs:** `plugins/agent-dispatch/src/agent_dispatch/`
   (`queue_steering.py`, `queue_lifecycle.py`, `queue_completion_review.py`,
   `wake.py`) and the Tasks pivot in `worktree-manager/`.
@@ -82,8 +82,18 @@ browsing earlier exchanges after processes, ownership, and services change.
 
 Completed tasks do not reopen. An operator can explicitly create a new task
 using the accepted outcome, relevant history, and new instructions as context.
-The old task remains completed and unchanged; the new task has its own goal,
+The old task's completed decision and accepted outcome remain unchanged;
+the new task has its own goal,
 contract, review policy, and visible connection to its predecessor.
+
+### compatible-completion-publication-recovery
+
+An authorized publisher can recover missing completion material through a
+compatible retry without reopening a submitted or completed task. Existing
+published results and references are not silently replaced, and an identical
+retry is not another answer or completion event. Recovery preserves the
+accepted submission and review decision; it is not permission to introduce a
+new answer into an old task instead of creating a follow-up.
 
 ### durable-fast-steer-acceptance
 
@@ -93,6 +103,14 @@ confirmed answer makes its task eligible for queued or claimed continuation,
 not falsely started merely because feedback was saved. Existing assignment
 and worktree context survive; another worker cannot overlap a retiring one.
 Retries resolve to the same accepted operation rather than duplicate answers.
+
+### durable-unsubmitted-answer-drafts
+
+An operator can save, revise, or discard an unsubmitted answer draft and
+continue editing it across sessions and surfaces. Draft persistence is distinct
+from accepting an answer, confirming a task, or delivering work to its worker.
+The task authority owns the draft; a UI does not become a competing store, and
+an autosave does not silently turn unfinished input into an accepted operation.
 
 ### affirmative-asynchronous-delivery
 
@@ -140,3 +158,15 @@ UIs consume the same contracts; no UI-owned result store or second queue exists.
 - [Tasks-pane UX](../tasks-pane-ux/README.md).
 - [Backend lifecycle effort](../../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/README.md).
 - [Tasks-pane effort](../../../../efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md).
+
+## Provenance
+
+- **2026-10-09** - Folded back compatible completion-publication recovery:
+  authorized retries can fill missing material without reopening a terminal
+  task or replacing existing results. Clarified that follow-up immutability
+  protects the completed decision and accepted outcome, not an accidental ban
+  on that recovery path.
+
+- **2026-10-09** - Folded back durable unsubmitted operator drafts, preserving
+  their separation from published conversation, answer acceptance, task review,
+  and worker delivery.

@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-09
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -284,17 +284,6 @@ purpose-built process (a scheduled watchdog dispatching a decomposition
 agent), not left as diffuse, second-order pressure on whichever future PR
 happens to touch the file next.
 
-## Non-Goals / Boundaries
-
-### no-custom-cross-plugin-aggregation-authority
-
-The harness must not depend on a custom plugin that discovers other plugins,
-invokes their context producers, coordinates a session rendezvous, caches or
-spills their aggregate, or becomes the shared authority for their guidance.
-Cross-plugin dynamic composition belongs to the native host. Compatibility
-paths may preserve reliable plugin-owned files and static fail-safes, but must
-not recreate a second composition runtime beside the host.
-
 ### recovery-revalidates-authority
 
 Context recovery should never replay a previously valid aggregate solely
@@ -416,6 +405,17 @@ policy, availability, or routing choices.
 
 ## Non-Goals / Boundaries
 
+### no-custom-cross-plugin-aggregation-authority
+
+The harness must not depend on a custom plugin that discovers other plugins,
+invokes their context producers, coordinates a session rendezvous, caches or
+spills their aggregate, or becomes the shared authority for their guidance.
+Cross-plugin dynamic composition belongs to the native host. Compatibility
+paths may preserve reliable plugin-owned files and static fail-safes, but must
+not recreate a second composition runtime beside the host.
+
+### Additional boundaries
+
 - This vision does not prescribe one configuration schema or hook script.
 - It does not maximize sub-agent count or require delegation for every lookup.
 - It does not delegate final synthesis, goal ownership, or completion judgment.
@@ -448,3 +448,9 @@ policy, availability, or routing choices.
 - Parent vision: none
 - Child visions: none (leaf)
 - Reality docs: `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
+
+## Provenance
+
+- **2026-10-09** - Restored the canonical placement of existing behaviors and
+  boundaries after a duplicate boundary heading split the behavior section.
+  All existing guidance, delegation, routing, and safety intent was retained.

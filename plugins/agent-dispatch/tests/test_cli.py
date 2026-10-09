@@ -2283,6 +2283,73 @@ def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
     assert "t1" in err
 
 
+def test_do_spawn_forwards_resume_worktree_for_reused_allocation(monkeypatch):
+    """The one-shot ``create --spawn`` path must apply the same reused/
+    retired-conversation decision as the supervisor's headless factory
+    (``spawn_factories.resume_worktree_eligible``) -- otherwise this entry
+    point still reuses the directory while calling plain ``create`` when
+    the carried handle is missing, the exact history-loss path strict
+    resume exists to close."""
+    import argparse
+
+    from agent_dispatch import __main__, bridge
+
+    captured = {}
+
+    def fake_spawn_or_resume_worker(*_a, **kwargs):
+        captured.update(kwargs)
+        import subprocess
+
+        return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(bridge, "spawn_or_resume_worker", fake_spawn_or_resume_worker)
+    args = argparse.Namespace(
+        spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
+    )
+    task = {
+        "id": "t1",
+        "spawn_worktree": "wt-1",
+        "spawn_worktree_ownership": "reused",
+        "spawn_conversation_retired": False,
+        "spawn_session_handle": None,
+    }
+    __main__._do_spawn(args, task)
+    assert captured["resume_worktree"] is True
+
+
+def test_do_spawn_withholds_resume_worktree_for_retired_conversation(monkeypatch):
+    """The mirror case: a reused allocation whose carried conversation was
+    deliberately retired (an operator rearm) must NOT pass
+    ``resume_worktree=True`` -- that fallback would resurrect the retired
+    session via the worktree directory's own latest session, bypassing the
+    already-correctly-dropped ``spawn_session_handle``."""
+    import argparse
+
+    from agent_dispatch import __main__, bridge
+
+    captured = {}
+
+    def fake_spawn_or_resume_worker(*_a, **kwargs):
+        captured.update(kwargs)
+        import subprocess
+
+        return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(bridge, "spawn_or_resume_worker", fake_spawn_or_resume_worker)
+    args = argparse.Namespace(
+        spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
+    )
+    task = {
+        "id": "t1",
+        "spawn_worktree": "wt-1",
+        "spawn_worktree_ownership": "reused",
+        "spawn_conversation_retired": True,
+        "spawn_session_handle": None,
+    }
+    __main__._do_spawn(args, task)
+    assert captured["resume_worktree"] is False
+
+
 def test_parser_worktree_status():
     args = build_parser().parse_args(["worktree-status"])
     assert args.command == "worktree-status"

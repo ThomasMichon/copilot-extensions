@@ -61,9 +61,29 @@ def test_resume_then_send_happy_path_no_holder(monkeypatch):
     assert len(calls) == 2
     assert calls[0] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
     assert "--force" not in calls[0]
+    assert "--strict" not in calls[0]  # allow_takeover=True (default) -> non-strict
     assert calls[1] == [
         "/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file", "-",
         "--caller", "agent-dispatch:w1", "--no-wait",
+    ]
+
+
+def test_non_forcing_recovery_requests_strict_resume(monkeypatch):
+    """``allow_takeover=False`` is the non-forcing conversation-recovery
+    path: it must request the bridge's identity-preserving ``--strict``
+    resume contract, never a silent fresh replacement conversation."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if _is_resume(cmd):
+            return _proc(cmd, 0, json.dumps({"session_id": "resumed-9"}))
+        return _proc(cmd, 0, "ok")
+
+    result = _resume(monkeypatch, fake_run, allow_takeover=False, wait=False)
+    assert result.returncode == 0
+    assert calls[0] == [
+        "/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--strict",
     ]
 
 

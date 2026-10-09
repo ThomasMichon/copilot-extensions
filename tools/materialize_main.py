@@ -56,7 +56,7 @@ _FILE_POINTER_RE = re.compile(
 
 # Consumer trees that sit outside plugins/ but still reference shared libs
 # the same way -- mirrors sync-vendored-libs.py's own _EXTRA_CONSUMER_DIRS.
-_EXTRA_CONSUMER_DIRS = ("worktree-manager",)
+_EXTRA_CONSUMER_DIRS = uer._EXTRA_CONSUMER_DIRS
 
 
 def _file_pointer_source(path: Path) -> str | None:
@@ -91,9 +91,11 @@ def find_retired_directory_pointers(root: Path) -> list[Path]:
     """Every retired directory-pointer marker still present under ``root``,
     a whole-repo-shaped tree (``plugins/<name>/libs/<lib>/`` or
     ``worktree-manager/libs/<lib>/``)."""
-    return sorted(root.glob("plugins/*/libs/*/" + POINTER_NAME)) + sorted(
-        root.glob("worktree-manager/libs/*/" + POINTER_NAME)
-    )
+    return sorted(root.glob("plugins/*/libs/*/" + POINTER_NAME)) + [
+        pointer
+        for consumer in _EXTRA_CONSUMER_DIRS
+        for pointer in sorted(root.glob(f"{consumer}/libs/*/{POINTER_NAME}"))
+    ]
 
 
 def find_retired_directory_pointers_in_plugin(plugin_dir: Path) -> list[Path]:

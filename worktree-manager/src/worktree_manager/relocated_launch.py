@@ -40,31 +40,6 @@ def _relocated_launch_script():
     return script if script.exists() else None
 
 
-def _seed_already_claimed_in(plan) -> str | None:
-    """Recover a seed ``_resolve_for``'s own ``resolve --json`` call already
-    claimed/embedded into ``plan.cmd`` -- covering BOTH an explicit
-    ``--seed`` AND a persisted ``pending_seed`` the engine claims (clears)
-    unconditionally on every resolve, regardless of whether this specific
-    call supplied an explicit one.
-
-    Trusts ONLY the engine's own explicit ``plan.seed_claimed`` metadata
-    (contract v1+) -- never inferred from ``cmd``'s own trailing argv shape:
-    ``_build_launch_cmd`` accepts arbitrary configured/profile
-    ``copilot_args``, so a seedless worktree can legitimately produce a
-    command that ALSO happens to end in ``--interactive <configured
-    value>`` (e.g. a profile that already supplies the flag), which a
-    trailing-pair heuristic would misidentify as the claimed seed. Returns
-    ``None`` when ``seed_claimed`` is false/absent (including an older
-    engine that predates this field -- a conservative miss, never a false
-    positive) or ``cmd`` doesn't actually end in an ``--interactive`` pair."""
-    if not getattr(plan, "seed_claimed", False):
-        return None
-    cmd = list(getattr(plan, "cmd", None) or [])
-    if len(cmd) >= 2 and cmd[-2] == "--interactive":
-        return cmd[-1]
-    return None
-
-
 def _run_relocated_mux_launch(req, plan, script) -> int:
     """Delegate an ordinary local launch to the relocated launch-session
     script -- the ONE canonical muxed-launch implementation. The script
@@ -87,24 +62,18 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
             print("error: could not resolve a worktree id for this launch.")
             return 1
         args += ["--worktree-id", worktree_id]
+        staged = getattr(plan, "raw", None) or {}
+        seed_id = staged.get("seed_id")
+        if getattr(req, "seed_prompt", None) and not staged.get("seed_pending"):
+            print("error: the engine did not stage the requested prompt; update and retry.")
+            return 1
+        if staged.get("seed_pending"):
+            if not isinstance(seed_id, str) or not seed_id:
+                print("error: the engine omitted the staged launch-prompt identity; update and retry.")
+                return 1
+            args += ["--stage-launch-seed", "--seed-id", seed_id]
         if req.mode == "bare-resume":
             args.append("--bare-resume")
-        else:
-            # resume-prompt-durable-seed-and-mux-fix: this script re-resolves
-            # the launch plan ITSELF (its own internal ``resolve --worktree-id
-            # --json`` call) rather than reusing ``plan.cmd`` above -- the
-            # ``plan`` this function receives already had any seed claimed
-            # (a persisted ``pending_seed`` cleared, same as an explicit one)
-            # and embedded by the earlier ``_resolve_for`` call, but that
-            # embedded argv is discarded here, never reaching this
-            # re-invocation. Recover the already-claimed seed straight out of
-            # ``plan.cmd`` (covers both an explicit seed and a claimed
-            # persisted one uniformly) and forward it so the script's own
-            # resolve call can embed it again -- bare-resume and base are
-            # excluded, matching the engine's own rejection for both.
-            seed = _seed_already_claimed_in(plan)
-            if seed:
-                args += ["--seed", seed]
 
     is_windows = _core()._is_windows()
     no_mux = bool(getattr(req, "no_mux", False))

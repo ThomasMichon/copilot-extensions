@@ -376,7 +376,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
-                 "nudge_status.py", "bind_nudge.py", "hook_client.py"):
+                 "nudge_status.py", "bind_nudge.py", "hook_client.py", "terminal_probe.py"):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, bd / name)
@@ -1564,28 +1564,20 @@ def projects_yaml_path() -> Path:
     return registry_paths.registry_path("projects.yaml", legacy_root=install_dir())
 
 
-def read_projects_registry() -> dict:
+def read_projects_registry(*, strict: bool = False) -> dict:
     """Read projects.yaml and return a dict with a 'projects' key.
 
-    Returns ``{"projects": {}}`` if file is missing or unparseable.
+    Returns ``{"projects": {}}`` if the file is missing, and if it can't be read
+    or parsed unless ``strict`` (see :func:`projects_registry.parse_projects_registry`).
     """
-    path = projects_yaml_path()
-    if not path.exists():
-        return {"projects": {}}
+    from .projects_registry import parse_projects_registry
+
+    path = projects_yaml_path()  # an invalid installation context raises, never reads as empty
     try:
-        import yaml
-
-        from . import config_migrations
-
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {"projects": {}}
-        # Lazy schema migration (in memory, never persists / never raises).
-        data = config_migrations.migrate_loaded(data, config_migrations.SCHEMA_PROJECTS)
-        if "projects" not in data or not isinstance(data["projects"], dict):
-            data["projects"] = {}
-        return data
+        return parse_projects_registry(path)
     except Exception:
+        if strict:
+            raise
         return {"projects": {}}
 
 

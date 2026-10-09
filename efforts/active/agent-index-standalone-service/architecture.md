@@ -1,7 +1,7 @@
 # Standalone indexer architecture and four-piece decomposition
 
-Back to the [effort](README.md). **Status: implementation design; four-piece
-amendment proposed before code extraction.**
+Back to the [effort](README.md). **Status: reviewed four-piece design; initial
+native API/controller composition implemented for validation, not deployed.**
 
 ## Boundary and ownership
 
@@ -211,6 +211,25 @@ single-writer queue authority and supported rollback.
 
 See the effort's [validation plan](README.md#validation-plan) for acceptance.
 The current proposal is not permission to migrate an existing live index.
+
+## Initial implementation slice
+
+`agent-index-service/` is the first normal service distribution and executable.
+It runs the existing API/master and local persistence/worker adapters through a
+normal `agent-index` Python-library dependency, with explicit standalone source,
+data/routing and external warm-engine configuration. It does not require plugin
+loading or repository discovery.
+
+This establishes a real program boundary, not a completed remote DB or worker
+split. Its independent release identity uses the existing registered standalone
+consumer/changefile path, not marketplace metadata. An admission-controlled
+contained test runner and native Windows/Linux CI gate exercise installed-core
+hosting and zdd cutover.
+
+Version-slot bootstrap, schema-aware rollback, sustained native supervision,
+further component ownership extraction and authenticated remote adapters remain
+the next implementation slices. No live canary is migrated merely by adding
+this package.
 
 ## Prior art
 

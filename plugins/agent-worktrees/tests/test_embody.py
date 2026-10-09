@@ -159,6 +159,27 @@ def _stub_config(monkeypatch):
 
 
 class TestCmdEmbody:
+    @pytest.fixture(autouse=True)
+    def _creation_seed_authority_boundary(self, monkeypatch):
+        """Control-flow tests model the writer separately from the real daemon suite."""
+        from agent_worktrees import launch_seed_state, pending_seed
+
+        def claim(path):
+            seed = pending_seed.claim_pending_seed(path)
+            return {"seed": {"text": seed} if seed else None, "legacy_seed": seed}
+
+        monkeypatch.setattr(
+            launch_seed_state, "creation_text",
+            lambda path, record: getattr(record, "pending_seed", None),
+        )
+        monkeypatch.setattr(launch_seed_state, "claim_creation", claim)
+        monkeypatch.setattr(
+            launch_seed_state, "settle_creation",
+            lambda path, receipt, result: pending_seed.settle_claim(
+                path, receipt.get("legacy_seed"), result,
+            ),
+        )
+
     def test_requires_a_target(self, capfd):
         rc = m.cmd_embody(_ns())
         assert rc == 2

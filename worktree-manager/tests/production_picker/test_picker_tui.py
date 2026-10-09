@@ -2297,11 +2297,8 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
     asyncio.run(run())
 
 
-def test_resume_prompt_offered_only_for_local_open_or_resume_rows():
-    """The "Resume prompt…" verb rides alongside Open/Resume under the
-    exact same local-only eligibility condition as "Launch in new window"
-    -- a seed is rejected by the engine's resolve CLI alongside a remote
-    ``--machine`` target."""
+def test_resume_prompt_offered_only_for_local_cold_resume_rows():
+    """Live and sessionless Open never offer a Resume prompt."""
     from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
         PickerScreenWorktreeActionsMixin as M,
     )
@@ -2312,7 +2309,7 @@ def test_resume_prompt_offered_only_for_local_open_or_resume_rows():
     }
     acts = M._session_action_verbs(local_mux_live)
     assert "Open" in acts
-    assert "Resume prompt…" in acts
+    assert "Resume prompt…" not in acts
 
     remote_mux_live = dict(local_mux_live, is_local=False)
     acts = M._session_action_verbs(remote_mux_live)
@@ -2326,6 +2323,10 @@ def test_resume_prompt_offered_only_for_local_open_or_resume_rows():
     acts = M._session_action_verbs(local_resumable)
     assert "Resume" in acts
     assert "Resume prompt…" in acts
+    assert "Resume prompt…" not in M._session_action_verbs(
+        dict(local_resumable, is_local=False))
+    assert "Resume prompt…" not in M._session_action_verbs(
+        dict(local_resumable, sessionless=True))
 
     reclaimable = {
         "source_kind": "machine-ssh", "is_local": True,
@@ -2358,6 +2359,7 @@ def test_resume_prompt_seed_carries_through_to_resume_decision():
                 r for r in scr.list_records()
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
+            rec.update(mux_live=False, sessionless=False)
             scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
             await pilot.pause()
 
@@ -2393,6 +2395,7 @@ def test_resume_prompt_cancel_leaves_the_picker_open():
                 r for r in scr.list_records()
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
+            rec.update(mux_live=False, sessionless=False)
             scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
             await pilot.pause()
 
@@ -2402,6 +2405,38 @@ def test_resume_prompt_cancel_leaves_the_picker_open():
 
             assert _prompt_dlg(scr) is None
             assert app.result is None
+
+    asyncio.run(run())
+
+
+def test_resume_prompt_refuses_live_dispatch_but_retains_confirmed_racing_intent():
+    from worktree_manager.production_picker.picker_tui.field_widgets import _AutoExpandTextArea
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            rec = next(r for r in scr.list_records()
+                       if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa")
+            rec.update(mux_live=True)
+            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            await pilot.pause()
+            assert _prompt_dlg(scr) is None
+            assert app.result is None
+
+            rec.update(mux_live=False, sessionless=False)
+            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            await pilot.pause()
+            dlg = _prompt_dlg(scr)
+            assert dlg is not None
+            dlg.query_one("#q-0", _AutoExpandTextArea).text = "must not run"
+            rec["mux_live"] = True
+            await pilot.press("enter")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.result["action"] == "resume"
+            assert app.result["options"]["seed_prompt"] == "must not run"
 
     asyncio.run(run())
 
@@ -4741,13 +4776,8 @@ def test_new_worktree_bare_drops_seed_prompt(monkeypatch):
     asyncio.run(run())
 
 
-def test_new_worktree_no_mux_drops_seed_prompt(monkeypatch):
-    """A No-Mux worktree launches Copilot directly, bypassing the mux pane
-    that `agent-worktrees embody`'s pending_seed delivery depends on
-    entirely -- a typed prompt would be persisted but never delivered (or
-    delivered unexpectedly later, if a mux session is created afterward).
-    Confirming Create with No Mux checked must silently drop it, mirroring
-    the Bare path."""
+def test_new_worktree_no_mux_preserves_seed_prompt(monkeypatch):
+    """Direct launches use the same staged backend-argv handoff as mux."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     from worktree_manager.production_picker.picker_tui.field_widgets import (
         _AutoExpandTextArea,
@@ -4779,7 +4809,7 @@ def test_new_worktree_no_mux_drops_seed_prompt(monkeypatch):
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
-        assert app.result["options"]["seed_prompt"] == ""
+        assert app.result["options"]["seed_prompt"] == "fix the flaky test"
 
     asyncio.run(run())
 
@@ -9582,9 +9612,13 @@ def test_registered_pivot_create_action_resolves_dynamic_options(tmp_path, monke
             # (5s) -- under full-suite CPU contention, spawning the child
             # interpreter itself can approach that bound.
             deadline = time.monotonic() + 15
-            while not isinstance(app.screen, CreateActionScreen) and time.monotonic() < deadline:
+            while (
+                not isinstance(app.screen, CreateActionScreen) or not app.screen.is_mounted
+            ) and time.monotonic() < deadline:
                 await pilot.pause()
             assert isinstance(app.screen, CreateActionScreen)
+            assert app.screen.is_mounted
+            await pilot.pause()
             screen = app.screen
             criteria_field = next(q for q in screen._q if q["name"] == "criteria")
             assert criteria_field["options"] == ["alpha", "beta"]
@@ -9624,9 +9658,13 @@ def test_registered_pivot_create_action_dynamic_options_failure_degrades_to_free
             await pilot.pause()
             scr._activate()
             deadline = time.monotonic() + 15
-            while not isinstance(app.screen, CreateActionScreen) and time.monotonic() < deadline:
+            while (
+                not isinstance(app.screen, CreateActionScreen) or not app.screen.is_mounted
+            ) and time.monotonic() < deadline:
                 await pilot.pause()
             assert isinstance(app.screen, CreateActionScreen)
+            assert app.screen.is_mounted
+            await pilot.pause()
             screen = app.screen
             criteria_field = next(q for q in screen._q if q["name"] == "criteria")
             assert criteria_field["options"] == []

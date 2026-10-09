@@ -21,8 +21,13 @@ T0, T1, T2 = "2026-10-07T10:00:00+00:00", "2026-10-07T11:00:00+00:00", "2026-10-
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
+    from agent_dispatch import procutil
+
     monkeypatch.setattr(srcs, "registry_path", lambda: tmp_path / "attention-sources.json")
     monkeypatch.setattr(attention_store, "default_path", lambda: tmp_path / "attention-observed.json")
+    # The bridge and pr sources read installed siblings; these tests run without them.
+    monkeypatch.setattr(procutil, "agent_bridge_launch_prefix", lambda: None)
+    monkeypatch.setattr(procutil, "agent_worktrees_launch_prefix", lambda: None)
 
 
 def _item(source="s", entity="task", ref="t1", state="awaiting_input", created=T0, **kw):

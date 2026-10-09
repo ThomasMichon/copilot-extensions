@@ -15,6 +15,7 @@ from .cli_mode_models import (  # noqa: F401 -- re-exported public models
 )
 from .install_paths import effective_config_dir
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
+from .preference_models import PreferencePolicyFields, PreferenceRequestFields
 
 # -- Platform defaults -------------------------------------------------------
 
@@ -193,7 +194,7 @@ TurnInfo.model_rebuild()
 # -- API requests ------------------------------------------------------------
 
 
-class StartSessionRequest(BaseModel):
+class StartSessionRequest(PreferenceRequestFields):
     """Request to start a new agent session."""
 
     agent: str | None = None
@@ -310,7 +311,7 @@ class CursorAckRequest(BaseModel):
 # -- API responses -----------------------------------------------------------
 
 
-class StartSessionResponse(BaseModel):
+class StartSessionResponse(PreferencePolicyFields):
     session_id: str
     name: str
     status: SessionStatus
@@ -882,7 +883,7 @@ class RepoBridgeConfig(BaseModel):
     default_env: dict[str, str] = Field(default_factory=dict)
 
 
-class ServiceConfig(BaseModel):
+class ServiceConfig(PreferencePolicyFields):
     """Root config loaded from ~/.agent-bridge/config.yaml."""
 
     # Unknown keys are ignored (pydantic default, pinned explicitly): a config

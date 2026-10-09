@@ -302,6 +302,20 @@ be discarded (or the cancel signature *persists* across sends). See the
 # Wait for a running session's current turn
 <agent-bridge catalog argv[0]> wait <session-id>
 
+# What each session is parked on right now -- read once, never a wait (that's
+# `wait --attention`). Works for bridge-managed sessions and registered
+# interactive ones alike (a session id or a worktree handle; a handle answers
+# for the session heading that worktree now). --json prints {schema: 1,
+# sessions: [{ref, status: ok|not_found|unsupported|error, reason, availability,
+# registry: bridge|live, session_id, worktree_id, fidelity: full|reduced,
+# detail, error}]}, one per operand in order. reason is an attention reason
+# (input_required, permission_required, policy_required, failed, unreachable,
+# turn_complete, ...) or null when nothing is pending; availability
+# unknown_after_restart marks a request this daemon generation can't answer.
+# A daemon older than HTTP protocol 29 reports every session unsupported (no
+# request is sent).
+<agent-bridge catalog argv[0]> --json attention <session|worktree> [<session|worktree> ...]
+
 # Stop a session (preserves state for resume)
 <agent-bridge catalog argv[0]> stop <session-id>
 

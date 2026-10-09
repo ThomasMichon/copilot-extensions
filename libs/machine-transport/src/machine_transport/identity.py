@@ -17,9 +17,9 @@ through :func:`is_local_machine` instead.
 from __future__ import annotations
 
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
-from .registry import MachineEntry, find_machine_entry
+from .registry import MachineIdentity, find_machine_entry
 
 __all__ = ["is_local_machine"]
 
@@ -28,7 +28,7 @@ def is_local_machine(
     name: str,
     *,
     config_machine: str,
-    load_entries: Callable[[], dict[str, MachineEntry]],
+    load_entries: Callable[[], Mapping[str, MachineIdentity]],
     real_hostname: str | None = None,
 ) -> bool:
     """True when ``name`` (a machine key, alias, ``hostname`` field, or

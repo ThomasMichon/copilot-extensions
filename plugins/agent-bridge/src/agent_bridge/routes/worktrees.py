@@ -1012,7 +1012,7 @@ async def _start_fresh_worktree_session(
 
 @router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
 async def resume_worktree(
-    worktree_id: str, request: Request, reclaim: bool = False
+    worktree_id: str, request: Request, reclaim: bool = False, strict: bool = False
 ) -> SessionInfo:
     """Resume a worktree by ensuring it has a live session.
 
@@ -1034,7 +1034,20 @@ async def resume_worktree(
     consumer's best-effort represent-if-live preflight. ``reclaim=true``
     bypasses the guard: the caller has just terminated the interactive CLI.
 
-    Returns 404 if the worktree has no session at all.
+    ``strict=true`` is the **identity-preserving contract**: a caller that
+    needs the GUARANTEE it gets back the exact existing conversation (or a
+    clear refusal), never a silent replacement. It disables BOTH fresh-
+    session fallbacks below -- a missing bridge record and a failed resume
+    each raise **409** (``reason: resume_requires_existing_session``)
+    instead of starting a new session under this worktree. Default False
+    preserves today's behavior (a taken-over or resume-exhausted worktree
+    stays usable via a fresh session).
+
+    Returns 404 if the worktree has no session at all and ``strict`` is
+    False. Under ``strict=true`` that same case returns **409**
+    (``reason: resume_requires_existing_session``), never 404 -- the
+    identity-preserving contract's refusal status, not the non-strict
+    not-found status.
     """
     from .sessions import _session_info
 
@@ -1057,6 +1070,16 @@ async def resume_worktree(
                 },
             )
 
+    def _strict_refusal(reason_detail: str) -> HTTPException:
+        return HTTPException(
+            status_code=409,
+            detail={
+                "reason": "resume_requires_existing_session",
+                "worktree_id": worktree_id,
+                "detail": reason_detail,
+            },
+        )
+
     mgr = getattr(request.app.state, "session_manager", None)
     session = _latest_session_for_worktree(mgr, worktree_id)
     if session is None:
@@ -1064,7 +1087,10 @@ async def resume_worktree(
         # interactive Copilot that took no turn, or a just-taken-over worktree
         # whose interactive CLI never persisted an ACP session). The worktree
         # still exists on disk, so -- rather than 404 and leave a taken-over
-        # worktree unusable (#1683) -- start a *fresh* owned session in it.
+        # worktree unusable (#1683) -- start a *fresh* owned session in it,
+        # UNLESS the caller asked for the strict identity-preserving contract.
+        if strict:
+            raise _strict_refusal(f"no existing session for worktree {worktree_id}")
         fresh = await _start_fresh_worktree_session(
             worktree_id, request, mgr, reclaim
         )
@@ -1099,6 +1125,16 @@ async def resume_worktree(
         resumed = await mgr.resume_session(session.session_id)
         return _session_info(resumed)
     except KeyError as exc:
+        # A concurrent removal between the `_latest_session_for_worktree`
+        # lookup above and this resume call (e.g. a racing cleanup) -- under
+        # the strict identity-preserving contract this is the exact same
+        # "resume failed" case the generic ``Exception`` branch below
+        # refuses for, not a 404 a non-strict caller's singleton fallback
+        # would otherwise treat as license to spawn a fresh replacement.
+        if strict:
+            raise _strict_refusal(
+                f"resume of session {session.session_id} failed: {exc}"
+            ) from exc
         raise HTTPException(
             status_code=404,
             detail=f"Session {session.session_id} not found",
@@ -1114,7 +1150,14 @@ async def resume_worktree(
         ) from exc
     except Exception as exc:
         # Resume failed (e.g. ACP session gone). Fall back to a fresh session
-        # in the same worktree so the worktree remains usable.
+        # in the same worktree so the worktree remains usable -- UNLESS the
+        # caller asked for the strict identity-preserving contract, in which
+        # case a failed resume must be a clear refusal, never a silent
+        # replacement conversation.
+        if strict:
+            raise _strict_refusal(
+                f"resume of session {session.session_id} failed: {exc}"
+            ) from exc
         log.warning(
             "resume_worktree %s: resume of %s failed (%s); starting fresh session",
             worktree_id, session.session_id, exc,

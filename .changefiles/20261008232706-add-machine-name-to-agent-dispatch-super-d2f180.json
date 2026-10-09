@@ -1,9 +1,0 @@
-{
-  "comment": "Add '--machine <name>' to 'agent-dispatch supervise override enable|disable', dispatching the override mutation over SSH to the named machine's own per-machine override store (reusing the existing peer-queue-browse SSH transport).",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}

@@ -57,8 +57,8 @@ from ..session_manager import (
 )
 from ..transport import SpawnTarget
 from ..worktree_head import resolve_head
-from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page
-from .event_pages import rows_to_events as _rows_to_events
+from ..preference_requests import apply_request_preferences, reused_preference_source
+from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page, rows_to_events as _rows_to_events
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -652,8 +652,10 @@ async def start_session(req: StartSessionRequest, request: Request):
     if req.caller_id and not req.force_new:
         existing = _find_reusable_session(mgr, agent_name, req.caller_id)
         if existing is not None:
+            existing_source = reused_preference_source(req, existing)
             return StartSessionResponse(
                 session_id=existing.session_id,
+                preference_source=existing_source,
                 name=existing.name,
                 status=existing.status, caller_session_id=getattr(existing, "caller_session_id", None),
             )
@@ -730,15 +732,14 @@ async def start_session(req: StartSessionRequest, request: Request):
 
     # Per-session env overrides (e.g. BYOK provider selection) merge onto the
     # agent's declared env, per-session winning (applied by the transport).
-    if req.env:
-        target.env = {**target.env, **req.env}
+    request_env, source = apply_request_preferences(req, request.app.state, target)
 
     try:
         session = await mgr.start_session(
             target, agent_name=agent_name, caller_id=req.caller_id,
             caller_session_id=req.caller_session_id, mcp_servers=req.mcp_servers,
             copilot_args=req.copilot_args,
-            env_overrides=req.env,
+            env_overrides=request_env or None,
             caller_owner_ref=req.caller_owner_ref,
             model=req.model, effort=req.effort,
             parity_fault=req.parity_fault,
@@ -765,6 +766,7 @@ async def start_session(req: StartSessionRequest, request: Request):
 
     return StartSessionResponse(
         session_id=session.session_id,
+        preference_source=source,
         name=session.name,
         status=session.status,
         parity_fault_result=parity_fault_result, caller_session_id=getattr(session, "caller_session_id", None),
@@ -1678,3 +1680,5 @@ async def end_session(
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+from .attention_current import router as _current_attention  # noqa: E402 -- avoids an import cycle
+router.include_router(_current_attention)

@@ -331,6 +331,42 @@ jobs:
         working-directory: worktree-manager
         run: uv run --extra dev pytest -q
 
+  agent-index-service-linux:
+    name: agent-index-service (ubuntu-latest, standalone full)
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test standalone controller with installed core and host containment
+        run: python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60
+
+  agent-index-service-windows:
+    name: agent-index-service (windows-latest, standalone full)
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test standalone controller with installed core and host containment
+        run: python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60
+
   guards-full-sweep:
     name: guards (full-tree, non-PR-scoped)
     needs: gate
@@ -385,13 +421,15 @@ jobs:
     # exists to react automatically to real validation runs), so the fix is
     # to just never offer that path, rather than trying to harden a job
     # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, guards-full-sweep]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
     if: >-
       always() &&
       github.event_name == 'repository_dispatch' &&
       needs.gate.outputs.is_dev == 'true' &&
       (needs.full.result == 'failure' ||
        needs.worktree-manager.result == 'failure' ||
+       needs.agent-index-service-linux.result == 'failure' ||
+       needs.agent-index-service-windows.result == 'failure' ||
        needs.guards-full-sweep.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -518,7 +556,7 @@ jobs:
 
   promote:
     name: Promote dev -> main
-    needs: [gate, full, worktree-manager, guards-full-sweep]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
     # `always()`: `full`/`worktree-manager`/`guards-full-sweep` are legitimately
     # `skipped` (not `success`) whenever `gate` found `is_dev == 'false'` --
     # the default implicit `if` (require every `needs` job to have succeeded)
@@ -627,7 +665,7 @@ jobs:
           # is_dev was true, so full/worktree-manager/guards-full-sweep were
           # NOT skipped by their own `if:` above -- they must have genuinely
           # run and succeeded, or we refuse to promote unvalidated content.
-          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.guards-full-sweep.result }}"; do
+          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.agent-index-service-linux.result }}" "${{ needs.agent-index-service-windows.result }}" "${{ needs.guards-full-sweep.result }}"; do
             if [ "$r" != "success" ]; then
               echo "proceed=false" >> "$GITHUB_OUTPUT"
               echo "::error::Validation did not pass ($r) -- refusing to promote."

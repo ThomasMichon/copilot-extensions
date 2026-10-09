@@ -14,6 +14,7 @@ WRAPPER_FILES = (
     "launch-session.cmd",
     "launch-session.ps1",
     "launch-session.sh",
+    "pane-launch.ps1",
     "pane-wrapper.ps1",
     "pane-wrapper.sh",
     "psmux-path.ps1",

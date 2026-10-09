@@ -18,6 +18,10 @@ from pathlib import Path
 from . import claim_history, config as cfg
 from . import git_ops, hooks, obligations, pr_publish, push_diagnostics, tracking
 from .config import Config, SourceAttribution
+from .pr_patch_ids import (
+    _commit_patch_ids as _commit_patch_ids,
+    _patch_id as _patch_id,
+)
 from .tracking import PRRecord
 
 HOLD_LABEL = "do-not-merge"
@@ -302,98 +306,6 @@ def _rollback(worktree_path: str, wt_branch: str, orig_sha: str | None) -> None:
 def _rev(ref: str, *, cwd: str) -> str:
     r = git_ops.git("rev-parse", ref, cwd=cwd, check=False)
     return r.stdout.strip() if r.returncode == 0 else ""
-
-
-def _patch_id(base: str, head: str, *, cwd: str) -> str:
-    """Squash-invariant patch-id of ``base..head`` (#898), or "" on failure.
-
-    ``git diff base..head | git patch-id --stable`` identifies the *change
-    content*, invariant across a squash / rebase / re-commit -- so a downstream
-    recorder (an issue-close comment, a session ref) can bind to something that
-    survives the server-side squash-merge rewriting the commit SHA, instead of a
-    pre-squash SHA that dangles once the work lands. Best-effort: an empty diff or
-    any git error yields "".
-    """
-    if not base:
-        return ""
-    diff = git_ops.git("diff", f"{base}..{head}", cwd=cwd, check=False)
-    if diff.returncode != 0 or not diff.stdout:
-        return ""
-    try:
-        import subprocess
-        pid = subprocess.run(
-            ["git", "patch-id", "--stable"],
-            input=diff.stdout, cwd=cwd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    if pid.returncode != 0:
-        return ""
-    out = pid.stdout.strip()
-    # `git patch-id` prints "<patch-id> <commit-id>"; take the patch-id token.
-    return out.split()[0] if out else ""
-
-
-def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
-    """Map patch IDs to non-merge commits in ``base..head``.
-
-    Stream one ``git log`` process into one ``git patch-id`` process. This
-    avoids both per-commit process spawning and buffering a long patch history
-    in memory.
-    """
-    if not base:
-        return {}
-    import subprocess
-
-    log_process: subprocess.Popen[bytes] | None = None
-    patch_process: subprocess.Popen[str] | None = None
-    env = git_ops.repository_identity_env()
-    try:
-        log_process = subprocess.Popen(
-            [
-                "git", "log", "--no-merges", "--format=commit %H", "-p",
-                f"{base}..{head}",
-            ],
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        if log_process.stdout is None:
-            log_process.kill()
-            log_process.wait()
-            return {}
-        patch_process = subprocess.Popen(
-            ["git", "patch-id", "--stable"],
-            cwd=cwd,
-            env=env,
-            stdin=log_process.stdout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        log_process.stdout.close()
-        output, _ = patch_process.communicate(timeout=30)
-        log_returncode = log_process.wait(timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        if patch_process is not None and patch_process.poll() is None:
-            patch_process.kill()
-            patch_process.communicate()
-        if log_process is not None and log_process.poll() is None:
-            log_process.kill()
-            log_process.wait()
-        return {}
-    if patch_process.returncode != 0 or log_returncode != 0:
-        return {}
-    result: dict[str, set[str]] = {}
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) >= 2:
-            result.setdefault(parts[0], set()).add(parts[1])
-    return result
 
 
 def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
@@ -946,10 +858,6 @@ def create_pr(
     )
 
     head_sha = _rev("HEAD", cwd=worktree_path)
-    # Squash-invariant reference for downstream recorders (#898): survives the
-    # server-side squash-merge that rewrites the commit SHA.
-    patch_id = _patch_id(base_sha, "HEAD", cwd=worktree_path)
-
     # Effective per-invocation head scheme. In a refspec repo, a *parallel* PR
     # (--new while another PR is still live) cannot use worktree/<id> as its
     # head -- that branch is the live refspec head of the other PR -- so it
@@ -974,7 +882,7 @@ def create_pr(
             pushed = pr_publish.push_checked(
                 record, publish_remote, f"{wt_branch}:refs/heads/{feature_branch}", cwd=worktree_path,
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -1011,7 +919,7 @@ def create_pr(
             pushed = pr_publish.push_checked(
                 record, publish_remote, feature_branch, cwd=worktree_path,
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -1024,6 +932,8 @@ def create_pr(
                 snapshot=True,
             )}
 
+    base_sha, head_sha = getattr(pushed, "rebase_base_sha", "") or base_sha, getattr(pushed, "published_head_sha", "") or head_sha
+    patch_id = _patch_id(base_sha, head_sha, cwd=worktree_path)
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
     if record is not None and target_pr is not None:
@@ -2136,15 +2046,8 @@ def _set_pr_locked(
     )
     if url is not None:
         pr.url = url
-        # `set-pr --url ...` is the documented manual-registration path for
-        # a PR opened outside create-pr's own flow (e.g. via a provider's
-        # own CLI/API directly) -- without this, `pr.repo` is left unset and
-        # every downstream operation needing the hosting `owner/repo` slug
-        # (pr-nudge's requested_reviewers call, among others) silently falls
-        # back to the worktree's generic local project name instead, which
-        # is wrong whenever the PR's actual host repo has a different name
-        # or owner than the local project (real failure: a 404 from GitHub's
-        # API against a nonexistent `repos/<project-name>/pulls/<n>` path).
+        # Manual registration needs the provider's owner/repo slug, not the
+        # local project label, for subsequent provider calls.
         if parsed_repo:
             pr.repo = parsed_repo
     if number is not None:
@@ -2153,6 +2056,9 @@ def _set_pr_locked(
         pr.provider = provider
     if reassigned:  # its old fork target isn't this PR's; the revision outranks stale snapshots
         pr.remote = pr.head_repo = pr.head_identity = pr.head_owner = ""
+        pr.base_sha = pr.head_sha = pr.patch_id = ""
+        pr.opened_at = pr.closed_at = ""
+        pr.state = "open"
         pr.pr_revision += 1
     if identity_changed:
         pr.attribution_head = ""
@@ -2485,7 +2391,7 @@ def _push_existing_feature(
             record, remote, feature_branch, cwd=worktree_path,
             expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
             force_with_lease_expect=(lease_expect or None),
-            force_with_lease=(existing_target is not None),
+            force_with_lease=(existing_target is not None), repo=repo,
         )
     if not pushed:
         error = f"Failed to (re)push '{feature_branch}' to '{remote}'."
@@ -2526,12 +2432,13 @@ def _push_existing_feature(
         # target is always non-terminal here (a live match or a fresh record).
         target.state = "open"
         pr_publish.record_remote_identity(target, remote, repo.remote, pushed.head_repo, getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
-        target.head_sha = head_sha
+        target.base_sha = getattr(pushed, "rebase_base_sha", "") or target.base_sha
+        head_sha = target.head_sha = getattr(pushed, "published_head_sha", "") or head_sha
         target.head_observed_at = ""
         target.head_observed_api_base = ""
         # Refresh the squash-invariant patch-id after the re-squash (#898).
         target.patch_id = _patch_id(
-            target.base_sha, feature_branch, cwd=worktree_path)
+            target.base_sha, head_sha, cwd=worktree_path)
         target.provider = target.provider or prcfg.provider
         tracking.save_record(record)
     base_sha = target.base_sha if target else ""

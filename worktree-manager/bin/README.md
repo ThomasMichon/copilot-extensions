@@ -12,6 +12,26 @@ of the `worktree-manager-control-plane` effort.
   cutover argv), then call `agent-worktrees post-exit` for finalization.
 - `pane-wrapper.sh` / `pane-wrapper.ps1` — wrap the actual mux pane command for
   graceful exit-code handling, initial-prompt injection, and AHP token handoff.
+- `pane-launch.ps1` — Windows file-based argument transport. Producers invoke
+  this shipped entrypoint with `pwsh -File` and `-Manifest <JSON path>`, using
+  PowerShell single-quoted paths with doubled apostrophes across PSMux's space
+  join. The version-1 JSON object carries `wrapper` and a non-empty string
+  `argv` array, consumed and deleted before invoking the unchanged wrapper.
+  Consumption holds an exclusive delete-on-close file handle through validation,
+  so concurrent consumers cannot execute the same handoff twice.
+  Each create attempt uses a fresh manifest;
+  failed creation cleans up its unconsumed file after owned-session teardown.
+  AHP credentials still use the separate protected token handoff, not JSON.
+  Relaunching requires a fresh producer command, not replaying a consumed
+  one-shot handoff. Timed-out programmatic mux calls retain their manifest
+  because the pane may still be starting; its consumer owns successful cleanup.
+  Both producers register handoffs in the runtime's dedicated `pane-args/` directory.
+  Unconsumed files expire after 24 hours on the next resident-monitor sweep or
+  Python pane-command generation, preserving delayed startup within that grace period.
+  Cleanup is limited to transport-named files directly in that directory and
+  refuses symlink/junction traversal.
+  A cleanup sharing violation logs a warning and retains the file for expiry
+  rather than replacing the original launch failure or interrupting retries.
 - `session-options.ps1` / `session-options.sh` — per-session status bar +
   behaviors that `launch-session.ps1`/`.sh` stamp onto each mux session.
   `launch-session.ps1` dot-sources `session-options.ps1` via a
@@ -43,3 +63,11 @@ steps were deleted from `plugins/agent-worktrees/` in the same cutover.
 Deployed automatically: `self_install.py`'s `_copy_payload` copies the whole
 `worktree-manager/` payload directory (this one included) into each versioned
 install slot — no separate packaging step is needed for this directory.
+For agent-worktrees' standalone fallback, promotion also materializes the
+files in `plugins/agent-worktrees/launch-wrapper-assets.json`, including
+`pane-launch.ps1`, into that plugin's packaged `bin/` directory.
+Python pane generation uses that fallback when an otherwise-usable older
+Worktree Manager bundle does not yet contain the dispatcher and wrapper pair.
+The outer launcher retains the cmd shim's Windows PowerShell 5.1 fallback:
+plan argv uses PowerShell's bundled Newtonsoft reader with date parsing
+disabled. The native pane dispatcher still runs through PowerShell 7.

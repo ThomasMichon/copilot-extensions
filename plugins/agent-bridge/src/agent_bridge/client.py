@@ -1001,6 +1001,8 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         env: dict[str, str] | None = None,
         model: str | None = None,
         effort: str | None = None,
+        preference_source: str | None = None,
+        context: str | None = None,
         copilot_args: list[str] | None = None,
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
@@ -1019,6 +1021,19 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         ``caller_session_id`` is sent only to a daemon that records it.
         """
         body: dict[str, Any] = {}
+        from .protocol import TARGET_PREFERENCES_PROTOCOL_VERSION
+        from .session_preferences import SOURCE_ENV, CONTEXT_ENV, SOURCES
+
+        selected_source = preference_source if preference_source is not None else (env or {}).get(SOURCE_ENV)
+        if selected_source is not None and selected_source not in SOURCES:
+            raise ValueError("unsupported preference_source")
+        if selected_source is not None or context is not None or (env or {}).get(CONTEXT_ENV):
+            if not self.daemon_supports(TARGET_PREFERENCES_PROTOCOL_VERSION):
+                raise BridgeClientError(426, "The daemon does not support execution preference policy")
+        if preference_source is not None:
+            body["preference_source"] = preference_source
+        if context is not None:
+            body["context"] = context
         if agent:
             body["agent"] = agent
         if args := (["--agent", charter, *(copilot_args or [])] if charter else copilot_args):
@@ -1159,6 +1174,7 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         worktree_id: str,
         *,
         reclaim: bool = False,
+        strict: bool = False,
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/worktrees/{id}/resume -- ensure a worktree has a live
@@ -1169,13 +1185,40 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         holding the worktree normally yields a 409
         (``reason: live_cli_holds_worktree``); ``reclaim=true`` bypasses that
         guard so the caller can own a worktree it has just freed.
+
+        ``strict`` is the identity-preserving contract: never a silent fresh
+        replacement conversation. Either the existing session resumes, or the
+        call raises a 409 (``reason: resume_requires_existing_session``).
+
+        Gated on ``STRICT_RESUME_PROTOCOL_VERSION`` -- unlike most gated
+        fields, this one **fails closed** rather than degrading: ``strict`` is
+        a behaviorful request parameter an older daemon's ``/resume`` handler
+        would silently ignore, falling through to its own pre-existing
+        fresh-session fallback and defeating the exact history-loss guarantee
+        the caller explicitly asked for. Silently sending a non-strict
+        request in that case would be worse than refusing outright, so an
+        unsupported daemon raises instead of quietly downgrading.
         """
-        params = {"reclaim": "true"} if reclaim else None
+        params = {}
+        if reclaim:
+            params["reclaim"] = "true"
+        if strict:
+            from .protocol import STRICT_RESUME_PROTOCOL_VERSION
+
+            if not self.daemon_supports(STRICT_RESUME_PROTOCOL_VERSION):
+                raise BridgeClientError(
+                    426,
+                    f"the bridge daemon at {self._base} predates protocol "
+                    f"{STRICT_RESUME_PROTOCOL_VERSION} (strict resume); refusing "
+                    "to send a request that daemon would silently honor "
+                    "non-strictly",
+                )
+            params["strict"] = "true"
         return (
             self._request(
                 "POST",
                 f"/api/v1/worktrees/{worktree_id}/resume",
-                params=params,
+                params=params or None,
                 request_timeout=request_timeout,
             )
             or {}

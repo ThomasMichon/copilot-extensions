@@ -1,9 +1,0 @@
-{
-  "comment": "Add 'agent-dispatch workers config-section' CLI glue: a Worktree Manager Picker config_sections entry point reporting a declared supervised-lane pool's status and toggling its local enable/disable override.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}

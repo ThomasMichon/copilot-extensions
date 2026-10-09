@@ -1,9 +1,0 @@
-{
-  "comment": "Subscribe to Copilot's raw session events via initialize clientCapabilities._meta so sub-agent lifecycle and parent attribution are recorded",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

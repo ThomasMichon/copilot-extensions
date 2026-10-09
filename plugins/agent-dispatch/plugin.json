@@ -6,6 +6,7 @@
   "sessionContext": "session-context.json",
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
+  "installerDeadlineSeconds": 1050,
   "zeroDowntimeUpdate": true,
   "author": {
     "name": "Thomas Michon"

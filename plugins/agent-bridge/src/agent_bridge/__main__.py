@@ -492,6 +492,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scope project-addressed verbs to REPO instead of the caller's cwd project. For send/create the remote worktree resolve targets REPO; for agents/machines the displayed catalog is filtered to REPO. Injected by the `<repo> <slug>` router.",
     )
     sub = parser.add_subparsers(dest="command")
+    from .attention_cli import register_attention_commands
+
+    register_attention_commands(sub)
     register_service_start_commands(sub)
     register_config_commands(sub)
     register_venue_commands(sub)

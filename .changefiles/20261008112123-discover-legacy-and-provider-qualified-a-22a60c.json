@@ -1,9 +1,0 @@
-{
-  "comment": "Discover legacy and provider-qualified archive source roots through one shared reader",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

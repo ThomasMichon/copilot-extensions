@@ -74,6 +74,9 @@ def test_diagnose_stale_lease_when_started_expired_and_no_activity():
     now = 1000.0 + doctor.DEFAULT_STALE_LEASE_GRACE_SECONDS + 1
     d = doctor.diagnose(task, now=now, resolve=lambda wt: {"status": "active"})
     assert d.verdict == "stale_lease"
+    assert "normally parked" in d.detail
+    assert "persistent session" in d.detail
+    assert "likely dead" not in d.detail
 
 
 def test_diagnose_started_within_grace_is_healthy():
@@ -851,4 +854,3 @@ def test_cmd_doctor_merges_stuck_queued_reservations_into_sweep(capsys, monkeypa
     verdicts = {d["verdict"] for d in out["diagnoses"]}
     assert "orphaned_worktree_gone" in verdicts
     assert doctor.QUEUED_STUCK_RESERVATION_VERDICT in verdicts
-

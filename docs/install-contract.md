@@ -282,6 +282,25 @@ platform-appropriate publication primitive described above.
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.
 
+**agent-worktrees' own versioned-slot build lease** (`Enter-VersionedSlotLease`/
+`_acquire_versioned_slot_lease`, a plugin-local OS-backed exclusive lock
+distinct from the cell-root provisioning lock above) refuses to build into a
+slot another live process is already constructing. A caller that needs to
+tolerate ordinary contention rather than fail on first refusal uses the
+bounded-wait wrapper (`Wait-ForVersionedSlotLease`/
+`_wait_for_versioned_slot_lease`): it polls for the lease on a real wall-clock
+deadline, configurable via `AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC` (default 180
+seconds), with a poll interval via `AGENT_WORKTREES_SLOT_LEASE_POLL_MS`
+(PowerShell, default 1000) or `AGENT_WORKTREES_SLOT_LEASE_POLL_SEC` (bash,
+default 1). Only genuine contention is retried; any other failure of the
+authoritative gate (permission/path/storage) fails immediately regardless of
+the configured budget. The PowerShell adapter classifies the platform's native
+lock errors: Win32 sharing/lock violations on Windows and EAGAIN/EWOULDBLOCK
+on Unix; a Unix permission error must not be mistaken for contention.
+Reaching the deadline without acquiring the lease fails the
+build with an actionable error naming the env var to raise if builds routinely
+take longer than the default.
+
 An operative plugin adapter holds one cell-root provisioning lock across the
 entire snapshot, slot reservation, venv/package build, completion, cutover, and
 deploy-manifest publication transaction. Receipt primitives retain their own
@@ -1485,6 +1504,22 @@ logs `WATCHDOG-KILL` to `~/.<name>/reconcile.err.log`, and exits `124`. Deadline
 default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so a hung
 download degrades to "failed + retryable" rather than wedging. Backstop:
 `bootstrap-check`'s single-flight + stale-reap.
+
+Unified `agent-worktrees update` gives module and registered-runtime installers
+the selected positive watchdog deadline plus 30 seconds for cleanup and failure
+publication, instead of preempting the default watchdog at 300 seconds. A disabled
+watchdog (`<=0`) still leaves a finite 510-second updater safety bound. The
+worktrees self-installer retains its existing 600-second minimum, extended when
+a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
+values fail explicitly before launching the installer.
+
+Plugins with a watchdog default other than 480 seconds declare that positive
+integer as `installerDeadlineSeconds` in `plugin.json`; unified update reads it
+only when neither deadline environment override is set. The declaration must
+match the plugin's own cross-platform installer defaults. Agent-dispatch declares
+1050 seconds for its longer activation/cutover lifecycle, so its default caller
+budget is 1080 seconds; an explicit disabled-watchdog override still uses the
+finite 510-second fallback. Invalid declarations fail before installer launch.
 
 The **agent-bridge Windows hook** serializes reconcile admission and status
 publication with an installation-root-scoped global mutex, including across

@@ -60,21 +60,29 @@ are complete, rather than stopping after the design PR.
 
 ### Phase A - Shared identity and Linux manager
 
-- [ ] Recover and assess the prototype; reuse only mechanisms that meet
-  the current contract.
-- [ ] Establish trusted successor identity before adoption. A PID and a
-  newly sampled start token are not evidence of which process originally
-  published the active route. Add a backward-compatible publication token
-  or spawn-registration contract, and reject unverifiable candidates.
-- [ ] Implement distinct routing and manager-state paths, atomic versioned
+- [x] Recover and assess the prototype; reuse only mechanisms that meet
+  the current contract. The old best-effort identity and PPID-only paths
+  are not reused as a production backend.
+- [x] Add backward-compatible publication-time identity. Landed in
+  [PR #5803](https://github.com/ThomasMichon/copilot-extensions/pull/5803),
+  including preservation through rollback/watchdog promotion.
+- [x] Require the published baseline and proven ownership before adopting
+  successors; reject unverifiable candidates rather than sampling a new
+  identity from an already-reused PID. Implemented by the Linux library slice;
+  Windows custody and production launcher integration remain separate gates.
+- [x] Implement distinct routing and manager-state paths, atomic versioned
   state, singleton ownership, ancestry checks, stable identity baselines,
-  zombie reaping, bounded successor discovery, and crash cleanup.
-- [ ] Implement marker-driven Linux re-exec while polling the child; restore
+  zombie reaping, bounded successor discovery, and crash cleanup. Landed by
+  [PR #5821](https://github.com/ThomasMichon/copilot-extensions/pull/5821).
+- [x] Implement marker-driven Linux re-exec while polling the child; restore
   the validated watched process without invoking `spawn` a second time.
-  Preserve pending cutover discovery across the exec boundary.
-- [ ] Keep unsupported-platform handling explicit and fail closed; no
-  best-effort Windows facade over the superseded PPID-walk prototype.
-- [ ] Synchronize vendored consumers and add the required changefiles.
+  Preserve pending cutover discovery across the exec boundary. Landed by
+  PR #5821.
+- [x] Keep unsupported-platform handling explicit and fail closed; no
+  best-effort Windows facade over the superseded PPID-walk prototype. Landed
+  by PR #5821.
+- [x] Synchronize vendored consumers and add the required changefiles.
+  Landed by PR #5821.
 
 ### Phase B - Windows ownership and handoff
 
@@ -153,3 +161,11 @@ requirements or permission to weaken the existing vision.
 - Design PR #5556 is merged; #5655 remains open.
 - Established this target-local implementation contract. No manager code
   or platform production-readiness claim is delivered by this proposal.
+
+### 2026-10-08 - Identity foundation landed; Linux manager implementation
+
+- Plan PR #5801 and publication-identity PR #5803 are merged.
+- The next slice implements a Linux-only pidfd-backed manager, durable
+  state/lease recovery, bounded discovery, and actual re-exec/cutover
+  subprocess proof. It does not wire a production launcher or close the
+  systemd/Windows validation gates.

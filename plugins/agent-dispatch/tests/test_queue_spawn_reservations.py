@@ -12,6 +12,10 @@ with its own stable public surface, is actually composed into
 lesson already applied -- ordinary top-level imports from
 ``queue_records``, not a ``TYPE_CHECKING``-guarded lazy import -- so this
 guard should stay green without ever needing a follow-up fix).
+
+The conclusion-retry claim/revalidate family split further into its own
+sibling mixin (module size) -- see ``test_queue_spawn_conclusion.py`` for
+its own matching import guard.
 """
 
 from __future__ import annotations
@@ -23,7 +27,6 @@ import pytest
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_spawn_reservations import (
     SpawnReservationMixin,
-    _conclusion_payload,
     _newer_worktree_reservation,
     _validate_conclusion_claim,
     spawn_key,
@@ -46,15 +49,11 @@ def test_spawn_reservation_methods_are_directly_importable():
     assert callable(SpawnReservationMixin.retire_spawn)
     assert callable(SpawnReservationMixin.request_spawn_release)
     assert callable(SpawnReservationMixin.settle_spawn)
-    assert callable(SpawnReservationMixin.record_spawn_conclusion)
-    assert callable(SpawnReservationMixin.claim_spawn_conclusion_retry)
-    assert callable(SpawnReservationMixin.validate_spawn_conclusion_claim)
 
 
 @pytest.mark.guard
 def test_module_level_helpers_are_directly_importable():
     assert callable(spawn_key)
-    assert callable(_conclusion_payload)
     assert callable(_validate_conclusion_claim)
     assert callable(_newer_worktree_reservation)
 
@@ -77,8 +76,5 @@ def test_mixin_method_annotations_resolve_via_get_type_hints():
         "retire_spawn",
         "request_spawn_release",
         "settle_spawn",
-        "record_spawn_conclusion",
-        "claim_spawn_conclusion_retry",
-        "validate_spawn_conclusion_claim",
     ):
         typing.get_type_hints(getattr(SpawnReservationMixin, name))
