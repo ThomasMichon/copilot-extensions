@@ -141,6 +141,22 @@ def test_invalid_declared_deadline_is_explicit(payloads, value):
         runtime._installer_timeout("agent-example", environment, payload)
 
 
+def test_unreadable_manifest_does_not_silently_shorten_the_deadline(payloads, monkeypatch):
+    plugin, environment = payloads
+    environment.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
+    payload = plugin.parent / "agent-example"
+    original = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path == payload / "plugin.json":
+            raise PermissionError("installer default declaration unavailable")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(PermissionError, match="default declaration unavailable"):
+        runtime._installer_timeout("agent-example", environment, payload)
+
+
 def test_invalid_deadline_does_not_launch_runtime_or_module(payloads, monkeypatch):
     plugin, environment = payloads
     environment["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = "invalid"

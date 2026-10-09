@@ -32,8 +32,12 @@ def _installer_timeout(
             raise ValueError(f"{name}: invalid installer deadline {raw!r}; expected integer seconds") from error
     elif plugin_dir is not None:
         manifest = plugin_dir / "plugin.json"
-        if manifest.is_file():
-            data = json.loads(manifest.read_text(encoding="utf-8"))
+        try:
+            manifest_text = manifest.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            pass
+        else:
+            data = json.loads(manifest_text)
             if not isinstance(data, dict):
                 raise ValueError(f"{name}: installer manifest must be an object")
             deadline = data.get("installerDeadlineSeconds", 480)
