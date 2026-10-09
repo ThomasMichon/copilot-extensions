@@ -1,0 +1,9 @@
+{
+  "comment": "Defer daemon exception imports until launch-seed failure handling so standalone CLI imports do not require the daemon transport.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

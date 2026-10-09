@@ -45,13 +45,14 @@ from . import (
     tracking,
 )
 from . import config as cfg
-from .tracking_write import AmbiguousWriteOutcome
 
 
 class LaunchSeedStagingFailure(RuntimeError):
     """Creation succeeded, but seed staging did not produce a confirmed result."""
 
     def __init__(self, record, seed_id: str, cause: Exception):
+        from .tracking_write import AmbiguousWriteOutcome
+
         self.worktree = {
             "id": record.worktree_id, "path": record.worktree_path,
             "branch": record.branch, "repo": record.repo,

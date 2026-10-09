@@ -229,3 +229,14 @@ encoded commands or initial-prompt transports.
   deletion was attempted, the record remains, and the serialized launch-seed
   removal diagnostic preserves the original lock error. Production ordering
   and safety gates are unchanged; all 33 managed-removal tests passed locally.
+- Removal repair PR #5925 received approval, passed required checks and merged.
+  Continued with the new validation run; release and installed-host proof are
+  still outstanding.
+- That full run exposed an eager daemon dependency import (#5928): the CLI
+  composition root imports the creation module, which imported the transport
+  merely to classify seed-staging exceptions. Deferred that import to the
+  failure constructor and extended the existing missing-transport import
+  regression to cover the creation class explicitly.
+- All 69 audit, paired-creation and seed-staging tests passed. Lint and the
+  install-contract gate passed. This below-altitude import repair changes no
+  launcher or recovery behavior; no installer/clean-room lane is affected.
