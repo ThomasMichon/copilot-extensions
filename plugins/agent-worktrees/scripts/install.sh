@@ -1327,6 +1327,14 @@ _wait_for_versioned_slot_lease() {
     local poll_seconds="${AGENT_WORKTREES_SLOT_LEASE_POLL_SEC:-1}"
     case "$wait_seconds" in (*[!0-9]*|'') wait_seconds=180 ;; esac
     case "$poll_seconds" in (*[!0-9]*|'') poll_seconds=1 ;; esac
+    # Reject (fall back to the default) a value whose sheer DIGIT COUNT
+    # risks silent wraparound once it enters arithmetic expansion below --
+    # digit-only validation alone does not make that conversion safe (an
+    # astronomically oversized operator typo would otherwise still "parse"
+    # but wrap into an arbitrary, possibly-small or negative result,
+    # defeating the bounded-wait guarantee this function exists to provide).
+    case "$wait_seconds" in (??????????*) wait_seconds=180 ;; esac
+    case "$poll_seconds" in (??????????*) poll_seconds=1 ;; esac
     # Force base-10 interpretation: digit-only validation above still
     # accepts a zero-padded value (e.g. "08"), which bash's arithmetic
     # context and `[[ -gt ]]` would otherwise read as octal and abort on
@@ -1334,35 +1342,43 @@ _wait_for_versioned_slot_lease() {
     wait_seconds=$((10#$wait_seconds))
     poll_seconds=$((10#$poll_seconds))
     [[ "$poll_seconds" -gt 0 ]] || poll_seconds=1
-    [[ "$wait_seconds" -gt 0 ]] || return 1
+    # A clamp independent of digit count: even a 9-digit value that
+    # survives both checks above without wrapping is still an implausible
+    # wait and worth capping at something sane (1 year) rather than
+    # trusting it outright.
+    if [[ "$wait_seconds" -gt 31536000 ]]; then wait_seconds=31536000; fi
+    [[ "$wait_seconds" -ge 0 ]] || return 1
 
-    local start_epoch now_epoch elapsed remaining
+    local start_epoch now_epoch elapsed remaining attempted=0
     start_epoch="$(date +%s)"
     while :; do
         now_epoch="$(date +%s)"
         elapsed=$((now_epoch - start_epoch))
         remaining=$((wait_seconds - elapsed))
-        if [[ "$remaining" -le 0 ]]; then
+        # A zero (or already-elapsed) budget still gets exactly ONE
+        # attempt -- "wait up to 0 seconds" means "don't wait on
+        # contention", never "don't even try the lease at all".
+        if [[ "$attempted" -eq 1 && "$remaining" -le 0 ]]; then
             return 1
         fi
+        local read_timeout="$remaining"
+        if [[ "$read_timeout" -lt 1 ]]; then read_timeout=1; fi
+        if [[ "$read_timeout" -gt 10 ]]; then read_timeout=10; fi
         # Every _acquire_versioned_slot_lease call below forces TWO
         # dynamically-scoped locals (visible to the mkdir fallback and the
         # no-flock Python fallback via bash's dynamic scoping of `local`
-        # across callees), capping each to whatever budget actually
-        # remains THIS iteration: the mkdir fallback's own default retry
-        # loop is up to ~10 nested one-second sleeps, and the no-flock
-        # fallback's status read blocks up to 10 seconds on its own --
-        # either would otherwise let a single attempt silently blow
-        # straight through a short caller-configured budget (e.g.
+        # across callees): the mkdir fallback's own default retry loop is
+        # up to ~10 nested one-second sleeps, and the no-flock fallback's
+        # status read blocks up to 10 seconds on its own -- either would
+        # otherwise let a single attempt silently blow straight through a
+        # short caller-configured budget (e.g.
         # AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC=2) before this function's own
         # deadline check ever runs again. Collapsing each attempt (and
         # bounding the helper's own internal wait) to the remaining budget
         # keeps the caller's wall-clock deadline authoritative end to end.
         local _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT=1
-        local _VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT="$remaining"
-        if [[ "$_VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT" -gt 10 ]]; then
-            _VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT=10
-        fi
+        local _VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT="$read_timeout"
+        attempted=1
         if _acquire_versioned_slot_lease; then return 0; fi
         [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
 
