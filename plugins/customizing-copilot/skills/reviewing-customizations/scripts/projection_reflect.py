@@ -14,8 +14,9 @@ or must instead route to conflict-dispatch:
 
 * deterministic finding **classification** (fail-closed allowlist: only
   ``projection-missing`` and ``projection-source-update`` are plain drift
-  that ``sync`` already resolved -- every other check name, including one
-  this module has never seen before, requires conflict-dispatch);
+  that ``sync`` already resolved; aggregate-budget warnings are separate
+  audit advisories -- every other check name, including one this module
+  has never seen before, requires conflict-dispatch);
 * the **"did anything change" trigger** (``changed or lock_updated``, not
   ``changed`` alone -- a lock-only update, or a `scan` finding with no file
   change, must never be silently treated as a no-op);
@@ -95,10 +96,11 @@ PLAIN_DRIFT_CHECKS = frozenset({"projection-missing", "projection-source-update"
 
 @dataclass(frozen=True)
 class Classification:
-    """The split of a scan's findings into plain drift vs. conflict-routed."""
+    """Plain drift, conflict-routed findings, and non-gating audit advisories."""
 
     plain: tuple[object, ...]
     conflict: tuple[object, ...]
+    advisory: tuple[object, ...] = ()
 
     @property
     def is_clean(self) -> bool:
@@ -108,21 +110,28 @@ class Classification:
 def classify_findings(findings: Iterable[object]) -> Classification:
     """Split findings by their ``.check`` name using the fail-closed allowlist.
 
-    Any check name not explicitly in :data:`PLAIN_DRIFT_CHECKS` -- including
-    one this module has never seen before -- is treated as conflict-routed.
+    Aggregate-budget warnings are audit-only. Every other check name not
+    explicitly in :data:`PLAIN_DRIFT_CHECKS` -- including one this module
+    has never seen before -- is treated as conflict-routed.
     This is deliberate: a newly introduced check in
     ``instruction_projections.py`` must be reviewed and explicitly
     allowlisted here before a deterministic worker may silently resolve it.
     """
     plain: list[object] = []
     conflict: list[object] = []
+    advisory: list[object] = []
     for finding in findings:
         check = getattr(finding, "check", None)
-        if check in PLAIN_DRIFT_CHECKS:
+        if (
+            check == "projection-aggregate-budget"
+            and getattr(finding, "severity", None) == "warning"
+        ):
+            advisory.append(finding)
+        elif check in PLAIN_DRIFT_CHECKS:
             plain.append(finding)
         else:
             conflict.append(finding)
-    return Classification(tuple(plain), tuple(conflict))
+    return Classification(tuple(plain), tuple(conflict), tuple(advisory))
 
 
 def has_actionable_change(*, changed: Iterable[str], lock_updated: bool) -> bool:

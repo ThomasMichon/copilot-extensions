@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Draft; operator-approved scope | #5789 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Draft | #5737, #5738, #5740, #5741 |
 | [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Draft; architecture proposal | #5768, #5769 |
 | [Local Projection Launch Readiness](active/local-projection-launch-readiness/README.md) | Draft | #5707 |

@@ -67,12 +67,13 @@ def _write_plugin(
     *,
     version: str = "1.0.0",
     body: str = "Keep this static fallback useful.\n",
+    apply_to: str = "**",
 ) -> tuple[Path, SimpleNamespace]:
     plugin = root / marketplace / name
     template = plugin / "instructions" / "fallback.instructions.md"
     template.parent.mkdir(parents=True, exist_ok=True)
     template.write_text(
-        '---\napplyTo: "**"\n---\n\n# Fallback\n\n' + body,
+        f'---\napplyTo: "{apply_to}"\n---\n\n# Fallback\n\n' + body,
         encoding="utf-8",
         newline="\n",
     )
@@ -90,7 +91,7 @@ def _write_plugin(
                         "template": "instructions/fallback.instructions.md",
                         "destination": f".github/instructions/{name}/fallback.instructions.md",
                         "customizationKind": "instructions",
-                        "applyTo": "**",
+                        "applyTo": apply_to,
                         "legacyMarkers": [],
                     }
                 ],
@@ -134,6 +135,68 @@ def test_first_sync_is_bypass_eligible_when_trusted(tmp_path: Path) -> None:
     assert outcome.bypass_eligible
     assert not outcome.needs_conflict_dispatch
     assert outcome.changed
+
+
+def test_over_budget_sync_reports_audit_debt_without_repeat_prs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(repo, trusted_marketplaces=["copilot-extensions"])
+    sources = [
+        _write_plugin(
+            tmp_path, "copilot-extensions", f"policy-{index}",
+            body="x" * 2700 + "\n",
+            apply_to=f"policy-{index}/**",
+        )[1]
+        for index in range(4)
+    ]
+    first = worker.run_sync_pass(
+        repo, sources, trusted_marketplaces=["copilot-extensions"],
+    )
+    assert len(first.changed) == 4
+    assert first.bypass_eligible
+    assert not first.needs_conflict_dispatch
+    assert first.audit_warnings
+    payload = first.to_dict()
+    assert all(
+        warning["check"] == "projection-aggregate-budget"
+        and warning["severity"] == "warning"
+        and "over by" in warning["message"]
+        for warning in payload["auditWarnings"]
+    )
+
+    second = worker.run_sync_pass(
+        repo, sources, trusted_marketplaces=["copilot-extensions"],
+    )
+    assert not second.needs_pr
+    assert not second.bypass_eligible
+    assert not second.needs_conflict_dispatch
+    assert second.audit_warnings
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: sources,
+    )
+    assert worker.main([str(repo), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert not payload["needsPr"]
+    assert payload["auditWarnings"]
+    assert worker.main([str(repo)]) == 0
+    assert "[WARN]" in capsys.readouterr().out
+
+    # Force a real update so source trust and pin checks still apply.
+    template = sources[0].payload_root / "instructions" / "fallback.instructions.md"
+    template.write_text(
+        template.read_text(encoding="utf-8").replace("x" * 2700, "y" * 2700),
+        encoding="utf-8",
+    )
+    untrusted = worker.run_sync_pass(
+        repo, sources, trusted_marketplaces=[], pinned_commits={},
+    )
+    assert untrusted.needs_pr
+    assert not untrusted.bypass_eligible
+    assert not untrusted.needs_conflict_dispatch
+    assert any("trusted-source" in reason for reason in untrusted.bypass.reasons)
+    assert any("immutable commit pin" in reason for reason in untrusted.bypass.reasons)
 
 
 def test_untrusted_source_is_review_only_not_dispatched(tmp_path: Path) -> None:
