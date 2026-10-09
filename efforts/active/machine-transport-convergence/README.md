@@ -90,7 +90,7 @@ Publication-blocker decision:
 - [x] Coordinate with #5689 on shared identity ownership and avoid overlapping edits.
 
 ### Phase 2 - Named-machine consumers
-- [ ] Repair the owned-PR publication blocker #5796, then resume the original
+- [x] Repair the owned-PR publication blocker #5796, then resume the original
   consumer work. _(operator-approved prerequisite)_
 - [ ] Resolve #5737 by migrating Bridge registry and named-machine resolution;
   preserve ACP launch construction and compatibility metadata.
@@ -270,3 +270,25 @@ identity authority: reconcile `machine-transport` with #5689's
   confirmed merged; the latter remains the publication prerequisite.
   This effort stays Active and its remaining implementation/deployment gates
   remain open.
+
+### 2026-10-09 - Publication repair merged; deployment pending
+- #5825 squash-merged into `dev` as
+  `3743ff99012541f7cf33754ec1ad21501e3caad1` after current-head automated review
+  reported zero findings and required CI cleared. The review's recommendation
+  for a final human security-sensitive review remains advisory, not a claim of
+  human approval.
+- Final exhaustive Windows publication matrix: **27 passed, no skips** in
+  1103.10 seconds, including real Git leases, per-commit tree reconstruction,
+  conflict continuation, inherited Git-context isolation, real pre-push hooks,
+  and native headless observation. Two fresh native observation cycles showed
+  zero newly visible windows or foreground transitions.
+- Linux representative contracts ran in required CI. Exhaustive Linux remains
+  an explicit post-promotion gate: its new manual workflow was unavailable on
+  the default branch before promotion, so no exhaustive Linux pass is claimed.
+- Promotion to `main`, unified installed-consumer refresh, harness projection
+  reconciliation and actual Bridge publication remain outstanding. The repair
+  source worktree is retained until those live-consumer obligations settle.
+- #5689's owner acknowledged direction (1) and resumed their original PR's
+  rebase and validation. No additional coordination response is needed while
+  they work; dependent Dispatch and agent-machines slices still wait for it.
+  This campaign remains Active.
