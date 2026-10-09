@@ -196,7 +196,7 @@ def test_unavailable_home_refuses_in_place_install(tmp_path: Path, extension: st
 
 def test_all_reconcile_launchers_choose_home() -> None:
     for script in (ROOT / "plugins").glob("*/scripts/bootstrap-check.ps1"):
-        text = script.read_text(encoding="utf-8")
+        text = script.read_text(encoding="utf-8").replace("`\n", " ")
         for line in text.splitlines():
             if "Start-Process -FilePath 'conhost.exe'" in line:
                 assert "-WorkingDirectory $env:USERPROFILE" in line, script
