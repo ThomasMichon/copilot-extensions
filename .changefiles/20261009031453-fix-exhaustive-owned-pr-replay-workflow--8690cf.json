@@ -1,0 +1,9 @@
+{
+  "comment": "Fix exhaustive owned-PR replay workflow setup by using the resolvable setup-uv v9.0.0 action tag.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
