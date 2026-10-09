@@ -32,6 +32,8 @@ from agent_procutil import no_window_flags
 from ssh_manager import CodespaceConfigSource, ConnectionManager
 
 log = logging.getLogger("agent-bridge.session-host.codespace")
+# CodeSpace states in which an SSH reconnect would have to start (re-wake) it.
+_STOPPED_STATES = frozenset({"Shutdown", "Archived", "Deleted"})
 
 
 def _creation_flags() -> int:
@@ -112,9 +114,24 @@ class CodeSpaceTransport:
 
     async def is_running(self) -> bool:
         """Read the exact target without SSH, scoped to an account that can see it."""
-        return await asyncio.to_thread(self._read_availability)
+        return await asyncio.to_thread(self._read_state) == "Available"
 
-    def _read_availability(self) -> bool:
+    async def reconnect_allowed(self) -> bool:
+        """Credential-relay reconnect gate: may an SSH reconnect run now?
+
+        ``True`` when Available; ``False`` only for a definitively stopped
+        CodeSpace (reconnecting would start it again). A transitional state
+        (e.g. Starting, ShuttingDown) is inconclusive and raises, so the relay
+        supervisor backs off and re-checks instead of retiring.
+        """
+        state = await asyncio.to_thread(self._read_state)
+        if state == "Available":
+            return True
+        if state in _STOPPED_STATES:
+            return False
+        raise RuntimeError(f"CodeSpace {self._name} is {state}; relay reconnect deferred")
+
+    def _read_state(self) -> str:
         if not self._name or self._name.strip() != self._name:
             raise RuntimeError("CodeSpace availability requires an exact target name")
         deadline = time.monotonic() + 30.0
@@ -132,7 +149,7 @@ class CodeSpaceTransport:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise RuntimeError("CodeSpace availability lookup failed") from exc
 
-        def query(env: dict[str, str]) -> bool | None:
+        def query(env: dict[str, str]) -> str | None:
             result = run([
                 "api", f"/user/codespaces/{quote(self._name, safe='')}",
                 "--method", "GET", "--hostname", "github.com",
@@ -153,7 +170,7 @@ class CodeSpaceTransport:
                 or not data["state"].strip()
             ):
                 raise RuntimeError("CodeSpace availability did not identify the requested target")
-            return data["state"] == "Available"
+            return data["state"]
 
         pinned_env = getattr(self._source, "_gh_env", None)
         env = dict(pinned_env if pinned_env is not None else os.environ)

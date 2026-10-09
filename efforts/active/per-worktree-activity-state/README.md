@@ -37,9 +37,11 @@ authority that already exists.
 
 ## Coordination
 
-- **Topology:** single sequential driver, one PR per phase (no parallel
-  slices; each phase's PR targets `dev` and is reviewed/merged before the
-  next phase's worktree is created).
+- **Topology:** single sequential driver, no parallel implementation slices.
+  Each phase targets `dev` and clears review/merge before the next phase
+  begins. Phase 1 now has a reviewed rollout amendment followed by a
+  producer-enrollment release and a later backfill/readiness release;
+  enrollment alone does not complete Phase 1.
 - **Host (owns PRs):** this operator's primary machine (the only
   participant).
 - **Delegates:** none.
@@ -132,9 +134,28 @@ Items 1 and 2 above were confirmed already implemented
 investigation; this effort covers items 3-6 plus the migration and archival
 follow-ons.
 
+### Producer-cutover bootstrap decision (2026-10-08)
+
+The operator selected **`staged-enrollment`** when offered:
+
+> Stage producer enrollment first; keep slots unready until legacy launch
+> roots naturally exit (recommended).
+
+This is an accepted agent-recommended rollout amendment, not a claim that
+the existing monitor drain enrolls or fences legacy CLI producers. Its
+requirements and validation gates are in
+[`phase-1-producer-enrollment.md`](phase-1-producer-enrollment.md).
+No manual service restart or stale-runtime process killing is authorized.
+
 ## Plan
 
 ### Phase 1 — Direct handoff-lifecycle slots
+- [ ] **Stage producer enrollment before activating backfill**
+      _(accepted agent-recommended rollout amendment)_: implement and deploy
+      the producer-generation/root barrier, retain unready slots and legacy
+      readers during bootstrap, then activate only with verified complete
+      producer coverage and a graceful drain. See
+      [`phase-1-producer-enrollment.md`](phase-1-producer-enrollment.md).
 - [ ] Extend `SessionHandoff` (tracking.py) with: `spawn_attempted_at`,
       `predecessor_retire_state` (`pending|retired|abandoned`),
       `retire_attempts`, `retire_last_attempt_at`, `retire_last_outcome`,
@@ -448,6 +469,12 @@ archived-journal discovery, standalone-install retention floor):
       for a token concurrently with that token's backfill; confirm the
       backfilled slot reflects the newer state (the lock-merged result),
       never a stale snapshot from before the concurrent write (Phase 1).
+- [ ] Phase 1's staged-enrollment validation: see
+      [`phase-1-producer-enrollment.md`](phase-1-producer-enrollment.md)
+      (pre-resolution root enrollment, pre-upgrade bootstrap coverage,
+      natural drain, concurrency, rollback, fresh install, and real
+      cross-platform launch boundaries). Passing monitor-drain tests alone
+      must never authorize lifecycle readiness.
 - [ ] Unit tests proving the 6 rewired hot-path functions never call
       `activity.read_events`/`handoff_trace.read_trace` (Phase 2) --
       e.g. a monkeypatch that raises if either is called during a sweep or
@@ -468,7 +495,10 @@ archived-journal discovery, standalone-install retention floor):
 
 ## Proposal
 
-_Pending review of Phase 1's PR (first reviewable slice)._
+The original six-phase plan cleared review in #5669. The staged Phase 1
+producer-enrollment amendment must clear its own plan review before its
+implementation starts. Phase 1's existing local slot/backfill groundwork
+remains unpublished and is not evidence of production readiness.
 
 ## Journal
 
@@ -547,3 +577,20 @@ _Pending review of Phase 1's PR (first reviewable slice)._
   preservation claim, and updated the matching Validation Plan item to
   test the actual new behavior.
 
+### 2026-10-08 — Staged producer-enrollment rollout amendment
+- Source tracing confirmed that `status_monitor_cutover.activate_after_update`
+  drains resident sweeps and accepted requests, not every old one-shot CLI
+  writer. `launch_registry` registration follows initial interpreter
+  resolution and has no runtime-generation stamp; the runtime resolver
+  returns a cached interpreter without a lease spanning resolution and use.
+  A successful monitor cutover or a one-time executable census cannot prove
+  the missing pre-spawn boundary.
+- The operator selected staged enrollment over an explicit fresh-start
+  boundary or leaving the design blocked. The amendment preserves natural
+  legacy-root exit, explicit readiness gating, and the complete six-phase
+  objective. It does not authorize terminating those roots.
+- Submitted intent is enrollment first, then a separately gated migration
+  release. Bootstrap must account for roots that predate enrollment, including
+  roots not yet registered; if their coverage cannot be established, the
+  implementation must report that blocker and keep readiness false rather
+  than manufacture a drain proof.

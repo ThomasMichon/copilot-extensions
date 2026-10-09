@@ -98,6 +98,27 @@ before ACP readiness or prompt delivery. A relay-enabled resume fails explicitly
 when that readiness cannot be proven; fleets with relay disabled skip the gate.
 This resume contract is separate from broader relay port-stability policy.
 
+Session-Host sessions carry the relay's reverse-forward on a dedicated,
+self-healing supervisor (`ssh_manager.SupervisedRelayForward`) owned per
+session. That ownership ends with the session: the bridge stops a session's
+relay supervisors -- and their whole SSH process tree, including a
+`gh codespace ssh` ProxyCommand -- when the session is marked failed, ends, or
+is explicitly stopped (a redeploy detach keeps it for the surviving turn, and a
+later resume re-supervises it from the durable endpoint). A CodeSpace relay's
+supervisor also checks the CodeSpace's state through the GitHub API before any
+reconnect: it retires instead of reconnecting when the CodeSpace is stopped,
+and backs off without connecting while it is in a transitional state (e.g.
+starting or shutting down), so a relay never re-wakes a CodeSpace that was
+stopped on purpose yet still recovers across a restart.
+
+Teardown terminates a live SSH root together with its process tree on every
+platform. A ProxyCommand child that has already outlived its root is swept only
+where ownership can be proven safely: on Linux (with pidfds) by a
+per-supervisor environment token, and on Windows by the registered ProxyCommand
+owner. On other POSIX platforms such a stdio ProxyCommand is left to exit on
+its own when its closed pipes reach EOF; it is never re-spawned, because the
+retired supervisor does not reconnect.
+
 The relay speaks the git credential protocol over TCP and supports the standard
 `get`/`fill`, `store`/`approve`, and `erase`/`reject` shapes plus token actions
 such as `get-github-token`, `get-azure-token`, and `get-access-token`; provider
