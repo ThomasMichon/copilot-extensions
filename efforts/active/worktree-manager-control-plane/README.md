@@ -366,7 +366,13 @@ realized in `main`; unchecked items are the remaining delta.
       `AHP+no-mux` launch-path regression; together with the existing
       `direct+mux`, `direct+no-mux`, and `AHP+mux` coverage, the four-way
       matrix is now explicit rather than inferred indirectly from separate
-      tests.
+      tests. **Proof boundary:** these injected-capability selection/composition
+      tests do not prove production AHP mux wrapping. The Picker's AHP branch
+      still uses `launcher.launch` with the default unavailable mux capability
+      and bypasses relocated-script dispatch. The script's persisted-AHP/mux
+      machinery is not reached by that route. The explicitly deferred follow-up
+      from `phase-3b-mux-relocation.md` and `#2062` is now tracked as `#5898`;
+      production four-way acceptance remains ahead.
 - [x] Keep both mechanics fully functional through the relocation — this is a
       location and ownership change, not a behavior regression; existing
       worktrees with a recorded `session_backend` binding must keep resolving
@@ -377,10 +383,15 @@ realized in `main`; unchecked items are the remaining delta.
       [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891)
       revalidated that contract while closing the Picker-independence follow-on.
 
-Phase 3b is complete: the AHP backend now lives in Worktree Manager, mux
+Phase 3b relocation is complete: the AHP backend now lives in Worktree Manager, mux
 launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
+This is not a claim of complete provider-neutral hosting or production AHP/mux
+parity. `#5898` retains the separately excluded presentation follow-up; direct
+handoff choreography and the intentional standalone remux/restore lane require
+their own ownership reconciliation under `#2062`, not removal or an inferred
+reopening of this relocation slice.
 
 ### Phase 3c — Picker non-blocking I/O (Done — Steps 1-5 landed; optional progress-envelope follow-up tracked in #4274)
 - [x] Make every I/O-touching Picker surface — pivot loads (built-in and

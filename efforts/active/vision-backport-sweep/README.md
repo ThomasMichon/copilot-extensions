@@ -78,7 +78,13 @@
   `ThomasMichon/copilot-extensions#580` (pre-existing relay stability tracker;
   source-proven pinned-port eviction without occupant ownership/staleness proof) ·
   `ThomasMichon/copilot-extensions#5890` (existing unresolved closed-signature
-  recurrence and bounded automated-attempt policy)
+  recurrence and bounded automated-attempt policy) ·
+  `ThomasMichon/copilot-extensions#5896` (unreadable context sources silently
+  omitted from budget attribution) ·
+  `ThomasMichon/copilot-extensions#5898` (production AHP Picker mux presentation;
+  an explicitly excluded follow-up, not a new relocation regression) ·
+  `ThomasMichon/copilot-extensions#5900` (optional process-spawn provenance
+  realization through existing telemetry seams)
 
 ## Guiding Intent
 
@@ -471,6 +477,35 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       - [ ] CI-remediation complete external acceptance and charter-enforcement
             reconciliation beyond inspected source gates; owner validation
             remains explicit, not inferred from compiled workflow presence.
+      - [x] `visions/harness-guidance/README.md` — scoped ownership, static/local
+            delivery and context-accounting source comparison. Existing intent
+            covers the inspected guarantees; repaired only duplicate section
+            placement without removing intent. Reproduced silent source-read
+            omission in the real budget API with mocked discovery (`#5896`).
+      - [ ] Harness-guidance remaining routing/budget adapters, trust/recovery,
+            native-host composition and complete contributor delivery beyond
+            this scoped source audit.
+      - [x] `visions/process-registry/README.md` — complete current-stage
+            vision/proposal comparison. The existing `#5559` owner explicitly
+            leaves placement and implementation open; proposed admission,
+            broker, query, journal and retention rules are not runtime evidence.
+            No new intent or implementation-absence claim was manufactured.
+      - [x] `visions/process-telemetry/README.md` — scoped existing lifecycle
+            emitters, sink/spool and two real shared-spawn callers compared.
+            No missing vision-level intent was found. Per-site instrumentation
+            is optional; generic process publication remains unproved, tracked
+            as north-star realization `#5900`, not per-site violation tickets.
+      - [ ] Remaining telemetry adopter/publication and closing-resource paths
+            beyond the inspected renderer/SSH routes; no global absence or
+            released cross-platform instrumentation is inferred.
+      - [x] `visions/session-hosting/README.md` — scoped provider/agency,
+            selection, interaction, replay/reconnect, fencing and retirement
+            source audit. Existing vision covers the observed intent. Pure
+            production-routing/composition proof confirmed the known deferred
+            AHP/mux gap (`#5898`); narrowed direct handoff choreography to a
+            partial provider-boundary question under `#2062`.
+      - [ ] Remaining hosting title, represented-human, generalized-provider
+            and full-restart acceptance paths beyond this source slice.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -583,6 +618,37 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Guidance attribution and hosting/provenance proof boundaries
+- Durable conversation/evidence cohort merged as `#5895` with current-head
+  Copilot approval, zero findings and actual required CI; its child finalized.
+  A review-transition waiter timed out after baselining an already-present
+  approval. Read the actual current-head reviewer/body and required checks
+  instead of treating that timeout or its stale convenience note as a verdict.
+- Source snapshots were verified through `e38752be78ad` and the relevant
+  inspected files remained unchanged at integration base `1b0a9bc25ad0`.
+  Three bounded read-only tracks retained coordinator ownership; no runtime,
+  process, check-in or live hosting operation was used as a reproduction.
+
+  | Subject / contract | Scoped source evidence | Decision and retained owner |
+  |---|---|---|
+  | Guidance delivery/ownership | Projection manager serializes local rendering, resolves contributors under its own lock, preserves foreign/tracked files, records errors and treats guidance budget excess as advisory within separate safety bounds. | Existing vision intent retained. Restored behavior/boundary placement after a duplicate `Non-Goals / Boundaries` heading; no policy was removed, weakened or silently reassigned. Full host/contributor acceptance remains open. |
+  | Context-accounting attribution | `context_budget.py:_measure_files` catches `OSError` and drops the source; `build_context_budget` has no failed static/metadata-source entry. A fully mocked call to the real API with one unreadable synthetic source returned zero entries/bytes and no read-failure record. | Carved `#5896`. This was an in-memory shape proof, not a permission change, personal-guidance scan, dynamic hook execution or live-runtime test. Keep fail-open delivery separate from explicit audit uncertainty. |
+  | Process registry | `agent-process-self-report-registry` architecture is explicitly Draft and disclaims an implemented/deployed broker. Placement, client/adopter, admission, reconciliation, journal/retention and validation remain unchecked. | Existing `#5559` owns realization. Stopped at the documented proposal gate rather than treating schemas, budgets or owner recommendations as enforced runtime behavior or searching absence into a global claim. |
+  | Process telemetry | Dispatch coordinator and Bridge event reduction really publish lifecycle records. Optional sink installation and JSONL spooling are real; exception fail-open is not latency isolation. Shared procutil renderer/SSH calls provide spawn effects but no inspected connected process-publication proof. | Per-site adoption is explicitly optional. The never-delay promise concerns adopted spawn records, not every legacy lifecycle callback. `#2501` was vision-only authoring; scoped tracker searches found no realization owner, so carved `#5900` without claiming global absence or mandatory instrumentation. |
+  | AHP presentation | Production `_run_launch` ensures/attaches AHP and returns through `launcher.launch`; effective default capability is unavailable despite mux requested. A process-free use of actual routing/composition bodies showed the same direct result for new/resume; the real PowerShell wrapping route is bypassed. | This is already expressly deferred by Phase 3b, not a new regression. Carved excluded scope as `#5898` and clarified the owner's injected-capability matrix proof versus production acceptance. `#5892`/`#5878` remain separate transparent Windows handoff work, not superseded. |
+  | Handoff provider ownership | Direct agency-side mux creation/control/retirement remains in the inspected path. Identity guards and the deliberate zero-provider fallback remain meaningful; physical directory placement alone is not an ownership violation. | Rejected the blanket foreign-pane/ownership-violation claim. Posted the narrower provider-boundary reconciliation under existing `#2062`, preserving co-packaged owning adapters, standalone behavior, head/claims authority and safe retirement. |
+
+- The registry source chain and full process-publication/hosting matrices are
+  realization obligations, not completed by a proposal, script relocation,
+  fake-capability test, opaque identity record or CLI command name. No
+  SDK/App/third-party conformance or observed duplicate/foreign retirement was
+  inferred.
+- This publication changes documentation only. The budget reproduction proves
+  the reported source omission, not its eventual fix. No new runtime unit/
+  component, clean-room or live external acceptance is claimed; identified
+  owners retain those gates. The original whole-index, remaining service
+  invariants and global Validation Plan remain open.
 
 ### 2026-10-09 — Durable conversation/evidence and CI policy source cohort
 - Host-resource reconciliation merged as `#5886` with current-head Copilot
