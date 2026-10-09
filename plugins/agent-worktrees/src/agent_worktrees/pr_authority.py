@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from . import config as cfg, pr_publish, tracking
+from . import config as cfg, pr_publication_state, pr_publish, tracking
 
 _held = threading.local()
 
@@ -45,9 +45,7 @@ def _projection(record: tracking.WorktreeRecord | None) -> tuple:
     if record is None or not record.prs:
         return ()
     return (record.repo, record.worktree_id, record.worktree_path, tuple(
-        (p.pr_id, p.branch, p.repo, p.provider, p.number, p.url, p.remote,
-         p.head_repo, p.head_identity, p.rewrite_identity, p.rewrite_owner,
-         tracking._pr_is_terminal(p))
+        pr_publication_state.authority(p)
         for p in record.prs
     ))
 
@@ -111,7 +109,7 @@ def _exists(path: Path) -> bool:
     return True
 
 
-def _ledgers(project: str) -> set[Path]:
+def _ledgers(project: str) -> dict[Path, str]:
     from . import installer
 
     path = installer.projects_yaml_path()
@@ -130,7 +128,7 @@ def _ledgers(project: str) -> set[Path]:
             if not cfg._PROJECT_NAME_RE.fullmatch(name) or name in (".", ".."):
                 raise ValueError("Invalid project name; rewrite refused.")
             names.add(name)
-    return {cfg.tracking_dir(name).resolve() for name in names}
+    return {cfg.tracking_dir(name).resolve(): name for name in names}
 
 
 def _live_prs(data: dict, path: Path) -> list[dict]:
@@ -158,7 +156,7 @@ def assert_exclusive(config: cfg.Config, record: tracking.WorktreeRecord, pr: tr
     """Strictly scan every adopted ledger while the outer authority guard is held."""
     selected = (cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml").resolve()
     ledgers = _ledgers(config.repo_name)
-    ledgers.add(selected.parent)
+    ledgers[selected.parent] = config.repo_name
     for ledger in sorted(ledgers):
         try:
             files = sorted(ledger.iterdir()) if _exists(ledger) else []
@@ -178,7 +176,20 @@ def assert_exclusive(config: cfg.Config, record: tracking.WorktreeRecord, pr: tr
                     cwd = data.get("worktree_path")
                     if not isinstance(cwd, str) or not Path(cwd).is_dir():
                         raise ValueError("Another tracking record has an ambiguous PR destination; rewrite refused.")
-                    identity = pr_publish.push_identity(candidate.get("remote") or config.default_repo.remote, cwd=cwd)
+                    remote = candidate.get("remote")
+                    if not remote:
+                        project = ledgers[ledger]
+                        candidate_config = config
+                        if project != config.repo_name:
+                            _read(cfg.project_dir(project) / "config.yaml")
+                            try:
+                                candidate_config = cfg.load_project_config(
+                                    project, include_control_plane_related_pr=False,
+                                )
+                            except (OSError, KeyError, TypeError, ValueError) as exc:
+                                raise ValueError("Cannot resolve another project's PR destination; rewrite refused.") from exc
+                        remote = candidate_config.default_repo.remote
+                    identity = pr_publish.push_identity(remote, cwd=cwd)
                 if not identity:
                     raise ValueError("Another tracking record has an unreadable PR destination; rewrite refused.")
                 if identity == pr.rewrite_identity:

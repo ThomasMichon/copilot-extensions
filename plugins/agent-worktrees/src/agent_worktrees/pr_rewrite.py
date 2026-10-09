@@ -15,6 +15,8 @@ def observe_pr(config: Config, pr: tracking.PRRecord) -> PullResult:
     if pr.number is None:
         raise ValueError("Cannot observe an unnumbered PR.")
     prcfg = config.default_repo.pr
+    if pr.provider and pr.provider != prcfg.provider:
+        raise ValueError("Tracked PR provider differs from configuration; refusing credential resolution.")
     provider = providers.get_provider(pr.provider or prcfg.provider)
     return provider.get_pull(
         pr.repo, int(pr.number), api_base=prcfg.api_base,

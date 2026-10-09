@@ -65,6 +65,11 @@ def test_explicit_rewrite_public_cli_real_rebase(pr_repo, scheme, monkeypatch):
     monkeypatch.setattr(pr_ops, "refresh_source_attribution",
                         lambda *a: attribution.append(a[-1]) or "")
     monkeypatch.chdir(wt)
+    (wt / "squash.txt").write_text("intentional squash\n")
+    git("add", "-A", cwd=wt)
+    git("commit", "-m", "prepare intentional squash", cwd=wt)
+    squashed, reason = git_ops.squash_branch("origin/master", "intentional squash", cwd=str(wt))
+    assert squashed, reason
     assert not finalize.push_changes(wid, config)
     assert record_for(wid).pr.head_sha == old
     before = git("rev-parse", "HEAD", cwd=wt)
@@ -144,6 +149,7 @@ def test_explicit_rewrite_ownership_and_destination_guards(pr_repo, defect, monk
         git("config", "remote.origin.pushurl", str(remote.parent / "wrong.git"), cwd=wt)
     elif defect == "wrong-repo":
         rec.pr.repo = "other/project"
+        rec.pr.pr_revision += 1
     elif defect == "wrong-provider-pr":
         rec.pr.number = 42
         monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: PullResult(head_sha="a" * 40))

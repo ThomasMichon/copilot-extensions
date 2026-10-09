@@ -175,3 +175,29 @@ def test_publication_generation_fresh_rmw_and_stale_refusal(authority_state):
     with pytest.raises(ValueError, match="tracking authority changed"):
         pr_publish.persist_publication(config, competing_publisher, competing_publisher.pr)
     assert tracking.load_record(record.yaml_path).pr.head_sha == "b" * 40
+
+
+def test_pr_authority_legacy_candidate_uses_its_project_remote(authority_state, monkeypatch, tmp_path):
+    config, record, root, registry, ledgers = authority_state
+    checkout = tmp_path / "legacy-checkout"
+    checkout.mkdir()
+    other = tracking.create_new_record(
+        "other", "worktree/other", str(checkout), "alias", "test", "linux", ledgers["alias"],
+    )
+    other.prs = [replace(record.pr, pr_id="legacy", rewrite_identity="", rewrite_owner="")]
+    tracking.save_record(other)
+    project = tmp_path / "alias-config"
+    project.mkdir()
+    (project / "config.yaml").write_text("remote: upstream\n")
+    alias = replace(config, repo_name="alias", repos={"alias": cfg.RepoConfig(
+        anchor=str(checkout), worktree_root=str(tmp_path), remote="upstream",
+    )})
+    monkeypatch.setattr(cfg, "project_dir", lambda name: project)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: alias)
+    observed = []
+    monkeypatch.setattr(pr_publish, "push_identity",
+                        lambda remote, **k: observed.append(remote) or (
+                            record.pr.rewrite_identity if remote == "upstream" else "different/repo"))
+    with pr_authority.guard(), pytest.raises(ValueError, match="Another worktree"):
+        pr_authority.assert_exclusive(config, record, record.pr)
+    assert observed == ["upstream"]

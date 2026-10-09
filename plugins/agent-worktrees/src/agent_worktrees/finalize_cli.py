@@ -427,7 +427,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
         if getattr(args, "title_only", False):
-            yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+            yaml_path = (cfg.tracking_dir(config.repo_name) if getattr(args, "rewrite_pr", False) else cfg.tracking_dir()) / f"{worktree_id}.yaml"
             if not yaml_path.exists():
                 output.err(f"Tracking file not found for {worktree_id}")
                 return 1

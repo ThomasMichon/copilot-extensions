@@ -3579,7 +3579,7 @@ class TestRerunAutoOpen:
         assert rec.prs[1].attribution_explicit is False
         assert rec.prs[1].pr_id
         assert rec.prs[1].pr_id != rec.prs[0].pr_id
-        assert rec.prs[1].pr_revision == 3
+        assert rec.prs[1].pr_revision == 4  # attribution, lease, ownership, provider identity
         assert rec.prs[1].rewrite_owner == f"{wid}:{rec.prs[1].branch}"
 
 

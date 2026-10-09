@@ -16,7 +16,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import git_ops, output, push_timeout, tracking
@@ -513,6 +513,7 @@ def record_pushed_head(
     :func:`push_remote`), save, then refresh the provider's head observation and
     the source attribution, warning on either failure."""
     if pushed_pr is not None:
+        expected = replace(pushed_pr)
         if rebase_base_sha:
             pushed_pr.base_sha = rebase_base_sha
         if pushed_pr.base_sha:
@@ -526,7 +527,7 @@ def record_pushed_head(
         if remote and remote != config.default_repo.remote:
             record_remote_identity(pushed_pr, remote, config.default_repo.remote, head_repo, head_identity)
     if pushed_pr is not None:
-        persist_publication(config, record, pushed_pr)
+        persist_publication(config, record, pushed_pr, expected=expected)
     from . import pr_ops
 
     observation_error = pr_ops.refresh_head_observation(config, record, pushed_pr, head_sha)
@@ -545,9 +546,10 @@ def record_pushed_head(
         )
 
 
-def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord) -> None:
+def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
+                        *, expected: tracking.PRRecord | None = None) -> None:
     """Persist a successful push's lease through a fresh, revision-checked RMW."""
-    from . import config as cfg
+    from . import config as cfg, pr_publication_state
 
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     fields = ("state", "base_sha", "head_sha", "patch_id", "remote", "head_repo",
@@ -555,7 +557,9 @@ def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tra
     with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
         current = _publication_pr(fresh, pr)
-        if (current is None or tracking._pr_is_terminal(current) or current.pr_revision != pr.pr_revision
+        if (current is None or tracking._pr_is_terminal(current)
+                or (not pr_publication_state.matches(current, expected) if expected is not None
+                    else current.pr_revision != pr.pr_revision)
                 or (current.branch, current.repo, current.provider, current.number)
                 != (pr.branch, pr.repo, pr.provider, pr.number)):
             raise ValueError("PR head was pushed, but tracking authority changed; inspect and reconcile its lease.")
@@ -564,7 +568,7 @@ def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tra
                 setattr(current, field, getattr(pr, field))
             current.pr_revision += 1
             tracking.save_record(fresh)
-        pr.pr_revision = current.pr_revision
+        pr_publication_state.copy_pr(pr, current)
 
 
 def _publication_pr(record: tracking.WorktreeRecord, pr: tracking.PRRecord) -> tracking.PRRecord | None:
@@ -575,6 +579,7 @@ def _publication_pr(record: tracking.WorktreeRecord, pr: tracking.PRRecord) -> t
 def prepare_existing_publication(
     record: tracking.WorktreeRecord | None, existing: tracking.PRRecord | None,
     branch: str, prcfg: PRConfig, attribution: SourceAttribution | None,
+    *, remote: str = "", cwd: str = "",
 ) -> tracking.PRRecord | None:
     """Persist a fresh association before a legacy feature-branch push starts."""
     if record is None or existing is not None:
@@ -583,6 +588,15 @@ def prepare_existing_publication(
         branch=branch, provider=prcfg.provider, repo=record.repo or "",
         state="creating", opened_at=tracking._now_iso(),
     )
+    previous = next((p for p in reversed(record.prs)
+                     if p.branch == branch and tracking._pr_is_terminal(p) and p.head_sha), None)
+    if previous is not None:
+        identity = previous.rewrite_identity or previous.head_identity
+        if not identity or identity != push_identity(remote, cwd=cwd):
+            raise ValueError("Prior terminal PR destination is not attested here; reconcile before reusing its branch.")
+        target.head_sha, target.base_sha, target.patch_id = previous.head_sha, previous.base_sha, previous.patch_id
+        target.remote, target.head_repo, target.head_identity = previous.remote, previous.head_repo, previous.head_identity
+        target.head_owner = previous.head_owner
     tracking.stamp_frozen_attribution(
         target, attribution=prcfg.source_attribution if attribution is None else attribution,
         explicit=attribution is not None or prcfg.source_attribution_configured,

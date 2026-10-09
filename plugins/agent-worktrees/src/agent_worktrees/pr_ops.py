@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import re
 import string
+from dataclasses import replace
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, output, pr_publish, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, output, pr_publication_state, pr_publish, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
@@ -868,9 +869,15 @@ def create_pr(
     use_refspec = prcfg.head_scheme == "refspec" and not parallel_snapshot
     # Reuse-lease guard (#5298): see push_diagnostics.reuse_lease_expect.
     lease_expect = push_diagnostics.reuse_lease_expect(target_pr, active) if reusing else ""
-    if reusing and not lease_expect:
+    try:
+        provisional = pr_publication_state.provisional_lease(target_pr, publish_remote, feature_branch, worktree_path)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
+    if reusing and not lease_expect and provisional is None:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
+    expected_publication = replace(target_pr) if target_pr is not None else None
+    push_lease = provisional if provisional is not None else (lease_expect or None)
 
     if use_refspec:
         # Refspec mode (#1815): keep the squashed work ON worktree/<id> and push
@@ -882,7 +889,7 @@ def create_pr(
             pushed = pr_publish.push_checked(
                 record, publish_remote, f"{wt_branch}:refs/heads/{feature_branch}", cwd=worktree_path,
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
+                force_with_lease_expect=push_lease, force_with_lease=reusing, repo=repo,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -919,7 +926,7 @@ def create_pr(
             pushed = pr_publish.push_checked(
                 record, publish_remote, feature_branch, cwd=worktree_path,
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
+                force_with_lease_expect=push_lease, force_with_lease=reusing, repo=repo,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -946,7 +953,7 @@ def create_pr(
         target_pr.head_observed_api_base = ""
         target_pr.patch_id = patch_id
         target_pr.provider = target_pr.provider or prcfg.provider
-        pr_publish.persist_publication(config, record, target_pr)
+        pr_publish.persist_publication(config, record, target_pr, expected=expected_publication)
 
     git_ops.delete_backup_ref(cwd=worktree_path)
 
@@ -1270,28 +1277,18 @@ def _open_via_provider(
         result["draft"] = False  # nothing opened -> no draft was created
         return
 
-    target_pr.url = pull.url
-    target_pr.number = pull.number
-    if pull.state:
-        target_pr.state = pull.state
     if record is not None:
-        # #1029 backfill: if the worktree never recorded an originating session
-        # (e.g. created before this field existed), stamp the session that
-        # produced this PR -- but never clobber an explicit one.
-        if not record.parent_session and session:
-            record.parent_session = session
-        if marker_published:
-            target_pr.attribution_head = head_sha
-        # pr-merge-obligation-gate defense 2: the provider just confirmed
-        # this PR is genuinely open -- claim it now, in the SAME record save
-        # as everything else above, so a worktree can never finalize past an
-        # open PR it just created regardless of pr.strategy.
-        claimed_ref = _ensure_pr_claim(record, target_pr)
-        tracking.save_record(record)
+        claimed_ref = pr_publication_state.persist_pull(
+            config, record, target_pr, pull,
+            head_sha=head_sha, marker_published=marker_published, session=session,
+        )
         if claimed_ref:
             claim_history.record_pr_event(
                 claimed_ref, worktree_id=record.worktree_id,
                 machine=record.machine, event="claimed", project=record.repo)
+    else:
+        target_pr.url, target_pr.number = pull.url, pull.number
+        target_pr.state = pull.state or target_pr.state
     result["pr_opened"] = True
     result["url"] = pull.url
     result["number"] = pull.number
@@ -2383,16 +2380,23 @@ def _push_existing_feature(
          if p.branch == feature_branch and not tracking._pr_is_terminal(p)),
         None,
     )
-    lease_expect = push_diagnostics.reuse_lease_expect(existing_target)
-    if existing_target is not None and not lease_expect:
+    try:
+        target = pr_publish.prepare_existing_publication(
+            record, existing_target, feature_branch, prcfg, attribution, remote=remote, cwd=worktree_path,
+        )
+        lease_expect = push_diagnostics.reuse_lease_expect(target)
+        provisional = pr_publication_state.provisional_lease(target, remote, feature_branch, worktree_path)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
+    if existing_target is not None and not lease_expect and provisional is None:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
-    target = pr_publish.prepare_existing_publication(record, existing_target, feature_branch, prcfg, attribution)
+    expected_publication = replace(target) if target is not None else None
     with hooks.allow_pr_push():
         pushed = pr_publish.push_checked(
             record, remote, feature_branch, cwd=worktree_path,
             expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
-            force_with_lease_expect=(lease_expect or None),
+            force_with_lease_expect=(provisional if provisional is not None else (lease_expect or None)),
             force_with_lease=(existing_target is not None), repo=repo,
         )
     if not pushed:
@@ -2415,7 +2419,7 @@ def _push_existing_feature(
         target.patch_id = _patch_id(
             target.base_sha, head_sha, cwd=worktree_path)
         target.provider = target.provider or prcfg.provider
-        pr_publish.persist_publication(config, record, target)
+        pr_publish.persist_publication(config, record, target, expected=expected_publication)
     base_sha = target.base_sha if target else ""
     patch_id = target.patch_id if target else ""
     result = {
