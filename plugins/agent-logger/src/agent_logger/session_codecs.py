@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import shutil
@@ -22,6 +23,7 @@ from typing import BinaryIO, NoReturn
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_MEMBER_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_ARCHIVE_INPUT_BYTES = MAX_ARCHIVE_BYTES + 64 * 1024 * 1024
 MAX_ZIP_DIRECTORY_BYTES = 16 * 1024 * 1024
 MAX_TAR_METADATA_BYTES = 16 * 1024 * 1024
 _CASE_INSENSITIVE = os.name == "nt"
@@ -36,6 +38,25 @@ _INVALID_COMPONENT = re.compile(r'[\x00-\x1f\x7f-\x9f<>:"|?*]')
 class ArchiveMemberDigest:
     size: int
     sha256: str
+
+
+class _LimitedTarInput(io.FileIO):
+    """Cap compressed bytes consumed by tarfile's sequential stream reader."""
+
+    def __init__(self, descriptor: int) -> None:
+        super().__init__(descriptor, "rb", closefd=False)
+        self.consumed = 0
+
+    def read(self, size: int | None = -1) -> bytes:
+        remaining = MAX_ARCHIVE_INPUT_BYTES - self.consumed + 1
+        maximum = remaining if size is None or size < 0 else min(size, remaining)
+        data = super().read(maximum)
+        if data is None:
+            raise OSError("session tar input unexpectedly unavailable")
+        self.consumed += len(data)
+        if self.consumed > MAX_ARCHIVE_INPUT_BYTES:
+            raise ValueError("session archive exceeds its compressed-input byte budget")
+        return data
 
 
 def _copy_and_digest(
@@ -191,6 +212,8 @@ class TarGzCodec(Codec):
             return [m.name for m in tar.getmembers() if m.isfile()]
 
     def member_digests(self, archive: Path) -> dict[str, ArchiveMemberDigest]:
+        from agent_logger.sync.provenance import open_regular_no_follow
+
         result: dict[str, ArchiveMemberDigest] = {}
         total = 0
         headers = 0
@@ -237,31 +260,39 @@ class TarGzCodec(Codec):
                         raise ValueError("session tar exceeds its metadata byte budget")
                 return info
 
-        with tarfile.open(archive, "r|gz", tarinfo=BoundedTarInfo) as tar:
-            for info in tar:
-                if info.isdir():
-                    if info.size:
-                        raise ValueError(f"nonempty session tar directory: {info.name!r}")
-                    continue
-                if not info.isfile():
-                    raise ValueError(f"non-regular session archive member: {info.name!r}")
-                name = _validate_member_name(info.name)
-                if not name or name in result:
-                    raise ValueError(f"duplicate or empty session archive member: {info.name!r}")
-                if name != info.name:
-                    raise ValueError(f"noncanonical session archive member: {info.name!r}")
-                if info.size < 0 or info.size > MAX_ARCHIVE_MEMBER_BYTES:
-                    raise ValueError("session archive member exceeds its byte budget")
-                source = tar.extractfile(info)
-                if source is None:
-                    raise ValueError(f"missing session archive member: {info.name!r}")
-                with source:
-                    result[name] = _copy_and_digest(
-                        source, None, min(MAX_ARCHIVE_MEMBER_BYTES, MAX_ARCHIVE_BYTES - total)
-                    )
-                if result[name].size != info.size:
-                    raise ValueError(f"truncated session archive member: {info.name!r}")
-                total += result[name].size
+        with open_regular_no_follow(archive) as raw:
+            if os.fstat(raw.fileno()).st_size > MAX_ARCHIVE_INPUT_BYTES:
+                raise ValueError("session archive exceeds its compressed-input byte budget")
+            with (
+                _LimitedTarInput(raw.fileno()) as limited,
+                tarfile.open(fileobj=limited, mode="r|gz", tarinfo=BoundedTarInfo) as tar,
+            ):
+                for info in tar:
+                    if info.isdir():
+                        if info.size:
+                            raise ValueError(f"nonempty session tar directory: {info.name!r}")
+                        continue
+                    if not info.isfile():
+                        raise ValueError(f"non-regular session archive member: {info.name!r}")
+                    name = _validate_member_name(info.name)
+                    if not name or name in result:
+                        raise ValueError(
+                            f"duplicate or empty session archive member: {info.name!r}"
+                        )
+                    if name != info.name:
+                        raise ValueError(f"noncanonical session archive member: {info.name!r}")
+                    if info.size < 0 or info.size > MAX_ARCHIVE_MEMBER_BYTES:
+                        raise ValueError("session archive member exceeds its byte budget")
+                    source = tar.extractfile(info)
+                    if source is None:
+                        raise ValueError(f"missing session archive member: {info.name!r}")
+                    with source:
+                        result[name] = _copy_and_digest(
+                            source, None, min(MAX_ARCHIVE_MEMBER_BYTES, MAX_ARCHIVE_BYTES - total)
+                        )
+                    if result[name].size != info.size:
+                        raise ValueError(f"truncated session archive member: {info.name!r}")
+                    total += result[name].size
         return result
 
 
@@ -269,6 +300,7 @@ def _zip_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     result: dict[str, zipfile.ZipInfo] = {}
     names: set[str] = set()
     total = 0
+    compressed_total = 0
     for index, info in enumerate(archive.infolist()):
         if index >= MAX_ARCHIVE_MEMBERS:
             raise ValueError("session ZIP exceeds its member budget")
@@ -284,6 +316,8 @@ def _zip_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
             raise ValueError(f"encrypted session ZIP member: {info.filename!r}")
         if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
             raise ValueError(f"unsupported session ZIP compression: {info.compress_type}")
+        if info.compress_size < 0 or info.compress_size > MAX_ARCHIVE_INPUT_BYTES:
+            raise ValueError("session archive exceeds its compressed-input byte budget")
         if info.is_dir():
             if kind == stat.S_IFREG:
                 raise ValueError(f"inconsistent session ZIP directory: {info.filename!r}")
@@ -299,6 +333,9 @@ def _zip_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
         total += info.file_size
         if total > MAX_ARCHIVE_BYTES:
             raise ValueError("session ZIP exceeds its total byte budget")
+        compressed_total += info.compress_size
+        if compressed_total > MAX_ARCHIVE_INPUT_BYTES:
+            raise ValueError("session archive exceeds its compressed-input byte budget")
         result[name] = info
     file_keys = sorted(name.casefold() if _CASE_INSENSITIVE else name for name in result)
     for index, name in enumerate(file_keys):
@@ -313,6 +350,8 @@ def _preflight_zip(raw: BinaryIO) -> None:
     """Bound central-directory allocation before zipfile constructs its index."""
     raw.seek(0, os.SEEK_END)
     size = raw.tell()
+    if size > MAX_ARCHIVE_INPUT_BYTES:
+        raise ValueError("session archive exceeds its compressed-input byte budget")
     raw.seek(max(0, size - 65_557))
     tail = raw.read(65_557)
     position = tail.rfind(b"PK\x05\x06")

@@ -14,6 +14,7 @@ import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 
@@ -405,6 +406,65 @@ def test_tar_comparison_rejects_sparse_before_extent_decoding(
         monkeypatch.setattr(tarfile.TarInfo, hook, forbidden_sparse)
     with pytest.raises(ValueError, match="sparse session tar"):
         sessions.CODECS["targz"].member_digests(archive)
+
+
+@pytest.mark.parametrize("codec", ["targz", "zip"])
+def test_physical_archive_budget_is_checked_before_parser_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codec: str
+) -> None:
+    implementation = sessions.CODECS[codec]
+    archive = tmp_path / f"bounded{implementation.suffix}"
+    implementation.archive_dir(_session(tmp_path / "live"), archive)
+    size = archive.stat().st_size
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_INPUT_BYTES", size)
+    assert "events.jsonl" in implementation.member_digests(archive)
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_INPUT_BYTES", size - 1)
+
+    def forbidden_parser(*args: object, **kwargs: object) -> None:
+        raise AssertionError(
+            "oversized physical input must not reach decompression or ZIP parsing"
+        )
+
+    if codec == "targz":
+        monkeypatch.setattr(tarfile, "open", forbidden_parser)
+    else:
+        monkeypatch.setattr(zipfile, "ZipFile", forbidden_parser)
+    with pytest.raises(ValueError, match="compressed-input byte budget"):
+        implementation.member_digests(archive)
+
+
+def test_tar_compressed_read_budget_remains_bounded_after_file_growth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "growing.tar.gz"
+    sessions.CODECS["targz"].archive_dir(_session(tmp_path / "live"), archive)
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_INPUT_BYTES", archive.stat().st_size)
+    original_open = tarfile.open
+
+    def grow_before_decompression(
+        *, fileobj: BinaryIO, mode: str, tarinfo: type[tarfile.TarInfo]
+    ) -> tarfile.TarFile:
+        with archive.open("ab") as writer:
+            writer.write(b"additional compressed input" * 100)
+        return original_open(fileobj=fileobj, mode=mode, tarinfo=tarinfo)
+
+    monkeypatch.setattr(tarfile, "open", grow_before_decompression)
+    with pytest.raises(ValueError, match="compressed-input byte budget"):
+        sessions.CODECS["targz"].member_digests(archive)
+
+
+@pytest.mark.parametrize("oversized_member", [False, True])
+def test_zip_declared_compressed_input_has_per_member_and_total_budgets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, oversized_member: bool
+) -> None:
+    archive = tmp_path / "compressed-budget.zip"
+    _zip(archive, [("events.jsonl", b"x"), ("extra", b"x")])
+    with zipfile.ZipFile(archive) as opened:
+        monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_INPUT_BYTES", 100)
+        for info in opened.infolist():
+            info.compress_size = 101 if oversized_member else 60
+        with pytest.raises(ValueError, match="compressed-input byte budget"):
+            session_codecs._zip_members(opened)
 
 
 def _corrupt_payload(archive: Path, *, deflated: bool) -> None:

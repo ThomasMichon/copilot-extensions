@@ -95,7 +95,13 @@ ctime is creation time and does not provide that same guarantee. These checks
 do not freeze concurrent writers or continuously pin mutable directory ancestors.
 
 ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
-decoded file bytes. Creation also bounds inspected source entries and excludes
+decoded file bytes. ZIP readers and tar representation comparison also limit
+physical compressed input to 2 GiB + 64 MiB before parsing. Tar comparison caps
+bytes consumed by its sequential compressed reader even if the file grows
+after the size check; ZIP admission caps each member's declared compressed size
+and their total before content decoding. This bounds input work even for streams
+that produce no decoded bytes. Ordinary single-format tar reads remain unchanged.
+Creation also bounds inspected source entries and excludes
 linked/name-surrogate directories without descending into them. Source entries
 are admitted incrementally before retention, rather than allocating an entire
 directory listing before checking the limit; admitted batches are sorted for
