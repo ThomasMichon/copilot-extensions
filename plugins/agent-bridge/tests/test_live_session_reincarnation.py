@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge import db_live_session_aliases as aliases
@@ -50,6 +51,19 @@ def test_a_lapsed_row_whose_local_process_still_runs_is_not_taken_over(tmp_db: D
     assert _register(tmp_db, "conv-5", lapsed, pid=100, started=lapsed) == "live"
     assert _register(tmp_db, "conv-5", now, pid=200, started=now) == "incarnation_mismatch"
     assert tmp_db.get_live_session("conv-5")["pid"] == 100
+
+
+@pytest.mark.parametrize("alive, admitted", [(False, True), (True, False), (None, False)])
+def test_a_wedged_row_is_revived_only_once_its_process_is_provably_gone(tmp_db: Database, monkeypatch, alive,
+                                                                      admitted) -> None:
+    """A row the sweep found wedged (its pid alive then) whose process has since
+    exited: the resumed process need not wait for the next sweep."""
+    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: alive)
+    now = time.time()
+    assert _register(tmp_db, "conv-6", now - 600, pid=100, started=now - 600) == "live"
+    tmp_db.execute_write("UPDATE live_sessions SET status='wedged' WHERE session_id=?", ("conv-6",))
+    got = _register(tmp_db, "conv-6", now, pid=200, started=now)
+    assert got == ("live" if admitted else "incarnation_mismatch")
 
 
 def test_a_fresh_live_row_is_never_taken_over_by_another_process(tmp_db: Database) -> None:

@@ -80,13 +80,16 @@ def settle_resumed_claim(
         if (row is not None and row.get("reservation_id") == reservation.get("reservation_id")
                 and row.get("claimed_by_session_id") == expected):
             return expected, reservation  # the bridge folded the placeholder in
-        resumed = vc.live_session_for(expected)
+        try:
+            resumed, resumed_known = vc.live_session_for(expected, strict=True), True
+        except unknown:
+            resumed, resumed_known = {}, False
         try:
             placeholder, placeholder_known = vc.live_session_for(claimed, strict=True), True
         except unknown:
             placeholder, placeholder_known = {}, False
-        if (row is not None and resumed.get("session_id") == expected
-                and resumed.get("status", "live") == "live"
+        resumed_live = resumed.get("session_id") == expected and resumed.get("status", "live") == "live"
+        if (row is not None and resumed_live
                 # Gone, or a dead row (an unclean exit leaves it to expire).
                 and (placeholder_known and (not placeholder
                                             or placeholder.get("status") in ("expired", "taken-over")))):
@@ -100,9 +103,14 @@ def settle_resumed_claim(
                 return expected, {}  # live, maybe without CLI mode; nothing for the caller to release
             return expected, (renewed if claimant == expected else {})
         if clock() >= deadline:
-            # Only a successful read proves the placeholder gone: an unanswered
-            # one keeps it as the session, as before, never a failed launch.
-            placeholder_live = not placeholder_known or (
-                placeholder.get("session_id") == claimed and placeholder.get("status", "live") == "live")
-            return (claimed if placeholder_live else None), reservation
+            placeholder_live = placeholder.get("session_id") == claimed and placeholder.get("status", "live") == "live"
+            if resumed_live and not placeholder_live:
+                # Live, but its claim couldn't be renewed in time (a failed
+                # reservation read): the session, without CLI mode to release.
+                return expected, {}
+            # Only successful reads prove neither is live: an unanswered one
+            # keeps the placeholder as the session, as before, never a failed launch.
+            if placeholder_live or not (placeholder_known and resumed_known):
+                return claimed, reservation
+            return None, reservation
         sleep(_POLL_SECONDS)

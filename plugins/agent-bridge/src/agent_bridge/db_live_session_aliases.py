@@ -123,6 +123,8 @@ def _incarnation_mismatch(
     if (status == "live" and (row["updated_at"] or 0) < now - LIVE_SESSION_STALE_SECONDS
             and (row["venue"] or local_pid_alive(row["pid"]) is not True)):
         return False
+    if status == "wedged" and not row["venue"] and local_pid_alive(row["pid"]) is False:
+        return False  # its process was alive when the sweep looked, and is provably gone now
     if (aliased and machine and row["machine"]
             and machine.casefold() != str(row["machine"]).casefold()):
         return True
