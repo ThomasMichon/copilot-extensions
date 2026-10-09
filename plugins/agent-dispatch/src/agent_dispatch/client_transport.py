@@ -33,6 +33,29 @@ def default_connect_retries() -> int:
         return 2
 
 
+def default_idempotent_retries() -> int:
+    """Default retries for a request that already carries an idempotency key
+    (e.g. :meth:`DispatchClient.steer`) and times out waiting for the
+    response -- distinct from :func:`default_connect_retries`, which only
+    ever covers a bare connect failure.
+
+    A ``submit_steer``-style write is a single fast local transaction, but
+    the *full round trip* can still exceed ``timeout`` under heavy load even
+    though the write already landed and committed (confirmed live: a
+    client-reported failure whose task nonetheless showed the answer already
+    recorded). A plain read-timeout is otherwise never safe to retry -- it
+    cannot distinguish "never reached the server" from "reached, processed,
+    and committed, but the response was never seen" -- so this budget is
+    reserved for calls that supply an idempotency key the coordinator can
+    dedup against, never applied generically. Overridable via
+    ``AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES``.
+    """
+    try:
+        return max(0, int(os.environ.get("AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES", "2")))
+    except (TypeError, ValueError):
+        return 2
+
+
 class ConnectRetryClient(httpx.Client):
     """``httpx.Client`` that retries a bare connect failure a bounded number
     of times before giving up.

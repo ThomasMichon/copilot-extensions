@@ -508,6 +508,74 @@ def test_submit_steer_not_owner_gated(q):
     assert task.awaiting_steer is False
 
 
+def test_submit_steer_idempotency_key_dedups_a_retry(q):
+    """The actual live failure mode this substrate exists for: a client
+    retries an ambiguous (connected-but-the-response-timed-out) submission.
+    Reusing the same key must not append a second answer, re-run the status
+    transition, or enqueue a second wake -- it returns the already-committed
+    result unchanged."""
+    t = _held(q, worker="w1")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=[{"name": "f", "type": "text"}]))
+
+    first = q.submit_steer(
+        t.id, fields={"f": "value"}, sender="operator", idempotency_key="key-1"
+    )
+    second = q.submit_steer(
+        t.id, fields={"f": "a different value"}, sender="operator", idempotency_key="key-1"
+    )
+
+    assert first.awaiting_steer is False
+    assert second.awaiting_steer is False
+    log = q.steer_log(t.id)
+    assert len(log) == 1
+    # The retry's (different) field value is never applied -- only the
+    # original, already-committed submission's fields are recorded.
+    assert log[0]["fields"] == {"f": "value"}
+
+
+def test_submit_steer_different_idempotency_keys_are_distinct_answers(q):
+    t = _held(q, worker="w1")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=[{"name": "f", "type": "text"}]))
+
+    q.submit_steer(t.id, fields={"f": "one"}, sender="operator", idempotency_key="key-1")
+    q.submit_steer(t.id, fields={"f": "two"}, sender="operator", idempotency_key="key-2")
+
+    log = q.steer_log(t.id)
+    assert [entry["fields"] for entry in log] == [{"f": "one"}, {"f": "two"}]
+
+
+def test_submit_steer_without_idempotency_key_behaves_as_before(q):
+    """No key supplied (the pre-existing call shape) -- every call is its
+    own, independent answer, same as before this feature existed."""
+    t = _held(q, worker="w1")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=[{"name": "f", "type": "text"}]))
+
+    q.submit_steer(t.id, fields={"f": "one"}, sender="operator")
+    q.submit_steer(t.id, fields={"f": "two"}, sender="operator")
+
+    log = q.steer_log(t.id)
+    assert [entry["fields"] for entry in log] == [{"f": "one"}, {"f": "two"}]
+
+
+def test_submit_steer_empty_idempotency_key_never_raises_a_uniqueness_error(q):
+    """An empty string is a non-``None`` value the partial unique index
+    still indexes, but a plain truthiness check (``if idempotency_key:``)
+    would treat it as "no key" and skip the dedup lookup -- a second
+    empty-keyed submission would then hit a raw SQLite uniqueness error
+    instead of a clean dedup return. An empty key must behave identically
+    to no key at all: every call is independent."""
+    t = _held(q, worker="w1")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=[{"name": "f", "type": "text"}]))
+
+    first = q.submit_steer(t.id, fields={"f": "one"}, sender="operator", idempotency_key="")
+    second = q.submit_steer(t.id, fields={"f": "two"}, sender="operator", idempotency_key="")
+
+    assert first.awaiting_steer is False
+    assert second.awaiting_steer is False
+    log = q.steer_log(t.id)
+    assert [entry["fields"] for entry in log] == [{"f": "one"}, {"f": "two"}]
+
+
 def test_submit_steer_requests_resume_of_suspended_headless_owner(q):
     t = q.create("review PR 42")
     reservation, _ = q.reserve_spawn(t.id)
