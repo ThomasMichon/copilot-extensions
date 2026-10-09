@@ -179,6 +179,15 @@ to the **worktree/effort** using it) so agents **cooperate rather than
 collide**, plus **startup tolerance** that waits patiently for a slow-booting
 machine instead of declaring it dead.
 
+### The host launch policy — one machine-level gate before any worker starts
+A host can have its own reasons to hold a worker back (an operator pause, a
+stop marker, a budget) that live outside this provider. It registers **one
+command** on the machine, and **every** CodeSpace worker launch asks it first —
+a direct `copilot` launch here and agent-bridge's Session Host spawn alike —
+through one seam (`launch-check`), so the two paths can never disagree. The gate
+**fails closed**: a policy that can't answer, or a registration that can't be
+read or checked, refuses the launch rather than slipping a worker past it.
+
 ### The venue pool — a finite, budget-bounded, shared resource
 The set of an account's CodeSpaces is a **pool** drawn against a **bounded core
 budget**. The provider treats that pool as a resource to **allocate within, not
@@ -341,6 +350,14 @@ A cooperative **borrow/return** lets agents share a scarce CodeSpace without a
 hard lock, and **startup tolerance** waits out a slow boot rather than failing
 early. The borrow binds a venue to the **worktree/effort** using it, so a second
 agent knows it is taken.
+
+### host-launch-policy
+A host registers one **launch policy** command per machine, and every CodeSpace
+worker launch — direct `copilot` and agent-bridge's Session Host spawn on start
+or resume — asks it first through `launch-check`, refusing (exit 79, a
+`launch_refused` event) when it says so or can't answer. The registration is
+owner-only, its command is pinned to an absolute path and run contained from one
+directory, and a resident bridge that predates the gate is reported.
 
 ### bounded-shared-pool
 The account's CodeSpaces are managed as a **finite pool against a bounded core

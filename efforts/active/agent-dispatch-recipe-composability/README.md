@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-10-02
-- **Status:** Active <!-- Phase 1 done; Phase 2 landed (PR #4993 merged); Phase 3 (docs) next -->
+- **Status:** Active <!-- Phase 1 done; Phase 2 landed (PR #4993 merged); Phase 3 (docs) landed; Phase 4 (agent-recommended, lower priority) and the deferred motivating-consumer validation remain open -->
 - **Vision:** `visions/plugins/agent-dispatch/README.md` §*extend-any-declaration*
   (added by this effort's own Provenance entry) — generalizes *loop-recipes*
   and *The recipe* from "extend one of four named, plugin-shipped archetypes
@@ -282,14 +282,21 @@ fit an existing archetype.
       silent gap.
 
 ### Phase 3 — Docs
-- [ ] `plugins/agent-dispatch/README.md`: document the generalized
+- [x] `plugins/agent-dispatch/README.md`: document the generalized
       `extends:` chaining (any base, multi-hop) and the `script` provider,
       with a worked migration example (a hand-written custom-backlog
       `command:` emitter → its `script`-provider `repository_issue_loop`
-      equivalent).
-- [ ] Update `visions/plugins/agent-dispatch/README.md`'s
+      equivalent). **Landed:** new subsections in the *Registrar `extends:`*
+      section — chaining semantics (per-hop directory resolution, the
+      cycle/depth guard, the known path-dependent-field gap), the `script`
+      forge provider's request/response contract table, and the worked
+      migration example.
+- [x] Update `visions/plugins/agent-dispatch/README.md`'s
       *extend-any-declaration* Provenance entry to mark implementation
-      landed, citing the merged PRs.
+      landed, citing the merged PRs. **Landed:** cites
+      `ThomasMichon/copilot-extensions#4968` (Phase 1) and `#4993`
+      (Phase 2), names the remaining open gap (`#5174`) and the deferred
+      motivating-consumer validation.
 
 ### Phase 4 — Further script-hook points _(agent-recommended, lower priority)_
 - [ ] _(agent-recommended)_ If a concrete future consumer needs a
@@ -333,6 +340,29 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-08 — Phase 3 (docs) complete
+- `plugins/agent-dispatch/README.md`'s *Registrar `extends:`* section
+  gained three new subsections: **Chaining `extends:`** (multi-hop
+  resolution semantics, per-hop directory resolution for nested refs, the
+  cycle/depth guard's `RegistrarError` shape, and the known narrower gap —
+  per-hop provenance for a few path-dependent declared fields outside
+  `kind: emitter`'s own `spec.cwd`, refused outright as a relative
+  inherited path rather than silently misresolved); the **`script` forge
+  provider** (the request/response JSON contract table for its four
+  operations, error handling, path resolution, `forge.namespace`/
+  `forge.backlog`); and a **worked migration example** turning a
+  hand-written `command:`-backed custom-backlog emitter into its
+  `script`-provider `repository_issue_loop` equivalent.
+- `visions/plugins/agent-dispatch/README.md`'s *extend-any-declaration*
+  Provenance entry updated from "implementation not yet landed" to cite
+  both merged PRs (`ThomasMichon/copilot-extensions#4968` Phase 1, `#4993`
+  Phase 2) and name the two still-open items (the `#5174` path-provenance
+  gap; the motivating consumer's own deferred validation).
+- Remaining open items, unchanged by this phase: Phase 4 (agent-
+  recommended, lower priority, no concrete consumer yet) and the
+  Validation Plan's last item (motivating consumer's own emitter
+  validation, owned by that consumer's own effort).
 
 ### 2026-10-04 — PR #4993 merged: Phase 2 (`script` forge provider) complete
 - 25 automated review rounds processed across the push-fix loop

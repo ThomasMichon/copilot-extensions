@@ -37,6 +37,7 @@ from .session_manager import (
     log,
 )
 from .transport import AgentProcess, SpawnTarget
+from .venue_launch_policy import LaunchRefusedError
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
 
@@ -872,6 +873,16 @@ class _SessionStartMixin:
                 "for dispatcher '%s'",
                 session_id, exc.codespace, exc.owner,
             )
+        except LaunchRefusedError as exc:
+            # The host's launch policy refused this worker on the CodeSpace
+            # (e.g. an operator pause): a deliberate refusal, not a failure.
+            await _cleanup_failed_process_launch()
+            self._mark_session_failed(session, trigger="launch_refused")
+            session.event_log.append("launch_refused", {
+                "codespace": exc.codespace, "reason": exc.reason,
+            })
+            session.event_log.append("error", {"message": str(exc)})
+            log.warning("Session %s not launched: %s", session_id, exc)
         except Exception as exc:
             await _cleanup_failed_process_launch()
             self._mark_session_failed(session, trigger="start_exception")

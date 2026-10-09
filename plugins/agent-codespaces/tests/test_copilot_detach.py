@@ -49,7 +49,7 @@ def seams(monkeypatch):
         lifecycle, "list_codespaces",
         lambda: [types.SimpleNamespace(name="cs-1", repository="example/example-web-vessel")],
     )
-    monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a: None)
+    monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a, **k: None)
     monkeypatch.setattr(
         copilot_venue,
         "github_credential_preflight",
@@ -163,7 +163,7 @@ def test_missing_codespace_fails_before_claiming_anything(seams, monkeypatch, ca
 
     monkeypatch.setattr(lifecycle, "list_codespaces", lambda: [])
     claims = []
-    monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a: claims.append(a) or None)
+    monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a, **k: claims.append(a) or None)
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams))
     assert rc == 1 and claims == [] and seams.holds == [] and seams.ssh == []
     assert "was not found" in json.loads(capsys.readouterr().out)["error"]
@@ -282,7 +282,7 @@ def test_old_venue_tooling_fails_closed(seams, capsys):
 
 
 def test_busy_claim_touches_nothing(seams, monkeypatch):
-    monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a: 75)
+    monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a, **k: 75)
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams))
     assert rc == 75
     assert seams.holds == [] and seams.ssh == [] and seams.reserve == []
@@ -1335,3 +1335,42 @@ def test_the_record_keeps_the_model_the_session_actually_ran_with(seams, monkeyp
     assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["copilot_args"] == ["--no-ask-user", "--model=first-model", "--resume=sid-42"]
+
+
+@pytest.mark.parametrize("status, asks_policy", [("live", False), (None, True)])
+def test_only_a_launch_asks_the_launch_policy_not_a_rejoin(seams, monkeypatch, capsys, status, asks_policy):
+    """A rejoin of a running worker launches nothing, so a refusing policy (a
+    full core budget, say) never blocks reattaching to it."""
+    seen = []
+    monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a, **k: seen.append(k) or None)
+    seams.live_rows["anchor-example-web@cs-1"]["status"] = status
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True})
+    assert detach.cmd_detach(_args(seed=None), ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    assert seen == [{"launch_policy": asks_policy}]
+
+
+def test_a_rejoin_that_created_a_session_is_still_refused_and_stopped(seams, monkeypatch, capsys):
+    """The worker stopped between the check and embody: the rejoin started a
+    session after all, so the policy decides then, and a refused one is stopped."""
+    from agent_codespaces import launch_policy
+
+    monkeypatch.setattr(launch_policy, "refusal", lambda cs: "over the core budget")
+    seams.live_rows["anchor-example-web@cs-1"]["status"] = "live"
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
+    assert rc == launch_policy.LAUNCH_REFUSED_EXIT
+    assert any("kill-session" in c for c in seams.remote)
+    assert "over the core budget" in capsys.readouterr().err
+
+
+def test_a_refused_rejoin_stops_the_session_the_venue_actually_named(seams, monkeypatch):
+    """The venue named the session it started differently than predicted: the
+    refusal's cleanup must stop that session, not the predicted name."""
+    from agent_codespaces import launch_policy
+
+    monkeypatch.setattr(launch_policy, "refusal", lambda cs: "over the core budget")
+    seams.live_rows["anchor-example-web@cs-1"]["status"] = "live"
+    renamed = json.dumps({"ok": True, "created": True, "session": "wt-anchor-renamed"})
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=renamed))
+    assert rc == launch_policy.LAUNCH_REFUSED_EXIT
+    kills = [c for c in seams.remote if "kill-session" in c]
+    assert kills and all("=wt-anchor-renamed" in c for c in kills)
