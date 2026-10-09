@@ -1032,6 +1032,18 @@ allocation still creates its first conversation. The disposable-CLI label
 remains a terminal cleanup policy, not permission to replace conversations
 between candidate rounds.
 
+This resume path is withheld, never attempted, when the retained worktree's
+carried conversation was deliberately retired (an operator rearm starts the
+task over): the worktree's own resume fallback resolves whatever session is
+latest in that directory, independent of the reservation's own session
+handle, so applying it to a retired conversation would silently resurrect
+it instead of starting the genuinely fresh one the rearm intended. The
+retired marker survives a retry that itself fails before recording a
+replacement session, and clears again the moment a new, not-yet-retired
+session is recorded. Every spawn entry point (the supervisor's headless
+factory and the one-shot `create --spawn` CLI path) applies this same
+decision via `spawn_factories.resume_worktree_eligible`.
+
 CLI:
 
 ```

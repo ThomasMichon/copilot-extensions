@@ -208,17 +208,6 @@ class SpawnReservationMixin:
                 if prior is not None:
                     carried_worktree = prior["worktree"]
                     carried_session = prior["session_handle"]
-                    # Propagate a retired marker forward across a handle-less
-                    # retry (copilot-extensions#5699 follow-up review): if the
-                    # immediately-prior reservation already dropped its
-                    # carried session as retired but failed before a fresh
-                    # one was ever recorded, this attempt's own prior-row
-                    # lookup sees that same already-null session_handle and
-                    # would otherwise never re-run the retired-detection
-                    # query below at all -- silently losing the marker and
-                    # letting the worktree-resume fallback resurrect the
-                    # retired conversation after all.
-                    conversation_retired = bool(prior["conversation_retired"])
                     if carried_session is not None:
                         # rearmed counts as retired too (copilot-extensions#4978):
                         # an operator rearm starts the task over, so its carried
@@ -257,6 +246,23 @@ class SpawnReservationMixin:
                                 "(task %s, attempt %s); will try to resume it",
                                 carried_session, task.exclusive_key, task_id, attempt,
                             )
+                            # A genuinely fresh, not-yet-retired handle: this
+                            # re-verification is authoritative and must never
+                            # be overridden by an older marker a prior row
+                            # happened to still carry (e.g. attempt 2 recorded
+                            # this very session after attempt 1 was itself
+                            # retired -- that marker belongs to the conversation
+                            # that is gone, not to this new one).
+                            conversation_retired = False
+                    else:
+                        # Handle-less retry: the prior reservation never
+                        # recorded a replacement session at all (it failed,
+                        # or hasn't recorded one yet), so the retired-
+                        # detection re-verification above never had a handle
+                        # to check in the first place. Inherit its own
+                        # marker verbatim -- it is the only evidence this
+                        # attempt has.
+                        conversation_retired = bool(prior["conversation_retired"])
                     worktree_ownership = "reused"
             if carried_worktree is not None:
                 cleanup_claims = conn.execute(
