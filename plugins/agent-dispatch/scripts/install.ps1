@@ -1325,6 +1325,7 @@ function New-PluginBuildSnapshot {
                 if (Test-Path -LiteralPath (Join-Path $snapDir 'pyproject.toml')) {
                     Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction Stop
                     $snapTmp = $null
+                    Publish-FileAtomically -Path (Join-Path $InstallDir "stamp-candidate-$Version") -Content $snapDir -Encoding (New-Object Text.UTF8Encoding($false))
                     Write-Ok "Reusing content-addressed build snapshot: $snapDir"
                     return $snapDir
                 }
@@ -1355,6 +1356,9 @@ function New-PluginBuildSnapshot {
                 Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale)
             }
             Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+            if ($localStamp) {
+                Publish-FileAtomically -Path (Join-Path $InstallDir "stamp-candidate-$Version") -Content $snapDir -Encoding (New-Object Text.UTF8Encoding($false))
+            }
             Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
                 ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
             Write-Ok "Building from durable snapshot: $snapDir (never locks the marketplace payload)"
@@ -3655,6 +3659,16 @@ function Invoke-Stamp {
         }
         if ($currentStamped -and (Test-VersionLt -A $SrcVersion -B $currentStamped) -and -not $Force) {
             Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $currentStamped (a newer stamp arrived first; -Force to override)"
+            return
+        }
+        # Snapshot creation and marker publication take separate locks to avoid
+        # AB-BA deadlock. A newer same-version local candidate may have won
+        # while this invocation waited for the publication lock.
+        $candidateMarker = Join-Path $InstallDir "stamp-candidate-$SrcVersion"
+        if ((Test-Path -LiteralPath $candidateMarker) -and
+            (Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace' -and
+            [IO.File]::ReadAllText($candidateMarker) -cne $snapDir) {
+            Write-Skip 'Not publishing: a newer same-version local snapshot candidate superseded this stamp'
             return
         }
         # Publish-FileAtomically guards the binstub's self-provisioning read

@@ -458,10 +458,7 @@ def _fixture_checkout(tmp_path: Path) -> Path:
     return plugin
 
 
-def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path):
-    env = _env(tmp_path)
-    plugin = _fixture_checkout(tmp_path)
-    runtime = tmp_path / "runtime"
+def _snapshot_prelude() -> str:
     script = _prelude("ps1")
     for name in (
         "Resolve-VendoredLib",
@@ -476,6 +473,51 @@ def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path):
         "Invoke-Stamp",
     ):
         script += _function("ps1", name)
+    return script
+
+
+def test_delayed_stamp_cannot_publish_over_newer_same_version_content(tmp_path):
+    env = _env(tmp_path)
+    plugin = _fixture_checkout(tmp_path)
+    runtime = tmp_path / "runtime"
+    script = _snapshot_prelude()
+    script += _function("ps1", "Enter-PluginSnapshotLock").replace(
+        "function Enter-PluginSnapshotLock", "function Enter-RealSnapshotLock", 1
+    )
+    script += f"""
+$PluginDir='{plugin}'
+$InstallDir='{runtime}'
+$LocalBin='{tmp_path / "local-bin"}'
+$SrcVersion='1.2.3'
+$Force=$false
+$script:GlobalActivationLockTimeoutSeconds=10
+$script:interleaved=$false
+$script:deployed=0
+function Deploy-SelfProvisioningBinstub {{ $script:deployed++ }}
+function Enter-PluginSnapshotLock {{
+    param($InstallDir, $Version, $TimeoutSeconds=20)
+    if (-not $Version -and -not $script:interleaved) {{
+        $script:interleaved=$true
+        [IO.File]::WriteAllText((Join-Path $PluginDir 'new-source.py'), 'newer content')
+        Invoke-Stamp
+    }}
+    return Enter-RealSnapshotLock -InstallDir $InstallDir -Version $Version -TimeoutSeconds $TimeoutSeconds
+}}
+Invoke-Stamp
+$published = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
+if (-not (Test-Path (Join-Path $published 'new-source.py'))) {{ throw 'delayed stamp overwrote newer content' }}
+if ($script:deployed -ne 1) {{ throw 'stale stamp deployed its launchers' }}
+if ([IO.File]::ReadAllText((Join-Path $InstallDir 'stamp-candidate-1.2.3')) -cne $published) {{ throw 'candidate and published identity diverged' }}
+"""
+    result = _run("ps1", script, tmp_path, env)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path):
+    env = _env(tmp_path)
+    plugin = _fixture_checkout(tmp_path)
+    runtime = tmp_path / "runtime"
+    script = _snapshot_prelude()
     script += f"""
 $PluginDir='{plugin}'
 $InstallDir='{runtime}'

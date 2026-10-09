@@ -1974,6 +1974,10 @@ including snapshot-local, non-editable dependency references. Local-checkout
 unchanged stamps reuse one snapshot, while plugin, engine or library edits
 publish a new immutable identity. Direct local builds retain their checkout
 paths. The POSIX stamp remains an owning-payload pointer. Dispatch
+records the latest same-version local snapshot candidate under the snapshot
+lock and rechecks it under the publication lock, so a delayed stamp cannot
+overwrite newer content or launchers. The locks remain sequential to avoid
+inverting runtime installation's lock order. Dispatch
 owns signed-Python validation/recovery, pre/post-build artifact scrubbing,
 dependency order, optional MCP-extra fallback, launchers and its complete
 coordinator/supervisor lifecycle; only shared acquisition, retry and manifest

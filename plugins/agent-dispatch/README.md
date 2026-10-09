@@ -107,7 +107,9 @@ self-provisioning binstub + payload marker without building a venv. PowerShell
 materializes a standalone snapshot with both installer-engine files and all
 declared local libraries; local-checkout stamps use content-addressed snapshot
 identities over the materialized tree. Unchanged stamps reuse one snapshot,
-while source, engine or library edits publish a new immutable identity. POSIX
+while source, engine or library edits publish a new immutable identity.
+Delayed same-version local stamps reject a superseded snapshot candidate before
+publishing markers or launchers. POSIX
 retains its owning-payload pointer. `provision`/`install`/`update` build
 a versioned runtime under `~/.agent-dispatch/versions/<v>/` (published by the
 `current-version` marker), an `agent-dispatch` binstub in `~/.local/bin`, a

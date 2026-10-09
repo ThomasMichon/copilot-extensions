@@ -607,6 +607,17 @@ installs, no service-specific config needed for this class of plugin.
   uses ordinal keys, with a real case-sensitive filesystem regression.
   A guard-blocking private identifier in existing install-contract prose
   was removed without changing the documented marker behavior.
+- The third review identified a same-version local stamp publication race.
+  Snapshot creation now records its latest content candidate under the
+  version-scoped lock; publication rechecks that candidate under the global
+  lock and rejects superseded markers and launchers. Existing sequential
+  lock acquisition is preserved to avoid runtime-install AB-BA deadlock.
+  The deterministic interleaving regression constructs and publishes newer
+  content between an older stamp's snapshot creation and publication lock.
+- This follow-up's installer/snapshot/stamp/activation selection passed:
+  75 passed, 4 skipped. Final wrapper counts are shell 2250 and PowerShell
+  4058, for 6308 total versus the 6288 baseline (+20); the canonical engine
+  remains 881 lines. The aggregate rollout shrinkage gate remains open.
 
 ### 2026-09-12 — Kickoff
 - Effort created directly off the operator's request, immediately following
