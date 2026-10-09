@@ -8,7 +8,7 @@ import platform
 import sys
 import threading
 
-from . import activity, embody_resume, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
+from . import activity, embody_resume, local_cache_refresh, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
@@ -487,6 +487,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _resolve_json_mode(state: ResolveCommandState) -> int:
+    if state.use_new and getattr(state.args, "dry_run", False):
+        return output._json_error(
+            "--json --new --dry-run is unsupported; no worktree or guidance was created"
+        )
     try:
         config = state.load_config()
     except Exception as exc:
@@ -564,6 +568,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         launch_preflight = _preflight_launch(config, state.args, work_dir)
         if launch_preflight.error:
             return output._json_error(launch_preflight.error, exit_code=3)
+        local_cache_refresh.prepare_for_launch(
+            work_dir, dry_run=getattr(state.args, "dry_run", False)
+        )
         launch_cmd = _build_launch_cmd(
             config,
             state.args,
@@ -619,6 +626,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
+    local_cache_refresh.prepare_for_launch(
+        record.worktree_path, dry_run=getattr(state.args, "dry_run", False)
+    )
     if getattr(state.args, "restore", False):
         session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
         restored = _perform_remux(

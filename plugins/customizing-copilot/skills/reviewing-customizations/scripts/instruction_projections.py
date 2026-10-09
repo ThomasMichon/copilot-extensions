@@ -184,6 +184,8 @@ class Result:
     lock_updated: bool = False
     declared: int = 0
     locked: int = 0
+    written: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
 
     @property
     def blocking(self) -> int:
@@ -206,6 +208,8 @@ class Result:
             "declared": self.declared,
             "locked": self.locked,
             "changed": sorted(self.changed),
+            "written": sorted(self.written),
+            "removed": sorted(self.removed),
             "unchanged": sorted(self.unchanged),
             "lockUpdated": self.lock_updated,
             "findings": [asdict(finding) for finding in self.findings],
@@ -1205,13 +1209,7 @@ def _render_local_cache_locked(
                 root, PurePosixPath(local_destination)
             )
             if local_destination in tracked_paths or tracking_inconclusive:
-                # The .gitignore convention this whole mechanism depends on
-                # (docs/patterns/worktree-scoped-dynamic-guidance.md) is a
-                # prerequisite this function verifies rather than assumes --
-                # a repo that hasn't adopted it yet, or a file accidentally
-                # committed before it was, must never be silently written
-                # to (which would then evade the checked-in orphan scan's
-                # deliberate *.local.instructions.md exclusion). An
+                # Never manage tracked local guidance. An
                 # inconclusive check (a real git working tree whose tracked-
                 # files query itself failed) is treated exactly like
                 # "tracked" -- never like "confirmed untracked" -- because
@@ -1285,6 +1283,7 @@ def _render_local_cache_locked(
             )
             continue
         result.changed.append(local_destination)
+        result.written.append(local_destination)
         valid_destinations.add(local_destination)
 
     for path in existing_local_cache_files:
@@ -1332,6 +1331,7 @@ def _render_local_cache_locked(
             )
             continue
         result.changed.append(relative)
+        result.removed.append(relative)
     return result
 
 

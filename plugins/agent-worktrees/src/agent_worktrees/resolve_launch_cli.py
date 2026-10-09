@@ -9,9 +9,43 @@ import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import activity, codename_tracking, embody_resume, git_ops, local_cache_refresh, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking
 from . import config as cfg
+
+if TYPE_CHECKING:
+    from .__main__ import LaunchPreflight
+
+
+def emit_launch_preflight_error(
+    preflight: LaunchPreflight, *, json_output: bool = False
+) -> int:
+    """Emit a controlled launch error in the caller's established format."""
+    message = preflight.error or "launch preflight failed"
+    if json_output:
+        return output._json_error(message, exit_code=3)
+    print(f"  \u2717 {message}", file=sys.stderr)
+    _emit_plan({"action": "error", "error": message, "exit_code": 3})
+    return 3
+
+
+def preflight_launch(
+    config: cfg.Config, args: argparse.Namespace, work_dir: str
+) -> LaunchPreflight:
+    """Read-only validation before any launch-side mutation."""
+    from . import state_root as state_root_mod
+
+    recovery = getattr(args, "recovery", False)
+    repo = config.default_repo
+    platform_key = config.platform if config.platform != "wsl" else "linux"
+    launch_map = repo.launch_recovery if recovery else repo.launch
+    config_root = None
+    if not recovery and platform_key not in launch_map and repo.setup_hook.get(platform_key):
+        config_root = state_root_mod.resolve_config_root(
+            config, cwd=work_dir, project=cfg.active_project()
+        )
+    return _core().LaunchPreflight(config_root=config_root)
 
 
 def _core():
@@ -438,7 +472,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         # dynamic-guidance.md): refresh every enabled source's gitignored
         # *.local.instructions.md sibling now -- a fast-forward just above
         # may have changed the installed payload this worktree sees.
-        # Best-effort and silent -- see local_cache_refresh's own docstring.
+        # Degradation is reported without blocking an otherwise usable launch.
         local_cache_refresh.refresh_local_cache(record.worktree_path)
 
     resume_target = None
