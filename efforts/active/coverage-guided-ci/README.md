@@ -574,6 +574,43 @@ effort's
 copilot-extensions-specific Phase 1.
 
 ### Phase 6 — Windows CI coverage gap (follow-up from Phase 3.5's CI-history review)
+- [ ] Investigate Windows `agent-worktrees` durations from rotation run
+      37731754633 (tracking issue #5682). Preserve the 300-second sub-suite
+      ceiling and behavioral coverage; target at least 20% headroom
+      (240 seconds or less) in each sub-suite, and verify the entire
+      plugin fits its aggregate budget. Collect individual setup/call
+      durations on a hosted Windows runner, not just total job time.
+      Initial local profiling: `test_pr_complete.py` took 150.61 seconds
+      for 17 passing tests; claimant-guard tests took 56.14 seconds for
+      18 tests, predominantly repeated Git-fixture setup. An immutable
+      session seed with independent copied object stores reduces the
+      combined complete/claimant/nudge subset from approximately 233
+      seconds to 139 seconds, but the original 25-file group still exceeds
+      300 seconds locally. This is progress, not completion; the large
+      `test_pr_ops.py` remains a principal profiling target. Local timings
+      are load-sensitive and must not be substituted for hosted evidence.
+      Hosted candidate run 37739890830 confirms the aggregate budget is
+      also binding: groups 1-6 took 77.01, 59.45, 156.05, 258.77,
+      140.88, and 21.75 seconds. Group 7 then received only 170.531
+      seconds of the 900-second plugin budget and timed out there.
+      Group 4 alone misses the 240-second headroom target. A manually
+      requested diagnostic profile may temporarily allow complete
+      timing collection; scheduled/default runs keep their existing
+      budgets. A diagnostic pass is never performance acceptance.
+      Complete hosted diagnostic 37742776238 passed 7,425 tests with
+      42 platform/explicit-tier skips. Its 12 pytest group timings were
+      76.26, 58.46, 152.28, 241.44, 148.37, 20.59, 531.79,
+      153.87, 88.37, 77.19, 137.72, and 28.24 seconds (1,714.58
+      seconds total, excluding runner/setup overhead). This proves real
+      behavioral success at that revision, not compliance with 900 seconds.
+- [ ] Correct the rotation's scheduled-event branch condition: schedules
+      execute on `main`, so requiring `github.ref == refs/heads/dev` skips
+      the selection job. Scheduled runs should check out `dev` internally;
+      manual runs should exercise their requested revision. Pin all matrix
+      jobs to the exact selection checkout SHA and expose per-test durations
+      and unbuffered progress so a timeout still leaves identifiable evidence.
+      Rotation must remain internal to CI, with no settings-changing PRs.
+
 Direct consequence of reviewing CI build history after Phase 3.5: **every
 "full suite" CI job in this repo runs on `ubuntu-latest` only.** The per-PR
 `smoke` matrix (`ci.yml`) and the `dev`→`main` promotion's `full` matrix
@@ -695,6 +732,200 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
+- The review-fixed full Windows worktree run 37885149671 passed all
+  intended cases in 540.84 seconds including cleanup (maximum group
+  95.04 seconds). Its repeat 37886775797 passed worktrees too, but
+  exposed a separate real `agent-pull-requests` restart-test race:
+  two in-process daemon generations remained live and attempted the same
+  subscription temporary file, causing a Windows PermissionError.
+  The daemon pollers now honor the existing shutdown event promptly; the
+  restart test shuts down and joins the old generation before constructing
+  the replacement, preserving durable subscribers. All 53 plugin tests pass
+  in the contained runner; a mandatory patch changefile accompanies the fix.
+- The revised Copilot request workflow hit its licensed-account REST quota,
+  not a code/test failure. Observed reset was 05:26:38 UTC; an owned bounded
+  backoff waited until that time before one failed-job retry. No token/account
+  switch, bypass merge, or repeated rate-limit retry was used. The actual
+  subsequent reviewer verdict remains required.
+- In response to the operator's pre-push cost question, timed every actual
+  guard rather than blaming the push bound. The unchanged 16-check sequence
+  took 244.50 seconds: headless-launch 89.15, bridge contracts 44.75,
+  docs consistency 28.64, and install contracts 27.40 seconds.
+  Whole-tree traversal, duplicate AST work and repeated immutable-evidence
+  probes dominated, not pytest execution.
+- Preserved the full gate while reducing work: existing exclusions are
+  pruned during enumeration; headless candidates parse once and duplicate
+  contents share analysis without sharing path-specific diagnostics; bridge
+  evidence avoids repeatedly probing the same available full commit IDs.
+  Missing evidence/mutable refs remain rechecked and recovery behavior is
+  preserved. Exact candidate/diagnostic and recovery regressions pass
+  (102 tests). The final same-machine 16-check sequence passed in 57.79
+  seconds, versus 244.50 seconds before. No publication or test timeout was
+  raised, no guard was removed, and no policy exclusion was widened.
+- The actual Copilot review raised a Medium teardown race: closing a
+  kill-on-close Windows Job Object initiates asynchronous descendant
+  termination, so group deletion could begin while a descendant still held
+  files. Fixed the entire cleanup contract: explicit Job termination and
+  raw active-process-count confirmation before handle close, POSIX live-group
+  confirmation after signals, controller reaping after forced kill, and no
+  cleanup scheduling on unproven teardown. A typed failure retains the named
+  sandbox instead of deleting beneath a possibly live process. Native Windows
+  regressions cover file-holding descendants after both normal controller exit
+  and timeout; portable tests cover delayed membership and retained failure
+  state. Review remains gated on the revised verdict and fresh hosted evidence.
+- Strict same-code normal runs 37865342941 and 37866787409 both
+  completed every intended case: 7,430 passed and 42 legitimate skips
+  across all 13 groups. Actual plugin elapsed time INCLUDING joined
+  cleanup was 567.25 and 857.44 seconds respectively, below the
+  unchanged 900-second ceiling. Maximum group times were 90.26 and
+  148.38 seconds, well below the 240-second headroom target.
+  The slower repeat has 42.56 seconds of aggregate margin; do not
+  describe the first run's 332.75-second margin as guaranteed. Readiness
+  now has real repeat evidence, but review, merge, promotion, and scheduled
+  firing remain distinct gates; another normal run is planned while review
+  proceeds.
+- Publication encountered the existing 180-second Git-push bound while
+  running all pre-push checks; no hook was skipped or timeout enlarged.
+  The feed-neutrality guard repeatedly walked the full checkout once per
+  pattern, including local test environments before filtering exclusions.
+  It now walks once and prunes only its original excluded directories.
+  Actual candidate sets are exactly identical (499 paths), measured
+  13.84 seconds before versus 1.51 seconds after; all 14 guard tests
+  pass. This removes a directly encountered publication bottleneck without
+  weakening feed policy or changing test budgets.
+- Normal run 37859573130 attempted every intended case (7,430 passed,
+  42 skipped), with all 13 pytest group times below 240 seconds
+  (maximum 187.39 seconds, total 873.49 seconds). However, its
+  first-group-to-final-status elapsed time was approximately 955.76
+  seconds, including 52 seconds of final sandbox cleanup. This is NOT
+  aggregate-budget acceptance even though the old runner reported success.
+- Fixed two real budget blind spots: an exited subprocess no longer
+  bypasses the elapsed wall check, and the plugin deadline is checked after
+  all cleanup. Cleanup of a fully reaped group's owned directory now
+  overlaps the next group through one bounded thread; all futures are joined
+  before outer sandbox removal and errors propagate. Short Windows `t/gN`
+  paths remain unchanged, reusing the framework's readonly-aware removal
+  rather than adding a path-length-increasing directory suffix.
+  Deadline/cleanup/rotation regressions pass (33 tests). A real two-group
+  execution with the final short paths passed all 57 cases in 84.48 seconds
+  including cleanup;
+  the complete hosted candidate must still prove actual aggregate headroom.
+- Complete uncensored candidate diagnostic 37834155432 passed every
+  group, but still took 1,714.21 seconds of pytest time. Durations above
+  0.05 seconds attribute 1,319.85 seconds to calls and 173.27 seconds
+  to setup; further fixture-only optimization cannot plausibly close the
+  gap by itself. The operator explicitly approved trying bounded
+  two-worker Windows execution plus further actual cost reduction, keeping
+  all existing budgets. The rotation now opts only `agent-worktrees` into
+  `pytest-xdist -n 2 --dist=loadfile`; default local execution and all
+  other plugins remain serial. Both workers stay in the same containment
+  job. This is an experiment awaiting hosted acceptance, not a budget
+  change or declaration of completion.
+- Removed 32 repeated initial `create_pr` calls that merely prepared
+  post-publication, push, and finalize scenarios. A real publication is
+  performed once per pytest worker session; each case receives independent
+  copied Git stores and a relocated tracking record. Fresh-publication and
+  tested rerun calls remain real. Mechanical inverse AST checks prove
+  the transformed cases preserve all later calls, assertions, decorators,
+  and parameterization. Two added mutation regressions verify the published
+  seed's complete byte snapshot remains unchanged across copied commit,
+  push, and tracking updates.
+- Contained two-worker checks pass under unchanged limits: 38 publication
+  and topology cases in 280.72 seconds, then all 35 parametrized push/finalize
+  cases in 198.84 seconds locally. The rotation worker-selection guard
+  (9 tests), focused lint, and install-contract gate pass. These timings are
+  not hosted full-suite acceptance; the complete hosted two-worker run is
+  still required before readiness.
+- The uncensored profile also identified `test_terminal_conclusion.py`
+  (73.89 seconds of reported calls), whose helper rebuilt the same Git
+  topology inside each call. It now copies an immutable session topology
+  and recreates only per-case tracking/session state. Mechanical inverse
+  AST checks preserve every existing operation/assertion/decorator; an
+  additional real commit/push/worktree-removal regression leaves both the
+  seed and sibling copy byte-identical. All 53 terminal-conclusion cases
+  pass locally under the same contained limits in 83.53 seconds.
+- First normal two-worker hosted run 37852839930 still exhausted the
+  900-second aggregate limit in group 9. Groups 1-8 passed in 64.11,
+  39.48, 114.33, 217.55, 58.36, 78.63, 55.46, and 186.10
+  seconds; every completed group met 240-second headroom, but the
+  remaining groups were not attempted. File-affinity scheduling left
+  uneven call-cost loads, so the two-worker experiment now uses work
+  stealing. The CI test process also resolves the same-version packaged
+  native Git to avoid Git for Windows' launcher
+  process; no persistent PATH/config changes are made.
+- All 124 modified contracts pass locally with work stealing and native
+  Git in two contained groups (67 in 272.25 seconds, 57 in 50.06
+  seconds), including the real pre-push hook and isolation regressions.
+  A prior accidentally broadened local selection included the entire
+  finalize-precondition module and exhausted its 300-second group budget;
+  it did not complete and is not acceptance evidence. The final hosted
+  candidate must still attempt every intended case under normal budgets.
+- A focused native-Git probe removed every other Git distribution directory
+  from the process PATH and still passed the real pre-push hook contract.
+  Therefore the final CI optimization prepends only native Git's binary
+  directory, leaving shell lookup priority unchanged rather than broadly
+  preferring Git's shell/tool directory.
+- Hosted run 37858035629 exposed a setup bug before tests started:
+  `Get-Command git -CommandType Application` returned three executables,
+  which PowerShell concatenated into one invalid command name. The
+  resolver now selects the first PATH match explicitly. Reproducing the
+  three-match PATH locally and executing the actual CI setup block passes;
+  the regression guard and all 9 rotation tests pass. This failed run is
+  setup evidence only and does not establish any suite timing.
+- The unchanged-budget combined candidate run 37831230027 still fails
+  aggregate acceptance, not an assertion: its first seven groups passed
+  in 63.52, 47.92, 149.31, 280.58, 73.69, 72.85, and 49.10
+  seconds; group 8 received only 154.218 seconds remaining and timed
+  out there. Group 4 also misses the 240-second target. No claim of
+  performance completion is supported. Diagnostic mode now emits every
+  setup/call/teardown duration over 0.05 seconds, rather than only the
+  top 30, so the next complete profile can attribute aggregate cost
+  rather than extrapolating from a censored summary.
+- Hosted diagnostic run 37742776238 attempted all 12 Windows groups:
+  7,425 passed, 42 skipped. Group 7 took 531.79 seconds and group 4
+  took 241.44 seconds; total pytest time was 1,714.58 seconds.
+  Default-budget acceptance remains open.
+- Reused immutable finalize landing/precondition Git seeds with independent
+  copied object stores, remote retargeting, and commit/push isolation
+  regressions. This removes approximately 696 net repeated setup Git calls.
+  The original 86 behavioral test bodies remain unchanged.
+- Split all 307 methods of the oversized PR-operations module into 12
+  explicit behavioral-contract modules. Independent AST multiset comparison
+  proves every test body, signature, decorator, and parameterization is
+  preserved. This improves grouping granularity; it does not itself reduce
+  aggregate work.
+- Identified a separate runner-side cost: the storage-budget probe repeated
+  filesystem stat calls for every accumulated temporary file every two
+  seconds. Cached `os.scandir` metadata measured 0.027 seconds versus
+  1.612 seconds for the same 15,766,315-byte representative Windows tree.
+  Accounting limits, sampling cadence, subprocess containment, and normal
+  timeout budgets are unchanged. Nested-size and no-link-following/removal
+  regressions plus the existing persistent-environment-drift check pass.
+  This microbenchmark is not full-suite acceptance.
+- Removed unused sample templates and automatic maintenance from the tiny
+  shared PR seed and avoided unnecessary file-metadata copies. The two
+  real-Git PR seed isolation regressions and a real create/push contract
+  passed focused contained runs. The new finalize regressions initially
+  inferred bare repos implicitly; fixed their probes to use explicit
+  `--git-dir` without weakening `safe.bareRepository` policy.
+- Focused contained validation of all copied topologies now passes
+  (4 regressions, 34.89 seconds). All split PR contracts collect
+  (311 parametrized cases), and 23 selected helper/CLI/real-publication
+  cases pass in 25.68 seconds. Focused F/E9 lint and install-contract
+  validation also pass. These are prerequisites, not full-suite acceptance.
+- Local full finalize validation remains incomplete: a normal-budget run
+  timed out during `test_a_commit_after_a_sync_still_counts` before reaching
+  the second module. Preserve this failure and obtain hosted evidence for the
+  combined candidate rather than claiming local or diagnostic-mode success
+  meets the target. Publication remains draft; neither the performance goal
+  nor the scheduled-event correction is landed.
+- Documentation impact: `TESTING.md` documents independent fixture copies,
+  the PR contract split, and cached storage probes. No production plugin
+  behavior, installer, or fresh-machine provision path changed, so the
+  clean-room tier does not apply. Hosted Windows full-suite validation is the
+  real external lane and must clear unchanged budgets before readiness.
+
 ### 2026-10-08 — Phase 6: Windows coverage rotation drafted, landed, and merged (PR #5662)
 Direct follow-up to reviewing CI build history after Phase 3.5 wrapped
 (at the operator's request): confirmed via `gh run list`/`gh run view`
@@ -731,7 +962,7 @@ actual repo-owner account, not this session's raw `gh auth` identity (a
 distinction the effort's own custom instructions describe but I hadn't
 seen play out concretely until checking `gh pr view --json author`). The
 real blocker was `identifier-leak-guard`: it correctly caught a personal
-Windows username (`tmichon`) pasted verbatim into an earlier journal
+Windows username pasted verbatim into an earlier journal
 entry's example error path (documenting the `agent-ssh` bash-shim
 finding) — fixed in the same PR by genericizing it to `your_user`, the
 denylist message's own suggested replacement. Confirmed via a repo grep

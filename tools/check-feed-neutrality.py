@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import fnmatch
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -76,15 +78,23 @@ _SHELL_DEFAULT_PREFIX_RE = re.compile(r"\$\{?\w+:-\s*['\"]?$")
 _PS_COALESCE_PREFIX_RE = re.compile(r"\?\?\s*['\"]?$")
 
 
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
 def _iter_candidate_files() -> list[Path]:
     seen: set[Path] = set()
     files: list[Path] = []
-    for pattern in _SCAN_GLOBS:
-        for f in REPO.rglob(pattern):
-            if _SCAN_DIR_EXCLUDE_PARTS & set(f.relative_to(REPO).parts):
+    for directory, subdirectories, filenames in os.walk(REPO, onerror=_raise_walk_error):
+        subdirectories[:] = [
+            name for name in subdirectories if name not in _SCAN_DIR_EXCLUDE_PARTS
+        ]
+        for name in (*subdirectories, *filenames):
+            if name in _SCAN_DIR_EXCLUDE_PARTS:
                 continue
-            if f in seen:
+            if not any(fnmatch.fnmatch(name, pattern) for pattern in _SCAN_GLOBS):
                 continue
+            f = Path(directory) / name
             seen.add(f)
             files.append(f)
     workflows = REPO / ".github" / "workflows"

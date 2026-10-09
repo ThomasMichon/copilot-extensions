@@ -26,9 +26,12 @@ Exit 0 = consistent, 1 = drift (suitable for a pre-push hook / CI).
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
+import os
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -105,11 +108,22 @@ COUNT_PATTERNS = [
 ]
 
 
+def _markdown_paths() -> Iterator[Path]:
+    """Keep glob candidates, but never descend into already-excluded trees."""
+    excluded = {".worktrees", "node_modules"}
+    if excluded.intersection(REPO.parts):
+        return
+    for root, dirs, files in os.walk(REPO):
+        dirs[:] = [name for name in dirs if name not in excluded]
+        # Glob also yields matching directories; preserve their read errors.
+        for name in dirs + files:
+            if fnmatch.fnmatch(name, "*.md"):
+                yield Path(root) / name
+
+
 def check_counts(expected: dict[str, int]) -> list[str]:
     problems: list[str] = []
-    for md in sorted(REPO.glob("**/*.md")):
-        if ".worktrees" in md.parts or "node_modules" in md.parts:
-            continue
+    for md in sorted(_markdown_paths()):
         raw = md.read_text(encoding="utf-8")
         # Strip markdown emphasis so "**five**" / "`five`" still match.
         text = raw.replace("*", "").replace("`", "")

@@ -75,6 +75,61 @@ def _load_checker():
     return module
 
 
+def test_available_immutable_commit_is_probed_once_per_repository(monkeypatch, tmp_path):
+    checker = _load_checker()
+    evidence = checker._eg
+    monkeypatch.setattr(evidence, "REPO", tmp_path / "first")
+    monkeypatch.setattr(evidence, "_AVAILABLE_COMMITS", set())
+    calls = []
+
+    def git(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(evidence, "git", git)
+    commit = "a" * 40
+    assert evidence.ensure_commit_available(commit)
+    assert evidence.ensure_commit_available(commit)
+    assert len(calls) == 1
+    monkeypatch.setattr(evidence, "REPO", tmp_path / "second")
+    assert evidence.ensure_commit_available(commit)
+    assert len(calls) == 2
+
+
+def test_missing_commit_is_not_cached_across_later_recovery(monkeypatch):
+    evidence = _load_checker()._eg
+    monkeypatch.setattr(evidence, "_AVAILABLE_COMMITS", set())
+    monkeypatch.setattr(evidence, "_FETCH_RECOVERY_ATTEMPTED", True)
+    codes = iter((1, 0))
+    calls = []
+
+    def git(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, next(codes), "", "")
+
+    monkeypatch.setattr(evidence, "git", git)
+    commit = "b" * 40
+    assert not evidence.ensure_commit_available(commit)
+    assert evidence.ensure_commit_available(commit)
+    assert evidence.ensure_commit_available(commit)
+    assert len(calls) == 2
+
+
+def test_mutable_commit_reference_is_always_rechecked(monkeypatch):
+    evidence = _load_checker()._eg
+    monkeypatch.setattr(evidence, "_AVAILABLE_COMMITS", set())
+    calls = []
+
+    def git(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(evidence, "git", git)
+    assert evidence.ensure_commit_available("HEAD")
+    assert evidence.ensure_commit_available("HEAD")
+    assert len(calls) == 2
+
+
 def _registry(repo: Path, commit: str, blob: str) -> dict[str, Any]:
     http_contract = {
         "id": "agent-bridge.http-wire",

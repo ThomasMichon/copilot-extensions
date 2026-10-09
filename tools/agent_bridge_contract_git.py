@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 _GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
 _MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
 _FETCH_RECOVERY_ATTEMPTED = False
+_AVAILABLE_COMMITS: set[tuple[Path, str]] = set()
 
 
 def clean_git_environment() -> dict[str, str]:
@@ -66,7 +67,18 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
 def ensure_commit_available(commit: str) -> bool:
     global _FETCH_RECOVERY_ATTEMPTED
 
-    if git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
+    key = (REPO, commit)
+    immutable = _GIT_OBJECT_RE.fullmatch(commit) is not None
+    if immutable and key in _AVAILABLE_COMMITS:
+        return True
+
+    def present() -> bool:
+        found = git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0
+        if found and immutable:
+            _AVAILABLE_COMMITS.add(key)
+        return found
+
+    if present():
         return True
     if _FETCH_RECOVERY_ATTEMPTED:
         return False
@@ -77,7 +89,7 @@ def ensure_commit_available(commit: str) -> bool:
         ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
     ):
         git(*fetch_args)
-        if git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
+        if present():
             return True
     return False
 

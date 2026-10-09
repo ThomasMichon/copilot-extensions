@@ -9,6 +9,7 @@ Run:  python -m pytest tools/test_check_headless_launch.py
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 
@@ -35,6 +36,186 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(guard, "PLUGINS_DIR", tmp_path / "plugins")
     monkeypatch.setattr(guard, "LIBS_DIR", tmp_path / "libs")
     return tmp_path
+
+
+def test_identical_source_is_analyzed_once_but_every_path_is_reported(repo, monkeypatch):
+    body = (
+        "import subprocess\n"
+        "subprocess.Popen(['git', 'status'], creationflags=subprocess.CREATE_NEW_CONSOLE)\n"
+    )
+    _mk_plugin(repo, "alpha", adopts=True, body=body)
+    _mk_plugin(repo, "beta", adopts=True, body=body)
+    calls = []
+    original_parse = guard.ast.parse
+
+    def parse(text, *args, **kwargs):
+        calls.append(text)
+        return original_parse(text, *args, **kwargs)
+
+    monkeypatch.setattr(guard.ast, "parse", parse)
+    problems = guard.verify()
+
+    assert calls == [body]
+    assert any("plugins/alpha/src/alpha/mod.py:2:" in problem for problem in problems)
+    assert any("plugins/beta/src/beta/mod.py:2:" in problem for problem in problems)
+
+
+def test_declarative_single_walk_preserves_exact_candidates(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    names = [
+        "task.json", "task.yaml", "task.yml", "TASK.JSON", "TASK.YAML",
+        "TASK.YML", ".hidden.json", "ignore.js", "ignore.py", "ignore.yam",
+        "nested/task.json", "nested/task.yaml", "nested/task.yml",
+    ]
+    names.extend(f"{skip}/nested/task.json" for skip in guard._SKIP_DIR_PARTS)
+    names.extend(f"{skip}/nested/task.yaml" for skip in guard._SKIP_DIR_PARTS)
+    names.extend(f"{skip}/nested/task.yml" for skip in guard._SKIP_DIR_PARTS)
+    for name in names:
+        path = src / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+    (src / "directory.json").mkdir()
+    # Exclusions are relative to the scan root, not its ancestors.
+    excluded_root = src / "libs"
+    roots = (src, excluded_root)
+    expected = {
+        root: [
+            f
+            for pattern in ("*.json", "*.yaml", "*.yml")
+            for f in root.rglob(pattern)
+            if not guard._SKIP_DIR_PARTS.intersection(f.relative_to(root).parts)
+        ]
+        for root in roots
+    }
+    original = Path.rglob
+    walks = []
+
+    def rglob(path, pattern):
+        walks.append((path, pattern))
+        yield from original(path, pattern)
+
+    monkeypatch.setattr(Path, "rglob", rglob)
+    for root in roots:
+        assert list(guard._iter_declarative(root)) == expected[root]
+    assert walks == [(root, "*.[jy]*") for root in roots]
+
+
+def test_verify_reuses_candidates_and_ast_without_skipping_roots(repo, monkeypatch):
+    body = (
+        "import subprocess\n"
+        "x = subprocess.CREATE_NO_WINDOW\n"
+        "x = subprocess.CREATE_NEW_CONSOLE\n"
+        'subprocess.run(["cmd"])\n'
+    )
+    _mk_plugin(repo, "agent-cache", adopts=True, body=body)
+    other_roots = [
+        repo / "plugins" / "agent-cache" / "scripts",
+        repo / "plugins" / "agent-cache" / "libs" / "sample" / "src",
+        repo / "libs" / "sample" / "src",
+    ]
+    for root in other_roots:
+        root.mkdir(parents=True)
+        (root / "safe.py").write_text("x = 1\n", encoding="utf-8")
+    roots = guard._production_src_roots()
+    expected_files = [f for root in roots for f in guard._iter_py(root)]
+    expected_parses = []
+    contents = set()
+    for path in expected_files:
+        text = path.read_text(encoding="utf-8")
+        if text not in contents:
+            contents.add(text)
+            expected_parses.append(path)
+    for root in roots:
+        for skip in guard._SKIP_DIR_PARTS:
+            excluded = root / skip / "invalid.py"
+            excluded.parent.mkdir(parents=True)
+            excluded.write_text("if (\n", encoding="utf-8")
+
+    original_iter = guard._iter_py
+    original_parse = ast.parse
+    enumerated = []
+    parsed = []
+
+    def iter_py(src):
+        enumerated.append(src)
+        yield from original_iter(src)
+
+    def parse(text, filename="<unknown>", *args, **kwargs):
+        parsed.append(Path(filename))
+        return original_parse(text, filename, *args, **kwargs)
+
+    monkeypatch.setattr(guard, "_iter_py", iter_py)
+    monkeypatch.setattr(guard.ast, "parse", parse)
+    rel = "plugins/agent-cache/src/agent_cache/mod.py"
+    assert guard.verify() == [
+        f"{rel}:3: unsafe 'CREATE_NEW_CONSOLE' -- Windows Default Terminal "
+        "may surface it even with SW_HIDE; use a shared no-window "
+        "primitive, or add '# headless-guard: allow <interactive reason>'  ::  "
+        "x = subprocess.CREATE_NEW_CONSOLE",
+        f"{rel}:2: raw 'CREATE_NO_WINDOW' -- use agent_procutil "
+        "(no_window_kwargs / detached_kwargs / no_window_flags), or add "
+        "'# headless-guard: allow <why>'  ::  x = subprocess.CREATE_NO_WINDOW",
+        f"{rel}:4: unsuppressed console spawn of 'cmd' -- "
+        "a window-less parent (a detached waiter, a background "
+        "daemon) would surface a brand-new visible console for "
+        "this; pass creationflags/startupinfo or splat "
+        "agent_procutil's no_window_kwargs()/detached_kwargs(), "
+        "or add '# headless-guard: allow <why>'  ::  subprocess.run([\"cmd\"])",
+    ]
+    assert enumerated == roots
+    assert parsed == expected_parses
+
+
+def test_cached_scope_safety_matches_uncached_algorithm():
+    text = (
+        "import subprocess, os\n"
+        "from subprocess import run as launch\n"
+        "from os import system as shell\n"
+        "subprocess.run(['cmd'])\n"
+        "shell('git status')\n"
+        "def safe():\n"
+        "    subprocess.run(['cmd'])\n"
+        "    no_window_kwargs()\n"
+        "    os.system('git status')\n"
+        "    def nested_unsafe():\n"
+        "        launch(['ssh'])\n"
+        "        shell('cmd /c echo')\n"
+        "async def unsafe():\n"
+        "    launch(['pwsh'])\n"
+        "    subprocess.Popen(['python'])\n"
+        "    subprocess.call(['cmd'], creationflags=0)\n"
+        "    def nested_safe():\n"
+        "        detached_kwargs()\n"
+        "        subprocess.run(['node'])\n"
+    )
+
+    class UncachedFinder(guard._SpawnFinder):
+        def _enclosing_has_safe_helper(self, node):
+            if self._func_stack:
+                func = self._func_stack[-1]
+                lines = self._text.splitlines()
+                end = getattr(func, "end_lineno", None) or len(lines)
+                source = "\n".join(lines[func.lineno - 1:end])
+            else:
+                source = self._text
+            return any(helper in source for helper in guard._SAFE_HELPERS)
+
+    class CountingFinder(guard._SpawnFinder):
+        def __init__(self, text):
+            super().__init__(text)
+            self.source_scopes = []
+
+        def _enclosing_source(self, node):
+            self.source_scopes.append(self._func_stack[-1] if self._func_stack else None)
+            return super()._enclosing_source(node)
+
+    tree = ast.parse(text)
+    legacy = UncachedFinder(text)
+    optimized = CountingFinder(text)
+    legacy.visit(tree)
+    optimized.visit(tree)
+    assert optimized.hits == legacy.hits == [(11, "ssh"), (12, "cmd")]
+    assert len(optimized.source_scopes) == len(set(optimized.source_scopes)) == 5
 
 
 def test_flags_raw_flag_in_adopting_plugin(repo):
@@ -419,4 +600,3 @@ def test_declarative_json_allowlist_file_suppresses(repo, monkeypatch):
     allow.write_text(f"{rel}  reviewed, consumer applies no_window_kwargs\n", encoding="utf-8")
     monkeypatch.setattr(guard, "HEADLESS_GUARD_ALLOWLIST", allow)
     assert guard.verify() == []
-

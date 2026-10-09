@@ -34,9 +34,11 @@ Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -299,6 +301,36 @@ def _uses_engine_manifest_writer(text: str, ext: str) -> bool:
     )
 
 
+def _raise_scan_error(error: OSError) -> None:
+    raise error
+
+
+def _powershell_paths(root: Path, *, repo_backstop: bool = False) -> list[Path]:
+    """Collect the same script candidates, pruning only backstop exclusions."""
+    if repo_backstop and (
+        root == PLUGINS_DIR
+        or PLUGINS_DIR in root.parents
+        or is_ignored_scan_path(root)
+    ):
+        return []
+    paths: list[Path] = []
+    for directory, dirs, files in os.walk(root, onerror=_raise_scan_error):
+        parent = Path(directory)
+        if repo_backstop:
+            dirs[:] = [
+                name for name in dirs
+                if parent / name != PLUGINS_DIR
+                and not is_ignored_scan_path(parent / name)
+            ]
+        # rglob also selects directories and file symlinks bearing this suffix;
+        # retain them so read failures still surface rather than being filtered.
+        paths.extend(
+            parent / name for name in (*dirs, *files)
+            if fnmatch.fnmatch(name, "*.ps1")
+        )
+    return sorted(paths)
+
+
 def check() -> int:
     violations: list[str] = []
     ps1_resolvers: dict[str, str | None] = {}
@@ -319,7 +351,7 @@ def check() -> int:
         return 1
 
     persistent_environment_blocks: dict[str, str | None] = {}
-    for path in sorted(PLUGINS_DIR.rglob("*.ps1")):
+    for path in _powershell_paths(PLUGINS_DIR):
         text = path.read_text(encoding="utf-8", errors="replace")
         direct_access = persistent_environment_violations(text)
         uses_adapter = (
@@ -361,11 +393,9 @@ def check() -> int:
     # registry paths/APIs) directly and leak into the operator's real,
     # persistent Windows User PATH -- exactly the leak this repo hit live. This
     # pass only checks the same direct-access detector against every other
-    # tracked `.ps1` in the repo; it does not require the adapter marker or
+    # non-excluded `.ps1` in the repo; it does not require the adapter marker or
     # `PLUGINS_DIR`'s stricter identical-block rules, which are installer-only.
-    for path in sorted(REPO.rglob("*.ps1")):
-        if PLUGINS_DIR in path.parents or is_ignored_scan_path(path):
-            continue
+    for path in _powershell_paths(REPO, repo_backstop=True):
         text = path.read_text(encoding="utf-8", errors="replace")
         for problem in persistent_environment_violations(text):
             relative = path.relative_to(REPO).as_posix()

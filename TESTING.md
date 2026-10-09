@@ -42,6 +42,30 @@ time scales: 30 seconds per test, 300 seconds per sequential 25-file sub-suite,
 and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage:
 
+Temporary-storage probes use cached directory-entry metadata without following
+symbolic links. This avoids repeated filesystem queries competing with the
+suite on Windows; accounting limits and probe frequency are unchanged.
+
+After each contained process tree has been reaped, one owned cleanup thread
+removes that group's temporary directory while the next group runs. The runner
+waits for all cleanup before returning and includes final sandbox cleanup in
+the aggregate budget. An exited process cannot hide an already-exceeded
+sub-suite deadline. The final status reports elapsed time including cleanup.
+The short `t/g<index>` basetemp names are preserved for Windows path limits.
+Windows teardown explicitly terminates the owned Job Object and waits until
+its full active-process count is zero before closing the handle. POSIX teardown
+likewise verifies no live group members remain after termination. If reaping
+cannot be proved, the runner fails and retains the named sandbox rather than
+deleting files beneath a potentially live descendant.
+
+Pre-push still runs every declared guard. Candidate discovery prunes only
+each guard's existing exclusions rather than repeatedly traversing them.
+Identical Python source is analyzed once per headless-guard invocation, while
+every path's diagnostics and allowances are still evaluated independently.
+Bridge-contract availability caches only positive, full immutable commit IDs
+within the current repository/invocation; missing evidence and mutable refs
+remain rechecked so fetch recovery cannot be hidden by a negative cache.
+
 On Windows, contained runs also set the installer test-mode contract
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`. Conforming installers virtualize
 persistent User/Machine environment reads and writes to Process scope. The
@@ -121,6 +145,33 @@ moving tests between files didn't silently drop or duplicate a contract's
 coverage. When splitting an existing oversized test module, assign one
 contract per resulting file as you go; retrofitting the marker onto
 already-small, single-contract files is not required.
+
+The PR-workflow contracts in `agent-worktrees` are separated into create,
+fork, refspec, attribution, publication, push, finalize, tracking, claim,
+status, CLI, and helper modules. Their shared repository fixture builds its
+Git topology once per pytest session and gives each test independent copied
+object stores, refs, indexes, remotes, and repaired worktree links. The
+finalize landing/precondition families likewise use isolated copies rather
+than recreating the same committed topology for each test. Tests still run
+the real Git behavior under test; no mutable repository is shared.
+Post-publication contracts also copy a real, already-published seed and its
+tracking record, relocating both worktree and local-repository identity.
+Fresh-publication tests still execute the complete create/push path.
+Terminal-conclusion tests likewise copy a Git-only seed while recreating
+tracking and session lifecycle state for each case; disposable cleanup is
+verified not to modify either the seed or an independent sibling copy.
+
+The Windows rotation runs `agent-worktrees` with two `pytest-xdist` workers
+and `--dist=worksteal`, balancing individual cases without adding workers. Other
+plugins and ordinary local runs remain serial. Both workers and all their
+descendants share the sub-suite's existing containment job and its unchanged
+time, process, memory, and temporary-storage limits. Worker-local pytest
+temporary roots and immutable seeds preserve repository isolation.
+The rotation resolves Git for Windows' packaged native executable from its
+execution path and verifies it matches the installed Git version before
+preferring its binary directory in the test process's PATH.
+This avoids the extra launcher process without altering persistent settings,
+Git configuration, hooks, shell lookup priority, or repository behavior.
 
 ## Optional devcontainer-based isolation (Linux)
 
