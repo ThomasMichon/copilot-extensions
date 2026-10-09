@@ -101,10 +101,35 @@ def _dispatch_reader(args: argparse.Namespace):
     return read
 
 
+def _disabled(read_at: str) -> dict[str, Any]:
+    return {"items": [], "status": "disabled", "uncertain": 0, "read_at": read_at}
+
+
+def _sibling_readers(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, float]]:
+    """The ``bridge`` and ``pr`` readers, each ``disabled`` when its plugin
+    isn't installed here."""
+    from . import attention_siblings as sib
+    from . import procutil
+    from .remote_dispatch import local_machine
+
+    bridge, worktrees = procutil.agent_bridge_launch_prefix(), procutil.agent_worktrees_launch_prefix()
+    include_remote = bool(getattr(args, "include_remote", False))
+    readers = {
+        "bridge": (lambda read_at: sib.read_bridge(read_at, prefix=bridge, machine=local_machine(),
+                                                   include_remote=include_remote)) if bridge else _disabled,
+        "pr": (lambda read_at: sib.read_pr(read_at, prefix=worktrees, env=procutil.agent_worktrees_environment()))
+        if worktrees else _disabled,
+    }
+    return readers, {"bridge": sib.BRIDGE_TIMEOUT, "pr": sib.PR_TIMEOUT}
+
+
 def _readers(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, float], list[dict[str, str]], set[str]]:
     registrations, config_errors = srcs.load_registrations()
     readers: dict[str, Any] = {"dispatch": _dispatch_reader(args)}
     timeouts = {"dispatch": srcs.DEFAULT_TIMEOUT}
+    sibling_readers, sibling_timeouts = _sibling_readers(args)
+    readers.update(sibling_readers)
+    timeouts.update(sibling_timeouts)
     for name, spec in registrations.items():
         readers[name] = lambda read_at, n=name, s=spec: srcs.read_command(n, s, read_at)
         # The command's own timeout fires first, and its runner then stops the
@@ -121,6 +146,11 @@ def _read(args: argparse.Namespace) -> dict[str, Any] | None:
     if unknown:
         print(f"agent-dispatch: unknown attention source(s): {', '.join(unknown)} "
               f"(known: {', '.join(sorted(known))})", file=sys.stderr)
+        return None
+    disabled = sorted(n for n in selected or () if readers.get(n) is _disabled)
+    if disabled:
+        print(f"agent-dispatch: attention source(s) not installed on this machine: {', '.join(disabled)}",
+              file=sys.stderr)
         return None
     return srcs.collect(readers, timeouts=timeouts, selected=selected,
                         config_errors=config_errors, store=FirstObserved())
@@ -254,6 +284,8 @@ def _add_read_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true", help="Print the versioned JSON envelope")
     p.add_argument("--source", action="append", default=[], metavar="NAME",
                    help="Read only this source (repeatable); an unknown name is a usage error")
+    p.add_argument("--include-remote", action="store_true",
+                   help="Also read the transcript presence of bridge sessions on remote targets (an SSH read each)")
 
 
 def register_attention_commands(sub: argparse._SubParsersAction) -> None:

@@ -903,6 +903,11 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
             request_timeout=max(self._timeout, timeout_seconds + 5.0),
         ) or {}
 
+    def current_attention(self, session_ref: str) -> dict[str, Any]:
+        """A session's current attention reason, never a wait (the caller gates
+        on ``CURRENT_ATTENTION_PROTOCOL_VERSION``)."""
+        return self._request("GET", f"/api/v1/sessions/{session_ref}/attention/current") or {}
+
     def answer_permission(
         self, session_id: str, request_id: str, option_id: str
     ) -> dict[str, Any]:

@@ -1,5 +1,13 @@
 """``agent-worktrees claims find`` -- fleet-wide lookup of which locally
-tracked worktrees hold a claim on a PR in a given repo.
+tracked worktrees hold a claim on a PR, in one repo or in every repo.
+
+``--json`` carries a versioned per-project envelope, ``{"schema": 1,
+"projects": [{"project", "status": "ok" | "failed", "error"?, "unreadable"?,
+"prs": [{"worktree_id", "authority", "repo", "number", "state"}]}]}``, so a
+caller can tell a project that couldn't be read from one with no PRs. With
+``--repo`` it also keeps the original ``repo``/``state``/``live_checked``/
+``matches`` keys. It exits non-zero only when the project registry itself
+can't be read (3), and, with ``--repo``, when nothing matches (1).
 
 The two-hop `claims <id>` -> `owner_ref` -> `claimant-liveness` recipe (see
 the `tracing-claimant-graphs` skill) assumes you already know which
@@ -44,6 +52,27 @@ def _pr_number(pr) -> int | None:
         if m:
             return int(m.group(1))
     return None
+
+
+def _pr_repo(pr) -> str:
+    """The claim's ``owner/name`` (Azure DevOps: ``project/repo``), recovered
+    from ``url`` when the record holds only a bare repo name, as some older
+    records do. Empty when neither yields a slug."""
+    repo = (pr.repo or "").strip()
+    if "/" in repo:
+        return repo
+    import re
+    from urllib.parse import urlparse
+
+    parts = [p for p in urlparse(pr.url or "").path.split("/") if p]
+    if "_git" in parts:  # Azure DevOps: .../<project>/_git/<repo>/pullrequest/<n>
+        i = parts.index("_git")
+        if 1 <= i < len(parts) - 1:
+            return f"{parts[i - 1]}/{parts[i + 1]}"
+    for i, part in enumerate(parts):
+        if re.fullmatch(r"pull(?:s|-?requests?)?", part) and i >= 2:
+            return f"{parts[i - 2]}/{parts[i - 1]}"
+    return ""
 
 
 def _candidate_prs(repo: str, state: str) -> list[dict]:
@@ -122,6 +151,113 @@ def _apply_live_check(matches: list[dict], repo: str, state: str) -> list[dict]:
     return kept
 
 
+#: The ``projects[]`` envelope's version (see :func:`scan_projects`).
+SCHEMA = 1
+#: Exit code when the project registry itself can't be read.
+REGISTRY_UNREADABLE_EXIT = 3
+
+
+class RegistryUnreadable(Exception):
+    """The machine's project registry couldn't be read: no project list at all."""
+
+
+def canonical_authority(endpoint: str) -> str | None:
+    """A provider ``authority_endpoint()`` as a canonical key: scheme,
+    credentials, a default port and a trailing slash dropped, the host
+    lowercased, the path kept (an Azure DevOps organization, a path-hosted
+    Gitea). ``None`` when it has no host."""
+    from urllib.parse import urlparse
+
+    value = (endpoint or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    try:
+        host, port = (parsed.hostname or "").lower(), parsed.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    scheme = (parsed.scheme or "https").lower()
+    if port is not None and port != {"http": 80, "https": 443}.get(scheme):
+        host = f"{host}:{port}"
+    path = "/".join(part for part in (parsed.path or "").split("/") if part)
+    return f"{host}/{path}" if path else host
+
+
+def _authority_resolver(project: str):
+    """``provider_name -> canonical authority | None`` for ``project``'s own PR
+    configuration; ``None`` for every PR when that configuration can't load."""
+    try:
+        from . import config as cfg
+        from . import providers
+
+        prcfg = cfg.load_project_config(project).default_repo.pr
+    except Exception:
+        return lambda provider_name: None
+
+    def resolve(provider_name: str) -> str | None:
+        try:
+            provider = providers.get_provider(provider_name or prcfg.provider or "github")
+            return canonical_authority(provider.authority_endpoint(getattr(prcfg, "api_base", "") or ""))
+        except Exception:
+            return None
+
+    return resolve
+
+
+def scan_projects(repo: str | None, state: str) -> list[dict]:
+    """Every adopted project's tracked PRs (in ``repo``, or every repo), each
+    project ``ok`` or ``failed`` on its own. Raises :class:`RegistryUnreadable`
+    when there is no project list to scan. A record file that can't be loaded
+    is counted (``unreadable``), never silently dropped: the list is then
+    known to be incomplete."""
+    from . import installer
+
+    try:
+        registry = installer.read_projects_registry()
+    except Exception as exc:
+        raise RegistryUnreadable(str(exc)) from exc
+    projects = registry.get("projects") if isinstance(registry, dict) else None
+    if not isinstance(projects, dict):
+        raise RegistryUnreadable("the project registry has no projects mapping")
+    wanted = (repo or "").strip().lower() or None
+    out: list[dict] = []
+    for project in sorted(str(p) for p in projects if str(p)):
+        try:
+            tracking_dir = claims_owner._tracking_dir(project)
+            if tracking_dir is None:
+                raise RuntimeError("its project directory can't be resolved")
+            files = sorted(tracking_dir.glob("*.yaml")) if tracking_dir.exists() else []
+        except Exception as exc:  # noqa: BLE001 -- one project's failure is that project's
+            out.append({"project": project, "status": "failed", "error": str(exc) or type(exc).__name__,
+                        "prs": []})
+            continue
+        from . import tracking
+
+        authority = _authority_resolver(project)
+        prs, unreadable = [], 0
+        for path in files:
+            try:
+                record = tracking.load_record(path)
+            except Exception:  # noqa: BLE001
+                unreadable += 1
+                continue
+            for pr in record.prs or []:
+                slug = _pr_repo(pr)
+                if wanted and slug.lower() != wanted and (pr.repo or "").strip().lower() != wanted:
+                    continue
+                if state != "all" and pr.state != state:
+                    continue
+                prs.append({"worktree_id": record.worktree_id, "authority": authority(pr.provider or ""),
+                            "repo": slug, "number": _pr_number(pr), "state": pr.state})
+        entry = {"project": project, "status": "ok", "prs": prs}
+        if unreadable:
+            entry["unreadable"] = unreadable
+        out.append(entry)
+    return out
+
+
 def _emit_human(repo: str, state: str, live: bool, matches: list[dict]) -> None:
     if live:
         verified = (
@@ -146,30 +282,55 @@ def _emit_human(repo: str, state: str, live: bool, matches: list[dict]) -> None:
             output.info(f"  owner_ref: {m['owner_ref']}")
 
 
+def _emit_projects_human(state: str, projects: list[dict]) -> None:
+    output.header(f"Tracked '{state}' PRs in every repo, across {len(projects)} project(s) "
+                  "(local tracking -- stale entries possible)")
+    for entry in projects:
+        if entry["status"] != "ok":
+            output.err(f"{entry['project']}: couldn't be read: {entry.get('error')}")
+            continue
+        if entry.get("unreadable"):
+            output.warn(f"{entry['project']}: {entry['unreadable']} tracking record(s) couldn't be read")
+        for pr in entry["prs"]:
+            output.info(f"{entry['project']} / {pr['worktree_id']}: {pr['authority']}/{pr['repo']}"
+                        f"#{pr['number']} state={pr['state']}")
+
+
+def _fail(args: argparse.Namespace, msg: str, code: int) -> int:
+    if args.json:
+        output._json_output({"error": msg})
+    else:
+        output.err(msg)
+    return code
+
+
 def cmd_claims_find(args: argparse.Namespace, target: list[str]) -> int:
     if not target or target[0] != "pr":
-        msg = "claims find: usage 'find pr --repo <owner/name> [--state open|closed|merged|all] [--live]'"
-        if args.json:
-            output._json_output({"error": msg})
-        else:
-            output.err(msg)
-        return 2
+        return _fail(args, "claims find: usage 'find pr [--repo <owner/name>] "
+                     "[--state open|closed|merged|all] [--live]'", 2)
     repo = getattr(args, "claim_repo", None)
-    if not repo:
-        msg = "claims find pr: --repo <owner/name> is required"
-        if args.json:
-            output._json_output({"error": msg})
-        else:
-            output.err(msg)
-        return 2
     state = getattr(args, "claim_state", None) or "open"
     live = bool(getattr(args, "claim_live", False))
+    if live and not repo:
+        return _fail(args, "claims find pr: --live needs --repo <owner/name>", 2)
+    try:
+        projects = scan_projects(repo, state)
+    except RegistryUnreadable as exc:
+        return _fail(args, f"claims find pr: the project registry can't be read: {exc}",
+                     REGISTRY_UNREADABLE_EXIT)
+    if not repo:
+        if args.json:
+            output._json_output({"schema": SCHEMA, "repo": None, "state": state, "projects": projects})
+        else:
+            _emit_projects_human(state, projects)
+        return 0
     matches = _candidate_prs(repo, state)
     if live:
         matches = _apply_live_check(matches, repo, state)
     if args.json:
         output._json_output({
-            "repo": repo, "state": state, "live_checked": live, "matches": matches,
+            "schema": SCHEMA, "repo": repo, "state": state, "live_checked": live, "matches": matches,
+            "projects": projects,
         })
     else:
         _emit_human(repo, state, live, matches)

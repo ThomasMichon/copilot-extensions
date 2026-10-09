@@ -154,9 +154,16 @@ CALLER_SESSION_ID_PROTOCOL_VERSION = 24
 # against an older daemon it refuses rather than risk undoing a racing stop.
 COOPERATIVE_STOP_PROTOCOL_VERSION = 25
 
+# First version that serves ``GET /api/v1/sessions/{ref}/attention/current``:
+# a session's current attention reason, never a wait, for an owned session and
+# for a represented (registered interactive) one. ``agent-bridge attention``
+# gates on it and reports ``unsupported`` against an older daemon rather than
+# sending a request it would 404 on.
+CURRENT_ATTENTION_PROTOCOL_VERSION = 27
+
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 25
+HTTP_PROTOCOL_VERSION = 27
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

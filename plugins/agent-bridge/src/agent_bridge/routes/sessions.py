@@ -1678,3 +1678,5 @@ async def end_session(
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+from .attention_current import router as _current_attention  # noqa: E402 -- avoids an import cycle
+router.include_router(_current_attention)

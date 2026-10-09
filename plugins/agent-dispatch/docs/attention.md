@@ -6,16 +6,18 @@ not in each client, and a source that fails reads as `degraded`, never as an
 empty "all clear".
 
 ```bash
-agent-dispatch attention [--json] [--source NAME ...]
-agent-dispatch attention next [--after CURSOR] [--json] [--source NAME ...]
+agent-dispatch attention [--json] [--source NAME ...] [--include-remote]
+agent-dispatch attention next [--after CURSOR] [--json] [--source NAME ...] [--include-remote]
 agent-dispatch attention source add NAME [--timeout S] -- ARGV...
 agent-dispatch attention source remove NAME
 agent-dispatch attention source list
 ```
 
 Exit 0 for any read (the `status` field carries the outcome), 2 for a usage
-error: an unknown `--source` name (nothing is read), a cursor this command
-didn't issue, or a registration that isn't valid.
+error: an unknown `--source` name, or one whose plugin isn't installed here
+(nothing is read), a cursor this command didn't issue, or a registration that
+isn't valid. `--include-remote` also reads the transcripts of bridge sessions
+on a remote target (an SSH read each; see `bridge` below).
 
 ## Sources
 
@@ -34,6 +36,41 @@ didn't issue, or a registration that isn't valid.
   progress for longer than `AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS`
   (both strictly greater, default 1800; `0` turns that half off). Held tasks
   whose owner is `unknown` or `gone` never count. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`. Each active lane's backlog is one coordinator read, started only while it can still finish inside the source's deadline; a lane it doesn't reach, or whose read fails, counts toward `uncertain` too, so backlog probing never fails the source's task items.
+- **`bridge`** (built in, when agent-bridge is installed; otherwise `disabled`):
+  sessions parked on the operator. Candidates are the bridge-managed sessions
+  (`agent-bridge --json sessions`, not stopped or ended) and the live registered
+  interactive ones (`agent-bridge --json live-sessions list`), keyed by their
+  logical reference `wt:<machine>/<project>/<worktree-id>`: a session in both
+  registries, or a successor after a restart, takeover or handoff, is one item
+  that keeps its place, and its `show` action (`agent-bridge result <session>`)
+  names the session heading the worktree now. Each is read through `agent-bridge
+  --json attention <worktree-id>...` (the bridge's own attention evaluator):
+  `input_required`, `permission_required` and `policy_required` are
+  `awaiting_input`, `failed` and `unreachable` are `failed` (all `reported`);
+  settled reasons (`turn_complete`, `turn_cancelled`, `stopped`, `ended`) are no
+  item; `contract_changed`, a reason this version doesn't know, a request that
+  predates the bridge's restart, an unreadable session and an older bridge
+  (`unsupported`) count toward `uncertain`. A bridge-managed session's
+  transcript presence is read too (`agent-bridge --json presence`): `awaiting_input`
+  is an item (`scanned` or `heuristic`), `unknown` counts toward `uncertain`, and
+  an item from both is one item at the stronger confidence, its reason naming
+  both. A transcript on a remote target is read only with `--include-remote`. A
+  session no managed worktree hosts has no durable reference yet and counts
+  toward `uncertain`. If either listing fails, the source fails. Deadline 30 s.
+- **`pr`** (built in, when agent-worktrees is installed; otherwise `disabled`):
+  every PR agent-worktrees tracks, in every adopted project
+  (`agent-worktrees claims find pr --state all --json`), read once each by its
+  project, repository and number (`agent-worktrees -p <project> pr bar
+  <owner/name> <n> --json`, ten at a time). An `OPEN` PR whose merge bar
+  `failed` is a `failed` item keyed `<authority>/<owner/name>#<n>` (the same
+  `owner/name#<n>` under two authorities is two items), with `show` (`pr bar`)
+  and, on github.com, `open` (`gh pr view --web`) actions. The live state
+  decides: a PR whose record still says open but which closed is no item, and a
+  reopened one is. A record whose PR merged is skipped unread (a merge is
+  terminal). A bar read that is `unknown` or fails, and a record without an
+  authority, an `owner/name` or a number, count toward `uncertain`; a project
+  whose PRs can't be enumerated fails the source. Deadline 90 s: each bar read
+  makes several provider calls.
 - **Command sources**: a command registered on this machine
   (`attention source add`, stored beside the coordinator's install as
   `attention-sources.json`) under a name that is its identity (adding a name that is already registered replaces it):
@@ -82,7 +119,7 @@ after it even when that item was resolved meanwhile; it wraps to the top.
 | `schema` | `1`, on every item |
 | `id` | `<source>:<entity>:<entity_ref>`; unique per entity, the order's final tie-breaker |
 | `entity` | `task`, `session`, `pr`, `queue`, or a source's own `x.<source>.<kind>` (`<kind>` matches `[a-z0-9_-]+`, so the `id` splits back unambiguously) |
-| `entity_ref` | the durable reference within its kind (a task id, ...) |
+| `entity_ref` | the durable reference within its kind: a task id, a repo for a `queue`, `wt:<machine>/<project>/<worktree-id>` for a `session`, `<authority>/<owner/name>#<n>` for a `pr` |
 | `lifecycle_state` | the owner's state (`started`, `submitted`, ...), or `null` |
 | `display_state` | `failed`, `stalled`, `awaiting_input`, `blocked`, `review` (worst first) |
 | `severity` | the rank of `display_state` (0 = `failed`) |

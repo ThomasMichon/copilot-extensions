@@ -93,13 +93,25 @@ every registered project, which ones are behind a **currently open** PR in
 some other repo" -- has a dedicated command:
 
 ```
-<agent-worktrees catalog argv[0]> claims find pr --repo <owner/repo> \
+<agent-worktrees catalog argv[0]> claims find pr [--repo <owner/repo>] \
   [--state open|closed|merged|all] [--live] [--json]
 ```
 
 - Scans **every project registered on this machine** (not just the current
-  one) for worktrees whose PR history (`prs`) names `--repo`, filtered by
-  the locally tracked `--state` (default `open`).
+  one, and from any directory: it needs no project context) for worktrees
+  whose PR history (`prs`) names `--repo` (every repo when it's omitted),
+  filtered by the locally tracked `--state` (default `open`).
+- `--json` always carries a versioned per-project envelope, `{"schema": 1,
+  "projects": [{"project", "status": "ok" | "failed", "error"?,
+  "unreadable"?, "prs": [{"worktree_id", "authority", "repo", "number",
+  "state"}]}]}`: `authority` is the PR's canonical provider authority (host,
+  plus the path for an Azure DevOps organization or a path-hosted Gitea), and
+  `repo`/`number` fall back to the PR URL for older records. A project whose
+  store can't be read is `failed` (the others still list), and `unreadable`
+  counts record files that couldn't be loaded. With `--repo` it also keeps the
+  `repo`, `state`, `live_checked` and `matches` keys. Exit 3 when the project
+  registry itself can't be read; with `--repo`, 1 when nothing matches;
+  otherwise 0. `--live` needs `--repo`.
 - **Without `--live`** this is fast but a *candidate* list only: a
   worktree's locally tracked PR state can read `"open"` long after the PR
   actually merged or closed elsewhere -- expect heavy staleness (a real

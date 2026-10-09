@@ -24,7 +24,7 @@ import httpx
 from . import attention_contract as ac
 from .client import DispatchError
 
-BUILTIN_SOURCES = ("dispatch",)
+BUILTIN_SOURCES = ("bridge", "dispatch", "pr")
 DEFAULT_TIMEOUT = 20.0
 MAX_TIMEOUT = 120.0
 #: A command source's stdout and stderr together (characters); more fails that source.
@@ -216,7 +216,7 @@ def load_registrations(path: Path | None = None) -> tuple[dict[str, dict[str, An
 def registration_error(name: Any, spec: Any) -> str | None:
     if not isinstance(name, str) or not ac.SOURCE_NAME.match(name):
         return "a source name must match [a-z0-9-]+"
-    if name in BUILTIN_SOURCES or name in ("bridge", "pr"):
+    if name in BUILTIN_SOURCES:
         return f"{name!r} is a built-in source's name"
     if not isinstance(spec, dict):
         return "a registration must be an object"
