@@ -1,0 +1,9 @@
+{
+  "comment": "Republish the shared machine-transport dependency after the execution-identity consolidation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
