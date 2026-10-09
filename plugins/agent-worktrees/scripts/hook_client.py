@@ -199,8 +199,18 @@ def _enrich_session_payload(payload: dict) -> dict:
             for key, value in os.environ.items()
             if key != "WORKTREE_ID"
         },
+        "terminal": _probe_terminal(),
     }
     return enriched
+
+
+def _probe_terminal() -> dict:
+    """Best-effort terminal facts from the deployed probe; never raises."""
+    try:
+        probe = _load_sibling("terminal_probe.py")
+        return probe.probe() if probe is not None else {}
+    except Exception:
+        return {}
 
 
 def _session_launch_key(payload: dict) -> str:
