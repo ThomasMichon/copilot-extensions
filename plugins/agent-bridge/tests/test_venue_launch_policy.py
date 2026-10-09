@@ -292,19 +292,3 @@ async def test_a_legacy_codespace_target_is_gated_by_its_command(monkeypatch):
     with pytest.raises(vlp.LaunchRefusedError) as exc:
         await transport.spawn(target)
     assert exc.value.codespace == "cs-legacy"
-
-
-@pytest.mark.asyncio
-async def test_an_allowed_raw_codespace_spawn_marks_its_launch_checked(monkeypatch):
-    """The ``agent-codespaces ssh --stdio`` the bridge spawns asks the policy
-    itself unless told the bridge already did; the persisted target stays unmarked."""
-    from agent_bridge import transport
-
-    monkeypatch.setattr(vlp, "codespace_launch_refusal", lambda name: None)
-    spawned = AsyncMock(return_value="proc")
-    monkeypatch.setattr(transport, "spawn_raw", spawned)
-    target = SpawnTarget(type="command", spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
-                         codespace={"name": "cs-one", "repo": "org/repo"})
-    assert await transport.spawn(target) == "proc"
-    assert spawned.call_args.args[0].env[vlp.LAUNCH_CHECKED_ENV] == "cs-one"
-    assert vlp.LAUNCH_CHECKED_ENV not in target.env

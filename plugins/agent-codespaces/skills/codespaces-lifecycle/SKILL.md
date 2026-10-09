@@ -161,10 +161,11 @@ never blocks. See `borrowing-codespaces` for the full lease + fence model.
 A host that keeps its own reasons to hold a worker back (an operator pause, a
 stop marker, a budget) registers one command on this machine; every CodeSpace
 worker launch asks it first -- attached and detached `copilot`, a direct
-`ssh <name> --stdio` (an agent's stdio transport, e.g. `--remote-cmd "copilot
---acp --stdio"`), and agent-bridge's Session Host or raw spawn on start or
-resume (including the implicit resume a later `send` triggers; the bridge's own
-`ssh --stdio` spawn isn't asked a second time). A detached `copilot` that rejoins a worker
+`ssh <name> --stdio --remote-cmd <cmd>` (a remote agent's stdio transport,
+e.g. `--remote-cmd "copilot --acp --stdio"`), and agent-bridge's Session Host
+or raw spawn on start or resume (including the implicit resume a later `send`
+triggers; a raw spawn is asked by the bridge and again by the `ssh --stdio` it
+runs, since nothing a caller sets may skip the policy). A detached `copilot` that rejoins a worker
 the host bridge shows running launches nothing and isn't asked; should it start
 a session after all (the worker stopped meanwhile), the policy is asked then and
 a refused session is stopped:

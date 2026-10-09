@@ -178,7 +178,6 @@ def test_copilot_launch_proceeds_to_the_claim_when_allowed(monkeypatch):
 def test_a_direct_stdio_agent_launch_is_refused_before_any_connect(monkeypatch, capsys):
     from agent_codespaces import __main__ as cli
 
-    monkeypatch.delenv(lp.LAUNCH_CHECKED_ENV, raising=False)
     monkeypatch.setattr(cli, "_ssh_session", lambda args: pytest.fail("must not connect"))
     _policy("print('{\"refuse\": \"paused\"}')")
     args = argparse.Namespace(name="cs", stdio=True, remote_cmd="copilot --acp --stdio")
@@ -186,17 +185,17 @@ def test_a_direct_stdio_agent_launch_is_refused_before_any_connect(monkeypatch, 
     assert "paused" in capsys.readouterr().err
 
 
-def test_a_plain_ssh_and_a_bridge_checked_stdio_launch_are_not_asked(monkeypatch):
-    monkeypatch.setattr(lp, "refusal", lambda name, deadline=None: pytest.fail("must not ask"))
-    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=False)) is None
-    monkeypatch.setenv(lp.LAUNCH_CHECKED_ENV, "cs")
-    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=True)) is None
-
-
-def test_a_checked_marker_for_another_codespace_does_not_skip_the_policy(monkeypatch):
-    monkeypatch.setenv(lp.LAUNCH_CHECKED_ENV, "other")
+def test_nothing_a_caller_sets_skips_the_stdio_launch_check(monkeypatch):
+    monkeypatch.setenv("AGENT_CODESPACES_LAUNCH_CHECKED", "cs")
     monkeypatch.setattr(lp, "refusal", lambda name, deadline=None: "paused")
-    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=True)) == lp.LAUNCH_REFUSED_EXIT
+    args = argparse.Namespace(name="cs", stdio=True, remote_cmd="copilot --acp --stdio")
+    assert lp.stdio_refused_exit_code(args) == lp.LAUNCH_REFUSED_EXIT
+
+
+def test_a_connection_that_launches_no_remote_command_is_not_asked(monkeypatch):
+    monkeypatch.setattr(lp, "refusal", lambda name, deadline=None: pytest.fail("must not ask"))
+    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=False, remote_cmd=None)) is None
+    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=True, remote_cmd=None)) is None
 
 
 def _cli(argv):

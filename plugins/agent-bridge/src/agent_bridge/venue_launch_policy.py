@@ -178,20 +178,11 @@ def ensure_codespace_launch_allowed(codespace: str) -> None:
         raise LaunchRefusedError(codespace, reason)
 
 
-#: Set by agent-bridge on the ``agent-codespaces ssh --stdio`` it spawns after
-#: asking this policy itself, so that launch isn't asked twice.
-#: Mirrors ``agent_codespaces.launch_policy.LAUNCH_CHECKED_ENV``.
-LAUNCH_CHECKED_ENV = "AGENT_CODESPACES_LAUNCH_CHECKED"
-
-
-async def gate_raw_codespace_spawn(target: object):
+async def gate_raw_codespace_spawn(target: object) -> None:
     """Ask the policy before a raw-transport spawn whose target is a CodeSpace (a
     resync, or a resume without a Session Host), as the Session Host spawner does
-    for its own; any other target passes. Raises :class:`LaunchRefusedError`.
-    Returns the target to spawn: an allowed CodeSpace target comes back as a
-    copy whose environment marks the launch checked (``LAUNCH_CHECKED_ENV``)."""
+    for its own; any other target passes. Raises :class:`LaunchRefusedError`."""
     import asyncio
-    import dataclasses
 
     name = (getattr(target, "codespace", None) or {}).get("name")
     if not name and getattr(target, "spawn_command", None):
@@ -199,7 +190,5 @@ async def gate_raw_codespace_spawn(target: object):
         from .session_host.codespace_transport import parse_codespace_target
 
         name = (parse_codespace_target(target.spawn_command) or {}).get("name")
-    if not name:
-        return target
-    await asyncio.to_thread(ensure_codespace_launch_allowed, name)
-    return dataclasses.replace(target, env={**(getattr(target, "env", None) or {}), LAUNCH_CHECKED_ENV: name})
+    if name:
+        await asyncio.to_thread(ensure_codespace_launch_allowed, name)
