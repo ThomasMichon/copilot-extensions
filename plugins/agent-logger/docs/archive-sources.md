@@ -92,6 +92,23 @@ alias declarations are attribution evidence, not usage meters or proof that two
 session versions are compatible. A producer must establish source ownership and
 collision safety before writing or changing metadata.
 
+## Producer publication handshake
+
+`agent_logger.source_publication` supplies the producer/destination handshake:
+
+- `load_source_identity_file(path)` reads required metadata with the same
+  bounded no-link loader as source discovery.
+- `validate_publication_key(key, identity)` admits only the identity's canonical
+  namespace. An explicit read alias is not authorization for a new write.
+
+These are read-only producer helpers, not destination ownership admission. The
+destination target must compare full source identity, reject collisions and
+unowned nonempty leaves, and preserve aliases **under its existing sync lock
+through all subsequent session/provenance writes**. This module deliberately
+does not duplicate that target-owned write path or introduce a second lock.
+Its availability alone does not wire namespace writers, claim destination
+ownership, authorize a remote receiver, or authorize live publication.
+
 ## Failure and platform boundaries
 
 Discovery rejects traversal, unsupported path components, symlink/name-surrogate
