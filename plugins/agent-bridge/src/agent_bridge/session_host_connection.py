@@ -15,6 +15,7 @@ from .connect import ConnectError, ConnectStage
 from .models import SessionStatus
 from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
 from .transport import SpawnTarget
+from .session_preferences import client_preferences
 
 
 def _core() -> Any:
@@ -144,7 +145,7 @@ class _SessionHostConnectionMixin:
             sock = await SessionHostClient.connect(port=spawned.local_port)
             timing.add("host_connect", time.monotonic() - step_started)
             step_started = time.monotonic()
-            await sock.attach(0, nonce=spawned.nonce.encode())
+            hello = await sock.attach(0, nonce=spawned.nonce.encode())
             timing.add("host_attach", time.monotonic() - step_started)
             step_started = time.monotonic()
             streams = await open_acp_streams(sock)
@@ -160,6 +161,8 @@ class _SessionHostConnectionMixin:
                 on_permission=permission_callback,
                 model_override=model,
                 effort_override=effort,
+                target_preferences=getattr(hello, "preference_receipt", None),
+                **client_preferences(target, self._db, session_id),
             )
             # Surface a mid-session transport drop (loopback socket down, host +
             # child alive) as ``disconnected`` so the reattach driver fires (P1).
@@ -646,6 +649,7 @@ class _SessionHostConnectionMixin:
                 on_event=_on_acp_event,
                 model_override=session.model_override,
                 effort_override=session.effort_override,
+                **client_preferences(session.target, self._db, rec.session_id),
             )
             streams.on_transport_lost = client.mark_transport_lost
             streams.on_child_exit = client.mark_host_child_exited

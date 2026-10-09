@@ -14,6 +14,11 @@ host settings (``model``, ``effortLevel``, ``contextTier``). Set
 
 Model availability is organization/account dependent, so the flags are
 best-effort: ``copilot`` may still reject an unavailable model at launch.
+
+``AGENT_BRIDGE_PREFERENCE_SOURCE=target-settings`` opts detached launchers out
+of reading caller settings. Target-local CLI launch preference translation then
+owns defaults. Explicit flags and historical environment overrides remain
+intentional choices; this helper never reads or guesses a remote home.
 """
 
 from __future__ import annotations
@@ -25,6 +30,10 @@ from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("venue-copilot")
+
+
+class InvalidPreferenceSource(ValueError):
+    """An explicit invalid policy must not silently choose another authority."""
 
 _OPT_OUT_ENV = "AGENT_CODESPACES_MODEL_PROPAGATE"
 _OPT_OUT_VALUES = {"0", "false", "no"}
@@ -126,36 +135,53 @@ def normalized_config(values: dict[str, Any] | None) -> dict[str, str]:
     return cfg
 
 
-def resolve_model_config(override: dict[str, Any] | None = None) -> dict[str, str]:
+def resolve_model_config(
+    override: dict[str, Any] | None = None, *, preference_source: str | None = None,
+) -> dict[str, str]:
     """Resolve the caller's model configuration (see the module docstring for
-    precedence). Returns any of ``model``, ``effort``, ``context``. Never
-    raises."""
+    precedence). Returns any of ``model``, ``effort``, ``context``. Invalid
+    explicit policies raise; settings reads remain best-effort."""
+    source = preference_source if preference_source is not None else os.environ.get(
+        "AGENT_BRIDGE_PREFERENCE_SOURCE", "caller-settings",
+    )
+    if not isinstance(source, str) or source not in {"caller-settings", "target-settings"}:
+        raise InvalidPreferenceSource("Unsupported preference source; refusing default fallback")
     try:
         opt_out = os.environ.get(_OPT_OUT_ENV, "").strip().lower()
-        if opt_out in _OPT_OUT_VALUES:
+        if source == "caller-settings" and opt_out in _OPT_OUT_VALUES:
             return {}
 
-        cfg = _host_settings_config()
+        cfg = _host_settings_config() if source == "caller-settings" else {}
         env_cfg = {
             key: value
             for key, env_name in _ENV_KEYS.items()
             if (value := _clean(os.environ.get(env_name)))
         }
         cfg.update(env_cfg)
+        if source == "target-settings" and (
+            _clean(os.environ.get("COPILOT_PROVIDER_BASE_URL"))
+            or (os.environ.get("COPILOT_OFFLINE") or "").strip().lower() in {"1", "true", "yes", "on"}
+        ):
+            cfg.pop("model", None)
         cfg.update(normalized_config(override))
         return cfg
     except Exception:
         return {}
 
 
-def model_copilot_args(existing: list[str] | None = None) -> list[str]:
+def model_copilot_args(
+    existing: list[str] | None = None, *, preference_source: str | None = None,
+) -> list[str]:
     """Copilot args that start a detached (interactive) venue session on the
     caller's own model, reasoning effort, and context tier, as single
     ``--flag=value`` tokens for the launch's ``--copilot-arg`` list. A flag the
     caller already passed in ``existing`` wins and is not duplicated.
-    Degrade-safe: never raises."""
+    Invalid explicit policies raise rather than changing authority; settings
+    reads remain degrade-safe."""
     try:
-        resolved = resolve_model_config()
+        resolved = resolve_model_config(preference_source=preference_source)
+    except InvalidPreferenceSource:
+        raise
     except Exception:
         return []
     given = {str(arg).split("=", 1)[0] for arg in existing or []}

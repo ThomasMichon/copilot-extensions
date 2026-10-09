@@ -48,6 +48,12 @@ the only thing each provider's own `copilot` command has to own.
 
 ## Vendoring
 
+Detached model flag injection defaults to caller settings. The explicit
+`AGENT_BRIDGE_PREFERENCE_SOURCE=target-settings` policy leaves defaults to
+the target-local launcher while preserving explicit flags/environment choices.
+See [session preference authority](../../plugins/agent-bridge/docs/session-preferences.md)
+for the policy and its distinction from ACP enforcement.
+
 **In dev**, every consumer's `pyproject.toml` references this library through
 a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
 Phase 1) --

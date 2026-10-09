@@ -17,6 +17,7 @@ from . import installer as inst, output, services as svc
 from . import picker_profiles_cli, services_cli
 from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
+from .update_runtime import _installer_timeout
 
 
 def _core():
@@ -350,10 +351,15 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             output.err(f"Installer not found: {installer}")
             return 1
 
+        try:
+            installer_timeout = max(600, _installer_timeout("agent-worktrees", aw_runtime_env, plugin_dir))
+        except (OSError, ValueError) as error:
+            output.err(str(error))
+            return 1
         result = subprocess.run(
             argv,
             cwd=plugin_dir,
-            timeout=600,
+            timeout=installer_timeout,
             env=aw_runtime_env,
         )
         if result.returncode != 0:
