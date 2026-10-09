@@ -108,6 +108,15 @@ collection-only label does not exempt work that can alter an environment another
 run is using. Genuinely read-only inventory remains available independently;
 contention is explicit, and any requested wait is bounded.
 
+### preparation-is-not-collection
+
+Environment and dependency preparation can run separately without invoking test
+collection or the test/fixture loader. Collection executes test code and honors
+the same declared containment boundary as execution; it is not read-only
+inventory. Preparation retains runner-owned resource and state accountability,
+and any explicitly required bootstrap access does not silently become test
+authority in a later stage.
+
 ### cheapest faithful tier
 
 A behavior is tested at the lowest-cost tier that can genuinely falsify it.
@@ -165,6 +174,11 @@ force unrelated contributors to debug an entire subsystem.
   [`test-portfolio-rationalization`](../../efforts/active/test-portfolio-rationalization/README.md)
 
 ## Provenance
+
+- **2026-10-09** — Folded back the deliberate separation of dependency
+  preparation, executable collection, and read-only inventory. Preserved
+  bootstrap access and ordinary testing while keeping preparation inside the
+  portfolio's ownership and budget promises.
 
 - **2026-10-09** — Folded back shared-host admission and protection of mutable
   test environments from the common direct-host/devcontainer admission protocol.
