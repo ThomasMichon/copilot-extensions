@@ -149,3 +149,11 @@ def test_maximum_deadline_is_usable_by_real_subprocess(tmp_path):
         [sys.executable, "-c", "pass"], cwd=tmp_path, env=os.environ.copy(), timeout=maximum,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_fractional_timeout_diagnostic_preserves_configured_bound():
+    import subprocess
+
+    assert "timed out after 0.5s" in push_timeout.message(
+        subprocess.TimeoutExpired(["git", "push"], 0.5), 0.5,
+    )
