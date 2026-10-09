@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`, sources in `agent-bridge` and `agent-worktrees`)
 - **Branch(es):** two implementation PRs off `dev` -- ThomasMichon/copilot-extensions#5668 (the contract, the aggregator, the CLI, command sources and the `dispatch` source), then one for the `bridge` and `pr` sources with their sibling commands; Phase 4 clients as separate PRs (the Tasks pane in this repository; a downstream dashboard in its own)
 - **Created:** 2026-10-07
-- **Status:** Active (Phase 1 in review: ThomasMichon/copilot-extensions#5668)
+- **Status:** Active (Phases 1-3 built: ThomasMichon/copilot-extensions#5668 merged; the `bridge` and `pr` sources in review in ThomasMichon/copilot-extensions#5813)
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md) §Behaviors *buildup-is-a-health-signal*, §Features *verify-the-completion-claim* (work "held for attention")
 
 ## Guiding Intent
@@ -77,21 +77,21 @@ an empty queue.
 
 ### Phase 1 — The item contract + aggregator core (agent-dispatch)
 
-- [ ] The versioned item, the order, deduplication, per-source results with first-observed times, and the aggregate envelope, as specified in [contract.md](contract.md). Only discovered sources take part. (ThomasMichon/copilot-extensions#5668)
-- [ ] Unit tests: ordering, dedupe, degraded vs empty, item and envelope round-trip.
+- [x] The versioned item, the order, deduplication, per-source results with first-observed times, and the aggregate envelope, as specified in [contract.md](contract.md). Only discovered sources take part. (ThomasMichon/copilot-extensions#5668)
+- [x] Unit tests: ordering, dedupe, degraded vs empty, item and envelope round-trip.
 
 ### Phase 2 — Built-in adapters ([sources.md](sources.md#built-in-adapters))
 
-- [ ] `dispatch`: steering asks, holds, unconfirmed completion claims, and stalled queues. (ThomasMichon/copilot-extensions#5668)
-- [ ] `bridge`, with its sibling `agent-bridge --json attention <session>` read. (Follow-up PR.)
-- [ ] `pr`, with `agent-worktrees claims find pr` extended across every project and repo. (Follow-up PR.)
-- [ ] A per-source timeout bounds each adapter; a timeout is that source's `failed`.
+- [x] `dispatch`: steering asks, holds, unconfirmed completion claims, and stalled queues. (ThomasMichon/copilot-extensions#5668)
+- [x] `bridge`, with its sibling `agent-bridge --json attention <session>` read (HTTP protocol 29).
+- [x] `pr`, with `agent-worktrees claims find pr` extended across every project and repo.
+- [x] A per-source timeout bounds each adapter; a timeout is that source's `failed`.
 
 ### Phase 3 — CLI + pluggable sources ([sources.md](sources.md#cli-and-pluggable-sources))
 
-- [ ] `attention` and `attention next` with the position cursor. (ThomasMichon/copilot-extensions#5668)
-- [ ] Command sources registered through `attention source add`. (ThomasMichon/copilot-extensions#5668)
-- [ ] Docs: each plugin's CLI reference, the skill reference, and the item schema.
+- [x] `attention` and `attention next` with the position cursor. (ThomasMichon/copilot-extensions#5668)
+- [x] Command sources registered through `attention source add`. (ThomasMichon/copilot-extensions#5668)
+- [x] Docs: each plugin's CLI reference, the skill reference, and the item schema.
 
 ### Phase 4 — Clients
 
@@ -103,12 +103,12 @@ an empty queue.
 
 Each tier's required cases are in [validation.md](validation.md).
 
-- [ ] Unit: contract, ordering, dedupe and first-observed times.
-- [ ] Unit: the envelope and selective reads.
-- [ ] Unit: the dispatch adapter.
-- [ ] Unit: command sources and external identity.
-- [ ] Unit: the bridge adapter.
-- [ ] Unit: the pr adapter.
+- [x] Unit: contract, ordering, dedupe and first-observed times.
+- [x] Unit: the envelope and selective reads.
+- [x] Unit: the dispatch adapter.
+- [x] Unit: command sources and external identity.
+- [x] Unit: the bridge adapter.
+- [x] Unit: the pr adapter.
 - [ ] Simple e2e.
 - [ ] Live.
 
@@ -129,6 +129,22 @@ Open questions for review:
    isn't forgotten. It could instead be filtered out by default.
 
 ## Journal
+
+### 2026-10-08 — The `bridge` and `pr` sources
+- `agent-bridge --json attention <session>...` reads the bridge's current
+  attention reason for an owned or a represented session (HTTP protocol 29,
+  `CURRENT_ATTENTION_PROTOCOL_VERSION`; `unsupported` against an older daemon).
+  The bridge source reads each candidate by its worktree handle, so the answer
+  and the action follow the session heading the worktree now.
+- `claims find pr` needs no project context, `--repo` is optional, and its
+  `--json` carries the schema-1 per-project envelope; older records' bare repo
+  names and missing numbers are recovered from the PR URL.
+- Decided while building: `--include-remote` gates the transcript presence read
+  of bridge sessions on a remote target (the SSH read); every registered
+  session's attention is a local daemon read. A tracked PR whose record says
+  `merged` is skipped unread (a merge is terminal on every provider); stopped
+  and ended bridge sessions aren't candidates. A `pr bar` read makes several
+  provider calls, so the pr source reads ten at a time under a 90 s deadline.
 
 ### 2026-10-08 — Two PRs; design in sibling docs
 - Implementation lands in two PRs: ThomasMichon/copilot-extensions#5668 (the

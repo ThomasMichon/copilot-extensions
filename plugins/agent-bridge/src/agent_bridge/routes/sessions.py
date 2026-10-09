@@ -58,8 +58,7 @@ from ..session_manager import (
 from ..transport import SpawnTarget
 from ..worktree_head import resolve_head
 from ..preference_requests import apply_request_preferences, reused_preference_source
-from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page
-from .event_pages import rows_to_events as _rows_to_events
+from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page, rows_to_events as _rows_to_events
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -1681,3 +1680,5 @@ async def end_session(
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+from .attention_current import router as _current_attention  # noqa: E402 -- avoids an import cycle
+router.include_router(_current_attention)
