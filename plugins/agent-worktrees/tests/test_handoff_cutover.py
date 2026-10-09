@@ -726,15 +726,48 @@ class TestPaneWrapperInitialPrompt:
             )
 
         receipt.unlink(missing_ok=True)
-        result = subprocess.run(
-            cmd, env=env, capture_output=True, text=True, timeout=15,
-        )
+        try:
+            result = subprocess.run(
+                cmd, env=env, capture_output=True, text=True, timeout=15,
+            )
+        except subprocess.TimeoutExpired as exc:
+            receipt_state = receipt.read_text("utf-8") if receipt.exists() else "absent"
+            captured_args = output.read_text("utf-8") if output.exists() else "absent"
+            pytest.fail(
+                "Pane wrapper exceeded its 15-second budget: "
+                f"receipt={receipt_state!r}; child_args={captured_args!r}; "
+                f"stdout_tail={(exc.stdout or b'')[-4096:]!r}; "
+                f"stderr_tail={(exc.stderr or b'')[-4096:]!r}"
+            )
         assert result.returncode == 0, result.stderr
         assert json.loads(output.read_text("utf-8")) == [
             "--interactive", prompt,
         ]
         assert receipt.read_text("utf-8") == "launching"
         receipt.unlink()
+
+    @pytest.mark.parametrize("stage", ["before-receipt", "before-child", "after-child"])
+    def test_wrapper_timeout_reports_launch_stage(self, tmp_path, monkeypatch, stage):
+        def timeout(cmd, **kwargs):
+            assert kwargs["timeout"] == 15
+            if stage != "before-receipt":
+                receipt = tmp_path / "receipt path" / "wrappertest"
+                receipt.parent.mkdir()
+                receipt.write_text("launching", encoding="utf-8")
+            if stage == "after-child":
+                (tmp_path / "args.json").write_text('["--interactive"]', encoding="utf-8")
+            raise subprocess.TimeoutExpired(
+                cmd, 15, output=b"last wrapper statement", stderr=b"child stderr"
+            )
+
+        monkeypatch.setattr(subprocess, "run", timeout)
+        with pytest.raises(pytest.fail.Exception) as failure:
+            self.test_wrapper_appends_native_interactive_prompt(tmp_path)
+        message = str(failure.value)
+        assert ("receipt='absent'" in message) == (stage == "before-receipt")
+        assert ("child_args='absent'" in message) == (stage != "after-child")
+        assert "last wrapper statement" in message
+        assert "child stderr" in message
 
 
 class TestMuxRetirePane:

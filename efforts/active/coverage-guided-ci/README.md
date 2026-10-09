@@ -732,6 +732,23 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-09 — Phase 6: exact-head repeat exposes a bounded pane-wrapper stall
+- Reconciled head 78b44a061 passed normal hosted run 37894850444 in
+  865.27 seconds including cleanup (maximum group 161.49 seconds).
+  Repeat 37897693769 failed the real initial-prompt wrapper integration
+  test's existing 15-second subprocess bound, not the plugin deadline.
+  The failed group completed in 154.81 seconds; total elapsed before
+  failure was 331.08 seconds including cleanup. This is unresolved
+  evidence, not a pass or an accepted flake.
+- The same real Windows launch passes locally with two workers in
+  1.82, 2.09, and 2.03 seconds. No root cause is established from these
+  isolated successes. Added bounded failure diagnostics for the receipt,
+  captured child argv, and the last executed PowerShell wrapper statement
+  so another hosted failure identifies startup, child, or teardown stage.
+  Three diagnostic regressions and the real launch pass. The wrapper,
+  owner Job Object, launch transport, assertions, and every timeout remain
+  unchanged. Fresh hosted evidence and diagnosis remain required.
+
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged
   watch-daemon correction (joined shutdown, unique atomic-write files,
