@@ -87,7 +87,11 @@ capability.
 `session-host-prepare` advertises `preference_wrapper` with `version: 1` and
 `launcher: "{{target_preference_launcher}}"`, together with its discovered
 `execution_instance` and configured execution user. Missing, mismatched, or
-unadvertised bindings refuse an attested launch. The bridge stages its
+unadvertised bindings refuse an attested launch. The bridge passes the selected
+instance as `--expected-instance` before provider preparation. The provider
+confirms it before credential projection and uses that immutable Docker ID for
+SSH provisioning, environment/shim setup and launch-only file writes; a reused
+container name cannot redirect those operations. The bridge stages its
 content-addressed stdlib-only Host bundle through the existing transport;
 there is no live installation or settings provisioning.
 

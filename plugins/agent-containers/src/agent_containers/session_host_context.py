@@ -20,7 +20,9 @@ class TrustedContext:
         return iter((self.config, self.fleet, self.user, self.workspace))
 
 
-def resolve_context(name: str, config: ContainersConfig) -> TrustedContext:
+def resolve_context(
+    name: str, config: ContainersConfig, expected_instance: str | None = None,
+) -> TrustedContext:
     from .lifecycle import get_container, inspect_container
 
     info = get_container(config, name)
@@ -28,10 +30,14 @@ def resolve_context(name: str, config: ContainersConfig) -> TrustedContext:
         raise RuntimeError(f"Container '{name}' is not a discovered fleet member")
     if info.state != "running":
         raise RuntimeError(f"Container '{name}' is not running (state={info.state!r})")
+    if expected_instance and info.container_id != expected_instance:
+        raise RuntimeError("selected container instance changed before preparation")
     fleet = config.fleets.get(info.fleet or "")
     if fleet is None:
         raise RuntimeError(f"Container '{name}' has no matching fleet configuration")
-    inspection = inspect_container(name)
+    inspection = inspect_container(expected_instance or name)
+    if expected_instance and inspection.get("Id") != expected_instance:
+        raise RuntimeError("selected container instance could not be confirmed")
     actual_profile = (
         ((inspection.get("Config") or {}).get("Labels") or {})
         .get(SECURITY_PROFILE_LABEL)

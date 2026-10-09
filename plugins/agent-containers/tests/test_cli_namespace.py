@@ -164,6 +164,8 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
         rc = main([
             "session-host-prepare",
             "example-web-1",
+            "--expected-instance",
+            "instance-fixture",
             "--host-relay-port",
             "61234",
         ])
@@ -174,6 +176,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     assert result["remote_command"].startswith("source /tmp/")
     assert result["acp_command"] == command
     assert result["execution_instance"] == "instance-fixture"
+    assert write_env.call_args.args[0] == "instance-fixture"
     assert result["preference_wrapper"] == (
         {"version": 1, "launcher": "{{target_preference_launcher}}"} if wrapper else None
     )
@@ -185,7 +188,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     assert staged["GIT_CONFIG_COUNT"] == "2"
     assert staged["GIT_CONFIG_VALUE_1"] == "/usr/local/bin/ado-auth-helper"
     assert staged["GIT_TERMINAL_PROMPT"] == "0"
-    deploy.assert_called_once_with("example-web-1", ado=True)
+    deploy.assert_called_once_with("instance-fixture", ado=True)
 
 
 def test_session_host_state_is_non_waking(capsys):

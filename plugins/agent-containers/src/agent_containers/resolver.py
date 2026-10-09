@@ -431,6 +431,7 @@ class ContainerResolver:
             )
             spec["container"] = {
                 "name": name,
+                "instance_id": getattr(info, "container_id", None),
                 "workspace_folder": workspace_folder,
                 "security_profile": fleet.security_profile,
                 "user": user,

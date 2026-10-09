@@ -203,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Prepare trusted-container SSH/auth launch inputs for agent-bridge",
     )
     host_prepare.add_argument("name", help="Container name")
+    host_prepare.add_argument("--expected-instance", default=None)
     host_prepare.add_argument(
         "--host-relay-port",
         type=int,
@@ -214,11 +215,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Print non-waking JSON lifecycle state for one container",
     )
     host_state.add_argument("name", help="Container name")
+    host_state.add_argument("--expected-instance", default=None)
     host_cleanup = sub.add_parser(
         "session-host-cleanup",
         help="Remove one launch-only trusted-container environment file",
     )
     host_cleanup.add_argument("name", help="Container name")
+    host_cleanup.add_argument("--expected-instance", default=None)
     host_cleanup.add_argument("--remote-env", required=True)
 
     sub.add_parser("version", help="Show version")
@@ -426,11 +429,11 @@ def _cmd_installer_readiness() -> int:
     return emit(evaluate(config, containers, failures))
 
 
-def _trusted_session_host_context(name: str):
+def _trusted_session_host_context(name: str, expected_instance: str | None = None):
     """Resolve a trusted fleet member without launching its Session Host."""
     from .session_host_context import resolve_context
 
-    return resolve_context(name, load_config())
+    return resolve_context(name, load_config(), expected_instance)
 
 
 def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
@@ -444,7 +447,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     )
     from .relay_provider import token_for
 
-    context = _trusted_session_host_context(args.name)
+    context = _trusted_session_host_context(args.name, args.expected_instance)
     config, fleet, user, workspace = context
     acp_command = config.acp_command_for(fleet)
     launcher_token = "{{target_preference_launcher}}"
@@ -452,11 +455,12 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     if token_count > 1:
         raise ValueError("target preference template requires exactly one launcher token")
     instance_id = getattr(context, "instance_id", "")
-    if token_count and not instance_id:
-        raise ValueError("target preference launcher requires a discovered execution instance")
-    ssh_config = prepare_ssh_config(args.name, user)
-    cleanup_remote_envs(args.name, user)
-    launch_env = container_environment(args.name, user)
+    if token_count and (not args.expected_instance or instance_id != args.expected_instance):
+        raise ValueError("target preference launcher requires its selected execution instance")
+    projection_target = args.expected_instance or args.name
+    ssh_config = prepare_ssh_config(projection_target, user)
+    cleanup_remote_envs(projection_target, user)
+    launch_env = container_environment(projection_target, user)
 
     forward, relay_enabled = config.credentials_for(fleet)
     if forward:
@@ -479,7 +483,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
                 f"credential relay on 127.0.0.1:{args.host_relay_port} "
                 "did not answer the identity probe"
             )
-        deploy_shims(args.name, ado=True)
+        deploy_shims(projection_target, ado=True)
         launch_env["LC_GIT_CREDENTIAL_RELAY_HOST"] = "127.0.0.1"
         launch_env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
         launch_env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
@@ -488,7 +492,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
             f"{config.relay_port}:127.0.0.1:{args.host_relay_port}"
         )
 
-    remote_env = write_remote_env(args.name, user, launch_env)
+    remote_env = write_remote_env(projection_target, user, launch_env)
     remote_command = build_remote_command(
         acp_command,
         remote_env,
@@ -507,7 +511,10 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
             {"version": 1, "launcher": launcher_token} if token_count else None
         ),
         "reverse_forwards": reverse_forwards,
-        "state_command": [*payload_command_argv(), "session-host-state", args.name],
+        "state_command": [
+            *payload_command_argv(), "session-host-state", args.name,
+            *(["--expected-instance", instance_id] if args.expected_instance else []),
+        ],
     }))
     return 0
 
@@ -517,7 +524,7 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
     from .lifecycle import inspect_container
 
     try:
-        details = inspect_container(args.name)
+        details = inspect_container(args.expected_instance or args.name)
     except RuntimeError as exc:
         detail = str(exc)
         if "No such object" not in detail and "No such container" not in detail:
@@ -536,7 +543,9 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
 
 def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     """Remove only a provider-created launch env path."""
-    _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
+    _config, _fleet, user, _workspace = _trusted_session_host_context(
+        args.name, args.expected_instance,
+    )
     remote_env = PurePosixPath(args.remote_env)
     if (
         not remote_env.is_absolute()
@@ -548,7 +557,7 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
         raise RuntimeError(
             f"Refusing unsafe Session Host env cleanup path: {args.remote_env!r}"
         )
-    cleanup_remote_env(args.name, user, str(remote_env))
+    cleanup_remote_env(args.expected_instance or args.name, user, str(remote_env))
     return 0
 
 
