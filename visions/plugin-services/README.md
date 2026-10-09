@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-09
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -342,7 +342,7 @@ itself is kept in sync, rather than depending on each plugin separately
 noticing and re-deriving it.
 
 ### install-adopt-boundary
-Two lifecycle verbs, two scopes, never crossed. **Install/update** touches only
+Two lifecycle scopes, never crossed. **Install/update deployment** touches only
 **machine-local** content — it deploys and updates a plugin's own runtime and
 local config, and may migrate that config's *schema*, but it never changes the
 user's chosen *behaviors* and never alters a **repo** (its committed config or its
@@ -354,6 +354,17 @@ part of each command's contract: a repo-bootstrap command may write repo and
 machine-local wiring, while a projection command may only read published repo
 state and update user-level configuration. The verb name alone never grants
 repo-write authority.
+
+Local source installation remains supported without turning its checkout into
+the installer's workspace. Generated build work and cleanup take place in an
+installer-owned stage outside that checkout; untracked generated artifacts do
+not become permission to mutate the source repository.
+
+A higher-level updater may intentionally orchestrate declared repository
+synchronization or explicit integration alongside deployment. Those operations
+remain separately attributable and governed by their repository authority and
+contribution contract. Their presence never expands the installer phase's write
+scope or makes ambient repository discovery an integration request.
 
 ### entity-relationship-diagnosability
 Every entity the suite tracks (worktree, session, task, machine, repo,
@@ -448,7 +459,7 @@ literal cause** (what actually blocked the address) rather than masking it or
 silently degrading — so the failure is diagnosable instead of mysterious.
 
 ### install-leaves-repos-unaltered
-Running install or update never changes a repo: no commit, no edit to the repo's
+The installer deployment phase never changes a repo: no commit, no edit to the repo's
 committed config, no git-hook injection. At most it migrates machine-local config
 schema and *warns* about a stale or deprecated repo convention it observes. Any
 repo-altering effect is explicit, ownership-aware, and travels through the
@@ -668,6 +679,12 @@ an incomplete change, the same way an undocumented behavior change is.
   `docs/architecture.md`
 
 ## Provenance
+
+- **2026-10-09** — Clarified the operator-confirmed installation boundary:
+  source builds and cleanup remain outside the checkout, while an intentional
+  higher-level updater can retain separately governed source synchronization.
+  Preserved source installation, explicit integration, and chosen-behavior
+  protection rather than weakening them to match installer side effects.
 
 - **2026-10-08** — Made lifecycle-transition authority explicit within
   *zero-downtime-cutover*: concurrent update and recovery callers share the same
