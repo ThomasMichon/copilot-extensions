@@ -1896,6 +1896,82 @@ def test_monitor_pending_handoff_request_counts_failed_spawn_as_attempted(
     assert m._monitor_pending_handoff_request(record) is None
 
 
+def _spawned_nothing_world(monkeypatch, tmp_path, *, attempts, spawned_nothing=True, trace=()):
+    """``attempts`` started+failed spawn pairs for handoff-1 (each failure
+    carrying ``spawned_nothing``), plus any ``trace`` duplicates; returns the
+    record and the list the claim stub appends to."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "repo-a")
+    monkeypatch.setattr(m.handoff_trace, "read_trace", lambda *a, **k: list(trace))
+    started = [{"event": "handoff_successor_spawn_started", "handoff_token": "handoff-1", "ts": f"t{i}"}
+               for i in range(attempts)]
+    failed = [{"event": "handoff_successor_spawn_failed", "handoff_token": "handoff-1", "ts": f"t{i}",
+               "spawned_nothing": spawned_nothing} for i in range(attempts)]
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [{"handoff_id": "handoff-1", "session_id": "session-1",
+                     "session_state": r"C:\state\handoff-request.json"}]
+        if event == "handoff_successor_spawn_started":
+            return started
+        if event == "handoff_successor_spawn_failed":
+            return failed
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+    claims: list[dict] = []
+
+    def claim(request):
+        claims.append(request)
+        return {"ok": True, "claimed": True, "path": "claim.json"}
+
+    monkeypatch.setattr(m, "_monitor_claim_handoff_cutover", claim)
+    monkeypatch.setattr(
+        m, "_monitor_read_session_state_handoff",
+        lambda path: {"handoffId": "handoff-1", "seed": "HANDOFF_SEED", "worktree": "a", "consumed": False},
+    )
+    handoff = types.SimpleNamespace(token="handoff-1", predecessor="session-1", candidate=None,
+                                    successor=None, live_cutover=True)
+    record = types.SimpleNamespace(worktree_id="a", handoffs=[handoff], pending_handoffs=[handoff])
+    return record, claims
+
+
+def test_monitor_retries_a_handoff_whose_spawn_created_nothing(tmp_path, monkeypatch):
+    """A spawn that failed before any pane or process existed (a launcher
+    missing mid-update) has no successor to stack on, and the predecessor has
+    already stopped: the handoff is retried rather than stranded."""
+    record, claims = _spawned_nothing_world(monkeypatch, tmp_path, attempts=1)
+    request = m._monitor_pending_handoff_request(record)
+    assert request is not None and request["token"] == "handoff-1" and len(claims) == 1
+
+
+def test_monitor_stops_retrying_a_spawn_that_created_nothing_after_the_cap(tmp_path, monkeypatch):
+    from agent_worktrees import sessions_pane_retire
+
+    record, claims = _spawned_nothing_world(
+        monkeypatch, tmp_path, attempts=sessions_pane_retire.MAX_PRE_SPAWN_ATTEMPTS)
+    assert m._monitor_pending_handoff_request(record) is None and claims == []
+
+
+def test_monitor_never_retries_a_failed_spawn_that_may_have_opened_a_pane(tmp_path, monkeypatch):
+    record, claims = _spawned_nothing_world(monkeypatch, tmp_path, attempts=1, spawned_nothing=False)
+    assert m._monitor_pending_handoff_request(record) is None and claims == []
+
+
+def test_monitor_counts_an_attempt_in_both_stores_once(tmp_path, monkeypatch):
+    """The durable trace and the rolling log hold the same events: one attempt
+    recorded in both is still one attempt, so the token is still retried."""
+    trace = [
+        {"event": "handoff_successor_spawn_started", "handoff_token": "handoff-1", "ts": "t0"},
+        {"event": "handoff_successor_spawn_failed", "handoff_token": "handoff-1", "ts": "t0",
+         "spawned_nothing": True},
+    ]
+    record, claims = _spawned_nothing_world(monkeypatch, tmp_path, attempts=1, trace=trace)
+    assert m._monitor_pending_handoff_request(record) is not None and len(claims) == 1
+
+
 def test_monitor_pending_handoff_request_honors_durable_trace_after_log_eviction(
     tmp_path, monkeypatch,
 ):

@@ -143,6 +143,7 @@ def pane_create(
             "foregrounded": False,
             "mux_session": resolved_session,
             "error": f"no live mux session {resolved_session}",
+            "spawned_nothing": True,
         }
 
     receipt_token = payload_receipt_token or secrets.token_hex(16)
@@ -196,6 +197,8 @@ def pane_create(
             "foregrounded": False,
             "mux_session": resolved_session,
             "error": str(exc),
+            # A timed-out mux call may still have opened a pane.
+            "spawned_nothing": not isinstance(exc, subprocess.TimeoutExpired),
         }
 
     if result.returncode != 0:
@@ -212,6 +215,7 @@ def pane_create(
             "foregrounded": False,
             "mux_session": resolved_session,
             "error": result.stderr.strip() or f"exit {result.returncode}",
+            "spawned_nothing": True,
         }
 
     new_pane = result.stdout.strip() or None

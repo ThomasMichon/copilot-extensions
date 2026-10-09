@@ -23,6 +23,7 @@ import httpx
 
 from . import attention_contract as ac
 from .client import DispatchError
+from .handoff_baton import is_handoff_task
 
 BUILTIN_SOURCES = ("bridge", "dispatch", "pr")
 DEFAULT_TIMEOUT = 20.0
@@ -66,13 +67,18 @@ def _valid_form(form: Any) -> bool:
 
 
 def _task_item(task: dict[str, Any], read_at: str,
-               cli: tuple[str, ...] | None = ("agent-dispatch",)) -> dict[str, Any] | None:
+               cli: tuple[str, ...] | None = ("agent-dispatch",),
+               now: float | None = None) -> dict[str, Any] | None:
     """One task's item, coalescing its conditions to the worst: an operator ask
     (``awaiting_steer``), an operator hold (``hold_reason``), or a self-tracked
     completion claim awaiting confirmation (``submitted``). ``submitted`` is
     concluded, so it wins over a stale steering flag (``steer submit`` refuses a
     concluded task); one with an ``evaluator_ref`` waits on its evaluator, not
-    the operator, and ``completed`` is never an item. ``cli`` is the invocation
+    the operator, and ``completed`` is never an item. A handoff baton is
+    different: its pickup is its completion, so a ``submitted`` one is spent
+    (never a review), and one no session has picked up for longer than the
+    handoff threshold is ``stalled`` -- its predecessor already stopped, so the
+    work waits on a successor. ``cli`` is the invocation
     that reaches the coordinator this read came from (its ``--url``/``--shared``,
     never a token), so the action runs as-is; ``None`` (a read authenticated only
     by a ``--token`` argument) means no action could, so none is offered."""
@@ -81,9 +87,11 @@ def _task_item(task: dict[str, Any], read_at: str,
     card = task.get("card") if isinstance(task.get("card"), dict) else {}
     if not task_id:
         return None
+    handoff = is_handoff_task(task)
+    waited = _unpicked_handoff_age(task, now) if handoff else None
     extra: dict[str, Any] = {}
     if status == "submitted":
-        if task.get("evaluator_ref"):
+        if task.get("evaluator_ref") or handoff:
             return None
         state, reason = "review", f"completion awaiting confirmation: {title}"
     elif task.get("awaiting_steer"):
@@ -92,6 +100,8 @@ def _task_item(task: dict[str, Any], read_at: str,
         extra = {"input": form} if _valid_form(form) else {}
     elif task.get("hold_reason"):
         state, reason = "blocked", f"held ({ac.one_line(task['hold_reason'], 60)}): {title}"
+    elif waited is not None:
+        state, reason = "stalled", f"no session has picked up this handoff for {waited / 60:.0f} min: {title}"
     else:
         return None
     # The steering card for an ask; the task itself (its result, its hold) otherwise.
@@ -114,6 +124,9 @@ DISPATCH_READ_LIMIT = 5000
 QUEUED_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_QUEUED_AFTER_SECS"
 HELD_LIVE_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS"
 DEFAULT_STALLED_AFTER = 1800.0
+#: Seconds an unclaimed handoff baton may wait for a successor (``0`` turns it off).
+HANDOFF_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_HANDOFF_AFTER_SECS"
+DEFAULT_HANDOFF_AFTER = 600.0
 #: Seconds, from the start of a dispatch read (its task list included), within
 #: which every per-lane backlog read must *finish*, inside the source's own
 #: deadline. A lane that can't, or whose read fails, counts toward
@@ -124,12 +137,24 @@ BACKLOG_BUDGET = 19.0
 _LANE_REQUEST_TIMEOUT = 10.0
 
 
-def _threshold(env: str) -> float:
+def _threshold(env: str, default: float = DEFAULT_STALLED_AFTER) -> float:
     try:
-        value = float(os.environ.get(env, DEFAULT_STALLED_AFTER))
+        value = float(os.environ.get(env, default))
     except ValueError:
-        return DEFAULT_STALLED_AFTER
-    return value if value >= 0 else DEFAULT_STALLED_AFTER
+        return default
+    return value if value >= 0 else default
+
+
+def _unpicked_handoff_age(task: dict[str, Any], now: float | None) -> float | None:
+    """Seconds a handoff baton has waited unclaimed, when past the handoff
+    threshold; ``None`` otherwise (claimed, too young, or the age is unknown)."""
+    after = _threshold(HANDOFF_AFTER_ENV, DEFAULT_HANDOFF_AFTER)
+    created = task.get("created_at")
+    if (not after or task.get("status") not in ("proposed", "queued") or task.get("owner")
+            or not isinstance(created, (int, float)) or isinstance(created, bool)):
+        return None
+    age = (time.time() if now is None else now) - created
+    return age if age > after else None
 
 
 def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
@@ -173,7 +198,7 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                 backlogs[repo] = (client.health(repo=repo) or {}).get("backlog") or {}
             except (DispatchError, httpx.HTTPError, OSError, ValueError):
                 unread += 1
-    items = [i for i in (_task_item(t, read_at, cli) for t in tasks) if i]
+    items = [i for i in (_task_item(t, read_at, cli, now=time.time()) for t in tasks) if i]
     items += [i for i in (_queue_item(r, b, read_at, cli) for r, b in backlogs.items()) if i]
     uncertain = unread + (1 if len(tasks) >= limit else 0)
     return {"items": items, "status": "uncertain" if uncertain else "ok", "uncertain": uncertain,

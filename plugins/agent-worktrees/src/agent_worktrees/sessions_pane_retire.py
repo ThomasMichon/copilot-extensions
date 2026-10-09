@@ -7,6 +7,7 @@ helpers shared by the pane lifecycle primitives.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 
@@ -254,6 +255,11 @@ def _mux_pane_alive(
     )
 
 
+#: Total spawn attempts the monitor makes for one handoff token when every
+#: earlier attempt failed before any successor pane or process existed.
+MAX_PRE_SPAWN_ATTEMPTS = 3
+
+
 def already_attempted_handoff_tokens(worktree_id: str) -> set[str]:
     """Return every handoff token this worktree already had a cutover spawn
     attempt for, merging the bounded rolling ``activity.jsonl`` log with the
@@ -263,9 +269,9 @@ def already_attempted_handoff_tokens(worktree_id: str) -> set[str]:
 
     Counts ``handoff_successor_spawn_started`` -- logged unconditionally
     before ``pane_create``/``headless_new_session`` even runs, so it covers a
-    failed spawn (``handoff_successor_spawn_failed``, no pane ever created)
-    just as much as a successful one -- plus ``handoff_cutover_spawn`` for
-    back-compat with any already-recorded attempt that predates this gate.
+    failed spawn (``handoff_successor_spawn_failed``) just as much as a
+    successful one -- plus ``handoff_cutover_spawn`` for back-compat with any
+    already-recorded attempt that predates this gate.
     Counting only the success event would leave a token that failed to spawn
     at all (e.g. a mux/pane-create error) with no attempted-marker, letting it
     retry unbounded exactly like the confirmed-candidate gap this function
@@ -284,6 +290,16 @@ def already_attempted_handoff_tokens(worktree_id: str) -> set[str]:
     -- ``_monitor_pending_handoff_request`` had no memory that it had already
     tried, so every ~3-4 minute sweep (the claim lock's own staleness window)
     treated the token as untouched and spawned yet another pane.
+
+    The one exception is a spawn that provably created nothing: its
+    ``handoff_successor_spawn_failed`` event says ``spawned_nothing: true``
+    (no pane opened, no process started -- a launcher missing mid-update, a
+    mux error). There is no successor to stack on, and the predecessor has
+    already stopped, so leaving the handoff stranded is the worse outcome: a
+    token whose every attempt failed that way is retried (once per claim
+    staleness window) until it has had ``MAX_PRE_SPAWN_ATTEMPTS`` attempts.
+    A failure event without that field (an older one, or one after a pane
+    opened) still counts as an attempt.
     """
     trace_events: list[dict[str, object]] = []
     project = cfg.active_project()
@@ -292,17 +308,34 @@ def already_attempted_handoff_tokens(worktree_id: str) -> set[str]:
             trace_events = handoff_trace.read_trace(project, worktree_id)
         except Exception:
             trace_events = []
-    attempt_event_names = ("handoff_successor_spawn_started", "handoff_cutover_spawn")
-    attempt_events = [e for e in trace_events if e.get("event") in attempt_event_names]
-    for event_name in attempt_event_names:
-        attempt_events += activity.read_events(
+    started_name, failed_name = "handoff_successor_spawn_started", "handoff_successor_spawn_failed"
+    event_names = (started_name, "handoff_cutover_spawn", failed_name)
+    events = [e for e in trace_events if e.get("event") in event_names]
+    for event_name in event_names:
+        events += activity.read_events(
             worktree_id=worktree_id, event=event_name, limit=64,
         )
-    return {
-        str(event.get("handoff_token") or "").strip()
-        for event in attempt_events
-        if str(event.get("handoff_token") or "").strip()
-    }
+    # Both stores record the same event: count each once.
+    unique = {json.dumps(e, sort_keys=True, default=str): e for e in events}.values()
+    attempted: set[str] = set()
+    started: dict[str, int] = {}
+    spawned_nothing: dict[str, int] = {}
+    for event in unique:
+        token = str(event.get("handoff_token") or "").strip()
+        if not token:
+            continue
+        name = event.get("event")
+        if name == started_name:
+            started[token] = started.get(token, 0) + 1
+        elif name == failed_name:
+            if event.get("spawned_nothing") is True:
+                spawned_nothing[token] = spawned_nothing.get(token, 0) + 1
+        else:
+            attempted.add(token)
+    for token, count in started.items():
+        if spawned_nothing.get(token, 0) < count or count >= MAX_PRE_SPAWN_ATTEMPTS:
+            attempted.add(token)
+    return attempted
 
 
 def wait_for_handoff_candidate(
