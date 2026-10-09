@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -834,3 +835,183 @@ sleep 0.5
             line for line in out_file.read_text().splitlines() if line.strip()
         ]
         assert events == ["FIRST=OK", "SECOND=REFUSED", "THIRD=OK"], events
+
+
+def _assemble_wait_for_lease_harness(text: str, install_dir: Path, version: str = "1.2.3") -> str:
+    """Assemble a standalone, runnable copy of the real
+    `_wait_for_versioned_slot_lease` and its full real dependency chain
+    (`_versioned_slot_lease_path`, both mkdir-fallback halves, the
+    no-flock python fallback, `_acquire_versioned_slot_lease`,
+    `_release_versioned_slot_lease`) exactly as shipped -- behavioral
+    parity with the installer's actual call graph, not a hand-reduced
+    stand-in. `_acquire_versioned_slot_lease` itself already degrades
+    gracefully to the universal mkdir gate alone when `flock` is absent
+    and no fcntl-capable python resolves (the real, common case on this
+    Windows/Git-Bash test runner) -- a stub `_bootstrap_python` that
+    always fails reproduces exactly that real degraded-but-correct path,
+    rather than skipping the no-flock branch out of the harness entirely."""
+    lease_path_fn = _function_body(text, "_versioned_slot_lease_path")
+    mkdir_acquire_fn = _function_body(text, "_acquire_versioned_slot_lease_mkdir_fallback")
+    mkdir_release_fn = _function_body(text, "_release_versioned_slot_lease_mkdir_fallback")
+    py_fallback_fn = _function_body(text, "_acquire_versioned_slot_lease_python_fallback")
+    acquire_fn = _function_body(text, "_acquire_versioned_slot_lease")
+    release_fn = _function_body(text, "_release_versioned_slot_lease")
+    wait_fn = _function_body(text, "_wait_for_versioned_slot_lease")
+    return f"""
+set -uo pipefail
+INSTALL_DIR="{_bash_path(install_dir)}"
+SRC_VERSION="{version}"
+VERSIONED_RUNTIME=1
+_VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+_VERSIONED_SLOT_LEASE_FAILURE_REASON=""
+_VERSIONED_SLOT_LEASE_FD=""
+_VERSIONED_SLOT_LEASE_PY_PID=""
+_VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
+_bootstrap_python() {{ return 1; }}
+{lease_path_fn}
+}}
+{mkdir_acquire_fn}
+}}
+{mkdir_release_fn}
+}}
+{py_fallback_fn}
+}}
+{acquire_fn}
+}}
+{release_fn}
+}}
+{wait_fn}
+}}
+"""
+
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+def test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget(tmp_path: Path):
+    """Bounded-join regression (phase-3-runtime-admission, #5472/#5788),
+    POSIX side, real separate processes (not same-process subshells): a
+    contender calling `_wait_for_versioned_slot_lease` while another real
+    process holds the lease must poll rather than give up on first
+    contention, and must acquire the lease itself once the holder
+    releases within the configured budget -- proving a real bounded
+    wait/retry, not merely a renamed single-shot refusal. Mirrors
+    `test_installer_powershell51.py::test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget`."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    harness = _assemble_wait_for_lease_harness(text, install_dir)
+    ready_marker = tmp_path / "holder-ready.txt"
+    release_marker = tmp_path / "release-now.txt"
+
+    holder_path = tmp_path / "holder.sh"
+    holder_path.write_text(harness + f"""
+_acquire_versioned_slot_lease_mkdir_fallback "$(_versioned_slot_lease_path)" || true
+touch "{_bash_path(ready_marker)}"
+while [[ ! -f "{_bash_path(release_marker)}" ]]; do sleep 0.05; done
+""", encoding="utf-8")
+    holder = subprocess.Popen(
+        [_BASH, str(holder_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        for _ in range(100):  # up to ~10s
+            if ready_marker.exists() or holder.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert ready_marker.exists(), "holder process never reported readiness"
+
+        contender_env = dict(os.environ)
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC"] = "20"
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_POLL_SEC"] = "1"
+        contender_path = tmp_path / "contender.sh"
+        contender_path.write_text(harness + """
+if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False; fi
+""", encoding="utf-8")
+        contender = subprocess.Popen(
+            [_BASH, str(contender_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=contender_env,
+        )
+        try:
+            time.sleep(0.5)
+            release_marker.write_text("go")
+            out, err = contender.communicate(timeout=25)
+        except subprocess.TimeoutExpired:
+            contender.kill()
+            pytest.fail("contender's bounded wait did not return within its own budget")
+        assert contender.returncode == 0, err
+        assert "RESULT=True" in out, (
+            f"a bounded-wait contender must acquire the lease once the "
+            f"holder releases it within budget; stdout={out!r} stderr={err!r}"
+        )
+    finally:
+        release_marker.write_text("go")
+        try:
+            holder.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+def test_wait_for_versioned_slot_lease_times_out_when_never_released(tmp_path: Path):
+    """The POSIX bounded wait must actually be bounded: if the holder
+    never releases, a contender configured with a short budget must
+    return non-zero at (approximately) that budget, not hang
+    indefinitely. Mirrors
+    `test_installer_powershell51.py::test_wait_for_versioned_slot_lease_times_out_when_never_released`."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    harness = _assemble_wait_for_lease_harness(text, install_dir)
+    ready_marker = tmp_path / "holder-ready.txt"
+    release_marker = tmp_path / "release-now.txt"
+
+    holder_path = tmp_path / "holder.sh"
+    holder_path.write_text(harness + f"""
+_acquire_versioned_slot_lease_mkdir_fallback "$(_versioned_slot_lease_path)" || true
+touch "{_bash_path(ready_marker)}"
+while [[ ! -f "{_bash_path(release_marker)}" ]]; do sleep 0.05; done
+""", encoding="utf-8")
+    holder = subprocess.Popen(
+        [_BASH, str(holder_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        for _ in range(100):  # up to ~10s
+            if ready_marker.exists() or holder.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert ready_marker.exists(), "holder process never reported readiness"
+
+        contender_env = dict(os.environ)
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC"] = "2"
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_POLL_SEC"] = "1"
+        contender_path = tmp_path / "contender.sh"
+        contender_path.write_text(harness + """
+if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False; fi
+""", encoding="utf-8")
+        started = time.monotonic()
+        contender = subprocess.run(
+            [_BASH, str(contender_path)],
+            capture_output=True, text=True, timeout=30,
+            env=contender_env,
+        )
+        elapsed = time.monotonic() - started
+        assert contender.returncode == 0, contender.stderr
+        assert "RESULT=False" in contender.stdout, (
+            f"a bounded-wait contender must give up, not hang, once its "
+            f"configured budget elapses while the holder never releases; "
+            f"stdout={contender.stdout!r} stderr={contender.stderr!r}"
+        )
+        assert elapsed < 15, (
+            f"bounded wait took {elapsed:.1f}s against a 2s budget -- "
+            "the timeout is not actually bounding the wait"
+        )
+        assert elapsed >= 1.5, (
+            f"bounded wait took only {elapsed:.1f}s against a 2s budget -- "
+            "the configured wait duration is not actually being honored"
+        )
+    finally:
+        release_marker.write_text("go")
+        try:
+            holder.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            holder.kill()
