@@ -88,7 +88,7 @@ def _candidate_prs(repo: str, state: str) -> list[dict]:
     matches: list[dict] = []
     for project, record in claims_owner._iter_records():
         for pr in record.prs or []:
-            if (pr.repo or "").strip().lower() != wanted_repo:
+            if wanted_repo not in ((pr.repo or "").strip().lower(), _pr_repo(pr).lower()):
                 continue
             if state != "all" and pr.state != state:
                 continue
@@ -186,22 +186,33 @@ def canonical_authority(endpoint: str) -> str | None:
 
 
 def _authority_resolver(project: str):
-    """``provider_name -> canonical authority | None`` for ``project``'s own PR
-    configuration; ``None`` for every PR when that configuration can't load."""
+    """``(slug, provider_name) -> canonical authority | None``, from the same
+    per-slug binding ``pr bar`` reads the PR through
+    (``pr_config.resolve_repo_config_for_slug``), so a foreign repo's PR is
+    labelled with its own provider host, never the project's default repo's.
+    ``None`` when the slug resolves to no registered binding (``pr bar`` can't
+    read it either) or the project's configuration can't load."""
     try:
         from . import config as cfg
-        from . import providers
+        from . import pr_config, providers
 
-        prcfg = cfg.load_project_config(project).default_repo.pr
+        config = cfg.load_project_config(project)
     except Exception:
-        return lambda provider_name: None
+        return lambda slug, provider_name: None
+    cache: dict[tuple[str, str], str | None] = {}
 
-    def resolve(provider_name: str) -> str | None:
-        try:
-            provider = providers.get_provider(provider_name or prcfg.provider or "github")
-            return canonical_authority(provider.authority_endpoint(getattr(prcfg, "api_base", "") or ""))
-        except Exception:
-            return None
+    def resolve(slug: str, provider_name: str) -> str | None:
+        key = (slug.lower(), provider_name)
+        if key not in cache:
+            try:
+                resolution = pr_config.resolve_repo_config_for_slug(config, slug)
+                prcfg = resolution.repo_config.pr if resolution.resolved else None
+                cache[key] = canonical_authority(providers.get_provider(
+                    provider_name or prcfg.provider or "github",
+                ).authority_endpoint(getattr(prcfg, "api_base", "") or "")) if prcfg is not None else None
+            except Exception:
+                cache[key] = None
+        return cache[key]
 
     return resolve
 
@@ -249,7 +260,8 @@ def scan_projects(repo: str | None, state: str) -> list[dict]:
                     continue
                 if state != "all" and pr.state != state:
                     continue
-                prs.append({"worktree_id": record.worktree_id, "authority": authority(pr.provider or ""),
+                prs.append({"worktree_id": record.worktree_id,
+                            "authority": authority(slug, pr.provider or "") if "/" in slug else None,
                             "repo": slug, "number": _pr_number(pr), "state": pr.state})
         entry = {"project": project, "status": "ok", "prs": prs}
         if unreadable:

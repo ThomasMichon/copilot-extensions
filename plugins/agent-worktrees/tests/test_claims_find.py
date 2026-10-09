@@ -102,7 +102,7 @@ def test_cmd_claims_find_without_repo_lists_every_repo_per_project(monkeypatch, 
     _seed_pr_record(tmp_path, monkeypatch, "proj-a", "wt-a", repo="acme/widgets", pr_state="open", number=7)
     _seed_pr_record(tmp_path, monkeypatch, "proj-b", "wt-b", repo="other/gadgets", pr_state="closed",
                     number=None, url="https://gitea.example.com/other/gadgets/pulls/9")
-    monkeypatch.setattr(claims_find_cli, "_authority_resolver", lambda project: lambda provider: "github.com")
+    monkeypatch.setattr(claims_find_cli, "_authority_resolver", lambda project: lambda slug, provider: "github.com")
     rc = claims_find_cli.cmd_claims_find(
         argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
     assert rc == 0
@@ -116,6 +116,37 @@ def test_cmd_claims_find_without_repo_lists_every_repo_per_project(monkeypatch, 
             {"worktree_id": "wt-b", "authority": "github.com", "repo": "other/gadgets", "number": 9,
              "state": "closed"}]},
     ]
+
+
+def test_the_authority_comes_from_the_slugs_own_binding_not_the_default_repo(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import pr_config
+
+    bindings = {
+        "acme/home": NS(resolved=True, repo_config=NS(pr=NS(provider="github", api_base=""))),
+        "forge/tool": NS(resolved=True, repo_config=NS(pr=NS(provider="gitea",
+                                                              api_base="https://forge.example.com/gitea/"))),
+        "nobody/knows": NS(resolved=False, repo_config=None),
+    }
+    monkeypatch.setattr(cfg, "load_project_config", lambda project: NS(default_repo=NS(pr=NS(provider="github"))))
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda config, slug: bindings[slug])
+    resolve = claims_find_cli._authority_resolver("proj-a")
+    assert resolve("acme/home", "") == "github.com"
+    assert resolve("forge/tool", "") == "forge.example.com/gitea"  # not the project's default github.com
+    assert resolve("nobody/knows", "") is None  # pr bar can't read it either
+
+
+def test_repo_filter_matches_a_bare_legacy_record_by_its_url(monkeypatch, tmp_path, capfd):
+    _seed_pr_record(tmp_path, monkeypatch, "proj-a", "wt-legacy", repo="widgets", pr_state="open", number=8,
+                    url="https://github.com/acme/widgets/pull/8")
+    monkeypatch.setattr(claims_find_cli, "_authority_resolver", lambda project: lambda slug, provider: "github.com")
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo="acme/widgets", claim_state="open", claim_live=False), ["pr"])
+    out = json.loads(capfd.readouterr().out)
+    assert rc == 0 and [m["worktree_id"] for m in out["matches"]] == ["wt-legacy"]
+    assert [p["repo"] for e in out["projects"] for p in e["prs"]] == ["acme/widgets"]
 
 
 def test_claims_find_one_failing_project_does_not_hide_the_other(monkeypatch, tmp_path, capfd):
