@@ -363,3 +363,19 @@ identity authority: reconcile `machine-transport` with #5689's
   to #5911; do not duplicate the owner's patch or bypass/retry the failed gate.
   Corrected external exhaustive validation remains blocked on that tracked
   remediation and successful normal promotion.
+
+### 2026-10-09 - Distinct ambiguity error contract
+- The latest review identified a previously missed API mismatch: strict
+  configured-identity ambiguity was mapped to `404 host_not_found`.
+  `machine-transport` now exposes `AmbiguousMachineError` as a `ValueError`
+  subtype. Bridge uses that same signal for SSH-alias/cross-namespace
+  collisions and translates it through its existing remote-error module to
+  `400 ambiguous_host`; genuinely missing hosts retain `404 host_not_found`.
+  Existing consumers catching `ValueError` remain compatible.
+- Real-resolver remote regressions cover colliding machine aliases, hostnames,
+  display names and SSH aliases, plus missing-host preservation. Related Bridge
+  contracts including standalone installer staging:
+  **319 passed, 1 skipped**. Shared-library regressions: **76 passed**.
+  The first shared run lacked its scratch parent; creating that parent resolved
+  the setup-only failure before the successful run. Touched lint, exact module
+  ceilings and whitespace checks passed; no baseline was widened.

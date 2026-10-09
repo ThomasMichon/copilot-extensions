@@ -185,6 +185,8 @@ machine has multiple environments. A machine key, alias or hostname does not
 choose an environment implicitly, regardless of casing; exact SSH aliases are
 matched case-insensitively. Static agents retain the defaults above, and local
 registry coverage uses the same selected environment as actual spawning.
+Remote APIs return `400 ambiguous_host` for configured ambiguous identities or
+SSH aliases, distinct from `404 host_not_found` for an unknown host.
 
 ### SSH Alias Convention
 

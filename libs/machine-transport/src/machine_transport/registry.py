@@ -30,6 +30,7 @@ from typing import Any, Protocol, TypeVar
 import yaml
 
 __all__ = [
+    "AmbiguousMachineError",
     "MachineIdentity",
     "MachineEntry",
     "SSHEnvironment",
@@ -39,6 +40,10 @@ __all__ = [
     "parse_machines_yaml",
     "parse_machines_yaml_file",
 ]
+
+
+class AmbiguousMachineError(ValueError):
+    """A configured identity matches more than one machine or SSH target."""
 
 
 class MachineIdentity(Protocol):
@@ -274,5 +279,5 @@ def find_machine_entry(
                 return entry
             matches.append(entry)
     if len(matches) > 1:
-        raise ValueError(f"Machine '{name}' is ambiguous in topology")
+        raise AmbiguousMachineError(f"Machine '{name}' is ambiguous in topology")
     return matches[0] if matches else None

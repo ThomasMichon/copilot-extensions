@@ -867,7 +867,7 @@ class RemoteOperationService:
         try:
             machine, environment = self._resolver.resolve_ssh_environment(host)
         except ValueError as exc:
-            raise RemoteBridgeError(404, "host_not_found", str(exc)) from exc
+            raise RemoteBridgeError.from_resolution_error(exc) from exc
         environments = list(getattr(machine, "ssh_environments", ()))
         if len(environments) > 1:
             alias_matches = [

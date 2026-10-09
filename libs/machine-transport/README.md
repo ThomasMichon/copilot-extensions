@@ -91,7 +91,9 @@ this is independent of the missing-value policies. `SSHEnvironment` also carries
 `port` and `user` metadata for consumers that need it.
 
 `find_machine_entry(..., reject_ambiguous=True)` rejects a non-exact identity
-shared by multiple machines. Exact registry keys retain precedence. The default
+shared by multiple machines with `AmbiguousMachineError`, a `ValueError`
+subclass that lets API consumers distinguish ambiguity from a missing entry
+without parsing diagnostic text. Exact registry keys retain precedence. The default
 remains first-match for existing consumers. Bridge opts into strict identity
 matching and separately binds SSH aliases to their precise environment: that
 consumer-specific binding and default environment preference remain outside

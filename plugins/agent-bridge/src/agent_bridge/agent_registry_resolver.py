@@ -10,7 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 from dropin_registry import WarningTracker
-from machine_transport import find_machine_entry
+from machine_transport import AmbiguousMachineError, find_machine_entry
 
 from .agent_registry_common import (
     AgentConfig,
@@ -203,12 +203,12 @@ class AgentResolver(_ProviderDiscoveryMixin):
         if machine and machine.key.lower() == host.lower():
             return machine, None
         if host.lower() in self._ambiguous_ssh_aliases:
-            raise ValueError(f"SSH alias '{host}' is ambiguous in topology")
+            raise AmbiguousMachineError(f"SSH alias '{host}' is ambiguous in topology")
         entry = self._alias_index.get(host.lower())
         if entry:
             alias_machine, matched_env = entry
             if machine and machine is not alias_machine:
-                raise ValueError(f"Machine '{host}' is ambiguous in topology")
+                raise AmbiguousMachineError(f"Machine '{host}' is ambiguous in topology")
             machine = alias_machine
             if ssh_environment and ssh_environment != matched_env.name:
                 raise ValueError(

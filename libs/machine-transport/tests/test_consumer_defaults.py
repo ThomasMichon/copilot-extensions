@@ -2,7 +2,7 @@
 
 import pytest
 
-from machine_transport import MachineEntry, find_machine_entry, parse_machines_yaml
+from machine_transport import AmbiguousMachineError, MachineEntry, find_machine_entry, parse_machines_yaml
 
 
 def test_raw_parser_defaults_and_bridge_policy_are_independent():
@@ -33,8 +33,9 @@ def test_strict_matching_is_opt_in_and_exact_keys_keep_precedence():
     second = MachineEntry("second", "Second", alias="SAME")
     entries = {"first": first, "second": second}
     assert find_machine_entry(entries, "same") is first
-    with pytest.raises(ValueError, match="ambiguous"):
+    with pytest.raises(AmbiguousMachineError, match="ambiguous") as exc:
         find_machine_entry(entries, "same", reject_ambiguous=True)
+    assert isinstance(exc.value, ValueError)
     assert find_machine_entry(entries, "first", reject_ambiguous=True) is first
     assert find_machine_entry(entries, "", reject_ambiguous=True) is None
 

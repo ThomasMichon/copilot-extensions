@@ -266,3 +266,34 @@ def test_unnamed_environment_alias_does_not_crash_local_registry_coverage(monkey
     resolver = AgentResolver(agents, machines)
     assert resolver.resolve("explicit-worker").type == "ssh"
     assert not resolver._is_local_loopback_agent(agents["explicit-worker"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["FRIENDLY", "OS-BOX", "SAME-NAME", "BOX-LINUX"])
+async def test_remote_operations_distinguish_ambiguous_configured_identities(monkeypatch, host):
+    from agent_bridge.remote_errors import RemoteBridgeError
+    from agent_bridge.remote_operations import RemoteOperationService
+
+    monkeypatch.setattr("socket.gethostname", lambda: "elsewhere")
+    machines = _machines()
+    machines["box"].display_name = "Same-Name"
+    machines.update(parse_machines_yaml({"machines": {"other": {
+        "alias": "friendly", "hostname": "os-box", "display_name": "same-name",
+        "ssh": {"environments": [{"name": "linux", "alias": "box-linux"}]},
+    }}}))
+    service = RemoteOperationService(AgentResolver({}, machines))
+    with pytest.raises(RemoteBridgeError) as exc:
+        await service._lease(host)
+    assert (exc.value.status, exc.value.code) == (400, "ambiguous_host")
+
+
+@pytest.mark.asyncio
+async def test_remote_operations_preserve_missing_host_error(monkeypatch):
+    from agent_bridge.remote_errors import RemoteBridgeError
+    from agent_bridge.remote_operations import RemoteOperationService
+
+    monkeypatch.setattr("socket.gethostname", lambda: "elsewhere")
+    service = RemoteOperationService(AgentResolver({}, _machines()))
+    with pytest.raises(RemoteBridgeError) as exc:
+        await service._lease("missing")
+    assert (exc.value.status, exc.value.code) == (404, "host_not_found")

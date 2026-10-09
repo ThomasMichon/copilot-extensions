@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .identity import is_local_machine
 from .registry import (
+    AmbiguousMachineError,
     MachineEntry,
     SSHEnvironment,
     find_machine_entry,
@@ -29,6 +30,7 @@ from .transport import (
 )
 
 __all__ = [
+    "AmbiguousMachineError",
     "MachineEntry",
     "SSHEnvironment",
     "TransportPlan",
