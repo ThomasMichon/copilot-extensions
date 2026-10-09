@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 26,
+        "current": 27,
         "minimum": 1,
-        "previous_generation": 25,
+        "previous_generation": 26,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -32,7 +32,8 @@
           23,
           24,
           25,
-          26
+          26,
+          27
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -75,13 +76,14 @@
         "events_before_paging": 23,
         "caller_session_id": 24,
         "cooperative_stop": 25,
-        "codespace_launch_policy": 26
+        "codespace_launch_policy": 26,
+        "current_attention": 27
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "a4b2b7bce385e687a91552e88d5970d80a8b07437b86df4bd0ad45186eff0a67",
+          "sha256": "111b4d721fbcb647c70c76f89b59ba8b0273fe8bc252edd7a131c75e1f3a9018",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -99,7 +101,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "f4c9e7bb47124e20d68e27fe95f2fee3139134965980329621a568be224ec904",
+          "sha256": "fccce8320347fb24c7a3e9a998047ae0d2ef4f34d4f73d7950d096c623898b79",
           "semantic": false,
           "non_semantic_reason": "Adds the before=/limit= backward JSON page (continuity-qualified, atomic with event-log rebuild) to the events route (HTTP generation 23, gated by events_before_paging); forwards an optional caller_session_id from the create request into session rows and the status dict and echoes it in the create/reuse StartSessionResponse (HTTP generation 24, gated by caller_session_id); the representative session-create request shape is otherwise unchanged. The prompt-submit route forwards no_resume and fills the response's session_id with the session that took the prompt (HTTP generation 25, gated by cooperative_stop)."
         },
@@ -125,15 +127,15 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "c62c7d3388c7c7e8d72e61d5361176e0f35f7a5beae644a0047606f461bc1b03",
+          "sha256": "39906bd80aa672a4e79bb7ba8c731c615a0803e3f9324cee8b225f7956721ab3",
           "role": "current health response",
-          "generation": 26
+          "generation": 27
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-response.json",
-          "sha256": "d6078cc275290b6464bf78e376e8f46409e756a589ccd1b98cd22d287192ac39",
+          "sha256": "f240ab3d3d09597681d3238ba33e5cc2f85b9c374599ee4d92ba2d08d9137ec3",
           "role": "current agent-roster list response (force_refresh/require_complete, Phase 3b)",
-          "generation": 26
+          "generation": 27
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-21/health.json",
@@ -167,9 +169,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "15d52ed33da98975ada000817d16f52aaba6f765157bc7a494596a8e33434b58",
+          "sha256": "26bc1b3428013137586b86fa6366566cabc036fc9e8135780964d4c797a4a105",
           "role": "current session-create response",
-          "generation": 26
+          "generation": 27
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
@@ -197,9 +199,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "d25fa86ef8ebc0f81f7b4aa4305b4f8b0cea5908904fafae073889c9ea6b0c30",
+          "sha256": "37c0e2058b759009eecca3a12ea4faff68a40e2d9cd4816f8370b7f7d707e97c",
           "role": "current HTTP range and capability constants",
-          "generation": 26
+          "generation": 27
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
@@ -260,9 +262,47 @@
           "sha256": "17a51cb5479362780a6de3c4e7330029877cbe29334d570f15bf0564934b8d84",
           "role": "previous HTTP generation health evidence",
           "generation": 25
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-26/health.json",
+          "sha256": "c62c7d3388c7c7e8d72e61d5361176e0f35f7a5beae644a0047606f461bc1b03",
+          "role": "previous HTTP generation health evidence",
+          "generation": 26
         }
       ],
       "provenance": [
+        {
+          "commit": "6c0df9bafb15adad594ab3faaef01aa0678e205c",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 27,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "c0216e45c6190fb65957cb8db26e01eeb24610cf",
+          "capture_method": "Read production constants from the pushed head revision; HTTP_PROTOCOL_VERSION is 27 and current_attention is introduced at generation 27."
+        },
+        {
+          "commit": "6c0df9bafb15adad594ab3faaef01aa0678e205c",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 27,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "e315994cc84c26faf267e72c5f6848c823bcb31b",
+          "capture_method": "Serialize StartSessionResponse from the pushed head revision; its protocol_version default follows HTTP generation 27."
+        },
+        {
+          "commit": "6c0df9bafb15adad594ab3faaef01aa0678e205c",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 27,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+          "capture_method": "Invoke the health route shape from the pushed head revision with controlled empty runtime state; the response advertises HTTP generation 27."
+        },
+        {
+          "commit": "6c0df9bafb15adad594ab3faaef01aa0678e205c",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 27,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-captured at generation 27 (current_attention) from the pushed head revision; the agents route and its response shapes are unchanged."
+        },
         {
           "commit": "c93f5e9780268d397e0a509e1ccb1d54ae395881",
           "plugin_version": "0.4.1-dev3",
