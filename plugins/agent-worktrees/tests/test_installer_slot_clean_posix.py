@@ -61,10 +61,12 @@ _HAS_FCNTL = importlib.util.find_spec("fcntl") is not None
 
 
 def _bash_path(p: Path) -> str:
-    """A path suitable for embedding in a colon-delimited `PATH` string
+    """A path suitable for shell variables and a colon-delimited `PATH` string
     under Git Bash: a literal `C:/Users/...` (plain `.as_posix()`) breaks
     PATH-splitting because bash treats the drive letter's `:` as a PATH
-    separator too. MSYS2's own `/c/Users/...` form has no such colon."""
+    separator too. MSYS2's own `/c/Users/...` form has no such colon.
+    Use it consistently: `cd C:/...` can yield a different MSYS mount alias
+    from `cd /c/...`, even with `pwd -P`, invalidating prefix comparisons."""
     posix = p.as_posix()
     if len(posix) >= 2 and posix[1] == ":" and posix[0].isalpha():
         return f"/{posix[0].lower()}{posix[2:]}"
@@ -154,7 +156,8 @@ def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path):
 
     link_dir = tmp_path / ".venv"
     try:
-        link_dir.symlink_to(venv_dir, target_is_directory=True)
+        # A drive-absolute target can switch MSYS mount aliases on traversal.
+        link_dir.symlink_to(venv_dir.relative_to(link_dir.parent), target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"cannot create symlinks in this environment: {exc}")
 
@@ -169,8 +172,8 @@ def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path):
 
     harness = f"""
 set -uo pipefail
-LINK_DIR="{link_dir.as_posix()}"
-VENV_DIR="{venv_dir.as_posix()}"
+LINK_DIR="{_bash_path(link_dir)}"
+VENV_DIR="{_bash_path(venv_dir)}"
 PATH="{_bash_path(fallback_bin)}:$PATH"
 {fn_body}
 }}
@@ -224,8 +227,8 @@ def test_bootstrap_python_exclude_venv_dir_filters_the_path_fallback_too(
 
     harness = f"""
 set -uo pipefail
-LINK_DIR="{link_dir.as_posix()}"
-VENV_DIR="{venv_dir.as_posix()}"
+LINK_DIR="{_bash_path(link_dir)}"
+VENV_DIR="{_bash_path(venv_dir)}"
 PATH="{_bash_path(venv_dir)}/bin:{_bash_path(fallback_bin)}:$PATH"
 {fn_body}
 }}

@@ -16,7 +16,7 @@ import string
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, pr_publish, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, pr_publish, publication_deadline, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
@@ -873,14 +873,11 @@ def create_pr(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
 
     if use_refspec:
-        # Refspec mode (#1815): keep the squashed work ON worktree/<id> and push
-        # it directly to the PR head ref. No local feature branch, no checkout
-        # dance; HEAD never leaves wt_branch, and wt_branch is NOT reset to
-        # upstream -- it legitimately sits ahead of master while the PR is open
-        # (a later `git sync` fast-forwards it clean on merge).
+        # Publish the worktree ref without changing HEAD or resetting its commits.
         with hooks.allow_pr_push():
             pushed = pr_publish.push_checked(
                 record, publish_remote, f"{wt_branch}:refs/heads/{feature_branch}", cwd=worktree_path,
+                timeout=publication_deadline.configured(prcfg),
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
                 force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
             )
@@ -918,6 +915,7 @@ def create_pr(
         with hooks.allow_pr_push():
             pushed = pr_publish.push_checked(
                 record, publish_remote, feature_branch, cwd=worktree_path,
+                timeout=publication_deadline.configured(prcfg),
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
                 force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
             )
@@ -2389,6 +2387,7 @@ def _push_existing_feature(
     with hooks.allow_pr_push():
         pushed = pr_publish.push_checked(
             record, remote, feature_branch, cwd=worktree_path,
+            timeout=publication_deadline.configured(prcfg),
             expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
             force_with_lease_expect=(lease_expect or None),
             force_with_lease=(existing_target is not None), repo=repo,

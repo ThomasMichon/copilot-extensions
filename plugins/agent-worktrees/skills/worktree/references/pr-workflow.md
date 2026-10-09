@@ -448,6 +448,20 @@ Set `head_scheme` per repo to choose; the multi-machine system default is `refsp
 
 ### Step 1: `create-pr`
 
+Managed PR pushes retain a bounded deadline and run the real pre-push hook.
+If legitimate validation needs longer than the default 180 seconds, configure
+`pr.push_timeout_seconds: 300` in the repository's
+`.copilot-extensions/agent-worktrees/config.yaml` (or the machine-local
+`repos.<name>.pr` block). The same per-attempt bound covers `create-pr` reruns
+and PR-mode `push-changes`; publication-lock wait and stale-lock budgets scale
+with it. Only positive, finite numbers whose dependent budgets fit portable
+signed 32-bit millisecond wait limits are accepted—there is no unbounded
+setting. A timeout still kills the entire push/hook process tree. See the
+[configuration reference](../../../docs/config-reference.md#pr-workflow--reposnamepr-machine-local-or-in-repo).
+
+Config drop-ins validate the same deadline before activation; an invalid
+fragment is withdrawn independently without blocking valid peers.
+
 ```
 <agent-worktrees catalog argv[0]> create-pr --title "Concise PR title"
 ```
@@ -595,7 +609,11 @@ Patch IDs are diagnostic metadata only: they discard hunk locations. Authorizati
 reconstructs each source commit's three-way tree on its new parent with
 `git merge-tree --write-tree --merge-base` and requires the actual replay tree.
 Only a genuine conflict with an explicit sequencer continuation may change it;
-an unchanged reconstructed tree proves an already-applied source commit. A Git
+an unchanged reconstructed tree proves an already-applied source commit. Exact
+source commit objects already reachable from the new base also need no replay,
+even when a stale recorded base includes upstream changes later edited again.
+This ancestry check uses the original new base, never later replayed source work
+or patch-ID equivalence. A Git
 version without this plumbing capability refuses recovery explicitly.
 Older runtimes could leave the cached patch ID behind after an incremental
 push; recovery records both that cache and the reconstructed published patch,

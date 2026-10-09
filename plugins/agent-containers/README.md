@@ -234,6 +234,16 @@ CPU/memory/PID ceilings, and default to `network: none`. They must provide an
 explicit per-fleet `acp_command`; there is no implicit
 `--allow-all --experimental` fallback.
 
+Trusted SSH Session Host fleets may opt into the
+[target-local preference launcher](../agent-bridge/docs/session-preferences.md#target-local-container-launcher)
+by placing `{{target_preference_launcher}}` at the final direct execution point
+of their operator-owned `acp_command`. Authentication/proxy/workspace setup stays
+before the token. The provider advertises wrapper-authority v1 only for that
+explicit template and binds preparation to the discovered container instance
+and selected execution user. Appended caller flags cannot enable it.
+This does not change the public caller-settings default, expand a sandbox,
+provision target settings, or support the restricted provider-exec route.
+
 The primary threat is a fallible worker issuing a mistaken/destructive command,
 including one suggested by prompt injection—not an omnipotent hostile tenant.
 Containment therefore prioritizes disposable local state, no host filesystem or

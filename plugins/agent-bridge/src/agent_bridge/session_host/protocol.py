@@ -48,7 +48,7 @@ class MsgType(bytes, enum.Enum):
                        # after the unexpected-disconnect grace window
 
     # Host -> Frontend
-    HELLO = b"H"       # payload: u64 max_seq + u64 child_pid + optional v1
+    HELLO = b"H"       # payload: u64 max_seq + u64 child_pid + optional versioned
                        # execution-preference JSON (legacy clients ignore tail)
     FRAME = b"F"       # payload: u64 seq + raw ACP frame bytes (verbatim)
     LIVENESS = b"L"    # payload: u8 alive(1/0) + u32 exit_code

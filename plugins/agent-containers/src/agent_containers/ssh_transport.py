@@ -443,9 +443,9 @@ def write_remote_env(container: str, user: str, values: dict[str, str]) -> str |
     return remote_path
 
 
-def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> None:
+def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> bool:
     if not remote_path:
-        return
+        return True
     _validate_target(container, user)
     try:
         result = _run([
@@ -454,13 +454,15 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> No
         ])
     except RuntimeError as exc:
         log.warning("Could not clean SSH launch environment in %s: %s", container, exc)
-        return
+        return False
     if result.returncode != 0:
         log.warning(
             "Could not clean SSH launch environment in %s: %s",
             container,
             result.stderr.strip(),
         )
+        return False
+    return True
 
 
 def cleanup_remote_envs(container: str, user: str) -> None:

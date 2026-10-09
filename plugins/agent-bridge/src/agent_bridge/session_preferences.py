@@ -127,6 +127,10 @@ def execution_settings(
 def validate_receipt(receipt: Any, child_pid: int) -> dict[str, Any] | None:
     if not isinstance(receipt, dict):
         return None
+    if receipt.get("version") == 2:
+        from .preference_attestation import valid_receipt
+
+        return receipt if valid_receipt(receipt, child_pid) else None
     if receipt.get("version") != RECEIPT_VERSION or receipt.get("child_pid") != child_pid:
         return None
     if receipt.get("status") not in {"resolved", "missing", "unsupported", "error"}:

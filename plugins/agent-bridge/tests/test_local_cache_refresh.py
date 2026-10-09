@@ -123,7 +123,7 @@ class TestSessionHostConnectionLocalCacheOrdering:
         monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
         monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
         task = asyncio.create_task(_SessionHostConnectionMixin._connect_via_session_host(
-            SimpleNamespace(),
+            SimpleNamespace(_db=None),
             SpawnTarget(type="local", project="example", cwd=None),
             tracker=SimpleNamespace(stage=lambda *args: contextlib.nullcontext()),
             session_id="test-session",
@@ -164,7 +164,7 @@ class TestSessionHostConnectionLocalCacheOrdering:
         spawn = AsyncMock(side_effect=RuntimeError("spawn reached"))
         with pytest.raises(asyncio.CancelledError if cancelled else RuntimeError):
             await _SessionHostConnectionMixin._connect_via_session_host(
-                SimpleNamespace(),
+                SimpleNamespace(_db=None),
                 SpawnTarget(type="local", cwd=str(tmp_path)),
                 tracker=SimpleNamespace(stage=lambda *args: contextlib.nullcontext()),
                 session_id="test-session",

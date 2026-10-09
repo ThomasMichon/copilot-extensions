@@ -11,7 +11,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from . import git_ops, hooks, tracking
+from . import git_ops, hooks, push_timeout, tracking
 
 
 @dataclass(frozen=True)
@@ -169,6 +169,9 @@ def _conflict_lineage(
     current = onto
     index = 0
     for old_sha, old_parent in old_rows:
+        # A stale recorded base can include upstream history later edited again.
+        if _ancestor(old_sha, onto, cwd):
+            continue
         tree, conflicted = _merge_tree(old_parent, current, old_sha, cwd)
         current_tree = _git("rev-parse", f"{current}^{{tree}}", cwd=cwd)
         if not current_tree:
@@ -303,7 +306,8 @@ def record_synced(worktree_id: str, config, cwd: str) -> None:
         _save(proof, cwd)
 
 
-def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) -> git_ops.PushResult:
+def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
+         timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT) -> git_ops.PushResult:
     """The only non-ancestral publish path: a freshly verified owned-PR replay."""
     try:
         proof = verify(record, repo, remote, refspec, expected, cwd=cwd)
@@ -319,7 +323,7 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) ->
         from .git_push_transport import push as transport
         result = transport(
             remote, f"{proof.source_head}:refs/heads/{proof.branch}", cwd=cwd,
-            force_with_lease_expect=expected,
+            force_with_lease_expect=expected, timeout=timeout,
         )
         if result:
             result.rebase_base_sha = proof.new_base

@@ -6,6 +6,8 @@ import json
 import logging
 from pathlib import Path
 
+import pytest
+
 from dropin_registry import (
     EntryDecision,
     EntryStatus,
@@ -80,6 +82,29 @@ def test_operator_yaml_fault_isolated_from_valid_peer(tmp_path):
     assert report.entry_classes[str(valid)] == "operator"
     assert [finding.reason for finding in report.findings] == ["invalid-entry"]
     assert report.findings[0].remedy
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("value", ['"300"', "true", "0", ".inf", "600000"])
+def test_invalid_push_deadline_isolated_from_valid_peer(tmp_path, managed, value):
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    valid = directory / "valid.yaml"
+    valid.write_text("repos:\n  sample:\n    pr:\n      push_timeout_seconds: 600\n", encoding="utf-8")
+    body = f"repos:\n  sample:\n    pr:\n      push_timeout_seconds: {value}\n"
+    if managed:
+        _pointer(directory, source, root, _target(root, body), name="invalid.json")
+    else:
+        (directory / "invalid.yaml").write_text(body, encoding="utf-8")
+    report = dropins.scan_config_dropin_registry(
+        directory, project_name="sample", activation_report=_active_report(source, root),
+    )
+    assert [item.entry for item in report.active_configs] == [valid.resolve()]
+    assert report.active_configs[0].raw_config["repos"]["sample"]["pr"]["push_timeout_seconds"] == 600
+    assert [finding.reason for finding in report.findings] == ["invalid-entry"]
+    assert "repos.sample.pr.push_timeout_seconds" in report.findings[0].detail
 
 
 def test_pr_required_body_sections_rejects_non_string_shape():

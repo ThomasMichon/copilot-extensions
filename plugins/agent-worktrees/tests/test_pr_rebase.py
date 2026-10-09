@@ -143,6 +143,48 @@ def test_owned_pr_rebase_rejects_concurrent_reviewer_commit(pr_repo, command):
     assert _record(wid).pr.head_sha == old
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("drop_source", [False, True], ids=["preserved", "dropped"])
+def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(pr_repo, drop_source):
+    config, wid, path, remote, branch, _ = _prepare(pr_repo)
+    old_base = _record(wid).pr.base_sha
+    first_base = _advance(config, path, "README.md")
+    _git("rebase", "origin/master", cwd=path)
+    assert finalize.push_changes(wid, config)
+    record = _record(wid)
+    published = record.pr.head_sha
+    assert record.pr.base_sha == first_base
+    # Older integrations could advance the source fork without refreshing base_sha.
+    record.pr.base_sha = old_base
+    tracking.save_record(record)
+    (path / "feedback.txt").write_text("unpublished source work\n")
+    _git("add", "feedback.txt", cwd=path)
+    _git("commit", "-m", "source feedback", cwd=path)
+    anchor = Path(config.default_repo.anchor)
+    (anchor / "README.md").write_text("later upstream revision\n")
+    _git("add", "README.md", cwd=anchor)
+    _git("commit", "-m", "edit earlier upstream change", cwd=anchor)
+    _git("push", "origin", "master", cwd=anchor)
+    _git("fetch", "origin", cwd=path)
+    onto = _git("rev-parse", "origin/master", cwd=path)
+    _, conflicted = pr_rebase._merge_tree(old_base, onto, first_base, str(path))
+    assert conflicted  # Reapplying the historical upstream change is not a no-op.
+    if drop_source:
+        _git("rebase", "--onto", "origin/master", published, cwd=path)
+    else:
+        _git("rebase", "origin/master", cwd=path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    assert finalize.push_changes(wid, config) is not drop_source
+    expected = published if drop_source else tip
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == expected
+    if not drop_source:
+        assert (path / "a.txt").read_text() == "one\n"
+        assert (path / "b.txt").read_text() == "two\n"
+        assert (path / "README.md").read_text() == "later upstream revision\n"
+        assert (path / "feedback.txt").read_text() == "unpublished source work\n"
+        assert _record(wid).pr.base_sha == onto
+
+
 @exhaustive
 @pytest.mark.parametrize("mutation", ["reset", "same-tree-reset", "amend", "drop"])
 def test_owned_pr_rebase_refuses_unproved_source_rewrite(pr_repo, mutation):
@@ -315,6 +357,7 @@ def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypa
 
     monkeypatch.setattr(git_ops, "git", fake_git)
     monkeypatch.setattr(pr_rebase.subprocess, "run", fake_run)
+    monkeypatch.setattr(pr_rebase, "_ancestor", lambda *args: False)
     monkeypatch.setattr(pr_rebase, "_merge_tree", lambda *a: ("replay-tree", True))
     assert pr_rebase._conflict_lineage(
         "base", "original", "onto", "finished", ["old-patch"], ["new-patch"],
