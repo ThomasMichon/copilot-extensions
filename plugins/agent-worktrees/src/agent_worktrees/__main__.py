@@ -116,7 +116,7 @@ from . import (
     reclaim,
     sessions,
     sessions_pane_retire,  # noqa: F401 -- compatibility re-export (handoff_cutover.py tests patch m.sessions_pane_retire)
-    tracking, tracking_lifecycle,
+    terminal_identity, tracking, tracking_lifecycle,
 )
 from . import claimant as claimant_mod
 from . import config as cfg
@@ -4056,12 +4056,7 @@ def _run_session_lifecycle(
     result: dict = {}
     project_process = None
     _write_session_lifecycle_receipt(payload, "started")
-    try:
-        from . import terminal_identity
-
-        terminal_identity.record_session_terminal(payload, session_environment)
-    except Exception:
-        pass
+    terminal_identity.record_session_terminal(payload, session_environment)
     try:
         project_process = _start_project_session_hook(cwd, session_environment)
         nudge = _registration_nudge_context(cwd)
