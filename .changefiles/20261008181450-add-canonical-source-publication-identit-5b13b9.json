@@ -1,5 +1,5 @@
 {
-  "comment": "Add canonical source publication identity and locked filesystem admission helpers",
+  "comment": "Add required producer identity loading and canonical publication-key validation",
   "changes": [
     {
       "plugin": "agent-logger",
