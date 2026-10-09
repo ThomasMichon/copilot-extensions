@@ -748,6 +748,14 @@ _Pending review of this plan._
   Three diagnostic regressions and the real launch pass. The wrapper,
   owner Job Object, launch transport, assertions, and every timeout remain
   unchanged. Fresh hosted evidence and diagnosis remain required.
+- Diagnostic-enabled normal run 37995292958 passed all 7,433 cases with
+  42 legitimate skips in 695.47 seconds including cleanup; the slowest
+  group took 124.73 seconds and the real wrapper took 4.26 seconds.
+  The earlier isolated stall remains unproven, not silently reclassified
+  as harmless. Current review also caught an omitted `os.walk` error
+  callback in the docs-consistency guard; enumeration now raises the
+  original error and a denied-subtree regression proves it fails closed.
+  All eight docs-scan regressions pass with unchanged exclusions.
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged

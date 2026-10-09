@@ -111,6 +111,23 @@ def test_excluded_subtrees_are_not_enumerated(tmp_path, monkeypatch):
     assert tmp_path / "node_modules-copy" / "deep" in visited
 
 
+def test_unreadable_markdown_subtree_fails_closed(tmp_path, monkeypatch):
+    blocked = tmp_path / "docs"
+    blocked.mkdir()
+    real_scandir = os.scandir
+
+    def denied_scandir(path):
+        if Path(path) == blocked:
+            raise PermissionError("cannot enumerate Markdown subtree")
+        return real_scandir(path)
+
+    monkeypatch.setattr(checker, "REPO", tmp_path)
+    monkeypatch.setattr(os, "scandir", denied_scandir)
+    expected = dict.fromkeys(("total", "runtime", "payload", "cc_skills"), 1)
+    with pytest.raises(PermissionError, match="cannot enumerate Markdown subtree"):
+        checker.check_counts(expected)
+
+
 @pytest.mark.parametrize("excluded", [".worktrees", "node_modules"])
 def test_excluded_ancestor_still_excludes_entire_tree(tmp_path, monkeypatch, excluded):
     repo = tmp_path / excluded / "repo"

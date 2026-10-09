@@ -108,12 +108,16 @@ COUNT_PATTERNS = [
 ]
 
 
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
 def _markdown_paths() -> Iterator[Path]:
     """Keep glob candidates, but never descend into already-excluded trees."""
     excluded = {".worktrees", "node_modules"}
     if excluded.intersection(REPO.parts):
         return
-    for root, dirs, files in os.walk(REPO):
+    for root, dirs, files in os.walk(REPO, onerror=_raise_walk_error):
         dirs[:] = [name for name in dirs if name not in excluded]
         # Glob also yields matching directories; preserve their read errors.
         for name in dirs + files:
