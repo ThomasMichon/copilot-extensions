@@ -1053,6 +1053,11 @@ appropriately larger/riskier for one sitting):
   code; an unusable result is discarded before the shared uv fallback.
   The regression matrix covers usable/unusable results at both zero and
   nonzero exit codes.
+- Native Windows validation exposed fixture uv lookup escaping to a real
+  bootstrap. Fixtures now select their fake executable explicitly and forbid
+  bootstrap/service/process effects. The corrected native installer/recovery
+  and launch-memory selection passes: 52 passed / 15 skipped, including a
+  native signed-venv health matrix. Deployment remains outstanding.
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-pull-requests --reinstall --admission-wait 540`
     -> PASS (`21 passed`) after the shared POSIX binstub helper picked up the
     same success-without-runtime exit fix this leg needed for agent-vault
