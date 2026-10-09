@@ -172,9 +172,7 @@ def validate_session_ref(ref: sessions.SessionRef) -> None:
     else:
         _directory(ref.path.parent)
         member = ref.path
-        sidecars = (
-            ref.path.parent / f"{ref.id}.{name}" for name in sessions.SIDECAR_MEMBERS
-        )
+        sidecars = (ref.path.parent / f"{ref.id}.{name}" for name in sessions.SIDECAR_MEMBERS)
     _regular_member(member)
     for sidecar in sidecars:
         _regular_member(sidecar, optional=True)
@@ -267,9 +265,18 @@ def _metadata(
 ) -> tuple[SourceIdentity | None, tuple[str, ...], MarkerStamp | None]:
     marker = path / SOURCE_METADATA_MEMBER
     try:
-        info = marker.lstat()
+        marker.lstat()
     except FileNotFoundError:
         return None, (), None
+    return read_source_metadata(marker)
+
+
+def read_source_metadata(
+    marker: Path,
+) -> tuple[SourceIdentity, tuple[str, ...], MarkerStamp]:
+    """Read required identity metadata through the common bounded, no-link reader."""
+    _directory(marker.parent)
+    info = marker.lstat()
     if is_link_or_reparse(marker, info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise SourceLayoutError(f"archive source metadata is not regular: {marker}")
     with open_regular_no_follow(marker) as stream:
