@@ -48,7 +48,8 @@ the trust model and both postures are owned by the
 - **The coordination layer — the venue-agnostic dispatch core.** agent-bridge
   already owns the daemon, the session lifecycle, the credential-relay server,
   and the plugin **resolution** logic. It also owns every venue-agnostic *launch*
-  concern: propagating the host's model/effort/context to the dispatched agent,
+  concern: applying the selected model/effort/context preference policy
+  (caller-host defaults unless an execution-side policy is explicitly selected),
   resolving a repo's own in-repo (`.ai`/`.claude`) skills and other
   `--plugin-dir`s, landing the agent in a concrete working directory, and
   monitoring/coordinating the resulting session. The core computes these once;
@@ -123,11 +124,20 @@ the trust model and both postures are owned by the
 ## Features
 
 ### venue-agnostic-launch
-The dispatched agent inherits the host's **model, reasoning effort, and context
+By default, the dispatched agent inherits the host's **model, reasoning effort, and context
 tier**, its resolved **in-repo skills / `--plugin-dir`s**, and a **concrete
 working directory** — computed by the core and applied identically in every
 venue. Plugins that explicitly target *operating within a venue* (an in-context
 venue-agent plugin) remain venue-scoped and are layered on top.
+
+### execution-side-preference-authority
+An explicit alternative policy may resolve defaults under the executing user's
+identity rather than the caller's. Caller-host propagation remains the default.
+The selected policy should preserve explicit choices, intentional backend
+profiles, and confirmed session selections across resume. Its execution
+authority and effective model/effort/context should be observable; an
+unsupported identity boundary or context capability must never masquerade as
+successful inheritance or silently switch to caller defaults.
 
 ### single-ssh-transport
 SSH-backed remote venues are reached over **one SSH transport**. A container provides an SSH
@@ -197,7 +207,7 @@ A fix to a shared dispatch code path takes effect in **every** venue at once;
 there is no second venue where the same class of bug must be re-fixed.
 
 ### fail-loud-not-silent-degrade
-When a venue-agnostic guarantee cannot be met — the host model didn't propagate,
+When a venue-agnostic guarantee cannot be met — the selected preference didn't apply,
 a token couldn't be bootstrapped, the relay back-channel didn't establish — the
 dispatch **surfaces it** rather than silently falling back to a degraded default.
 

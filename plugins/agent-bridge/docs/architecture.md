@@ -40,6 +40,7 @@ Copilot CLI sessions (multiple)
 | SSH carrier | `carrier.py` + vendored `ssh-manager` | One bounded, reconnecting framed stdio carrier per normalized SSH connection identity |
 | ACP agent | `acp_agent.py` | Upstream ACP agent interface (stdio mode) |
 | ACP client | `acp_client.py` | Downstream ACP client (subprocess comms) |
+| Preference authority | `session_preferences.py` | Optional execution-bound preference receipts and selected-state restoration; [contract and limits](session-preferences.md) |
 | Sub-agent tracking | `acp_subagents.py` | Background-task detection and sub-agent attribution from Copilot's raw session-event feed |
 | Events | `events.py` | SSE event log with durable IDs; content-free session, conversation, and tool-call telemetry reduction. Owned and represented sources are labeled; represented turn completion supplies its terminal idle boundary. |
 | Config | `config.py` | Config loading, topology management |

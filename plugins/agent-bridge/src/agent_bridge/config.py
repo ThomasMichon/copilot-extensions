@@ -130,6 +130,7 @@ def load_config() -> ServiceConfig:
     root = config_dir()
     cfg_path = root / "config.yaml"
     if cfg_path.exists():
+        data = None
         try:
             data = yaml.safe_load(cfg_path.read_text()) or {}
             # Lazy schema migration (in memory, never persists / never raises) so
@@ -141,7 +142,11 @@ def load_config() -> ServiceConfig:
             if isinstance(data, dict):
                 data = _normalize_service_config(data, root=root)
             return ServiceConfig(**data)
-        except Exception:
+        except Exception as exc:
+            if isinstance(data, dict) and data.get("preference_source") == "target-settings":
+                raise ValueError(
+                    "Invalid target-settings configuration; refusing caller-settings fallback"
+                ) from exc
             log.warning("Failed to parse %s, using defaults", cfg_path)
     return ServiceConfig(
         db_path=str(default_db_path(root)),

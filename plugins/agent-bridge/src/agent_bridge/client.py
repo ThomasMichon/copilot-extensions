@@ -1001,6 +1001,8 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         env: dict[str, str] | None = None,
         model: str | None = None,
         effort: str | None = None,
+        preference_source: str | None = None,
+        context: str | None = None,
         copilot_args: list[str] | None = None,
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
@@ -1019,6 +1021,19 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         ``caller_session_id`` is sent only to a daemon that records it.
         """
         body: dict[str, Any] = {}
+        from .protocol import TARGET_PREFERENCES_PROTOCOL_VERSION
+        from .session_preferences import SOURCE_ENV, CONTEXT_ENV, SOURCES
+
+        selected_source = preference_source or (env or {}).get(SOURCE_ENV)
+        if selected_source is not None and selected_source not in SOURCES:
+            raise ValueError("unsupported preference_source")
+        if selected_source is not None or context is not None or (env or {}).get(CONTEXT_ENV):
+            if not self.daemon_supports(TARGET_PREFERENCES_PROTOCOL_VERSION):
+                raise BridgeClientError(426, "The daemon does not support execution preference policy")
+        if preference_source is not None:
+            body["preference_source"] = preference_source
+        if context is not None:
+            body["context"] = context
         if agent:
             body["agent"] = agent
         if args := (["--agent", charter, *(copilot_args or [])] if charter else copilot_args):

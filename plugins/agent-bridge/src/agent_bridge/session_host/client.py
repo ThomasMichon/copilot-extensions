@@ -13,7 +13,11 @@ through the host transparently.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
+from typing import Any
+
+from ..session_preferences import MAX_RECEIPT_BYTES, validate_receipt
 
 from . import protocol as proto
 
@@ -22,6 +26,7 @@ from . import protocol as proto
 class Hello:
     max_seq: int
     child_pid: int
+    preference_receipt: dict[str, Any] | None = None
 
 
 class SessionHostClient:
@@ -64,8 +69,15 @@ class SessionHostClient:
         if msg is None or msg[0] != proto.MsgType.HELLO:
             raise ConnectionError("session host did not send HELLO")
         payload = msg[1]
+        child_pid = proto.unpack_u64(payload[8:16])
+        receipt = None
+        if 16 < len(payload) <= 16 + MAX_RECEIPT_BYTES:
+            try:
+                receipt = validate_receipt(json.loads(payload[16:]), child_pid)
+            except (ValueError, UnicodeError):
+                pass
         return Hello(max_seq=proto.unpack_u64(payload[:8]),
-                     child_pid=proto.unpack_u64(payload[8:16]))
+                     child_pid=child_pid, preference_receipt=receipt)
 
     async def frames(self):
         """Async-iterate ``(seq, frame_bytes)`` until the connection ends.
