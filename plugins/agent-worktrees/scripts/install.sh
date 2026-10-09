@@ -49,6 +49,11 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
 done
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     CONTEXTUAL_INSTALL=true
+    __aw_origin_payload="$PLUGIN_DIR"
+    if [[ "$PLUGIN_DIR" != */.copilot/installed-plugins/* &&
+          -n "${COPILOT_PLUGIN_STAGED_FROM:-}" ]]; then
+        __aw_origin_payload="$COPILOT_PLUGIN_STAGED_FROM"
+    fi
     case "$__aw_action" in
         install|update|status) ;;
         *)
@@ -81,7 +86,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             --context "$COPILOT_EXTENSIONS_CONTEXT" \
             --durable-home "$__aw_durable_home" \
             --expected-plugin-id agent-worktrees \
-            --expected-payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+            --expected-payload-root "$__aw_origin_payload"
     )" || exit $?
     __aw_context_root="$(
         LC_ALL=C awk -f "$__aw_json_query" \
@@ -103,7 +108,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     }
     __aw_status_args=(
         status
-        --payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+        --payload-root "$__aw_origin_payload"
         --plugin-id agent-worktrees
         --legacy-root "$HOME/.agent-worktrees"
         --context "$COPILOT_EXTENSIONS_CONTEXT"
@@ -161,7 +166,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 --context "$COPILOT_EXTENSIONS_CONTEXT" \
                 --durable-home "$__aw_durable_home" \
                 --expected-plugin-id agent-worktrees \
-                --expected-payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+                --expected-payload-root "$__aw_origin_payload"
         )" || return 1
         current_namespace="$(
             __aw_context_value "$current_validated" namespaceGeneration
@@ -182,9 +187,16 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
 
     # The standard self-stage block is intentionally byte-identical across
     # plugins and stages beneath the legacy root. Context installs stage here
-    # instead, inside the selected installation, then mark the child staged so
-    # the standard block remains inert.
-    if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
+    # instead, inside the selected installation. Only a relocated context child
+    # may skip attributable staging.
+    if [[ "${COPILOT_PLUGIN_INSTALL_STAGED:-}" != context-install ||
+          "$PLUGIN_DIR" == */.copilot/installed-plugins/* ]]; then
+        case "${OSTYPE:-}:$PWD" in
+            msys*:*/.copilot/installed-plugins/*|cygwin*:*/.copilot/installed-plugins/*)
+                printf 'self-stage failed: Windows shell launch CWD pins the payload; launch from HOME or use install.ps1\n' >&2
+                exit 1
+                ;;
+        esac
         cd "$HOME"
         __aw_stage_root="$__aw_install_root/.install-stage"
         __aw_stage="$__aw_stage_root/$(date -u +%Y%m%dT%H%M%S)-$$"
@@ -208,13 +220,14 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         fi
         export COPILOT_PLUGIN_INSTALL_STAGED=context-install
         export COPILOT_PLUGIN_STAGED_FROM="$PLUGIN_DIR"
+        __aw_watchdog="$(cat <<'CONTEXT_INSTALL_WATCHDOG'
+        __aw_staged_entry=$1
+        __aw_stage=$2
+        __aw_deadline=$3
+        __aw_install_root=$4
+        shift 4
         set -m
-        (
-            cd "$__aw_staged_payload"
-            exec bash \
-                "$__aw_staged_payload/scripts/$(basename "${BASH_SOURCE[0]}")" \
-                "$@"
-        ) &
+        bash "$__aw_staged_entry" "$@" &
         __aw_child=$!
         set +m
         __aw_watcher=""
@@ -241,13 +254,13 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                     __aw_waited=$((__aw_waited + 1))
                     if [[ "$__aw_waited" -ge "$__aw_deadline" ]]; then
                         : >"$__aw_stage/.watchdog-fired"
-                        kill -- -"$__aw_child" 2>/dev/null ||
-                            kill "$__aw_child" 2>/dev/null || true
                         printf '[%sZ] WATCHDOG-KILL agent-worktrees context install exceeded %ss deadline (child pid %s); killed tree. Stage: %s\n' \
                             "$(date -u +%Y-%m-%dT%H:%M:%S)" \
                             "$__aw_deadline" "$__aw_child" "$__aw_stage" \
                             >>"$__aw_install_root/reconcile.err.log" 2>/dev/null ||
                             true
+                        kill -- -"$__aw_child" 2>/dev/null ||
+                            kill "$__aw_child" 2>/dev/null || true
                         break
                     fi
                 done
@@ -267,6 +280,11 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         rm -rf "$__aw_stage"
         trap - INT TERM
         exit "$__aw_rc"
+CONTEXT_INSTALL_WATCHDOG
+        )"
+        exec bash -c "$__aw_watchdog" bash \
+            "$__aw_staged_payload/scripts/$(basename "${BASH_SOURCE[0]}")" \
+            "$__aw_stage" "$__aw_deadline" "$__aw_install_root" "$@"
     fi
 fi
 
@@ -291,13 +309,25 @@ fi
 # session-start-hook failure class) self-terminates instead of leaking forever.
 # Best-effort, pid-guarded reap of dead-owner stage dirs (a concurrent or wedged
 # installer's dir is never touched -- it uses its own unique dir).
-if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
+if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" == */.copilot/installed-plugins/* ]]; then
     __ss_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     __ss_payload="$(cd "$__ss_self_dir/.." && pwd)"
     case "$(printf '%s' "$__ss_payload" | tr '\\' '/')" in
         */.copilot/installed-plugins/*)
             __ss_name="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$__ss_payload/plugin.json" 2>/dev/null | head -1)"
             if [[ -n "$__ss_name" ]]; then
+                case "${OSTYPE:-}:$PWD" in
+                    msys*:*/.copilot/installed-plugins/*|cygwin*:*/.copilot/installed-plugins/*)
+                        printf 'self-stage failed: Windows shell launch CWD pins the payload; launch from HOME or use install.ps1\n' >&2
+                        exit 1
+                        ;;
+                esac
+                # Maintenance keeps HOME as CWD; build inputs are absolute staged paths.
+                if ! cd "$HOME"; then
+                    printf 'self-stage failed: cannot leave the replaceable payload\n' >&2
+                    exit 1
+                fi
                 __ss_root="$HOME/.$__ss_name/.install-stage"
                 __ss_stage="$__ss_root/$(date -u +%Y%m%dT%H%M%S)-$$"
                 if mkdir -p "$__ss_stage" && cp -a "$__ss_payload" "$__ss_stage/"; then
@@ -330,10 +360,33 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
                     # (the POSIX twin of Windows `taskkill /T`). setsid -w is
                     # avoided: on some util-linux builds it swallows the child's
                     # exit code (returns 0), which would mask a failed install.
+                    # Re-exec the watchdog without a payload script descriptor.
+                    # Merely changing CWD leaves bash's script handle open on Windows.
+                    __ss_watchdog="$(cat <<'INSTALL_WATCHDOG'
+                    __ss_entry=$1
+                    __ss_name=$2
+                    __ss_stage=$3
+                    __ss_deadline=$4
+                    shift 4
                     set -m
                     bash "$__ss_entry" "$@" &
                     __ss_child=$!
                     set +m
+                    __ss_watcher=""
+                    __ss_cancel() {
+                        local signal_rc="$1"
+                        kill -- -"$__ss_child" 2>/dev/null ||
+                            kill "$__ss_child" 2>/dev/null || true
+                        wait "$__ss_child" 2>/dev/null || true
+                        if [[ -n "$__ss_watcher" ]]; then
+                            kill "$__ss_watcher" 2>/dev/null || true
+                            wait "$__ss_watcher" 2>/dev/null || true
+                        fi
+                        trap - INT TERM
+                        exit "$signal_rc"
+                    }
+                    trap '__ss_cancel 130' INT
+                    trap '__ss_cancel 143' TERM
                     if [[ "$__ss_deadline" -gt 0 ]]; then
                         (
                             __ss_waited=0
@@ -342,10 +395,10 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
                                 __ss_waited=$((__ss_waited + 1))
                                 if [[ "$__ss_waited" -ge "$__ss_deadline" ]]; then
                                     : > "$__ss_stage/.watchdog-fired"
-                                    kill -- -"$__ss_child" 2>/dev/null || kill "$__ss_child" 2>/dev/null || true
                                     printf '[%sZ] WATCHDOG-KILL %s: install exceeded %ss deadline (child pid %s); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: %s\n' \
                                         "$(date -u +%Y-%m-%dT%H:%M:%S)" "$__ss_name" "$__ss_deadline" "$__ss_child" "$__ss_stage" \
                                         >> "$HOME/.$__ss_name/reconcile.err.log" 2>/dev/null || true
+                                    kill -- -"$__ss_child" 2>/dev/null || kill "$__ss_child" 2>/dev/null || true
                                     break
                                 fi
                             done
@@ -358,9 +411,17 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
                         exit "$__ss_rc"
                     fi
                     if wait "$__ss_child"; then exit 0; else exit $?; fi
+INSTALL_WATCHDOG
+                    )"
+                    exec bash -c "$__ss_watchdog" bash \
+                        "$__ss_entry" "$__ss_name" "$__ss_stage" "$__ss_deadline" "$@"
                 else
-                    printf '  [WARN] self-stage failed, running in place\n' >&2
+                    printf 'self-stage failed; refusing to run from the replaceable payload\n' >&2
+                    exit 1
                 fi
+            else
+                printf 'self-stage requires a plugin identity before leaving the payload\n' >&2
+                exit 1
             fi
             ;;
     esac
@@ -391,8 +452,8 @@ if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then
     fi
     __sm_staged=false
     if [[ -n "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then __sm_staged=true; fi
-    printf '{"ran_from":"%s","staged_from":"%s","staged":%s,"child_pid":%s,"grandchild_pid":%s}\n' \
-        "$__sm_self_dir" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$__sm_staged" "$$" "$__sm_grand_pid" \
+    printf '{"ran_from":"%s","staged_from":"%s","staged":%s,"working_dir":"%s","child_pid":%s,"grandchild_pid":%s}\n' \
+        "$__sm_self_dir" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$__sm_staged" "$PWD" "$$" "$__sm_grand_pid" \
         > "$__sm_home/smoke.json"
     sleep "$__sm_sleep"
     exit 0

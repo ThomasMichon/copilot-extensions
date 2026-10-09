@@ -151,7 +151,7 @@ now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # inside one flat `bash -c`, so it stays nohup-protected end to end -- no
 # extra un-nohup'd wrapper subshell that could die to a SIGHUP the nohup'd
 # child itself would have survived.
-nohup bash -c '
+(cd "$HOME" && exec nohup bash -c '
   reconcile_log="$1"; status_file="$2"; deployed="$3"; current="$4"; started_at="$5"
   shift 5
   bash "$@" >"$reconcile_log" 2>&1
@@ -161,7 +161,7 @@ nohup bash -c '
   printf "{\"at\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"launched_pid\":%s,\"log\":\"%s\",\"completed_at\":\"%s\",\"exit_code\":%d,\"success\":%s}\n" \
     "$started_at" "$deployed" "$current" "${BASHPID:-$$}" "$reconcile_log" "$completed_at" "$rc" "$success" \
     >"$status_file" 2>/dev/null || true
-' _ "$reconcile_log" "$status_file" "$deployed" "$current" "$now" "${target[@]}" &
+' _ "$reconcile_log" "$status_file" "$deployed" "$current" "$now" "${target[@]}") &
 launched_pid=$!
 printf '{"at":"%s","from":"%s","to":"%s","launched_pid":%s,"log":"%s"}\n' \
   "$now" "$deployed" "$current" "$launched_pid" "$reconcile_log" \

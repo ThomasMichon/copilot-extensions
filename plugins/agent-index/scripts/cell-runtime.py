@@ -260,13 +260,14 @@ def _run_context(
     ]
     result = subprocess.run(
         command,
-        cwd=payload_root,
+        cwd=Path.home(),
         env=_isolated_environment(),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -1353,33 +1354,22 @@ def _git_source(path: Path) -> tuple[str | None, str | None, bool]:
     if _source_kind(path) != "local":
         return None, None, False
     repo = path.parent.parent
+
+    def read_git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *arguments],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        ).stdout.strip()
+
     try:
-        commit = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        ).stdout.strip()
-        branch = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        ).stdout.strip()
-        dirty = bool(
-            subprocess.run(
-                ["git", "-C", str(repo), "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=True,
-            ).stdout
-        )
+        commit = read_git("rev-parse", "--short", "HEAD")
+        branch = read_git("rev-parse", "--abbrev-ref", "HEAD")
+        dirty = bool(read_git("status", "--porcelain"))
         return commit, branch, dirty
     except (OSError, subprocess.SubprocessError):
         return "unknown", "unknown", False

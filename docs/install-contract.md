@@ -1464,12 +1464,40 @@ payload into a **unique per-invocation** dir `~/.<name>/.install-stage/<ts>-<pid
 and **re-exec from there**. The singleton payload is then touched only for the fast
 copy, never the whole (possibly-wedged) install. Guards:
 - `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
-  `installed-plugins`) is a second guard.
+  `installed-plugins`) is authoritative. An inherited staging flag from another
+  installer cannot suppress staging when the actual script still resides in the
+  installed payload. Both staging and leaving the payload must succeed; failure
+  aborts instead of falling back to an in-place build.
+- Maintenance/reconciliation launchers start their children from HOME. Windows
+  launchers set `WorkingDirectory` explicitly; PowerShell provider location and
+  native process CWD are distinct. The staged installer also runs from HOME,
+  resolving all build inputs by absolute runtime-owned staged paths. Ordinary
+  task/workspace commands retain their caller's project context.
+- Structured worktrees installs retain their context-owned staging path even
+  with inherited flags; they never fall through into legacy staging. Read-only
+  index status and dependency-light cell-slot actions remain exempt from legacy
+  staging and its filesystem writes. Index cell coordinators and their context
+  helper children keep HOME as CWD even while waiting on installation locks.
+- POSIX watchdogs re-exec as a command rather than retaining the original payload
+  script as their input. On Windows, MSYS/Cygwin emulated exec additionally keeps
+  the original launch process and its native CWD alive: launch those scripts from
+  HOME, or use the native PowerShell entrypoint. A shell installer started inside
+  an installed payload on those hosts fails explicitly instead of pinning it.
 - `COPILOT_PLUGIN_STAGED_FROM=<real payload path>` preserves marketplace detection
   (see [Source](#source--where-the-installer-runs-from-no-flag)).
 - **Reap is pid-guarded:** a sibling stage dir is removed only if its owner pid (the
   `<ts>-<pid>` suffix) is **dead** — a concurrent or stalled installer's dir is never
   touched. *A stalled install must never block another copy.*
+
+`tools/test_payload_cwd_contract.py` exercises first-touch staging with absent and
+inherited flags, failed relocation, and directory rename/replacement while the
+installer/watchdog is still alive. Generated Windows command shims check both
+logical and native CWD before redirecting off a payload, including when a caller
+has already used `Set-Location` without releasing its native directory handle.
+When that logical location is already a safe workspace, only the native CWD is
+updated; the caller's workspace is preserved rather than replaced by HOME.
+The path-gated `Payload CWD contract` workflow runs a focused Linux/Windows smoke
+on relevant PRs; its scheduled/manual lane runs the full inherited-flag matrix.
 
 ### Watchdog — a stalled install self-terminates (fixes stall-outs)
 
