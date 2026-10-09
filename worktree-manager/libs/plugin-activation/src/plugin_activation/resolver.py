@@ -160,8 +160,12 @@ def _decision_findings(
 def resolve_active_plugins(
     *,
     home: str | Path | None = None,
+    include_projects: bool = True,
 ) -> ActivationReport:
-    """Resolve global or registered-project sources with tri-state authority."""
+    """Resolve sources with tri-state authority; optionally restrict to global.
+
+    Global-only callers do not inspect registered projects or their overrides.
+    """
     user_home = Path(home).expanduser() if home is not None else Path.home()
     copilot_home = user_home / ".copilot"
     agent_worktrees_home = user_home / ".agent-worktrees"  # marketplace-isolation: allow registry
@@ -186,25 +190,27 @@ def resolve_active_plugins(
         if candidate.indeterminate:
             source_indeterminate.add(source)
 
-    project_roots, project_findings, projects_authority = _verified_project_roots(
-        agent_worktrees_home
-    )
-    registry_findings.extend(project_findings)
-    settings_authorities = [global_settings.authority, projects_authority]
-    for project, root in project_roots:
-        project_settings = _read_settings(root, SETTINGS_RELS)
-        settings_authorities.append(project_settings.authority)
-        registry_findings.extend(project_settings.findings)
-        for source in project_settings.settings.enabled_sources():
-            scope = f"project:{project}"
-            scopes[source].add(scope)
-            candidate = _local_root(source, project_settings, base=root, _memo=memo)
-            source_findings[source].extend(candidate.findings)
-            if candidate.root is not None:
-                local_roots[source].add(candidate.root)
-                scope_local_roots[source][scope] = candidate.root
-            if candidate.indeterminate:
-                source_indeterminate.add(source)
+    settings_authorities = [global_settings.authority]
+    if include_projects:
+        project_roots, project_findings, projects_authority = _verified_project_roots(
+            agent_worktrees_home
+        )
+        registry_findings.extend(project_findings)
+        settings_authorities.append(projects_authority)
+        for project, root in project_roots:
+            project_settings = _read_settings(root, SETTINGS_RELS)
+            settings_authorities.append(project_settings.authority)
+            registry_findings.extend(project_settings.findings)
+            for source in project_settings.settings.enabled_sources():
+                scope = f"project:{project}"
+                scopes[source].add(scope)
+                candidate = _local_root(source, project_settings, base=root, _memo=memo)
+                source_findings[source].extend(candidate.findings)
+                if candidate.root is not None:
+                    local_roots[source].add(candidate.root)
+                    scope_local_roots[source][scope] = candidate.root
+                if candidate.indeterminate:
+                    source_indeterminate.add(source)
 
     authority = _combine_authority(*settings_authorities)
     decisions: dict[str, EntryDecision[ActivePlugin]] = {}

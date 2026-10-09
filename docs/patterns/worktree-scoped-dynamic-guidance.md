@@ -145,8 +145,8 @@ depends on a hook having run.
 
 ### 4. Refresh at worktree lifecycle boundaries, not every session
 
-The render step is triggered by `agent-worktrees` at worktree **create and
-resume** -- before the first (or next) session in that worktree even starts,
+The render step is triggered by `agent-worktrees` at worktree **create,
+resume, and local JSON launch planning** -- before the first (or next) session in that worktree even starts,
 so the harness's own directory scan (if it reads live files rather than a git
 index) may pick it up with zero reliance on the catch-all at all. This
 mirrors the existing manual "an anchor-repo user restarts to pick up a
@@ -159,7 +159,7 @@ invoked CLI's whole process tree on a stall, not just its direct child) --
 never importing that plugin's Python package directly, per
 [`a-la-carte-independence.md`](a-la-carte-independence.md)'s "no
 cross-plugin reach-around" rule. The sibling's root is resolved through
-`plugin_activation.resolve_active_plugins()` -- the same identity-verified
+`plugin_activation.resolve_active_plugins(include_projects=False)` -- the same identity-verified
 active-plugin evidence `claim_providers.py` uses for its own sibling
 callbacks -- rather than trusting a directory merely because it
 self-declares the expected name in a `plugin.json`, per
@@ -172,14 +172,27 @@ missing or ambiguous provenance (zero, or more than one, matching active
 plugin) fails closed. This resolution step itself runs in its own
 bounded subprocess (`python -m agent_worktrees.local_cache_refresh
 <home>`) rather than in-process or on a bare thread, since the resolver
-can spawn Git child processes verifying registered projects that only a
-real process-tree kill can guarantee don't outlive a timeout.
+performs bounded global identity discovery without visiting unrelated registered
+projects. Process-tree containment still protects its filesystem I/O.
 `worktree_creation._create_worktree_core` and
 `resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
-call it at exactly the point described above. Fully best-effort: customizing-
+call it at exactly the point described above. `resolve_cli._resolve_json_mode`
+also prepares the selected local base/worktree before returning its launch
+command. Dry-run plans never render. Fully best-effort: customizing-
 copilot not being installed, the repo not yet being trusted, a subprocess
-timeout, or any other render failure are all silently absorbed, never
-gating create/resume itself.
+timeout, or any other render failure never gate create/resume itself, but
+return attributable outcomes and log degradation rather than disappear.
+Outcomes distinguish ready (installed/unchanged), partial safe delivery,
+unavailable renderer, timeout, failed render and deliberately skipped work.
+Renderer JSON counts generic warnings separately from blocking findings; warnings
+include budget audits, ownership handoffs and retained-file protections. An
+over-budget installation is still ready.
+The renderer's additive `written` and `removed` JSON lists distinguish delivery
+from stale-cache cleanup; legacy `changed` remains the complete mutation list.
+Consumers count only written/unchanged paths as installed guidance and put
+blocking safety findings first when bounding diagnostic details. An older
+renderer missing this accounting contract is reported as degraded, never
+guessed to have installed files it might have removed.
 
 The plugin's `sessionStart` hook repeats the same render as a backup, to
 catch payload drift accrued between a worktree's creation/resume and the
@@ -193,11 +206,12 @@ within the hook's own request handling, never dispatched to a background
 thread. **Landed**: `agent_worktrees.__main__._run_session_lifecycle` (the
 real `sessionStart` handler `hook_client.py`'s thin client dispatches to)
 calls `local_cache_refresh.sessionstart_diagnostic()` as this synchronous
-backup step, alongside its existing anchor-hygiene and provisioning
-diagnostics. Its subprocess call is bounded by a timeout derived from the
+backup step before registration and later provisioning diagnostics. It resolves
+a nested session cwd back to the checkout root and includes the refresh
+outcome in the lifecycle diagnostic stream. Its subprocess call is bounded by a timeout derived from the
 hook's own remaining decision-deadline budget (capped at
 `local_cache_refresh.SESSIONSTART_MAX_TIMEOUT_S`), and skipped entirely once
-too little budget remains -- so it can never itself cause the resident hook
+too little budget remains, with an explicit skipped diagnostic -- so it can never itself cause the resident hook
 server to miss its own response deadline.
 
 `agent-bridge`'s own `target.type == "local"` spawn path is the one
@@ -217,6 +231,16 @@ process, but this call sits inside `agent-bridge`'s own long-lived event
 loop, shared by every concurrent session the daemon serves, so every
 subprocess call here is natively async (never a synchronous call or a
 background thread a timeout could only abandon, not actually stop).
+The bridge awaits completion before spawn and logs unavailable, partial,
+failed, timeout and audit-warning outcomes. Discovery and rendering share the
+actual remaining elapsed-time budget rather than reserving unused discovery
+time.
+
+Remote Session Host providers do not run this host-local renderer against a
+remote path. Target-side worktree creation/resolve and installed session-start
+hooks own their corresponding refreshes. A provider bypassing those boundaries
+needs target-side preparation; host-local success is not evidence of remote
+installation.
 
 ### 5. The checked-in copy remains the unconditional floor
 

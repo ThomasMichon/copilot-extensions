@@ -16,13 +16,241 @@ from __future__ import annotations
 import json
 import os
 import sys
+import subprocess
+import shutil
+import time
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import local_cache_refresh as lcr
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _renderer_json(*, changed=None, unchanged=None, warnings=0, blocking=0):
+    return json.dumps({
+        "operation": "render-local-cache",
+        "changed": changed or [],
+        "written": changed or [],
+        "removed": [],
+        "unchanged": unchanged or [],
+        "warnings": warnings,
+        "blocking": blocking,
+        "findings": [],
+    })
+
+
+@pytest.mark.parametrize(
+    "blocking,changed,returncode,expected",
+    [(0, ["local"], 0, "ready"), (1, ["local"], 1, "partial"),
+     (1, [], 1, "failed"), (0, [], 1, "failed")],
+)
+def test_renderer_outcomes_preserve_actual_delivery(blocking, changed, returncode, expected):
+    result = lcr._render_result(
+        _renderer_json(changed=changed, warnings=4, blocking=blocking), returncode
+    )
+    assert result.status == expected
+    assert result.changed == len(changed)
+    assert result.warnings == 4
+    assert result.blocking == blocking
+
+
+@pytest.mark.parametrize("raw", ["not-json", "{}", _renderer_json(warnings=True)])
+def test_renderer_invalid_output_cannot_be_ready(raw):
+    with pytest.raises(ValueError):
+        lcr._render_result(raw, 0)
+
+
+def test_cleanup_is_not_installation_and_blocking_findings_take_priority():
+    data = json.loads(_renderer_json(changed=["removed"], blocking=1))
+    data.update(written=[], removed=["removed"], findings=[
+        {"severity": "warning", "check": "budget", "path": "large", "message": "audit"}
+    ] * 3 + [{"severity": "blocking", "check": "unsafe", "path": "foreign", "message": "refused"}])
+    result = lcr._render_result(json.dumps(data), 1)
+    assert result.status == "failed"
+    assert result.changed == 0
+    assert result.removed == 1
+    assert result.detail.startswith("unsafe: foreign: refused")
+
+
+def test_dry_run_launch_never_refreshes(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        lcr, "refresh_local_cache",
+        lambda root: pytest.fail("dry-run must not render guidance"),
+    )
+    assert lcr.prepare_for_launch(tmp_path, dry_run=True).status == "skipped"
+
+
+def test_sessionstart_repairs_nested_worktree_guidance(tmp_path, monkeypatch):
+    from agent_worktrees import push_timeout
+
+    root = tmp_path / "repository"
+    (root / ".git").mkdir(parents=True)
+    nested = root / "src"
+    nested.mkdir()
+    sibling = root / ".github" / "instructions" / "demo.local.instructions.md"
+    sibling.parent.mkdir(parents=True)
+    sibling.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home, **kwargs: tmp_path / "renderer.py")
+    monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
+
+    def render(argv, **kwargs):
+        assert Path(argv[3]) == root
+        sibling.write_text("fresh", encoding="utf-8")
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=_renderer_json(changed=["demo.local.instructions.md"], warnings=1)
+        )
+
+    monkeypatch.setattr(push_timeout, "run_bounded", render)
+    diagnostic = lcr.sessionstart_diagnostic(str(nested), deadline=None)
+    assert "ready" in diagnostic
+    assert sibling.read_text(encoding="utf-8") == "fresh"
+    assert not (nested / ".github").exists()
+
+
+def test_real_global_discovery_and_renderer_fit_sessionstart_budget(tmp_path, monkeypatch):
+    """Exercise both production subprocesses and source discovery, not stubs."""
+    scripts = (
+        _REPO_ROOT / "plugins" / "customizing-copilot" / "skills"
+        / "reviewing-customizations" / "scripts"
+    )
+    if not scripts.is_dir():
+        pytest.skip("customizing-copilot sibling plugin not checked out here")
+    home = tmp_path / "home"
+    installed = home / ".copilot" / "installed-plugins" / "test-market"
+    renderer = installed / "customizing-copilot"
+    shutil.copytree(scripts, renderer / "skills" / "reviewing-customizations" / "scripts")
+    (renderer / "plugin.json").write_text(
+        json.dumps({"name": "customizing-copilot", "version": "1.0.0"}), encoding="utf-8"
+    )
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {"customizing-copilot@test-market": True}}),
+        encoding="utf-8",
+    )
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    names = [f"guidance-{index}" for index in range(8)]
+    settings.write_text(
+        json.dumps({"enabledPlugins": {f"{name}@test-market": True for name in names}}),
+        encoding="utf-8",
+    )
+    templates = []
+    siblings = []
+    for name in names:
+        plugin = installed / name
+        template = plugin / "instructions" / "fallback.instructions.md"
+        template.parent.mkdir(parents=True)
+        template.write_text('---\napplyTo: "**"\n---\n\n' + "Useful guidance.\n" * 700, encoding="utf-8")
+        templates.append(template)
+        (plugin / "plugin.json").write_text(
+            json.dumps({"name": name, "version": "1.0.0"}), encoding="utf-8"
+        )
+        (plugin / "instruction-projections.json").write_text(json.dumps({
+            "schema": "copilot-extensions.instruction-projections", "version": 1,
+            "projections": [{
+                "id": "fallback", "template": "instructions/fallback.instructions.md",
+                "destination": f".github/instructions/{name}/fallback.instructions.md",
+                "customizationKind": "instructions", "applyTo": "**",
+                "legacyMarkers": [f"{name}:static-fallback"],
+            }],
+        }), encoding="utf-8")
+        siblings.append(repo / ".github" / "instructions" / name / "fallback.local.instructions.md")
+    monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
+    started = time.monotonic()
+    first = lcr.refresh_local_cache(repo, home=home, timeout=lcr.SESSIONSTART_MAX_TIMEOUT_S)
+    assert first.status == "ready", first.diagnostic
+    assert first.changed == len(names)
+    assert first.warnings > 0
+    assert time.monotonic() - started < lcr.SESSIONSTART_MAX_TIMEOUT_S
+    assert sum(path.stat().st_size for path in siblings) > 48 * 1024
+    assert all("Useful guidance.\n" * 700 in path.read_text(encoding="utf-8") for path in siblings)
+    templates[0].write_text('---\napplyTo: "**"\n---\n\nUpdated useful guidance.\n', encoding="utf-8")
+    repaired = lcr.refresh_local_cache(repo, home=home, timeout=lcr.SESSIONSTART_MAX_TIMEOUT_S)
+    assert repaired.status == "ready", repaired.diagnostic
+    assert repaired.changed == 1
+    assert repaired.unchanged == len(names) - 1
+    assert "Updated useful guidance." in siblings[0].read_text(encoding="utf-8")
+
+
+def test_json_base_launch_prepares_guidance_before_command(tmp_path, monkeypatch, capfd):
+    from agent_worktrees import resolve_cli
+    import argparse
+
+    events = []
+    config = SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path)))
+    args = argparse.Namespace(dry_run=False)
+    state = SimpleNamespace(
+        load_config=lambda: config, requested_machine=None, use_base=True, use_new=False, args=args,
+    )
+    monkeypatch.setattr(resolve_cli, "_validate_profile_assignment_config", lambda config: None)
+    monkeypatch.setattr(resolve_cli, "_preflight_launch", lambda *a: SimpleNamespace(error=None))
+    monkeypatch.setattr(
+        lcr, "prepare_for_launch", lambda root, **kwargs: events.append(("guidance", root))
+    )
+    monkeypatch.setattr(
+        resolve_cli, "_build_launch_cmd", lambda *a, **kwargs: events.append(("command", None)) or ["copilot"]
+    )
+    monkeypatch.setattr(resolve_cli, "_repo_session_env", lambda *a: {})
+    monkeypatch.setattr(resolve_cli, "_build_env", lambda *a, **kwargs: {})
+    assert resolve_cli._resolve_json_mode(state) == 0
+    assert events == [("guidance", str(tmp_path)), ("command", None)]
+    assert json.loads(capfd.readouterr().out)["action"] == "exec"
+
+
+def test_json_worktree_launch_prepares_selected_root(tmp_path, monkeypatch):
+    import argparse
+    from agent_worktrees import resolve_cli
+
+    record_path = tmp_path / "example.yaml"
+    record_path.write_text("fixture", encoding="utf-8")
+    root = tmp_path / "selected"
+    record = SimpleNamespace(worktree_path=str(root))
+    state = SimpleNamespace(
+        load_config=lambda: SimpleNamespace(), requested_machine=None, use_base=False,
+        use_new=False, worktree_id="example", args=argparse.Namespace(dry_run=False),
+    )
+    monkeypatch.setattr(resolve_cli, "_validate_profile_assignment_config", lambda config: None)
+    monkeypatch.setattr(resolve_cli.worktree_identity, "_resolve_worktree_id", lambda value: value)
+    monkeypatch.setattr(resolve_cli, "_relocate_active_project_for_worktree", lambda value: False)
+    monkeypatch.setattr(resolve_cli.cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(resolve_cli.tracking, "load_record", lambda path: record)
+    monkeypatch.setattr(resolve_cli, "_preflight_launch", lambda *a: SimpleNamespace(error=None))
+
+    def prepared(selected_root, **kwargs):
+        assert selected_root == str(root)
+        assert kwargs == {"dry_run": False}
+        raise RuntimeError("stopped after pre-session preparation")
+
+    monkeypatch.setattr(lcr, "prepare_for_launch", prepared)
+    with pytest.raises(RuntimeError, match="stopped after pre-session preparation"):
+        resolve_cli._resolve_json_mode(state)
+
+
+@pytest.mark.parametrize("machine", [None, "remote"])
+def test_json_new_dry_run_cannot_create_or_render(tmp_path, monkeypatch, capfd, machine):
+    import argparse
+    from agent_worktrees import resolve_cli
+
+    state = SimpleNamespace(
+        load_config=lambda: SimpleNamespace(), requested_machine=machine, use_base=False,
+        use_new=True, args=argparse.Namespace(dry_run=True),
+    )
+    monkeypatch.setattr(resolve_cli, "_validate_profile_assignment_config", lambda config: None)
+    monkeypatch.setattr(
+        resolve_cli, "_create_worktree_core",
+        lambda *args, **kwargs: pytest.fail("dry-run must not create a worktree"),
+    )
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *args, **kwargs: pytest.fail("dry-run refusal must precede delegation"),
+    )
+    assert resolve_cli._resolve_json_mode(state) != 0
+    assert "no worktree or guidance was created" in capfd.readouterr().out
 
 
 class TestSelectGlobalRoot:
@@ -327,7 +555,7 @@ class TestRefreshLocalCache:
 
         def _fake_run_bounded(argv, **kwargs):
             calls.append((argv, kwargs))
-            return SimpleNamespace(returncode=0)
+            return SimpleNamespace(returncode=0, stdout=_renderer_json())
 
         from agent_worktrees import push_timeout
 
@@ -346,7 +574,7 @@ class TestRefreshLocalCache:
         ]
         assert argv[6] == str(tmp_path / ".copilot" / "installed-plugins")
         assert argv[7:] == ["--agent-worktrees-path", "/bin/agent-worktrees"]
-        assert kwargs["timeout"] == 12.0 - lcr._RESOLUTION_TIMEOUT_S
+        assert 0 < kwargs["timeout"] <= 12.0
 
     def test_omits_agent_worktrees_path_when_unresolved(
         self, tmp_path: Path, monkeypatch
@@ -507,7 +735,7 @@ class TestRefreshLocalCache:
 
 class TestSessionstartDiagnostic:
     """``sessionstart_diagnostic`` is the backup refresh ``__main__.py``'s
-    ``_run_session_lifecycle`` calls at the end of ``sessionStart``; see
+    ``_run_session_lifecycle`` calls before registration on ``sessionStart``; see
     ``test_hook_ipc.py`` for coverage of its wiring into that lifecycle."""
 
     def test_caps_timeout_at_the_sessionstart_max(

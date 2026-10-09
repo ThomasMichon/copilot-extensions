@@ -195,6 +195,39 @@ def test_global_local_plugin_is_active(tmp_path):
     )
 
 
+def test_global_only_resolution_does_not_visit_project_registry(tmp_path, monkeypatch):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+
+    def unrelated_projects(_home):
+        raise AssertionError("global-only lookup must not verify unrelated projects")
+
+    monkeypatch.setattr(resolver, "_verified_project_roots", unrelated_projects)
+    report = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.active["demo@local"].root_for_scope("global") == installed
+    assert report.active["demo@local"].scopes == ("global",)
+
+
+def test_global_only_resolution_cannot_select_a_project_override(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+    repo = tmp_path / "project"
+    _register_project(tmp_path, "project", repo, "https://github.com/example/project.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+
+    report = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert report.active["demo@local"].root_for_scope("global") == installed
+    assert report.active["demo@local"].root_for_scope("project:project") is None
+
+
 def test_local_override_disables_base_setting(tmp_path):
     _write_json(
         tmp_path / ".copilot" / "settings.json",

@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-09
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -206,6 +206,15 @@ a remote session to the bridge on the target machine, or deliver a message
 through that peer, so the environment that can keep the target alive owns the
 target's process.
 
+### shared remote-control transport
+
+The bridge owns shared, reconnecting remote-control reach over the connectivity
+layer. Equivalent connection and access contexts can carry many logical
+operations and subscriptions without creating a transport owner per caller.
+Similar names are not proof that two contexts may share a connection. The
+transport carries the hosting bridge's control and event contracts; it does not
+become another session, transcript, or delivery-cursor authority.
+
 ### live-session registry
 
 Interactive sessions may register themselves with a bridge and receive an
@@ -332,6 +341,16 @@ event ledger, and resolver layer rather than inventing a second protocol.
 Remote sessions are owned by the bridge closest to the environment where they
 run. The host bridge becomes a peer client; target processes and state survive
 host-link churn because the target-local bridge owns their lifetime.
+
+### multiplexed-remote-control-and-observation
+
+A consumer can control and observe multiple remote targets through shared
+reach while each logical operation retains its own target, caller, outcome,
+and history position. Aggregating observations does not merge those identities
+or make resource use grow with an independently owned connection for every
+observed session. A slow, disconnected, or incompatible participant is reported
+within the transport's bounded recovery policy, not hidden behind an apparently
+healthy process.
 
 ### live-session-messaging
 
@@ -636,6 +655,18 @@ agent, and session combination proves serviceable. If a peer path, live
 injection, or namespace route is unavailable, the bridge falls back to a safe
 simpler path or refuses clearly.
 
+### uncertain-effects-are-not-blindly-replayed
+
+Unavailable capability and an operation failing after admission are different
+outcomes. An alternate route may be selected when absence or an explicit
+pre-admission incompatibility is established. Neither a same-route retry nor a
+second channel blindly repeats potentially admitted work: recovery establishes
+the authoritative outcome or proves safe idempotency or deduplication before
+reissuing it. Safe retries and replayable observation remain available.
+Compatibility is assessed
+for the semantics actually requested, without needlessly requiring newer
+semantics for an otherwise supported operation.
+
 ### negotiate-before-side-effects
 
 A new session or ownership transition selects a mutually supported semantic
@@ -720,6 +751,14 @@ adding a rival daemon, a mandatory sibling, or a second ownership authority.
 Event IDs and delivery cursors remain stable across frontend cycles and
 reattach. If recovery must rebuild a stream, consumers converge on the rebuilt
 authoritative log rather than silently diverging.
+
+### remote-replay-retains-hosting-authority
+
+Forwarding an event does not acknowledge it for the consumer. Remote delivery
+retains the hosting bridge's ordered history and caller-specific position until
+the intended consumer acknowledges delivery. Reconnects resume from that durable
+authority; changed history, replay gaps, or exhausted delivery capacity require an explicit
+reconciliation outcome rather than silent loss or a second local event ledger.
 
 ### eventual-terminal-reconciliation
 
@@ -875,6 +914,12 @@ machine may deliberately gate outbound reach until policy allows it.
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
 
 ## Provenance
+
+- **2026-10-09** — Folded back shared remote-control transport, isolated logical
+  observation, hosting-owned replay and acknowledgement, and the distinction
+  between unavailable capability and uncertain admitted effects. Mined from
+  the persistent carrier, remote-operation compatibility gates, aggregate
+  observation surface, and process-boundary consumer paths.
 
 - **2026-10-08** — Folded back faithful delivery decisions and cooperative
   stop with independently observable acknowledgement and final-state

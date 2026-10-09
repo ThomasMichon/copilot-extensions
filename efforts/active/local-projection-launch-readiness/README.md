@@ -113,20 +113,20 @@ Existing source and destination safety checks are not context-budget checks.
   local delivery versus audit distinction.
 
 ### Phase 2 - Pre-session lifecycle coverage and observable repair
-- [ ] Inventory creation and launch paths: worktree create, resume, explicit JSON
+- [x] Inventory creation and launch paths: worktree create, resume, explicit JSON
   launch planning, local Session Host session creation, and session-start backup.
   Record the owning seam and whether rendering completes before agent startup.
-- [ ] Wire missing applicable pre-session boundaries through the existing
+- [x] Wire missing applicable pre-session boundaries through the existing
   renderer CLI; preserve dry-run behavior and optional-plugin independence.
-- [ ] Replace discarded refresh results with bounded, attributable outcomes:
+- [x] Replace discarded refresh results with bounded, attributable outcomes:
   installed/unchanged, unavailable, unsafe, timeout, or failed. Budget warnings
   must not masquerade as failed installation.
-- [ ] Preserve installation-cell identity and target-local source resolution.
+- [x] Preserve installation-cell identity and target-local source resolution.
   Avoid unrelated-project discovery on the hot path where the owning resolver
   offers a supported scoped path; do not replace provenance with PATH guessing.
-- [ ] Make session-start repair missing/stale caches within its existing bounded
+- [x] Make session-start repair missing/stale caches within its existing bounded
   lifecycle budget. Failures remain visible without blocking usable sessions.
-- [ ] For a venue with no locally accessible target root, document the owning
+- [x] Deferred to `ThomasMichon/copilot-extensions#5714`: For a venue with no locally accessible target root, document the owning
   target-side boundary or explicitly transfer a concrete gap to a named issue;
   do not claim host-local rendering installed guidance in a remote filesystem.
 
@@ -153,13 +153,13 @@ operator-requested contract, not additional operator requirements.
 - [x] Unsafe paths, foreign existing local files, ambiguous identities and
   tracked local destinations retain their safety refusals without dropping
   unrelated safe sources.
-- [ ] Lifecycle ordering tests prove rendering precedes agent startup on each
+- [x] Lifecycle ordering tests prove rendering precedes agent startup on each
   applicable path, including JSON plans; dry runs cause no cache writes.
-- [ ] Session-start-only tests repair a missing or outdated cache and report
+- [x] Session-start-only tests repair a missing or outdated cache and report
   bounded failures without silent success.
-- [ ] A representative real render exercises production launch budgets rather
+- [x] A representative real render exercises production launch budgets rather
   than only timeout arithmetic; reuse existing latency evidence where valid.
-- [ ] Run targeted contained suites, required lint/install-contract gates, and
+- [x] Run targeted contained suites, required lint/install-contract gates, and
   a relevant clean-room pre-session delivery scenario when available.
 - [ ] Verify the promoted payload and a consuming worktree's installed local
   source set, not merely a successful subprocess exit or a merged PR.
@@ -171,6 +171,61 @@ checked-in fallback and its privileged review transaction separate. Do not
 force marker/lock repair or raise size limits to disguise the delivery gap.
 
 ## Journal
+
+### 2026-10-08 - Lifecycle implementation and native acceptance
+- Worktree creation renders before returning its launch plan; legacy resume
+  renders before launch-command construction. JSON base/existing-worktree
+  plans now do likewise. JSON new plans use the creation seam; the previously
+  mutating `--json --new --dry-run` combination now refuses explicitly without
+  creating a worktree or writing guidance.
+- Local Session Host creation awaits rendering after authoritative cwd
+  resolution and before spawn. The synchronous session-start backup resolves
+  nested cwd to the checkout root, runs before registration, and returns its
+  outcome through lifecycle diagnostics.
+- Both consumers retain identity-verified global renderer lookup but skip
+  unrelated registered-project discovery. Structured results retain actual
+  installed/unchanged counts, audit warnings, bounded finding details and
+  explicit degradation; subprocess-tree containment and cancellation remain.
+- Focused native worktree tests: 69 passed. Focused bridge tests: 59 passed,
+  4 explicit skips. Shared activation tests: 69 passed, 1 explicit skip.
+  A hermetic native test exercises real global discovery, real source discovery
+  and rendering of eight over-budget projections within the production
+  five-second session-start budget, then repairs drift. No discovery/renderer
+  stubs stand in for that proof.
+- Clean-room execution is unavailable here: Docker's Linux-engine daemon
+  socket is absent. No service was started merely to run validation. The
+  hermetic native production-CLI test supplies fresh-state coverage, not a
+  claimed Docker clean-room pass.
+- Remote worktree resolve/create and target-installed session-start hooks own
+  their corresponding target-side refreshes. Raw remote-provider Session Host
+  startup bypassing those seams is explicitly transferred to #5714; host-local
+  rendering is never claimed to install remote files.
+- Phase 2 is implemented locally; review, promotion and installed-consumer
+  acceptance remain open in Phase 3.
+- Publication exposed two existing uncontained console spawns in the touched
+  lifecycle module. Both now use the shared no-window helper; 241 lifecycle/
+  reap tests passed with 4 explicit skips, and the headless guard passed.
+  _(agent-recommended publication unblocker)_
+- Review identified nested explicit local bridge cwd as another root-resolution
+  seam. The bridge renderer now resolves the enclosing checkout, including
+  worktree gitfiles, without changing the agent's requested process cwd.
+- Follow-up review exposed accounting ambiguity in the legacy `changed` list.
+  Additive renderer `written`/`removed` lists now separate installation from
+  stale cleanup, bounded diagnostics prioritize safety failures over budget
+  warnings, and bridge timeout classification includes Python 3.10's distinct
+  `asyncio.TimeoutError`. The new-worktree dry-run refusal also runs before
+  remote delegation.
+- Discovery exceptions and nonzero resolver/renderer exits retain bounded stderr,
+  so a genuine discovery fault cannot masquerade as an absent optional plugin.
+
+### 2026-10-08 - Renderer landed; lifecycle slice begins
+- PR #5711 merged with automated approval and passing checks. Phase 1 is
+  source-complete; promoted runtime proof remains part of Phase 3.
+- Transition the Driving agent to Phase 2. Align the effort index with the
+  README's Active status.
+- The vision sentence now explicitly requires guidance to be available before
+  instruction loading, removing the missing predicate rather than changing
+  the launch-order contract.
 
 ### 2026-10-08 - Renderer slice implemented
 - Local template/per-file/aggregate size excess and invalid budget config are
@@ -193,8 +248,6 @@ force marker/lock repair or raise size limits to disguise the delivery gap.
   creation/session-start ordering and advisory-budget decision remain verbatim.
 - Transition the Driving agent from Phase 0 to Phase 1. The small publication
   attribution repair passed all 23 module-size guard tests.
-- The nonblocking vision-wording finding is corrected with the first
-  implementation slice.
 
 ### 2026-10-08 - Inception
 - Confirmed the prior primacy effort is Done; this is a follow-on reliability

@@ -1410,15 +1410,10 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
     assert calls == [str(tmp_path)]
 
 
-def test_session_lifecycle_absorbs_local_cache_refresh_failure(
+def test_session_lifecycle_reports_local_cache_refresh_failure(
     monkeypatch, tmp_path
 ):
-    """A failure inside the refresh (customizing-copilot not installed, a
-    render error, anything) never surfaces as a session-lifecycle failure
-    -- ``local_cache_refresh.sessionstart_diagnostic`` absorbs it silently,
-    matching ``local_cache_refresh.refresh_local_cache``'s own best-effort
-    contract.
-    """
+    """A refresh failure is diagnosed without failing session registration."""
     payload = {
         "sessionId": "session-1",
         "workingDirectory": str(tmp_path),
@@ -1459,7 +1454,8 @@ def test_session_lifecycle_absorbs_local_cache_refresh_failure(
 
     result = main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
 
-    assert "boom" not in str(result)
+    assert "[local-guidance] failed" in result["_stderr"]
+    assert "boom" in result["_stderr"]
 
 
 def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):

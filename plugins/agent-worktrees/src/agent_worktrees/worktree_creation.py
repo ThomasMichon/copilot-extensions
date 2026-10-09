@@ -799,7 +799,7 @@ def _create_worktree_core(
     # dynamic-guidance.md): refresh every enabled source's gitignored
     # *.local.instructions.md sibling now, before the first session here
     # even starts, so a directory-scanning harness may pick it up with no
-    # reliance on the repo-wide catch-all. Best-effort and silent -- see
+    # reliance on the repo-wide catch-all. Best-effort with diagnostics -- see
     # local_cache_refresh's own docstring.
     local_cache_refresh.refresh_local_cache(worktree_path)
 
