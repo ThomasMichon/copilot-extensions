@@ -194,6 +194,68 @@ def test_explicit_effort_slugs_require_every_named_effort_to_exist(tmp_path):
     assert result["missing_effort_slugs"] == ["missing-effort"]
 
 
+def test_discovery_sweeps_nested_per_repo_layout_not_just_one_flat_level(tmp_path):
+    # A consumer may nest one extra level by originating repo when one
+    # state root serves several repos (efforts/active/<repo>/<slug>/
+    # README.md) rather than this module's own flat efforts/active/<slug>/
+    # README.md -- discovery must find either shape without a new config
+    # knob, keyed on the effort's own immediate folder name either way.
+    nested = tmp_path / "efforts" / "active" / "some-repo" / "nested-effort" / "README.md"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text("# Nested effort\n\n- **Status:** In Progress\n", encoding="utf-8")
+
+    result = run_tick(
+        FakeClient(),
+        _config(tmp_path, effort_slugs=["nested-effort"]),
+        clock=lambda: 10_000,
+        cwd=tmp_path,
+    )
+
+    assert result["missing_effort_slugs"] == []
+    task = result["created"][0]
+    payload = json.loads(task["payload_inline"])["effort_driver_loop"]
+    assert payload["effort_slug"] == "nested-effort"
+    assert payload["effort_readme"] == (
+        "efforts/active/some-repo/nested-effort/README.md"
+    )
+
+
+def test_discovery_rejects_ambiguous_slug_found_at_more_than_one_path(tmp_path):
+    _write_effort(tmp_path, "shared-name", title="Flat copy", status="In Progress")
+    nested = tmp_path / "efforts" / "active" / "some-repo" / "shared-name" / "README.md"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text("# Nested copy\n\n- **Status:** In Progress\n", encoding="utf-8")
+
+    try:
+        run_tick(
+            FakeClient(),
+            _config(tmp_path, effort_slugs=["shared-name"]),
+            clock=lambda: 10_000,
+            cwd=tmp_path,
+        )
+    except RuntimeError as exc:
+        assert "shared-name" in str(exc)
+    else:  # pragma: no cover - regression guard
+        raise AssertionError("expected an ambiguous slug collision to be rejected")
+
+
+def test_discovery_ignores_a_loose_readme_directly_under_active(tmp_path):
+    loose = tmp_path / "efforts" / "active" / "README.md"
+    loose.parent.mkdir(parents=True, exist_ok=True)
+    loose.write_text("# Not an effort\n", encoding="utf-8")
+    _write_effort(tmp_path, "recipe-library", title="Real effort", status="In Progress")
+
+    result = run_tick(
+        FakeClient(),
+        _config(tmp_path, effort_slugs=["recipe-library"]),
+        clock=lambda: 10_000,
+        cwd=tmp_path,
+    )
+
+    assert result["missing_effort_slugs"] == []
+    assert len(result["created"]) == 1
+
+
 def test_submitted_effort_task_suppresses_duplicate_creation_on_later_cadence(tmp_path):
     _write_effort(
         tmp_path,

@@ -841,7 +841,7 @@ jobs:
       - name: Native source discovery and chronicler contracts
         run: >-
           python tools/run-plugin-tests.py agent-logger
-          -k "source_roots or chronicle"
+          -k "source_roots or source_publication or chronicle"
 
   discover:
     name: discover suites
