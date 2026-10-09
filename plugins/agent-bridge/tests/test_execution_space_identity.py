@@ -56,6 +56,24 @@ def test_hostname_is_not_a_current_space_selector():
     assert platform == "windows"
 
 
+def test_scoped_topology_rejects_an_unscoped_local_selection():
+    spaces = _spaces()
+    spaces["legacy-host"] = MachineConfig(key="legacy-host", display_name="Legacy")
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"):
+        with pytest.raises(ValueError, match="registered execution space"):
+            agent_registry._detect_local_machine(spaces, "legacy-host")
+
+
+def test_legacy_only_topology_keeps_explicit_local_selection():
+    legacy = MachineConfig(key="legacy-host", display_name="Legacy")
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"):
+        selected, platform = agent_registry._detect_local_machine(
+            {"legacy-host": legacy}, "legacy-host",
+        )
+    assert selected is legacy
+    assert platform == "windows"
+
+
 def test_targeting_and_locality_use_distinct_registered_keys():
     spaces = _spaces()
     agents = {

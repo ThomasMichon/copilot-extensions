@@ -88,6 +88,14 @@ receiving execution user's registered project configuration, never a caller's
 transport alias or supplied machine label. An unavailable project registration
 is an explicit authority failure, not permission to mutate an orphaned ledger.
 
+Launch-seed staging, handoff receipts, completion, and removal also authorize
+the freshly loaded record within the write lock, before changing either the
+record or its seed sidecar. Authority rejection is a known error, never an
+ambiguous daemon outcome or a post-send retry. A persisted seed without its
+authoritative worktree record is retained for explicit recovery rather than
+automatically removed. Clients require authority-aware daemon verb versions;
+older resident implementations are never sent these mutations.
+
 Registries without explicit execution-space declarations retain their legacy
 lifecycle behavior. Distinct registered keys nevertheless do not become local
 merely through shared hostname metadata. Keys cannot contain whitespace, path

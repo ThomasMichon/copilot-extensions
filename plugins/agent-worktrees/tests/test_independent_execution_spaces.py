@@ -524,3 +524,85 @@ def test_cross_space_owned_handoff_rejects_before_source_release(
     with pytest.raises(claim_handoffs.ClaimHandoffError, match="source claims are retained"):
         claim_handoffs.accept(bundle.bundle_id, actor=bundle.consumer, machine=scoped_config.machine)
     assert registry.read_bytes() == before
+
+
+@pytest.mark.parametrize("verb", [
+    "launch_seed_stage", "launch_seed_take", "launch_seed_restore",
+    "launch_seed_finish", "launch_seed_remove",
+])
+def test_seed_transaction_rechecks_owner_after_acquiring_lock(
+    verb, tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import launch_seed_state, tracking_write
+
+    path = tmp_path / "wt-owner.yaml"
+    path.write_text("record before", encoding="utf-8")
+    target = launch_seed_state.state_path(path)
+    target.parent.mkdir()
+    target.write_text("seed before", encoding="utf-8")
+    record = SimpleNamespace(
+        machine=scoped_config.machine, repo="project", worktree_id=path.stem,
+        owner_ref=None,
+    )
+    lock_held = False
+
+    @contextmanager
+    def raced_lock(*args, **kwargs):
+        nonlocal lock_held
+        record.owner_ref = "workstation-wsl/project/wt-new-parent"
+        lock_held = True
+        try:
+            yield
+        finally:
+            lock_held = False
+
+    def fresh_record(record_path):
+        assert lock_held
+        return record
+
+    monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
+    monkeypatch.setattr(tracking, "load_record", fresh_record)
+    monkeypatch.setattr(
+        tracking, "save_record",
+        lambda *args, **kwargs: pytest.fail("foreign seed transaction saved a record"),
+    )
+    monkeypatch.setattr(
+        launch_seed_state, "_write",
+        lambda *args, **kwargs: pytest.fail("foreign seed transaction wrote a sidecar"),
+    )
+    result = tracking_write.run_direct(verb, {
+        "worktree_id": path.stem, "yaml_path": str(path), "remove_record": True,
+    }, reason="fixture authority race")
+    assert result["error"] == "execution_space"
+    assert "cross-space" in result["message"]
+    assert path.read_text(encoding="utf-8") == "record before"
+    assert target.read_text(encoding="utf-8") == "seed before"
+
+
+def test_seed_daemon_returns_known_authority_rejection_without_writing(
+    tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import launch_seed_state, locks, status_monitor_runtime, tracking_write
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+        owner_ref="workstation-wsl/project/wt-parent",
+    )
+    before = record.yaml_path.read_bytes()
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    endpoint = tracking_write.rendezvous_fields(server)
+    monkeypatch.setattr(locks, "read_lock", lambda *args: endpoint)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(
+        tracking_write, "run_direct",
+        lambda *args, **kwargs: pytest.fail("authority rejection fell back after daemon dispatch"),
+    )
+    try:
+        with pytest.raises(ValueError, match="cross-space"):
+            launch_seed_state.stage(record.yaml_path, kind="resume", text="must remain unstaged")
+    finally:
+        server.close()
+    assert record.yaml_path.read_bytes() == before
+    assert not launch_seed_state.state_path(record.yaml_path).exists()

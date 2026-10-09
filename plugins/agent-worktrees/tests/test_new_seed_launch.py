@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import launch_seed_exec as new_seed_launch, launch_seed_state, resolve_cli, tracking
+from agent_worktrees import config as cfg
 from agent_worktrees.sessions import LiveVerdict
 from test_resolve_seed_delivery import _args, _stub_launch_plumbing
 from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
@@ -25,6 +26,16 @@ BASH = (
     or shutil.which("bash", path=r"C:\Program Files\Git\bin")
     or (shutil.which("bash") if os.name != "nt" else None)
 )
+
+
+@pytest.fixture(autouse=True)
+def registered_demo_project(tmp_path):
+    project_dir = cfg.project_dir("demo")
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": "demo", "machine": "test",
+        "repos": {"demo": {"anchor": str(tmp_path), "default_branch": "dev"}},
+    }), encoding="utf-8")
 
 
 def test_resolve_parser_defaults_to_deferred_new_ownership():

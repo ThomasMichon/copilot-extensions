@@ -66,7 +66,14 @@ def _create_config(tmp_path: Path, **overrides) -> cfg.Config:
         },
     )
     base.update(overrides)
-    return cfg.Config(**base)
+    config = cfg.Config(**base)
+    project_dir = cfg.project_dir(config.repo_name)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": config.repo_name, "machine": config.machine,
+        "repos": {config.repo_name: {"anchor": str(anchor)}},
+    }), encoding="utf-8")
+    return config
 
 
 def _args(**overrides):

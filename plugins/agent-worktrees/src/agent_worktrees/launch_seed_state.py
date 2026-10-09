@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
 from . import locks, status_monitor_runtime, tracking, tracking_write
+from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 from .worktree_status_daemon import _is_safe_identity_token
 
 
@@ -85,6 +88,7 @@ def _record(args: dict):
     record = tracking.load_record(path)
     if record.worktree_id != path.stem or args.get("worktree_id") != record.worktree_id:
         raise ValueError("Launch-seed record identity mismatch")
+    require_project_record_mutation(record)
     return record
 
 
@@ -195,23 +199,28 @@ def _apply_remove(args: dict) -> dict:
     if args.get("worktree_id") != path.stem:
         raise ValueError("Launch-seed removal identity mismatch")
     with tracking._RecordLock(path, require_sidecar=True):
-        if args.get("remove_record") and path.exists():
+        if path.exists():
             _record(args)
+        elif target.exists():
+            raise ExecutionSpaceError("cannot authorize launch-seed removal without its worktree record")
         target.unlink(missing_ok=True)
         if args.get("remove_record"):
             path.unlink(missing_ok=True)
     return {"removed": True, "record_removed": bool(args.get("remove_record"))}
 
 
-def _dispatch(verb: str, args: dict, *, min_version: int = 1) -> dict:
+def _dispatch(verb: str, args: dict, *, min_version: int = 2) -> dict:
     enabled = status_monitor_runtime._status_monitor_enabled()
-    return tracking_write.dispatch(
+    result = tracking_write.dispatch(
         verb, args,
         read_lock_data=lambda: locks.read_lock(status_monitor_runtime._monitor_lock_path()),
         ensure_monitor=status_monitor_runtime._ensure_status_monitor if enabled else None,
         boot_wait_s=tracking_write.BOOT_WAIT_S if enabled else 0.0,
         min_version=min_version,
     )
+    if result.get("error") == "execution_space":
+        raise ValueError(result["message"])
+    return result
 
 
 def stage(
@@ -251,7 +260,7 @@ def remove(yaml_path: Path, *, remove_record: bool = False) -> dict:
     return _dispatch("launch_seed_remove", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "remove_record": remove_record,
-    }, min_version=2)
+    }, min_version=3)
 
 
 def pending(yaml_path: Path, record=None) -> LaunchSeed | None:
@@ -297,8 +306,20 @@ def settle_creation(yaml_path: Path, receipt: dict, result: dict) -> dict:
     }
 
 
-tracking_write.register_verb("launch_seed_stage", _apply_stage)
-tracking_write.register_verb("launch_seed_take", _apply_take)
-tracking_write.register_verb("launch_seed_restore", _apply_restore)
-tracking_write.register_verb("launch_seed_finish", _apply_finish)
-tracking_write.register_verb("launch_seed_remove", _apply_remove, version=2)
+def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict]:
+    def apply(args: dict) -> dict:
+        try:
+            return handler(args)
+        except ExecutionSpaceError as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting launch-seed mutation for %s: %s", args.get("worktree_id"), exc,
+            )
+            return {"error": "execution_space", "message": str(exc)}
+    return apply
+
+
+tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=2)
+tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=2)
+tracking_write.register_verb("launch_seed_restore", _authority_checked(_apply_restore), version=2)
+tracking_write.register_verb("launch_seed_finish", _authority_checked(_apply_finish), version=2)
+tracking_write.register_verb("launch_seed_remove", _authority_checked(_apply_remove), version=3)
