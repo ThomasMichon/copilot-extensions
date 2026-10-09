@@ -5,7 +5,7 @@
 - **Branch(es):** per-slice (each session/slice opens its own PR branch; no
   shared long-lived branch — see Coordination)
 - **Created:** 2026-10-05
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- source reconciliation; implementation owners remain open -->
 - **Vision:** `visions/README.md` (the whole index — a repo-wide sweep,
   not one item); scoped so far:
   `visions/plugins/agent-dispatch/tasks-pane-ux` §Concepts/the-suspended-task-waiter,
@@ -129,7 +129,20 @@
   `ThomasMichon/copilot-extensions#5946` (PR-watch non-firing baseline
   persistence and restart transition continuity) ·
   `ThomasMichon/copilot-extensions#5947` (PR-watch subscriber expiry under
-  provider outage)
+  provider outage) ·
+  `ThomasMichon/copilot-extensions#5952` (caller-settings read failure fidelity) ·
+  `ThomasMichon/copilot-extensions#5953` (identity-bound keeper retirement custody) ·
+  `ThomasMichon/copilot-extensions#5954` (independent owned-forward cleanup) ·
+  `ThomasMichon/copilot-extensions#5955` (Pythonless POSIX first-use bootstrap) ·
+  `ThomasMichon/copilot-extensions#5956` (uniform deploy-template scope decision) ·
+  `ThomasMichon/copilot-extensions#5957` (remaining live-contract tolerance windows) ·
+  `ThomasMichon/copilot-extensions#5958` (persistent helper payload-CWD inheritance) ·
+  `ThomasMichon/copilot-extensions#5959` (Vault exhausted transport cause preservation) ·
+  `ThomasMichon/copilot-extensions#5960` (CI charter/tool and diagnostic-file promises) ·
+  `ThomasMichon/copilot-extensions#5961` (selected venue session/mux attachment) ·
+  `ThomasMichon/copilot-extensions#5962` (component-aware subtitle truncation) ·
+  `ThomasMichon/copilot-extensions#5963` (claim-kind metadata/production admission) ·
+  `ThomasMichon/copilot-extensions#5964` (hook/provisioning activation boundary)
 
 ## Guiding Intent
 
@@ -183,11 +196,11 @@ decision. Its implementation does not expand this sweep's completion gate.
   same session. The operator flagged these as concrete, session-evidenced
   vision-backport candidates and asked for the broader sweep to be scoped and
   sequenced across sessions rather than attempted at once.
-- **Governing skill:** [`backporting-visions`](../../../plugins/visions/skills/backporting-visions/SKILL.md)
+- **Governing skill:** [`backporting-visions`](../../../../plugins/visions/skills/backporting-visions/SKILL.md)
   (specializes `envisioning`) — read its superset discipline and
   design/service-invariant audit sections before reconciling any further
   vision.
-- **Vision index:** [`visions/README.md`](../../../visions/README.md) — the
+- **Vision index:** [`visions/README.md`](../../../../visions/README.md) — the
   full standing list this sweep works against, prioritizing branch visions
   and any leaf whose plugin had heavy recent PR traffic.
 
@@ -246,7 +259,7 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       complete from this one subject.
 
 ### Phase 2 — Widen the vision sweep
-- [ ] Read every remaining vision in `visions/README.md`'s index against its
+- [x] Read every remaining vision in `visions/README.md`'s index against its
       subject's current reality docs + code, prioritizing branch visions
       (`agent-fabric`, `native-convergence`, `plugin-services` itself) and any
       leaf whose plugin had heavy recent PR traffic. Apply the three-bin sort
@@ -256,6 +269,9 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       starts in earnest (deliberately not pre-enumerated now — scope it from
       the actual state of each vision at reconciliation time, not guessed
       upfront).
+      Completion roster: all 35 current index entries are explicitly attributed
+      below. This closes current-source reconciliation, not the additive
+      runtime/acceptance backlog carried by the named owners.
       - [x] `visions/plugins/agent-codespaces/README.md` — reconciled against
             313 commits of drift since its 2026-07-31 authoring. Folded back
             *repo-sourced-provenance* (active-plugin-declared venue policy,
@@ -448,11 +464,15 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             inspectable choice, and explicit authentication failure versus
             ambient consent. Filed `#5791` for the concrete CLI fallback;
             retained the separate Copilot inference-identity safety boundary.
-      - [ ] `visions/plugins/agent-worktrees/README.md` — remaining parent
+      - [x] `visions/plugins/agent-worktrees/README.md` — remaining parent
             reconciliation beyond the account slice, including head/claims,
             contribution roles, daemon authority, and lifecycle coverage.
             Retained-checkout archive filtering is now source-proven `#5942`;
             bounded daemon mutation admission stays with `#3761`.
+            Final source legs resolve helper/package, direct hook admission,
+            claim-provider hygiene, durable target and retirement questions:
+            `#1096/#3761/#1043/#396/#5453/#5754` retain their respective
+            implementation, with uniformity/protocol policy `#5956/#5957`.
       - [x] `visions/plugins/agent-worktrees/README.md` — scoped lifecycle,
             head-recovery, finalization, role resolution and daemon-write
             comparison. Rejected the initial design-only/bypass inference:
@@ -569,9 +589,20 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             Existing `#1817`/`#5676`/`#5677`/`#5678` retain their respective
             configuration, preservation, accounting and adoption objectives.
             Manifest preparation was not mistaken for final log rendering.
-      - [ ] Logger remaining rescue replacement, qualified cold retrieval,
-            persistent digest-reader paths, full accounting/aggregation and
-            released consumer adoption beyond this source cohort.
+      - [x] `visions/plugins/agent-logger/session-intelligence/README.md` —
+            explicit index attribution for that child comparison: structured
+            associations, reusable preservation/derivation/catalog surfaces
+            and independent accounting/aggregation intent were read with the
+            parent. This attribution does not close the remaining corpus/
+            consumer source question or their implementation acceptance.
+      - [x] Logger remaining current-source corpus, admission and cold-reader
+            comparison. Cross-root primitives are real, but chronicler
+            settle/journal gates are not independent all-session derivation;
+            process-log readers do not repair venue producers that never
+            transported those logs. Qualified cold lookup and publication/
+            accounting gaps remain explicitly `#5676/#5677/#5678`.
+      - [x] Deferred to `ThomasMichon/copilot-extensions#5678`: released
+            consumer adoption and implementation/live aggregation acceptance.
       - [x] Logger scoped rescue, cold-provider resolution, persistent digest
             readers and aggregate-plan/daily-manifest comparison. These
             foundations are real, but do not prove all-session derivation,
@@ -585,9 +616,13 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             Open-issue recurrence is not another automated dispatch; closed
             recurrence is a distinct unresolved policy, now tracked as `#5890`
             in its existing owner. No live fix-agent run was triggered.
-      - [ ] CI-remediation complete external acceptance and charter-enforcement
-            reconciliation beyond inspected source gates; owner validation
-            remains explicit, not inferred from compiled workflow presence.
+      - [x] CI-remediation remaining source charter/output/cancellation
+            comparison. Deterministic path/output gates are real, semantic
+            intent triage remains agent/reviewer conduct. Direct comment and
+            promised diagnostic-file SHA clauses are `#5960`; generated
+            reporting and original-issue SHA availability remain valid limits.
+      - [x] Deferred to `ThomasMichon/copilot-extensions#4783`: CI-remediation
+            complete external execution/acceptance and runtime blockage.
       - [x] `visions/harness-guidance/README.md` — scoped ownership, static/local
             delivery and context-accounting source comparison. Existing intent
             covers the inspected guarantees; repaired only duplicate section
@@ -611,9 +646,13 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             No missing vision-level intent was found. Per-site instrumentation
             is optional; generic process publication remains unproved, tracked
             as north-star realization `#5900`, not per-site violation tickets.
-      - [ ] Remaining telemetry adopter/publication and closing-resource paths
-            beyond the inspected renderer/SSH routes; no global absence or
-            released cross-platform instrumentation is inferred.
+      - [x] Telemetry closing-resource/adopter current-source comparison.
+            Procutil spawn/wait/job-close and generic lifecycle/spool paths
+            are real but not process closing-resource publication. The two
+            inspected callers are optional unadopted sites, not violations.
+            Portable start/end-or-closing records, cheap figures and adoption
+            remain explicitly under `#5900`; no global absence, mandatory
+            per-site rollout or released instrumentation is inferred.
       - [x] `visions/session-hosting/README.md` — scoped provider/agency,
             selection, interaction, replay/reconnect, fencing and retirement
             source audit. Existing vision covers the observed intent. Pure
@@ -661,27 +700,44 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             Open/New, supervision and every boundary. Carved title content
             (`#5912`) and per-venue creation binding (`#5913`); `#3657` and
             `#3507` retain supervision/actions and transferred live validation.
-      - [ ] Venue remaining exact session/mux reattachment, title-preserving
-            truncation, complete claim-contribution admission and live parity
-            beyond the inspected source; shared labels are not full conformance.
+      - [x] Venue exact selected-session/mux, truncation and claim-admission
+            source comparison. Real scope-derived attach is not selected-row
+            identity propagation (`#5961`); whole subtitle pass-through is not
+            transient-first ellipsis (`#5962`); installed kind metadata is not
+            activated/executable or fully journalable extension (`#5963`).
+      - [x] Deferred to `ThomasMichon/copilot-extensions#3657`: venue live
+            action/supervision and selected-execution acceptance; `#3507`
+            retains the transferred real-Docker lane.
       - [x] `visions/clean-room-validation/README.md` — scoped runner,
             report-admission, Bridge-solo and judge-contract source comparison.
             Existing vision intent covers the inspected guarantees. Carved
             empty-report admission (`#5921`), absent-base enforcement (`#5922`)
             and model-dependent Tier P witnesses (`#5924`); retained useful
             subject coverage and the declared no-model lane.
-      - [ ] Clean-room remaining scenario admission and judgment-consumer
-            source reconciliation; fresh sessions are not fresh machines, but
-            no accepted contaminated verdict was established in this slice.
+      - [x] Clean-room remaining current-source admission, report and
+            judge-consumer comparison. Targeted manifest/setup/provenance
+            guards are real; runners report judged:false and caller/agent
+            literal judgment is not a hidden universal hard validator.
+            Progressive fixture adds scenario-owned mechanical checks;
+            turn-key assembly is not proved by honest-stop/doc-audit success.
+            Repetition contamination/accepted false pass was not established.
+      - [x] Deferred to `ThomasMichon/copilot-extensions#5921`: clean-room
+            implementation acceptance for truthful outcome-report admission;
+            `#5922/#5924` retain composition/lane realization.
       - [x] `visions/venue-parity/README.md` — scoped shared launch, seed
             forwarding, plugin composition, preference and detach comparison.
             Existing intent already covers those capabilities. Carved attached
             Container seed-file loss (`#5926`) and remote plugin-discovery
             false-empty (`#5927`); distinct detach implementations alone are
             not proof of a parity violation.
-      - [ ] Venue-parity remaining source routes and preference-failure
-            authority semantics; no blanket target-authority or resume-failure
-            claim was established by the inspected paths.
+      - [x] Venue-parity remaining shared attached/detached/ACP and preference
+            source comparison. Failed caller preference reads become empty
+            defaults (`#5952`), but explicit/recalled flags and target-mode
+            receipt/refusal are counterexamples to a global authority failure.
+            Shared production primitives are real; distinct bodies alone are
+            not a parity violation.
+      - [x] Deferred to `ThomasMichon/copilot-extensions#954`: venue-parity
+            P2-P5 implementation and live acceptance beyond source comparison.
       - [x] `visions/cli-default-bridging/README.md` — current-stage Draft,
             prototype and existing ACP lifecycle comparison. Corrected native
             close-method attribution and distinguished SDK-extension proof
@@ -1000,10 +1056,13 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       malformed-object access (`#5903`) and a publication after the final owner
       read being deleted by cleanup (`#5904`). No endpoint, PID, socket, service
       or live cutover was used for either proof.
-- [ ] Remaining endpoint scopes, cross-cell legacy fallback, native permissions,
-      exposure and consumer lifecycle ordering beyond this library/Dispatch/
-      Vault slice; neither API proof establishes a live outage or all-runtime
-      acceptance.
+- [x] Remaining endpoint/current-mode and lifecycle consumer source questions
+      classified individually and through finite residual traces. Existing
+      discovered/ephemeral default paths are not port-free guarantees or full
+      cross-cell/native permission acceptance.
+- [x] Deferred to `ThomasMichon/copilot-extensions#54`: endpoint transport/
+      exposure realization and native permission/acceptance hardening; `#873`
+      retains the specific Windows Vault pipe boundary and `#5918` provenance.
 - [x] Ran a slice of the `plugin-services` invariant audit against every
       `agent-*` plugin's runtime-deploy path, scored against **two separate
       questions per plugin**: does a same-version, content-changed update
@@ -1079,11 +1138,14 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       marketplace staging are not confused with original checkout mutation.
       Only this invariant was scored. The matrix does not score every package
       backend, arbitrary configured callback, or lifecycle descendant.
-- [ ] Complete the remaining install/adopt source coverage: namespaced
+- [x] Complete the remaining install/adopt source coverage: namespaced
       lifecycle helpers, package-backend/prerequisite effects, and
       ownership/contribution enforcement for explicit integration/projection
       routes identified as partial above.
-- [ ] Resolve individual-anchor/per-mode dispositions from the grouped map
+      The declared package graph/materialization/refusal path is source-present;
+      remaining source-stage and fallback effects are `#5851/#5820/#4410`,
+      interpreter acquisition `#5955`, cell cleanup/rollback `#1096/#1110`.
+- [x] Resolve individual-anchor/per-mode dispositions from the grouped map
       before Phase 3 closes: each applicable item needs its own bounded status,
       source evidence and implementation owner, rather than inheriting a
       strongest-negative group score. Remaining source decisions concern
@@ -1093,6 +1155,12 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       source from declared rollout under `#1109/#1110` and acceptance retained
       by service owners; do not silently turn any of them into conformance.
       Live execution of every carved fix is not this sweep's completion gate.
+      Finite residuals were resolved into source C/V/N or named implementation/
+      policy/rollout objectives. The final owner table and Journal close
+      generic unread-source blockers without upgrading P to false conformance.
+- [x] Deferred to `ThomasMichon/copilot-extensions#1096`: installation-cell
+      family rollout, interrupted receipt/recovery/retirement execution and
+      release/live acceptance; `#1109/#1110` remain its specific consumers.
 
 ### Phase 4 — Decide the material-refresh relationship
 - [x] Decide whether user-facing material refresh (docs, Picker preview
@@ -1102,12 +1170,12 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       planning/execution is tracked by `#5799`.
 
 ## Validation Plan
-- [ ] Every vision file touched passes the superset check (no unintended
+- [x] Every vision file touched passes the superset check (no unintended
       Non-Goal/negative the subject violates; every folded-back capability
       traced to a real PR/commit/reality doc).
-- [ ] Every carved issue cites its vision item per `visions/README.md`'s
+- [x] Every carved issue cites its vision item per `visions/README.md`'s
       convention and is deduped against open issues before filing.
-- [ ] No vision file records conformance/gap-list prose — that output lives
+- [x] No vision file records conformance/gap-list prose — that output lives
       here or in linked issues only.
 
 ## Proposal
@@ -1119,6 +1187,73 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Source-reconciliation completion and explicit follow-on ownership
+- Completion is the original sweep: reconcile the current 35-entry vision
+  index as a superset and classify applicable service invariants. It is not
+  completion of every runtime delta, deployed fleet, clean-room acceptance,
+  native protocol convergence or independent adopter-material refresh.
+- All current indexed subjects have source/owner maps. The 36-by-13 artifact
+  is 468 individual source dispositions, not 468 unconditional conformance
+  promises. Finite P questions were resolved to inspected source or explicit
+  implementation/policy/rollout owners, preserving partial and conditional
+  legacy/cell/native/companion distinctions.
+
+  | Final source decision | Evidence / owner | Completion boundary |
+  |---|---|---|
+  | Package/refusal construction | Materializer and recursive nested-reference checks; promotion refuses unresolved results. | Source construction is C; artifact/release execution stays with implementation owners. |
+  | Deploy-template scope | Documented engine exclusions and permanent Worktrees exception. | Known contract discrepancy `#5956`, not an invented callback or a silent invariant weakening. |
+  | Hook admission | Worktrees registration reaches cold resident ensure; Bridge/Dispatch/Vault background owning installers. | Direct boot `#3761`, Index native lane `#5768`, cross-cutting installer boundary `#5964`. |
+  | Registry/transition custody | Claim-provider uncertainty/findings are dropped; Dispatch withdrawal retry and passive-age reap lack complete authority. | `#1043/#396/#5754`; conforming config/namespace registries and promoted survivor guards remain valid. |
+  | Persistent launch/cleanup | Owning shims/native roots protect lanes; supported direct callers can inherit payload cwd; numeric keeper retirement and sequential failed stops are concrete. | `#5958/#5953/#5954`; staging `#5820`, live-owner admission `#4309` remain distinct. |
+  | Acquisition/fallback | Private uv exists, legacy Python guards precede it; Container pip branch omits shipped-library precedence. | `#5955/#4410`; no inevitable failure or all-platform claim. |
+  | Cell recovery/current modes | Receipt/lock/selection/retirement source exists; Index post-deploy rollback can retire a healthy successor when old endpoint is gone. | `#1096/#1110` and Index rollback objective; no live transaction or outage reproduced. |
+  | Live contracts/diagnostics | Bridge inventory is present; other internal windows remain inventoried realization. Concrete composed commands and named gaps exist. | `#1460/#1468/#1915/#5957`, task/session gap `#3555`; no forced extra native handshake. |
+  | Corpus/admission/retrieval | Cross-root readers are real; chronicler gates, incomplete venue log transport and qualified cold lookup remain bounded gaps. | `#5676/#5677/#5678`; no global corpus absence or duplicate rendered-log assertion. |
+  | Judge/report consumers | Setup/container/model/driver/provenance checks and scenario fixture validation exist; semantic literal judgment remains caller/independent judge conduct. | `#5921/#5922/#5924` realization; no mandatory validator or accepted contamination claim. |
+  | Venue/policy consumers | Real attach defaults, provider actions and charter gates are not selected-execution/truncation/claim-extensibility or model-compliance proof. | `#5952/#5960/#5961/#5962/#5963`; existing `#954/#3657` retain live implementation. |
+
+- Every newly carved issue was deduped and its assigned number/title fetched
+  immediately. Existing owners were extended where the same source class
+  applied; no competing runtime PR, production agent, live cleanup or policy
+  choice was executed. New and existing negatives were not weakened to match
+  lagging source.
+- Reviewable documentation slices and targeted source/shape counterexamples
+  establish this reconciliation. Runtime unit/live/clean-room fixes stay
+  with the machine-checked transferred objectives above; no absent test or
+  proposal was recast as successful acceptance.
+- Status is Done for source reconciliation. The independent
+  `adopter-material-refresh` remains separate under `#5799`, and all carved
+  implementation/decision owners remain open on their own merits.
+
+### 2026-10-09 — Individual-disposition publication and finite residual audit
+- Individual-anchor/preference/publication slice merged as `#5950` at
+  `c3d9b7e308dd`, then finalized. The owner-authored review was a clean
+  Comment with zero concrete findings; its generic request for human
+  validation did not invent a new merge gate. Waited for actual same-head
+  CI run `37966411955` to finish successfully, separately from required
+  checks and review disposition.
+- Re-read the current 35-entry index against the canonical roster. Added
+  the Logger session-intelligence child's explicit path rather than treating
+  a shorthand parent/child mention as absent comparison or skipping it.
+- Remaining P source questions are being narrowed to actual repository
+  callers: package/helper closure and deployment boundaries, hook descendants,
+  registry/lease retirement, current cell/companion activation and protocol/
+  traversal scope. Arbitrary future operator callbacks are not an endlessly
+  expanding audit target. Source-uninspected, intentionally unsupported/
+  staged rollout and implementation/live validation remain distinct.
+- Remaining corpus, clean-room admission/judge consumers, venue preference/
+  reattachment, telemetry closing-resource and CI charter source legs retain
+  their explicit owners and completion questions. The 468-cell artifact is
+  evidence organization, not a claim that every P has already been resolved.
+  Parent Status and global Validation Plan remain Active/open.
+- Closed the bounded telemetry source leg: the complete leaf already covers
+  optional start/end-or-closing records and cheap exit-resource figures.
+  Dispatch/Bridge lifecycle producers and generic spools are implemented;
+  procutil and the inspected cache/SSH callers expose subprocess/exit/job
+  cleanup, not resource telemetry. Retained `#5900` as portable realization
+  owner. Inline exception fail-open is not latency isolation, but no adopted
+  spawn-site violation was proved; no per-site ticket or stronger claim.
 
 ### 2026-10-09 — Preference authority, publication recovery and cell-mode boundaries
 - Source-map/subscription slice merged as `#5943` at `96385a4ba739` with
