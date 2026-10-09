@@ -1,9 +1,0 @@
-{
-  "comment": "Bind Windows background reconcile to its installer worker and attempt; reap stale trees and preserve self-stage watchdog admission.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

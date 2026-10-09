@@ -1,9 +1,0 @@
-{
-  "comment": "Repair installer activation through effective config and detach hosted service successors from launcher Jobs",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

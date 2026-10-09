@@ -1,9 +1,0 @@
-{
-  "comment": "Install local guidance before JSON launch plans and expose bounded session-start repair outcomes",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

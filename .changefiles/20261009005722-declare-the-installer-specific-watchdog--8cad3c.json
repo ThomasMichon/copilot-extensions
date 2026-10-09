@@ -1,9 +1,0 @@
-{
-  "comment": "Declare the installer-specific watchdog default for safe unified updater budgets.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Ship shared venue-copilot support for optional target-settings launch policy",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

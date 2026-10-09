@@ -1,9 +1,0 @@
-{
-  "comment": "Add a 'plugin:<name>[@marketplace]:<path>' extends: ref kind so a registrar declaration (repo or plugin) can extend any other active plugin's own recipe by name, generalizing cross-registrar addressing to all four plugin/repo origin crossings with origin-agnostic circular-dependency prevention.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}

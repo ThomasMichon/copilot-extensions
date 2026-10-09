@@ -1,9 +1,0 @@
-{
-  "comment": "Add regression test proving a leftover versioned-slot lease file is safely reusable after release (no runtime behavior change).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

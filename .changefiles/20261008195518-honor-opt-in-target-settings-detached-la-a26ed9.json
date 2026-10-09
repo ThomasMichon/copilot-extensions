@@ -1,9 +1,0 @@
-{
-  "comment": "Honor opt-in target-settings detached launch policy without injecting caller defaults",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

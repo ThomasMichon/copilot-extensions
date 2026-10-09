@@ -1,9 +1,0 @@
-{
-  "comment": "Bounded wait/retry for versioned-slot build-lease contention: a concurrent first build is now joined within a configurable budget (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC, default 180s) and reused once it completes, instead of refusing immediately and requiring a manual re-run.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
