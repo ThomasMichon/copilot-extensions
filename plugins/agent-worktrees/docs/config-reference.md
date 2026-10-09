@@ -69,8 +69,10 @@ configuration:
 machine: workstation-windows
 ```
 
-The selected key must exist and match the actual execution platform. New
-worktrees, including unowned creations, fail before source fetch when that
+The selected key and configured platform must match the actual execution
+platform. A record's stored platform must also agree: retaining a key for its
+native environment does not authorize legacy records created in another one.
+New worktrees, including unowned creations, fail before source fetch when that
 selection is invalid. Invalid registry data cannot supply a hostname fallback.
 Each execution user retains its own validated registry root, project
 registrations and settings; no records or preferences are copied between spaces.

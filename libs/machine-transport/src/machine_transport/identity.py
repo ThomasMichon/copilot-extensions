@@ -76,7 +76,7 @@ def is_local_machine(
         # comparing two possibly-empty alias strings directly would.
         if this is not None:
             return target is this
-    if target.execution_platform:
+    if getattr(target, "execution_platform", ""):
         return False
     hostname = (real_hostname or socket.gethostname()).lower()
     if target.hostname and target.hostname.lower() == hostname:

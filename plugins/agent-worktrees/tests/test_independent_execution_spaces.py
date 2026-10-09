@@ -49,7 +49,7 @@ def scoped_config(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     config = SimpleNamespace(
-        machine="workstation-windows", repo_name="project",
+        machine="workstation-windows", platform="windows", repo_name="project",
         default_repo=SimpleNamespace(anchor=str(tmp_path)),
     )
     monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
@@ -97,6 +97,7 @@ def test_true_same_registered_space_resolves_its_local_ledger(scoped_config, tmp
 @pytest.mark.parametrize("platform", ["windows", "wsl"])
 def test_each_space_selects_only_its_own_execution_platform(platform, scoped_config, monkeypatch):
     scoped_config.machine = f"workstation-{platform}"
+    scoped_config.platform = platform
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
     execution_spaces.require_current_execution_space(scoped_config)
     assert execution_spaces.require_owner_identity(scoped_config.machine, scoped_config)
@@ -117,7 +118,7 @@ def test_parent_settlement_cannot_mutate_wrong_ledger(owner, scoped_config, monk
     from agent_worktrees import finalize
 
     record = SimpleNamespace(
-        machine="workstation-windows", worktree_id="wt-child",
+        machine="workstation-windows", platform="windows", worktree_id="wt-child",
         owner_ref=f"{owner}/project/wt-parent",
     )
     monkeypatch.setattr(
@@ -228,16 +229,19 @@ def test_invalid_registry_never_falls_back_to_shared_hostname(tmp_path, monkeypa
         cfg.detect_machine(tmp_path)
 
 
-@pytest.mark.parametrize("machine", ["workstation", "workstation-wsl"])
+@pytest.mark.parametrize(("machine", "platform"), [
+    ("workstation", "windows"), ("workstation-wsl", "windows"),
+    ("workstation-windows", "wsl"),
+])
 def test_unowned_create_requires_the_current_registered_space(
-    machine, tmp_path, scoped_config, monkeypatch,
+    machine, platform, tmp_path, scoped_config, monkeypatch,
 ):
     import agent_worktrees.__main__ as main
 
     anchor = tmp_path / "anchor"
     anchor.mkdir()
     config = cfg.Config(
-        machine=machine, platform="windows", repo_name="project", srcroot=str(tmp_path),
+        machine=machine, platform=platform, repo_name="project", srcroot=str(tmp_path),
         repos={"project": cfg.RepoConfig(
             anchor=str(anchor), worktree_root=str(tmp_path / "children"),
         )},
@@ -256,7 +260,7 @@ def test_parent_record_authority_is_rechecked_before_settlement(
 ):
     parent_ref = "workstation-windows/project/wt-parent"
     child = SimpleNamespace(
-        machine="workstation-windows", worktree_id="wt-child",
+        machine="workstation-windows", platform="windows", worktree_id="wt-child",
         owner_ref=parent_ref, owner_claim_ref=tracking.parse_claim_ref(parent_ref),
     )
     parent = SimpleNamespace(
@@ -285,7 +289,7 @@ def test_known_parent_io_failure_reports_unconfirmed_settlement(
 ):
     parent_ref = "workstation-windows/project/wt-parent"
     child = SimpleNamespace(
-        machine="workstation-windows", worktree_id="wt-child",
+        machine="workstation-windows", platform="windows", worktree_id="wt-child",
         owner_ref=parent_ref, owner_claim_ref=tracking.parse_claim_ref(parent_ref),
     )
     parent_dir = tmp_path / "project"
@@ -352,7 +356,7 @@ def test_claim_write_rechecks_owner_after_acquiring_lock(
     from agent_worktrees import tracking_claim_write
 
     record = SimpleNamespace(
-        machine=scoped_config.machine, repo="project", worktree_id="wt-owner",
+        machine=scoped_config.machine, platform="windows", repo="project", worktree_id="wt-owner",
         owner_ref=None,
     )
     lock_held = False
@@ -478,7 +482,7 @@ def test_sweep_rechecks_fresh_owner_under_lock(
     from agent_worktrees import sweep
 
     stale = SimpleNamespace(
-        machine=scoped_config.machine, repo="project", worktree_id="wt-owner",
+        machine=scoped_config.machine, platform="windows", repo="project", worktree_id="wt-owner",
         owner_ref=None, resources=[],
     )
     fresh = SimpleNamespace(
@@ -541,7 +545,7 @@ def test_seed_transaction_rechecks_owner_after_acquiring_lock(
     target.parent.mkdir()
     target.write_text("seed before", encoding="utf-8")
     record = SimpleNamespace(
-        machine=scoped_config.machine, repo="project", worktree_id=path.stem,
+        machine=scoped_config.machine, platform="windows", repo="project", worktree_id=path.stem,
         owner_ref=None,
     )
     lock_held = False
@@ -606,3 +610,97 @@ def test_seed_daemon_returns_known_authority_rejection_without_writing(
         server.close()
     assert record.yaml_path.read_bytes() == before
     assert not launch_seed_state.state_path(record.yaml_path).exists()
+
+
+@pytest.mark.parametrize("verb", ["release", "settle"])
+@pytest.mark.parametrize("json_out", [False, True])
+def test_claim_cli_reports_authority_rejection_without_success_or_crash(
+    verb, json_out, tmp_path, scoped_config, monkeypatch, capfd,
+):
+    from agent_worktrees import tracking_claim_write, worktree_identity
+
+    path = tmp_path / "wt-foreign.yaml"
+    path.write_text("unchanged", encoding="utf-8")
+    foreign = SimpleNamespace(
+        machine="workstation-wsl", platform="wsl", repo="project",
+        worktree_id=path.stem, owner_ref=None,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda *args: path.stem)
+    monkeypatch.setattr(tracking, "load_record", lambda *args: foreign)
+    monkeypatch.setattr(
+        claims_cli, "_dispatch_claim",
+        lambda name, args: getattr(tracking_claim_write, f"apply_{name}")(args),
+    )
+    result = getattr(claims_cli, f"_claims_{verb}")(
+        SimpleNamespace(json=json_out, remove=False, released=False), "owner/example#1",
+    )
+    output = capfd.readouterr().out
+    assert result == 1
+    if json_out:
+        assert "different execution space" in json.loads(output)["error"]
+    else:
+        assert "different execution space" in output
+    assert "settled outbound" not in output
+    assert path.read_text(encoding="utf-8") == "unchanged"
+
+
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("failure", [ValueError, PermissionError, yaml.YAMLError])
+def test_cleanup_registry_failure_is_a_structured_refusal(
+    force, failure, tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import cleanup_gc_cli
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+    )
+
+    def invalid_registry(anchor):
+        raise failure("cannot validate registry")
+
+    monkeypatch.setattr(cfg, "load_machines_yaml", invalid_registry)
+    result = cleanup_gc_cli._revalidate_cleanup_safety(
+        record.worktree_id, repo=SimpleNamespace(anchor=str(tmp_path)),
+        tracking_path=tmp_path, force=force,
+        reap=lambda *args: pytest.fail("cleanup reached destructive work without registry authority"),
+    )
+    assert not result.cleanable
+    assert result.bucket == "execution-space"
+    assert "registry is invalid" in result.reason
+    assert record.yaml_path.exists()
+
+
+@pytest.mark.parametrize("platform", ["wsl", None])
+def test_matching_key_does_not_authorize_an_ambiguous_legacy_platform(platform, scoped_config):
+    record = SimpleNamespace(
+        machine=scoped_config.machine, platform=platform, repo="project",
+        worktree_id="legacy-shared-key", owner_ref=None,
+    )
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
+        execution_spaces.require_record_mutation(record, scoped_config)
+
+
+def test_configured_platform_must_match_actual_selected_space(scoped_config):
+    scoped_config.platform = "wsl"
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
+        execution_spaces.require_current_execution_space(scoped_config)
+
+
+def test_finalize_session_settlement_propagates_authority_rejection(
+    tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import finalize, tracking_write
+
+    record = SimpleNamespace(
+        machine=scoped_config.machine, platform="windows", repo="project",
+        worktree_id="wt-owner", owner_ref=None,
+    )
+    monkeypatch.setattr(
+        tracking_write, "dispatch",
+        lambda *args, **kwargs: {"error": "rejected", "message": "foreign ledger"},
+    )
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="foreign ledger"):
+        finalize._settle_current_session_claim(tmp_path / "wt-owner.yaml", record, "session-1")

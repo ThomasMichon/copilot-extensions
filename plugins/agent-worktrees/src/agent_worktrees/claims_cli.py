@@ -583,7 +583,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
             return output._json_error(f"no outbound claim with ref: {ref}")
         output.err(f"no outbound claim with ref: {ref} on {wt_id}")
         return 1
-    if result.get("error") == "reserved":
+    if result.get("error") in {"reserved", "rejected"}:
         if args.json:
             return output._json_error(result["message"])
         output.err(result["message"])
@@ -651,7 +651,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             return output._json_error(msg)
         output.err(msg)
         return 1
-    if result.get("error") == "reserved":
+    if result.get("error") in {"reserved", "rejected"}:
         if args.json:
             return output._json_error(result["message"])
         output.err(result["message"])
