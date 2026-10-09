@@ -288,6 +288,15 @@ output, and `stale-branch-sweep.yml` acts on already-merged PRs' branches):
 | `agent-dispatch-pwsh-race-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | Runs `agent-dispatch`'s multi-process `pwsh` mutex-race tests (self-skipped by default in `ci.yml`'s smoke lane) on both `ubuntu-latest` and `windows-latest` — deliberately its own workflow for the same reason as `context-handoff-exhaustive.yml`. |
 | `ci-failure-fix-attempt.lock.yml` | `issues: [labeled]`, `workflow_dispatch` | Generated agentic-workflow (`gh-aw` compiled) that reacts to a labeled CI-failure tracking issue; also manually dispatchable with inputs. |
 
+The release reporter checks the optional fixer's workflow state once before
+dispatching newly filed signatures. An operator-disabled workflow is a visible,
+successful skip: no dispatch requests are sent. Repeated issue IDs in one batch
+are dispatched at most once. If disablement races with a
+dispatch, the reporter rechecks state once and skips the remaining batch without
+retrying. Authentication, metadata, and dispatch errors for an enabled workflow
+remain failures; detection, signature deduplication, and comment cooldowns are
+unchanged.
+
 ## Promotion: dev → main
 
 Merging to `dev` is not the same as shipping. Every consumer still only
