@@ -140,10 +140,36 @@ def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> 
     return point
 
 
+def check_start(point: RecoveryPoint, *, cwd: str) -> None:
+    branch = git_ops.git(
+        "symbolic-ref", "--short", "HEAD", cwd=cwd, isolated_repository=True,
+    ).stdout.strip()
+    if branch != point.branch or _rev("HEAD", cwd) != point.local_head:
+        raise ValueError("Source branch or HEAD changed after the recovery snapshot")
+
+
+def _result(point: RecoveryPoint, cwd: str) -> str:
+    branch = git_ops.git(
+        "symbolic-ref", "--short", "HEAD", cwd=cwd, isolated_repository=True,
+    ).stdout.strip()
+    current = _rev("HEAD", cwd)
+    if branch != point.branch:
+        raise ValueError("Source branch changed during synchronization")
+    if current == point.local_head and git_ops.is_commit_ancestor(point.target_head, current, cwd=cwd):
+        return current
+    from . import pr_rebase
+
+    replay = pr_rebase._replay(point.branch, current, cwd)
+    if replay is None or replay[:2] != (point.local_head, point.target_head):
+        raise ValueError("HEAD does not identify the completed pre-snapshot rebase transition")
+    return replay[2]
+
+
 def complete(point: RecoveryPoint, *, cwd: str) -> None:
-    """Bind the supported operation's result without depending on Git's reflog."""
+    """Persist the exact transition for later journal-independent publication."""
+    head = _result(point, cwd)
     if point.pr_id and point.published_head:
-        result = replace(point, synced_head=_rev("HEAD", cwd))
+        result = replace(point, synced_head=head)
         points = _points(cwd)
         points[point.pr_id] = asdict(result)
         collection = {"version": 2, "latest": point.pr_id, "checkpoints": points}

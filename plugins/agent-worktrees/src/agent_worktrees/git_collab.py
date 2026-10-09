@@ -97,6 +97,11 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
     ).stdout.strip()
 
     print(f"Rebasing {branch} onto {upstream}...")
+    try:
+        pr_recovery.check_start(recovery, cwd=worktree_path)
+    except (OSError, ValueError, git_ops.GitError) as exc:
+        output.err(f"Nothing rebased: {exc}")
+        return False
     if not git_ops.rebase(recovery.target_head, cwd=worktree_path):
         output.err(
             f"Rebase of {branch} onto {upstream} hit a conflict and was aborted; "

@@ -251,6 +251,43 @@ def test_pre_sync_reset_cannot_launder_unrelated_source_into_rewrite_authority(p
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
 
 
+@pytest.mark.parametrize("interpose", ["before-rebase", "after-rebase"])
+def test_interposed_head_mutation_cannot_be_attested_as_the_rebase_result(
+    pr_repo, monkeypatch, interpose,
+):
+    config, wid, path, remote, branch, old = _prepare(pr_repo)
+    original_prepare = pr_recovery.prepare
+    original_rebase = git_ops.rebase
+
+    def mutate(target):
+        _git("reset", "--hard", target, cwd=path)
+        (path / "interposed.txt").write_text("unrelated replacement\n")
+        _git("add", "interposed.txt", cwd=path)
+        _git("commit", "-m", "interposed replacement", cwd=path)
+
+    if interpose == "before-rebase":
+        def prepare(*args, **kwargs):
+            point = original_prepare(*args, **kwargs)
+            mutate(point.target_head)
+            return point
+
+        monkeypatch.setattr(pr_recovery, "prepare", prepare)
+        monkeypatch.setattr(git_ops, "rebase", lambda *_, **__: pytest.fail("must not rebase"))
+    else:
+        def rebase(target, **kwargs):
+            assert original_rebase(target, **kwargs)
+            mutate(target)
+            return True
+
+        monkeypatch.setattr(git_ops, "rebase", rebase)
+    assert not git_collab.sync_forward(wid, config)
+    assert not pr_recovery._path(str(path)).exists()
+    point = _point(path, pending=True)
+    assert _git("rev-parse", point["local_ref"], cwd=path) == old
+    assert not finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
+
+
 @pytest.mark.parametrize("failure", ["conflict", "checkpoint-write"])
 def test_failed_repeated_sync_preserves_completed_authority_after_reflog_expiry(
     pr_repo, monkeypatch, failure,

@@ -608,6 +608,12 @@ a conflict, abort or checkpoint-write failure preserves that last completed
 authority even after its rebase journals expire.
 Completed points are retained per PR identity, so synchronizing another live
 PR also cannot overwrite an older PR's valid authority.
+Before rebasing, the source branch and HEAD must still match the recovery
+snapshot. At completion, the checkpoint captures the exact native rebase
+transition with that original tip and pinned target (or an unchanged no-op),
+not an arbitrary later HEAD. Native journals are needed only at this immediate
+operation boundary; the durable checkpoint does not require them to survive
+until publication.
 The first backed sync requires the pre-sync source to contain the saved
 published tip. Repeated syncs may continue a prior completed backed result;
 they retain its original lineage under a separate ref. An unrelated reset
