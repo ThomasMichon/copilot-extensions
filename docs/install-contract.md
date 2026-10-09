@@ -2008,6 +2008,28 @@ dependency order, optional MCP-extra fallback, launchers and its complete
 coordinator/supervisor lifecycle; only shared acquisition, retry and manifest
 mechanics move into the engine.
 
+`agent-index` uses canonical references on `dev` and shared acquisition,
+native capture, transient retries and manifest writing. Its versioned CLI,
+optional host-server sibling and separately provisioned durable embedding venv
+all use those shared build mechanics. Signed-Python discovery, signature/venv
+health validation, dependency order, Torch/CUDA feeds, engine configuration and
+every activation/service lifecycle remain local. Signed results are accepted
+only after checking the interpreter's venv prefix and `pyvenv.cfg`; an
+unusable result is removed before fallback, even when creation returned zero.
+An existing interpreter alone never proves the engine venv reusable.
+
+PowerShell Index stamps materialize both engine files and every declared local
+library (`zdd`, `agent-procutil`, `dropin-registry`), with snapshot-local
+non-editable references. The existing ordinal whole-payload hash supplies
+content-addressed immutable snapshot identity, including plugin, engine and
+library bytes and case-distinct paths. Unchanged stamps reuse identical
+snapshots; existing corrupt snapshots fail without replacement. Snapshot
+production and marker/launcher publication use sequential locks, with a
+same-version candidate recheck before atomic marker publication. A delayed
+stamp cannot overwrite a newer candidate's markers or launchers. The POSIX
+stamp retains its owning-payload pointer, whose released payload is already
+self-contained. Neither stamp provisions the embedding stack.
+
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine
 files; this is a phased rollout, not a blanket requirement for every runtime

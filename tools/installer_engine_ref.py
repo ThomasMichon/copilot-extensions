@@ -30,6 +30,7 @@ ADOPTERS = (
     "agent-bridge",
     "agent-codespaces",
     "agent-dispatch",
+    "agent-index",
 )
 
 _LOCAL_LINES = {

@@ -403,7 +403,10 @@ engine under this effort.
       update flow. See the 2026-10-08 journal entry and issue #5802.
 - [ ] `agent-index` (separate engine venv — prove the config schema handles
       this before completing the remaining adopters).
-- [ ] `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-machines`.
+- [x] `agent-dispatch` — PR #5832 merged, release #5866 promoted the
+      adopter, and the normal update verified payload/runtime `0.14.0-dev1`
+      with a healthy routed coordinator and running supervisor.
+- [ ] `agent-containers`, `agent-mcp`, `agent-machines`.
 - [ ] **`agent-worktrees` is a decided permanent exception, not a deferred
       evaluation, and not part of the non-exempt adopter set above.** It is
       the control-plane plugin and by far the largest, most bespoke installer
@@ -520,6 +523,95 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-08 — Index adopter implementation prepared for integration
+
+- Public coordination: #5873. This Phase 2+ slice closes the reviewed
+  self-contained/immutable-runtime intent without changing service architecture.
+  Both Index wrappers use canonical engine references on `dev`; adopter
+  registration materializes byte-identical payload-local engines at release.
+- Shared acquisition, capture, venv/package retries and manifests cover the
+  versioned CLI, optional host-server sibling and independent durable engine.
+  No canonical engine change or new shared parameter was necessary.
+  Index retains CLI/server signed-Python preference, the durable engine's uv
+  interpreter selection, package ordering,
+  backend/CUDA/Torch feeds, engine.env and every activation/task/daemon lifecycle.
+  Signed-result usability, not exit code alone, gates recovery; an invalid
+  existing interpreter cannot bypass rebuilding.
+- PowerShell stamps materialize both engines and all three local libraries,
+  rewrite dependency references and reuse the existing ordinal payload hash.
+  Unchanged content reuses an immutable snapshot; plugin, engine, library and
+  case-distinct edits change its identity. Sequential snapshot/publication
+  locks recheck the same-version candidate before atomic marker and launcher
+  publication, addressing the stamp marker race tracked in #5271.
+- Installer counts: shell 2004 -> 1958 (-46), PowerShell 2539 -> 2579 (+40);
+  wrappers 4543 -> 4537 (-6). Canonical engine remains 403 shell + 478
+  PowerShell lines; combined corpus 5424 -> 5418 (-6). PowerShell growth
+  supplies self-contained immutable snapshots and shared signed-result health
+  policy rather than a duplicated service-specific engine.
+- Snapshot-origin provisioning preserves the durable snapshot pointer even
+  after the authoring source disappears; source metadata independently retains
+  the original payload provenance rather than advertising staging paths.
+- Contained fixtures exercise both CLI and durable-engine builds without real
+  packages/models or daemon contact. Available PowerShell coverage includes
+  signed-result simulation, snapshot reuse/content identity, unavailable
+  authoring sources and stale-candidate refusal. POSIX optional-server package
+  failure now warns without escaping the documented fallback via errexit.
+- The host full suite exposed repeated copied-interpreter fixture storage
+  growth: each POSIX venv copied three approximately 29 MB interpreter leaves.
+  Runtime-gate fixtures now use ordinary POSIX venv symlinks, retaining copies
+  on Windows. The same 2 GiB sub-suite budget then passed; no limit was raised.
+- Validation passed under admission 120 seconds / timeout 600 seconds:
+  focused installer selection 80 passed; full disconnected devcontainer suite
+  731 passed / 85 skipped; full host suite including available PowerShell
+  coverage 805 passed / 11 skipped; engine-sync/materialization/install-contract
+  tooling 107 passed. Install contract, engine sync, vendored-library sync,
+  versions, module size, docs, changefile, F/E9 lint and both installer parsers
+  passed. No accepted-flake exception was required.
+- Coordinator compatibility check retained unpinned uv interpreter selection
+  across all three venvs and the existing Windows Python/pip fallback when uv
+  acquisition fails. The durable engine does not acquire the CLI/server's
+  signed-rebuild policy. Final focused selection passed 82 cases; final full
+  host suite passed 807 cases with 11 skips.
+- The operator requested finishing this Index installer change, then pausing.
+  No further adopter slice will start at this boundary; the parent effort
+  remains Active with its remaining roster and validation gates intact.
+- Review, merge, release and live verification remain coordinator-owned and
+  outstanding. Native Windows/PowerShell 5.1, SAC and macOS behavior, and real
+  package provisioning, are not claimed. The adopter checkbox remains unchecked
+  and the overall effort remains Active.
+
+### 2026-10-08 — Dispatch adopter merged and deployment verified
+
+- PR #5832 merged as `3c153fae456d3ca70a18dc9c19f360d9b4fd3980` after
+  source CI and required gates passed and the final owner-authored `Comment`
+  review reported zero open findings. Four review rounds closed the snapshot
+  leak, existing-invalid signed rebuild, case-distinct hash and same-version
+  stale publication defects; no remaining finding was bypassed.
+- Final native Windows PowerShell 7 installer/snapshot/stamp/activation
+  selection passed (76 passed, 12 skipped). Actual SAC enforcement,
+  PowerShell 5.1, native macOS and live first-use provisioning remain
+  separate validation limitations, not claimed coverage.
+- Post-merge reconciliation initially hit a squash-replay conflict and
+  auto-aborted without changing the branch. Refreshing authoritative merged
+  PR metadata with `pr-status` allowed `pr-complete` to reconcile past the
+  verified squash merge while preserving its backup ref and active effort.
+- Release-driving `dev` CI was superseded twice by newer contributions,
+  rather than failing tests. Release promotion and normal deployed-runtime
+  verification were then completed: promotion PR #5866 included the adopter,
+  and the explicitly approved normal update installed `0.14.0-dev1`.
+- Both payload-local engine files match canonical bytes and the release
+  contains the local snapshot candidate guard. The active routed coordinator
+  reports `status: ok`, the new version and `draining: false`; its companion
+  supervisor is active/running. No forced update or unadopted runtime enablement
+  was requested.
+- The pre-update legacy unit was repeatedly rejecting a duplicate coordinator,
+  while the routed coordinator was healthy. This already-tracked condition
+  matches #5551; it was not treated as an outage or remedied with process kills
+  or a forced restart.
+- This adopter is complete. The effort remains Active: `agent-index`,
+  `agent-containers`, `agent-mcp`, `agent-machines`, permanent-exception
+  enforcement, opt-in retirement and aggregate validation remain open.
 
 ### 2026-10-08 — `agent-dispatch` adopter prepared for integration
 

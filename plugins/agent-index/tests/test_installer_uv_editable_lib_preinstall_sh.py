@@ -41,7 +41,7 @@ _BLOCKS = {
 # `agent-procutil` preinstall actually SKIPS the main install rather than
 # merely being logged (PR #4465 review).
 _ENGINE_WITH_GATE_START = _BLOCKS["engine"][0]
-_ENGINE_WITH_GATE_END = '\n            uv "${uv_args[@]}" || rc=$?'
+_ENGINE_WITH_GATE_END = '\n            _uv_pip_install "${uv_args[@]}" || rc=$?'
 
 
 def _extract(text: str, start: str, end: str) -> str:
@@ -73,12 +73,16 @@ def _run(
 set -uo pipefail
 _fail() {{ echo "FAIL:$1"; exit 1; }}
 uv() {{ echo "UV_INSTALL_ARGS:$*" >> '{marker}'; }}
+_uv_pip_install() {{ uv pip install "$@"; }}
 THE_VENV_PYTHON=venv_python_stub
 venv_python_stub() {{ echo "PIP_INSTALL_ARGS:$*" >> '{marker}'; }}
 PLUGIN_DIR='{plugin_dir}'
 have_uv={1 if have_uv else 0}
 {_resolve_vendored_lib_fn(text)}
+run_block() {{
 {block}
+}}
+run_block
 """
     environment = {**os.environ, "HOME": str(isolated_home)}
     proc = subprocess.run(
@@ -205,6 +209,7 @@ uv() {{
     fi
     return 0
 }}
+_uv_pip_install() {{ uv pip install "$@"; }}
 THE_VENV_PYTHON=venv_python_stub
 venv_python_stub() {{ echo "PIP_CALL:$*" >> '{marker}'; return 0; }}
 _resolve_vendored_lib() {{

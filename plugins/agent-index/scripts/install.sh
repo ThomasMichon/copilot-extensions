@@ -17,6 +17,7 @@ _step() { printf '  ...    %s\n' "$1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
 # Refuse every mutating lifecycle action before self-staging touches the legacy
 # runtime. Parse only the action and install-dir override here; the canonical
@@ -1014,27 +1015,12 @@ _find_python() {
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
 # governed box) instead of dead-ending; add it to PATH for this run.
 _ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
-    _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
-    return 1
+    UV_COMMAND="$(ensure_uv "$INSTALL_DIR")" || return $?
+    export PATH="$(dirname "$UV_COMMAND"):$PATH"
+}
+
+_uv_pip_install() {
+    invoke_uv_pip_install_resilient "${UV_COMMAND:-uv}" "$@"
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
@@ -1122,14 +1108,14 @@ _install_server_venv() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    if [[ ! -x "$server_venv_python" ]]; then
+    if [[ ! -x "$server_venv_python" || ! -f "$server_venv_dir/pyvenv.cfg" ]]; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv venv "$server_venv_dir" --allow-existing >/dev/null 2>&1 \
+            invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$server_venv_dir" --allow-existing \
                 || "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
         else
             "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
         fi
-        if [[ ! -x "$server_venv_python" ]]; then
+        if [[ ! -x "$server_venv_python" || ! -f "$server_venv_dir/pyvenv.cfg" ]]; then
             _warn "Server venv creation failed -- $server_venv_python not found (spawn_passive falls back to the shared venv)"
             return 0
         fi
@@ -1138,7 +1124,7 @@ _install_server_venv() {
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$server_venv_python" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1
+            _uv_pip_install --python "$server_venv_python" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1
         else
             "$server_venv_python" -m pip install "$zdd_dir" >/dev/null 2>&1
         fi || {
@@ -1147,13 +1133,13 @@ _install_server_venv() {
         }
     fi
 
-    local srv_out
+    local srv_out srv_rc=0
     if [[ "$have_uv" -eq 1 ]]; then
-        srv_out="$(uv pip install --python "$server_venv_python" "${PLUGIN_DIR}[store,server]" 2>&1)"
+        srv_out="$(_uv_pip_install --python "$server_venv_python" "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
     else
-        srv_out="$("$server_venv_python" -m pip install "${PLUGIN_DIR}[store,server]" 2>&1)"
+        srv_out="$("$server_venv_python" -m pip install "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
     fi
-    if [[ $? -ne 0 ]]; then
+    if [[ "$srv_rc" -ne 0 ]]; then
         _warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
         printf '%s\n' "$srv_out" >&2
         return 0
@@ -1229,17 +1215,17 @@ _ensure_runtime() {
         fi
     fi
 
-    if [[ ! -x "$VENV_PYTHON" ]]; then
+    if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
         if [[ "$have_uv" -eq 1 ]]; then
             _step 'Creating venv via uv...'
             _versioned_slot_clean
-            uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
+            invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$VENV_DIR" --allow-existing \
                 || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
         else
             _step 'Creating venv via python -m venv...'
             "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
         fi
-        [[ -x "$VENV_PYTHON" ]] || { _fail "Venv creation failed -- $VENV_PYTHON not found"; exit 1; }
+        [[ -x "$VENV_PYTHON" && -f "$VENV_DIR/pyvenv.cfg" ]] || { _fail "Venv creation failed -- interpreter or pyvenv.cfg missing"; exit 1; }
         _ok 'Venv created'
     else
         _skip 'Venv already exists'
@@ -1250,7 +1236,7 @@ _ensure_runtime() {
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
+            _uv_pip_install --python "$VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
         else
             "$VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null
         fi || {
@@ -1271,7 +1257,7 @@ _ensure_runtime() {
     local procutil_dir
     if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
+            _uv_pip_install --python "$VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
         else
             "$VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null
         fi || {
@@ -1300,7 +1286,7 @@ _ensure_runtime() {
         local pkg="$PLUGIN_DIR"
         [[ "$install_role" == "host" ]] && pkg="${PLUGIN_DIR}[store,server]"
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$pkg"
+            _uv_pip_install --python "$VENV_PYTHON" "$pkg"
         else
             "$VENV_PYTHON" -m pip install "$pkg"
         fi
@@ -1365,40 +1351,7 @@ _write_manifest() {
         [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
         echo "$commit $branch $dirty"
     }
-    local manifest="$INSTALL_DIR/deploy-manifest.json"
-    local kind ver commit branch dirty
-    kind="$(_source_kind "$PLUGIN_DIR")"
-    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-    commit="null"; branch="null"; dirty="false"
-    if [[ "$kind" == "local" ]]; then
-        local repo_root _c _b _d
-        repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
-        read -r _c _b _d <<< "$(_git_info "$repo_root")"
-        commit="\"$_c\""; branch="\"$_b\""; dirty="$_d"
-    fi
-    local tmp="$manifest.tmp"
-    cat > "$tmp" << EOF
-{
-  "schema_version": 3,
-  "service": "agent-index",
-  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$kind",
-    "path": "$PLUGIN_DIR",
-    "repo": "copilot-extensions",
-    "plugin": "agent-index",
-    "version": "$ver",
-    "commit": $commit,
-    "branch": $branch,
-    "dirty": $dirty
-  },
-  "venv": "$VENV_DIR",
-  "runtime": "python"
-}
-EOF
-    mv -f "$tmp" "$manifest"
-    _ok "Deploy manifest written (source: $kind)"
+    write_deploy_manifest agent-index agent-index "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-}"
 }
 
 _machine_role() {
@@ -1456,7 +1409,7 @@ _install_engine() {
         _skip "Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)"
         return 1
     fi
-    if [[ -x "$ENGINE_VENV_PYTHON" && "$upgrade" -eq 0 ]]; then
+    if [[ -x "$ENGINE_VENV_PYTHON" && -f "$ENGINE_VENV/pyvenv.cfg" && "$upgrade" -eq 0 ]]; then
         _skip "Engine runtime already provisioned (durable venv preserved): $ENGINE_VENV"
         return 0
     fi
@@ -1469,22 +1422,23 @@ _install_engine() {
     fi
     mkdir -p "$ENGINE_HOME"
     local have_uv=0
-    command -v uv >/dev/null 2>&1 && have_uv=1
+    if _ensure_uv; then have_uv=1; else _warn 'uv acquisition failed -- using the engine pip fallback'; fi
+    _ensure_uv_index
     if [[ "$have_uv" -eq 1 ]]; then
-        uv venv "$ENGINE_VENV" --allow-existing >/dev/null 2>&1 || "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
+        invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$ENGINE_VENV" --allow-existing || "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
     else
         "$py" -m venv "$ENGINE_VENV" >/dev/null 2>&1
     fi
-    [[ -x "$ENGINE_VENV_PYTHON" ]] || { _warn "Engine venv creation failed -- $ENGINE_VENV_PYTHON not found"; return 1; }
+    [[ -x "$ENGINE_VENV_PYTHON" && -f "$ENGINE_VENV/pyvenv.cfg" ]] || { _warn "Engine venv creation failed -- interpreter or pyvenv.cfg missing"; return 1; }
 
     # zdd is a declared dependency of agent-index but is not on PyPI -- install it
     # from the vendored lib first so pip can satisfy the requirement.
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$ENGINE_VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1 || true
+            _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1 || { _warn 'Engine zdd install failed'; return 1; }
         else
-            "$ENGINE_VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null 2>&1 || true
+            "$ENGINE_VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null 2>&1 || { _warn 'Engine zdd install failed'; return 1; }
         fi
     fi
 
@@ -1500,7 +1454,7 @@ _install_engine() {
     local procutil_dir
     if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || rc=$?
+            _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || rc=$?
         else
             "$ENGINE_VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null 2>&1 || rc=$?
         fi
@@ -1528,15 +1482,15 @@ _install_engine() {
     if [[ "$rc" -ne 0 ]]; then
         :
     elif [[ "$have_uv" -eq 1 ]]; then
-        uv pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
+        _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
+            local uv_args=(--python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
             [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
-            uv "${uv_args[@]}" || rc=$?
+            _uv_pip_install "${uv_args[@]}" || rc=$?
         fi
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
             _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
-            uv pip install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
+            _uv_pip_install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
         fi
     else
         "$ENGINE_VENV_PYTHON" -m pip install "$PLUGIN_DIR" || rc=$?
