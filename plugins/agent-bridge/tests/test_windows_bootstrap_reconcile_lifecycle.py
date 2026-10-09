@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows reconcile lifecycle")
+# Cold Server Core PowerShell startup measured 27s before the hook returned;
+# these bounded live-process cases include that startup and a real watchdog.
+pytestmark = [
+    pytest.mark.skipif(os.name != "nt", reason="Windows reconcile lifecycle"),
+    pytest.mark.timeout(90),
+]
 HOOK = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-check.ps1"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
@@ -37,7 +42,7 @@ def alive(pid: int) -> bool:
         kernel.CloseHandle(handle)
 
 
-def wait_for(read, predicate, seconds=10):
+def wait_for(read, predicate, seconds=40):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         value = read()
@@ -114,7 +119,7 @@ exit 9
         result = subprocess.run(
             [PWSH, "-NoProfile", "-File", str(selected / "scripts" / HOOK.name)],
             cwd=selected, env=env | (extra_env or {}),
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=40,
             creationflags=subprocess.CREATE_NO_WINDOW)
         assert result.returncode == 0, result.stderr
         assert result.stdout == "{}"
@@ -138,7 +143,7 @@ def test_fast_completion_owns_worker_pid_and_resets_inherited_staging(reconcile)
     run_hook()
     status = wait_for(lambda: read("reconcile-status.json"), lambda s: "completed_at" in s)
     stub = read("stub.json")
-    assert status["launched_pid"] == stub["pid"]
+    assert status["launched_pid"] != stub["pid"], "the worker supervises a separate installer"
     assert status["launched_pid"] != status["wrapper_pid"]
     assert status["exit_code"] == 9 and status["success"] is False
     assert status["attempt_id"] and status["worker_started_at"]
@@ -146,7 +151,7 @@ def test_fast_completion_owns_worker_pid_and_resets_inherited_staging(reconcile)
     assert Path(stub["cwd"]) == runtime.parent
 
 
-def test_young_worker_prevents_duplicate_even_when_wrapper_is_gone(reconcile):
+def test_wrapper_exit_does_not_hide_live_supervisor(reconcile):
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -154,10 +159,14 @@ def test_young_worker_prevents_duplicate_even_when_wrapper_is_gone(reconcile):
     status = read("reconcile-status.json")
     os.kill(status["wrapper_pid"], signal.SIGTERM)
     wait_for(lambda: alive(status["wrapper_pid"]), lambda active: not active)
-    assert alive(stub["pid"]), "the installer can outlive its console wrapper"
     run_hook()
-    assert read("reconcile-status.json")["attempt_id"] == status["attempt_id"]
-    assert alive(stub["pid"])
+    after = read("reconcile-status.json")
+    if after["attempt_id"] != status["attempt_id"]:
+        assert not alive(status["launched_pid"]), "a live supervisor must prevent replacement"
+    else:
+        assert after["launched_pid"] == status["launched_pid"]
+    if not alive(status["launched_pid"]):
+        wait_for(lambda: (alive(stub["pid"]), alive(stub["child"])), lambda s: s == (False, False))
 
 
 def test_stale_reap_kills_worker_and_grandchild_before_replacement(reconcile):
@@ -172,8 +181,9 @@ def test_stale_reap_kills_worker_and_grandchild_before_replacement(reconcile):
     run_hook()
     new = wait_for(lambda: read("reconcile-status.json"),
                    lambda s: s.get("attempt_id") != status["attempt_id"] and "completed_at" in s)
-    assert new["launched_pid"] != stub["pid"]
-    wait_for(lambda: (alive(stub["pid"]), alive(stub["child"])), lambda s: s == (False, False))
+    assert new["launched_pid"] != status["launched_pid"]
+    wait_for(lambda: (alive(status["launched_pid"]), alive(stub["pid"]), alive(stub["child"])),
+             lambda s: s == (False, False, False))
 
 
 def test_old_completion_cannot_overwrite_another_attempt(reconcile):
@@ -181,11 +191,13 @@ def test_old_completion_cannot_overwrite_another_attempt(reconcile):
     (runtime / "block").touch()
     run_hook()
     stub = wait_for(lambda: read("stub.json"), lambda s: s.get("child"))
+    supervisor = read("reconcile-status.json")["launched_pid"]
     newer = {"attempt_id": "replacement", "launched_pid": 0}
     (runtime / "reconcile-status.json").write_text(json.dumps(newer), encoding="utf-8")
     (runtime / "block").unlink()
     (runtime / "release").touch()
     wait_for(lambda: alive(stub["pid"]), lambda active: not active)
+    wait_for(lambda: alive(supervisor), lambda active: not active)
     assert read("reconcile-status.json") == newer
 
 
@@ -201,7 +213,7 @@ def test_inherited_staging_cannot_bypass_real_installer_watchdog(reconcile):
         "AGENT_BRIDGE_INSTALL_DEADLINE_SEC": "10",
     })
     status = wait_for(lambda: read("reconcile-status.json"),
-                      lambda s: "completed_at" in s, seconds=20)
+                      lambda s: "completed_at" in s, seconds=40)
     smoke = read("smoke.json")
     assert smoke, (status, read_log(runtime / "reconcile.log"))
     assert smoke["staged"] is True
@@ -268,7 +280,7 @@ exit $LASTEXITCODE
     run_hook()
     status = wait_for(lambda: read("reconcile-status.json"), lambda s: "completed_at" in s)
     assert status["exit_code"] == 0 and status["success"] is True
-    assert "123" in read_log(runtime / "reconcile.log")
+    assert "123" in read_log(Path(status["stderr_log"]))
 
 
 def test_stale_legacy_pid_without_birth_evidence_is_not_reaped(reconcile):
@@ -295,8 +307,7 @@ def test_terminating_installer_error_is_recorded_in_status_and_log(reconcile):
     run_hook()
     status = wait_for(lambda: read("reconcile-status.json"), lambda s: "completed_at" in s)
     assert status["exit_code"] == 1 and status["success"] is False
-    assert "fixture failure" in read_log(runtime / "reconcile.log")
-    assert status["attempt_id"] in read_log(runtime / "reconcile.log")
+    assert "fixture failure" in read_log(Path(status["stderr_log"]))
 
 
 def test_identity_change_at_final_reap_lookup_is_not_signaled(reconcile):
@@ -336,8 +347,22 @@ function taskkill.exe {
 }
 & (Join-Path $PSScriptRoot 'real-bootstrap.ps1')
 """, encoding="utf-8")
-    result = run_hook(extra_env={"REAP_TEST_PID": str(stub["pid"])})
+    result = run_hook(extra_env={"REAP_TEST_PID": str(status["launched_pid"])})
     assert "identity changed before reaping" in result.stderr
     assert not (runtime / "unexpected-kill").exists()
     assert alive(stub["pid"]) and alive(stub["child"])
     assert read("reconcile-status.json")["attempt_id"] == status["attempt_id"]
+
+
+def test_handled_native_failure_does_not_become_installer_exit_code(reconcile):
+    runtime, run_hook, read, plugin = reconcile
+    (plugin / "scripts" / "install.ps1").write_text(
+        r"""
+param([string]$Action, [switch]$NonInteractive)
+& (Get-Process -Id $PID).Path -NoProfile -Command 'exit 7'
+Write-Output 'handled native failure'
+""", encoding="utf-8")
+    run_hook()
+    status = wait_for(lambda: read("reconcile-status.json"), lambda s: "completed_at" in s)
+    assert status["exit_code"] == 0 and status["success"] is True
+    assert "handled native failure" in read_log(runtime / "reconcile.log")

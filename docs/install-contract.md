@@ -1500,6 +1500,12 @@ revalidated immediately before signaling. Completion updates only its own
 attempt, so a late worker
 cannot overwrite a replacement's status. Invalid prior ownership metadata
 defers reconciliation with a diagnostic instead of risking another installer.
+The supervisor invokes the installer in a separate PowerShell `-File` process
+and records that process's exit code, not a possibly stale native-command code
+from inside a successfully completed installer script. Its file-backed stdout
+(`log`) and stderr (`stderr_log`) capture avoids waiting for EOF on pipes that
+an installer descendant may retain after the installer exits. Watchdog diagnostics
+continue using the separate `reconcile.err.log`.
 The launcher starts outside the singleton payload and clears inherited
 `COPILOT_PLUGIN_INSTALL_STAGED` / `COPILOT_PLUGIN_STAGED_FROM` in the worker;
 staging and its watchdog belong to this installer invocation, not to an

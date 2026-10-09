@@ -37,8 +37,9 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
     OBSERVABILITY (#167): the background reconcile is otherwise silent -- a failed
     cutover would leave no trace. So this hook records every reconcile ATTEMPT to
     ~/.<name>/reconcile-status.json and redirects the installer's output to
-    ~/.<name>/reconcile.log (stdout) / reconcile.err.log (stderr). Check those to
-    see whether the last auto-reconcile succeeded.
+    ~/.<name>/reconcile.log (stdout) / reconcile-installer.err.log (stderr).
+    Watchdog diagnostics use reconcile.err.log. Check the status record and
+    those files to see whether the last auto-reconcile succeeded.
 
     OPT-IN GATE (removed -- agent-bridge-unified-zdd-cutover Phase 0): a
     version-drift reconcile used to require a checked-in, PER-PLUGIN
@@ -134,22 +135,24 @@ try {
     # before.)
     if ($runtimeHealthy -and $deployed -eq $current -and (-not $curVer -or $curVer -eq $deployed)) { Exit-SessionStart }
 
+    $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+    $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
+    $installerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-OutputFormat', 'Text', '-File')
     if (Test-Path $init) {
-        $reInner = "& '$($init.Replace("'", "''"))'"
+        $installerArguments += "`"$init`""
     } else {
         $inst = Join-Path $PluginDir 'scripts\install.ps1'
         if (-not (Test-Path $inst)) { Exit-SessionStart }
-        $reInner = "& '$($inst.Replace("'", "''"))' install -NonInteractive"
+        $installerArguments += @("`"$inst`"", 'install', '-NonInteractive')
     }
-    $pw = Get-Command pwsh -ErrorAction SilentlyContinue
-    $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+    $argumentCode = '@(' + (($installerArguments |
+        ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ',') + ')'
 
-    # Observability (#167): capture the otherwise-silent background reconcile so a
-    # failed auto-update is diagnosable. The headless pwsh self-redirects ALL its
-    # streams (incl. Write-Host) to reconcile.log with `*>` -- see the launch
-    # below for why an outer redirect can't be used under conhost --headless.
+    # Capture inside the headless supervisor: redirecting conhost itself would
+    # capture its empty streams, not the installer child's output.
     $reconcileLog = Join-Path $InstallDir 'reconcile.log'
+    $installerErrorLog = Join-Path $InstallDir 'reconcile-installer.err.log'
     $statusFile   = Join-Path $InstallDir 'reconcile-status.json'
     $hash = [Security.Cryptography.SHA256]::Create()
     try {
@@ -252,8 +255,8 @@ try {
     # DefTerm handoff cannot surface it as a visible window (-WindowStyle Hidden
     # ALONE is ignored by DefTerm). conhost --headless gives the child its OWN
     # headless console, so an outer Start-Process -RedirectStandard* would capture
-    # conhost's (empty) output, not the reconcile's -- the pwsh therefore
-    # self-redirects all streams to reconcile.log via `*>`. The command is
+    # conhost's (empty) output, not the reconcile's -- the supervisor therefore
+    # redirects the installer child's streams to files. The command is
     # base64-encoded to avoid arg-quoting under conhost; children (uv/python
     # building the venv) inherit the headless console and stay hidden too.
     $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -292,10 +295,20 @@ try {
     # Staging belongs to this installer invocation, not a different parent's.
     $env:COPILOT_PLUGIN_INSTALL_STAGED = $null
     $env:COPILOT_PLUGIN_STAGED_FROM = $null
-    $LASTEXITCODE = 0
-    & { __INSTALLER__ } *> '__RECONCILELOG__'
-    $ok = $?
-    $code = if ($ok) { $LASTEXITCODE } else { 1 }
+    # File-backed streams do not wait for EOF on pipes inherited by descendants.
+    $installer = Start-Process -FilePath '__EXE__' -NoNewWindow -PassThru `
+        -WorkingDirectory '__HOME__' -ArgumentList __ARGUMENTS__ `
+        -RedirectStandardOutput '__RECONCILELOG__' `
+        -RedirectStandardError '__ERRORLOG__' -ErrorAction Stop
+    try {
+        [void]$installer.Handle
+        $installer.WaitForExit()
+        $installer.Refresh()
+        $code = $installer.ExitCode
+        if ($null -eq $code) { throw 'installer exit status is unavailable' }
+    } finally {
+        $installer.Dispose()
+    }
 } catch {
     $failure = "attempt=__ATTEMPT__ background reconcile failed: $($_.Exception.Message)"
     Add-Content -LiteralPath '__RECONCILELOG__' -Value $failure
@@ -312,7 +325,10 @@ exit $code
 '@
     $worker = $worker.Replace('__MUTEX__', $mutexName).Replace('__ATTEMPT__', $attemptId).`
         Replace('__STATUSFILE__', $statusFile.Replace("'", "''")).`
-        Replace('__RECONCILELOG__', $reconcileLog.Replace("'", "''")).Replace('__INSTALLER__', $reInner)
+        Replace('__RECONCILELOG__', $reconcileLog.Replace("'", "''")).`
+        Replace('__ERRORLOG__', $installerErrorLog.Replace("'", "''")).`
+        Replace('__EXE__', $exe.Replace("'", "''")).`
+        Replace('__HOME__', $env:USERPROFILE.Replace("'", "''")).Replace('__ARGUMENTS__', $argumentCode)
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($worker))
     $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden -ErrorAction Stop `
         -WorkingDirectory $env:USERPROFILE `
@@ -329,6 +345,7 @@ exit $code
         worker_started_at = $null
         attempt_id   = $attemptId
         log          = $reconcileLog
+        stderr_log   = $installerErrorLog
     } | ConvertTo-Json -Compress
     [System.IO.File]::WriteAllText($statusFile, $status, $utf8NoBom)
 } catch {
