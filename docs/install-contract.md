@@ -1486,6 +1486,14 @@ default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so 
 download degrades to "failed + retryable" rather than wedging. Backstop:
 `bootstrap-check`'s single-flight + stale-reap.
 
+Unified `agent-worktrees update` gives module and registered-runtime installers
+the selected positive watchdog deadline plus 30 seconds for cleanup and failure
+publication, instead of preempting the default watchdog at 300 seconds. A disabled
+watchdog (`<=0`) still leaves a finite 510-second updater safety bound. The
+worktrees self-installer retains its existing 600-second minimum, extended when
+a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
+values fail explicitly before launching the installer.
+
 The **agent-bridge Windows hook** serializes reconcile admission and status
 publication with an installation-root-scoped global mutex, including across
 Windows login sessions. Each launch has an

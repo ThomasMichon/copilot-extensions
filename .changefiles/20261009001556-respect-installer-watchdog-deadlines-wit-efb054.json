@@ -1,0 +1,9 @@
+{
+  "comment": "Respect installer watchdog deadlines with cleanup grace and finite unified-update safety bounds.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
