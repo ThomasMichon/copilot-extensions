@@ -53,6 +53,10 @@ def _association(pr) -> str:
     return hashlib.sha256(json.dumps(fields).encode("utf-8")).hexdigest()
 
 
+def _pending_path(cwd: str) -> Path:
+    return _path(cwd).with_name("agent-worktrees-pr-recovery-pending.json")
+
+
 def selected_pr(worktree_id: str, branch: str, record):
     if record is None:
         return None
@@ -95,7 +99,7 @@ def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> 
         git_ops.git("update-ref", point.published_ref, published, "0" * len(published), cwd=cwd)
     if lineage:
         git_ops.git("update-ref", point.lineage_ref, lineage, "0" * len(lineage), cwd=cwd)
-    tracking._atomic_write(_path(cwd), json.dumps(asdict(point), sort_keys=True) + "\n")
+    tracking._atomic_write(_pending_path(cwd), json.dumps(asdict(point), sort_keys=True) + "\n")
     if published and not lineage:
         raise ValueError(
             "Pre-sync source does not contain the saved published work or a completed backed sync. "
@@ -110,6 +114,7 @@ def complete(point: RecoveryPoint, *, cwd: str) -> None:
     """Bind the supported operation's result without depending on Git's reflog."""
     result = replace(point, synced_head=_rev("HEAD", cwd))
     tracking._atomic_write(_path(cwd), json.dumps(asdict(result), sort_keys=True) + "\n")
+    _pending_path(cwd).unlink(missing_ok=True)
 
 
 def synced(record, pr, expected: str, head: str, *, cwd: str) -> RecoveryPoint | None:

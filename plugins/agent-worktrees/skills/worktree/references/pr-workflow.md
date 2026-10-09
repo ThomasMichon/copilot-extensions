@@ -602,6 +602,10 @@ and the completed supported sync to its original PR association. That explicit
 operation checkpoint permits publication of its result and ordinary feedback
 commits without requiring intact rebase journals. Missing legacy base/patch
 metadata is reconstructed from the pinned commit graph, not manually edited.
+Preparation writes a separate pending point. The last completed checkpoint is
+replaced only after a successful synchronization result is durably recorded;
+a conflict, abort or checkpoint-write failure preserves that last completed
+authority even after its rebase journals expire.
 The first backed sync requires the pre-sync source to contain the saved
 published tip. Repeated syncs may continue a prior completed backed result;
 they retain its original lineage under a separate ref. An unrelated reset

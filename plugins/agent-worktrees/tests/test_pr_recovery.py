@@ -40,8 +40,9 @@ def _prepare(pr_repo, *, legacy=False):
     return config, wid, path, remote, first["branch"], first["head_sha"]
 
 
-def _point(path):
-    return json.loads(pr_recovery._path(str(path)).read_text(encoding="utf-8"))
+def _point(path, *, pending=False):
+    checkpoint = pr_recovery._pending_path(str(path)) if pending else pr_recovery._path(str(path))
+    return json.loads(checkpoint.read_text(encoding="utf-8"))
 
 
 @pytest.mark.guard
@@ -185,12 +186,45 @@ def test_pre_sync_reset_cannot_launder_unrelated_source_into_rewrite_authority(p
     _git("commit", "-m", "unrelated replacement", cwd=path)
     unrelated = _git("rev-parse", "HEAD", cwd=path)
     assert not git_collab.sync_forward(wid, config)
-    point = _point(path)
+    point = _point(path, pending=True)
     assert _git("rev-parse", "HEAD", cwd=path) == unrelated
     assert _git("rev-parse", point["local_ref"], cwd=path) == unrelated
     assert _git("rev-parse", point["published_ref"], cwd=path) == old
     assert not finalize.push_changes(wid, config)
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
+
+
+@pytest.mark.parametrize("failure", ["conflict", "checkpoint-write"])
+def test_failed_repeated_sync_preserves_completed_authority_after_reflog_expiry(
+    pr_repo, monkeypatch, failure,
+):
+    config, wid, path, remote, branch, _ = _prepare(pr_repo)
+    assert git_collab.sync_forward(wid, config)
+    completed = _point(path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    _git("reflog", "expire", "--expire=now", "--all", cwd=path)
+    if failure == "conflict":
+        anchor = Path(config.default_repo.anchor)
+        (anchor / "a.txt").write_text("conflicting upstream addition\n")
+        _git("add", "a.txt", cwd=anchor)
+        _git("commit", "-m", "conflicting upstream addition", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+    else:
+        original = tracking._atomic_write
+
+        def fail_completed(path, data):
+            if path.name == "agent-worktrees-pr-recovery.json":
+                raise OSError("completed checkpoint write failed")
+            return original(path, data)
+
+        monkeypatch.setattr(tracking, "_atomic_write", fail_completed)
+    assert not git_collab.sync_forward(wid, config)
+    assert _point(path) == completed
+    assert _git("rev-parse", "HEAD", cwd=path) == tip
+    _git("reflog", "expire", "--expire=now", "--all", cwd=path)
+    monkeypatch.setattr(pr_rebase, "_replay", lambda *_: pytest.fail("must retain completed authority"))
+    assert finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
 
 
 def test_backup_is_not_authority_for_another_association_or_unrelated_tip(pr_repo):
