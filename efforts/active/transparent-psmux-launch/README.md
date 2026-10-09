@@ -167,3 +167,17 @@ encoded commands or initial-prompt transports.
   lane (five passed). Preserved the cmd shim's Windows PowerShell 5.1 fallback
   using its bundled date-disabled Newtonsoft reader for raw plan argv.
   Flat/nested date-shaped argv passed on actual PowerShell 5.1 and 7 (four checks).
+
+### 2026-10-09 - Required CI repair
+- PR #5892 received an approval with no unresolved launcher findings, but its
+  merged-base CI exposed the new lease-wait tests introduced by #5893.
+  Linux contention was classified using only Win32 error codes, so the wait
+  returned immediately instead of honoring its budget (#5906, #5907).
+- Rebased onto the newer `dev` and claimed #5907. Added platform-specific
+  contention classification while preserving immediate persistent-error
+  failures, with one-process coverage for both native code families.
+  Actual Windows holder/release/timeout and all PowerShell installer contracts
+  passed (21 passed, one platform-specific skip).
+- The required Linux CI lane remains the live Unix proof. No local Linux
+  distro or usable container engine was available; no CI bypass or blind
+  failure rerun is used.
