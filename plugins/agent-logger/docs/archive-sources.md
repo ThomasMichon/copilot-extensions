@@ -42,6 +42,43 @@ Optional missing stores contribute no physical observations. This is not
 evidence of zero usage, complete coverage, or a final session. A corrupt or
 unsupported archive fails when its existing codec reader consumes it.
 
+## Session archive formats
+
+The shared `agent_logger.sessions` registry supports `<id>.tar.gz` and
+`<id>.zip`. Tar+gzip remains the default; ZIP is explicitly selected with
+`archive_session(..., codec="zip")`. Existing selector sidecars remain
+uncompressed and use the same session ID. A session ID must be one safe path
+component; invalid archive stems fail instead of escaping sidecar, lookup, or
+materialization paths. Compression formats never create extra logical sessions.
+
+Both containers hold files relative to the session contents, without a leading
+session-ID directory. ZIP accepts stored and deflated files, benign root
+directory entries, and standard single-volume ZIP64 end records. Multi-volume,
+encrypted, unsupported compression, special/link members, unsafe paths,
+normalized duplicate names, and Windows case-fold collisions fail explicitly.
+ZIP extraction creates new files only, never overwriting existing destination
+evidence. New ZIP creation uses a unique temporary file, verifies file content
+and CRCs before replacement, rejects observed source changes, and leaves the
+source directory intact. Settled-source selection and any source retirement
+remain the caller's separately authorized responsibilities.
+
+ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
+decoded file bytes. Creation also bounds inspected source entries and excludes
+linked/name-surrogate directories without descending into them. The central
+directory has a 16 MiB budget checked before the standard ZIP parser allocates
+its index. Equality comparison uses the same decoded-content budgets. Errors
+and permission failures are not empty/missing evidence. These checks do not
+claim a continuous descriptor-pinned transaction over mutable ancestor paths.
+
+When two archive formats exist for one ID in one store, the reader compares
+every regular member's size and SHA-256 before yielding an archive observation.
+Identical readable contents produce one reference, preferring the legacy
+tar.gz representation; divergent, corrupt, noncanonical, or unprovable contents
+raise while retaining both files. A valid live session still takes precedence,
+and explicitly ordered archive stores retain their existing precedence.
+Across different source roots, provenance-based reconciliation and accounting
+remain the consumer/backend's responsibility.
+
 Two physical roots with the same recorded source identity remain two
 observations. Consumers must reconcile compatible session/event evidence,
 preserve divergent versions, and retain their own workflow state; the iterator

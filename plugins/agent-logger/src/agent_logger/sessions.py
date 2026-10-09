@@ -23,7 +23,8 @@ either a **live directory** or a compressed **archive**, transparently:
 
 The compression codec is **pluggable** (:data:`CODECS`); the default
 ``targz`` uses only the standard library, keeping agent-logger free of a
-compression dependency. A ``zstd`` codec can be registered later without
+compression dependency. ``zip`` adds bounded stored/deflated ZIP compatibility
+without changing that default. A ``zstd`` codec can be registered later without
 touching any call site.
 """
 
@@ -37,13 +38,26 @@ import shutil
 import stat
 import tarfile
 import tempfile
-from abc import ABC, abstractmethod
+import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from agent_logger.session_codecs import (
+    Codec as Codec,
+)
+from agent_logger.session_codecs import (
+    TarGzCodec as TarGzCodec,
+)
+from agent_logger.session_codecs import (
+    ZipCodec as ZipCodec,
+)
+from agent_logger.session_codecs import (
+    _validate_member_name,
+)
 
 if TYPE_CHECKING:
     # Deferred: agent_logger.catalog imports this module (for
@@ -83,134 +97,8 @@ EVENTS_MEMBER = "events.jsonl"
 # Codecs (pluggable)
 # ---------------------------------------------------------------------------
 
-class Codec(ABC):
-    """A compression codec: bundle a directory into one archive and read back.
-
-    A codec owns *both* the container (how a directory of files becomes one
-    stream) and the compression. The default bundles with ``tar`` and is the
-    only place tar/compression specifics live.
-    """
-
-    #: Registry name (config ``sync.compact.codec``).
-    name: str = "base"
-    #: File suffix for an archive produced by this codec (e.g. ``.tar.gz``).
-    suffix: str = ""
-
-    @abstractmethod
-    def archive_dir(self, src_dir: Path, dest: Path) -> None:
-        """Bundle ``src_dir``'s contents into a single archive at ``dest``.
-
-        Members are stored *relative to ``src_dir``* (no leading session-id
-        component) so extraction reproduces the session directory directly.
-        """
-
-    @abstractmethod
-    def read_member(self, archive: Path, member: str) -> bytes | None:
-        """Return the bytes of ``member`` from ``archive``, or ``None``."""
-
-    @abstractmethod
-    def extract_all(self, archive: Path, dest_dir: Path) -> None:
-        """Safely extract every member of ``archive`` under ``dest_dir``."""
-
-    @abstractmethod
-    def list_members(self, archive: Path) -> list[str]:
-        """Return the archive's member names (files only)."""
-
-
-def _validate_member_name(name: str) -> str:
-    """Reject absolute paths and ``..`` traversal; return a normalized name.
-
-    Guards archive extraction against the ``tar`` path-traversal class of bug
-    without relying on ``tarfile.extractall`` (which linters flag): callers
-    read members explicitly and write them under a validated relative path.
-    """
-    windows = PureWindowsPath(name)
-    norm = name.replace("\\", "/")
-    posix = PurePosixPath(norm)
-    if (
-        windows.anchor
-        or windows.drive
-        or windows.root
-        or posix.is_absolute()
-        or norm.startswith("/")
-    ):
-        raise ValueError(f"unsafe archive member path: {name!r}")
-    parts = []
-    for part in norm.split("/"):
-        if part in ("", "."):
-            continue
-        windows_normalized = part.rstrip(" .")
-        if (
-            part == ".."
-            or windows_normalized != part
-            or windows_normalized in ("", ".", "..")
-            or ":" in part
-        ):
-            raise ValueError(f"unsafe archive member path: {name!r}")
-        parts.append(part)
-    return "/".join(parts)
-
-
-class TarGzCodec(Codec):
-    """``tar`` + ``gzip`` bundling, standard-library only (default codec)."""
-
-    name = "targz"
-    suffix = ".tar.gz"
-
-    def archive_dir(self, src_dir: Path, dest: Path) -> None:
-        tmp = dest.with_name(dest.name + ".tmp")
-        tmp.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with tarfile.open(tmp, "w:gz") as tar:
-                for path in sorted(src_dir.rglob("*")):
-                    if path.is_symlink() or not path.is_file():
-                        continue
-                    arcname = path.relative_to(src_dir).as_posix()
-                    tar.add(path, arcname=arcname, recursive=False)
-            os.replace(tmp, dest)
-        finally:
-            tmp.unlink(missing_ok=True)
-
-    def read_member(self, archive: Path, member: str) -> bytes | None:
-        target = _validate_member_name(member)
-        with tarfile.open(archive, "r:gz") as tar:
-            try:
-                info = tar.getmember(target)
-            except KeyError:
-                return None
-            if not info.isfile():
-                return None
-            fh = tar.extractfile(info)
-            return fh.read() if fh is not None else None
-
-    def extract_all(self, archive: Path, dest_dir: Path) -> None:
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive, "r:gz") as tar:
-            for info in tar.getmembers():
-                if not info.isfile():
-                    continue
-                rel = _validate_member_name(info.name)
-                out = dest_dir / rel
-                try:
-                    out.absolute().relative_to(dest_dir.absolute())
-                except ValueError as exc:
-                    raise ValueError(
-                        f"unsafe archive member path: {info.name!r}"
-                    ) from exc
-                out.parent.mkdir(parents=True, exist_ok=True)
-                fh = tar.extractfile(info)
-                if fh is None:
-                    continue
-                with fh, open(out, "wb") as dst:
-                    shutil.copyfileobj(fh, dst)
-
-    def list_members(self, archive: Path) -> list[str]:
-        with tarfile.open(archive, "r:gz") as tar:
-            return [m.name for m in tar.getmembers() if m.isfile()]
-
-
 #: Registered codecs, keyed by config name. Add ``zstd`` here to enable it.
-CODECS: dict[str, Codec] = {c.name: c for c in (TarGzCodec(),)}
+CODECS: dict[str, Codec] = {c.name: c for c in (TarGzCodec(), ZipCodec())}
 
 #: Archive suffixes recognized during discovery, longest-first so ``.tar.gz``
 #: wins over any future ``.gz``.
@@ -252,6 +140,15 @@ def _archive_stem(archive: Path) -> str:
 # SessionRef -- a handle over one session (live dir or archive)
 # ---------------------------------------------------------------------------
 
+def _validate_session_id(session_id: str) -> None:
+    try:
+        normalized = _validate_member_name(session_id)
+    except ValueError as exc:
+        raise ValueError(f"unsafe session id: {session_id!r}") from exc
+    if not session_id or normalized != session_id or "/" in session_id or "\\" in session_id:
+        raise ValueError(f"unsafe session id: {session_id!r}")
+
+
 @dataclass(frozen=True)
 class SessionRef:
     """A single session, resolvable whether live or archived.
@@ -270,6 +167,9 @@ class SessionRef:
     kind: str
     path: Path
     store: Path | None = None
+
+    def __post_init__(self) -> None:
+        _validate_session_id(self.id)
 
     @property
     def is_archive(self) -> bool:
@@ -298,14 +198,40 @@ def _iter_live_refs(state_root: Path) -> Iterator[SessionRef]:
             yield SessionRef(id=d.name, kind="live", path=d)
 
 
-def _iter_archive_refs(store: Path) -> Iterator[SessionRef]:
+def _select_archive(refs: list[SessionRef]) -> SessionRef:
+    first = refs[0]
+    if len(refs) == 1:
+        return first
+    expected = _codec_for_archive(first.path).member_digests(first.path)
+    if EVENTS_MEMBER not in expected:
+        raise ValueError(f"session archive lacks {EVENTS_MEMBER}: {first.path}")
+    for ref in refs[1:]:
+        observed = _codec_for_archive(ref.path).member_digests(ref.path)
+        if observed != expected:
+            raise ValueError(
+                f"divergent session archive representations: {first.path} and {ref.path}"
+            )
+    return first
+
+
+def _iter_archive_refs(
+    store: Path, *, shadowed_ids: set[str] | None = None
+) -> Iterator[SessionRef]:
     if not store.is_dir():
         return
-    for f in store.iterdir():
+    candidates: dict[str, list[SessionRef]] = {}
+    for f in sorted(store.iterdir(), key=lambda path: path.name):
         if not f.is_file():
             continue
         if any(f.name.endswith(s) for s in _ARCHIVE_SUFFIXES):
-            yield SessionRef(id=_archive_stem(f), kind="archive", path=f, store=store)
+            session_id = _archive_stem(f)
+            if shadowed_ids is not None and session_id in shadowed_ids:
+                continue
+            candidates.setdefault(session_id, []).append(
+                SessionRef(id=session_id, kind="archive", path=f, store=store)
+            )
+    selected = [_select_archive(refs) for refs in candidates.values()]
+    yield from selected
 
 
 def iter_session_refs(
@@ -315,7 +241,9 @@ def iter_session_refs(
 
     A live session shadows an archived one with the same id (a session being
     reactivated), so live refs are yielded first and duplicate archive ids are
-    skipped. Pass ``None`` for an archive-only source without a live store.
+    skipped. Same-store format overlaps require identical member contents;
+    divergence fails before any archive from that store is yielded. Pass
+    ``None`` for an archive-only source without a live store.
     """
     seen: set[str] = set()
     if state_root is not None:
@@ -323,7 +251,7 @@ def iter_session_refs(
             seen.add(ref.id)
             yield ref
     for store in archive_stores:
-        for ref in _iter_archive_refs(store):
+        for ref in _iter_archive_refs(store, shadowed_ids=seen):
             if ref.id in seen:
                 continue
             seen.add(ref.id)
@@ -334,16 +262,20 @@ def resolve_ref(
     session_id: str, state_root: Path, *archive_stores: Path
 ) -> SessionRef | None:
     """Resolve one session id to a :class:`SessionRef` (live preferred)."""
+    _validate_session_id(session_id)
     live = state_root / session_id
     if live.is_dir() and (live / EVENTS_MEMBER).exists():
         return SessionRef(id=session_id, kind="live", path=live)
     for store in archive_stores:
+        candidates = []
         for suffix in _ARCHIVE_SUFFIXES:
             cand = store / f"{session_id}{suffix}"
             if cand.is_file():
-                return SessionRef(
-                    id=session_id, kind="archive", path=cand, store=store
+                candidates.append(
+                    SessionRef(id=session_id, kind="archive", path=cand, store=store)
                 )
+        if candidates:
+            return _select_archive(candidates)
     return None
 
 
@@ -442,7 +374,7 @@ def write_review_annotation(
     pr_number: int,
     role: str = "reviewer",
     recorded_at: str | None = None,
-    index: "ReviewCatalogIndex | None" = None,
+    index: ReviewCatalogIndex | None = None,
 ) -> None:
     """Append a review annotation to a **live** session's sidecar, idempotently.
 
@@ -643,6 +575,7 @@ def force_rmtree(path: Path) -> bool:
 
 def is_archived(session_id: str, store: Path, codec: str = "targz") -> bool:
     """Whether ``session_id`` already has an archive in ``store``."""
+    _validate_session_id(session_id)
     return (store / f"{session_id}{get_codec(codec).suffix}").is_file()
 
 
@@ -658,6 +591,7 @@ def archive_session(
     once the archive is verified.
     """
     session_id = session_dir.name
+    _validate_session_id(session_id)
     codec_impl = get_codec(codec)
     store.mkdir(parents=True, exist_ok=True)
     archive_path = store / f"{session_id}{codec_impl.suffix}"
@@ -680,12 +614,15 @@ def verify_archive(ref: SessionRef) -> bool:
     if ref.kind != "archive":
         return False
     try:
-        raw_members = _codec_for_archive(ref.path).list_members(ref.path)
+        codec = _codec_for_archive(ref.path)
+        raw_members = codec.list_members(ref.path)
         normalized = [_validate_member_name(member) for member in raw_members]
         if len(normalized) != len(set(normalized)):
             return False
         members = set(normalized)
-    except (tarfile.TarError, OSError, ValueError):
+        if isinstance(codec, ZipCodec):
+            codec.member_digests(ref.path)
+    except (tarfile.TarError, zipfile.BadZipFile, OSError, ValueError):
         return False
     return EVENTS_MEMBER in members
 
