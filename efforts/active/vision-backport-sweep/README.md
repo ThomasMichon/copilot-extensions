@@ -318,11 +318,15 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
             work. Phase B `#987` is closed with an unrelated closing artifact;
             its mapping scope remains under open umbrella `#985`, not inferred
             complete from that issue state.
-      - [ ] `visions/native-convergence/README.md` — remaining root/catalog/
-            working-boundary source coverage beyond this proof-boundary slice.
-            Verify actual mapping/interop and existing tracker disposition;
-            do not substitute help presence, issue closure, or projection-only
-            tests for that audit.
+      - [x] `visions/native-convergence/README.md` — remaining root/catalog/
+            working-boundary source audit recorded in the owning
+            `native-construct-convergence` effort. Configured roots, direct Git
+            creation, harness-owned catalogs, native identity consumption, and
+            native trust/permission integration were distinguished from proof of
+            native mapping. No additional vision-level fold-back was required.
+            Existing `#985`/`#986`/`#988` retain the unproved implementation
+            scope; unrelated closure of `#987` is not Phase B completion.
+            This completes the reconciliation audit, not native convergence.
       - [x] `visions/plugins/agent-worktrees/README.md` — account-boundary slice:
             account-catalog/routing separation, scoped credentials,
             inspectable choice, and explicit authentication failure versus
@@ -410,6 +414,28 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Remaining native mapping audit and sibling publication
+- Finished native root/catalog/working-boundary source reconciliation against
+  snapshot `ed8c1cfee`. The owning effort now records the evidence table,
+  distinguishes native identity consumption from unproved native root/catalog
+  mappings, and requires proof of the proposed native layout before migration.
+  The standing vision already covers the inspected intended capabilities; no
+  positive capability or boundary was removed or weakened.
+- Kept implementation ownership under `#985` and its existing phase trackers;
+  did not reopen `#987`, manufacture native contract proof, or create a duplicate
+  mapping issue. The branch itself deploys no runtime; this is not a further
+  plugin-services conformance result.
+- The independent material proposal merged as `#5807` with current-head
+  approval and required CI/PR gates. Recorded its planning-publication closure
+  in the sibling plan and on `#5799`; execution remains unassigned and the
+  sweep's overall Phase 2/3 and Validation Plan remain open.
+- Focused local root/trust/session-contract tests could not obtain the shared
+  host test-admission lease, including a bounded 180-second wait. No lease was
+  cleared and no other test run was interrupted. This documentation-only slice
+  makes no fresh native integration, clean-room, or live-host proof claim.
+  Those lanes require native mapping changes and contract evidence in the
+  owning convergence effort, rather than being substitutes for this source audit.
 
 ### 2026-10-05 — Kickoff + Phase 1 slice
 - Effort created as the tracker for the operator's vision-backport +

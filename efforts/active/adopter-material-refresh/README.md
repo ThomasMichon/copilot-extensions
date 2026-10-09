@@ -77,9 +77,9 @@ not additional operator-requested product features.
 
 ### Phase 0 — Publish the independent reviewed plan
 - [x] Confirm sibling relationship and slug; verify target adoption and dedup.
-- [ ] Land this proposal through the repository's normal review gate before
+- [x] Land this proposal through the repository's normal review gate before
       material execution.
-- [ ] Record the merged plan and leave execution independently claimable under
+- [x] Record the merged plan and leave execution independently claimable under
       the umbrella issue.
 
 ### Phase 1 — Inventory and baseline (agent-recommended)
@@ -120,7 +120,7 @@ not additional operator-requested product features.
 
 ## Validation Plan
 
-- [ ] The proposal passes effort-structure and repository review gates before
+- [x] The proposal passes effort-structure and repository review gates before
       execution begins.
 - [ ] Every changed present-tense claim has implementation/build evidence;
       aspirational vision text is not substituted for that evidence.
@@ -135,10 +135,10 @@ not additional operator-requested product features.
 
 ## Proposal
 
-**Pending repository review.** The operator confirmed relationship and name;
-the agent-recommended execution/validation structure still clears its normal
-review gate. No runtime implementation, service repair, repository creation,
-or private-environment capture is part of this proposal.
+**Reviewed Draft; execution unassigned.** The operator confirmed relationship
+and name, and the agent-recommended execution/validation structure cleared the
+normal review gate in `#5807`. No runtime implementation, service repair,
+repository creation, or private-environment capture was part of that proposal.
 
 ## Journal
 
@@ -152,3 +152,11 @@ or private-environment capture is part of this proposal.
 - Optional worktree-effort binding was refused by path-format validation, so
   this proposal continues with the standalone effort lifecycle. No tracking
   record was hand-edited to manufacture a binding.
+
+### 2026-10-09 — Planning publication complete
+- Proposal `#5807` merged after current-head Copilot approval with zero findings
+  and passing required CI/PR gates. Publication was recorded on `#5799`, and
+  the planning worktree was finalized after provider-confirmed merge.
+- Phase 0 and the proposal-review validation are complete; execution remains
+  unassigned and independently claimable under `#5799`. The effort stays Draft,
+  not Done, and no documentation family or preview asset has been refreshed.
