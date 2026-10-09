@@ -33,12 +33,12 @@ class RebaseProof:
 
 
 def _git(*args: str, cwd: str) -> str:
-    result = git_ops.git(*args, cwd=cwd, check=False)
+    result = git_ops.git("--no-replace-objects", *args, cwd=cwd, check=False)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def _git_bytes(*args: str, cwd: str, stdin: bytes | None = None) -> bytes:
-    cmd = ["git", *args]
+    cmd = ["git", "--no-replace-objects", *args]
     try:
         result = subprocess.run(
             cmd, cwd=cwd, input=stdin, capture_output=True, timeout=30,
@@ -214,11 +214,13 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) 
     # Older push-changes updated head_sha without refreshing its cached patch_id.
     # Reconstruct that head's actual patch from the pinned objects, and prove its
     # entire source replay below; the stale cache must never authorize a rewrite.
-    from .pr_ops import _patch_id
-
-    published_patch = _patch_id(pr.base_sha, expected, cwd=cwd)
-    if not published_patch:
+    published_diff = _git_bytes(
+        "diff", "--no-ext-diff", "--no-textconv", f"{pr.base_sha}..{expected}", cwd=cwd,
+    )
+    published_ids = _git_bytes("patch-id", "--stable", cwd=cwd, stdin=published_diff).split()
+    if not published_ids or not re.fullmatch(rb"[0-9a-f]{40,64}", published_ids[0]):
         return None
+    published_patch = published_ids[0].decode("ascii")
     old = _series(pr.base_sha, original, cwd)
     new = _series(onto, finished, cwd)
     applied = _series(pr.base_sha, onto, cwd)

@@ -338,6 +338,46 @@ def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tm
 
 
 @pytest.mark.guard
+def test_owned_pr_rebase_proof_reads_raw_objects_despite_replacement_refs(tmp_path):
+    path = tmp_path / "replacement-refs"
+    path.mkdir()
+    _git("init", cwd=path)
+    _git("config", "user.name", "Developer", cwd=path)
+    _git("config", "user.email", "developer@example.com", cwd=path)
+    data = path / "data.txt"
+    data.write_text("base\n")
+    _git("add", "data.txt", cwd=path)
+    _git("commit", "-m", "base", cwd=path)
+    base = _git("rev-parse", "HEAD", cwd=path)
+    candidates = []
+    for content, message in (("preserved\n", "original"), ("lost work\n", "changed")):
+        data.write_text(content)
+        _git("add", "data.txt", cwd=path)
+        tree = _git("write-tree", cwd=path)
+        candidates.append(_git("commit-tree", tree, "-p", base, "-m", message, cwd=path))
+    original, changed = candidates
+    expected = pr_rebase._series(base, changed, str(path))
+    assert expected and expected != pr_rebase._series(base, original, str(path))
+    _git("replace", changed, original, cwd=path)
+    assert _git("show", "-s", "--format=%s", changed, cwd=path) == "original"
+    assert pr_rebase._git("show", "-s", "--format=%s", changed, cwd=str(path)) == "changed"
+    assert pr_rebase._series(base, changed, str(path)) == expected
+    assert pr_rebase._conflict_lineage(
+        base, original, base, changed, ["original-patch"], ["changed-patch"], [],
+        [(changed, "rebase (continue): original")], str(path),
+    ) is None
+    descendant = _git("commit-tree", tree, "-p", original, "-m", "descendant", cwd=path)
+    _git("replace", "-f", changed, descendant, cwd=path)
+    assert git_ops.git(
+        "merge-base", "--is-ancestor", original, changed, cwd=path, check=False,
+    ).returncode == 0
+    assert not git_ops.is_commit_ancestor(original, changed, cwd=path)
+    assert not pr_rebase._ancestor(original, changed, str(path))
+    result = git_ops.push("origin", changed, cwd=path, force_with_lease_expect=original)
+    assert not result and "not an ancestor" in result.stderr
+
+
+@pytest.mark.guard
 @pytest.mark.parametrize("command", ["log", "patch-id"])
 def test_owned_pr_rebase_binary_timeouts_are_reported_as_git_errors(monkeypatch, command):
     def timeout(args, **kwargs):

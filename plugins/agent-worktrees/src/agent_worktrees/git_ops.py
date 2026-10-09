@@ -910,7 +910,10 @@ class PushResult:
 
 def is_commit_ancestor(ancestor: str, descendant: str, *, cwd: str | Path) -> bool:
     """Strict object ancestry, unlike the content-equivalent merge predicate."""
-    return git("merge-base", "--is-ancestor", ancestor, descendant, cwd=cwd, check=False).returncode == 0
+    return git(
+        "--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant,
+        cwd=cwd, check=False,
+    ).returncode == 0
 
 
 def push(

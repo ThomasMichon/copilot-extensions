@@ -587,6 +587,8 @@ update never silently advances that lease. After a successful rewrite, tracking
 refreshes the base, head and patch together.
 The destination is recorded only as a SHA-256 fingerprint; raw Git push URLs
 can carry credentials and are never copied into the checkpoint.
+Proof queries disable Git replacement objects, including ancestry, patch and
+commit-message checks, so they inspect the raw history that is actually pushed.
 Older runtimes could leave the cached patch ID behind after an incremental
 push; recovery records both that cache and the reconstructed published patch,
 but authorizes only the freshly verified full source replay, never the cache.
