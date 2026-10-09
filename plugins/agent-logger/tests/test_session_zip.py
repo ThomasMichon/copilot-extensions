@@ -318,6 +318,56 @@ def test_identical_archive_formats_allow_verified_retirement(
     assert sessions.read_member(zip_ref, "events.jsonl") == b'{"type":"session.start"}\n'
 
 
+@pytest.mark.parametrize("codec_order", [("targz", "zip"), ("zip", "targz")])
+def test_hub_dry_run_counts_logical_sessions_once_across_archive_formats(
+    tmp_path: Path, codec_order: tuple[str, str]
+) -> None:
+    from agent_logger.sync.targets.filesystem import LocalTarget
+
+    hub = tmp_path / "hub"
+    state = hub / "box" / "session-state"
+    store = hub / "box" / "archived"
+    sources = [_session(state, session_id) for session_id in ("first", "second")]
+    for source in sources:
+        for codec in codec_order:
+            sessions.archive_session(source, store, codec=codec)
+    target = LocalTarget({"path": str(hub)})
+    assert target.reconcile_hub("box", dry_run=True) == 2
+    assert all((source / "events.jsonl").is_file() for source in sources)
+    assert target.reconcile_hub("box") == 2
+    assert all(not source.exists() for source in sources)
+    assert all(
+        (store / f"{source.name}{sessions.CODECS[codec].suffix}").is_file()
+        for source in sources
+        for codec in codec_order
+    )
+
+
+@pytest.mark.parametrize("succeeds_on_retry", [False, True])
+def test_hub_reconciliation_does_not_count_failed_removals_or_block_sibling_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, succeeds_on_retry: bool
+) -> None:
+    from agent_logger.sync.targets.filesystem import LocalTarget
+
+    hub = tmp_path / "hub"
+    source = _session(hub / "box" / "session-state")
+    store = hub / "box" / "archived"
+    for codec in ("targz", "zip"):
+        sessions.archive_session(source, store, codec=codec)
+    original_remove = sessions.force_rmtree
+    calls = 0
+
+    def fail_first(path: Path) -> bool:
+        nonlocal calls
+        calls += 1
+        return original_remove(path) if succeeds_on_retry and calls > 1 else False
+
+    monkeypatch.setattr(sessions, "force_rmtree", fail_first)
+    assert LocalTarget({"path": str(hub)}).reconcile_hub("box") == int(succeeds_on_retry)
+    assert calls == 2
+    assert source.exists() is not succeeds_on_retry
+
+
 def test_empty_eventless_zip_is_not_verified(tmp_path: Path) -> None:
     archive = tmp_path / "eventless.zip"
     _zip(archive, [("workspace.yaml", b"id: eventless\n")])

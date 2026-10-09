@@ -2198,7 +2198,7 @@ class FilesystemTarget(Target):
         state = _existing_relative_directory(base, Path("session-state"))
         if archived is None or state is None:
             return 0
-        removed = 0
+        removed_ids: set[str] = set()
         for arc in archived.iterdir():
             if not arc.is_file() or not any(
                 arc.name.endswith(s) for s in sessions._ARCHIVE_SUFFIXES
@@ -2206,18 +2206,15 @@ class FilesystemTarget(Target):
                 continue
             sid = sessions._archive_stem(arc)
             live = state / sid
-            if not live.is_dir():
+            if sid in removed_ids or not live.is_dir():
                 continue
             ref = SessionRef(id=sid, kind="archive", path=arc, store=archived)
             if not sessions.verify_archive(ref):
                 continue
-            if dry_run:
-                removed += 1
-            elif sessions.force_rmtree(live):
-                # Count only sessions actually removed -- OneDrive hub dirs are
-                # ReadOnly online-only placeholders that defeat a plain rmtree.
-                removed += 1
-        return removed
+            if dry_run or sessions.force_rmtree(live):
+                # Count successful removes only; OneDrive placeholders can defeat rmtree.
+                removed_ids.add(sid)
+        return len(removed_ids)
 
     def compact_backlog(
         self,
