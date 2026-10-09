@@ -33,6 +33,20 @@ def test_rewrite_provider_mismatch_never_resolves_credentials(pr_repo, monkeypat
         pr_rewrite.observe_pr(config, pr)
 
 
+def test_rewrite_provider_mismatch_refuses_before_destination_provider_lookup(pr_repo, monkeypatch):
+    config, wid, wt, remote = pr_repo
+    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+    assert result["success"], result
+    record = load(wid)
+    record.pr.provider = "github"
+    record.pr.number = 42
+    record.pr.pr_revision += 1
+    tracking.save_record(record)
+    monkeypatch.setattr(pr_publish, "push_target", lambda *a: pytest.fail("destination provider lookup"))
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *a: pytest.fail("credential resolution"))
+    assert not finalize.push_changes(wid, config, rewrite_pr=True)
+
+
 def test_provider_identity_generation_survives_network_window_snapshot(pr_repo, monkeypatch):
     config, wid, wt, remote = pr_repo
     result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)

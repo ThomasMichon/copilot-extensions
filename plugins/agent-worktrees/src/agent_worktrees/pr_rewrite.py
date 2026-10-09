@@ -30,6 +30,8 @@ def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord 
     pr = record.active_pr() if record else None
     if not repo.pr.enabled or record is None or pr is None or pr.state != "open":
         raise ValueError("--rewrite-pr requires an open tracked PR, never direct/shared publication.")
+    if pr.provider and pr.provider != repo.pr.provider:
+        raise ValueError("Tracked PR provider differs from configuration; refusing credential resolution.")
     branch = f"worktree/{worktree_id}"
     if (record.worktree_id != worktree_id or record.repo.lower() != config.repo_name.lower() or record.branch != branch
             or Path(record.worktree_path).resolve() != Path(cwd).resolve()
