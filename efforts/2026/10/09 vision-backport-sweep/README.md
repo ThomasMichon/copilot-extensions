@@ -973,9 +973,9 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       - Vault: `cli.py:57-310,328-415`; service `968-1089,1327-1333`;
         native launcher/update, warm handoff and bootstrap drift chain.
         `#5940/#5918/#5938/#54` retain admission/scope/update/transport.
-        Client dial-cause preservation and hook-driven legacy service-start
-        semantics require narrower ownership decisions; neither a bound
-        endpoint nor a returning callback closes those anchors.
+        Exhausted client dial-cause fidelity is `#5959`; hook-driven legacy
+        service-start semantics remain `#5964`. Neither a bound endpoint nor
+        a returning callback closes those implementation anchors.
       - Pull Requests: completed-slot refusal `install.ps1:525-540` and
         `install.sh:423-465`; local service/claimant routes and OS lease;
         durable subscription `watch_daemon.py:204-240,298-371`.
@@ -1208,7 +1208,7 @@ sibling plan proves that the sibling's materials have been refreshed.
   | Persistent launch/cleanup | Owning shims/native roots protect lanes; supported direct callers can inherit payload cwd; numeric keeper retirement and sequential failed stops are concrete. | `#5958/#5953/#5954`; staging `#5820`, live-owner admission `#4309` remain distinct. |
   | Acquisition/fallback | Private uv exists, legacy Python guards precede it; Container pip branch omits shipped-library precedence. | `#5955/#4410`; no inevitable failure or all-platform claim. |
   | Cell recovery/current modes | Receipt/lock/selection/retirement source exists; Index post-deploy rollback can retire a healthy successor when old endpoint is gone. | `#1096/#1110` and Index rollback objective; no live transaction or outage reproduced. |
-  | Live contracts/diagnostics | Bridge inventory is present; other internal windows remain inventoried realization. Concrete composed commands and named gaps exist. | `#1460/#1468/#1915/#5957`, task/session gap `#3555`; no forced extra native handshake. |
+  | Live contracts/diagnostics | Bridge inventory is present; other internal windows remain inventoried realization. Concrete composed commands and named gaps exist; Vault exhausted dial cause is not generic not-running proof. | `#1460/#1468/#1915/#5957/#5959`, task/session gap `#3555`; no forced extra native handshake. |
   | Corpus/admission/retrieval | Cross-root readers are real; chronicler gates, incomplete venue log transport and qualified cold lookup remain bounded gaps. | `#5676/#5677/#5678`; no global corpus absence or duplicate rendered-log assertion. |
   | Judge/report consumers | Setup/container/model/driver/provenance checks and scenario fixture validation exist; semantic literal judgment remains caller/independent judge conduct. | `#5921/#5922/#5924` realization; no mandatory validator or accepted contamination claim. |
   | Venue/policy consumers | Real attach defaults, provider actions and charter gates are not selected-execution/truncation/claim-extensibility or model-compliance proof. | `#5952/#5960/#5961/#5962/#5963`; existing `#954/#3657` retain live implementation. |
