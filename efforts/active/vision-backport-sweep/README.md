@@ -76,7 +76,9 @@
   `ThomasMichon/copilot-extensions#5877` (named scoped noncredential
   host-resource realization) ·
   `ThomasMichon/copilot-extensions#580` (pre-existing relay stability tracker;
-  source-proven pinned-port eviction without occupant ownership/staleness proof)
+  source-proven pinned-port eviction without occupant ownership/staleness proof) ·
+  `ThomasMichon/copilot-extensions#5890` (existing unresolved closed-signature
+  recurrence and bounded automated-attempt policy)
 
 ## Guiding Intent
 
@@ -399,9 +401,12 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             or source-proven deviation was established. Real artifact and
             consumer acceptance remain with the owning `coverage-guided-ci`
             effort, not inferred complete from this reconciliation.
-      - [ ] `visions/coverage-guided-ci/README.md` — remaining concrete
-            ordinary-CI consumer invocation and activation audit beyond the
-            inspected baseline/promotion and selection-helper foundations.
+      - [x] `visions/coverage-guided-ci/README.md` — ordinary-CI invocation and
+            activation source audit. The real workflow still runs collect-only
+            plus guards; selection is a bounded, non-blocking shadow annotation,
+            not executable test selection. The owner retains Phase 4 live
+            activation and runtime-covered acceptance under `#4453`; no new
+            vision intent or redundant activation ticket was required.
       - [x] `visions/mux-companion/README.md` — scoped normal explicit cutover,
             read-only status/lineage boundaries, and refresh source trace
             inspected. No new fold-back was established.
@@ -434,6 +439,38 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             preserving dynamic-port startup and verified owned recovery.
             General resource realization and full credential/session lifecycle
             proof are not claimed by this source audit.
+      - [x] `visions/plugins/efforts/README.md` — payload-only policy delivery
+            reconciliation. Static projection and directly callable staged
+            producers were distinguished from registered automatic hooks.
+            Existing vision intent already covers the policy; no new runtime
+            validator, daemon, or counter requirement was manufactured from
+            unproved agent conduct. The historical owner is archived, not lost.
+      - [x] `visions/plugins/agent-dispatch/task-outputs-and-review/README.md` —
+            scoped conversation-source comparison and durable unsubmitted-draft
+            fold-back. Retained independent confirmation, exact review, history,
+            and affirmative delivery ahead of current implementation; the
+            canonical backend owner's Phases 5-7 remain under `#3681`.
+      - [ ] `visions/plugins/agent-dispatch/task-outputs-and-review/README.md` —
+            remaining creation-policy, post-completion enrichment/retry and
+            complete consumer/adapter acceptance beyond the inspected paths.
+      - [x] `visions/plugins/agent-logger/README.md` and session-intelligence
+            child — scoped preservation/derivation/catalog/consumer-source
+            comparison; folded back structured work-item/session associations.
+            Existing `#1817`/`#5676`/`#5677`/`#5678` retain their respective
+            configuration, preservation, accounting and adoption objectives.
+            Manifest preparation was not mistaken for final log rendering.
+      - [ ] Logger remaining rescue replacement, qualified cold retrieval,
+            persistent digest-reader paths, full accounting/aggregation and
+            released consumer adoption beyond this source cohort.
+      - [x] `visions/ci-failure-remediation/README.md` — current-stage watchdog,
+            trusted verification, compiled scope/output gates and charter source
+            reconciliation. No missing vision-level intent was established.
+            Open-issue recurrence is not another automated dispatch; closed
+            recurrence is a distinct unresolved policy, now tracked as `#5890`
+            in its existing owner. No live fix-agent run was triggered.
+      - [ ] CI-remediation complete external acceptance and charter-enforcement
+            reconciliation beyond inspected source gates; owner validation
+            remains explicit, not inferred from compiled workflow presence.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -546,6 +583,40 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Durable conversation/evidence and CI policy source cohort
+- Host-resource reconciliation merged as `#5886` with current-head Copilot
+  approval, zero findings and actual required CI; its child finalized. Replied
+  on `#5875`'s low citation finding with that merged fix-forward. The Active
+  sweep's whole-index and remaining service/Validation gates are unchanged.
+- Source cohorts used bounded read-only inspection, not contract documents as
+  runtime proof. Relevant plugin, vision and CI effect files were checked
+  unchanged from `fca474463dcf` through integration snapshot `36dc5153009c`.
+  Finalization could move a reference checkout's HEAD; the supplied base alone
+  was not treated as a freshly observed HEAD.
+
+  | Subject | Accepted source comparison | Retained boundary / owner |
+  |---|---|---|
+  | Efforts policy | `plugin.json` registers no hook; `instruction-projections.json` delivers the static completion fallback. `emit-policy.py`/`.ps1` directly validate adoption and emit bounded attributable policy; `.sh` is a staged wrapper. | Producers are not automatically hooked. The vision governs agent conduct and does not demand an executable completion validator. Archived owner: `efforts/2026/08/28 effort-driven-session-loops/README.md`. No new machinery delta was inferred. |
+  | Task drafts and conversation | `queue_steering.save_card_draft/clear_card_draft`, client and coordinator routes persist unfinished answers separately from acceptance. Backend submission/review/history and outbox bodies provide concrete foundations. | Added only durable unsubmitted-draft intent. Default non-verification/self-attestation, optional exact-review fences, overwritten card/result revisions and consumption reconciliation remain with `#3681`'s Phases 5-7; source evidence was posted there. |
+  | Logger association and derivation | `sessions.write_review_annotation` preserves durable association sidecars; `ReviewCatalogIndex.rebuild_from_sidecars` supplies rebuildable lookup. Sync, archive/segment readers, catalog, chronicle factory/source/writer and consumer seams were traced. | Added generic recorded work-item/session association retrieval, not a bundled tracker or workflow. Complete accounting, archive/rescue paths, aggregate execution authorization and released adoption were not declared conforming. Existing owners remain intact. |
+  | Chronicle retry/admission | Default `ManifestWriter` prepares the same manifest and returns no rendered-log paths; same-holder re-reservation is intentional and tested. Independent same-holder calls can interfere through failure release, which checks state/holder rather than invocation. | Rejected the overbroad duplicate-rendered-log claim. Actual rendering and single-flight lease authority belong to the external host. Narrow active-call release/adoption evidence was posted on `#5678`; legitimate retries remain supported. |
+  | Ordinary-CI targeting | `ci.yml:worktrees-smoke` runs collection and guards before invoking `coverage_guided_selection/cli.py` only in shadow mode, with a separate two-minute bound. CLI records selected/fallback/error decisions but does not execute them. | Audit complete; live activation and runtime-covered acceptance remain owner Phase 4 (`#4453`). Manual prototype integration is not ordinary PR selection or a replacement for the unchanged required gate. |
+  | CI-failure response | `ci_failure_watchdog.py` detects, dedups and re-verifies signatures; trusted report/verification jobs and compiled agent-success/scope/threat/output gates preserve the ordinary draft contribution path. | Prompt intent triage is not proof of model compliance. Per-run output limits are not a signature budget. Closed-tracker recurrence can create a new issue/dispatch; existing owner Phase 3 leaves that policy undecided, carved as `#5890`. |
+
+- Checked current tracker state rather than accepting historical references as
+  ownership: `#5701` is the merged steer retry/idempotency PR, `#5668` the
+  merged attention PR; neither owns the amendment implementation. `#3681`,
+  `#1817`, `#5677` and `#5678` remain open canonical owners.
+- Source-first superset review retained every existing positive, negative and
+  ownership boundary in the two edited leaves. New passages record deliberate
+  existing capabilities at intent altitude, not wire/schema/port details.
+  No runtime changes, source cleanup, task mutation, live chronicle execution,
+  concurrent render, or production CI-agent dispatch occurred.
+- Documentation-only structure/whitespace and real PR gates cover publication.
+  No new runtime unit/component, clean-room or external acceptance is claimed;
+  identified implementation owners retain those obligations. Partial source
+  paths above and the full parent completion gate remain open.
 
 ### 2026-10-09 — Host-resource current-stage and relay ownership reconciliation
 - Read the complete host-resource vision against the credential relay README,

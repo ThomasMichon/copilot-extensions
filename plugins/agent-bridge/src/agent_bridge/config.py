@@ -130,8 +130,12 @@ def load_config() -> ServiceConfig:
     root = config_dir()
     cfg_path = root / "config.yaml"
     if cfg_path.exists():
+        data = None
         try:
-            data = yaml.safe_load(cfg_path.read_text()) or {}
+            data = yaml.safe_load(cfg_path.read_text())
+            data = {} if data is None else data
+            if not isinstance(data, dict):
+                raise ValueError("agent-bridge configuration must be a mapping")
             # Lazy schema migration (in memory, never persists / never raises) so
             # a still-old config.yaml loads at the current shape before an
             # install/update has rewritten it on disk.
@@ -141,7 +145,19 @@ def load_config() -> ServiceConfig:
             if isinstance(data, dict):
                 data = _normalize_service_config(data, root=root)
             return ServiceConfig(**data)
-        except Exception:
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(
+                "Cannot establish preference authority from configuration; "
+                "refusing caller-settings fallback"
+            ) from exc
+        except Exception as exc:
+            if (
+                not isinstance(data, dict)
+                or ("preference_source" in data and data["preference_source"] != "caller-settings")
+            ):
+                raise ValueError(
+                    "Invalid explicit preference policy; refusing caller-settings fallback"
+                ) from exc
             log.warning("Failed to parse %s, using defaults", cfg_path)
     return ServiceConfig(
         db_path=str(default_db_path(root)),
@@ -156,7 +172,8 @@ def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
     legacy ``<repo>/.agent-bridge/config.yaml``, and merges an explicit
     marketplace overlay from
     ``<repo>/.copilot-extensions/agent-bridge/marketplaces/<marketplace-id>/config.yaml``
-    on top when present. Returns ``None`` when no readable layer exists.
+    on top when present. Returns ``None`` only when no layer exists; an invalid
+    or unavailable existing layer refuses authority fallback.
     """
     root = Path(repo_root).expanduser()
     layers = _repo_config_layers(root)
@@ -165,13 +182,24 @@ def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
     try:
         merged: dict[str, object] = {}
         for path in layers:
-            data = yaml.safe_load(path.read_text()) or {}
-            if isinstance(data, dict):
-                merged = _deep_merge_dicts(merged, data)
-        return RepoBridgeConfig(**merged)
-    except Exception:
-        log.warning("Failed to parse in-repo config %s, ignoring", layers[0], exc_info=True)
-        return None
+            data = yaml.safe_load(path.read_text())
+            data = {} if data is None else data
+            if not isinstance(data, dict):
+                raise ValueError("in-repository configuration must be a mapping")
+            if "preference_source" in data:
+                raise ValueError("repo preference policy belongs in default_env")
+            merged = _deep_merge_dicts(merged, data)
+        config = RepoBridgeConfig(**merged)
+        from .session_preferences import SOURCE_ENV, SOURCES
+
+        if SOURCE_ENV in config.default_env and config.default_env[SOURCE_ENV] not in SOURCES:
+            raise ValueError("unsupported preference_source")
+        return config
+    except Exception as exc:
+        raise ValueError(
+            "Invalid or unavailable in-repository preference configuration; "
+            "refusing authority fallback"
+        ) from exc
 
 
 def load_or_create_auth_token() -> str:

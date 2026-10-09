@@ -1,13 +1,23 @@
 {
   "captured_from": {
-    "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
-    "plugin_version": "0.4.0-dev425",
+    "commit": "7ee6a643e3da36c91258ef7ed4ade7773bcf2db8",
+    "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-    "source_git_blob": "09f8fd20efb3a35915989883a3835c7dffcb9a1c",
-    "source_sha256": "65ff14618e7a530a3d5177f3591e71edbc31760c3ebefd9e98e46f76abc45567"
+    "source_git_blob": "0281215b6baa6a7994a1cd0364d7242ecfc087a4",
+    "source_sha256": "7eccf1f791964c584cb211ebbf04c352998eece9c4de3fec264f5aa4ecce93b2"
   },
   "framing": "u32be body length, one-byte type, opaque payload",
+  "hello_preferences": {
+    "receipt": {
+      "version": 1,
+      "child_pid": 123,
+      "status": "missing",
+      "values": {},
+      "sources": {}
+    },
+    "frame_base64": "AAAAY0gAAAAAAAAAAAAAAAAAAAB7eyJ2ZXJzaW9uIjogMSwgImNoaWxkX3BpZCI6IDEyMywgInN0YXR1cyI6ICJtaXNzaW5nIiwgInZhbHVlcyI6IHt9LCAic291cmNlcyI6IHt9fQ=="
+  },
   "messages": {
     "attach": {
       "type_base64": "QQ==",
