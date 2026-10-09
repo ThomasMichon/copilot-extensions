@@ -1934,7 +1934,14 @@ if (-not $noMux) {
             try {
                 if (Test-Path -LiteralPath $paneWrapper) {
                     # Each retry owns a fresh handoff; the pane consumes it once.
-                    $paneArgsFile = Join-Path ([IO.Path]::GetTempPath()) (
+                    $paneArgsRoot = Join-Path $RuntimeDir 'pane-args'
+                    if ((Test-Path -LiteralPath $paneArgsRoot) -and
+                        ((Get-Item -LiteralPath $paneArgsRoot).Attributes -band
+                            [IO.FileAttributes]::ReparsePoint)) {
+                        throw 'Pane argument directory must not be a symlink.'
+                    }
+                    $null = [IO.Directory]::CreateDirectory($paneArgsRoot)
+                    $paneArgsFile = Join-Path $paneArgsRoot (
                         'aw-pane-' + [Guid]::NewGuid().ToString('N') + '.json'
                     )
                     $argsJson = ConvertTo-Json -InputObject @{

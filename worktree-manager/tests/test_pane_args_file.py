@@ -33,13 +33,14 @@ def _test_env(tmp_path: Path) -> dict[str, str]:
 
 def _powershell_producer(tmp_path: Path, wrapper: Path, argv: list[str]) -> list[str]:
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
-    start = source.index("                    $paneArgsFile = Join-Path")
+    start = source.index("                    $paneArgsRoot = Join-Path")
     end = source.index("\n                }\n                $savedAuth", start)
     payload = tmp_path / "producer-input.json"
     payload.write_text(json.dumps(argv), encoding="utf-8")
     script = tmp_path / "produce.ps1"
     script.write_text(
         "$paneWrapper=$args[0]\n"
+        "$RuntimeDir=$args[2]\n"
         "$paneLaunch=Join-Path (Split-Path -Parent $paneWrapper) 'pane-launch.ps1'\n"
         "$inputJson=[System.Text.Json.JsonDocument]::Parse([IO.File]::ReadAllText($args[1]))\n"
         "$wrapperArgs=@($inputJson.RootElement.EnumerateArray() | ForEach-Object { $_.GetString() })\n"
@@ -49,7 +50,8 @@ def _powershell_producer(tmp_path: Path, wrapper: Path, argv: list[str]) -> list
         encoding="utf-8",
     )
     result = subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(script), str(wrapper), str(payload)],
+        [PWSH, "-NoProfile", "-File", str(script), str(wrapper), str(payload),
+         str(tmp_path / "runtime")],
         capture_output=True, text=True, encoding="utf-8", timeout=15, env=_test_env(tmp_path),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
@@ -197,6 +199,7 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
     script = tmp_path / "retry.ps1"
     script.write_text(
         "$script:AwPsmuxBin=$args[0]\n$paneWrapper=$args[1]\n"
+        "$RuntimeDir=$args[2]\n"
         "$paneLaunch=Join-Path (Split-Path -Parent $paneWrapper) 'pane-launch.ps1'\n"
         "$plan=[pscustomobject]@{work_dir=$args[2]}\n"
         "$wrapperArgs=@('payload','two words')\n$ahpArgs=@()\n$envFlags=@()\n"
@@ -302,12 +305,13 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
                 "test-worktree", child_argv, is_tmux=False, pane_wrapper=str(wrapper),
             )
         manifest = Path(command[-1][1:-1].replace("''", "'"))
-        if producer == "python":
-            from agent_worktrees.sessions_pane_args import sweep_mux_pane_args
+        from agent_worktrees import config
+        from agent_worktrees.sessions_pane_args import sweep_mux_pane_args
 
-            delayed = time.time() - 60
-            os.utime(manifest, (delayed, delayed))
-            sweep_mux_pane_args()
+        assert manifest.parent == config.install_dir() / "pane-args"
+        delayed = time.time() - 60
+        os.utime(manifest, (delayed, delayed))
+        sweep_mux_pane_args()
         handoff = json.loads(manifest.read_text("utf-8"))
         assert handoff["wrapper"] == str(wrapper)
         expected_argv = (["-AwWt", "test-worktree"] if producer == "python" else []) + child_argv

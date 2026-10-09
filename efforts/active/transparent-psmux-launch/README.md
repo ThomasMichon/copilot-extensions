@@ -140,3 +140,8 @@ encoded commands or initial-prompt transports.
   handoff/deployment coverage: 330 passed, one platform-specific skip.
   Both native PSMux producers again passed two cycles, including delayed Python
   manifests surviving a sweep and subsequently being consumed.
+- Extended that registration to Worktree Manager's PowerShell producer using
+  its already-resolved runtime root. Interrupted PowerShell launches now share
+  the same expiry owner; neither producer leaves its manifest in loose temp.
+  Both delayed native consumers passed again, plus PowerShell retry/transport
+  coverage (48 checks) and five exact expiry/registration checks.

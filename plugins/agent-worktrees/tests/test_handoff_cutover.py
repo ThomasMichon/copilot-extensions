@@ -28,6 +28,28 @@ from agent_worktrees import worktree_identity
 
 # â”€â”€ build_mux_new_window_argv (pure) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestPaneArgsExpiry:
+    def test_powershell_orphan_is_registered_for_cleanup(self, tmp_path, monkeypatch):
+        import runpy
+
+        from agent_worktrees import sessions_pane_args as transport
+
+        if not shutil.which("pwsh"):
+            pytest.skip("PowerShell 7 is required")
+        monkeypatch.setattr(transport.config, "install_dir", lambda: tmp_path / "runtime")
+        root = Path(__file__).resolve().parents[3] / "worktree-manager"
+        producer = runpy.run_path(str(root / "tests" / "test_pane_args_file.py"))
+        command = producer["_powershell_producer"](
+            tmp_path, root / "bin" / "pane-wrapper.ps1", ["program", "prompt data"],
+        )
+        manifest = Path(command[-1][1:-1].replace("''", "'"))
+        try:
+            assert manifest.parent == transport.config.install_dir() / "pane-args"
+            os.utime(manifest, (0, 0))
+            transport.sweep_mux_pane_args()
+            assert not manifest.exists()
+        finally:
+            manifest.unlink(missing_ok=True)
+
     @pytest.mark.parametrize("age,expired", [(60, False), (86400, False), (86401, True)])
     def test_delayed_or_never_started_consumer(self, tmp_path, monkeypatch, age, expired):
         from agent_worktrees import sessions_pane_args as transport
