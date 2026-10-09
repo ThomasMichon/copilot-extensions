@@ -224,3 +224,58 @@ boundaries from implementation decisions and deployment-specific policy.
 - Baseline native service and warm engine are healthy, active indexing remains
   adopted, and a complete previous native version slot is retained. A bounded
   development health check is active; it is not new permanent service supervision.
+- Four-piece/authenticated-boundary amendment #5830 merged after review and
+  passing required CI. Component/job/source-scoped authorization and rejected
+  unauthenticated/cross-role operations are acceptance requirements for remote
+  adapters.
+- Initial code slice adds a normal `agent-index-service` API/controller program
+  with explicit repository-independent local component composition, preserving
+  existing client and core behavior. The embedding program is not renamed.
+  The existing standalone-consumer release mechanism is extended; no second
+  plugin or changefile schema is introduced.
+- Installed-core contained standalone suite: 68 tests passed, including two
+  real isolated zdd deployments, persisted query compatibility and synthetic
+  worker adoption. Core boundary/explicit-source/lazy-import selection: 37
+  passed with 2 platform skips. Release/materialization/rollback regressions
+  pass after repairing fixture dependency closure and a Windows symlink-target
+  identity assertion. Code is still awaiting publication and canary eligibility.
+- Canary API and warm engine remain healthy through existing fleet maintenance.
+  An incumbent indexing run ended partial after embedding read timeouts on two
+  sources; a successor incremental worker is active. A short warm-engine query
+  remains responsive. Live rollout changes are paused while that CPU/batch
+  timeout risk is classified; no worker is cancelled or engine cold-restarted.
+
+### 2026-10-09 - Merge-only pause boundary
+- Operator narrowed the current objective to landing existing PR #5863, then
+  pausing. No additional implementation, native canary migration or deployment
+  is authorized by this slice; the development health-check schedule is stopped.
+- The first review identified unconditional exhaustive PR CI and a stale
+  documentation limitation. Required Linux/Windows CI now path-gates the
+  controller contract smoke; full hosted/deployment coverage remains in
+  promotion and manual execution. CI integration is no longer documented as
+  deferred. The contained smoke passed 62 tests in 4.27 seconds; runner/workflow
+  policy regressions passed 30 tests.
+- Phases 2 and 3 remain open under #5768. This API/controller composition is
+  not the version-slot installer, a separated database/execution adapter, a
+  release reconciler or an authorized live service migration. Resume those
+  tracked slices only after the operator lifts the pause.
+- The next review found two containment defects in the new test surface.
+  Non-finite/nonpositive wall limits now fail before admission. POSIX hosted
+  children stay attached to the outer runner instead of creating escape
+  sessions; an abrupt-worker-exit regression runs in Linux CI. Windows retains
+  nested kill-on-close Job teardown. The full contained Windows standalone
+  suite passed 68 tests; runner/workflow regressions passed 35 with the Linux
+  process-group test explicitly deferred to its Linux CI lane.
+- Follow-up review identified the pre-seam core dependency floor and the new
+  registry's missing version-bump test path. Both base/native wheel requirements
+  now exclude the currently released `0.10.11-dev1` core and require
+  `0.10.12-dev1` or newer; the runtime seam check remains fail-closed. Test
+  preparation uses an explicit same-checkout core override (including native
+  extras) because `dev` freezes its source version. Actual preparation plus the
+  full contained suite passed 68 tests; wheel assertions reject the old core.
+  Registry-only changes now trigger the existing version-bump-engine suite.
+- Review also required smoke preparation itself to stay lightweight, not just
+  test selection. A genuinely fresh smoke environment passed 63 contracts in
+  2.32 seconds and contains no FastAPI/uvicorn/NumPy/pyarrow/LanceDB/tree-sitter
+  packages. Full preparation retains native extras. Runner/workflow regressions
+  passed 36 tests with one Linux-only process-group regression deferred to CI.

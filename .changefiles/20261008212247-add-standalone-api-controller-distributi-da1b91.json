@@ -1,0 +1,13 @@
+{
+  "comment": "Add standalone API controller distribution with explicit native configuration and release/test integration",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}

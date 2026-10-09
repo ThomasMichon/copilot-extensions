@@ -241,7 +241,7 @@ def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(tmp_path
 
     copied_link = dest / "some-dir" / "a-link"
     assert copied_link.is_symlink(), "a-link must be preserved as a symlink, not dereferenced"
-    assert os.readlink(copied_link) == str(secret)
+    assert os.path.samefile(os.readlink(copied_link), secret)
 
 
 def test_materialize_refuses_a_retired_directory_pointer_marker(tmp_path: Path):
