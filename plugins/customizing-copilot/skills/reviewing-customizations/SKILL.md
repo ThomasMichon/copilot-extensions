@@ -257,8 +257,9 @@ mutates a checked-in file or git history.
 
 Local delivery never withholds safe guidance because of a context-budget excess.
 Template, per-file and aggregate excess, and invalid budget configuration, are
-warning findings for this path; `scan`/checked-in `sync` retain their independent
-audit policy. Safety/ownership refusals remain blocking. The authoritative
+warning findings for this path. Checked-in `scan`/`sync` also report aggregate
+excess as advisory, while retaining their per-file and configuration checks.
+Safety/ownership refusals remain blocking. The authoritative
 distinction is in `docs/patterns/worktree-scoped-dynamic-guidance.md`.
 
 The CLI (`main()`/`__main__`) is the actual consent-gated scheduled-worker
