@@ -1,0 +1,9 @@
+{
+  "comment": "Separate shared SSH dial-log serialization testing from permitted telemetry timeout drops.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}
