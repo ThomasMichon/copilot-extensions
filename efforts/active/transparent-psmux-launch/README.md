@@ -202,3 +202,22 @@ encoded commands or initial-prompt transports.
 - A full Windows harness run also encountered the six existing mention-guard
   fixture failures explicitly tracked in #5250. They are kept separate from
   this containment repair; the release gate runs that suite on Linux.
+- All eleven contained runner tests passed locally. Repair PR #5917 passed
+  the required Linux suite and all checks, received approval, and merged.
+  Continued with the new `dev` run and release promotion; #5878 stays open.
+- The first unified consumer refresh completed successfully and its guidance
+  projections synchronized with zero blocking findings. This refreshed the
+  prior released baseline, not yet the file-launch change; final release
+  deployment and the installed-launch proof remain outstanding.
+
+### 2026-10-09 - Full promotion gate contract repair
+- The repaired `dev` CI passed and admitted the full promotion gate. Its only
+  suite failure was the late paired-carve policy race (#5919): the test still
+  expected a raw policy exception after the creation API gained the typed,
+  identity-preserving `LaunchSeedStagingFailure` boundary.
+- Kept the production boundary unchanged. The regression now verifies the
+  typed failure, original policy cause, created worktree identity/path/branch,
+  no-duplicate-create recovery payload and all previous residual-race message
+  assertions. All 21 paired-carve tests passed locally.
+- The reporter could not dispatch a fix agent because that workflow is
+  disabled (HTTP 422). Claimed the unowned repair rather than enabling it.
