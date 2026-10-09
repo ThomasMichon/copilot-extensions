@@ -205,7 +205,13 @@ def read_session_terminal(session_id) -> dict | None:
     live = None
     if pid and isinstance(recorded_start, str) and recorded_start:
         try:
-            live = locks.process_start_time(pid) == recorded_start
+            current = locks.process_start_time(pid)
+            if current is not None:
+                live = current == recorded_start
+            elif not locks.pid_alive(pid):
+                # Only a definitive "no such process" reads as dead; an
+                # unreadable start identity on an existing pid stays unknown.
+                live = False
         except Exception:
             live = None
     record["live"] = live

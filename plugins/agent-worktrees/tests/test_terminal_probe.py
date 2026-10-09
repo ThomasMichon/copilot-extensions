@@ -26,6 +26,14 @@ def test_probe_terminal_never_raises(monkeypatch):
     assert terminal_probe.probe() == {}
 
 
+def test_probe_scopes_ancestry_to_linux_and_windows(monkeypatch):
+    monkeypatch.setattr(terminal_probe, "_posix_ancestors", lambda: [7, 1])
+    monkeypatch.setattr(terminal_probe.sys, "platform", "linux")
+    assert terminal_probe.probe() == {"ancestors": [7, 1]}
+    monkeypatch.setattr(terminal_probe.sys, "platform", "darwin")
+    assert terminal_probe.probe() == {}
+
+
 class _FakeKernel32:
     def __init__(self, consoles):
         self.consoles = consoles

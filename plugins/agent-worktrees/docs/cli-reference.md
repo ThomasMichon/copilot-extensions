@@ -201,9 +201,15 @@ nothing was recorded):
 - Unknown facts are `null`. No window titles, absolute user paths, or secrets
   are recorded; executable names are basenames. `mux` is `{kind, pane}` inside
   tmux/psmux; `tty` is the controlling pts/tty on Linux.
+- **Platform scope:** process ancestry and Copilot process identity
+  (`copilot_pid`, `copilot_start_time`, `live`) are recorded on Windows and
+  Linux, matching the plugin's existing Win32 and `/proc` process-identity
+  primitives. Other platforms (e.g. macOS) record only environment-derived
+  facts (`term_program`, `mux`, `ssh`); those identity fields stay `null`.
 - `live` is computed at read time: `true` while `copilot_pid` still has the
-  recorded start time, `false` once that process is gone or the pid was reused,
-  `null` when unknown.
+  recorded start time; `false` when the pid was reused (different start time)
+  or definitively no longer exists; `null` when unknown (e.g. the start time
+  of an existing process is unreadable).
 - **Windows:** hooks run without a console window, so the hook client briefly
   `AttachConsole`s to its Copilot ancestor to read `GetConsoleWindow()` (from a
   short-lived console-less helper when the hook itself holds a windowless

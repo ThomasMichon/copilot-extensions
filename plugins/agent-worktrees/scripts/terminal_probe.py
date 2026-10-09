@@ -31,7 +31,11 @@ def probe() -> dict:
     try:
         if sys.platform == "win32":
             return _probe_windows()
-        return {"ancestors": _posix_ancestors()}
+        if sys.platform.startswith("linux"):
+            return {"ancestors": _posix_ancestors()}
+        # Ancestry and process identity are /proc-based (Linux) or Win32; other
+        # platforms (e.g. macOS) record only environment-derived facts.
+        return {}
     except Exception:
         return {}
 

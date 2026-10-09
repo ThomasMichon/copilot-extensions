@@ -119,6 +119,15 @@ def test_terminal_record_for_non_mux_session(monkeypatch, tmp_path, capfd):
     _fake_processes(monkeypatch, {200: "other"}, {200})
     assert terminal_identity.read_session_terminal("session-1")["live"] is False
 
+    # An unreadable start identity is unknown while the pid exists, dead once gone.
+    from agent_worktrees import locks
+
+    _fake_processes(monkeypatch, {}, {200})
+    monkeypatch.setattr(locks, "pid_alive", lambda pid: True)
+    assert terminal_identity.read_session_terminal("session-1")["live"] is None
+    monkeypatch.setattr(locks, "pid_alive", lambda pid: False)
+    assert terminal_identity.read_session_terminal("session-1")["live"] is False
+
 
 def test_terminal_record_unknowns_and_mux(monkeypatch, tmp_path):
     from agent_worktrees import terminal_identity
