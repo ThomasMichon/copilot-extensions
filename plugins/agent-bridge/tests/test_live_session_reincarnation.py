@@ -88,7 +88,7 @@ def test_a_revived_row_is_the_worktrees_newest_incarnation(tmp_db: Database, pid
     now = time.time()
     assert _register(tmp_db, "provisional", now - 3, pid=300, started=now - 3) == "live"
     assert _register(tmp_db, "conv-7", now, pid=pid, started=t0 + started_offset) == "live"
-    assert tmp_db.get_live_session("conv-7")["registered_at"] == pytest.approx(now)
+    assert tmp_db.get_live_session("conv-7")["registered_at"] == now
     assert tmp_db.current_live_session_for_worktree("wt-1", now=now) == "conv-7"
     message_id, reason = tmp_db.enqueue_live_message_if_fresh(
         "conv-7", sender="board", body="hi", now=now, expected_session_id="conv-7")
@@ -99,7 +99,7 @@ def test_a_heartbeat_keeps_the_rows_registration_time(tmp_db: Database) -> None:
     now = time.time()
     assert _register(tmp_db, "conv-8", now - 60, pid=100, started=now - 60) == "live"
     assert _register(tmp_db, "conv-8", now, pid=100, started=now - 60) == "live"
-    assert tmp_db.get_live_session("conv-8")["registered_at"] == pytest.approx(now - 60)
+    assert tmp_db.get_live_session("conv-8")["registered_at"] == now - 60
 
 
 def test_the_route_admits_a_resumed_process_for_an_expired_row(tmp_path, monkeypatch) -> None:
