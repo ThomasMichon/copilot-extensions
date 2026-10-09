@@ -33,7 +33,7 @@ class RebaseProof:
 
 
 def _git(*args: str, cwd: str) -> str:
-    result = git_ops.git("--no-replace-objects", *args, cwd=cwd, check=False)
+    result = git_ops.git("--no-replace-objects", *args, cwd=cwd, check=False, isolated_repository=True)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -132,7 +132,7 @@ def _replay(branch: str, head: str, cwd: str) -> tuple[str, str, str, list[tuple
 def _merge_tree(parent: str, onto: str, commit: str, cwd: str) -> tuple[str, bool]:
     args = ("--no-replace-objects", "merge-tree", "--write-tree", "--merge-base", parent, onto, commit)
     try:
-        result = git_ops.git(*args, cwd=cwd, check=False, timeout=30)
+        result = git_ops.git(*args, cwd=cwd, check=False, timeout=30, isolated_repository=True)
     except subprocess.TimeoutExpired as exc:
         raise git_ops.GitError(["git", *args], 124, f"timed out after {exc.timeout} seconds") from exc
     tree = result.stdout.splitlines()[0] if result.stdout else ""
@@ -223,7 +223,7 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) 
     ):
         return None
     owner_branch = record.branch
-    current = git_ops._get_current_branch_safe(cwd)
+    current = _git("symbolic-ref", "--short", "HEAD", cwd=cwd)
     if (
         owner_branch != f"worktree/{record.worktree_id}"
         or current not in (owner_branch, dest)
@@ -294,7 +294,7 @@ def record_synced(worktree_id: str, config, cwd: str) -> None:
     if pr is None:
         return
     repo = config.default_repo
-    source = git_ops._get_current_branch_safe(cwd) or ""
+    source = _git("symbolic-ref", "--short", "HEAD", cwd=cwd)
     proof = verify(
         record, repo, pr.remote or repo.remote, f"{source}:refs/heads/{pr.branch}",
         pr.head_sha, cwd=cwd,

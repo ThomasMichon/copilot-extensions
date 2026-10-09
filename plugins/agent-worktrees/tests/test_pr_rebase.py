@@ -249,7 +249,7 @@ def test_owned_pr_rebase_recovers_legacy_stale_published_patch_cache(pr_repo):
     pytest.param("snapshot", marks=exhaustive),
     pytest.param("refspec", marks=pytest.mark.guard),
 ])
-def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo, scheme, capsys):
+def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo, scheme, capsys, monkeypatch):
     config, wid, path, remote, branch, old = _prepare(pr_repo, scheme)
     _advance(config, path)
     _git("rebase", "origin/master", cwd=path)
@@ -259,6 +259,9 @@ def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo, scheme, capsys)
     hook = common / "hooks" / "pre-push"
     hook.write_text("#!/bin/sh\necho 'BLOCKED: release guard'\nexit 1\n")
     hook.chmod(hook.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(common / "disabled-hooks"))
     assert not finalize.push_changes(wid, config)
     output = capsys.readouterr()
     assert "BLOCKED: release guard" in output.out + output.err
@@ -294,7 +297,8 @@ def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, comma
 @pytest.mark.guard
 @pytest.mark.parametrize("changed_message", [" Message\n", "Message\n\n"])
 def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch, changed_message):
-    def fake_git(*args, cwd, check):
+    def fake_git(*args, cwd, check, isolated_repository):
+        assert isolated_repository
         if args[-1] == "base..original":
             stdout = "old base\n"
         elif args[-1] == "onto..finished":
@@ -341,6 +345,39 @@ def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tm
         patches.append(series[0])
     assert patches[0] != patches[1]
     assert patches[2] != patches[3]
+
+
+@pytest.mark.guard
+def test_owned_pr_rebase_poisoned_git_context_cannot_redirect_proof_or_push(pr_repo, monkeypatch):
+    config, wid, path, remote, branch, old = _prepare(pr_repo)
+    onto = _advance(config, path)
+    _git("rebase", "origin/master", cwd=path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    foreign = remote.parent / "foreign.git"
+    _git("init", "--bare", str(foreign), cwd=remote.parent)
+    record = _record(wid)
+    with monkeypatch.context() as patch:
+        patch.setenv("GIT_DIR", str(foreign))
+        patch.setenv("GIT_WORK_TREE", str(remote.parent))
+        patch.setenv("GIT_INDEX_FILE", str(foreign / "index"))
+        assert pr_rebase._git("rev-parse", "HEAD", cwd=str(path)) == tip
+        assert git_ops._remote_url("origin", cwd=path) == str(remote)
+        proof = pr_rebase.verify(
+            record, config.default_repo, "origin", f"{record.branch}:refs/heads/{branch}",
+            old, cwd=str(path),
+        )
+        assert proof is not None
+        result = pr_rebase.push(
+            record, config.default_repo, "origin", f"{record.branch}:refs/heads/{branch}",
+            old, cwd=str(path),
+        )
+        assert result, result.stderr
+        assert result.published_head_sha == tip and result.rebase_base_sha == onto
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    assert git_ops.git(
+        "--git-dir", str(foreign), "show-ref", "--verify", f"refs/heads/{branch}",
+        cwd=path, check=False,
+    ).returncode != 0
 
 
 @pytest.mark.guard

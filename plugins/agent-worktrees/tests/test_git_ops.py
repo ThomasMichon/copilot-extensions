@@ -92,6 +92,31 @@ class TestPythonRuntimeEnvScrub:
         for name in self._LEAKED:
             assert name not in env
 
+    @pytest.mark.parametrize("isolated", [False, True])
+    def test_git_repository_selection_is_explicitly_isolated(self, monkeypatch, isolated):
+        poisoned = {
+            "GIT_DIR": "foreign",
+            "GIT_WORK_TREE": "wrong",
+            "GIT_INDEX_FILE": "foreign-index",
+            "GIT_NAMESPACE": "wrong-namespace",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.hooksPath",
+            "GIT_CONFIG_VALUE_0": "disabled",
+        }
+        for name, value in poisoned.items():
+            monkeypatch.setenv(name, value)
+        captured = {}
+
+        def fake_run(cmd, **kw):
+            captured.update(kw["env"])
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        go.git("--version", isolated_repository=isolated)
+        for name, value in poisoned.items():
+            assert captured.get(name) == (None if isolated else value)
+        assert captured["GIT_TERMINAL_PROMPT"] == "0"
+
 
 class TestNoHooks:
     """#3707: the plugin's mechanical git ops (squash re-commit / rebase)
@@ -172,12 +197,13 @@ class TestPush:
         seen = {}
         monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
                             capture=True, timeout=None, no_hooks=False,
-                            kill_tree=False: (
-            seen.update(args=a, no_hooks=no_hooks),
+                            kill_tree=False, isolated_repository=False: (
+            seen.update(args=a, no_hooks=no_hooks, isolated_repository=isolated_repository),
             types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
         assert bool(go.push("origin", "main", cwd=".")) is True
         assert seen["args"][:1] == ("push",)
         assert seen["no_hooks"] is False
+        assert seen["isolated_repository"] is True
 
     def test_push_retry_also_does_not_bypass_hooks(self, monkeypatch):
         """The auth-fallback retry push (#900) must not bypass hooks either --
@@ -190,7 +216,7 @@ class TestPush:
         no_hooks_seen: list[bool] = []
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             no_hooks_seen.append(no_hooks)
             injected = "http.extraheader=AUTHORIZATION: basic x" in args
             rc = 1 if injected else 0
@@ -216,7 +242,7 @@ class TestPushTimeout:
         captured = {}
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             captured["timeout"] = timeout
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -229,7 +255,7 @@ class TestPushTimeout:
         captured = {}
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             captured["timeout"] = timeout
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -242,7 +268,7 @@ class TestPushTimeout:
         captured = {}
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             captured["timeout"] = timeout
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -257,7 +283,7 @@ class TestPushTimeout:
         captured = {}
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             captured["kill_tree"] = kill_tree
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -274,7 +300,7 @@ class TestPushTimeout:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             raise subprocess.TimeoutExpired(
                 cmd=["git", *args], timeout=timeout,
                 output="", stderr="[agent-worktrees] runtime not provisioned...",
@@ -299,7 +325,7 @@ class TestPushTimeout:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             raise subprocess.TimeoutExpired(
                 cmd=["git", *args], timeout=timeout,
                 output="stdout: provisioning uv venv...",
@@ -323,7 +349,7 @@ class TestPushTimeout:
         )
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False):
+                     no_hooks=False, kill_tree=False, isolated_repository=False):
             injected = "http.extraheader=AUTHORIZATION: basic x" in args
             if injected:
                 return types.SimpleNamespace(returncode=1, stdout="", stderr="403")

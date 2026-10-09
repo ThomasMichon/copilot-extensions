@@ -24,6 +24,7 @@ def push(
             result = git_ops.git(
                 *prefix, "push", remote, branch, *extra, "--quiet",
                 cwd=cwd, check=False, timeout=timeout, kill_tree=True,
+                isolated_repository=True,
             )
         except subprocess.TimeoutExpired as exc:
             return git_ops.PushResult(ok=False, stderr=push_timeout.message(exc, timeout))

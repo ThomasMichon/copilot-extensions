@@ -157,6 +157,7 @@ def git(
     timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
+    isolated_repository: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a git command with consistent error handling.
 
@@ -165,12 +166,8 @@ def git(
         cwd: Working directory for the command.
         check: If True, raise GitError on non-zero exit.
         capture: If True, capture stdout and stderr.
-        timeout: If set, seconds to wait before ``subprocess.run`` raises
-            ``subprocess.TimeoutExpired``. Default ``None`` keeps the historical
-            unbounded behavior for every caller that does not opt in (e.g.
-            network ops like ``fetch``/``push``). Read-only inspection callers
-            (worktree classification) pass a bound so a single stalled ``git``
-            spawn cannot hang them indefinitely.
+        timeout: Optional subprocess bound; None preserves unbounded network ops.
+            Inspection callers pass a bound to prevent stalled probes.
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's client-side
             guard hooks cannot block/corrupt trusted plumbing that only re-arranges
             ALREADY-committed content (squash re-commit, rebase). **``push()`` never passes
@@ -178,12 +175,14 @@ def git(
             must be allowed to block a non-compliant push (not ``--no-verify``; scopes the
             disable to internal git ops). #3707.
         kill_tree: If True (real timeout), kill the whole tree on a stall -- :mod:`push_timeout`.
+        isolated_repository: Ignore inherited Git repo/config selectors; use cwd.
     Returns:
         CompletedProcess with stdout/stderr as strings.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
-    env = env_scrub.scrub_python_runtime_env({**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    env = repository_identity_env() if isolated_repository else os.environ.copy()
+    env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
     if kill_tree and timeout is not None:
         result = push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
     else:
@@ -910,7 +909,7 @@ class PushResult:
 
 def is_commit_ancestor(ancestor: str, descendant: str, *, cwd: str | Path) -> bool:
     """Strict object ancestry, unlike the content-equivalent merge predicate."""
-    return git("--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant, cwd=cwd, check=False).returncode == 0
+    return git("--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant, cwd=cwd, check=False, isolated_repository=True).returncode == 0
 
 
 def push(
@@ -961,7 +960,7 @@ def push(
 
 def _remote_url(remote: str, *, cwd: str | Path) -> str | None:
     """Return the configured URL for *remote*, or None."""
-    result = git("remote", "get-url", remote, cwd=cwd, check=False)
+    result = git("remote", "get-url", remote, cwd=cwd, check=False, isolated_repository=True)
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None

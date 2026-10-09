@@ -589,6 +589,8 @@ The destination is recorded only as a SHA-256 fingerprint; raw Git push URLs
 can carry credentials and are never copied into the checkpoint.
 Proof queries disable Git replacement objects, including ancestry, patch and
 commit-message checks, so they inspect the raw history that is actually pushed.
+Proof reads, push-destination authentication and the pinned push scrub inherited
+Git repository/config selectors so all operate on the supplied checkout.
 Patch IDs are diagnostic metadata only: they discard hunk locations. Authorization
 reconstructs each source commit's three-way tree on its new parent with
 `git merge-tree --write-tree --merge-base` and requires the actual replay tree.
