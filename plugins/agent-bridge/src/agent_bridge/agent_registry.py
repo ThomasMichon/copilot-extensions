@@ -198,14 +198,17 @@ def _detect_local_machine(
 
     hostname = socket.gethostname()
     platform = _detect_platform()
+    scoped = any(machine.execution_platform for machine in machines.values())
     if local_execution_space is not None:
         selected = machines.get(local_execution_space)
         if selected is None:
             raise ValueError("local_execution_space does not name a canonical registered key")
+        if scoped and not selected.execution_platform:
+            raise ValueError("local_execution_space must select a registered execution space in a scoped topology")
         if selected.execution_platform and selected.execution_platform != platform:
             raise ValueError("local_execution_space does not match this daemon's execution platform")
         return selected, platform
-    if any(machine.execution_platform for machine in machines.values()):
+    if scoped:
         raise ValueError(
             "explicit local_execution_space is required for independent registered spaces"
         )

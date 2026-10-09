@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import launch_seed_exec, launch_seed_state as state, tracking, tracking_write
+from agent_worktrees import config as cfg
 
 
 @pytest.fixture(autouse=True)
@@ -24,10 +25,49 @@ def _cold_probe_boundary(monkeypatch):
 
 
 def _record(tmp_path):
+    project_dir = cfg.project_dir("demo")
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": "demo", "machine": "test",
+        "repos": {"demo": {"anchor": str(tmp_path), "default_branch": "dev"}},
+    }), encoding="utf-8")
     return tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "checkout"), "demo", "test",
         "windows", tmp_path,
     ).yaml_path
+
+
+@pytest.mark.parametrize(("name", "old_version"), [
+    ("stage", 1), ("take", 1), ("restore", 1), ("finish", 1), ("remove", 2),
+])
+def test_seed_client_never_dials_pre_authority_daemon(tmp_path, monkeypatch, name, old_version):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    path = _record(tmp_path)
+    seed = state.stage(path, kind="new", text="initial intent")
+    receipt = state.take(path, seed_id=seed.seed_id)
+    verb = f"launch_seed_{name}"
+    old = {
+        "tracking_write_endpoint": "127.0.0.1:49152",
+        "tracking_write_token": "fixture-token",
+        "tracking_write_verbs": [verb],
+        "tracking_write_verb_versions": {verb: old_version},
+    }
+    assert tracking_write.endpoint_from_rendezvous(old, verb=verb, min_version=old_version)
+    monkeypatch.setattr(locks, "read_lock", lambda *args: old)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(
+        tracking_write, "_send_tracking_write_request",
+        lambda *args, **kwargs: pytest.fail("launch-seed mutation dialed an authority-unaware daemon"),
+    )
+    operations = {
+        "stage": lambda: state.stage(path, kind="resume", text="new intent"),
+        "take": lambda: state.take(path, seed_id=seed.seed_id),
+        "restore": lambda: state.restore(path, receipt),
+        "finish": lambda: state.finish(path, receipt),
+        "remove": lambda: state.remove(path, remove_record=True),
+    }
+    assert operations[name]() is not None
 
 
 @pytest.mark.parametrize("kind", ["new", "resume"])
@@ -70,7 +110,10 @@ def test_seed_is_discarded_after_backend_start_not_before(tmp_path, monkeypatch,
     path = _record(tmp_path)
     seed = state.stage(path, kind=kind, text="next turn")
     argv = []
+    real_popen = launch_seed_exec.subprocess.Popen
     def spawn(command, **kwargs):
+        if command[0] != "copilot":
+            return real_popen(command, **kwargs)
         pending = state.peek(path)
         assert pending.text == seed.text and pending.handoff_id
         argv.append(command)
@@ -131,10 +174,15 @@ def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkey
     path = _record(tmp_path)
     seed = state.stage(path, kind="resume", text="next turn")
     calls = []
-    monkeypatch.setattr(
-        launch_seed_exec.subprocess, "Popen",
-        lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(wait=lambda: 0),
-    )
+    real_popen = launch_seed_exec.subprocess.Popen
+
+    def spawn(argv, **kwargs):
+        if argv[0] != "copilot":
+            return real_popen(argv, **kwargs)
+        calls.append(argv)
+        return SimpleNamespace(wait=lambda: 0)
+
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
     monkeypatch.setattr(
         state, "finish",
         lambda *a, **k: (_ for _ in ()).throw(tracking_write.AmbiguousWriteOutcome("late ack")),
