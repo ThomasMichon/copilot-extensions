@@ -1792,7 +1792,10 @@ def _mux_pane_cmd(
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir
 
         launch_dir = _usable_worktree_manager_launcher_dir()
-        if launch_dir is not None:
+        if launch_dir is not None and all(
+            (launch_dir / name).is_file()
+            for name in ("pane-wrapper.ps1", "pane-launch.ps1")
+        ):
             wrapper = str(launch_dir / "pane-wrapper.ps1")
     if wrapper is None:
         name = "pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"

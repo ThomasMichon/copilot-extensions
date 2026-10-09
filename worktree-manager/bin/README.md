@@ -17,6 +17,8 @@ of the `worktree-manager-control-plane` effort.
   PowerShell single-quoted paths with doubled apostrophes across PSMux's space
   join. The version-1 JSON object carries `wrapper` and a non-empty string
   `argv` array, consumed and deleted before invoking the unchanged wrapper.
+  Consumption holds an exclusive delete-on-close file handle through validation,
+  so concurrent consumers cannot execute the same handoff twice.
   Each create attempt uses a fresh manifest;
   failed creation cleans up its unconsumed file after owned-session teardown.
   AHP credentials still use the separate protected token handoff, not JSON.
@@ -62,3 +64,5 @@ install slot — no separate packaging step is needed for this directory.
 For agent-worktrees' standalone fallback, promotion also materializes the
 files in `plugins/agent-worktrees/launch-wrapper-assets.json`, including
 `pane-launch.ps1`, into that plugin's packaged `bin/` directory.
+Python pane generation uses that fallback when an otherwise-usable older
+Worktree Manager bundle does not yet contain the dispatcher and wrapper pair.

@@ -150,3 +150,9 @@ encoded commands or initial-prompt transports.
   Reused the existing cross-version link/junction guard for creation, expiry
   and rejection cleanup. Real Windows junction and unowned-command regressions,
   plus the handoff/lifecycle suite: 146 passed.
+- Covered independent-update skew: an older otherwise-healthy manager slot
+  lacking the dispatcher now falls back to the packaged wrapper/dispatcher
+  pair. Made manifest consumption atomic with an exclusive delete-on-close
+  handle; a coordinated two-consumer regression proves exactly one child runs.
+  Handoff/lifecycle tests: 147 passed; all transport and both native producer
+  tests, including concurrent consumption: 21 passed.

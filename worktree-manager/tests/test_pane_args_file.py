@@ -169,6 +169,49 @@ def test_custom_wrapper_failure_is_not_success_shaped(tmp_path):
     assert not manifest.exists()
 
 
+def test_concurrent_manifest_consumers_execute_once(tmp_path):
+    wrapper = tmp_path / "once.ps1"
+    output = tmp_path / "executions.txt"
+    wrapper.write_text("[IO.File]::AppendAllText($args[0], \"once`n\")\n", encoding="utf-8")
+    manifest = tmp_path / "once.json"
+    manifest.write_text(json.dumps({
+        "version": 1, "wrapper": str(wrapper), "argv": [str(output)],
+    }), encoding="utf-8")
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    held_launcher = tmp_path / "held-launcher.ps1"
+    anchor = "    $handoff = $document.RootElement"
+    held_launcher.write_text(LAUNCHER.read_text("utf-8").replace(
+        anchor, anchor + "\n[IO.File]::WriteAllText($env:PANE_TEST_READY,'ready')\n"
+        "while (-not (Test-Path -LiteralPath $env:PANE_TEST_RELEASE))"
+        " { Start-Sleep -Milliseconds 20 }\n",
+    ), encoding="utf-8")
+    env = dict(_test_env(tmp_path), PANE_TEST_READY=str(ready), PANE_TEST_RELEASE=str(release))
+    first = subprocess.Popen(
+        [PWSH, "-NoProfile", "-File", str(held_launcher), "-Manifest", str(manifest)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and first.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists()
+        second = _run(manifest, env)
+        assert second.returncode == 3, second.stderr
+        assert not output.exists()
+        release.write_text("go")
+        _stdout, stderr = first.communicate(timeout=10)
+        assert first.returncode == 0, stderr
+        assert output.read_text("utf-8").splitlines() == ["once"]
+        assert not manifest.exists()
+    finally:
+        release.write_text("go")
+        if first.poll() is None:
+            first.kill()
+        first.communicate(timeout=10)
+
+
 @pytest.mark.parametrize("argv", [[], None, [1], ["ok", None], "not an array"])
 def test_invalid_manifest_argv_is_rejected(tmp_path, argv):
     manifest = tmp_path / "invalid-argv.json"

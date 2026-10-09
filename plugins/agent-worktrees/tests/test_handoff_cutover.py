@@ -149,6 +149,30 @@ class TestPaneArgsExpiry:
 
 
 class TestBuildMuxNewWindowArgv:
+    def test_old_manager_slot_uses_packaged_fallback(self, tmp_path, monkeypatch):
+        from agent_worktrees import manager_launch_cli
+
+        old_slot = tmp_path / "old-slot"
+        old_slot.mkdir()
+        (old_slot / "pane-wrapper.ps1").write_text("# old wrapper")
+        packaged = tmp_path / "packaged"
+        packaged.mkdir()
+        (packaged / "pane-wrapper.ps1").write_text("# packaged wrapper")
+        (packaged / "pane-launch.ps1").write_text("# packaged launcher")
+        monkeypatch.setattr(
+            manager_launch_cli, "_usable_worktree_manager_launcher_dir", lambda: old_slot,
+        )
+        monkeypatch.setattr(sessions, "_LEGACY_BIN_DIR", str(packaged))
+        argv = sessions._mux_pane_cmd("id", ["program"], is_tmux=False)
+        try:
+            manifest = Path(argv[-1][1:-1].replace("''", "'"))
+            assert Path(json.loads(manifest.read_text("utf-8"))["wrapper"]) == (
+                packaged / "pane-wrapper.ps1"
+            )
+            assert argv[-3] == "'" + str(packaged / "pane-launch.ps1") + "'"
+        finally:
+            sessions.cleanup_mux_pane_args(argv)
+
     def test_psmux_resolves_manager_owned_bundle(self, tmp_path, monkeypatch):
         from agent_worktrees import manager_launch_cli
 
