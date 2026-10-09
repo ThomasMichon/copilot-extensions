@@ -46,6 +46,7 @@ from ..live_controls import (
     SetModeRequest,
     SetModeResult,
 )
+from .. import live_backfill as _backfill
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
@@ -274,6 +275,7 @@ async def register_live_session(
     if store is not None:
         for alias_id in db.live_session_aliases_to(row["session_id"]):
             store.alias(alias_id, row["session_id"])
+    _backfill.on_registration(request, row)  # a session that lost its history in a restart replays it
     return _to_info(row)
 
 
@@ -548,7 +550,7 @@ async def deregister_live_session(
 
 @router.post("/{session_id}/events", response_model=IngestLiveEventsResult)
 async def ingest_live_events(
-    session_id: str, body: IngestLiveEventsRequest, request: Request
+    session_id: str, body: IngestLiveEventsRequest, request: Request, replay: bool = False
 ) -> IngestLiveEventsResult:
     """Ingest a batch of raw SDK events from a represented session's extension.
 
@@ -566,11 +568,10 @@ async def ingest_live_events(
     session_id = registration["session_id"]
     store = _store(request)
     raw = [e.model_dump() for e in body.events]
-    ingested = store.ingest(
-        session_id,
-        raw,
-        worktree_id=registration.get("worktree_id"),
-    )
+    ingested = _backfill.ingest(request, registration, raw, replay=replay)  # held while a replay is awaited
+    if replay:  # an older history, replayed: it never re-derives the session's current state
+        return IngestLiveEventsResult(session_id=session_id, ingested=ingested,
+                                      last_id=_backfill.latest_id(store, session_id))
     # Phase 7 Channel A: fold the raw batch into a coarse turn_state so the
     # tracker sees running/idle/stalled -- objective and token-free.
     prior = (db.get_live_session(session_id) or {}).get("turn_state")

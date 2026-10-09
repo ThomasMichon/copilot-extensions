@@ -22,7 +22,9 @@ Two deliberate boundaries make this safe and honest:
   represented id (which has no ``sessions`` row) cannot persist there. Durability
   is unnecessary: NF seeds **cold history from the on-disk transcript** and the
   represented log carries only the **live tail** (honest reduced fidelity). A
-  bridge restart simply clears the tail; the extension re-registers and resumes.
+  bridge restart clears the tail; the extension re-registers and resumes, and
+  the bridge asks it to replay its own transcript's tail so the log is rebuilt
+  in order (``live_backfill``).
 
 The translation is intentionally lower-fidelity than native ACP: streaming
 deltas, plans, and raw tool arguments/results are thinned or dropped in favor of
@@ -34,6 +36,7 @@ approval can only ever happen at the operator's terminal.
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from bisect import bisect_right
@@ -741,8 +744,12 @@ class LiveEventStore:
             agent_id = subagent_id(item)
             if agent_id and not data.get("agentId"):
                 data = {**data, "agentId": agent_id}
+            # A replayed history (see live_backfill) keeps each event's own time;
+            # a non-finite one would serialize as NaN/Infinity and break SSE readers.
+            ts = item.get("timestamp")
+            ts = float(ts) if isinstance(ts, (int, float)) and math.isfinite(ts) else None
             for event_type, payload in translate_sdk_event(sdk_type, data):
-                log, appended_id = self._land(session_id, log, log.append(event_type, payload))
+                log, appended_id = self._land(session_id, log, log.append(event_type, payload, timestamp=ts))
                 if isinstance(event_id, str) and event_id:
                     self._record_sdk_event(session_id, event_id, appended_id)
                 appended += 1

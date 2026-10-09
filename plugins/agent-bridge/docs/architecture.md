@@ -207,6 +207,7 @@ GET    /api/v1/live-sessions/{id}        # Fetch one registered live session
 POST   /api/v1/live-sessions/{id}/mode   # Switch its agent mode (interactive/plan/autopilot); waits for the outcome
 GET    /api/v1/live-sessions/{id}/controls # Extension: claim pending session controls (each returned once)
 POST   /api/v1/live-sessions/{id}/controls/ack # Extension: report claimed controls applied or rejected
+POST   /api/v1/live-sessions/{id}/events?replay=true # Extension: replay its transcript tail (answers control:replay-history)
 GET    /api/v1/dispatch-tasks/{id}/session # Resolve an agent-dispatch task -> the session that worked it (live-then-cold-store, durable attachment history)
 
 GET    /api/v1/remote/{host}/sessions/{id}/status
@@ -227,6 +228,19 @@ applies later); a claimed one is waited on briefly for its outcome, otherwise
 reported `state: in_flight` with `applied: null` (it may still apply). A
 control whose requester is gone (older than the longest wait plus that grace)
 expires unapplied at the next poll.
+
+**History replay after a restart.** A represented session's event log lives in
+the daemon's memory only, while its registration is durable. When a session
+registered in an earlier daemon generation has no log in this one, the bridge
+queues a `control:replay-history` control on its next registration or ingest
+(`live_backfill`), and holds its incoming live events. The extension answers by
+posting the tail of the session's own `events.jsonl` to
+`POST .../events?replay=true`. The bridge lands the replay first, keeping each
+event's own timestamp, then the held events, and the store's event-id dedup
+drops the overlap. A replay never re-derives the session's turn state or
+progress. If none arrives within 60 s, the held events are released, and a late
+replay is ignored because it would land out of order. An extension that
+predates the control rejects it.
 
 **Session identity: `session_id` vs `durable_session_id`.** Every session
 response also carries `acp_session_id` (the durable Copilot session id) and
