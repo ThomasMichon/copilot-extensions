@@ -6,7 +6,7 @@
 - **Created:** 2026-10-08
 - **Status:** Active
 - **Vision:** `visions/agent-fabric/README.md`, derive-don't-duplicate and graceful composition
-- **Sub-issues:** #5737 · #5738 · #5740 · #5741
+- **Sub-issues:** #5737 · #5738 · #5740 · #5741 · #5972 · #5973 · #5974
 
 ## Guiding Intent
 
@@ -35,6 +35,13 @@ Preserve provider-specific launch protocols and standalone installation.
   The negotiated direction retires the duplicate `machine-identity` library:
   shared matching, locality and host/WSL qualification live in `machine-transport`,
   with consumer-specific discovery and diagnostics in thin adapters.
+- **Additional consumer slices:** #5972 covers Worktrees and Picker decisions,
+  #5973 covers SSH WSL/mesh identity, and #5974 reviews Index designated-host
+  routing. The campaign owner reserved #5972 before implementation; filing the
+  other two issues does not reserve them. Do not modify peer-owned claimant,
+  handoff or host/WSL paths while #5689 remains open. Independent Picker
+  identity matching can proceed after this extension clears review, without
+  changing the peer's execution-identity contract.
 
 ## Context
 
@@ -92,7 +99,7 @@ Publication-blocker decision:
 ### Phase 2 - Named-machine consumers
 - [x] Repair the owned-PR publication blocker #5796, then resume the original
   consumer work. _(operator-approved prerequisite)_
-- [ ] Resolve #5737 by migrating Bridge registry and named-machine resolution;
+- [x] Resolve #5737 by migrating Bridge registry and named-machine resolution;
   preserve ACP launch construction and compatibility metadata.
 - [ ] Resolve #5738 by migrating Dispatch named-machine SSH resolution; preserve
   endpoint/tunnel behavior and explicit diagnostics.
@@ -102,9 +109,18 @@ Publication-blocker decision:
 ### Phase 3 - Provider boundary and completion
 - [x] Resolve #5740 with a documented dynamic-venue boundary, or migrate only
   independently proven named-machine overlap.
+- [x] Capture the additional inventory slices under #5972, #5973 and #5974 with
+  operator approval; keep provider-specific contracts distinct.
+- [ ] Resolve #5972 by sharing Worktrees/Picker machine matching, locality and
+  SSH selection, or review a justified distinct contract for each candidate.
+- [ ] Resolve #5973 by sharing WSL/mesh host identity while retaining SSH
+  aliases, live provider projection, keypair selection and native/guest venues.
+- [ ] Resolve #5974 through a reviewed Index designated-host identity boundary
+  that preserves explicit indexer configuration and standalone operation.
 - [ ] Inventory other agent-* named-machine operation paths for remaining
-  duplicated identity/transport resolution. _(agent-recommended verification
-  of the requested all-consumer objective)_
+  duplicated identity/transport resolution, including unresolved generated
+  installer-context source ownership, shell-only paths and provider argv.
+  _(agent-recommended verification of the requested all-consumer objective)_
 - [ ] Land any remaining proven overlap, or transfer a specifically bounded
   item to a named tracked objective with explicit rationale.
 - [ ] Complete deployment evidence, journal outcomes, and mark the effort Done
@@ -138,6 +154,31 @@ Keep path discovery and caller-specific errors at the consumer edge. Preserve
 existing public interfaces through thin adapters where needed. Reject a second
 identity authority: reconcile `machine-transport` with #5689's
 `machine-identity` before changing the overlapping consumer.
+
+### Additional consumer boundaries and sequencing
+
+The bounded inventory found Worktrees' claimant SSH resolver, fleet listing,
+launch helpers and roster locality; Picker source construction and roster
+locality; SSH WSL selection and mesh host identity; and Index designated-host
+read routing. This is candidate coverage, not a claim that every operation was
+inspected. Generated installer-context references were excluded from source
+reads and their canonical owner was not resolved, so they are not automatically
+classified as receipt-only. Shell-only paths and some provider argv remain open
+inventory gaps.
+
+The first independent #5972 slice is strict launch/Picker identity matching in
+`resolve_machine_cli.py`, reusing the shared matcher while preserving SSH
+environment selection, public plan shapes and command construction. Claimant,
+handoff, fleet/roster and native/guest locality integration must compose #5689's
+reviewed contract rather than pre-empt it. A partial Picker slice does not close
+#5972 or the whole campaign.
+
+For #5973, stable SSH target aliases and rotating dtssh endpoints remain a
+provider projection, not execution identities. For #5974, review whether the
+configured indexer designation is a machine identity or a distinct provider
+contract before choosing a portable shared boundary. Do not introduce another
+topology configuration or silently turn a real resolver error into an optional
+provider's absence.
 
 ## Journal
 
@@ -364,6 +405,24 @@ identity authority: reconcile `machine-transport` with #5689's
   Corrected external exhaustive validation remains blocked on that tracked
   remediation and successful normal promotion.
 
+### 2026-10-09 - Additional inventory approved and tracked
+- The operator approved tracking and continuing the three additional slices.
+  Created #5972, #5973 and #5974 after duplicate checks, and verified every
+  posted title, full body and label. #5973 is explicitly a consumer child of
+  the existing #5674/#5689 contract, not a competing identity fix.
+- Reserved #5972 atomically in the canonical issue queue and published a
+  codename-safe issue claim; the immediate thread re-read found no competing
+  claim. The other two issues remain unclaimed backlog entries.
+- A bounded source inventory also found already-shared locality paths and
+  distinct container, logging, cache and network-URL provider contracts.
+  An initial incorrect Picker source root was corrected by a narrow read of
+  the actual repository-root Worktree Manager source. Uninspected generated
+  installer-context references remain an explicit evidence gap.
+- This plan extension must land before the independent Picker implementation.
+  Overlapping host/WSL consumer work still waits for #5689's original owner.
+  The release correction is now being validated in its owner's #5885, not
+  duplicated here; #5911 will carry that owner's merge receipt.
+
 ### 2026-10-09 - Distinct ambiguity error contract
 - The latest review identified a previously missed API mismatch: strict
   configured-identity ambiguity was mapped to `404 host_not_found`.
@@ -379,3 +438,29 @@ identity authority: reconcile `machine-transport` with #5689's
   The first shared run lacked its scratch parent; creating that parent resolved
   the setup-only failure before the successful run. Touched lint, exact module
   ceilings and whitespace checks passed; no baseline was widened.
+
+### 2026-10-09 - Bridge merged and both-platform publication evidence
+- #5765 merged into `dev` as
+  `d7c22454cf114a06d2e897ff57baab29f51eb89a` after current-head approval
+  with zero findings, no unresolved threads and green required CI.
+  #5737 was explicitly closed. This settles the source migration, not its
+  promotion/deployment or the campaign's other consumers.
+- Corrected exhaustive publication workflow run `37923323675` passed against
+  the exact merged `dev` source
+  `40667090654f2d3264f0d7a91c585b0f2a044b0e`:
+  Windows **27 passed, no skips**; Linux **26 passed, 1 skipped**.
+  The skipped contract is Windows-native headless observation; its Windows
+  counterpart ran. The read-only lane used the corrected workflow on `dev`
+  because its merged feature ref was deleted and normal promotion is blocked.
+  This proves the external exhaustive contracts, not default-branch deployment.
+- The continuing campaign worktree was pulled past the squash without losing
+  post-merge work. Cached PR metadata caused ordinary reconciliation to
+  replay already-merged commits; before a zero-slice rebase, independently
+  reconstructed the exact aggregate merge tree and verified equality with
+  the provider's squash commit. Pre-reconcile backup refs were retained,
+  there were zero later commits to replay, and normal `pr-complete` then
+  reported current with `origin/dev`.
+- Dispatch and agent-machines integration still wait for the original #5689
+  identity owner. Remaining inventory and the independent #5911 release
+  remediation are open; no duplicate peer patch or release bypass is authorized
+  by this journal. The effort remains Active.
