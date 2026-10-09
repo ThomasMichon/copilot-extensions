@@ -19,11 +19,22 @@ _UNKNOWN_OPTION = re.compile(
 )
 
 
+def _normalized_text(text: str) -> str:
+    text = _ANSI.sub("", text[:_INPUT_LIMIT])
+    return " ".join(
+        "".join(c for c in text if c.isprintable() or c.isspace()).split()
+    )
+
+
 def _safe_text(text: str, limit: int) -> str:
-    text = text[:_INPUT_LIMIT]
+    # Cleanup must precede matching: otherwise it can reconstruct a sensitive
+    # key or value only after the redactors have already inspected the text.
+    text = _normalized_text(text)
     for name, value in os.environ.items():
         if value and _SECRET_ENV.fullmatch(name):
-            text = text.replace(value, "[REDACTED]")
+            normalized_value = _normalized_text(value)
+            if normalized_value:
+                text = text.replace(normalized_value, "[REDACTED]")
     text = _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", text)
     text = re.sub(r"(?i)\bBearer\s+[^\s,;\"']+", "Bearer [REDACTED]", text)
     text = re.sub(r"://[^/\s@]+@", "://[REDACTED]@", text)
@@ -31,10 +42,6 @@ def _safe_text(text: str, limit: int) -> str:
         r"\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b",
         "[REDACTED]",
         text,
-    )
-    text = _ANSI.sub("", text)
-    text = " ".join(
-        "".join(c for c in text if c.isprintable() or c.isspace()).split()
     )
     return text[:limit] + ("..." if len(text) > limit else "")
 

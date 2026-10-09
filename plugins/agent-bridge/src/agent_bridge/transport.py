@@ -631,8 +631,7 @@ async def _resolve_worktree_remote(
     plan = _extract_json_object(result.stdout)
     if plan is None:
         raise RuntimeError(
-            "remote worktree resolve returned no JSON object: "
-            f"{result.stdout.strip()[:400]}"
+            "remote worktree resolve returned no JSON object"
         )
     return plan
 

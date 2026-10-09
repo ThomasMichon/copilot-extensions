@@ -152,6 +152,42 @@ def test_diagnostics_are_bounded_sanitized_and_do_not_echo_environments(monkeypa
 
 
 @pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
+@pytest.mark.parametrize(("text", "secret"), [
+    ("TO\x1b[31mKEN=pattern-secret", "pattern-secret"),
+    ("PASS\x00WORD=pattern-secret", "pattern-secret"),
+    ("Bearer pat\x1b[31mtern-secret", "pattern-secret"),
+    ("https://user:pat\x1b[31mtern-secret@host/repo", "pattern-secret"),
+    ("known-env-\x1b[31msecret", "known-env-secret"),
+])
+def test_control_cleanup_cannot_reveal_credentials_after_redaction(text, secret, monkeypatch):
+    monkeypatch.setenv("EXAMPLE_API_TOKEN", "known-env-secret")
+    detail = resolver_failure_detail(json.dumps({"error": text}), text)
+    assert secret not in detail
+    assert "[REDACTED]" in detail
+    assert "\x1b" not in detail
+    assert "\x00" not in detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
+@pytest.mark.parametrize("stdout", [
+    '{"launch":{"env":{"PASSWORD":"example-secret"}}',
+    "banner PASSWORD=example-secret",
+])
+async def test_successful_exit_without_json_never_echoes_stdout(stdout):
+    manager = SimpleNamespace(exec_command=AsyncMock(return_value=_result(
+        exit_code=0, stdout=stdout,
+    )))
+    with pytest.raises(RuntimeError, match="no JSON object") as caught:
+        await _resolve_worktree_remote(
+            manager, SpawnTarget(type="ssh", host="workstation", project="project"),
+        )
+    assert "example-secret" not in str(caught.value)
+    assert "PASSWORD" not in str(caught.value)
+    assert manager.exec_command.await_count == 1
+
+
+@pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
 def test_oversized_or_deeply_nested_stdout_is_not_echoed():
     for stdout in (
         json.dumps({"error": "x" * 100000}),
