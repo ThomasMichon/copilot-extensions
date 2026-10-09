@@ -282,6 +282,22 @@ platform-appropriate publication primitive described above.
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.
 
+**agent-worktrees' own versioned-slot build lease** (`Enter-VersionedSlotLease`/
+`_acquire_versioned_slot_lease`, a plugin-local OS-backed exclusive lock
+distinct from the cell-root provisioning lock above) refuses to build into a
+slot another live process is already constructing. A caller that needs to
+tolerate ordinary contention rather than fail on first refusal uses the
+bounded-wait wrapper (`Wait-ForVersionedSlotLease`/
+`_wait_for_versioned_slot_lease`): it polls for the lease on a real wall-clock
+deadline, configurable via `AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC` (default 180
+seconds), with a poll interval via `AGENT_WORKTREES_SLOT_LEASE_POLL_MS`
+(PowerShell, default 1000) or `AGENT_WORKTREES_SLOT_LEASE_POLL_SEC` (bash,
+default 1). Only genuine contention is retried; any other failure of the
+authoritative gate (permission/path/storage) fails immediately regardless of
+the configured budget. Reaching the deadline without acquiring the lease fails the
+build with an actionable error naming the env var to raise if builds routinely
+take longer than the default.
+
 An operative plugin adapter holds one cell-root provisioning lock across the
 entire snapshot, slot reservation, venv/package build, completion, cutover, and
 deploy-manifest publication transaction. Receipt primitives retain their own
