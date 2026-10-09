@@ -24,6 +24,15 @@ def copy_pr(destination: tracking.PRRecord, source: tracking.PRRecord) -> None:
         setattr(destination, field.name, getattr(source, field.name))
 
 
+def advance_authority_revisions(record: tracking.WorktreeRecord, current: tracking.WorktreeRecord) -> None:
+    from . import pr_publish
+
+    for pr in record.prs:
+        previous = pr_publish._publication_pr(current, pr)
+        if previous is not None and authority(previous) != authority(pr) and pr.pr_revision <= previous.pr_revision:
+            pr.pr_revision = previous.pr_revision + 1
+
+
 def require_current(record: tracking.WorktreeRecord, expected: tracking.PRRecord | None) -> None:
     from . import pr_publish
 

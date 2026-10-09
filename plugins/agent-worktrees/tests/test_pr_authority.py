@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import installer, pr_authority, pr_publish, tracking
+from agent_worktrees import installer, pr_authority, pr_ops, pr_publish, tracking
 
 pytestmark = pytest.mark.contract("agent_worktrees.pr_publish.rewrite_authority")
 
@@ -217,3 +217,24 @@ def test_pr_authority_native_provider_states(authority_state, state, conflicts):
                 pr_authority.assert_exclusive(config, record, record.pr)
         else:
             pr_authority.assert_exclusive(config, record, record.pr)
+
+
+@pytest.mark.parametrize("writer", ["set-pr", "save", "locked-without-handoff-merge"])
+def test_state_correction_generation_survives_stale_save(authority_state, writer):
+    config, record, root, registry, ledgers = authority_state
+    stale = tracking.load_record(record.yaml_path)
+    if writer == "set-pr":
+        assert pr_ops.set_pr(record.worktree_id, config=config, state="closed")["success"]
+    else:
+        fresh = tracking.load_record(record.yaml_path)
+        fresh.pr.state = "closed"
+        if writer == "save":
+            tracking.save_record(fresh)
+        else:
+            with tracking._RecordLock(fresh.yaml_path, require_sidecar=True):
+                tracking._save_record_unlocked(fresh, preserve_handoff_reservations=False)
+    closed = tracking.load_record(record.yaml_path)
+    assert closed.pr.state == "closed" and closed.pr.pr_revision > stale.pr.pr_revision
+    stale.title = "unrelated stamp"
+    tracking.save_record(stale)
+    assert tracking.load_record(record.yaml_path).pr.state == "closed"

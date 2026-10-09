@@ -2405,10 +2405,11 @@ def _save_record_unlocked(
     current code** -- a still-live OLDER-code process has no such field and
     can drop it on an unrelated save (pre-existing/systemic, not per-field).
     """
+    from . import pr_authority, pr_publication_state
     if path is None:
         path = record.yaml_path
-    if preserve_handoff_reservations and path.exists():
-        current = load_record(path)
+    current = load_record(path) if path.exists() else None
+    if preserve_handoff_reservations and current is not None:
         if current.effort_revision > record.effort_revision:
             record.active_effort = current.active_effort
             record.effort_revision = current.effort_revision
@@ -2554,7 +2555,9 @@ def _save_record_unlocked(
             # known provenance rather than silently overwriting it with an unset value merely
             # because this snapshot never saw it.
             record.codename_source = current.codename_source
+    if current is not None:
         _merge_pr_attribution_state(record, current)
+        pr_publication_state.advance_authority_revisions(record, current)
 
     for session in record.sessions or ():
         if len(session.activations) > _MAX_SESSION_ACTIVATIONS:
@@ -3020,8 +3023,7 @@ def _save_record_unlocked(
             sort_keys=False,
         )
 
-    from .pr_authority import write_record
-    write_record(record, path, content)
+    pr_authority.write_record(record, path, content)
     record_cache.store(path, record)
 
 
