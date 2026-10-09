@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit exact-lease rewrites for exclusively owned tracked PR heads while preserving incremental publication",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

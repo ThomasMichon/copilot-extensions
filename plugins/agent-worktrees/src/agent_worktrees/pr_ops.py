@@ -16,7 +16,7 @@ import string
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, pr_publish, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, output, pr_publish, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
@@ -946,7 +946,7 @@ def create_pr(
         target_pr.head_observed_api_base = ""
         target_pr.patch_id = patch_id
         target_pr.provider = target_pr.provider or prcfg.provider
-        tracking.save_record(record)
+        pr_publish.persist_publication(config, record, target_pr)
 
     git_ops.delete_backup_ref(cwd=worktree_path)
 
@@ -983,7 +983,7 @@ def create_pr(
     _finish_auto_open(
         result, config, record, target_pr, title=eff_title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        draft=want_draft, attribution=attribution, prcfg=prcfg,
+        draft=want_draft, attribution=attribution, prcfg=prcfg, published_identity=getattr(pushed, "head_identity", ""),
     )
     observation_error = refresh_head_observation(
         config, record, target_pr, head_sha
@@ -1447,12 +1447,7 @@ def refresh_head_observation(
             f"tracked PR provider {provider_name!r} differs from configured "
             f"provider {prcfg.provider!r}; credentials cannot be resolved safely"
         )
-    identity = (
-        provider_name,
-        target_pr.repo,
-        int(target_pr.number),
-        target_pr.branch,
-    )
+    identity = (provider_name, target_pr.repo, int(target_pr.number), target_pr.branch)
     observed_api_base = ""
     yaml_path = record.yaml_path
 
@@ -1464,7 +1459,7 @@ def refresh_head_observation(
                 candidate.repo,
                 candidate.number,
                 candidate.branch,
-            ) == identity:
+            ) == identity and candidate.pr_revision == target_pr.pr_revision:
                 return candidate
         return None
 
@@ -1473,10 +1468,13 @@ def refresh_head_observation(
         current_pr = _matching_pr(current)
         if current_pr is None:
             return "tracked PR identity changed before provider observation"
+        if current_pr.head_sha != head_sha:
+            current_pr.pr_revision += 1
         current_pr.head_sha = head_sha
         current_pr.head_observed_at = ""
         current_pr.head_observed_api_base = ""
         tracking.save_record(current)
+    target_pr.pr_revision = current_pr.pr_revision
     target_pr.head_sha = head_sha
     target_pr.head_observed_at = ""
     target_pr.head_observed_api_base = ""
@@ -1527,22 +1525,22 @@ def _finish_auto_open(
     draft: bool,
     attribution: SourceAttribution | None,
     prcfg,
+    published_identity: str = "",
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
-
-    Shared by the first-run and the re-run paths so neither silently leaves a
-    pushed branch without reporting its PR:
-
-    * ``open_pr``/``pr.auto_open`` off -> no-op (manual flow).
-    * target PR has no number yet      -> open it via the provider.
-    * target PR already opened          -> surface its number/url on ``result``
-                                           (never re-create -> no duplicate, #1167).
+    Both initial and incremental create-pr publication record ownership here.
+    Manual flow opens nothing; an already-numbered PR is never duplicated (#1167).
     """
     want_open = prcfg.auto_open if open_pr is None else open_pr
     if target_pr is None:
         if not want_open:  # untracked worktree: still say why nothing was opened
             result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
         return
+    if record is not None and result.get("success"):
+        error = pr_publish.record_rewrite_ownership(config, record, target_pr, result["branch"], head_sha, published_identity)
+        if error:
+            result["rewrite_ownership_error"] = error
+            output.warn(error)
     if not want_open:
         # Nothing is opened or changed on the provider (create-pr already read the tracked
         # PR's state, so a merged PR's branch is never reused); say what exists so no caller is told
@@ -1895,23 +1893,21 @@ def set_pr(
             f"{', '.join(_VALID_PR_STATES)}."
         )}
 
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = (cfg.tracking_dir(config.repo_name) if config else cfg.tracking_dir()) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return {**base, "error": f"No tracking record found for '{worktree_id}'."}
 
-    # Foreground verb (#4547): a critical read-modify-write. Hold the blocking
-    # cross-process record lock across the whole load -> mutate -> save so a
-    # concurrent writer (another CLI verb, or a Picker best-effort sweep) can't
-    # clobber this update last-writer-wins. The window below contains NO
-    # network/git I/O, so the lock is held only briefly -- the guarantee the
-    # criticality-aware lock relies on.
-    with tracking._RecordLock(yaml_path):
-        return _set_pr_locked(
-            base, yaml_path, url=url, number=number, state=state,
-            provider=provider, branch=branch,
-            select_number=select_number, select_branch=select_branch,
-            config=config,
-        )
+    from . import pr_authority, pr_publish
+    try:
+        with pr_authority.guard(), pr_publish.metadata_lock(worktree_id, project=config.repo_name if config else None), tracking._RecordLock(yaml_path):
+            return _set_pr_locked(
+                base, yaml_path, url=url, number=number, state=state,
+                provider=provider, branch=branch,
+                select_number=select_number, select_branch=select_branch,
+                config=config,
+            )
+    except TimeoutError as exc:
+        return {**base, "error": str(exc)}
 
 
 #: A GitHub/generic or Gitea PR URL's hosting ``owner/repo`` slug -- both
@@ -2044,6 +2040,7 @@ def _set_pr_locked(
         or (provider is not None and provider != pr.provider)
         or (parsed_repo and parsed_repo.lower() != (pr.repo or "").lower())
     )
+    ownership_changed = identity_changed or (branch is not None and branch != pr.branch) or (url is not None and url != pr.url)
     if url is not None:
         pr.url = url
         # Manual registration needs the provider's owner/repo slug, not the
@@ -2060,6 +2057,10 @@ def _set_pr_locked(
         pr.opened_at = pr.closed_at = ""
         pr.state = "open"
         pr.pr_revision += 1
+    if ownership_changed:
+        pr.rewrite_owner = pr.rewrite_identity = ""
+        if not reassigned and pr.head_sha:
+            pr.pr_revision += 1
     if identity_changed:
         pr.attribution_head = ""
         pr.head_observed_at = ""
@@ -2386,6 +2387,7 @@ def _push_existing_feature(
     if existing_target is not None and not lease_expect:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
+    target = pr_publish.prepare_existing_publication(record, existing_target, feature_branch, prcfg, attribution)
     with hooks.allow_pr_push():
         pushed = pr_publish.push_checked(
             record, remote, feature_branch, cwd=worktree_path,
@@ -2401,34 +2403,7 @@ def _push_existing_feature(
                 retry_command="agent-worktrees create-pr"
             )
         return {**base, "error": f"{error}\n{pushed.stderr.strip()}" if pushed.stderr else error}
-    # Match the PRRecord for this branch (a worktree may track several); update
-    # it in place rather than clobbering an unrelated active PR. A *terminal*
-    # PR for this branch (merged/closed externally, e.g. via the auto-merge
-    # label) must NOT be reused -- surfacing it would report the merged PR as if
-    # freshly opened and open no PR for the new commits (#1336). In that case we
-    # append a FRESH record so the auto-open tail opens a new PR for the push.
-    target: PRRecord | None = existing_target
     if record is not None:
-        if target is None:
-            target = PRRecord(
-                branch=feature_branch, provider=prcfg.provider,
-                repo=record.repo or "", opened_at=tracking._now_iso(),
-            )
-            # codename-attribution-by-default: freeze this PR's attribution
-            # decision ONCE, at this fresh-construction site -- same
-            # effective-value/explicitness rule as create_pr's own fresh
-            # construction.
-            _want_attribution = (
-                prcfg.source_attribution if attribution is None else attribution
-            )
-            tracking.stamp_frozen_attribution(
-                target, attribution=_want_attribution,
-                explicit=(
-                    attribution is not None
-                    or prcfg.source_attribution_configured
-                ),
-            )
-            record.prs.append(target)
         # target is always non-terminal here (a live match or a fresh record).
         target.state = "open"
         pr_publish.record_remote_identity(target, remote, repo.remote, pushed.head_repo, getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
@@ -2440,7 +2415,7 @@ def _push_existing_feature(
         target.patch_id = _patch_id(
             target.base_sha, head_sha, cwd=worktree_path)
         target.provider = target.provider or prcfg.provider
-        tracking.save_record(record)
+        pr_publish.persist_publication(config, record, target)
     base_sha = target.base_sha if target else ""
     patch_id = target.patch_id if target else ""
     result = {
@@ -2457,7 +2432,7 @@ def _push_existing_feature(
     _finish_auto_open(
         result, config, record, target, title=title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        draft=draft, attribution=attribution, prcfg=prcfg,
+        draft=draft, attribution=attribution, prcfg=prcfg, published_identity=getattr(pushed, "head_identity", ""),
     )
     observation_error = refresh_head_observation(config, record, target, head_sha)
     if observation_error:

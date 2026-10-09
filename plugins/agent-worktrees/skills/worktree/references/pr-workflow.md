@@ -826,6 +826,45 @@ Either way HEAD stays on
 checked out on a legacy feature branch is accepted too and pushed as-is.) It
 does not create a PR; it updates the existing one.
 
+After an **intentional local rebase or squash**, ordinary `push-changes`
+still refuses to discard published history. To publish that deliberate
+rewrite, run `<agent-worktrees catalog argv[0]> push-changes --rewrite-pr`.
+This is not an automatic rebase: it publishes your current committed tip
+as-is, under either head scheme, using the **previously recorded full head
+SHA** as an exact remote lease. It never fetches a new lease to overwrite
+someone else's newer work. A moved/deleted remote head requires inspection
+and reconciliation, not blind retry.
+
+The opt-in requires the owning `worktree/{id}` checkout, persisted successful
+`create-pr` publication ownership, and an open, exclusively tracked private
+head ending in that worktree's canonical creation suffix. Ownership also binds
+the full destination attested by publication, for origin as well as a fork;
+another destination with the same slug and tip does not inherit permission.
+Legacy feature-branch checkouts, unowned `set-pr` associations, shared/default
+and release branches, missing leases, changed destinations and dirty trees
+are refused. Normal pre-push hooks, attribution and head tracking remain
+active. Rewrite authorization strictly scans every adopted project in the
+selected installation, matching the full destination and head ref rather than
+project names. Malformed or unreadable registry/record state and an ambiguous
+same-ref destination refuse the rewrite. An installation-scoped authority guard
+excludes reassignment and new ledger registration until the push finishes.
+Manual `set-pr` corrections wait for that guard; other association writers
+already holding a record lock fail immediately and must retry, never deadlock
+against publication. Ordinary Picker stamps with unchanged PR authority do not
+wait behind network I/O. The published source
+is pinned from the validated owning branch, never a later mutable `HEAD`.
+Review the rewritten diff and obtain current review before merging.
+
+For a legacy open PR without publication ownership, re-run `create-pr`
+**before rebasing**, while the owning branch still preserves the recorded
+published tip. This incremental publication records ownership without
+automatically rewriting history. A manual PR identity or branch correction
+invalidates ownership; a matching-looking suffix is never proof by itself.
+Ownership and each changed publication lease are persisted through fresh,
+generation-bound metadata transactions so an older unrelated save cannot erase,
+resurrect, or regress them. Short IDs, relocated
+worktree paths, and JSON responses use the selected project's ledger.
+
 ### Bounding review/fix rounds (`pr rounds`)
 
 An automated reviewer can keep finding one new edge case per round, so an

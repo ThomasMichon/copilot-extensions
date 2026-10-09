@@ -66,6 +66,8 @@ def add_parsers(sub) -> None:
     p.add_argument("--config", default=None)
 
     p = sub.add_parser("push-changes", help="Push worktree changes to remote default branch")
+    p.add_argument("--rewrite-pr", action="store_true",
+                   help="Intentionally publish rewritten owned PR history using its recorded exact head lease")
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None, help="Set worktree title")
     p.add_argument(
@@ -419,7 +421,10 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 return output._json_error(msg)
             output.err(msg)
             return 1
-        worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
+        if getattr(args, "rewrite_pr", False):
+            worktree_id = worktree_identity._resolve_worktree_id(worktree_id, project=config.repo_name)
+        else:
+            worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
         if getattr(args, "title_only", False):
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -444,6 +449,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             title=args.title,
             dry_run=args.dry_run,
             allow_unsquashed=getattr(args, "allow_unsquashed", False),
+            rewrite_pr=getattr(args, "rewrite_pr", False),
         )
 
         reminder = context_cli._pr_reminder_for(
@@ -452,7 +458,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             ok=bool(success),
         )
         if use_json:
-            yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+            yaml_path = (cfg.tracking_dir(config.repo_name) if getattr(args, "rewrite_pr", False) else cfg.tracking_dir()) / f"{worktree_id}.yaml"
             final_status = "pushed"
             if yaml_path.exists():
                 try:

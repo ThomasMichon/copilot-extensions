@@ -366,6 +366,8 @@ class PRRecord:
     branch: str = ""
     base_sha: str = ""
     head_sha: str = ""
+    rewrite_owner: str = ""  # successful create-pr publisher: worktree-id:head-branch
+    rewrite_identity: str = ""  # full destination attested by that publication
     head_observed_at: str = ""  # provider-clock timestamp observing this exact head
     head_observed_api_base: str = ""  # provider endpoint that issued the timestamp
     attribution_head: str = ""
@@ -403,12 +405,9 @@ class PRRecord:
     # finding: this repo's config-migration framework explicitly excludes
     # tracking YAML, so no such pass has an actual entry point).
     pr_id: str = ""
-    # Bumped every time this entry's attribution_mode/attribution_explicit
-    # are (re)stamped -- following the `profile_assignment_revision`
-    # pattern already established elsewhere in this file. Guards
-    # `_save_record_unlocked`'s per-entry merge: a stale in-memory snapshot
-    # never overwrites a matching on-disk entry whose `pr_revision` is
-    # already at least as high.
+    # Attribution stamps and manual published-identity/branch corrections advance
+    # this generation. A newer durable correction wins whole; ties preserve
+    # the already-frozen attribution pair.
     pr_revision: int = 0
 
 
@@ -1369,6 +1368,8 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         **_parse_frozen_attribution_pair(raw),
         pr_id=pr_id_raw if isinstance(pr_id_raw, str) else "",
         pr_revision=pr_revision,
+        rewrite_owner=str(raw.get("rewrite_owner", "") or ""),
+        rewrite_identity=str(raw.get("rewrite_identity", "") or ""),
     )
 
 
@@ -1447,7 +1448,7 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
     if pr.number is not None:
         d["number"] = pr.number
     d["provider"] = pr.provider
-    for key in ("repo", "remote", "head_repo", "head_identity", "head_owner", "opened_at", "closed_at"):  # lean: only when set
+    for key in ("repo", "remote", "head_repo", "head_identity", "head_owner", "opened_at", "closed_at", "rewrite_owner", "rewrite_identity"):  # lean: only when set
         if getattr(pr, key):
             d[key] = getattr(pr, key)
     # codename-attribution-by-default: emit `attribution_explicit` whenever
@@ -2367,14 +2368,12 @@ def _merge_pr_attribution_state(
             not (a and b) or a == b for a, b in ((match.number, current_pr.number), (match.provider, current_pr.provider)))
         for f in (("remote", "head_repo", "head_identity", "head_owner") if same_pr else ()):
             setattr(match, f, getattr(match, f) or getattr(current_pr, f))
-        # A positive equal-or-newer on-disk revision wins a differing PR identity.
-        if not same_pr and current_pr.pr_revision >= max(1, match.pr_revision):
+        # Newer publication wins whole; equal identity corrections also win.
+        if current_pr.pr_revision > match.pr_revision or (
+                not same_pr and current_pr.pr_revision >= max(1, match.pr_revision)):
             for f in fields(match):
                 setattr(match, f.name, getattr(current_pr, f.name))
-        # An EQUAL on-disk revision is authoritative too (fix-PR-#3037-review finding): two
-        # concurrent first-touch freezes can each bump 0 -> 1, and the frozen pair is decided
-        # ONCE -- on a tie the value already durably on disk (this save's lock-serialized
-        # predecessor) wins over an in-memory value that has not yet been persisted.
+        # Equal revisions preserve the already-durable first-touch attribution freeze.
         if current_pr.pr_revision >= match.pr_revision:
             match.attribution_mode = current_pr.attribution_mode
             match.attribution_explicit = current_pr.attribution_explicit
@@ -3021,7 +3020,8 @@ def _save_record_unlocked(
             sort_keys=False,
         )
 
-    _atomic_write(path, content)
+    from .pr_authority import write_record
+    write_record(record, path, content)
     record_cache.store(path, record)
 
 
@@ -3074,9 +3074,7 @@ def save_record(
 ) -> None:
     """Locked cross-process CAS for one complete worktree record.
 
-    :func:`_save_record_unlocked` refreshes :mod:`record_cache` itself
-    (2026-09-27), still inside this call's ``_RecordLock``, so any reader
-    in THIS process sees the fresh state without a redundant re-parse."""
+    :func:`_save_record_unlocked` refreshes the record cache inside the lock."""
     if path is None:
         path = record.yaml_path
     with _RecordLock(path, require_sidecar=True):

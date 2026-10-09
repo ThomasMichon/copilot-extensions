@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import git_ops, output, push_timeout, tracking
+from .config import Config, PRConfig, SourceAttribution
 
 #: Why ``push-changes``/``create-pr`` refuse when :func:`push_remote` can't tell.
 UNREADABLE_REMOTE = (
@@ -361,10 +362,48 @@ def publish_lock(cwd: str, *, acquire_timeout: float | None = None):
             _unlock_publish_file(fh)
 
 
+def metadata_lock(worktree_id: str, *, project: str | None = None):
+    """Serialize explicit publication and manual PR reassignment, not Picker stamps."""
+    from . import config as cfg
+    path = (cfg.tracking_dir(project) if project else cfg.tracking_dir()) / f"{worktree_id}.pr-authority.yaml"
+    return tracking._RecordLock(path, timeout=PUBLISH_LOCK_ACQUIRE_TIMEOUT_S, require_sidecar=True)
+
+
+def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
+                             branch: str, head_sha: str, identity: str) -> str:
+    """Stamp a successful create-pr publication through a fresh, generation-bound RMW."""
+    from . import config as cfg
+    if not identity:
+        return "Publication had no attested destination; rewrite ownership was not recorded."
+    path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
+    try:
+        with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
+            fresh = tracking.load_record(path)
+            current = _publication_pr(fresh, pr)
+            if (current is None or current.branch != branch or current.head_sha != head_sha
+                    or current.state != "open" or current.pr_revision != pr.pr_revision
+                    or current.number != pr.number or current.repo.lower() != pr.repo.lower()
+                    or current.provider != pr.provider):
+                return "Tracked PR changed since publication; rewrite ownership was not recorded."
+            owner = f"{record.worktree_id}:{branch}"
+            if current.rewrite_owner != owner or current.rewrite_identity != identity:
+                current.rewrite_owner = owner
+                current.rewrite_identity = identity
+                current.pr_revision += 1
+                tracking.save_record(fresh)
+            pr.rewrite_owner = current.rewrite_owner
+            pr.rewrite_identity = current.rewrite_identity
+            pr.pr_revision = current.pr_revision
+            return ""
+    except (OSError, ValueError, TimeoutError) as exc:
+        return f"Could not record rewrite ownership: {exc}"
+
+
 def push_checked(record, remote: str, refspec: str, *, cwd: str,
                  expected_head_repo: str = "", expected_head_identity: str = "",
                  force_with_lease: bool = False,
-                 force_with_lease_expect: str | None = None, repo=None) -> git_ops.PushResult:
+                 force_with_lease_expect: str | None = None,
+                 allow_history_rewrite: bool = False, repo=None) -> git_ops.PushResult:
     """``git_ops.push`` for a PR head, under :func:`publish_lock`: when it goes to
     the PR's recorded fork, that remote must still name the fork's repo
     (``head_repo``) at push time -- another worktree's fork setup could have
@@ -384,8 +423,14 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 identity = push_identity(remote, cwd=cwd) if got else ""
                 if not want or got != want or not want_identity or identity != want_identity:
                     return git_ops.PushResult(ok=False, stderr=REPOINTED)
+            elif record is not None:
+                got = (push_slug(remote, cwd=cwd) or "").lower()
+                identity = push_identity(remote, cwd=cwd) if got else ""
+            if getattr(pr, "rewrite_identity", "") and pr.rewrite_identity != identity:
+                return git_ops.PushResult(ok=False, stderr=REPOINTED)
+            rewrite_args = {"allow_history_rewrite": True} if allow_history_rewrite else {}
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
-                                  force_with_lease_expect=force_with_lease_expect)
+                                  force_with_lease_expect=force_with_lease_expect, **rewrite_args)
             if repo is not None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."
             ):
@@ -480,7 +525,8 @@ def record_pushed_head(
             pushed_pr.state = "open"
         if remote and remote != config.default_repo.remote:
             record_remote_identity(pushed_pr, remote, config.default_repo.remote, head_repo, head_identity)
-    tracking.save_record(record)
+    if pushed_pr is not None:
+        persist_publication(config, record, pushed_pr)
     from . import pr_ops
 
     observation_error = pr_ops.refresh_head_observation(config, record, pushed_pr, head_sha)
@@ -497,3 +543,50 @@ def record_pushed_head(
             f"PR head was pushed, but source attribution publication "
             f"failed: {attribution_error}"
         )
+
+
+def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord) -> None:
+    """Persist a successful push's lease through a fresh, revision-checked RMW."""
+    from . import config as cfg
+
+    path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
+    fields = ("state", "base_sha", "head_sha", "patch_id", "remote", "head_repo",
+              "head_identity", "head_owner", "head_observed_at", "head_observed_api_base")
+    with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
+        fresh = tracking.load_record(path)
+        current = _publication_pr(fresh, pr)
+        if (current is None or tracking._pr_is_terminal(current) or current.pr_revision != pr.pr_revision
+                or (current.branch, current.repo, current.provider, current.number)
+                != (pr.branch, pr.repo, pr.provider, pr.number)):
+            raise ValueError("PR head was pushed, but tracking authority changed; inspect and reconcile its lease.")
+        if any(getattr(current, field) != getattr(pr, field) for field in fields):
+            for field in fields:
+                setattr(current, field, getattr(pr, field))
+            current.pr_revision += 1
+            tracking.save_record(fresh)
+        pr.pr_revision = current.pr_revision
+
+
+def _publication_pr(record: tracking.WorktreeRecord, pr: tracking.PRRecord) -> tracking.PRRecord | None:
+    matches = [p for p in record.prs if tracking._pr_identity_match(p, pr)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def prepare_existing_publication(
+    record: tracking.WorktreeRecord | None, existing: tracking.PRRecord | None,
+    branch: str, prcfg: PRConfig, attribution: SourceAttribution | None,
+) -> tracking.PRRecord | None:
+    """Persist a fresh association before a legacy feature-branch push starts."""
+    if record is None or existing is not None:
+        return existing
+    target = tracking.PRRecord(
+        branch=branch, provider=prcfg.provider, repo=record.repo or "",
+        state="creating", opened_at=tracking._now_iso(),
+    )
+    tracking.stamp_frozen_attribution(
+        target, attribution=prcfg.source_attribution if attribution is None else attribution,
+        explicit=attribution is not None or prcfg.source_attribution_configured,
+    )
+    record.prs.append(target)
+    tracking.save_record(record)
+    return target
