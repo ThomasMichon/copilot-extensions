@@ -1486,6 +1486,23 @@ default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so 
 download degrades to "failed + retryable" rather than wedging. Backstop:
 `bootstrap-check`'s single-flight + stale-reap.
 
+The **agent-bridge Windows hook** serializes reconcile admission and status
+publication with an installation-root-scoped global mutex, including across
+Windows login sessions. Each launch has an
+`attempt_id`; after the launch record is published, `launched_pid` identifies
+the actual PowerShell installer supervisor, with `worker_started_at` guarding
+against PID reuse and `wrapper_pid` retaining the headless console wrapper for
+diagnostics (`wrapper_started_at` protects the initial pre-worker record).
+Legacy live PIDs without birth evidence are not automatically force-reaped.
+Stale reaping terminates that supervisor's whole tree, not only
+the console wrapper. Completion updates only its own attempt, so a late worker
+cannot overwrite a replacement's status. Invalid prior ownership metadata
+defers reconciliation with a diagnostic instead of risking another installer.
+The launcher starts outside the singleton payload and clears inherited
+`COPILOT_PLUGIN_INSTALL_STAGED` / `COPILOT_PLUGIN_STAGED_FROM` in the worker;
+staging and its watchdog belong to this installer invocation, not to an
+unrelated parent installer.
+
 ### Agent Machines Windows first-use diagnostics
 
 The [Agent Machines Windows dispatcher](../plugins/agent-machines/scripts/invoke-payload-runtime.ps1)
