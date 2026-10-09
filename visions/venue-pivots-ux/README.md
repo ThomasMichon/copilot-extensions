@@ -184,8 +184,8 @@ cross-link column is already non-blank exactly when a worktree is driving
 the venue. No second column is needed to say the same thing twice.
 
 The finer-grained signal underneath that link distinguishes whether the
-driving worktree's session is actually **live**, present but idle, or
-unavailable to observation. The Worktrees pane answers the same question for
+driving worktree's session is actually **live** or present but idle.
+The Worktrees pane answers the same question for
 itself with its own compact `sess`/`live` column — a narrow (4-character),
 multi-valued indicator (a pulsing "●" glyph when a mux session is live,
 `PROC`/`LOCK` for other states), not a boolean. This vision's Codespaces
