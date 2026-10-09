@@ -287,8 +287,9 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
             src = child / "src"
             if src.is_dir():
                 pythonpath.append(str(src))
+    python, extra_env = mux_daemon_process.direct_daemon_python(sys.executable)
     argv = [
-        sys.executable,
+        python,
         "-m",
         "worktree_manager",
         "mux-daemon",
@@ -297,15 +298,17 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
         f"--listen-port={port}",
         "--passive",
     ]
+    env = mux_daemon_process.scrub_session_credentials(dict(os.environ))
+    env.update(extra_env)
     kwargs: dict[str, object] = {
         "cwd": str(root),
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
-        "env": mux_daemon_process.scrub_session_credentials(dict(os.environ)),
+        "env": env,
     }
-    existing = kwargs["env"].get("PYTHONPATH")
-    kwargs["env"]["PYTHONPATH"] = os.pathsep.join(
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join(
         pythonpath + ([existing] if existing else [])
     )
     kwargs.update(windowless_daemon_kwargs(breakaway=True))
