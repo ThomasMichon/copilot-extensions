@@ -369,13 +369,11 @@ def _remove_managed_worktree(
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     from . import launch_seed_state, tracking_write
     try:
-        launch_seed_state.remove(yaml_path)
+        removed_state = launch_seed_state.remove(yaml_path, remove_record=True)
+        if removed_state.get("record_removed") is not True:
+            return False, ["tracking/launch-seed removal was not confirmed"]
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         return False, [f"launch-seed remove failed: {exc}"]
-    try:
-        yaml_path.unlink()
-    except OSError as exc:
-        return False, [f"tracking record remove failed: {exc}"]
     disposition_history.remove(rec.worktree_id)
     handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
     return True, warns

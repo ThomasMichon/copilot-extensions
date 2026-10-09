@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import argparse
 import dataclasses
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -199,3 +200,49 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
     assert removed and not warnings
     assert not path.exists() and not state.state_path(path).exists()
     assert other.read_text(encoding="utf-8") == "keep me"
+
+
+def test_atomic_removal_prevents_concurrent_seed_recreation(tmp_path, monkeypatch):
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="old private prompt")
+    target = state.state_path(path)
+    start_writer = threading.Event()
+    writer_attempting = threading.Event()
+    failures = []
+    def writer():
+        assert start_writer.wait(3)
+        writer_attempting.set()
+        try:
+            state.stage(path, kind="resume", text="must not become orphaned")
+        except FileNotFoundError:
+            failures.append("record gone")
+    real_unlink = Path.unlink
+    def pause_after_seed_remove(self, *args, **kwargs):
+        result = real_unlink(self, *args, **kwargs)
+        if self == target:
+            start_writer.set()
+            assert writer_attempting.wait(3)
+        return result
+    monkeypatch.setattr(Path, "unlink", pause_after_seed_remove)
+    thread = threading.Thread(target=writer)
+    thread.start()
+    removed = state.remove(path, remove_record=True)
+    thread.join(5)
+    assert not thread.is_alive()
+    assert removed["record_removed"] is True
+    assert failures == ["record gone"]
+    assert not path.exists() and not target.exists()
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
+def test_gh_intermediary_does_not_acknowledge_or_consume_seed(tmp_path, monkeypatch, kind):
+    path = _record(tmp_path)
+    seed = state.stage(path, kind=kind, text="preserve until actual Copilot")
+    monkeypatch.setattr(
+        launch_seed_exec.subprocess, "Popen",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not start gh")),
+    )
+    assert launch_seed_exec.launch(
+        path, ["gh", "copilot"], invoke=True, seed_id=seed.seed_id,
+    ) == 3
+    assert state.peek(path) == seed

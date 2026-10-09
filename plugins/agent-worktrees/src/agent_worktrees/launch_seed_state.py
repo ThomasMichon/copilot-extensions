@@ -195,17 +195,22 @@ def _apply_remove(args: dict) -> dict:
     if args.get("worktree_id") != path.stem:
         raise ValueError("Launch-seed removal identity mismatch")
     with tracking._RecordLock(path, require_sidecar=True):
+        if args.get("remove_record") and path.exists():
+            _record(args)
         target.unlink(missing_ok=True)
-    return {"removed": True}
+        if args.get("remove_record"):
+            path.unlink(missing_ok=True)
+    return {"removed": True, "record_removed": bool(args.get("remove_record"))}
 
 
-def _dispatch(verb: str, args: dict) -> dict:
+def _dispatch(verb: str, args: dict, *, min_version: int = 1) -> dict:
     enabled = status_monitor_runtime._status_monitor_enabled()
     return tracking_write.dispatch(
         verb, args,
         read_lock_data=lambda: locks.read_lock(status_monitor_runtime._monitor_lock_path()),
         ensure_monitor=status_monitor_runtime._ensure_status_monitor if enabled else None,
         boot_wait_s=tracking_write.BOOT_WAIT_S if enabled else 0.0,
+        min_version=min_version,
     )
 
 
@@ -242,10 +247,11 @@ def finish(yaml_path: Path, receipt: dict) -> dict:
     })
 
 
-def remove(yaml_path: Path) -> dict:
+def remove(yaml_path: Path, *, remove_record: bool = False) -> dict:
     return _dispatch("launch_seed_remove", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
-    })
+        "remove_record": remove_record,
+    }, min_version=2)
 
 
 def pending(yaml_path: Path, record=None) -> LaunchSeed | None:
@@ -295,4 +301,4 @@ tracking_write.register_verb("launch_seed_stage", _apply_stage)
 tracking_write.register_verb("launch_seed_take", _apply_take)
 tracking_write.register_verb("launch_seed_restore", _apply_restore)
 tracking_write.register_verb("launch_seed_finish", _apply_finish)
-tracking_write.register_verb("launch_seed_remove", _apply_remove)
+tracking_write.register_verb("launch_seed_remove", _apply_remove, version=2)

@@ -1093,3 +1093,16 @@ _Pending._
   reap and creation-recovery cases pass. The carried post-creation High is
   implemented and covered; reply with current code/test anchors rather than
   silently re-fixing it. Publication and current-head review/CI remain.
+- **2026-10-08** -- The operator narrowed the immediate objective to merging
+  pending PRs from this worktree, then pausing. The recursive claim graph
+  found only PR #5756 active; older child PR claims are released. The next
+  review found an atomic-reap race: state deletion and YAML deletion were
+  separate locks. Both are now one version-2 daemon transaction under the
+  same record sidecar lock, with a concurrent-stage/removal regression.
+  An overview-only Medium identified `gh copilot` as an intermediary rather
+  than a proven Copilot-start boundary; prompted GH fallback now fails
+  closed before reservation/start, retaining both kinds for retry with a
+  direct Copilot executable. Seedless GH fallback is unchanged.
+  213 focused state/reap/recovery/setup cases pass (2 platform skips).
+  Complete current-head review/CI and merge before the requested pause;
+  the broader effort's release/live-observation/closure gates remain open.

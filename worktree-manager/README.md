@@ -82,6 +82,9 @@ Prompted requests require `--stage-launch-seed` support; ordinary seedless
 launches retain older-engine compatibility. Uninstrumented legacy/custom
 prompt launchers refuse without consuming the seed; use normalized setup or
 adopt the engine's documented launch-seed invocation boundary.
+The `gh copilot` intermediary cannot acknowledge actual Copilot startup;
+prompted requests using that fallback retain their seed and require a direct
+Copilot executable. Ordinary seedless fallback launches are unchanged.
 
 ## One-line bootstrap
 

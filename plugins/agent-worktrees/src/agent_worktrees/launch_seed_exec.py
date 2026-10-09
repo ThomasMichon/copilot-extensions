@@ -109,6 +109,14 @@ def launch(
     receipt = None
     argv = command
     if invoke and current is not None:
+        if Path(command[0]).name.lower() in {"gh", "gh.exe"} and command[1:2] == ["copilot"]:
+            print(
+                "Launch prompt remains staged: gh copilot is an intermediary, "
+                "not a confirmed Copilot startup boundary. Configure a direct "
+                "Copilot executable before retrying.",
+                file=sys.stderr,
+            )
+            return 3
         receipt = launch_seed_state.take(record_path, seed_id=current.seed_id)
         if receipt["seed"] is None:
             print("Launch prompt was already handed off or superseded; refresh and retry.", file=sys.stderr)
