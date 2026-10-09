@@ -92,6 +92,27 @@ alias declarations are attribution evidence, not usage meters or proof that two
 session versions are compatible. A producer must establish source ownership and
 collision safety before writing or changing metadata.
 
+## Filesystem publication admission
+
+`agent_logger.source_publication` supplies the producer/destination handshake:
+
+- `load_source_identity_file(path)` reads required metadata with the same
+  bounded no-link loader as source discovery.
+- `validate_publication_key(key, identity)` admits only the identity's canonical
+  namespace. An explicit read alias is not authorization for a new write.
+- `admit_publication_source(corpus_root, key, identity)` claims a new or empty
+  canonical source leaf, or verifies the full identity of an existing marked
+  leaf. It rejects a nonempty unmarked destination, a different repository
+  owner/provider/host at the same namespace, unsafe directories, and Windows
+  case-fold collisions. Existing alias declarations remain unchanged.
+
+The destination caller **must hold its existing sync lock across admission and
+the subsequent session/provenance writes**. These helpers do not introduce a
+second lock, transport remote publication, or migrate legacy aliases. A failed
+marker write remains an explicit error; malformed or incomplete metadata is not
+silently adopted on retry. Their availability alone does not wire namespace
+writers or authorize live publication.
+
 ## Failure and platform boundaries
 
 Discovery rejects traversal, unsupported path components, symlink/name-surrogate
