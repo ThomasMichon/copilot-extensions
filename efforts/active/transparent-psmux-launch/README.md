@@ -124,3 +124,11 @@ encoded commands or initial-prompt transports.
   Unix launch remains unchanged; this replaces only the Windows encoded
   transport and preserves the existing wrapper contract.
 - Publication and the release/deployed-worktree proof remain outstanding.
+
+### 2026-10-09 - Standalone packaging review
+- Implementation PR #5892 identified that the standalone agent-worktrees
+  release also needs the new dispatcher in its materialized fallback assets.
+- Added it to the asset manifest and mirrored cleanup list. A packaged-preview
+  regression proves Windows fallback deployment and command generation with
+  no separate Worktree Manager checkout; the deploy-contract guard now freezes
+  the mirrored list. Focused packaging, deployment and removal tests: 22 passed.

@@ -54,3 +54,6 @@ steps were deleted from `plugins/agent-worktrees/` in the same cutover.
 Deployed automatically: `self_install.py`'s `_copy_payload` copies the whole
 `worktree-manager/` payload directory (this one included) into each versioned
 install slot — no separate packaging step is needed for this directory.
+For agent-worktrees' standalone fallback, promotion also materializes the
+files in `plugins/agent-worktrees/launch-wrapper-assets.json`, including
+`pane-launch.ps1`, into that plugin's packaged `bin/` directory.
