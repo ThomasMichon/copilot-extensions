@@ -26,7 +26,7 @@ from machine_transport import machine_name as _mt_machine_name
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
-from . import config_migrations, inrepo_config_source, project_state, registry_paths
+from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
 from .codename_config import CodenameConfig, parse_codename
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
@@ -218,6 +218,7 @@ class PRConfig:
     # ``{topic}`` itself to use it.
     head_scheme: str = "refspec"   # refspec (default) | snapshot
     head_pattern: str = ""         # empty -> provider-aware default (see above)
+    push_timeout_seconds: float = publication_deadline.DEFAULT_PUSH_TIMEOUT
     # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
     # is the hosting endpoint -- required for self-hosted Gitea
     # (e.g. https://host/gitea) and Azure DevOps org URLs; GitHub defaults to
@@ -377,16 +378,11 @@ class PRConfig:
     # override it via its own ``fork`` field.
     roles: dict[str, PRRoleOverride] = field(default_factory=dict)
     fork: ForkConfig = field(default_factory=ForkConfig)
-    # ── Free-text repo-specific guidance (#pr-conduct-guidance-consolidation).
-    # Agents interact with PR config via ``agent-worktrees repos get``/the
-    # ``pr-*`` verbs, not by reading this file's comments directly -- so a
-    # comment explaining a non-obvious repo choice (e.g. "why bypass_mode:
-    # pull_request, not always/exempt") never reaches a calling agent unless
-    # it rides along through a command's own output. ``notes`` is that ride:
-    # free text surfaced as an extra ``Note:`` line in every ``pr_reminder``
-    # (the "Reminder [...]" text every pr-* verb already prints) whenever it's
-    # non-empty. Keep it short -- one or two sentences, not a policy essay.
+    # Free-text repo guidance surfaced by every pr_reminder().
     notes: str = ""
+
+    def __post_init__(self) -> None:
+        publication_deadline.validate(self.push_timeout_seconds)
 
 
 @dataclass(frozen=True)
@@ -1745,6 +1741,8 @@ def _parse_pr(raw: Any) -> PRConfig:
         branch_prefix=str(raw.get("branch_prefix", "feature")),
         head_scheme=head_scheme,
         head_pattern=str(raw.get("head_pattern", "")),
+        push_timeout_seconds=publication_deadline.validate(
+            raw.get("push_timeout_seconds", publication_deadline.DEFAULT_PUSH_TIMEOUT)),
         api_base=str(raw.get("api_base", "")),
         token_env=str(raw.get("token_env", "")),
         token_command=str(raw.get("token_command", "")),

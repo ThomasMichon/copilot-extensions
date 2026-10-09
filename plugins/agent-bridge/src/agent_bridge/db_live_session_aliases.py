@@ -79,6 +79,16 @@ _REGISTER_SQL = (
     "driven_by=COALESCE(excluded.driven_by, live_sessions.driven_by), "
     "venue=COALESCE(excluded.venue, live_sessions.venue), process_started_at="
     "COALESCE(excluded.process_started_at, live_sessions.process_started_at), "
+    # A new process reviving the row (a resumed conversation; ``_incarnation_mismatch``
+    # admitted it) is the worktree's newest incarnation: its ``registered_at`` is
+    # now, so a throwaway session the same launch registered moments earlier (a
+    # resume first starts a provisional session) can't outrank it. The same
+    # process heartbeating keeps its original time.
+    "registered_at=CASE WHEN (excluded.pid IS NOT NULL AND live_sessions.pid IS NOT NULL "
+    "AND excluded.pid != live_sessions.pid) OR (excluded.process_started_at IS NOT NULL "
+    "AND live_sessions.process_started_at IS NOT NULL AND ABS(excluded.process_started_at "
+    f"- live_sessions.process_started_at) >= {PROCESS_START_TOLERANCE_SECONDS}) "
+    "THEN excluded.registered_at ELSE live_sessions.registered_at END, "
     "status='live', updated_at=excluded.updated_at "
     "WHERE live_sessions.status != 'taken-over' "
     # An id-only heartbeat skips the insert guard above but keeps the row's

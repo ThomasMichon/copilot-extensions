@@ -399,6 +399,7 @@ def _resolve_child_exe(argv: list[str], path: str | None) -> list[str]:
 
 async def _spawn_child(
     argv: list[str], cwd: str | None, env: dict[str, str] | None,
+    *, pass_fds: tuple[int, ...] = (),
 ) -> asyncio.subprocess.Process:
     child_env = os.environ.copy()
     if env:
@@ -407,6 +408,11 @@ async def _spawn_child(
     # Copilot child's own plugin hooks, never inherited from this launcher.
     child_env.pop(_NONCE_ENV, None)
     child_env.pop("COPILOT_PLUGIN_ROOT", None)
+    if not pass_fds:
+        from ..preference_attestation import DIGEST_ENV, FD_ENV, MODE_ENV, NONCE_ENV, TARGET_ENV
+
+        for key in (DIGEST_ENV, FD_ENV, MODE_ENV, NONCE_ENV, TARGET_ENV):
+            child_env.pop(key, None)
     # POSIX/Linux: arm PR_SET_PDEATHSIG so copilot dies with the host even on a
     # hard host kill -- the Linux counterpart to the Windows kill-on-close job,
     # so a remote (mesh/CodeSpace) far side never orphans copilot. None (default)
@@ -423,6 +429,7 @@ async def _spawn_child(
         limit=_ACP_STDIO_LIMIT_BYTES,
         preexec_fn=preexec,
         creationflags=no_window_flags(),
+        **({"pass_fds": pass_fds} if pass_fds else {}),
     )
 
 
@@ -453,7 +460,15 @@ async def run_host(
     """
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
-    child = await _spawn_child(child_argv, cwd, env)
+    from ..preference_attestation import SHELL_MARKER
+
+    if child_argv and child_argv[0] == SHELL_MARKER:
+        from .preference_spawn import spawn_attested
+
+        child, preference_receipt = await spawn_attested(child_argv, cwd, env, _spawn_child)
+    else:
+        child = await _spawn_child(child_argv, cwd, env)
+        preference_receipt = execution_receipt(child_argv, env, child.pid or 0)
     state_path = Path(state_file) if state_file is not None else None
     state: dict[str, Any] = {}
 
@@ -469,9 +484,7 @@ async def run_host(
                        unexpected_reap_seconds=unexpected_reap_seconds,
                        active_reap_seconds=active_reap_seconds,
                        on_child_exit=_publish_child_exit,
-                       preference_receipt=execution_receipt(
-                           child_argv, env, child.pid or 0,
-                       ))
+                       preference_receipt=preference_receipt)
     bound_port = await host.serve(port=port)
     state.update({
         "version": 2,
@@ -485,7 +498,10 @@ async def run_host(
         "nonce": nonce,
         "created_at": time.time(),
         "state": "running",
-        "child_executable": child_argv[0] if child_argv else "",
+        "child_executable": (
+            "bash" if child_argv and child_argv[0] == SHELL_MARKER
+            else child_argv[0] if child_argv else ""
+        ),
         "cwd": cwd or "",
         "reverse_forwards": list(reverse_forwards or []),
         "boot_id": _boot_id(),
@@ -574,6 +590,12 @@ def _write_host_state(
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:2] == ["--preference-exec", "--"]:
+        from ..preference_exec import main as preference_exec_main
+
+        # zipapp's generated entry point ignores return values.
+        raise SystemExit(preference_exec_main(argv[2:]))
     ap = argparse.ArgumentParser(
         prog="python -m agent_bridge.session_host",
         description="Standalone Session Host: own a Copilot --acp child, serve reattach.",

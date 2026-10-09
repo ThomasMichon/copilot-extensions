@@ -228,23 +228,12 @@ def _container_remote_child_argv(
     copilot_args: list[str] | None = None,
 ) -> list[str]:
     """Build the far-side child command from provider env + bridge policy."""
-    acp_command = _append_plugin_dirs(
-        acp_command_override
-        or str(prepared.get("acp_command") or container_target["acp_command"]),
-        plugin_dirs,
+    from .container_preference_launch import container_child_argv
+
+    return container_child_argv(
+        container_target, prepared, plugin_dirs,
+        acp_command_override=acp_command_override, copilot_args=copilot_args,
     )
-    if copilot_args:
-        # Container charter overlay (trusted/SSH route): mirrors
-        # agent_containers.resolver._append_copilot_args, which does the
-        # same for the restricted/docker-exec route -- both append onto the
-        # in-container acp_command string, just reached via different spawn
-        # paths, so neither can import a shared helper from the other.
-        acp_command += " " + " ".join(shlex.quote(a) for a in copilot_args)
-    remote_env = prepared.get("remote_env")
-    if remote_env:
-        env_path = shlex.quote(str(remote_env))
-        acp_command = f". {env_path}; rm -f {env_path}; {acp_command}"
-    return ["bash", "-lc", acp_command]
 
 
 def _failed_acp_handshake_command() -> str:
@@ -779,6 +768,9 @@ class Session:
         self.caller_id = caller_id
         self.caller_session_id = caller_session_id
         self.target = target
+        from .container_preference_launch import migrate_selected_instance
+
+        migrate_selected_instance(target)
         self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before

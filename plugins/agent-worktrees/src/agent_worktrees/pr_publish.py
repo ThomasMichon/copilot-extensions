@@ -19,7 +19,7 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import git_ops, output, push_timeout, tracking
+from . import git_ops, output, publication_deadline, push_timeout, tracking
 
 #: Why ``push-changes``/``create-pr`` refuse when :func:`push_remote` can't tell.
 UNREADABLE_REMOTE = (
@@ -179,7 +179,7 @@ def push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     come from one snapshot, never across a fork setup that repoints the remote
     in between. ``None`` too when the lock can't be had."""
     try:
-        with publish_lock(worktree_path):
+        with publish_lock(worktree_path, push_timeout_seconds=publication_deadline.configured(repo.pr)):
             return _select_push_target(repo, pr, worktree_path)
     except PublishLockTimeout:
         return None
@@ -259,7 +259,7 @@ def head_branch_gone(repo, pr, worktree_path: str) -> bool:
     them would find the branch "absent" on another fork and retire a live PR.
     Unreadable or undecided is never "gone"."""
     try:
-        with publish_lock(worktree_path):
+        with publish_lock(worktree_path, push_timeout_seconds=publication_deadline.configured(repo.pr)):
             where = push_remote(repo, pr, worktree_path)
             # The exact ref: `ls-remote <branch>` is a tail glob, so an unrelated
             # `archive/<branch>` would keep a deleted head looking present.
@@ -336,10 +336,15 @@ _held = threading.local()
 
 
 @contextlib.contextmanager
-def publish_lock(cwd: str, *, acquire_timeout: float | None = None):
+def publish_lock(cwd: str, *, acquire_timeout: float | None = None,
+                 push_timeout_seconds: float = push_timeout.DEFAULT_PUSH_TIMEOUT):
     """Serialize changing a remote's URL with pushing through it, across every
     worktree of the clone (they share one ``.git/config``): the lock lives in the
     common git dir. Re-entrant within a thread; other threads and processes wait."""
+    timeout = publication_deadline.validate(push_timeout_seconds)
+    if acquire_timeout is None:
+        acquire_timeout = (PUBLISH_LOCK_ACQUIRE_TIMEOUT_S if timeout == push_timeout.DEFAULT_PUSH_TIMEOUT
+                           else publication_deadline.lock_wait(timeout))
     common = git_ops.git("rev-parse", "--git-common-dir", cwd=cwd, check=False).stdout.strip()
     path = Path(cwd, common) / "agent-worktrees-publish.lock"
     key = os.path.normcase(str(path.resolve()))
@@ -350,9 +355,7 @@ def publish_lock(cwd: str, *, acquire_timeout: float | None = None):
         yield
         return
     with path.open("a+b") as fh:
-        _lock_publish_file(fh, timeout=(
-            PUBLISH_LOCK_ACQUIRE_TIMEOUT_S if acquire_timeout is None else acquire_timeout
-        ))
+        _lock_publish_file(fh, timeout=acquire_timeout)
         held.add(key)
         try:
             yield
@@ -364,11 +367,13 @@ def publish_lock(cwd: str, *, acquire_timeout: float | None = None):
 def push_checked(record, remote: str, refspec: str, *, cwd: str,
                  expected_head_repo: str = "", expected_head_identity: str = "",
                  force_with_lease: bool = False,
-                 force_with_lease_expect: str | None = None, repo=None) -> git_ops.PushResult:
+                 force_with_lease_expect: str | None = None,
+                 timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT, repo=None) -> git_ops.PushResult:
     """``git_ops.push`` for a PR head, under :func:`publish_lock`: when it goes to
     the PR's recorded fork, that remote must still name the fork's repo
     (``head_repo``) at push time -- another worktree's fork setup could have
     repointed it since it was chosen."""
+    timeout = publication_deadline.validate(timeout)
     pr = _pr_for(record, refspec.rpartition(":")[2].removeprefix("refs/heads/"))
     want = (expected_head_repo or getattr(pr, "head_repo", "") or "").lower()
     # The full host/owner/name, read when the target was chosen (or recorded at
@@ -377,7 +382,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
     want_identity = expected_head_identity or (
         getattr(pr, "head_identity", "") if remote == getattr(pr, "remote", "") else "")
     try:
-        with publish_lock(cwd):
+        with publish_lock(cwd, push_timeout_seconds=timeout):
             got = identity = ""
             if expected_head_repo or remote == getattr(pr, "remote", ""):
                 got = (push_slug(remote, cwd=cwd) or "").lower()
@@ -385,13 +390,13 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 if not want or got != want or not want_identity or identity != want_identity:
                     return git_ops.PushResult(ok=False, stderr=REPOINTED)
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
-                                  force_with_lease_expect=force_with_lease_expect)
+                                  force_with_lease_expect=force_with_lease_expect, timeout=timeout)
             if repo is not None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."
             ):
                 from . import pr_rebase
                 result = pr_rebase.push(
-                    record, repo, remote, refspec, force_with_lease_expect, cwd=cwd,
+                    record, repo, remote, refspec, force_with_lease_expect, cwd=cwd, timeout=timeout,
                 )
             if result:
                 result.head_repo = got

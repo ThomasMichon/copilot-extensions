@@ -99,6 +99,11 @@ async def prepare_container_session_host(
     if not command or not name:
         raise RuntimeError("trusted container metadata lacks provider command/name")
     command += ["session-host-prepare", name]
+    expected_instance = target.get("instance_id")
+    if expected_instance:
+        command += ["--expected-instance", str(expected_instance)]
+    elif "{{target_preference_launcher}}" in str(target.get("acp_command") or ""):
+        raise RuntimeError("attested container launch lacks selected execution instance")
     if host_relay_port is not None:
         command += ["--host-relay-port", str(host_relay_port)]
     rc, out, err = await _run_provider(command, timeout=60.0)
@@ -116,6 +121,7 @@ async def prepare_container_session_host(
         ) from exc
     if (
         result.get("name") != name
+        or expected_instance and result.get("execution_instance") != expected_instance
         or not isinstance(result.get("ssh"), dict)
         or not result.get("remote_command")
     ):
@@ -275,6 +281,14 @@ async def cleanup_container_session_host(
             name,
             "--remote-env",
             str(remote_env),
+            *(
+                ["--expected-instance", str(prepared["execution_instance"])]
+                if prepared.get("execution_instance") else []
+            ),
+            *(
+                ["--expected-user", str(prepared["user"])]
+                if prepared.get("execution_instance") and prepared.get("user") else []
+            ),
         ],
         timeout=30.0,
     )

@@ -1,0 +1,28 @@
+{
+  "captured_from": {
+    "commit": "147d5829ceebdb6eec0bfbfaa976cd5d8647b3e5",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 1,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+    "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+    "source_sha256": "d72b281b0bbbe63108bd1bac5fbe932e90419516a96d5280d159a436cdfb1f8d"
+  },
+  "component_digest": "d201186f855710cabc0761ed00bc1f0a19f3e702c5e90ba121c24c89f8b95885",
+  "release_metadata_normalized": "agent_bridge.__version__",
+  "authority_modules": [
+    "agent_bridge",
+    "agent_bridge.winjob",
+    "agent_bridge.session_preferences",
+    "agent_bridge.preference_attestation",
+    "agent_bridge.preference_exec",
+    "agent_bridge.session_host",
+    "agent_bridge.session_host.protocol",
+    "agent_bridge.session_host.host",
+    "agent_bridge.session_host.osutil",
+    "agent_bridge.session_host.launcher",
+    "agent_bridge.session_host.preference_spawn",
+    "agent_procutil"
+  ],
+  "ordering": ["spawn-private-channel", "read-frame", "verify-frame", "consent"],
+  "failure_contract": "No exec consent; close channel, reap owned child, propagate refusal"
+}

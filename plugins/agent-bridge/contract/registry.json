@@ -1045,7 +1045,31 @@
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-          "sha256": "7eccf1f791964c584cb211ebbf04c352998eece9c4de3fec264f5aa4ecce93b2",
+          "sha256": "7d29a673827436d7445fcaa488d0140ab89872d5d8fe2aae6e002e9ed4f73cc8",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "sha256": "328543932b380484e7c454f90e6bc0c31c45b515087a7a94b5907158f2613868",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "sha256": "d72b281b0bbbe63108bd1bac5fbe932e90419516a96d5280d159a436cdfb1f8d",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "sha256": "c65331a77a10c63f14f7cd54c30b95ce341b5dd0e88a3663ad9b277d84c52936",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_preferences.py",
+          "sha256": "69563733d2af36b8153c1227f9d96a53180919f4e4f67cc9369c481fe0d6581c",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1065,8 +1089,38 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json",
-          "sha256": "4afcdf978664f472cb68800918400b41e13fba81696377f784c99c9038e44b07",
+          "sha256": "73c717cdbb604b5f2fb1bb8de8769f3d80c59e439dbc716e9d95e787f749cdd5",
           "role": "current framing, control/data messages and optional preference HELLO tail",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/prior-wrapper-v1/messages.json",
+          "sha256": "4afcdf978664f472cb68800918400b41e13fba81696377f784c99c9038e44b07",
+          "role": "preserved pre-wrapper framing and receipt-v1 HELLO tail",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-authority-v1.json",
+          "sha256": "aecaecd4e68f1263bb8fa4783c3981deb828a9b3bc2a243ddac13cd7d95f348f",
+          "role": "launch-bound wrapper v1 authority and receipt-v2 validity vectors",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-settings-reader.json",
+          "sha256": "691ab96907f5d8dbfb71b138e706ce79e452cf2fed60438dcb62b04bb487e20b",
+          "role": "executing-user settings keys and explicit profile/provider precedence",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-exec.json",
+          "sha256": "7fd73a3c06f87af6bd174e259e4f58a797e7dbddb545d0189d7e51ddf4947ea5",
+          "role": "terminal exec consent, private environment closure and PID preservation",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-consent.json",
+          "sha256": "df19f024ba694716a971e2bf651e9ac6976d6c3d98b9e07b6387d56311f4064d",
+          "role": "complete staged authority closure and consent-owner failure ordering",
           "generation": 1
         },
         {
@@ -1083,6 +1137,62 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "147d5829ceebdb6eec0bfbfaa976cd5d8647b3e5",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "cfc60efa921c38e1d8683c59cd07a6ae72261148",
+          "capture_method": "Re-attest receipt-v2 with the complete staged Host authority closure; normalize only the standalone non-executable release label."
+        },
+        {
+          "commit": "147d5829ceebdb6eec0bfbfaa976cd5d8647b3e5",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+          "capture_method": "Freeze consent-owner ordering and full staged-module digest coverage, including verifier, dispatcher and emitter."
+        },
+        {
+          "commit": "147d5829ceebdb6eec0bfbfaa976cd5d8647b3e5",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "capture_method": "Re-attest unchanged terminal exec behavior against the complete release-stable authority closure."
+        },
+        {
+          "commit": "977083d1ed4e0b3fcfbcbd8a63814c7479e47b9f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "source_git_blob": "d321c4317a8480c4afc1f4958d3586634418b1cb",
+          "capture_method": "Re-attest unchanged H1 framing with a documented versioned receipt tail; preserve the previous snapshot byte-for-byte."
+        },
+        {
+          "commit": "d834b9f4dbaf250f349fde3bf878836402f8b5cc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "78d3e7df09ec70f880cbf689a09ae9f461154cc0",
+          "capture_method": "Freeze synthetic wrapper-v1 and receipt-v2 shape, component closure digest, selected target and invalid binding vectors."
+        },
+        {
+          "commit": "d834b9f4dbaf250f349fde3bf878836402f8b5cc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_preferences.py",
+          "source_git_blob": "56533e7a93af7a6ced8e3bdc145b95fb0d5c46bd",
+          "capture_method": "Capture literal settings keys/flags and synthetic missing/default/profile/native-provider candidate resolution."
+        },
+        {
+          "commit": "d834b9f4dbaf250f349fde3bf878836402f8b5cc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "capture_method": "Freeze the private binding environment, explicit Host consent and PID-preserving final-context exec contract."
+        },
         {
           "commit": "7ee6a643e3da36c91258ef7ed4ade7773bcf2db8",
           "plugin_version": "0.4.1-dev3",
@@ -1121,7 +1231,9 @@
       "mixed_version_scenarios": [
         "new-frontend_H1-host",
         "H1-frontend_new-host",
-        "unknown-additive-message"
+        "unknown-additive-message",
+        "H1-frontend_receipt-v2-prefix",
+        "new-frontend_unattested-or-invalid-wrapper"
       ],
       "removal_gate": "Publish and negotiate a successor envelope, retain a generation-1 adapter through the rollback window, and prove zero live or recoverable generation-1 hosts."
     }

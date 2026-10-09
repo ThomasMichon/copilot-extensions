@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import config as cfg
 from agent_worktrees import fork_pr
 
@@ -390,7 +392,11 @@ class TestEnsureForkAndRemote:
         import dataclasses
         return dataclasses.replace(cfg.PRConfig(enabled=True), provider="github")
 
-    def test_publication_lock_timeout_returns_error(self, monkeypatch, tmp_path):
+    @pytest.mark.guard
+    @pytest.mark.parametrize("deadline", [180, 600])
+    def test_publication_lock_timeout_returns_error(self, monkeypatch, tmp_path, deadline):
+        import dataclasses
+
         from agent_worktrees import pr_publish
 
         timeout_type = getattr(pr_publish, "PublishLockTimeout", TimeoutError)
@@ -403,7 +409,8 @@ class TestEnsureForkAndRemote:
             def ensure_fork(self, repo_slug, *, api_base="", token=None):
                 return ("alice", "https://github.com/alice/repo.git")
 
-        def locked(_worktree_path):
+        def locked(_worktree_path, *, push_timeout_seconds):
+            assert push_timeout_seconds == deadline
             raise timeout_type("lock still held")
 
         monkeypatch.setattr(
@@ -412,7 +419,8 @@ class TestEnsureForkAndRemote:
         monkeypatch.setattr(pr_publish, "publish_lock", locked)
 
         result = fork_pr._ensure_fork_and_remote(
-            str(tmp_path), "owner/repo", self._cfg(), token=None,
+            str(tmp_path), "owner/repo",
+            dataclasses.replace(self._cfg(), push_timeout_seconds=deadline), token=None,
         )
 
         assert result == {"error": "lock still held"}
