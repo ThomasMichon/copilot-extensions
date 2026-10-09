@@ -258,6 +258,15 @@ control surfaces: start or resume sessions, submit turns, stream events, inspect
 state and context usage, interrupt the current turn without ending the session,
 and intentionally stop or end the session.
 
+### explicit-preference-authority-and-compatible-reuse
+
+A caller can explicitly select which authority supplies execution preferences,
+without confusing caller-resolved choices with settings owned by the target.
+The bridge preserves confirmed selections when reusing a session and visibly
+refuses conflicting requests rather than silently reinterpreting an existing
+launch. Requested, confirmed and unsupported choices remain distinguishable;
+an unsupported target-settings receipt is never proof that inheritance occurred.
+
 ### task-shaped-delegation-control
 
 A caller uses the same compact lifecycle vocabulary whether the target is a
@@ -914,6 +923,11 @@ machine may deliberately gate outbound reach until policy allows it.
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
 
 ## Provenance
+
+- **2026-10-09** — Folded back explicit execution-preference authority,
+  compatible session reuse and preservation of confirmed launch choices.
+  Kept requested, confirmed and unsupported choices distinct rather than
+  implying that target-settings inheritance follows from a request alone.
 
 - **2026-10-09** — Folded back shared remote-control transport, isolated logical
   observation, hosting-owned replay and acknowledgement, and the distinction
