@@ -139,6 +139,10 @@ In an already provisioned test environment:
 python -m pytest agent-index-service/tests plugins/agent-index/tests/test_standalone_explicit_sources.py -q
 ```
 
+POSIX hosted/deployment tests require the contained runner above; their children
+remain in its owner-controlled process group, including after abrupt pytest
+exit. Windows additionally uses nested kill-on-close Jobs for per-test teardown.
+
 The tests select temporary homes/config/data/routing and an isolated loopback
 embedding-protocol fixture; they never read the real native service home or
 use the production engine. They cover light imports, strict configuration,

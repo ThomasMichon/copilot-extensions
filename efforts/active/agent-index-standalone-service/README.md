@@ -259,3 +259,10 @@ boundaries from implementation decisions and deployment-specific policy.
   not the version-slot installer, a separated database/execution adapter, a
   release reconciler or an authorized live service migration. Resume those
   tracked slices only after the operator lifts the pause.
+- The next review found two containment defects in the new test surface.
+  Non-finite/nonpositive wall limits now fail before admission. POSIX hosted
+  children stay attached to the outer runner instead of creating escape
+  sessions; an abrupt-worker-exit regression runs in Linux CI. Windows retains
+  nested kill-on-close Job teardown. The full contained Windows standalone
+  suite passed 68 tests; runner/workflow regressions passed 35 with the Linux
+  process-group test explicitly deferred to its Linux CI lane.

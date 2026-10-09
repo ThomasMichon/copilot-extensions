@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -83,6 +86,47 @@ def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         runner.main(["worktree-manager", "--smoke"])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("timeout", ["nan", "inf", "-inf", "0", "-1"])
+def test_nonfinite_or_nonpositive_timeout_rejected_before_admission(monkeypatch, timeout):
+    monkeypatch.setattr(runner, "acquire", lambda wait: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["agent-index-service", f"--timeout={timeout}"])
+    assert exc.value.code == 2
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX outer containment regression uses Linux procfs")
+def test_posix_owned_child_survives_worker_exit_only_until_outer_cleanup(tmp_path):
+    from plugin_test_containment import Limits, isolated_environment, run_contained
+
+    repo = SCRIPT.parent.parent
+    receipt = tmp_path / "identity.json"
+    script = f"""
+import json,os,sys,subprocess
+from pathlib import Path
+sys.path[:0] = {[
+    str(repo / "agent-index-service" / "tests"),
+    str(repo / "libs" / "agent-procutil" / "src"),
+]!r}
+from _service_process import owned_python
+with owned_python(['-c', 'import time; time.sleep(120)'],
+                  cwd={str(tmp_path)!r}, stdout=subprocess.DEVNULL) as child:
+    Path({str(receipt)!r}).write_text(json.dumps({{
+        'pid': child.pid, 'group': os.getpgid(child.pid), 'owner_group': os.getpgrp(),
+    }}))
+    os._exit(0)
+"""
+    sandbox = tmp_path / "sandbox"
+    env = isolated_environment(os.environ, sandbox)
+    assert run_contained(
+        [sys.executable, "-c", script], cwd=repo, env=env, sandbox=sandbox,
+        limits=Limits(wall_seconds=15, poll_seconds=0.1),
+    ) == 0
+    identity = json.loads(receipt.read_text())
+    assert identity["group"] == identity["owner_group"]
+    state = Path(f"/proc/{identity['pid']}/stat")
+    assert not state.exists() or state.read_text().split(") ", 1)[1].startswith("Z ")
 
 
 def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():

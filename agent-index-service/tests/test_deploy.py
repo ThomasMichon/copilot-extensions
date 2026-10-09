@@ -191,6 +191,7 @@ while True:
         assert not (tmp_path / name).exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="POSIX abrupt-worker cleanup is tested by the outer runner")
 def test_owned_tree_is_reaped_after_assertion_failure(tmp_path):
     receipt = tmp_path / "owned-tree.json"
     script = """

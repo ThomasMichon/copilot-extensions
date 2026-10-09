@@ -802,9 +802,10 @@ jobs:
         env:
           PYTHONPATH: libs/single-instance-lease/src
         run: >-
-          uv run --with pytest python -m pytest -q
+          uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_run_plugin_tests.py
+          tools/test_run_standalone_tests.py
           tools/test_run_tests_in_devcontainer.py
 
   agent-index-service-linux:
@@ -860,9 +861,10 @@ jobs:
         env:
           PYTHONPATH: libs/single-instance-lease/src
         run: >-
-          uv run --with pytest python -m pytest -q
+          uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_run_plugin_tests.py
+          tools/test_run_standalone_tests.py
 
   archive-sources-windows:
     name: archive sources (windows-latest)

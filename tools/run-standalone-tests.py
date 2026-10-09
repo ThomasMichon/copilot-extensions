@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -54,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--admission-wait", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=600.0)
     args = parser.parse_args(argv)
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and positive")
     if args.smoke and args.component != "agent-index-service":
         parser.error("--smoke is only defined for agent-index-service")
     python = (args.python or default_python(args.component)).resolve()
