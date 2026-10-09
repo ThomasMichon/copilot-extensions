@@ -127,6 +127,9 @@ def current_owned_attention(session: Any, requested_ref: str) -> CurrentAttentio
         "worktree_id": getattr(session.target, "worktree_id", None),
         "fidelity": "full",
     }
+    status = session.status
+    if status in _TERMINAL:
+        return CurrentAttention(**base, reason=_TERMINAL[status], availability="available")
     if open_requests:
         (family, correlation_id), (reason, detail) = list(open_requests.items())[-1]
         live = _request_is_live(session, family, correlation_id)
@@ -134,9 +137,6 @@ def current_owned_attention(session: Any, requested_ref: str) -> CurrentAttentio
             **base, reason=reason, detail=detail,
             availability="available" if live else "unknown_after_restart",
         )
-    status = session.status
-    if status in _TERMINAL:
-        return CurrentAttention(**base, reason=_TERMINAL[status], availability="available")
     if status == SessionStatus.IDLE and settled is not None:
         return CurrentAttention(**base, reason=settled, availability="available")
     if settled == AttentionReason.UNREACHABLE:
