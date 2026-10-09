@@ -758,7 +758,8 @@ function Invoke-RuntimeProvision([string]$SetupRole) {
     }
     $probeHost = (Get-Process -Id $PID).Path
     if (-not $probeHost) { return 1 }
-    $probePayloadRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+    $probePayloadRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM -and
+        (Test-Path -LiteralPath (Join-Path $env:COPILOT_PLUGIN_STAGED_FROM 'payload-invocation.json') -PathType Leaf)) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else {
         $PluginDir

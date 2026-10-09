@@ -35,6 +35,14 @@ it directly. `install`/`update` rebuild only the light `[store,server]` service
 slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
 
+Both canonical installers use the shared installer engine for uv acquisition,
+venv/package retries and deploy manifests. The versioned CLI, optional
+host-server sibling and durable embedding venv retain separate lifetimes and
+plugin-owned dependency/signature policy. PowerShell stamps are immutable,
+self-contained snapshots; see the
+[shared installer contract](../../docs/install-contract.md#shared-installer-engine-helpers-libsinstaller-engine)
+for materialization and publication guarantees.
+
 ## Minimal setup
 
 1. Enable the plugin from the `copilot-extensions` marketplace.

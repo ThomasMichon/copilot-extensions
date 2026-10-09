@@ -46,6 +46,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
 if ($InstallDir) {
     $InstallDir = [IO.Path]::GetFullPath($InstallDir)
@@ -97,8 +98,13 @@ if ($Action -notin @(
         exit 1
     }
     $probeHost = (Get-Process -Id $PID).Path
+    $authorizationPayload = if (Test-Path -LiteralPath (Join-Path $probePayload 'payload-invocation.json') -PathType Leaf) {
+        $probePayload
+    } else {
+        (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+    }
     & $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
-        -PayloadRoot $probePayload -LegacyRoot $probeLegacyRoot
+        -PayloadRoot $authorizationPayload -LegacyRoot $probeLegacyRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -556,22 +562,11 @@ function Test-RuntimeOrigin {
 
 function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
-    # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
-    # An install/ensure run from a STALE payload (older than the active
-    # current-version marker -- e.g. a not-yet-reconciled marketplace snapshot, or a
-    # different local/worktree deploy that activated a newer slot) must not
-    # downgrade the running runtime. The current-version marker is authoritative
-    # (#1504); keep it and skip activating the older slot (it stays built-but-
-    # inactive) unless a downgrade is explicitly forced. This guards EVERY caller
-    # (install, update, ...), not just the `update` action's Invoke-DowngradeGuard,
-    # so a stale payload can't split-brain the service by re-activating an old slot.
-    if (-not $Force -and $SrcVersion) {
-        $curVer = ''
-        try { $curVer = ([IO.File]::ReadAllText((Join-Path $InstallDir 'current-version'))).Trim() } catch {}
-        if ($curVer -and (Test-VersionLt -A $SrcVersion -B $curVer)) {
-            Write-Skip "Keeping active runtime $curVer -- not activating older $SrcVersion (monotonic; dotfiles #1508)"
-            return $true
-        }
+    $publicationMutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+    if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+        Write-Skip 'Keeping newer runtime or stamp -- not activating an older slot'
+        return $true
     }
     if ((Test-Path $LegacyVenvDir) -and -not (Test-VenvIsLink $LegacyVenvDir)) {
         try { Invoke-Stop | Out-Null } catch {}
@@ -599,6 +594,9 @@ function Invoke-VersionedActivate {
     }
     Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
     return $true
+    } finally {
+        [void]$publicationMutex.ReleaseMutex(); $publicationMutex.Dispose()
+    }
 }
 
 function Get-VersionedCurrent {
@@ -1196,6 +1194,18 @@ function Get-SignedBasePython {
 }
 
 function Deploy-SetupGatedBinstub {
+    param([string]$PayloadRoot = '')
+    $publicationMutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+    if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+        Write-Skip 'Newer runtime or stamp superseded launcher publication'
+        return
+    }
+    if (-not $PayloadRoot) {
+        $snapshots = [IO.Path]::GetFullPath((Join-Path $InstallDir 'snapshots')).TrimEnd('/\') + [IO.Path]::DirectorySeparatorChar
+        $comparison = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        $PayloadRoot = if ([IO.Path]::GetFullPath($PluginDir).StartsWith($snapshots, $comparison)) { $PluginDir } else { $probePayload }
+    }
     <# Deploy a stable machine-global redirector to the payload-owned lifecycle
        gate. The gate owns setup consent, runtime readiness, and provisioning. #>
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
@@ -1210,7 +1220,7 @@ function Deploy-SetupGatedBinstub {
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
     $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
-    [IO.File]::WriteAllText($payloadDirMarker, $probePayload, $utf8NoBom)
+    Publish-FileAtomically -Path $payloadDirMarker -Content $PayloadRoot
 
     $ps1Path = Join-Path $LocalBin 'agent-index.ps1'
     $ps1Content = @'
@@ -1242,38 +1252,70 @@ exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
     Write-Ok "Binstub: $ps1Path (+ .cmd fallback, setup-gated)"
+    } finally {
+        [void]$publicationMutex.ReleaseMutex(); $publicationMutex.Dispose()
+    }
+}
+
+function Invoke-IndexUvPipInstall {
+    if (-not $script:UvCommand) { throw 'No validated uv executable is available for package installation' }
+    $result = Invoke-UvPipInstallResilient -UvCommand $script:UvCommand -Arguments $args
+    $global:LASTEXITCODE = $result.ExitCode
+    return $result.Output
+}
+
+function Test-IndexVenv {
+    param([string]$Dir, [string]$Python)
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg') -PathType Leaf)) { return $false }
+    $result = Invoke-NativeCapture {
+        & $Python -I -c 'import sys; print(sys.prefix); print(int(sys.prefix != sys.base_prefix))'
+    }
+    $lines = @($result.Output -split '\r?\n')
+    if ($result.ExitCode -ne 0 -or $lines.Count -ne 2 -or $lines[1] -ne '1') { return $false }
+    $comparison = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    return [string]::Equals([IO.Path]::GetFullPath($lines[0]).TrimEnd('/\'),
+        [IO.Path]::GetFullPath($Dir).TrimEnd('/\'), $comparison)
+}
+
+function New-IndexVenv {
+    param([string]$Dir, [string]$Python, [string]$PythonCmd,
+        [bool]$PreferSignedPython = $true)
+    $signedBase = if ($PreferSignedPython -and $env:OS -eq 'Windows_NT') { Get-SignedBasePython } else { $null }
+    $healthy = Test-IndexVenv -Dir $Dir -Python $Python
+    $unsigned = $false
+    if ($signedBase -and (Test-Path -LiteralPath $Python)) {
+        $unsigned = (Get-AuthenticodeSignature $Python).Status -ne 'Valid'
+    }
+    if ($healthy -and -not $unsigned) { return $true }
+    Write-Step "Building healthy runtime venv: $Dir"
+    if (Test-Path -LiteralPath $Dir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop }
+    if ($signedBase) {
+        $result = Invoke-NativeCapture { & $signedBase -m venv --copies $Dir }
+        if (Test-IndexVenv -Dir $Dir -Python $Python) { return $true }
+        Write-Warn "Signed-Python venv is unusable (exit $($result.ExitCode)) -- retrying with uv"
+        if (Test-Path -LiteralPath $Dir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop }
+    }
+    if ($script:UvCommand) {
+        $previousLocation = Get-Location
+        try {
+            if ($env:OS -eq 'Windows_NT') { Set-Location "$env:SystemDrive\" }
+            $result = Invoke-UvVenvResilient -UvCommand $script:UvCommand -VenvDir $Dir -Arguments @('--allow-existing')
+        } finally { Set-Location $previousLocation }
+        if ($result.ExitCode -eq 0 -and (Test-IndexVenv -Dir $Dir -Python $Python)) { return $true }
+        Write-Warn "uv venv failed health validation (exit $($result.ExitCode)): $($result.Output)"
+    }
+    if ($PythonCmd) {
+        $result = Invoke-NativeCapture { & $PythonCmd -m venv $Dir }
+        if ($result.ExitCode -ne 0) { Write-Warn $result.Output }
+    }
+    return (Test-IndexVenv -Dir $Dir -Python $Python)
 }
 
 function Install-ServerVenv {
-    <# agent-index-server-venv-split: provision a sibling SERVER venv inside
-       the current runtime slot ($VenvDir\server), installing the full
-       agent-index[store,server] package -- so `spawn_passive` (and, once its
-       own dispatcher retarget lands, `cmd_start`/`cmd_cell_start`) can run the
-       FastAPI/uvicorn/pydantic service from a venv separate from the
-       client/orchestrator's own, keeping a pure client's install footprint
-       light. This is the exact sibling path `config.server_venv_python()`
-       already resolves (a `server` subdirectory of whichever directory
-       contains the current interpreter's own `Scripts`/`bin` folder) --
-       provisioning here just makes that existing, previously-inert resolver
-       find something.
-
-       Host role only: a client never runs the service, so it never needs
-       this second venv. Provisioning failures are WARN, never FAIL --
-       `config.server_venv_python()` already falls back to `$null` (in-process
-       `serve()`, or the shared venv for `spawn_passive`) when no sibling
-       exists, so a failure here must never block the primary client
-       install/update.
-
-       Prefers a signed base Python via `--copies` (mirroring the main venv's
-       own preference, see `Get-SignedBasePython`'s docstring): the resulting
-       python.exe is BOTH spawnable over a non-interactive SSH logon AND
-       Smart-App-Control-allowed, same rationale as the primary slot. Falls
-       back to `uv venv` (or a bare `python -m venv`) only when no signed base
-       is available. Note this is NOT a latency optimization -- CPython's own
-       Windows venv launcher re-execs the base interpreter as a child process
-       either way (`--copies` and a plain/uv-created venv launcher both do
-       this; confirmed empirically), so preferring the signed base changes
-       SSH/SAC compatibility, not the number of process hops a spawn takes. #>
+    <# Optional host-only sibling runtime, matching config.server_venv_python().
+       New-IndexVenv keeps signed-Python/SSH policy consistent across runtimes.
+       Failures warn and retain the existing shared-venv service fallback. #>
     param(
         [Parameter(Mandatory)][string]$InstallRole,
         [Parameter(Mandatory)][AllowNull()][string]$PythonCmd
@@ -1287,45 +1329,25 @@ function Install-ServerVenv {
     $serverVenvPython = Join-Path $serverVenvDir 'Scripts\python.exe'
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-
-    if (-not (Test-Path $serverVenvPython)) {
-        $created = $false
-        $signedBase = Get-SignedBasePython
-        if ($signedBase) {
-            & $signedBase -m venv --copies --clear $serverVenvDir 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $serverVenvPython)) {
-                $created = $true
-                Write-Ok "Server venv created from signed Python ($signedBase)"
-            } else {
-                Write-Warn 'Signed-Python server venv creation failed -- falling back to uv'
-            }
-        }
-        if (-not $created) {
-            if (Get-Command uv -ErrorAction SilentlyContinue) {
-                $prevLoc = Get-Location
-                Set-Location "$env:SystemDrive\"
-                try { & uv venv $serverVenvDir --allow-existing 2>&1 | Out-Null } finally { Set-Location $prevLoc }
-            } elseif ($PythonCmd) {
-                & $PythonCmd -m venv $serverVenvDir 2>&1 | Out-Null
-            }
-            if (Test-Path $serverVenvPython) { $created = $true }
-        }
-        if (-not $created) {
-            $ErrorActionPreference = $prevEAP
+    try {
+    try {
+    if (-not (New-IndexVenv -Dir $serverVenvDir -Python $serverVenvPython -PythonCmd $PythonCmd)) {
             Write-Warn "Server venv creation failed -- $serverVenvPython not found (spawn_passive falls back to the shared venv)"
             return
-        }
+    }
+    } catch [System.IO.IOException], [System.UnauthorizedAccessException], [System.Management.Automation.RuntimeException] {
+        Write-Warn "Server venv repair failed: $($_.Exception.Message) -- spawn_passive falls back to the shared venv"
+        return
     }
 
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            & uv pip install --python $serverVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1 | Out-Null
+        if ($script:UvCommand) {
+            Invoke-IndexUvPipInstall --python $serverVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet | Out-Null
         } else {
             & $serverVenvPython -m pip install "$ZddDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
-            $ErrorActionPreference = $prevEAP
             Write-Warn "Server venv zdd install failed (exit $LASTEXITCODE) -- spawn_passive falls back to the shared venv"
             return
         }
@@ -1333,20 +1355,21 @@ function Install-ServerVenv {
     Remove-ConsoleTrampolines -VenvDir $serverVenvDir
 
     $serverPkgSpec = "$PluginDir[store,server]"
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
-        $srvOut = & uv pip install --python $serverVenvPython $serverPkgSpec 2>&1 | Out-String
+    if ($script:UvCommand) {
+        $srvOut = Invoke-IndexUvPipInstall --python $serverVenvPython $serverPkgSpec | Out-String
     } else {
         $srvOut = & $serverVenvPython -m pip install $serverPkgSpec 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
         Write-Warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
         Write-Host $srvOut
         return
     }
-    $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $serverVenvDir
     Write-Ok "Server venv provisioned: $serverVenvDir"
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
 }
 
 function Install-Runtime {
@@ -1372,7 +1395,17 @@ function Install-Runtime {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     Write-Ok "Directories: $InstallDir"
+    $script:UvCommand = Get-IndexUv
+    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using Python venv/pip fallback' }
 
+    $buildMutex = Enter-IndexBuildLock -VenvPath $VenvDir
+    try {
+    $preparationMutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+    if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+        Write-Skip 'Newer runtime or stamp superseded runtime preparation'
+        return
+    }
     # Detach an invalid active marker before any rebuild. If provisioning fails
     # later, no success-shaped current-version pointer remains.
     $activeMarker = Join-Path $InstallDir 'current-version'
@@ -1446,45 +1479,14 @@ function Install-Runtime {
             catch { Write-Fail "Could not remove the unsigned slot venv (in use?): $_ -- refusing to leave a non-SSH-invocable runtime in place"; exit 1 }
         }
     }
+    } finally {
+        [void]$preparationMutex.ReleaseMutex(); $preparationMutex.Dispose()
+    }
 
-    if (-not (Test-Path $VenvPython)) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        Invoke-VersionedSlotClean
-        # Prefer a signed base Python via `python -m venv --copies`: the signed
-        # python.exe is *copied* into the slot (no uv trampoline), so it is BOTH
-        # spawnable over a non-interactive SSH logon AND SAC-allowed -- the
-        # invariant the agent-index CLI SSH transport depends on. Fall back to
-        # uv (unsigned trampoline) only when no signed base is present.
-        $signedBase = Get-SignedBasePython
-        $created = $false
-        if ($signedBase) {
-            # --clear so a leftover non-empty slot dir (partial prior build)
-            # doesn't fail `venv` and force the uv (trampoline) fallback.
-            & $signedBase -m venv --copies --clear $VenvDir 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $VenvPython)) {
-                $created = $true
-                Write-Ok "Venv created from signed Python ($signedBase)"
-            } else {
-                Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
-            }
-        }
-        if (-not $created) {
-            if (Get-Command uv -ErrorAction SilentlyContinue) {
-                # Run uv from a trusted CWD (SystemDrive root), never the profile
-                # mount -- launching the WinGet uv.exe reparse shim with the
-                # profile as CWD is blocked on SAC/profile-mount Cloud PCs.
-                $prevLoc = Get-Location
-                Set-Location "$env:SystemDrive\"
-                try { & uv venv $VenvDir --allow-existing 2>&1 | Out-Null } finally { Set-Location $prevLoc }
-            } else {
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-            }
-        }
-        $ErrorActionPreference = $prevEAP
-        if (-not (Test-Path $VenvPython)) { Write-Fail "Venv creation failed -- $VenvPython not found"; exit 1 }
-        Write-Ok 'Venv created'
-    } else { Write-Skip 'Venv already exists' }
+    if (-not (Test-Path -LiteralPath $VenvPython)) { Invoke-VersionedSlotClean }
+    if (-not (New-IndexVenv -Dir $VenvDir -Python $VenvPython -PythonCmd $pythonCmd)) {
+        Write-Fail "Runtime venv failed health validation: $VenvDir"; exit 1
+    }
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -1492,8 +1494,8 @@ function Install-Runtime {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
+        if ($script:UvCommand) {
+            $zddOut = Invoke-IndexUvPipInstall --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
         } else {
             $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
         }
@@ -1516,8 +1518,8 @@ function Install-Runtime {
     # the non-uv (bare-pip) fallback below can still resolve it.
     $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
     if ($ProcutilDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $procutilOut = & uv pip install --python $VenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet 2>&1
+        if ($script:UvCommand) {
+            $procutilOut = Invoke-IndexUvPipInstall --python $VenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
         } else {
             $procutilOut = & $VenvPython -m pip install "$ProcutilDir" 2>&1
         }
@@ -1545,8 +1547,8 @@ function Install-Runtime {
     $installRole = Get-ActivationRole
     if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
     $pkgSpec = if ($installRole -eq 'host') { "$PluginDir[store,server]" } else { "$PluginDir" }
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
-        $out = & uv pip install --python $VenvPython $pkgSpec 2>&1 | Out-String
+    if ($script:UvCommand) {
+        $out = Invoke-IndexUvPipInstall --python $VenvPython $pkgSpec | Out-String
     } else {
         $out = & $VenvPython -m pip install $pkgSpec 2>&1 | Out-String
     }
@@ -1561,8 +1563,6 @@ function Install-Runtime {
     Write-Ok 'Package installed: agent-index'
 
     Install-ServerVenv -InstallRole $installRole -PythonCmd $pythonCmd
-
-    Deploy-SetupGatedBinstub
 
     $prevVersion = ''
     if ($VersionedRuntime) {
@@ -1581,10 +1581,12 @@ function Install-Runtime {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
             exit 1
         }
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
     }
 
-    Write-Manifest
+    if (-not (Publish-IndexRuntime)) {
+        if ($script:RuntimePublicationSuperseded) { return }
+        exit 1
+    }
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -1594,45 +1596,17 @@ function Install-Runtime {
     else { Write-Fail 'Verification: module import failed'; exit 1 }
 
     if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
+    } finally {
+        [void]$buildMutex.ReleaseMutex(); $buildMutex.Dispose()
+    }
 }
 
 function Write-Manifest {
-    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-    $kind = Get-SourceKind -PluginPath $PluginDir
-    $ver = '0.0.0'
-    $pyproj = Join-Path $PluginDir 'pyproject.toml'
-    if (Test-Path $pyproj) {
-        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
-    }
-    $commit = $null; $branch = $null; $dirty = $false
-    if ($kind -eq 'local') {
-        $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
-        $git = Get-GitInfo -Path $repoRoot
-        $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
-    }
-    $manifest = [ordered]@{
-        schema_version = 3
-        service        = 'agent-index'
-        deployed_at    = (Get-Date -Format 'o')
-        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
-        source         = [ordered]@{
-            kind    = $kind
-            path    = ($PluginDir -replace '\\', '/')
-            repo    = 'copilot-extensions'
-            plugin  = 'agent-index'
-            version = $ver
-            commit  = $commit
-            branch  = $branch
-            dirty   = $dirty
-        }
-        venv           = ($LinkDir -replace '\\', '/')
-        runtime        = 'python'
-    }
-    $tmp = "$manifestPath.tmp"
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
-    Write-Ok "Deploy manifest written (source: $kind)"
+    Write-DeployManifest -Service 'agent-index' -Plugin 'agent-index' `
+        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
+        -SourcePathOverride $env:COPILOT_PLUGIN_STAGED_FROM `
+        -GetSourceKind { param($path) Get-SourceKind -PluginPath $path } `
+        -GetGitInfo { param($path) Get-GitInfo -Path (Split-Path $path) }
 }
 
 function Get-MachineRole {
@@ -1734,10 +1708,20 @@ function Install-Engine {
         Write-Skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
         return $false
     }
-    if ((Test-Path $EngineVenvPython) -and -not $Upgrade) {
+    $cachedMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
+    try {
+    if ((Test-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython) -and -not $Upgrade) {
         Write-Skip "Engine runtime already provisioned (durable venv preserved): $EngineVenv"
         return $true
     }
+    } finally {
+        [void]$cachedMutex.ReleaseMutex(); $cachedMutex.Dispose()
+    }
+    $script:UvCommand = Get-IndexUv
+    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using the engine pip fallback' }
+    $buildMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
+    try {
+    if ((Test-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython) -and -not $Upgrade) { return $true }
     $pythonCmd = $null
     foreach ($candidate in @('python', 'python3', 'py')) {
         $found = Get-Command $candidate -ErrorAction SilentlyContinue
@@ -1759,12 +1743,7 @@ function Install-Engine {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
-        & uv venv $EngineVenv --allow-existing 2>&1 | Out-Null
-    } else {
-        & $pythonCmd -m venv $EngineVenv 2>&1 | Out-Null
-    }
-    if (-not (Test-Path $EngineVenvPython)) {
+    if (-not (New-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython -PythonCmd $pythonCmd -PreferSignedPython $false)) {
         $ErrorActionPreference = $prevEAP
         Write-Warn "Engine venv creation failed -- $EngineVenvPython not found"
         return $false
@@ -1774,12 +1753,16 @@ function Install-Engine {
     # from the vendored lib first so pip can satisfy the requirement.
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            & uv pip install --python $EngineVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1 |
+        if ($script:UvCommand) {
+            Invoke-IndexUvPipInstall --python $EngineVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         } else {
             & $EngineVenvPython -m pip install "$ZddDir" 2>&1 |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Warn 'Engine zdd install failed'; return $false
         }
     }
 
@@ -1794,8 +1777,8 @@ function Install-Engine {
     $engRc = 0
     $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
     if ($ProcutilDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            & uv pip install --python $EngineVenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet 2>&1 |
+        if ($script:UvCommand) {
+            Invoke-IndexUvPipInstall --python $EngineVenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         } else {
             & $EngineVenvPython -m pip install "$ProcutilDir" 2>&1 |
@@ -1832,20 +1815,20 @@ function Install-Engine {
         # agent-procutil's own preinstall above already failed -- skip the
         # rest of the engine install rather than risk silently accepting a
         # stale copy already present in a preserved engine venv.
-    } elseif (Get-Command uv -ErrorAction SilentlyContinue) {
-        $baseOut = & uv pip install --python $EngineVenvPython "$PluginDir" 2>&1
+    } elseif ($script:UvCommand) {
+        $baseOut = Invoke-IndexUvPipInstall --python $EngineVenvPython "$PluginDir"
         $engRc = $LASTEXITCODE
         $engOut = @($baseOut)
         if ($engRc -eq 0) {
-            $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir\server")
+            $pipArgs = @('--python', $EngineVenvPython, "$PluginDir\server")
             if ($Upgrade) { $pipArgs += '--upgrade' }
-            $srvOut = & uv @pipArgs 2>&1
+            $srvOut = Invoke-IndexUvPipInstall @pipArgs
             $engRc = $LASTEXITCODE
             $engOut += @($srvOut)
         }
         if ($engRc -eq 0 -and $torchIdx) {
             Write-Host "  ...    Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)" -ForegroundColor DarkGray
-            $torchOut = & uv pip install --python $EngineVenvPython --index-url $torchIdx --no-deps --reinstall-package torch torch 2>&1
+            $torchOut = Invoke-IndexUvPipInstall --python $EngineVenvPython --index-url $torchIdx --no-deps --reinstall-package torch torch
             $engRc = $LASTEXITCODE
             $engOut += @($torchOut)
         }
@@ -1877,6 +1860,9 @@ function Install-Engine {
     if ($LASTEXITCODE -ne 0) { Write-Warn 'Engine venv built but torch import failed'; return $false }
     Write-Ok "Engine runtime $(if ($Upgrade) { 'updated' } else { 'provisioned' }) (durable venv): $EngineVenv"
     return $true
+    } finally {
+        [void]$buildMutex.ReleaseMutex(); $buildMutex.Dispose()
+    }
 }
 
 function Restart-EngineDaemon {
@@ -2354,57 +2340,205 @@ function Invoke-ServiceCutover {
     }
 }
 
+function Publish-FileAtomically {
+    param([string]$Path, [string]$Content)
+    $Path = [IO.Path]::GetFullPath($Path)
+    $temporary = "$Path.tmp-$PID-$([Guid]::NewGuid().ToString('N'))"
+    $backup = "$temporary.bak"
+    try {
+        [IO.File]::WriteAllText($temporary, $Content, (New-Object Text.UTF8Encoding($false)))
+        for ($attempt = 1; $true; $attempt++) {
+            try {
+                if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, $backup) }
+                else { [IO.File]::Move($temporary, $Path) }
+                return
+            } catch {
+                if ($attempt -ge 20) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
+    }
+}
+
+function New-IndexMutex {
+    param([string]$Name)
+    return (New-Object Threading.Mutex($false, $Name) -ErrorAction Stop)
+}
+
+function Enter-IndexStampLock {
+    param([string]$Scope, [int]$TimeoutSeconds = 20, [string]$LockRoot = $InstallDir)
+    $identity = [IO.Path]::GetFullPath($LockRoot).TrimEnd('/\')
+    if ($env:OS -eq 'Windows_NT') { $identity = $identity.ToLowerInvariant() }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+    $stampHash = [BitConverter]::ToString(
+        $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity))
+    ).Replace('-', '').Substring(0, 24)
+    } finally { $sha.Dispose() }
+    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
+        "Global\CopilotExtensions.AgentIndex.Stamp.$stampHash.$Scope"
+    } else {
+        "CopilotExtensions.AgentIndex.Stamp.$stampHash.$Scope"
+    }
+    try {
+        $stampMutex = New-IndexMutex -Name $stampMutexName
+    } catch [System.UnauthorizedAccessException] {
+        if ($env:OS -ne 'Windows_NT') { throw }
+        Write-Warn "Global $Scope mutex creation denied -- using Local; cross-session serialization is unavailable"
+        $stampMutex = New-IndexMutex -Name $stampMutexName.Replace('Global\', 'Local\')
+    }
+    try {
+        try { $held = $stampMutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds)) }
+        catch [Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw "Timed out waiting for the agent-index $Scope lock." }
+        return $stampMutex
+    } catch { $stampMutex.Dispose(); throw }
+}
+
+function Enter-IndexBuildLock {
+    param([string]$VenvPath, [ValidateRange(0, 180)][int]$TimeoutSeconds = 180)
+    # Use the established 180-second build admission window, not the short stamp wait.
+    return (Enter-IndexStampLock -Scope 'Build' -LockRoot $VenvPath -TimeoutSeconds $TimeoutSeconds)
+}
+
+function Get-IndexUv {
+    $mutex = Enter-IndexStampLock -Scope 'Uv' -LockRoot $InstallDir -TimeoutSeconds 180
+    try {
+        return (Ensure-Uv -InstallRoot $InstallDir)
+    } finally {
+        [void]$mutex.ReleaseMutex(); $mutex.Dispose()
+    }
+}
+
+function Test-IndexPublicationFresh {
+    param([Parameter(Mandatory)][string]$Version, [bool]$AllowDowngrade = $false)
+    if ($AllowDowngrade) { return $true }
+    foreach ($marker in @('current-version', 'stamped-version')) {
+        $path = Join-Path $InstallDir $marker
+        if ((Test-Path -LiteralPath $path) -and
+            (Test-VersionLt -A $Version -B ([IO.File]::ReadAllText($path).Trim()))) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Publish-IndexRuntime {
+    $mutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+        $script:RuntimePublicationSuperseded = $false
+        if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+            $script:RuntimePublicationSuperseded = $true
+            Write-Skip 'Newer runtime or stamp superseded runtime publication'
+            return $false
+        }
+        if (-not (Invoke-VersionedActivate)) { return $false }
+        Deploy-SetupGatedBinstub
+        Write-Manifest
+        return $true
+    } finally {
+        [void]$mutex.ReleaseMutex(); $mutex.Dispose()
+    }
+}
+
+function Materialize-IndexSnapshot {
+    param([string]$SnapshotDir)
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    $libraries = [ordered]@{
+        'agent-zdd' = 'zdd'
+        'agent-procutil' = 'agent-procutil'
+        'agent-dropin-registry' = 'dropin-registry'
+    }
+    $project = Join-Path $SnapshotDir 'pyproject.toml'
+    $text = [IO.File]::ReadAllText($project)
+    foreach ($entry in $libraries.GetEnumerator()) {
+        $destination = Join-Path $SnapshotDir "libs\$($entry.Value)"
+        if (-not (Test-Path -LiteralPath (Join-Path $destination 'pyproject.toml'))) {
+            $source = Resolve-VendoredLib -LibName $entry.Value
+            if (-not $source) { throw "Required snapshot library unavailable: $($entry.Value)" }
+            Copy-Item -LiteralPath $source -Destination $destination -Recurse -ErrorAction Stop
+        }
+        $old = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
+        $text = $text.Replace($old, ('{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value))
+        $nested = Join-Path $destination 'pyproject.toml'
+        [IO.File]::WriteAllText($nested, [IO.File]::ReadAllText($nested).Replace(', editable = true }', ' }'), $utf8)
+    }
+    [IO.File]::WriteAllText($project, $text, $utf8)
+    foreach ($ext in @('ps1', 'sh')) {
+        $source = Join-Path $PluginDir "scripts\installer-engine.$ext"
+        if (-not (Test-Path -LiteralPath $source)) {
+            $source = Join-Path $PluginDir "..\..\libs\installer-engine\installer-engine.$ext"
+        }
+        Copy-Item -LiteralPath $source -Destination (Join-Path $SnapshotDir "scripts\installer-engine.$ext") -Force
+    }
+    $sh = Join-Path $SnapshotDir 'scripts\install.sh'
+    [IO.File]::WriteAllText($sh, [IO.File]::ReadAllText($sh).Replace(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"',
+        '. "$SCRIPT_DIR/installer-engine.sh"'), $utf8)
+    $ps1 = Join-Path $SnapshotDir 'scripts\install.ps1'
+    [IO.File]::WriteAllText($ps1, [IO.File]::ReadAllText($ps1).Replace(
+        '. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')',
+        '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')'), $utf8)
+}
+
+function New-IndexSnapshot {
+    $mutex = Enter-IndexStampLock -Scope 'Snapshot'
+    $temporary = Join-Path $InstallDir "snapshots\.stage-$PID-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        New-Item -ItemType Directory -Path $temporary -Force | Out-Null
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $temporary $_.Name) -Recurse -Force
+        }
+        Materialize-IndexSnapshot -SnapshotDir $temporary
+        Get-ChildItem -LiteralPath $temporary -Directory -Recurse -Force |
+            Where-Object { $exclude -contains $_.Name } |
+            Sort-Object { $_.FullName.Length } -Descending |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+        $hash = & { $PluginDir = $temporary; Get-PayloadHash }
+        $snapshot = Join-Path $InstallDir "snapshots\$SrcVersion-$hash"
+        if (Test-Path -LiteralPath $snapshot) {
+            $existingHash = & { $PluginDir = $snapshot; Get-PayloadHash }
+            if ($existingHash -cne $hash) { throw 'Existing content-addressed snapshot is corrupt' }
+        } else { [IO.Directory]::Move($temporary, $snapshot) }
+        Publish-FileAtomically -Path (Join-Path $InstallDir "stamp-candidate-$SrcVersion") -Content $snapshot
+        return $snapshot
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
+        [void]$mutex.ReleaseMutex(); $mutex.Dispose()
+    }
+}
+
 function Invoke-Stamp {
-    # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
-    # ~/.agent-index/snapshots/<ver>/, record markers, and deploy the setup-gated
-    # binstub -- deferring the venv and durable engine until explicit setup.
     Write-Host ''; Write-Host '=== agent-index stamp (defer runtime to explicit setup) ===' -ForegroundColor Cyan; Write-Host ''
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
-    $stampHash = [BitConverter]::ToString(
-        [Security.Cryptography.SHA256]::Create().ComputeHash(
-            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
-        )
-    ).Replace('-', '').Substring(0, 24)
-    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
-        "Local\CopilotExtensions.AgentIndex.Stamp.$stampHash"
-    } else {
-        "CopilotExtensions.AgentIndex.Stamp.$stampHash"
-    }
-    $stampMutex = New-Object Threading.Mutex($false, $stampMutexName)
-    $stampLockHeld = $false
-    try {
-        try {
-            $stampLockHeld = $stampMutex.WaitOne([TimeSpan]::FromSeconds(20))
-        } catch [Threading.AbandonedMutexException] {
-            $stampLockHeld = $true
-        }
-        if (-not $stampLockHeld) { throw 'Timed out waiting for the agent-index stamp lock.' }
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
-    $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
-    Remove-Item $payloadDirMarker, $payloadOriginMarker -Force -ErrorAction SilentlyContinue
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-    }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText($payloadOriginMarker, $probePayload, $utf8NoBom)
-    [System.IO.File]::WriteAllText($payloadDirMarker, $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
-    Write-Ok "Snapshot: $snapDir"
-    Deploy-SetupGatedBinstub
-    Write-Ok 'Stamped: agent-index binstub on PATH; runtime provisions after explicit setup.'
+    # Never nest snapshot and publication locks: runtime builds may publish too.
+    $snapshot = New-IndexSnapshot
+    $mutex = Enter-IndexStampLock -Scope 'Publish'
+    try {
+        $candidate = [IO.File]::ReadAllText((Join-Path $InstallDir "stamp-candidate-$SrcVersion"))
+        if ($candidate -cne $snapshot) { Write-Skip 'Newer same-version snapshot superseded this stamp'; return }
+        foreach ($marker in @('stamped-version', 'current-version')) {
+            $path = Join-Path $InstallDir $marker
+            if ((Test-Path -LiteralPath $path) -and -not $Force -and
+                (Test-VersionLt -A $SrcVersion -B ([IO.File]::ReadAllText($path).Trim()))) {
+                Write-Skip "Newer $marker superseded this stamp"; return
+            }
+        }
+        Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-origin') -Content $probePayload
+        Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapshot
+        Publish-FileAtomically -Path (Join-Path $InstallDir 'stamped-version') -Content $SrcVersion
+        Deploy-SetupGatedBinstub -PayloadRoot $snapshot
+        Write-Ok "Snapshot: $snapshot"
+        Write-Ok 'Stamped: agent-index binstub on PATH; runtime provisions after explicit setup.'
     } finally {
-        if ($stampLockHeld) { [void]$stampMutex.ReleaseMutex() }
-        $stampMutex.Dispose()
+        [void]$mutex.ReleaseMutex(); $mutex.Dispose()
     }
 }
 
@@ -2516,8 +2650,6 @@ switch ($Action) {
             foreach ($dir in @($InstallDir, $LocalBin)) {
                 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
             }
-            $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
-            [IO.File]::WriteAllText($payloadDirMarker, $probePayload, (New-Object System.Text.UTF8Encoding($false)))
             Deploy-SetupGatedBinstub
         }
         Ensure-Running

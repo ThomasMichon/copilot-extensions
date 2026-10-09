@@ -327,7 +327,7 @@ def _fake_runtime(
         else slot / "bin" / "python"
     )
     if not interpreter.is_file():
-        venv.EnvBuilder(with_pip=False).create(slot)
+        venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
     site_result = subprocess.run(
         [
             str(interpreter),
@@ -365,7 +365,7 @@ def _real_setup_runtime(
         if os.name == "nt"
         else slot / "bin" / "python"
     )
-    venv.EnvBuilder(with_pip=False).create(slot)
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
     site_result = subprocess.run(
         [
             str(interpreter),
@@ -588,7 +588,7 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     slot = install / "versions" / "9.9.9"
     profile.mkdir()
     slot.parent.mkdir(parents=True)
-    venv.EnvBuilder(with_pip=False).create(slot)
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
     interpreter = (
         slot / "Scripts" / "python.exe"
         if os.name == "nt"

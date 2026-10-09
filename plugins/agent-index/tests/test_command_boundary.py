@@ -122,13 +122,13 @@ def test_installers_preserve_two_step_cuda_engine_swap():
 
     assert 'AGENT_INDEX_TORCH_INDEX' in ps
     assert '--no-deps --reinstall-package torch torch' in ps
-    assert '$baseOut = & uv pip install --python $EngineVenvPython "$PluginDir" 2>&1' in ps
+    assert '$baseOut = Invoke-IndexUvPipInstall --python $EngineVenvPython "$PluginDir"' in ps
     assert '"$PluginDir\\server")' in ps
     assert "'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }" in ps
 
     assert 'AGENT_INDEX_TORCH_INDEX' in sh
     assert '--no-deps --reinstall-package torch torch' in sh
-    assert 'uv pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?' in sh
+    assert '_uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?' in sh
     assert '"$PLUGIN_DIR/server")' in sh
     assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
 

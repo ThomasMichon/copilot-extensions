@@ -2043,6 +2043,86 @@ dependency order, optional MCP-extra fallback, launchers and its complete
 coordinator/supervisor lifecycle; only shared acquisition, retry and manifest
 mechanics move into the engine.
 
+`agent-index` uses canonical references on `dev` and shared acquisition,
+native capture, transient retries and manifest writing. Its versioned CLI,
+optional host-server sibling and separately provisioned durable embedding venv
+all use those shared build mechanics. Signed-Python discovery, signature/venv
+health validation, dependency order, Torch/CUDA feeds, engine configuration and
+every activation/service lifecycle remain local. Signed results are accepted
+only after checking the interpreter's venv prefix and `pyvenv.cfg`; an
+unusable result is removed before fallback, even when creation returned zero.
+An existing interpreter alone never proves the engine venv reusable.
+POSIX likewise executes an isolated interpreter probe and requires a distinct
+venv prefix matching the physical venv root before CLI, server or engine reuse
+and after creation. A corrupt, base-interpreter, wrong-prefix or failed-probe
+runtime is repaired or explicitly rejected. uv interpreter selection remains
+unpinned; Windows CLI/server retain signed-first and Python/pip fallback policy,
+while the independent embedding engine keeps its uv-first policy.
+PowerShell package paths consult only the executable accepted by `Ensure-Uv`;
+a rejected but still-discoverable PATH uv is never selected again for packages.
+If no validated uv remains, CLI/server/engine package paths use Python/pip.
+Index uv acquisition and executable validation use one installation-wide guard
+shared by CLI and durable-engine callers. Windows uses the existing mutex
+adapter's `Uv` scope; POSIX uses fd7 with the same OS advisory locking and
+explicit unlock as its other guards. Acquisition admits for at most 180 seconds
+and releases before package/build/publication work. It never waits while owning
+build fd8 or publication fd9; a cheap cached-engine check releases its build
+guard before any acquisition. The shared canonical engine stays unchanged.
+An exception at the optional server repair boundary warns and retains the
+primary runtime's fallback, restoring the caller's error preference in `finally`.
+
+PowerShell Index stamps materialize both engine files and every declared local
+library (`zdd`, `agent-procutil`, `dropin-registry`), with snapshot-local
+non-editable references. The existing ordinal whole-payload hash supplies
+content-addressed immutable snapshot identity, including plugin, engine and
+library bytes and case-distinct paths. Unchanged stamps reuse identical
+snapshots; existing corrupt snapshots fail without replacement. Snapshot
+production and marker/launcher publication use sequential locks, with a
+same-version candidate recheck before atomic marker publication. A delayed
+stamp cannot overwrite a newer candidate's markers or launchers. The same
+installation-keyed publication mutex covers runtime preparation's marker
+removals, activation, payload/launcher publication, manifests and direct
+launcher repair. Runtime freshness is rechecked under that mutex, and activation
+plus related payload/launcher writes remain one publication transaction.
+Windows attempts a global named mutex so separate logon sessions share the guard.
+Only an UnauthorizedAccessException during Global creation permits Local
+fallback, with an explicit warning that cross-session serialization is unavailable;
+unrelated creation errors propagate. Equivalent trailing-separator paths resolve
+to one lock identity, including reentrant Local acquisitions.
+Snapshot production releases its separate lock before publication; no
+publication holder acquires the snapshot lock. Namespaced cell adapters retain
+their independent receipt-lock contract. The POSIX
+stamp retains its owning-payload pointer, whose released payload is already
+self-contained. Neither stamp provisions the embedding stack.
+
+Direct runtime installation additionally holds a target-venv build lock before
+any slot cleanup/repair through package installation, health, activation and
+related publication. Its slot path supplies version scope, so different versions
+can build independently. The optional server sibling inherits that guard; the
+durable engine uses its own target-venv guard. Build admission uses the existing
+180-second window, and all returns/failures release in `finally`. Lock order is
+build then publication; stamp takes snapshot, releases it, then takes publication,
+never a build lock while holding publication. POSIX follows the same target-keyed
+build scope using bounded flock admission or bootstrap Python's stdlib
+`fcntl.flock` on the same inherited descriptor. Both paths explicitly unlock
+before closing the descriptor, so a descendant retaining that open-file
+description cannot retain admission after the callback returns. The stable lock
+inode is not unlinked or replaced, and legacy PID markers are ignored rather
+than reclaimed. These guards do not alter daemon/engine lifecycle.
+POSIX publication uses a separate installation-wide advisory descriptor (fd9),
+while target/version build admission owns fd8. Invalid-marker preparation and
+final freshness checks, activation, payload/launcher writes, stamping and
+manifests all enter that publication guard. Nested publication calls reuse the
+owning scope without reopening fd9; no publication scope acquires build admission,
+and package work stays outside publication.
+
+An original snapshot origin remains provenance, not a required surviving
+authoring directory. The supported PowerShell runtime gate and installer
+authorization prologue use the validated owning payload for the mandatory
+legacy probe when the origin no longer supplies its invocation declaration.
+The probe still validates the complete declaration and installation governance;
+malformed declarations and denied namespace/legacy authorization remain blocking.
+
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine
 files; this is a phased rollout, not a blanket requirement for every runtime
