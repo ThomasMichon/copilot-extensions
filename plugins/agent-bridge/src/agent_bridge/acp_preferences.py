@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any
 
-from .session_preferences import PreferenceApplicationError, clean
+from .session_preferences import PreferenceApplicationError, SOURCES, clean
 
 log = logging.getLogger("agent-bridge")
 
@@ -58,6 +58,22 @@ def _config_index(
 
 
 class AcpPreferencesMixin:
+    def _initialize_preferences(
+        self, source: str, context: str | None, target: dict[str, Any] | None,
+        launch: dict[str, str] | None, confirmed: dict[str, str] | None,
+        provider_intent: bool,
+    ) -> None:
+        if source not in SOURCES:
+            raise ValueError("unsupported preference_source")
+        self.preference_source = source
+        self.context_override = context
+        self.target_preferences = target
+        self.launch_preferences = dict(launch or {})
+        self.confirmed_preferences = dict(confirmed or {})
+        self.provider_intent = provider_intent
+        self._verified_options = None
+        self._preferences_ready = source == "caller-settings"
+
     def _resolve_caller_preferences(self) -> dict[str, str]:
         raise NotImplementedError
 
@@ -133,7 +149,8 @@ class AcpPreferencesMixin:
         advertised = _config_index(config_options, grouped=target_mode)
 
         if (
-            target_mode and not preserving and receipt.get("provider_selected")
+            target_mode and not preserving
+            and (self.provider_intent or receipt.get("provider_selected"))
             and (receipt.get("sources") or {}).get("model") != "launch-profile"
             and "model" not in self.launch_preferences and not self.model_override
         ):

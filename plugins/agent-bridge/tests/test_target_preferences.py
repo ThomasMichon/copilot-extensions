@@ -547,6 +547,56 @@ def test_unreadable_authority_configuration_refuses_startup(monkeypatch, tmp_pat
         config.load_config()
 
 
+@pytest.mark.parametrize("text", [
+    "default_env:\n  AGENT_BRIDGE_PREFERENCE_SOURCE: target-settings\nbad: [",
+    "default_env: false\n",
+    "default_env:\n  AGENT_BRIDGE_PREFERENCE_SOURCE: target-setting\n",
+    "preference_source: target-settings\n",
+])
+def test_invalid_repo_authority_configuration_refuses_fallback(tmp_path, text):
+    from agent_bridge import config
+
+    path = tmp_path / ".copilot-extensions" / "agent-bridge" / "config.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="refusing authority fallback"):
+        config.load_repo_bridge_config(tmp_path)
+
+
+def test_unreadable_repo_authority_configuration_refuses_fallback(monkeypatch, tmp_path):
+    from agent_bridge import config
+
+    path = tmp_path / ".copilot-extensions" / "agent-bridge" / "config.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text("default_env: {}", encoding="utf-8")
+    original = Path.read_text
+
+    def read(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError("test repository read failure")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(ValueError, match="refusing authority fallback"):
+        config.load_repo_bridge_config(tmp_path)
+
+
+@pytest.mark.parametrize("env", [
+    {"COPILOT_PROVIDER_BASE_URL": "http://localhost:1"},
+    {"COPILOT_OFFLINE": "1"},
+])
+def test_real_request_owned_provider_intent_preserves_native_model(monkeypatch, env):
+    monkeypatch.setenv("AGENT_BRIDGE_ACP_MODEL", "target")
+    target = SimpleNamespace(env={SOURCE_ENV: "target-settings", **env}, copilot_args=[])
+    kwargs = client_preferences(target)
+    assert kwargs.pop("preference_source") == "target-settings"
+    assert kwargs["provider_intent"]
+    instance, _ = client(**kwargs)
+    asyncio.run(instance._apply_model_config(options()))
+    assert calls(instance) == {}
+    assert instance.confirmed_preferences["model"] == "native"
+
+
 def test_affinity_reuse_cannot_ignore_explicit_preferences_or_provider():
     from agent_bridge.preference_requests import reused_preference_source
 

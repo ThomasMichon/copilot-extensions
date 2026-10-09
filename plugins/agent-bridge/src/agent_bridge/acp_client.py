@@ -67,7 +67,6 @@ from .acp_subagents import (
     subagent_event_meta,
 )
 from .procgroup import safe_killpg, terminate_windows_tree
-from .session_preferences import SOURCES
 from .acp_preferences import (
     AcpPreferencesMixin, _ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID,
     _ACP_MODEL_ENV, _ACP_EFFORT_ENV, _ACP_PROPAGATE_OFF_ENV, _first_env,
@@ -407,6 +406,7 @@ class AcpClient(AcpPreferencesMixin):
         target_preferences: dict[str, Any] | None = None,
         launch_preferences: dict[str, str] | None = None,
         confirmed_preferences: dict[str, str] | None = None,
+        provider_intent: bool = False,
     ) -> None:
         self._on_event = on_event
         self._on_permission = on_permission
@@ -417,15 +417,10 @@ class AcpClient(AcpPreferencesMixin):
         # See ``_apply_model_config``.
         self.model_override = model_override
         self.effort_override = effort_override
-        if preference_source not in SOURCES:
-            raise ValueError("unsupported preference_source")
-        self.preference_source = preference_source
-        self.context_override = context_override
-        self.target_preferences = target_preferences
-        self.launch_preferences = dict(launch_preferences or {})
-        self.confirmed_preferences = dict(confirmed_preferences or {})
-        self._verified_options: Any = None
-        self._preferences_ready = preference_source == "caller-settings"
+        self._initialize_preferences(
+            preference_source, context_override, target_preferences,
+            launch_preferences, confirmed_preferences, provider_intent,
+        )
 
         self._process: asyncio.subprocess.Process | None = None
         self._connection: ClientSideConnection | None = None

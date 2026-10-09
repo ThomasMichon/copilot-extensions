@@ -58,6 +58,12 @@ def launch_preferences(argv: list[str], env: dict[str, str]) -> dict[str, str]:
     return values
 
 
+def native_provider_requested(env: dict[str, str]) -> bool:
+    return bool(clean(env.get("COPILOT_PROVIDER_BASE_URL"))) or (
+        (clean(env.get("COPILOT_OFFLINE")) or "").lower() in {"1", "true", "yes", "on"}
+    )
+
+
 def execution_receipt(
     argv: list[str], env: dict[str, str] | None, child_pid: int,
 ) -> dict[str, Any]:
@@ -99,9 +105,7 @@ def execution_settings(
     except (OSError, ValueError, UnicodeError):
         status = "error"
     backend = launch_preferences(argv, effective_env)
-    provider_selected = bool(clean(effective_env.get("COPILOT_PROVIDER_BASE_URL"))) or (
-        (clean(effective_env.get("COPILOT_OFFLINE")) or "").lower() in {"1", "true", "yes", "on"}
-    )
+    provider_selected = native_provider_requested(effective_env)
     if provider_selected:
         # An intentionally selected provider's native model is authoritative
         # when it has no explicit COPILOT_MODEL/--model selection.
@@ -157,6 +161,7 @@ def client_preferences(target: Any, db: Any = None, session_id: str = "") -> dic
         options["launch_preferences"] = launch_preferences(
             getattr(target, "copilot_args", []) or [], env,
         )
+        options["provider_intent"] = native_provider_requested(env)
         if db is not None and session_id:
             db.flush()
             rows = db.execute_read(
