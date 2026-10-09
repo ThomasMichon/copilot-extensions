@@ -229,7 +229,7 @@ class ArchiveSource:
         if archived is not None:
             _validate_session_entries(archived, archived=True)
         for ref in sessions.iter_session_refs(
-            live or self.path / ".absent-session-state",
+            live,
             *((archived,) if archived is not None else ()),
         ):
             self.validate()

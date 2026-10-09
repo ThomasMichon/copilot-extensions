@@ -124,6 +124,29 @@ def test_live_preference_and_cold_archives_use_existing_codec(tmp_path):
     assert sessions.read_member(next(r for r in refs if r.kind == "archive"), "events.jsonl")
 
 
+def test_archive_only_source_never_discovers_fabricated_live_root(tmp_path: Path) -> None:
+    from agent_logger.chronicle.source import ReservationStore, SyncedSessionSource
+
+    corpus = tmp_path / "corpus"
+    root = corpus / "repo.codespaces/box"
+    hidden = root / ".absent-session-state" / "session-1"
+    hidden.mkdir(parents=True)
+    (hidden / "events.jsonl").write_bytes(b'{"type":"session.start"}\n')
+    archived = root / "archived"
+    archived.mkdir()
+    with tarfile.open(archived / "session-1.tar.gz", "w:gz") as archive:
+        archive.add(hidden / "events.jsonl", arcname="events.jsonl")
+    refs = list(next(iter_archive_sources(corpus)).iter_sessions())
+    assert [(ref.id, ref.kind) for ref in refs] == [("session-1", "archive")]
+    assert list(sessions.iter_session_refs(None, archived)) == refs
+    assert list(sessions.iter_session_refs(None)) == []
+    source = SyncedSessionSource(corpus, ReservationStore(tmp_path / "state.db"))
+    found = source.scan()
+    assert len(found) == 1
+    assert found[0].session_id == "session-1"
+    assert found[0].archived is True
+
+
 def test_process_log_representations_delegate_without_coalescing(tmp_path):
     logs = tmp_path / "host.containers/worker/logs"
     logs.mkdir(parents=True)
