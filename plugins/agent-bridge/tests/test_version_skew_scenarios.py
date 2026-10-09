@@ -72,7 +72,7 @@ def test_strict_resume_fails_closed_against_older_daemon():
 
 def test_strict_resume_proceeds_against_new_enough_daemon():
     c = BridgeClient("http://127.0.0.1:0", "t")
-    c.health = lambda: {"status": "ok", "protocol_version": 27, "min_protocol_version": 1}  # type: ignore[method-assign]
+    c.health = lambda: {"status": "ok", "protocol_version": 28, "min_protocol_version": 1}  # type: ignore[method-assign]
     sent = {}
 
     def fake_request(method, path, *, params=None, request_timeout=None):

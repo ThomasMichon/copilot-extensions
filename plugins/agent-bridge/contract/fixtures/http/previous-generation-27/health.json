@@ -1,8 +1,8 @@
 {
   "captured_from": {
-    "commit": "65556708a8e5d368b56cfdb1a876bbdcd2f850eb",
+    "commit": "7ee6a643e3da36c91258ef7ed4ade7773bcf2db8",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 28,
+    "protocol_generation": 27,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
     "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
     "source_sha256": "df5f2392d27d20be304fc978c86a16a6f6f7fd8d47062e2f95f4770d921c9727"
@@ -21,7 +21,7 @@
       "topology_ready": false,
       "credential_relay_ready": false,
       "draining": false,
-      "protocol_version": 28,
+      "protocol_version": 27,
       "min_protocol_version": 1,
       "ssh_carriers": {
         "total": 0,
