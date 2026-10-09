@@ -1,0 +1,9 @@
+{
+  "comment": "Permit verified source-owned PR rebases with exact remote leases",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

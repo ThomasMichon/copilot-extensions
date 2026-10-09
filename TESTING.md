@@ -372,6 +372,20 @@ timeout/cancellation cleanup and run in the Agent Bridge CI lane.
 
 ## Test portfolio invariants
 
+Owned-PR rebase publication keeps representative real-Git success, reviewer-race
+and pre-push rejection contracts in the default/guard lane. The existing
+agent-worktrees changed-plugin gate scopes those checks to affected PRs. The full
+head-scheme/publication-flow and refusal matrix is opt-in and owned by the
+manually dispatched `PR rebase full` workflow on Linux and Windows:
+
+```powershell
+$env:AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE = '1'
+python tools\run-plugin-tests.py agent-worktrees -k owned_pr_rebase --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
+```
+
+Use the exhaustive mode when changing replay authorization or its publication
+adapters; unrelated PRs and ordinary promotion runs do not pay the matrix cost.
+
 Required pull-request CI is a fast regression gate, not the complete test
 inventory. Its design target is a wall time below five minutes under normal
 runner variance. This is not the runner's timeout: containment budgets such as

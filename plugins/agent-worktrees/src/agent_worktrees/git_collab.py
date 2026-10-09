@@ -96,6 +96,11 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
     head = git_ops.git(
         "rev-parse", "--short", "HEAD", cwd=worktree_path, check=False,
     ).stdout.strip()
+    from . import pr_rebase
+    try:
+        pr_rebase.record_synced(worktree_id, config, worktree_path)
+    except (OSError, git_ops.GitError) as exc:
+        output.warn(f"PR rebase proof could not be recorded: {exc}")
     suffix = f" (was {behind} behind)" if behind and behind != "0" else ""
     print(f"[OK] {branch} synced onto {upstream}{suffix}; HEAD now {head}.")
     return True
@@ -350,4 +355,3 @@ def merge_to_feature(
             return False
         print(f"[OK] {feature} pushed to {remote}.")
     return True
-

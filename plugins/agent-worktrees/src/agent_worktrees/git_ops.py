@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import env_scrub, push_timeout
 
 log = logging.getLogger("agent-worktrees")
@@ -101,6 +103,7 @@ def resolve_to_anchor(repo_path: Path) -> Path:
                 ["git", "-C", str(repo_path), "rev-parse", "--git-common-dir"],
                 capture_output=True, text=True, timeout=5,
                 env=repository_identity_env(),
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 common = Path(r.stdout.strip())
@@ -154,6 +157,7 @@ def git(
     timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
+    isolated_repository: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a git command with consistent error handling.
 
@@ -162,12 +166,8 @@ def git(
         cwd: Working directory for the command.
         check: If True, raise GitError on non-zero exit.
         capture: If True, capture stdout and stderr.
-        timeout: If set, seconds to wait before ``subprocess.run`` raises
-            ``subprocess.TimeoutExpired``. Default ``None`` keeps the historical
-            unbounded behavior for every caller that does not opt in (e.g.
-            network ops like ``fetch``/``push``). Read-only inspection callers
-            (worktree classification) pass a bound so a single stalled ``git``
-            spawn cannot hang them indefinitely.
+        timeout: Optional subprocess bound; None preserves unbounded network ops.
+            Inspection callers pass a bound to prevent stalled probes.
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's client-side
             guard hooks cannot block/corrupt trusted plumbing that only re-arranges
             ALREADY-committed content (squash re-commit, rebase). **``push()`` never passes
@@ -175,18 +175,21 @@ def git(
             must be allowed to block a non-compliant push (not ``--no-verify``; scopes the
             disable to internal git ops). #3707.
         kill_tree: If True (real timeout), kill the whole tree on a stall -- :mod:`push_timeout`.
+        isolated_repository: Ignore inherited Git repo/config selectors; use cwd.
     Returns:
         CompletedProcess with stdout/stderr as strings.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
-    env = env_scrub.scrub_python_runtime_env({**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    env = repository_identity_env() if isolated_repository else os.environ.copy()
+    env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
     if kill_tree and timeout is not None:
         result = push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
     else:
         result = subprocess.run(
             cmd, cwd=cwd, capture_output=capture, text=True,
             encoding="utf-8", errors="replace", env=env, timeout=timeout,
+            **no_window_kwargs(),
         )
     if check and result.returncode != 0:
         raise GitError(cmd, result.returncode, result.stderr.strip())
@@ -853,6 +856,8 @@ class PushResult:
     ok: bool
     stderr: str = ""
     stdout: str = ""
+    rebase_base_sha: str = ""
+    published_head_sha: str = ""
 
     def __bool__(self) -> bool:
         return self.ok
@@ -902,6 +907,11 @@ class PushResult:
             parts.append(f"git (stderr): {self.stderr.strip()}")
         return ("\n" + "\n".join(parts)) if parts else ""
 
+def is_commit_ancestor(ancestor: str, descendant: str, *, cwd: str | Path) -> bool:
+    """Strict object ancestry, unlike the content-equivalent merge predicate."""
+    return git("--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant, cwd=cwd, check=False, isolated_repository=True).returncode == 0
+
+
 def push(
     remote: str,
     branch: str,
@@ -926,28 +936,14 @@ def push(
     must be allowed to block a non-compliant push. Worktree-originated callers wrap this with
     ``hooks.allow_pr_push()``.
     """
-    if force_with_lease_expect is not None and not is_branch_merged(
+    if force_with_lease_expect is not None and not is_commit_ancestor(
         force_with_lease_expect, branch.split(":", 1)[0] if ":" in branch else branch, cwd=cwd):
         return PushResult(ok=False, stderr=f"Refusing: {force_with_lease_expect} not an ancestor.")
-    extra = ([f"--force-with-lease={branch.rsplit(':', 1)[-1]}:{force_with_lease_expect}"]
-             if force_with_lease_expect is not None else
-             ["--force-with-lease"] if force_with_lease else [])
-    auth_args = _auth_config_args(remote, cwd=cwd)
-    # Retry without an injected auth override on failure (#900).
-    attempts = [auth_args, []] if auth_args else [[]]
-    last_stderr = last_stdout = ""
-    for prefix in attempts:
-        try:
-            result = git(
-                *prefix, "push", remote, branch, *extra, "--quiet",
-                cwd=cwd, check=False, timeout=timeout, kill_tree=True,
-            )
-        except subprocess.TimeoutExpired as exc:
-            return PushResult(ok=False, stderr=push_timeout.message(exc, timeout))
-        if result.returncode == 0:
-            return PushResult(ok=True)
-        last_stderr, last_stdout = result.stderr or last_stderr, result.stdout or last_stdout
-    return PushResult(ok=False, stderr=last_stderr, stdout=last_stdout)
+    from .git_push_transport import push as transport
+    return transport(
+        remote, branch, cwd=cwd, force_with_lease=force_with_lease,
+        force_with_lease_expect=force_with_lease_expect, timeout=timeout,
+    )
 
 
 # --- Cross-account authentication (#29) -------------------------------------
@@ -964,7 +960,7 @@ def push(
 
 def _remote_url(remote: str, *, cwd: str | Path) -> str | None:
     """Return the configured URL for *remote*, or None."""
-    result = git("remote", "get-url", remote, cwd=cwd, check=False)
+    result = git("remote", "get-url", remote, cwd=cwd, check=False, isolated_repository=True)
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
@@ -1210,7 +1206,7 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
         # context points at (see :func:`repository_identity_env`).
         probe = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--git-dir"],
-            capture_output=True, text=True, timeout=10, env=env,
+            capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
         )
         if probe.returncode != 0:
             return False
@@ -1229,12 +1225,12 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
             with _credential_pin_lock(path, git_dir):
                 subprocess.run(
                     ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
-                    capture_output=True, text=True, timeout=10, env=env,
+                    capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
                 )
                 subprocess.run(
                     ["git", "-C", str(path), "config", "--local", "--unset-all",
                      f"{key}.username"],
-                    capture_output=True, text=True, timeout=10, env=env,
+                    capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
                 )
             return False
         with _credential_pin_lock(path, git_dir):
@@ -1245,20 +1241,20 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
             )
             subprocess.run(
                 ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
             subprocess.run(
                 ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", ""],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
             subprocess.run(
                 ["git", "-C", str(path), "config", "--local", f"{key}.username", login],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
             result = subprocess.run(
                 ["git", "-C", str(path), "config", "--local", "--add",
                  f"{key}.helper", helper_script],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
         return result.returncode == 0
     except Exception:
