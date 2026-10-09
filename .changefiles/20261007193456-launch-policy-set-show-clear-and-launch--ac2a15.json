@@ -1,0 +1,9 @@
+{
+  "comment": "launch-policy set/show/clear and launch-check: a host-registered command every CodeSpace worker launch asks first (copilot attached/detached); fails closed, refusal exits 79",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

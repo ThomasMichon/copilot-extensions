@@ -340,11 +340,21 @@ def build_codespace_spawner(
     an auth-light validation. ``unexpected_reap_seconds`` / ``active_reap_seconds``
     bound how long the detached far-side Host holds a front-less idle / active
     child before letting it go (so a reconnecting front can resume; #145).
+    Every spawn first asks the host's launch policy (``venue_launch_policy``).
     """
     from .spawner import CodeSpaceSpawner
 
+    class _PolicyGatedSpawner(CodeSpaceSpawner):
+        async def spawn(self, child_argv, **kwargs):
+            import asyncio
+
+            from ..venue_launch_policy import ensure_codespace_launch_allowed
+
+            await asyncio.to_thread(ensure_codespace_launch_allowed, codespace_name)
+            return await super().spawn(child_argv, **kwargs)
+
     transport = CodeSpaceTransport(codespace_name, repo, relay_port=relay_port)
-    return CodeSpaceSpawner(
+    return _PolicyGatedSpawner(
         transport, remote_dir=remote_dir, ready_timeout=ready_timeout,
         unexpected_reap_seconds=unexpected_reap_seconds,
         active_reap_seconds=active_reap_seconds,
