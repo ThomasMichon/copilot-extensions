@@ -524,6 +524,36 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-09 — Index POSIX advisory-lock ownership corrected
+
+- Scoped follow-up to the new POSIX helper at local head
+  `d84c33a7916ae60aaa47682ee470922c85a4e492`, before publication. A PID symlink
+  compare/readlink/delete sequence cannot atomically reclaim a stale owner:
+  another caller may replace it between the final comparison and deletion.
+  Descriptor close alone also fails when descendants retain the same open-file
+  description.
+- Replaced PID reclamation with real OS advisory locking. No-flock/macOS
+  admission uses bootstrap Python's stdlib fcntl on inherited fd8, preserving
+  its open-file description in the shell. Cleanup explicitly unlocks before
+  close in both normal flock and fcntl paths, preserves callback status, and
+  surfaces acquisition/unlock failures. Admission remains bounded to 180
+  seconds; no network or third-party prerequisites were added.
+- Real process regressions keep a harmless descendant alive with fd8 after
+  callback return, then prove another caller immediately acquires the same
+  target. Both paths also time out against a real held flock, preserve stale
+  PID evidence unchanged and retain one stable lock inode across reuse.
+  Children finish through a fixture signal, without termination.
+- Windows code, parent policy changes, canonical engine and existing
+  changefile are untouched. Measurements: shell 2030 -> 2064 (+34),
+  PowerShell remains 2651, wrappers 4715, canonical pair 881, aggregate 5596.
+  Native macOS and remaining native revalidation are not claimed; integration,
+  publication and the overall effort remain coordinator-owned/open.
+- Bounded validation: four OS-backed edge regressions passed, combined
+  installer/admission selection 106 passed, full host suite 829 passed /
+  11 skipped, disconnected full suite 741 passed / 99 skipped. Guards,
+  shell parsing and F/E9 lint passed. One admission attempt deferred with 75;
+  the authorized bounded retry completed without bypassing containment.
+
 ### 2026-10-09 — Index direct-build admission and user-mode mutex fallback
 
 - Continued only PR #5885 from published head

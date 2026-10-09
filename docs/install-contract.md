@@ -2058,8 +2058,12 @@ durable engine uses its own target-venv guard. Build admission uses the existing
 180-second window, and all returns/failures release in `finally`. Lock order is
 build then publication; stamp takes snapshot, releases it, then takes publication,
 never a build lock while holding publication. POSIX follows the same target-keyed
-build scope using bounded flock admission or an owned-PID fallback, released at
-the build subshell boundary. These guards do not alter daemon/engine lifecycle.
+build scope using bounded flock admission or bootstrap Python's stdlib
+`fcntl.flock` on the same inherited descriptor. Both paths explicitly unlock
+before closing the descriptor, so a descendant retaining that open-file
+description cannot retain admission after the callback returns. The stable lock
+inode is not unlinked or replaced, and legacy PID markers are ignored rather
+than reclaimed. These guards do not alter daemon/engine lifecycle.
 
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine

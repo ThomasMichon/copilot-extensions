@@ -1185,38 +1185,72 @@ _with_index_build_lock() (
         return 1
     fi
     timeout=$((10#$timeout))
-    local parent lock pid_lock="" owner deadline=$((SECONDS + timeout))
+    local parent lock lock_python="" use_flock=0
     parent="$(dirname "$target")"
     mkdir -p "$parent" || return 1
     lock="$parent/.$(basename "$target").build.lock"
-    _release_index_build_lock() {
-        if [[ -n "$pid_lock" ]]; then
-            [[ "$(readlink "$pid_lock" 2>/dev/null || true)" == "${BASHPID:-$$}" ]] && rm -f "$pid_lock"
-        else
-            exec 8>&-
-        fi
-    }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
-        exec 8>"$lock"
+        use_flock=1
+    else
+        lock_python="$(_bootstrap_python)" || lock_python=""
+        if [[ -n "$lock_python" ]]; then
+            lock_python="$("$lock_python" -I -c 'import fcntl, sys; print(sys._base_executable)' 2>/dev/null)" || lock_python=""
+        fi
+        if [[ -z "$lock_python" ]] || [[ "$("$lock_python" -I -c 'import fcntl; print("index-advisory-lock")' 2>/dev/null)" != index-advisory-lock ]]; then
+            lock_python="$(_find_python)" || {
+                _warn 'Runtime build admission requires a bootstrap Python with stdlib fcntl'
+                return 1
+            }
+            [[ "$("$lock_python" -I -c 'import fcntl; print("index-advisory-lock")' 2>/dev/null)" == index-advisory-lock ]] || {
+                _warn 'Bootstrap Python cannot provide stdlib fcntl build admission'
+                return 1
+            }
+        fi
+    fi
+    _python_index_build_lock() {
+        "$lock_python" -I - "$1" "$timeout" "$target" <<'PY'
+import fcntl
+import sys
+import time
+
+try:
+    if sys.argv[1] == "unlock":
+        fcntl.flock(8, fcntl.LOCK_UN)
+    else:
+        deadline = time.monotonic() + int(sys.argv[2])
+        while True:
+            try:
+                fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for runtime build admission: {sys.argv[3]}")
+                time.sleep(0.05)
+except OSError as error:
+    print(f"Runtime build advisory lock failed: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+    }
+    exec 8>"$lock" || { _warn "Cannot open runtime build admission lock: $lock"; return 1; }
+    _release_index_build_lock() {
+        local rc=$?
+        trap - EXIT
+        if [[ "$use_flock" == 1 ]]; then
+            if ! flock -u 8; then _warn "Cannot unlock runtime build admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
+        else
+            if ! _python_index_build_lock unlock; then _warn "Cannot unlock runtime build admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
+        fi
+        exec 8>&-
+        exit "$rc"
+    }
+    if [[ "$use_flock" == 1 ]]; then
         if ! flock -w "$timeout" 8; then
             _warn "Timed out waiting for runtime build admission: $target"
             exec 8>&-
             return 1
         fi
     else
-        pid_lock="$lock.pid"
-        until ln -s "${BASHPID:-$$}" "$pid_lock" 2>/dev/null; do
-            owner="$(readlink "$pid_lock" 2>/dev/null || true)"
-            if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null \
-                && [[ "$(readlink "$pid_lock" 2>/dev/null || true)" == "$owner" ]]; then
-                rm -f "$pid_lock"
-            elif ((SECONDS >= deadline)); then
-                _warn "Timed out waiting for runtime build admission: $target"
-                return 1
-            else
-                sleep 1
-            fi
-        done
+        if ! _python_index_build_lock lock; then exec 8>&-; return 1; fi
     fi
     trap '_release_index_build_lock' EXIT
     "$@"

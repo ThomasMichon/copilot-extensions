@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+import time
 import pytest
+
+if os.name != "nt":
+    import fcntl
 
 from test_install_engine_adoption import environment, function, run_ps
 from test_installer_publication_and_health import publication_fixture
@@ -201,6 +206,9 @@ def test_posix_build_timeout_and_failure_release(tmp_path, fallback):
         pytest.skip("native POSIX bash is unavailable")
     script = f"""
 {function("_with_index_build_lock", "sh")}
+{function("_bootstrap_python", "sh")}
+{function("_find_python", "sh")}
+LINK_DIR='{tmp_path / "missing-bootstrap-slot"}'
 _warn() {{ echo "$*" >&2; }}
 export COPILOT_EXT_NO_FLOCK={1 if fallback else 0}
 target='{tmp_path / "versions/1.0.0"}'
@@ -216,9 +224,13 @@ _with_index_build_lock "$target" success_build
     assert result.returncode == 0, result.stderr
     assert "released" in result.stdout
     parent = tmp_path / "versions"
-    # Hold an ordinary same-target lease without touching any production process.
-    if fallback:
-        (parent / ".1.0.0.build.lock.pid").symlink_to(str(os.getpid()))
+    # Legacy PID evidence is ignored; the inode is never replaced or unlinked.
+    legacy = parent / ".1.0.0.build.lock.pid"
+    legacy.symlink_to("2147483647")
+    lock = parent / ".1.0.0.build.lock"
+    inode = lock.stat().st_ino
+    with lock.open("r+") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
         result = subprocess.run([bash, "-c", script.split("fail_build()", 1)[0] + """
 INDEX_BUILD_LOCK_TIMEOUT_SECONDS=0
 never() { echo forbidden; }
@@ -227,3 +239,66 @@ _with_index_build_lock "$target" never
         assert result.returncode == 1
         assert "Timed out waiting" in result.stderr
         assert "forbidden" not in result.stdout
+    result = subprocess.run([bash, "-c", script.replace(
+        f"[[ ! -L '{legacy}' ]] || exit 97", ":",
+    )], env=environment(tmp_path), capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert legacy.is_symlink() and os.readlink(legacy) == "2147483647"
+    assert lock.stat().st_ino == inode
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_admission_unlocks_shared_descriptor_while_descendant_is_alive(tmp_path, fallback):
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
+        pytest.skip("native POSIX bash is unavailable")
+    ready, stop, done = (tmp_path / name for name in ("ready", "stop", "done"))
+    child_code = (
+        "import os, pathlib, time\n"
+        "os.fstat(8)\n"
+        f"pathlib.Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+        "deadline = time.monotonic() + 10\n"
+        f"while not pathlib.Path({str(stop)!r}).exists() and time.monotonic() < deadline:\n"
+        "    os.fstat(8)\n"
+        "    time.sleep(0.02)\n"
+        f"pathlib.Path({str(done)!r}).write_text('done')\n"
+    )
+    prelude = f"""
+{function("_with_index_build_lock", "sh")}
+{function("_bootstrap_python", "sh")}
+{function("_find_python", "sh")}
+LINK_DIR='{tmp_path / "missing-bootstrap-slot"}'
+_warn() {{ echo "$*" >&2; }}
+export COPILOT_EXT_NO_FLOCK={1 if fallback else 0}
+target='{tmp_path / "versions/1.0.0"}'
+"""
+    try:
+        result = subprocess.run([bash, "-c", prelude + f"""
+spawn_holder() {{
+    '{sys.executable}' -I -c {shlex.quote(child_code)} >'{tmp_path / "child.log"}' 2>&1 &
+    deadline=$((SECONDS + 5))
+    while [[ ! -f '{ready}' ]]; do
+        ((SECONDS < deadline)) || return 97
+        sleep 0.02
+    done
+}}
+_with_index_build_lock "$target" spawn_holder
+"""], env=environment(tmp_path), capture_output=True, text=True, timeout=20)
+        assert result.returncode == 0, result.stderr
+        assert ready.exists(), (tmp_path / "child.log").read_text()
+        os.kill(int(ready.read_text()), 0)
+        assert not done.exists()
+        result = subprocess.run([bash, "-c", prelude + """
+INDEX_BUILD_LOCK_TIMEOUT_SECONDS=0
+admitted() { echo reacquired; }
+_with_index_build_lock "$target" admitted
+"""], env=environment(tmp_path), capture_output=True, text=True, timeout=20)
+        assert result.returncode == 0, result.stderr
+        assert "reacquired" in result.stdout
+        assert not done.exists()
+    finally:
+        stop.write_text("stop")
+        deadline = time.monotonic() + 10
+        while ready.exists() and not done.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+    assert not ready.exists() or done.exists(), "harmless descendant did not finish"
