@@ -62,3 +62,10 @@ def test_kind_wakes_sweep_only_for_post_tool_use_with_targets():
     assert smc._kind_wakes_sweep("sessionStart", None) is False
     assert smc._kind_wakes_sweep("snapshot", None) is False
     assert smc._kind_wakes_sweep("statusPushed", None) is False
+
+
+def test_kind_wakes_sweep_unconditionally_for_handoff_wake():
+    # No targets of its own -- it exists purely to wake the loop for a
+    # just-persisted handoff registration, never a cached status segment.
+    assert smc._kind_wakes_sweep("handoffWake", None) is True
+    assert smc._kind_wakes_sweep("handoffWake", []) is True
