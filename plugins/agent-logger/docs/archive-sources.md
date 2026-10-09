@@ -83,6 +83,9 @@ Conflicting or unprovable representations remain on disk and the live session
 is retained. Verification also checks overlaps, so hub reconciliation cannot
 retire a live directory based on one valid archive beside a divergent sibling.
 Ordinary single-format tar verification remains unchanged.
+Removing one archive representation retains the ID's shared selector sidecars
+while any other registered representation remains, even if that sibling is
+unreadable. Removing the last representation also removes its sidecars.
 
 ZIP descriptor mutation checks include size, mtime, and ctime. POSIX ctime
 detects same-size in-place rewrites even if the writer restores mtime; Windows

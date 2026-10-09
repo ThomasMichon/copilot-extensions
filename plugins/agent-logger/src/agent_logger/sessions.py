@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 
 from agent_logger.session_codecs import (
     ArchiveMemberDigest,
+    _validate_member_name,
 )
 from agent_logger.session_codecs import (
     Codec as Codec,
@@ -58,9 +59,6 @@ from agent_logger.session_codecs import (
 )
 from agent_logger.session_codecs import (
     ZipCodec as ZipCodec,
-)
-from agent_logger.session_codecs import (
-    _validate_member_name,
 )
 
 if TYPE_CHECKING:
@@ -658,10 +656,12 @@ def restore_session(ref: SessionRef, dest_root: Path) -> Path:
 
 
 def remove_archive(ref: SessionRef) -> None:
-    """Delete an archive and its sidecars from its store."""
+    """Delete one representation, retaining shared sidecars while siblings remain."""
     if ref.kind != "archive" or ref.store is None:
         return
     ref.path.unlink(missing_ok=True)
+    if _archive_refs_for_id(ref.id, ref.store):
+        return
     for member in SIDECAR_MEMBERS:
         (ref.store / _sidecar_name(ref.id, member)).unlink(missing_ok=True)
 

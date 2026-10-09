@@ -162,6 +162,40 @@ def test_identical_tar_and_zip_are_one_content_proven_session(tmp_path: Path) ->
     assert tar_ref.path.is_file() and zip_ref.path.is_file()
 
 
+@pytest.mark.parametrize("removed_codec", ["targz", "zip"])
+@pytest.mark.parametrize("corrupt_sibling", [False, True])
+def test_removing_one_representation_preserves_shared_selector_sidecars(
+    tmp_path: Path, removed_codec: str, corrupt_sibling: bool
+) -> None:
+    source = _session(tmp_path / "live")
+    (source / "review-annotations.json").write_bytes(b"[]\n")
+    store = tmp_path / "store"
+    refs = {
+        codec: sessions.archive_session(source, store, codec=codec) for codec in ("targz", "zip")
+    }
+    removed = refs[removed_codec]
+    sibling = refs["zip" if removed_codec == "targz" else "targz"]
+    sidecars = {
+        member: (store / f"{source.name}.{member}").read_bytes()
+        for member in sessions.SIDECAR_MEMBERS
+    }
+    if corrupt_sibling:
+        sibling.path.write_bytes(b"unreadable evidence must retain selector metadata")
+
+    sessions.remove_archive(removed)
+    assert not removed.path.exists()
+    assert sibling.path.is_file()
+    assert sessions.read_workspace(sibling)["cwd"] == "/example"
+    assert sessions.read_origin(sibling) == {"source": "test"}
+    for member, expected in sidecars.items():
+        assert (store / f"{source.name}.{member}").read_bytes() == expected
+    assert (source / "events.jsonl").is_file()
+
+    sessions.remove_archive(sibling)
+    assert not sibling.path.exists()
+    assert all(not (store / f"{source.name}.{member}").exists() for member in sidecars)
+
+
 @pytest.mark.parametrize("member", ["events.jsonl", "checkpoints/index.md", "workspace.yaml"])
 def test_divergent_archive_representations_fail_before_first_observation(
     tmp_path: Path, member: str
