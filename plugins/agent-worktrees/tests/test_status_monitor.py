@@ -4079,6 +4079,95 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     assert len(writes) == 2  # startup ownership stamp only; no loop renewal
 
 
+def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, monkeypatch):
+    """Wiring-level regression: a real ``handoffWake`` request, dialed through
+    the actual loopback ``HookIpcServer`` (the same path ``hook_ipc.
+    send_best_effort`` uses), must set the REAL ``wake_event`` the sweep loop
+    waits on -- not merely satisfy the pure ``_kind_wakes_sweep`` predicate in
+    isolation. Exercises ``_decide`` (the resident's real request handler)
+    end to end, the same backoff-at-iteration-boundary quick-exit harness
+    ``test_status_monitor_binds_and_unbinds_resident_push`` uses, but with a
+    hook policy that actually passes ``ready()`` so a real ``HookIpcServer``
+    is constructed."""
+    from agent_worktrees import hook_ipc
+    from agent_worktrees import resident_push
+    from agent_worktrees import status_monitor_cutover as smc
+
+    class _FakeHookClient:
+        def _load_sibling(self, _name):
+            return object()  # any non-None stub satisfies ready()'s check
+
+    lock = tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: _FakeHookClient())
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    runtime_states = iter([False, True])
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
+    monkeypatch.setattr(
+        m,
+        "_monitor_sweep",
+        lambda *args, **kwargs: pytest.fail("sweep must not run while backing off"),
+    )
+    monkeypatch.setattr(m.time, "sleep", lambda *_a, **_k: None)
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            # Only back off the main loop's own iteration-boundary check --
+            # an in-flight hook request's own pre-mutation recheck must
+            # still be admitted ("ready"), or the dial below is refused
+            # before it ever reaches _resident_hook_decision/_kind_wakes_sweep.
+            if checkpoint == "iteration-boundary":
+                return {"status": "backoff", "reason": "test-exit"}
+            return {"status": "ready"}
+
+    monkeypatch.setattr(m.loop_governance_mod, "LoopGovernance", lambda: _Governance())
+
+    bound = []
+    real_bind = resident_push.bind
+
+    def _spy_bind(wake_event, segment_cache):
+        bound.append((wake_event, segment_cache))
+        real_bind(wake_event, segment_cache)
+
+    monkeypatch.setattr(resident_push, "bind", _spy_bind)
+
+    dial_results = []
+
+    class _DialingServer(hook_ipc.HookIpcServer):
+        def start(self) -> None:
+            # Dial AFTER the real (single) start() production calls --
+            # production's own _start_request_surfaces() does
+            # `HookIpcServer(_decide); hook_server.start()`, so dialing
+            # from __init__ would leave this server double-started (the
+            # second start() raising, silently discarding hook_server via
+            # the production startup guard) while the test still happened
+            # to pass because the dial ran before that failure.
+            super().start()
+            endpoint_lock = tmp_path / "dial-endpoint.json"
+            endpoint_lock.write_text(json.dumps(self.rendezvous()), encoding="utf-8")
+            dial_results.append(
+                hook_ipc.send_best_effort(
+                    "handoffWake", {"worktree_id": "wt-1"}, lock_path=endpoint_lock,
+                )
+            )
+
+    monkeypatch.setattr(hook_ipc, "HookIpcServer", _DialingServer)
+
+    assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
+
+    assert dial_results == [True], "the real wire round-trip must be accepted"
+    assert len(bound) == 1
+    wake_event, _segment_cache = bound[0]
+    assert wake_event.is_set(), (
+        "a real handoffWake request through the actual HookIpcServer must "
+        "set the real wake_event the sweep loop waits on, not just satisfy "
+        "the _kind_wakes_sweep predicate in isolation"
+    )
+
+
 def test_status_monitor_binds_and_unbinds_resident_push(tmp_path, monkeypatch):
     """resident_push must be bound to THIS run's real wake-event/segment-cache
     at startup (so a `status_disposition_write` verb served in-process during

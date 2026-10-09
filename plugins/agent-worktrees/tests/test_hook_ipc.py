@@ -61,6 +61,198 @@ def test_dynamic_loopback_endpoint_roundtrip(tmp_path):
         server.close()
 
 
+def test_send_best_effort_matches_and_rejects_an_explicit_installation_context(
+    tmp_path, monkeypatch,
+):
+    """With an explicit installation context selected (not the legacy
+    no-context default), a live server's lock belonging to a DIFFERENT
+    context (mismatched installReceipt/marketplaceId/pluginRoot) must be
+    rejected, and a matching one accepted -- exercising the explicit-context
+    comparison branch of ``_lock_matches_installation_context`` directly,
+    not just the legacy (no-context) branch the other lock tests cover."""
+    from agent_worktrees import registry_paths
+
+    monkeypatch.setattr(
+        registry_paths, "installation_context",
+        lambda: {"installReceipt": "context-A", "marketplaceId": "mkt-A", "pluginRoot": "/root/A"},
+    )
+    server = HookIpcServer(lambda kind, payload, deadline: {})
+    server.start()
+    try:
+        endpoint = dict(server.rendezvous())
+        lock_path = tmp_path / "status-monitor.lock"
+
+        endpoint.update(installReceipt="context-B", marketplaceId="mkt-B", pluginRoot="/root/B")
+        lock_path.write_text(json.dumps(endpoint), encoding="utf-8")
+        assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+
+        endpoint.update(installReceipt="context-A", marketplaceId="mkt-A", pluginRoot="/root/A")
+        lock_path.write_text(json.dumps(endpoint), encoding="utf-8")
+        assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is True
+    finally:
+        server.close()
+
+
+def test_send_best_effort_roundtrip_against_a_real_server(tmp_path):
+    seen = {}
+
+    def decide(kind, payload, deadline):
+        seen.update(kind=kind, payload=payload)
+        return {}
+
+    server = HookIpcServer(decide)
+    server.start()
+    try:
+        lock_path = tmp_path / "status-monitor.lock"
+        lock_path.write_text(json.dumps(server.rendezvous()), encoding="utf-8")
+        accepted = hook_ipc.send_best_effort(
+            "handoffWake", {"worktree_id": "wt-1"}, lock_path=lock_path,
+        )
+        assert accepted is True
+        assert seen == {"kind": "handoffWake", "payload": {"worktree_id": "wt-1"}}
+    finally:
+        server.close()
+
+
+def test_send_best_effort_never_raises_when_installation_context_resolution_raises(
+    tmp_path, monkeypatch,
+):
+    """``registry_paths.installation_context()`` can raise (e.g.
+    ``RegistryRootError``) for a malformed/unavailable explicit context --
+    this must resolve to ``False``, not propagate, since the context check
+    sits outside the lock-read guard."""
+    from agent_worktrees import registry_paths
+
+    def _raise():
+        raise RuntimeError("malformed explicit context")
+
+    monkeypatch.setattr(registry_paths, "installation_context", _raise)
+    server = HookIpcServer(lambda kind, payload, deadline: {})
+    server.start()
+    try:
+        lock_path = tmp_path / "status-monitor.lock"
+        lock_path.write_text(json.dumps(server.rendezvous()), encoding="utf-8")
+        assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+    finally:
+        server.close()
+
+
+def test_send_best_effort_never_raises_for_an_overflowing_timeout(tmp_path):
+    """``socket.create_connection``/``settimeout`` raise ``OverflowError``
+    (not ``OSError``) for ``float('inf')`` or another too-large finite
+    timeout -- uncaught, that would violate this function's never-raises
+    contract."""
+    server = HookIpcServer(lambda kind, payload, deadline: {})
+    server.start()
+    try:
+        lock_path = tmp_path / "status-monitor.lock"
+        lock_path.write_text(json.dumps(server.rendezvous()), encoding="utf-8")
+        assert hook_ipc.send_best_effort(
+            "handoffWake", {}, lock_path=lock_path, timeout=float("inf"),
+        ) is False
+    finally:
+        server.close()
+
+
+def test_send_best_effort_is_false_and_never_raises_with_no_resident(tmp_path):
+    missing_lock = tmp_path / "no-such-lock.json"
+    assert hook_ipc.send_best_effort(
+        "handoffWake", {"worktree_id": "wt-1"}, lock_path=missing_lock,
+    ) is False
+
+
+def test_send_best_effort_is_false_on_a_stale_or_mismatched_lock(tmp_path):
+    lock_path = tmp_path / "status-monitor.lock"
+    lock_path.write_text(json.dumps({"hook_transport": "tcp", "hook_endpoint": "127.0.0.1:1", "hook_token": ""}), encoding="utf-8")
+    assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+    lock_path.write_text("not json", encoding="utf-8")
+    assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+    lock_path.write_text(json.dumps({"hook_transport": "udp"}), encoding="utf-8")
+    assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+
+
+def test_send_best_effort_never_raises_for_a_port_out_of_valid_range(tmp_path):
+    """``isdigit()`` alone accepts any non-negative integer string, but
+    ``socket.create_connection`` raises ``OverflowError`` (not ``OSError``)
+    for a port outside 1..65535 -- uncaught, that would violate this
+    function's never-raises contract."""
+    lock_path = tmp_path / "status-monitor.lock"
+    lock_path.write_text(
+        json.dumps({"hook_transport": "tcp", "hook_endpoint": "127.0.0.1:99999999", "hook_token": "tok"}),
+        encoding="utf-8",
+    )
+    assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+    lock_path.write_text(
+        json.dumps({"hook_transport": "tcp", "hook_endpoint": "127.0.0.1:0", "hook_token": "tok"}),
+        encoding="utf-8",
+    )
+    assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+
+
+def test_send_best_effort_never_raises_for_a_non_serializable_payload_or_bad_timeout(tmp_path):
+    """Request construction (JSON serialization, ``deadline = time.time() +
+    timeout``) happens before the guarded socket block -- it must still
+    never propagate a TypeError/ValueError into the caller, or an
+    already-persisted handoff's best-effort wake would turn into a failed
+    CLI invocation."""
+    server = HookIpcServer(lambda kind, payload, deadline: {})
+    server.start()
+    try:
+        lock_path = tmp_path / "status-monitor.lock"
+        lock_path.write_text(json.dumps(server.rendezvous()), encoding="utf-8")
+        assert hook_ipc.send_best_effort(
+            "handoffWake", {"bad": object()}, lock_path=lock_path,
+        ) is False
+        assert hook_ipc.send_best_effort(
+            "handoffWake", {}, lock_path=lock_path, timeout="not-a-number",
+        ) is False
+    finally:
+        server.close()
+
+
+def test_send_best_effort_is_false_when_rejected_by_a_bad_token(tmp_path):
+    server = HookIpcServer(lambda kind, payload, deadline: {})
+    server.start()
+    try:
+        endpoint = dict(server.rendezvous())
+        endpoint["hook_token"] = "wrong-token"
+        lock_path = tmp_path / "status-monitor.lock"
+        lock_path.write_text(json.dumps(endpoint), encoding="utf-8")
+        assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+    finally:
+        server.close()
+
+
+def test_send_best_effort_is_false_for_a_live_server_from_a_different_installation(tmp_path):
+    """A live, perfectly reachable resident belonging to a DIFFERENT
+    installation (a mismatched ``installReceipt``/``marketplaceId`` on its
+    own published lock) must never be treated as this call's intended
+    target -- accepting it would silently "succeed" while the resident this
+    caller actually meant to wake is never touched."""
+    server = HookIpcServer(lambda kind, payload, deadline: {})
+    server.start()
+    try:
+        endpoint = dict(server.rendezvous())
+        endpoint["installReceipt"] = "some-other-installation"
+        endpoint["marketplaceId"] = "some-other-marketplace"
+        lock_path = tmp_path / "status-monitor.lock"
+        lock_path.write_text(json.dumps(endpoint), encoding="utf-8")
+        assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+    finally:
+        server.close()
+
+
+def test_send_best_effort_is_false_on_an_explicit_fallback_response(tmp_path):
+    server = HookIpcServer(lambda kind, payload, deadline: (_ for _ in ()).throw(HookUnavailable))
+    server.start()
+    try:
+        lock_path = tmp_path / "status-monitor.lock"
+        lock_path.write_text(json.dumps(server.rendezvous()), encoding="utf-8")
+        assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
+    finally:
+        server.close()
+
+
 def test_bad_token_gets_no_response(tmp_path):
     server = HookIpcServer(lambda kind, payload, deadline: {})
     server.start()
