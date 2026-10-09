@@ -84,6 +84,12 @@ agent-recommended details, not additional verbatim operator instructions.
       an explicitly confirmed call after real operator sign-off for that PR
       and proposed rewrite proceeds. A reason, discovered flag, or prior guard
       failure is not sign-off; agents must not add confirmation on their own.
+- [ ] Bind confirmation to the previewed PR/destination, immutable source
+      commit and exact expected remote head. Before admitting publication,
+      refuse a changed source or expected head and require a new preview and
+      sign-off; do not silently re-plan the confirmed operation. Pin the
+      approved source object for transport so later branch movement cannot
+      substitute unapproved content.
 - [ ] Allow operator-authorized recovery despite missing original-worktree,
       suffix, ownership-attestation or replay bookkeeping. Prefer source CWD
       where available, but support an explicitly selected target from a
@@ -117,7 +123,10 @@ agent-recommended details, not additional verbatim operator instructions.
       supported; a guard refusal never selects an exception on its own.
 - [ ] A break-glass request without per-PR confirmation changes no Git refs,
       tracking or remote state; its explicit preview precedes operator sign-off.
-      An affirmatively confirmed invocation follows the same exact-head fence.
+      Confirmed input must match the previewed source and expected remote head.
+      Advancing or amending the local source after preview, even with an
+      unchanged remote, requires a fresh preview/sign-off and cannot push
+      unseen content. A changed target or expected head is likewise refused.
 - [ ] Real isolated Git transport proves reasoned recovery with incomplete
       historical source/ownership/replay evidence and an unchanged exact lease.
 - [ ] A moved or deleted remote head is refused even with break-glass selected;
@@ -148,6 +157,9 @@ claim of cryptographic operator identity. A real invoker-identity authorization
 primitive remains the separate #4411 work; this effort does not depend on it or
 pretend a CLI flag implements it. Keep the exception low-friction and explicit,
 without turning unavailable identity infrastructure into another recovery veto.
+Confirmation carries the approved operation's immutable source and remote-head
+binding; it does not authorize whatever the recovery worktree happens to contain
+at a later invocation.
 
 ## Journal
 
@@ -161,3 +173,5 @@ without turning unavailable identity infrastructure into another recovery veto.
   and that target-only audit data omitted the invoker. Specified the existing
   no-mutation confirmation pattern and truthful invocation/session attribution,
   without expanding this effort into the deferred identity service.
+- Bound confirmation to the previewed source object as well as the remote-head
+  lease, covering local source changes between preview and confirmed execution.
