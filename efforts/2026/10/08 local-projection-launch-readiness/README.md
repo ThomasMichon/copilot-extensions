@@ -9,7 +9,8 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, serially landed proposal and implementation slices
 - **Created:** 2026-10-08
-- **Status:** Active
+- **Status:** Done
+- **Completed:** 2026-10-08
 - **Vision:** `visions/harness-guidance` -- closes `resilient-safety-boundary`
   and `ambient-delivery-fails-open`; extends `attributable-context-budget` so
   budget auditing cannot withhold otherwise-safe local guidance.
@@ -131,12 +132,12 @@ Existing source and destination safety checks are not context-budget checks.
   do not claim host-local rendering installed guidance in a remote filesystem.
 
 ### Phase 3 - Release and acceptance
-- [ ] Land the implementation slices with required plugin changefiles and review.
-- [ ] Verify a promoted release contains the changes and refresh the applicable
+- [x] Land the implementation slices with required plugin changefiles and review.
+- [x] Verify a promoted release contains the changes and refresh the applicable
   installed payloads through the normal unified update flow.
-- [ ] Demonstrate complete local-cache installation on an enabled stack that
+- [x] Demonstrate complete local-cache installation on an enabled stack that
   previously exceeded its budget, before a new session's instruction load.
-- [ ] Journal the evidence, resolve every Plan/Validation item or transfer it to
+- [x] Journal the evidence, resolve every Plan/Validation item or transfer it to
   a named objective, mark Done, and archive through normal review.
 
 ## Validation Plan
@@ -161,7 +162,7 @@ operator-requested contract, not additional operator requirements.
   than only timeout arithmetic; reuse existing latency evidence where valid.
 - [x] Run targeted contained suites, required lint/install-contract gates, and
   a relevant clean-room pre-session delivery scenario when available.
-- [ ] Verify the promoted payload and a consuming worktree's installed local
+- [x] Verify the promoted payload and a consuming worktree's installed local
   source set, not merely a successful subprocess exit or a merged PR.
 
 ## Proposal
@@ -171,6 +172,51 @@ checked-in fallback and its privileged review transaction separate. Do not
 force marker/lock repair or raise size limits to disguise the delivery gap.
 
 ## Journal
+
+### 2026-10-08 - Promoted, installed and accepted
+- Validation run 37879401651 passed all full-suite and guard jobs against
+  `98e087ca913c656c44bde24339df38ab590b8391`. Generated release PR #5850
+  merged as `d0fb2ad32e76a0b249f2ddabc984486a328c4117`; the release contains
+  the reviewed renderer accounting, scoped discovery and launch ordering.
+- Normal unified update installed agent-worktrees `1.24.28-dev1`,
+  agent-bridge `0.9.34-dev1` and customizing-copilot `0.2.12-dev1`.
+  Installer-managed cutovers drained cleanly without forced termination.
+- A fresh managed consumer worktree received 27 local projections before its
+  JSON creation command returned a launch plan. Independent source enumeration
+  found 28 declarations: 27 applicable local projections and one explicit
+  `skipLocalCache` catch-all. Every installed path and byte matched the current
+  installed template; no tracked consumer file changed.
+- On an existing consumer's JSON session-launch preparation, all 27 local
+  projections were present: 17 refreshed and 10 unchanged. Their 51,390 bytes
+  exceeded that consumer's unchanged 49,152-byte budget. The checked-in
+  projection lock and budget configuration remained byte-identical.
+- The installed synchronous session-start backup, invoked from a nested
+  consumer directory, repaired one missing cache and one stale version marker
+  within its production five-second budget: two installed, 25 unchanged and
+  zero failures. Restored bytes matched the installed templates; checked-in
+  instructions and lock hashes remained unchanged.
+- Mandatory checked-in sync separately retained an ownership-marker refusal
+  without overwriting it. Local launch preparation and repair still delivered
+  the complete safe source set, proving independence from that transaction.
+- All Plan and Validation Plan items are resolved. The inaccessible-target
+  provider gap remains explicitly transferred to #5714; #5716 and #5838 retain
+  their independent diagnostic/tooling objectives. No budget increase,
+  ownership-conflict overwrite, new schedule or forced busy-session stop was
+  needed to complete this effort.
+
+### 2026-10-08 - Lifecycle slice merged; release acceptance begins
+- PR #5715 merged after exact-head automated approval with zero open findings
+  and passing publication checks. Phase 2 and implementation publication are
+  complete; release promotion and installed-consumer proof remain open.
+- Concurrent effort-index edits were retained during rebases. A contradiction
+  between required own-PR rebasing and the publication ancestor guard is tracked
+  in #5838; an operator-authorized, exact-old-head lease updated only the owned
+  PR branch, with all pre-push guards intact and fresh review afterward.
+- An intermittent Windows async transport resource warning is tracked in #5716.
+  No surviving-process conclusion or destructive remediation was inferred.
+- Normal unified update and installer-managed graceful cutovers are authorized
+  for installed-runtime acceptance. No forced termination of busy sessions,
+  guidance-budget increase or ownership-conflict overwrite is authorized.
 
 ### 2026-10-08 - Lifecycle implementation and native acceptance
 - Worktree creation renders before returning its launch plan; legacy resume
