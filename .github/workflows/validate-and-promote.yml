@@ -542,16 +542,60 @@ jobs:
         if: always() && steps.watchdog.outputs.filed_issue_numbers != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          FILED_ISSUE_NUMBERS: ${{ steps.watchdog.outputs.filed_issue_numbers }}
         run: |
           if [ ! -f .github/workflows/ci-failure-fix-attempt.lock.yml ]; then
             echo "::notice::ci-failure-fix-attempt.lock.yml not yet compiled/present on the default branch -- Phase 2 isn't wired live yet. Skipping dispatch."
             exit 0
           fi
-          for NUM in ${{ steps.watchdog.outputs.filed_issue_numbers }}; do
+          # Split issue IDs as words, never expand them as filesystem patterns.
+          set -f
+          for NUM in $FILED_ISSUE_NUMBERS; do
+            if ! [[ "$NUM" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Invalid filed issue number -- refusing dispatch."
+              exit 1
+            fi
+          done
+          if [ -z "${FILED_ISSUE_NUMBERS//[[:space:]]/}" ]; then
+            echo "::notice::No newly filed issues -- skipping dispatch."
+            exit 0
+          fi
+          WORKFLOW_API="repos/$REPO/actions/workflows/ci-failure-fix-attempt.lock.yml"
+          STATE="$(gh api "$WORKFLOW_API" --jq .state)"
+          case "$STATE" in
+            active) ;;
+            disabled_*)
+              echo "::notice::Fix-attempt workflow is $STATE -- skipping all dispatches."
+              exit 0
+              ;;
+            *)
+              echo "::error::Unexpected fix-attempt workflow state: $STATE"
+              exit 1
+              ;;
+          esac
+          declare -A DISPATCHED=()
+          for NUM in $FILED_ISSUE_NUMBERS; do
+            if [[ -n "${DISPATCHED[$NUM]:-}" ]]; then
+              continue
+            fi
+            DISPATCHED[$NUM]=1
             echo "::notice::Dispatching the fix-attempt agent for issue #$NUM"
-            gh workflow run ci-failure-fix-attempt.lock.yml \
-              --repo "${{ github.repository }}" \
-              -f item_number="$NUM"
+            if gh workflow run ci-failure-fix-attempt.lock.yml \
+              --repo "$REPO" -f item_number="$NUM"; then
+              continue
+            else
+              DISPATCH_EXIT=$?
+            fi
+            # An operator can disable the workflow after the preflight.
+            # Recheck once, without retrying or dispatching the rest of the batch.
+            STATE="$(gh api "$WORKFLOW_API" --jq .state)"
+            if [[ "$STATE" == disabled_* ]]; then
+              echo "::notice::Fix-attempt workflow became $STATE -- skipping remaining dispatches."
+              exit 0
+            fi
+            echo "::error::Fix-attempt dispatch failed; workflow state is $STATE."
+            exit "$DISPATCH_EXIT"
           done
 
   promote:
