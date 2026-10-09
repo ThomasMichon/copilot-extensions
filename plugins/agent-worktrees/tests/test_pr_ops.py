@@ -2427,7 +2427,7 @@ class TestSetPRAndStatus:
 
         res = pr_ops.set_pr(wid, number=8)
 
-        assert res["head_sha"] == "same-head"
+        assert res["head_sha"] == ""
         persisted = tracking.load_record(
             cfg.tracking_dir() / f"{wid}.yaml"
         ).active_pr()
@@ -4805,7 +4805,9 @@ class TestPRFinalizeAndPush:
         assert (rec.pr.number, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner) == (99, "", "", "")
 
     @pytest.mark.parametrize("identity", ["number", "repo", "provider"])
-    def test_set_pr_reassignment_discards_previous_tip_and_lifecycle(self, pr_repo, identity):
+    def test_set_pr_reassignment_discards_previous_tip_and_lifecycle(
+        self, pr_repo: tuple[cfg.Config, str, Path, Path], identity: str
+    ) -> None:
         config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
@@ -4820,6 +4822,11 @@ class TestPRFinalizeAndPush:
             "provider": {"provider": "ado"},
         }[identity]
         assert pr_ops.set_pr(wid, config=config, **kwargs)["success"]
+        updated = tracking.load_record(path).pr
+        assert (updated.base_sha, updated.head_sha, updated.patch_id) == ("", "", "")
+        assert updated.state == "open"
+        assert updated.opened_at and updated.opened_at != "old-open"
+        assert updated.closed_at == ""
         stale.title = "unrelated stale update"
         tracking.save_record(stale)
         updated = tracking.load_record(path).pr
