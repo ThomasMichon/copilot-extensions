@@ -86,9 +86,10 @@ Direct source inspection in the research session that produced the
 `cli-default-bridging` vision established several concrete, previously
 unverified facts (full citations in the vision):
 
-- Extensions do not auto-load in ACP mode today, and no CLI flag, env var, or
-  ACP wire parameter can change that (`src/cli/acp/server.ts` has zero
-  references to "extension" anywhere).
+- The original research reported an ambient SDK-extension loading restriction
+  in ACP mode. The supported native-version floor and launch-time extension
+  presence require independent validation; this does not establish absence of
+  plugin-provided skills, agents or MCP composition.
 - `--plugin-dir` already works identically in ACP and ordinary interactive
   startup — the gap is specifically ambient, launch-time extension auto-load,
   not plugin/skill/MCP composition generally.
@@ -98,8 +99,10 @@ unverified facts (full citations in the vision):
   elicitation routing (fixed at session creation; legacy `ask_user` has no
   decline shape at all, structured elicitation has only a terminal,
   non-deferrable one).
-- **ACP itself already has native session create/terminate** (`session/new`,
-  `session/close`) that Session Host already relies on. Agent-bridge's own
+- **ACP + Session Host already provides creation and owned termination.**
+  The current downstream flow creates through ACP and terminates through the
+  Host's owned process lifecycle, not a proved native `session/close`.
+  Agent-bridge's own
   CLI-side extension (`extensions/agent-bridge/extension.mjs`) does not have
   an equivalent today, because it was built for reporting on and lightly
   steering sessions a human already launched — not for full end-to-end
@@ -304,6 +307,10 @@ and ordering before Phase 0 work begins.)_
 
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
+- Source-reconciliation tracker: `ThomasMichon/copilot-extensions#5930`.
+  The prototype's target bearer token authenticates access but is not an
+  exclusive driver claim; keep read-only observers independent of mutation
+  ownership. This linkage does not complete either Phase 2 item.
 - [ ] Design a generation/claim-style primitive for "exactly one driver at a
       time" against an **already-running** mux session — the gap Session
       Host's `host_index.py` already closes for ACP, and raw mux does not
@@ -324,7 +331,8 @@ and ordering before Phase 0 work begins.)_
 - [ ] Implement decline/cancel handling for structured elicitation
       (`onElicitationRequest`) where the SDK allows it.
 - [ ] Implement the TTY command bridge (`/clear`, `/exit`) for
-      session-lifecycle parity with ACP's native `session/new`/`session/close`.
+      creation/fresh-context and owned-termination parity with the existing
+      ACP + Session Host flow; command names alone are not lifecycle proof.
 - [ ] Decide and document, explicitly, how this effort's escalation ladder
       relates to #2971: whether it closes #2971 for the agent-driven case
       specifically while #2971 stays open for the human-attended case, or
@@ -360,8 +368,9 @@ path gets the Copilot SDK's own typed `assistant.idle` / `session.idle` /
 `subagent.started|completed|failed` / `session.background_tasks_changed`
 events for free (it forwards the raw event stream verbatim). The ACP path
 `agent-bridge` actually drives (`plugins/agent-bridge/src/agent_bridge/acp_client.py`)
-does not surface this — ACP extensions do NOT load in ACP-mode sessions, and
-`agent-bridge`'s own receiver side (`_BridgeClientImpl.session_update(self,
+does not surface this in the inspected receiver — SDK-extension availability
+is a separate launch-time/native-version proof, and `agent-bridge`'s own
+receiver side (`_BridgeClientImpl.session_update(self,
 session_id, update, **kwargs)`) silently **discards** `**kwargs` entirely,
 so even an already-present `_meta` payload on the wire would currently be
 thrown away unobserved. This is a confirmed **client-observability gap**,
