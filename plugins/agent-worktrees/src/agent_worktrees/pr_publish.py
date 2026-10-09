@@ -372,7 +372,7 @@ def metadata_lock(worktree_id: str, *, project: str | None = None):
 def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
                              branch: str, head_sha: str, identity: str) -> str:
     """Stamp a successful create-pr publication through a fresh, generation-bound RMW."""
-    from . import config as cfg
+    from . import config as cfg, pr_publication_state
     if not identity:
         return "Publication had no attested destination; rewrite ownership was not recorded."
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
@@ -380,8 +380,8 @@ def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracki
         with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
             fresh = tracking.load_record(path)
             current = _publication_pr(fresh, pr)
-            if (current is None or current.branch != branch or current.head_sha != head_sha
-                    or current.state != "open" or current.pr_revision != pr.pr_revision
+            if (not pr_publication_state.matches(current, pr) or current.branch != branch or current.head_sha != head_sha
+                    or current.state != "open"
                     or current.number != pr.number or current.repo.lower() != pr.repo.lower()
                     or current.provider != pr.provider):
                 return "Tracked PR changed since publication; rewrite ownership was not recorded."
@@ -391,9 +391,7 @@ def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracki
                 current.rewrite_identity = identity
                 current.pr_revision += 1
                 tracking.save_record(fresh)
-            pr.rewrite_owner = current.rewrite_owner
-            pr.rewrite_identity = current.rewrite_identity
-            pr.pr_revision = current.pr_revision
+            pr_publication_state.copy_pr(pr, current)
             return ""
     except (OSError, ValueError, TimeoutError) as exc:
         return f"Could not record rewrite ownership: {exc}"

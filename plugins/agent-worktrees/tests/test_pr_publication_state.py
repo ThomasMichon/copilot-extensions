@@ -3,6 +3,7 @@
 from dataclasses import replace
 from contextlib import contextmanager
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -282,3 +283,83 @@ def test_ordinary_publication_rechecks_authority_after_admission_wait(pr_repo, m
     assert not finalize.push_changes(wid, config)
     assert load(wid).pr.head_sha == before
     assert not (Path(config.default_repo.worktree_root) / ".finalize.lock").exists()
+
+
+def test_ownership_stamping_merges_attribution_only_revision(pr_repo):
+    config, wid, wt, remote = pr_repo
+    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+    assert result["success"], result
+    record = load(wid)
+    record.pr.rewrite_owner = record.pr.rewrite_identity = ""
+    record.pr.attribution_mode = ""
+    record.pr.pr_revision += 1
+    tracking.save_record(record)
+    expected = load(wid)
+    fresh = load(wid)
+    tracking.stamp_frozen_attribution(fresh.pr, attribution=False, explicit=True, assign_pr_id=False)
+    tracking.save_record(fresh)
+    error = pr_publish.record_rewrite_ownership(
+        config, expected, expected.pr, expected.pr.branch, expected.pr.head_sha,
+        pr_publish.push_identity("origin", cwd=str(wt)),
+    )
+    assert not error
+    assert expected.pr.rewrite_owner and expected.pr.attribution_mode == "false"
+    assert load(wid).pr.rewrite_owner == expected.pr.rewrite_owner
+
+
+@pytest.mark.parametrize("stamp", ["attribution", "observation"])
+def test_rewrite_admission_allows_non_authority_stamp(pr_repo, monkeypatch, stamp):
+    config, wid, wt, remote = pr_repo
+    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
+    assert result["success"], result
+    record = load(wid)
+    record.pr.attribution_mode = ""
+    record.pr.pr_revision += 1
+    tracking.save_record(record)
+    (wt / "followup.txt").write_text("followup\n")
+    git("add", "-A", cwd=wt)
+    git("commit", "-m", "followup", cwd=wt)
+    acquire = finalize.FinalizeLock.acquire
+
+    def stamped_acquire(lock):
+        acquire(lock)
+        fresh = load(wid)
+        if stamp == "attribution":
+            tracking.stamp_frozen_attribution(fresh.pr, attribution=False, explicit=True, assign_pr_id=False)
+        else:
+            fresh.pr.head_observed_at = "2026-10-09T00:00:00Z"
+        tracking.save_record(fresh)
+
+    monkeypatch.setattr(finalize.FinalizeLock, "acquire", stamped_acquire)
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+    monkeypatch.setattr(pr_ops, "refresh_source_attribution", lambda *a: "")
+    assert finalize.push_changes(wid, config, rewrite_pr=True)
+    current = load(wid)
+    assert current.pr.head_sha == pr_publish._tip("origin", current.pr.branch, str(wt))
+    if stamp == "attribution":
+        assert current.pr.attribution_mode == "false"
+
+
+@pytest.mark.parametrize("native,canonical", [("active", "open"), ("completed", "merged"), ("abandoned", "closed")])
+def test_azure_create_and_observe_use_canonical_lifecycle(monkeypatch, native, canonical):
+    from agent_worktrees.providers import azure_devops
+    from agent_worktrees.providers.base import PRScope
+
+    monkeypatch.setattr(azure_devops, "run_cli", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=json.dumps({"pullRequestId": 42, "status": native}), stderr="",
+    ))
+    provider = azure_devops.AzureDevOpsProvider()
+    scope = PRScope(repo="project/repo", head="feature/test", base="main", title="Feature",
+                    api_base="https://dev.azure.com/example")
+    created = provider.create_pull(scope)
+    observed = provider.get_pull(scope.repo, 42, api_base=scope.api_base)
+    assert created.state == observed.state == canonical
+    assert created.merged == observed.merged == (canonical == "merged")
+
+
+def test_azure_unknown_lifecycle_is_explicit_error():
+    from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
+    from agent_worktrees.providers.base import ProviderError
+
+    with pytest.raises(ProviderError, match="Unknown Azure DevOps PR status"):
+        AzureDevOpsProvider._canonical_state("future")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import activity, config as cfg, git_ops, hooks, output, pr_authority, pr_publish, providers, tracking
+from . import activity, config as cfg, git_ops, hooks, output, pr_authority, pr_publication_state, pr_publish, providers, tracking
 from .config import Config
 from .providers.attribution import BranchLeakError, validate_effective_head
 from .providers.base import ProviderError, PullResult
@@ -80,7 +80,8 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             # change which PR the request authorizes.
             path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
             fresh = tracking.load_record(path) if path.exists() else None
-            if (record is None or fresh is None or fresh.active_pr() != record.active_pr()):
+            if (record is None or fresh is None or record.active_pr() is None
+                    or not pr_publication_state.matches(fresh.active_pr(), record.active_pr())):
                 raise ValueError("Tracked PR changed while preparing the rewrite; nothing was pushed.")
             pr = _validate(worktree_id, config, fresh, cwd)
             target = pr_publish.push_target(repo, pr, cwd)
