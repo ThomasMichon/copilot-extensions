@@ -22,7 +22,7 @@ def _session(root: Path, session_id: str = "session-1") -> Path:
     (path / "events.jsonl").write_bytes(b'{"type":"session.start"}\n')
     (path / "workspace.yaml").write_text(f"id: {session_id}\ncwd: /example\n", encoding="utf-8")
     (path / "origin.json").write_text(json.dumps({"source": "test"}), encoding="utf-8")
-    (path / "checkpoints" / "index.md").write_text("# checkpoint\n", encoding="utf-8")
+    (path / "checkpoints" / "index.md").write_bytes(b"# checkpoint\n")
     return path
 
 
@@ -33,8 +33,12 @@ def _zip(path: Path, members: list[tuple[str | zipfile.ZipInfo, bytes]]) -> None
             archive.writestr(name, data)
 
 
-def test_zip_roundtrip_uses_registered_reader_without_changing_default(tmp_path: Path) -> None:
+@pytest.mark.parametrize("checkpoint", [b"# checkpoint\n", b"# checkpoint\r\n"])
+def test_zip_roundtrip_uses_registered_reader_without_changing_default(
+    tmp_path: Path, checkpoint: bytes
+) -> None:
     source = _session(tmp_path / "live")
+    (source / "checkpoints" / "index.md").write_bytes(checkpoint)
     store = tmp_path / "archived"
     ref = sessions.archive_session(source, store, codec="zip")
     assert ref.path.name == "session-1.zip"
@@ -45,11 +49,12 @@ def test_zip_roundtrip_uses_registered_reader_without_changing_default(tmp_path:
     assert sessions.read_member(ref, "missing") is None
     assert sessions.member_exists(ref, "checkpoints/index.md")
     with sessions.materialize(ref) as materialized:
-        assert (materialized / "checkpoints" / "index.md").read_bytes() == b"# checkpoint\n"
+        assert (materialized / "checkpoints" / "index.md").read_bytes() == checkpoint
     assert not materialized.exists()
     assert (source / "events.jsonl").is_file()
     restored = sessions.restore_session(ref, tmp_path / "restored")
     assert (restored / "events.jsonl").read_bytes() == (source / "events.jsonl").read_bytes()
+    assert (restored / "checkpoints" / "index.md").read_bytes() == checkpoint
 
 
 def test_zip_selection_metadata_stays_uncompressed(
