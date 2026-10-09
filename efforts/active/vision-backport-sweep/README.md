@@ -672,14 +672,15 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
             Native callback support was not freshly proved from this checkout.
 
 ### Phase 3 — Full design/service-invariant audit
-- [x] All-anchor current-source cohort across all thirteen installer-bearing
-      runtimes at snapshot `82c2b4590414`. The table below covers every
-      Feature/Behavior anchor, including
-      service-free applicability and the reviewed heavy-companion exception.
-      Scores describe inspected source, not whole-runtime/live acceptance:
+- [x] Produced a grouped source map spanning every current Feature/Behavior
+      family across thirteen installer-bearing runtimes at `82c2b4590414`,
+      including service-free applicability and the reviewed companion exception.
+      This is a non-completing triage map, not an individual-anchor conformance
+      verdict or Phase 3 closure. Scores describe grouped inspected evidence:
       **C** conforms in the cited path, **P** partial/mixed/unproved,
       **V** at least one grouped anchor has a demonstrated violation,
-      **N** not applicable. A group score never asserts that every member fails.
+      **N** not applicable. A group score never asserts which individual members
+      conform or fail; those dispositions must be resolved separately.
 
       | Group | Complete anchor membership |
       |---|---|
@@ -814,11 +815,16 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       lifecycle helpers, package-backend/prerequisite effects, and
       ownership/contribution enforcement for explicit integration/projection
       routes identified as partial above.
-- [ ] Audit the remaining `plugin-services` contracts beyond the completed
-      cutover/immutable-runtime and scoped installation-boundary stretches,
-      including self-contained runtime, all lease/coalescing paths,
-      discovery/exposure, lifecycle registration, and other applicable
-      invariants. Neither table is full Phase 3 completion.
+- [ ] Resolve individual-anchor/per-mode dispositions from the grouped map
+      before Phase 3 closes: each applicable item needs its own bounded status,
+      source evidence and implementation owner, rather than inheriting a
+      strongest-negative group score. Remaining source decisions concern
+      release-materialized package/installer boundaries, supported
+      lease/coalescing admission and retirement consumers, and cell-qualified
+      discovery/lifecycle/cleanup/rollback receipts. Distinguish uninspected
+      source from declared rollout under `#1109/#1110` and acceptance retained
+      by service owners; do not silently turn any of them into conformance.
+      Live execution of every carved fix is not this sweep's completion gate.
 
 ### Phase 4 — Decide the material-refresh relationship
 - [x] Decide whether user-facing material refresh (docs, Picker preview
@@ -866,10 +872,14 @@ sibling plan proves that the sibling's materials have been refreshed.
   this map. This closes the branch's source-reconciliation leg, not the
   parent sweep or any runtime/fleet delivery gate.
 
-### 2026-10-09 — Complete-anchor service source cohort and remaining UI/policy owners
+### 2026-10-09 — Service-family source map and remaining UI/policy owners
 - Three read-only tracks covered every current service Feature/Behavior anchor
   across thirteen installer-bearing runtimes. The grouped Phase 3 table records
-  applicability, bounded source conformance and partial evidence; it does not
+  bounded family applicability and partial evidence, not individual-anchor
+  conformance or Phase 3 closure. Review identified the ambiguity with the
+  still-open audit item; renamed the completed artifact to a non-completing
+  source map and narrowed that open item to the actual remaining source/
+  receipt/consumer decisions. The map does not
   turn unchanged runtime code, owner plans or release history into acceptance.
 - Deduped and extended existing owners: POSIX no-flock reclaim `#1132` across
   Worktrees/Bridge/CodeSpaces/Containers/SSH; Connection Owner live-beacon
