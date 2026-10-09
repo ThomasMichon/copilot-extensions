@@ -519,47 +519,8 @@ async def _run_local_ex(
 
 
 def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
-    """Check if an SSH host alias resolves to the local machine AND platform.
-
-    True only when the alias points to the same machine key AND platform
-    (wsl/windows/linux) -- avoids treating a Windows agent as "local" on
-    WSL (or vice versa), even on the same physical machine.
-    """
-    if not ssh_host:
-        return True
-
-    import socket
-    hostname = socket.gethostname().lower()
-    host_lower = ssh_host.lower()
-
-    machine, platform = resolver._local_machine, resolver._local_platform
-    if any(entry.execution_platform for entry in resolver.machines.values()):
-        return bool(
-            machine and (
-                host_lower == machine.key.lower()
-                or any(
-                    env.alias and env.alias.lower() == host_lower and env.name == platform
-                    for env in machine.ssh_environments
-                )
-            )
-        )
-    if not machine:
-        # Can't identify our own machine -- only match exact hostname.
-        return host_lower == hostname
-
-    # Match the SSH alias against the local machine's environments, but
-    # only the environment matching our platform.
-    for env in machine.ssh_environments:
-        if env.alias and env.alias.lower() == host_lower:
-            return env.name == platform
-
-    if host_lower == hostname or host_lower == machine.key.lower():
-        # Ambiguous -- only treat as local if exactly one environment
-        # matches our platform.
-        matching = [e for e in machine.ssh_environments if e.name == platform]
-        return len(matching) == 1
-
-    return False
+    """Use the resolver's selected identity for transport loopback."""
+    return resolver.is_local_transport(ssh_host)
 
 
 async def _run_ssh(

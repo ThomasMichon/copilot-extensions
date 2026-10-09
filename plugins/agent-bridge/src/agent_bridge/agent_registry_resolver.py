@@ -123,6 +123,34 @@ class AgentResolver(_ProviderDiscoveryMixin):
     def machines(self) -> dict[str, MachineConfig]:
         return self._machines
 
+    def is_local_transport(self, ssh_host: str | None) -> bool:
+        """Match a transport to the selected execution space, not its physical host."""
+        if not ssh_host:
+            return True
+        import socket
+
+        hostname = socket.gethostname().lower()
+        host_lower = ssh_host.lower()
+        machine, platform = self._local_machine, self._local_platform
+        if any(entry.execution_platform for entry in self.machines.values()):
+            return bool(
+                machine and (
+                    host_lower == machine.key.lower()
+                    or any(
+                        env.alias and env.alias.lower() == host_lower and env.name == platform
+                        for env in machine.ssh_environments
+                    )
+                )
+            )
+        if not machine:
+            return host_lower == hostname
+        for env in machine.ssh_environments:
+            if env.alias and env.alias.lower() == host_lower:
+                return env.name == platform
+        if host_lower == hostname or host_lower == machine.key.lower():
+            return len([env for env in machine.ssh_environments if env.name == platform]) == 1
+        return False
+
     @property
     def topology_errors(self) -> list[str]:
         return list(self._topology_errors)
