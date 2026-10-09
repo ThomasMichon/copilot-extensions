@@ -47,7 +47,7 @@ def _normalize_hostname(hostname: str) -> str:
     Casefolds for case-insensitive comparison only -- it must NOT also strip
     a domain suffix here, or two genuinely distinct FQDNs that happen to
     share a leading label (``host-a.corp.example`` vs ``host-a.lab.example``)
-    would compare equal (copilot-extensions#5382 review).
+    would compare equal.
     """
     return hostname.strip().casefold()
 
@@ -78,10 +78,10 @@ def _is_local_machine(declared_hostname: str, local_hostname: str) -> bool:
     by truncating to their leading label: that would conflate genuinely
     distinct hosts that happen to share a short name in different domains.
     """
-    if not declared_hostname or not local_hostname:
-        return False
     declared = _normalize_hostname(declared_hostname)
     local = _normalize_hostname(local_hostname)
+    if not declared or not local:
+        return False
     if declared == local:
         return True
     declared_qualified = "." in declared

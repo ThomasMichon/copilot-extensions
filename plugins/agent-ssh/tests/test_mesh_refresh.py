@@ -233,10 +233,13 @@ def test_refresh_mesh_flags_unreachable_alias(
         ("", "host-a-raw", False),
         ("host-a-raw", "", False),
         ("", "", False),
+        (" \t", " \t", False),
+        (" ", "host-a-raw", False),
+        ("host-a-raw", "\t", False),
+        (" host-a-raw ", "\thost-a-raw\t", True),
         # Two distinct FQDNs sharing a leading label must NEVER be equated by
-        # truncating both sides to their short name (copilot-extensions#5382
-        # review finding) -- only an exact match, or a bare short name on
-        # exactly one side, counts.
+        # truncating both sides to their short name -- only an exact match,
+        # or a bare short name on exactly one side, counts.
         ("host-a.corp.example", "host-a.lab.example", False),
         ("host-a.corp.example", "host-a.corp.example", True),
         ("HOST-A.CORP.EXAMPLE", "host-a.corp.example", True),
@@ -349,7 +352,7 @@ def test_refresh_mesh_skips_local_alias_using_key_fallback_when_hostname_omitted
     empty value means the machine's own key IS its hostname
     (agent_bridge.topology.MachineConfig.hostname). Self-detection must fall
     back to the key, not silently stay blind to the common key-only
-    declaration (copilot-extensions#5382 review)."""
+    declaration."""
 
     def fake_run(argv, **kwargs):
         out_index = argv.index("--out") + 1
