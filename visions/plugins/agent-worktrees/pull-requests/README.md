@@ -122,6 +122,16 @@ losing their target or confusing one subscriber's outcome with another's.
 This complements ordinary status queries and synchronous waits; it does not
 make a durable subscription service a prerequisite for every PR operation.
 
+### operator-authorized-pr-recovery
+
+An operator can deliberately recover an existing PR when historical worktree
+ownership or replay bookkeeping cannot establish the normal publication path.
+Working from the source-owning worktree is preferred when it is available, not
+an absolute prerequisite for an explicitly addressed and authorized recovery.
+The exception is attributable, reasoned, and auditable; it preserves concurrent
+remote changes, protected history, and the repository's review and merge policy.
+It extends the ordinary PR surface rather than requiring a second Git workflow.
+
 ### provenance-attribution-without-identifier-leakage
 
 Opening a PR through this capability may attribute it to the originating
@@ -151,6 +161,16 @@ When a named target repo is not registered, or its registered provider
 cannot be reached, the operation reports that plainly rather than silently
 falling back to the caller's own repo/provider or guessing at the target's
 identity.
+
+### recovery-does-not-require-perfect-bookkeeping
+
+Guards help the operator carry out an intended operation; incomplete historical
+proof must not make a legitimate, explicitly authorized diagnosis or recovery
+impossible. Compatible missing bookkeeping is reconciled by the supported
+operation, without a manual bootstrap obstacle course. When uncertainty needs
+an operator exception, its use is explicit and reported, never automatically
+inferred from a failed guard. An exception does not silently adopt a newer remote
+head, impersonate another target, or waive review and merge gates.
 
 ### mock-fidelity-is-provable-not-assumed
 
@@ -212,6 +232,11 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
   [PR watch runtime](../../../../plugins/agent-pull-requests/README.md)
 
 ## Provenance
+
+- **2026-10-09** — Added operator-authorized PR recovery: source-worktree
+  context remains preferred, while historical bookkeeping is not an
+  insurmountable barrier to a deliberate, attributable recovery exception.
+  Concurrent-change protection and repository review policy remain intact.
 
 - **2026-10-09** — Folded back durable, shared PR-transition subscriptions:
   independent subscriber criteria/lifetimes, target observation sharing and
