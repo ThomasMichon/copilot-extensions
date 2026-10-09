@@ -1125,6 +1125,16 @@ async def resume_worktree(
         resumed = await mgr.resume_session(session.session_id)
         return _session_info(resumed)
     except KeyError as exc:
+        # A concurrent removal between the `_latest_session_for_worktree`
+        # lookup above and this resume call (e.g. a racing cleanup) -- under
+        # the strict identity-preserving contract this is the exact same
+        # "resume failed" case the generic ``Exception`` branch below
+        # refuses for, not a 404 a non-strict caller's singleton fallback
+        # would otherwise treat as license to spawn a fresh replacement.
+        if strict:
+            raise _strict_refusal(
+                f"resume of session {session.session_id} failed: {exc}"
+            ) from exc
         raise HTTPException(
             status_code=404,
             detail=f"Session {session.session_id} not found",

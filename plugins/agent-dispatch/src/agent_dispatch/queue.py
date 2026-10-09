@@ -104,6 +104,7 @@ from .queue_agent_backed_repo import AgentBackedRepoMixin
 from .queue_routing_assignments import RoutingAssignmentMixin
 from .queue_schedule_registry import ScheduleRegistrationMixin
 from .queue_spawn_rearm import SpawnRearmMixin
+from .queue_spawn_conclusion import SpawnConclusionMixin
 from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existing call sites/tests
     SpawnReservationMixin,
     spawn_key,
@@ -138,6 +139,7 @@ class TaskQueue(
     ScheduleRegistrationMixin,
     RoutingAssignmentMixin,
     SpawnReservationMixin,
+    SpawnConclusionMixin,
     SpawnRearmMixin,
     ProducerFenceMixin,
     QueueStorageMixin,

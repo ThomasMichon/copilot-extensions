@@ -3,14 +3,19 @@ spawn-at-most-once safety model over ``spawn_reservations``).
 
 Extracted from :mod:`agent_dispatch.queue` (Phase 10 componentization,
 ``efforts/active/review-automation-reliability`` #2423), covering
-reservation acquisition (``reserve_spawn``), rearm/retire/defer/fail
-transitions, and conclusion claiming. Verified self-contained the same way
-as every prior slice: an AST free-name walk found only module-level
+reservation acquisition (``reserve_spawn``) and the rearm/retire/defer/fail
+active-state transitions. The conclusion-retry claim/revalidate family
+(``record_spawn_conclusion``, ``claim_spawn_conclusion_retry``,
+``validate_spawn_conclusion_claim``) later split further into its own
+sibling mixin, :mod:`agent_dispatch.queue_spawn_conclusion` (module size);
+``_validate_conclusion_claim``/``_newer_worktree_reservation`` stayed here
+since ``_update_reservation`` (below, used by several transitions that
+remain in this module) also needs them. Verified self-contained the same
+way as every prior slice: an AST free-name walk found only module-level
 helpers themselves used exclusively by this cluster (``spawn_key``,
-``_conclusion_payload``, ``_validate_conclusion_claim``,
-``_newer_worktree_reservation`` -- all move here too), and no test
-monkeypatches any of these methods by name. The three simple read-only
-lookups (``get_reservation``, ``latest_reservation``,
+``_validate_conclusion_claim``, ``_newer_worktree_reservation``), and no
+test monkeypatches any of these methods by name. The three simple
+read-only lookups (``get_reservation``, ``latest_reservation``,
 ``list_reservations``) stayed behind in ``queue.py`` itself, both because
 ``list_reservations`` calls ``self._canonical_repo`` (a ``TaskQueue``
 helper genuinely defined there) and to keep this module comfortably under
@@ -29,10 +34,8 @@ and ``self._now()`` from that class and is not usable standalone.
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-import uuid
 from collections.abc import Callable
 
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
@@ -43,18 +46,6 @@ log = logging.getLogger("agent-dispatch.queue")
 def spawn_key(task_id: str, attempt: int) -> str:
     """The canonical reservation key for a (task, attempt) spawn."""
     return f"dispatch-task:{task_id}:{attempt}"
-
-
-def _conclusion_payload(raw: object) -> dict[str, object]:
-    if not isinstance(raw, str) or not raw:
-        return {}
-    try:
-        payload = json.loads(raw)
-    except (TypeError, ValueError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    return payload
 
 
 def _validate_conclusion_claim(
@@ -208,7 +199,8 @@ class SpawnReservationMixin:
                 worktree_ownership = "reused"
             if task.exclusive_key is not None:
                 prior = conn.execute(
-                    "SELECT session_handle, worktree FROM spawn_reservations "
+                    "SELECT session_handle, worktree, conversation_retired "
+                    "FROM spawn_reservations "
                     "WHERE exclusive_key = ? AND worktree IS NOT NULL "
                     "ORDER BY reserved_at DESC LIMIT 1",
                     (task.exclusive_key,),
@@ -216,6 +208,17 @@ class SpawnReservationMixin:
                 if prior is not None:
                     carried_worktree = prior["worktree"]
                     carried_session = prior["session_handle"]
+                    # Propagate a retired marker forward across a handle-less
+                    # retry (copilot-extensions#5699 follow-up review): if the
+                    # immediately-prior reservation already dropped its
+                    # carried session as retired but failed before a fresh
+                    # one was ever recorded, this attempt's own prior-row
+                    # lookup sees that same already-null session_handle and
+                    # would otherwise never re-run the retired-detection
+                    # query below at all -- silently losing the marker and
+                    # letting the worktree-resume fallback resurrect the
+                    # retired conversation after all.
+                    conversation_retired = bool(prior["conversation_retired"])
                     if carried_session is not None:
                         # rearmed counts as retired too (copilot-extensions#4978):
                         # an operator rearm starts the task over, so its carried
@@ -242,12 +245,11 @@ class SpawnReservationMixin:
                             # Distinct from "never had a carried session" --
                             # a retired conversation must not be recovered via
                             # the bridge's worktree-level resume fallback
-                            # either (copilot-extensions#5699 review): that
-                            # fallback resumes whatever session is latest in
-                            # the worktree DIRECTORY, independent of this
-                            # table's own session_handle bookkeeping, so it
-                            # would silently resurrect the very conversation
-                            # just dropped above.
+                            # either: that fallback resumes whatever session
+                            # is latest in the worktree DIRECTORY, independent
+                            # of this table's own session_handle bookkeeping,
+                            # so it would silently resurrect the very
+                            # conversation just dropped above.
                             conversation_retired = True
                         else:
                             log.info(
@@ -821,193 +823,3 @@ class SpawnReservationMixin:
             now=now,
         )
 
-    def record_spawn_conclusion(
-        self,
-        key: str,
-        *,
-        conclusion_state: str,
-        conclusion_detail: str,
-        detail: str | None = None,
-        claim_token: str | None = None,
-        now: float | None = None,
-    ) -> SpawnReservation:
-        """Persist conclusion progress on an active or retired reservation."""
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT state, conclusion_state, conclusion_detail, "
-                "cleanup_claim_token, cleanup_claim_expires_at, "
-                "worktree, reserved_at "
-                "FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such reservation: {key}")
-            mutable_states = SpawnState.ACTIVE | frozenset({SpawnState.FAILED, SpawnState.SETTLED})
-            if row["state"] not in mutable_states:
-                conn.execute("COMMIT")
-                raise TaskError(f"reservation {key} is {row['state']!r}, not mutable")
-            _validate_conclusion_claim(
-                row["cleanup_claim_token"],
-                row["cleanup_claim_expires_at"],
-                claim_token,
-                now=ts,
-                required=(
-                    row["state"]
-                    in {
-                        SpawnState.FAILED,
-                        SpawnState.SETTLED,
-                    }
-                    and row["conclusion_state"] == "pending"
-                ),
-            )
-            if claim_token is not None:
-                newer = _newer_worktree_reservation(conn, row, key)
-                if newer is not None:
-                    conn.execute("COMMIT")
-                    raise TaskError(f"worktree carried by newer reservation {newer['key']}")
-            conn.execute(
-                "UPDATE spawn_reservations SET updated_at = ?, "
-                "detail = COALESCE(?, detail), conclusion_state = ?, "
-                "conclusion_detail = ?, "
-                "cleanup_claim_expires_at = CASE WHEN ? IS NOT NULL THEN 0 "
-                "ELSE cleanup_claim_expires_at END WHERE key = ?",
-                (
-                    ts,
-                    detail,
-                    conclusion_state,
-                    conclusion_detail,
-                    claim_token,
-                    key,
-                ),
-            )
-            updated = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            conn.execute("COMMIT")
-        return SpawnReservation._from_row(updated)
-
-    def claim_spawn_conclusion_retry(
-        self,
-        key: str,
-        *,
-        claim_seconds: float = 300.0,
-        now: float | None = None,
-    ) -> tuple[SpawnReservation, bool, str | None]:
-        """Claim a retired cleanup retry without racing worktree reuse."""
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such reservation: {key}")
-            if (
-                row["state"] not in {SpawnState.FAILED, SpawnState.SETTLED}
-                or row["conclusion_state"] != "pending"
-            ):
-                conn.execute("COMMIT")
-                raise TaskError(f"reservation {key} has no retired pending cleanup")
-            try:
-                current_expiry = float(row["cleanup_claim_expires_at"] or 0)
-            except (TypeError, ValueError):
-                current_expiry = 0.0
-            if row["cleanup_claim_token"] and current_expiry > ts:
-                conn.execute("COMMIT")
-                return SpawnReservation._from_row(row), False, None
-            blocker = None
-            if row["worktree"]:
-                blocker = conn.execute(
-                    "SELECT key FROM spawn_reservations "
-                    "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
-                    "AND reserved_at > ? "
-                    "ORDER BY reserved_at DESC LIMIT 1",
-                    (
-                        key,
-                        row["worktree"],
-                        row["worktree"],
-                        row["reserved_at"],
-                    ),
-                ).fetchone()
-            claim_token = None
-            if blocker is not None:
-                payload: dict[str, object] = {
-                    "action": "preserved",
-                    "reason": "worktree-carried-by-newer-reservation",
-                    "prior": row["conclusion_detail"],
-                }
-                conclusion_state = "held"
-            else:
-                claim_token = uuid.uuid4().hex
-                payload = {
-                    **_conclusion_payload(row["conclusion_detail"]),
-                    "action": "pending",
-                    "reason": "cleanup-retry-claimed",
-                    "claim_token": claim_token,
-                    "claim_expires_at": ts + max(1.0, claim_seconds),
-                }
-                conclusion_state = "pending"
-            if blocker is not None:
-                payload["blocking_reservation_key"] = blocker["key"]
-            conn.execute(
-                "UPDATE spawn_reservations SET updated_at = ?, "
-                "conclusion_state = ?, conclusion_detail = ?, "
-                "cleanup_claim_token = ?, cleanup_claim_expires_at = ? "
-                "WHERE key = ?",
-                (
-                    ts,
-                    conclusion_state,
-                    json.dumps(
-                        payload,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                    claim_token,
-                    (ts + max(1.0, claim_seconds) if claim_token is not None else None),
-                    key,
-                ),
-            )
-            updated = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            conn.execute("COMMIT")
-        return SpawnReservation._from_row(updated), blocker is None, claim_token
-
-    def validate_spawn_conclusion_claim(
-        self,
-        key: str,
-        claim_token: str,
-        *,
-        now: float | None = None,
-    ) -> SpawnReservation:
-        """Revalidate a cleanup lease and worktree fence before side effects."""
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such reservation: {key}")
-            _validate_conclusion_claim(
-                row["cleanup_claim_token"],
-                row["cleanup_claim_expires_at"],
-                claim_token,
-                now=ts,
-            )
-            newer = _newer_worktree_reservation(conn, row, key)
-            if newer is not None:
-                conn.execute("COMMIT")
-                raise TaskError(f"worktree carried by newer reservation {newer['key']}")
-            updated = SpawnReservation._from_row(row)
-            conn.execute("COMMIT")
-        return updated

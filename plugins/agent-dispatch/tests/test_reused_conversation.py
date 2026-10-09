@@ -114,13 +114,13 @@ def test_gone_carried_body_falls_back_to_worktree_resume_not_create(monkeypatch)
 
 
 def test_retired_conversation_never_recovers_via_worktree_resume(monkeypatch):
-    """copilot-extensions#5699 review: ``worktree_ownership == "reused"`` alone
-    also matches a worktree whose carried session was deliberately retired
-    (an operator rearm) -- the worktree-resume fallback resumes whatever
-    session is latest in that directory, independent of the dropped
-    ``spawn_session_handle``, so it would silently resurrect the exact
-    conversation the rearm retired. A genuinely fresh conversation must be
-    created instead -- never ``--strict resume``."""
+    """``worktree_ownership == "reused"`` alone also matches a worktree whose
+    carried session was deliberately retired (an operator rearm) -- the
+    worktree-resume fallback resumes whatever session is latest in that
+    directory, independent of the dropped ``spawn_session_handle``, so it
+    would silently resurrect the exact conversation the rearm retired. A
+    genuinely fresh conversation must be created instead -- never
+    ``--strict resume``."""
     calls = _transport(monkeypatch)
     ok, handle = make_headless_spawn()(_task(conversation_retired=True))
     assert ok is True
