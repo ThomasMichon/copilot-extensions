@@ -1,9 +1,0 @@
-{
-  "comment": "refresh-mesh: skip the outbound SSH probe for the dtssh alias whose declared hostname matches this machine's own, instead of dialing itself through the Dev Tunnel relay (#5375)",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

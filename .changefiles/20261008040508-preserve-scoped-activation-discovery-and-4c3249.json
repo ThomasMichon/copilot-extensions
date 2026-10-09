@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve scoped activation discovery and document visible lifecycle delivery outcomes",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

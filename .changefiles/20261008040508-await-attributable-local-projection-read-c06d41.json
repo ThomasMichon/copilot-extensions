@@ -1,9 +1,0 @@
-{
-  "comment": "Await attributable local projection readiness before Session Host spawn with scoped global discovery",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

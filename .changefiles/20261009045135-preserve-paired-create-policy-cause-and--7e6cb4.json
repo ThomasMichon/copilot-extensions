@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve paired-create policy-cause and recovery assertions under the typed staging failure contract.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

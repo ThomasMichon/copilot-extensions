@@ -1,9 +1,0 @@
-{
-  "comment": "Add Linux-only zdd singleton supervision with pidfd ownership, durable state, and exec recovery.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

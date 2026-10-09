@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in execution-side preference receipts, ACP capability reporting and confirmed selection restoration",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

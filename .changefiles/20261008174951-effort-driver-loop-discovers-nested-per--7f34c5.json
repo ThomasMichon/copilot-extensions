@@ -1,9 +1,0 @@
-{
-  "comment": "effort-driver-loop discovers nested per-repo effort layouts (efforts/active/<repo>/<slug>/README.md), not just the original flat efforts/active/<slug>/README.md -- a recursive sweep, backward compatible, with ambiguous-slug rejection.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

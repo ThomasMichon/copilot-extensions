@@ -1,9 +1,0 @@
-{
-  "comment": "Stage typed New and Resume seeds through daemon-owned worktree state, retain setup/start failures, and discard only at acknowledged Copilot handoff.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add required producer identity loading and canonical publication-key validation",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

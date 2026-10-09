@@ -1,9 +1,0 @@
-{
-  "comment": "Affirmative cross-process wake for a newly registered handoff (note-handoff) instead of waiting for the resident monitor's periodic sweep",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
