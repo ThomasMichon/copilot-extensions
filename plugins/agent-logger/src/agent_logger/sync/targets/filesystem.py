@@ -57,10 +57,17 @@ from agent_logger.sync.targets.base import (
     Target,
     is_session_path_included,
 )
-from agent_logger.sync.targets.publication_admission import check_publication_identity
+from agent_logger.sync.targets.publication_admission import (
+    PUBLICATION_IDENTITY_MARKER,
+    check_publication_identity,
+)
 
-#: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
-_EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
+#: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, ``.hold``
+#: (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker), and the
+#: publication-identity ownership marker -- reserved so source content can
+#: never overwrite (or be mistaken for) the destination's own admission claim.
+_EXCLUDE_NAMES = frozenset({".lock", "lock", PUBLICATION_IDENTITY_MARKER.casefold()})
+_EXCLUDE_SUFFIXES = (".lock", ".tmp", ".hold")
 
 _MAX_TRANSACTION_MANIFEST_BYTES = 16 * 1024 * 1024
 _MAX_FLEET_MACHINE_DEPTH = 4

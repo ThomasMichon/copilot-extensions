@@ -9,11 +9,16 @@ of which pass this argument).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent_logger.sync.targets.filesystem import LocalTarget
 from agent_logger.sync.targets.ingest import IngestTarget
+from agent_logger.sync.targets.publication_admission import (
+    PUBLICATION_IDENTITY_MARKER,
+    check_publication_identity,
+)
 from agent_logger.sync.targets.ssh import SshTarget
 
 
@@ -116,6 +121,56 @@ def test_filesystem_push_with_no_identity_is_unaffected(tmp_path: Path) -> None:
     result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
     assert result.ok
     assert not (dest_root / "m1" / ".archive-source.json").exists()
+
+
+def test_filesystem_push_never_copies_source_marker_over_ownership_claim(
+    tmp_path: Path,
+) -> None:
+    """A source tree that itself contains a file named like the ownership
+    marker must never overwrite the destination's real claim once admitted
+    -- the marker name is reserved and excluded from the copy loop."""
+    src = _make_source(tmp_path)
+    # Forged/incidental marker-named file sitting in the source root.
+    (src / ".archive-source.json").write_text(
+        '{"provider": "forged", "host": "x", "repository": "y", "venue": "z"}',
+        encoding="utf-8",
+    )
+    dest_root = tmp_path / "dest"
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = LocalTarget({"path": str(dest_root)}).push(
+        src, "m1", source_identity=identity
+    )
+    assert result.ok
+    marker = dest_root / "m1" / ".archive-source.json"
+    recorded = json.loads(marker.read_text(encoding="utf-8"))
+    assert recorded["host"] == "lambda-core"
+    assert recorded["provider"] == "github"
+
+
+def test_publication_marker_refuses_a_symlink_at_the_marker_path(
+    tmp_path: Path,
+) -> None:
+    """A symlink sitting at the marker path is never legitimate ownership
+    state -- admission must refuse outright (never follow it to read/write
+    through to wherever it points), so a race that plants a symlink there
+    can't redirect the claim write to an arbitrary file."""
+    dest = tmp_path / "dest" / "m1"
+    dest.mkdir(parents=True)
+    outside_target = tmp_path / "outside-secret.json"
+    outside_target.write_text("do-not-touch", encoding="utf-8")
+    (dest / PUBLICATION_IDENTITY_MARKER).symlink_to(outside_target)
+
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = check_publication_identity(dest, identity)
+    assert result is not None and not result.ok
+
+    marker = dest / PUBLICATION_IDENTITY_MARKER
+    assert marker.is_symlink()  # untouched -- never followed or replaced
+    assert outside_target.read_text(encoding="utf-8") == "do-not-touch"
 
 
 def test_ssh_target_rejects_identity_admission() -> None:
