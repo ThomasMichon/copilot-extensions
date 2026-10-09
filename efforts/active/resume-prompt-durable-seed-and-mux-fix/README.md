@@ -1118,3 +1118,9 @@ _Pending._
   60 focused state/resolve/setup cases pass (2 platform skips). Publish,
   resolve the implemented finding and obtain current-head review/CI before
   merging and honoring the requested pause.
+- **2026-10-08** -- Final direct-backend guard regressions pass: 60
+  state/resolve/setup cases (2 platform skips), including actual shell
+  consumers and both-kind late-mux/bare/unknown rejection. Remaining work for
+  the immediate operator request is current-head passing review/CI and
+  actual merge of the single active PR, then pause; no new feature slice is
+  authorized during that pause.
