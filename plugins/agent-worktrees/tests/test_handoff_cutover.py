@@ -27,6 +27,51 @@ from agent_worktrees import worktree_identity
 
 
 # â”€â”€ build_mux_new_window_argv (pure) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+class TestPaneArgsExpiry:
+    @pytest.mark.parametrize("age,expired", [(60, False), (86400, False), (86401, True)])
+    def test_delayed_or_never_started_consumer(self, tmp_path, monkeypatch, age, expired):
+        from agent_worktrees import sessions_pane_args as transport
+
+        monkeypatch.setattr(transport.config, "install_dir", lambda: tmp_path)
+        now = 200000.0
+        monkeypatch.setattr(transport.time, "time", lambda: now)
+        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper.write_text("# wrapper")
+        wrapper.with_name("pane-launch.ps1").write_text("# launcher")
+        argv = transport.file_mux_pane_cmd(str(wrapper), ["program", "prompt data"])
+        manifest = Path(argv[-1][1:-1].replace("''", "'"))
+        os.utime(manifest, (now - age, now - age))
+        unrelated = manifest.with_name("other.json")
+        unrelated.write_text("keep")
+        os.utime(unrelated, (0, 0))
+        transport.sweep_mux_pane_args()
+        assert manifest.exists() == (not expired)
+        assert unrelated.exists()
+        if not expired:
+            assert json.loads(manifest.read_text("utf-8"))["argv"] == [
+                "program", "prompt data",
+            ]
+        transport.cleanup_mux_pane_args(argv)
+
+    def test_next_producer_expires_abandoned_manifest(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions_pane_args as transport
+
+        monkeypatch.setattr(transport.config, "install_dir", lambda: tmp_path)
+        root = tmp_path / "pane-args"
+        root.mkdir()
+        orphan = root / "aw-pane-abandoned.json"
+        orphan.write_text("old")
+        os.utime(orphan, (0, 0))
+        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper.with_name("pane-launch.ps1").write_text("# launcher")
+        argv = transport.file_mux_pane_cmd(str(wrapper), ["program"])
+        try:
+            assert not orphan.exists()
+            assert Path(argv[-1][1:-1].replace("''", "'")).exists()
+        finally:
+            transport.cleanup_mux_pane_args(argv)
+
+
 class TestBuildMuxNewWindowArgv:
     def test_psmux_resolves_manager_owned_bundle(self, tmp_path, monkeypatch):
         from agent_worktrees import manager_launch_cli

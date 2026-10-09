@@ -23,6 +23,9 @@ of the `worktree-manager-control-plane` effort.
   Relaunching requires a fresh producer command, not replaying a consumed
   one-shot handoff. Timed-out programmatic mux calls retain their manifest
   because the pane may still be starting; its consumer owns successful cleanup.
+  Python handoffs live in the runtime's dedicated `pane-args/` directory.
+  Unconsumed files expire after 24 hours on the next resident-monitor sweep or
+  pane-command generation, preserving delayed startup within that grace period.
 - `session-options.ps1` / `session-options.sh` — per-session status bar +
   behaviors that `launch-session.ps1`/`.sh` stamp onto each mux session.
   `launch-session.ps1` dot-sources `session-options.ps1` via a

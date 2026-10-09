@@ -132,3 +132,11 @@ encoded commands or initial-prompt transports.
   regression proves Windows fallback deployment and command generation with
   no separate Worktree Manager checkout; the deploy-contract guard now freezes
   the mirrored list. Focused packaging, deployment and removal tests: 22 passed.
+- A subsequent review identified orphaned manifests after a timeout where no
+  pane ever starts. Python now uses the runtime's dedicated `pane-args/`
+  directory; the resident monitor and next producer expire unconsumed files
+  older than 24 hours, while younger delayed consumers remain usable.
+- Exact expiry-boundary, never-started, delayed-consumer, monitor and prior
+  handoff/deployment coverage: 330 passed, one platform-specific skip.
+  Both native PSMux producers again passed two cycles, including delayed Python
+  manifests surviving a sweep and subsequently being consumed.

@@ -228,6 +228,9 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
 )
 @pytest.mark.parametrize("producer", ["powershell", "python"])
 def test_real_psmux_file_launch_two_cycles(tmp_path, producer, monkeypatch):
+    from agent_worktrees import config
+
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path / "runtime")
     psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
     if not psmux:
         pytest.skip("PSMux is required")
@@ -299,6 +302,12 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
                 "test-worktree", child_argv, is_tmux=False, pane_wrapper=str(wrapper),
             )
         manifest = Path(command[-1][1:-1].replace("''", "'"))
+        if producer == "python":
+            from agent_worktrees.sessions_pane_args import sweep_mux_pane_args
+
+            delayed = time.time() - 60
+            os.utime(manifest, (delayed, delayed))
+            sweep_mux_pane_args()
         handoff = json.loads(manifest.read_text("utf-8"))
         assert handoff["wrapper"] == str(wrapper)
         expected_argv = (["-AwWt", "test-worktree"] if producer == "python" else []) + child_argv
