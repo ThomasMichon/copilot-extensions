@@ -1744,7 +1744,7 @@ class FilesystemTarget(Target):
                 source_files = _iter_regular_source_files(source, detritus.roots)
                 for src_file in source_files:
                     rel = src_file.relative_to(source)
-                    # Marker reserved at the publication root only (see
+                    # Marker reserved only for identified publications (see
                     # publication_admission.check_publication_identity).
                     # Case-insensitive: a case-insensitive destination
                     # filesystem resolves any differently-cased spelling to
@@ -1753,7 +1753,9 @@ class FilesystemTarget(Target):
                         rel.parent == Path(".")
                         and src_file.name.casefold() == marker_name_casefold
                     )
-                    if _is_excluded_name(src_file.name) or is_root_marker:
+                    if _is_excluded_name(src_file.name) or (
+                        source_identity is not None and is_root_marker
+                    ):
                         continue
                     if not is_session_path_included(rel, include_sessions, batch_mode=batch_mode):
                         continue

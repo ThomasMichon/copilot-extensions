@@ -173,6 +173,21 @@ def test_publication_identity_legacy_none_unchanged(tmp_path: Path) -> None:
     assert not (root / "m1" / admission.PUBLICATION_IDENTITY_MARKER).exists()
 
 
+def test_publication_identity_legacy_none_preserves_root_whitelist(tmp_path: Path) -> None:
+    from agent_logger.sync.targets.base import is_session_path_included
+
+    source = _source(tmp_path)
+    marker = source / admission.PUBLICATION_IDENTITY_MARKER
+    encoded = _metadata(_identity())
+    marker.write_bytes(encoded)
+    root = tmp_path / "archives"
+    result = LocalTarget({"path": str(root)}).push(source, "m1")
+    assert result.ok, result.detail
+    assert not is_session_path_included(Path(admission.PUBLICATION_IDENTITY_MARKER), None)
+    assert not (root / "m1" / admission.PUBLICATION_IDENTITY_MARKER).exists()
+    assert marker.read_bytes() == encoded
+
+
 @pytest.mark.parametrize("name", [
     "existing.txt",
     f".{admission.PUBLICATION_IDENTITY_MARKER}.deadbeefdeadbeef.tmp",
