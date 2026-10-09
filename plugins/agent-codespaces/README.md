@@ -43,6 +43,20 @@ A copilot-extensions plugin that provides:
   `agent-worktrees related list`), so every session knows which repos have no
   local checkout and must be worked via a CodeSpace
 
+### Transport identity boundary
+
+`codespace:<name>` addresses a dynamic GitHub Codespace, not a static named
+machine from `machines.yaml`. The provider discovers its current name, state,
+repository and SSH connection through GitHub; it must not reinterpret a
+Codespace address as a machine-registry key, hostname or SSH environment.
+
+The shared `machine-transport` library owns static named-machine identity and
+local-versus-SSH decisions. Codespaces owns its separate venue namespace and
+lifecycle. Detached launches' `_ssh_namespace()` helper only assembles options
+for the existing Codespace SSH session path, preserving provisioning, credential
+relay, forwarding, claim ownership and disconnect settlement. It is not an
+independent machine resolver and does not need a `machine-transport` dependency.
+
 ## Configuration
 
 **Most repos need no config at all.** agent-codespaces works out of the box on
