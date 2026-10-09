@@ -89,6 +89,9 @@ def _run_harness(
         "#!/bin/sh\nset -eu\n"
         f'PLUGIN_DIR="{plugin_dir}"\n'
         f'have_uv={have_uv}\n'
+        'UV_CMD=uv\n'
+        '_warn() { echo "$*" >&2; }\nsleep() { :; }\n'
+        f'. "{_PLUGIN_ROOT.parents[1] / "libs/installer-engine/installer-engine.sh"}"\n'
         'VENV_PYTHON="python3"\n'
         '_STALE_CACHE_REFRESH_PACKAGES=(agent-dispatch)\n'
         + _extract_function("_scrub_payload_build_artifacts")

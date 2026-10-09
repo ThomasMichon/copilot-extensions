@@ -102,8 +102,15 @@ do not load hooks, and adopters should not create a duplicate marked block.
 
 `scripts/install.{sh,ps1}` is a lifecycle manager --
 `stamp | provision | install | update | status | start | stop | uninstall`
-(`init.{sh,ps1}` is a thin alias for `install`). `stamp` only writes the
-self-provisioning binstub + payload marker; `provision`/`install`/`update` build
+(`init.{sh,ps1}` is a thin alias for `install`). `stamp` publishes the
+self-provisioning binstub + payload marker without building a venv. PowerShell
+materializes a standalone snapshot with both installer-engine files and all
+declared local libraries; local-checkout stamps use content-addressed snapshot
+identities over the materialized tree. Unchanged stamps reuse one snapshot,
+while source, engine or library edits publish a new immutable identity.
+Delayed same-version local stamps reject a superseded snapshot candidate before
+publishing markers or launchers. POSIX
+retains its owning-payload pointer. `provision`/`install`/`update` build
 a versioned runtime under `~/.agent-dispatch/versions/<v>/` (published by the
 `current-version` marker), an `agent-dispatch` binstub in `~/.local/bin`, a
 deploy manifest, the **"Tasks" picker pivot** (see below), and -- unless
@@ -111,6 +118,15 @@ deploy manifest, the **"Tasks" picker pivot** (see below), and -- unless
 coordinator, matching agent-bridge).
 `update` is downgrade-guarded (a stale checkout won't silently roll back a newer
 deployed runtime; override with `--force`).
+
+Both installers source the canonical installer engine during development;
+release tooling materializes byte-identical payload-local copies. The engine
+owns pinned, checksum-verified uv acquisition, transient venv/package retries
+and deploy-manifest writing. Dispatch retains dependency order, build-artifact
+scrubbing, optional `[mcp]` fallback, launchers, and coordinator/supervisor
+lifecycle. Windows prefers signed Python with `--copies` and validates the
+result independently of its exit code before accepting it; Python venv/pip
+remains the fallback when uv is unavailable.
 
 The installer also manages optional, label-gated **embody supervisor** services.
 The primary supervisor reads `~/.agent-dispatch/supervisor.env` and installs as

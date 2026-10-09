@@ -298,6 +298,8 @@ fi
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
+. "$SCRIPT_DIR/installer-engine.sh"
+
 PKG_SRC_DIR="$PLUGIN_DIR/src/agent_dispatch"
 
 # -- Parse arguments ---------------------------------------------------------
@@ -766,25 +768,10 @@ _find_python() {
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
 # governed box) instead of dead-ending; add it to PATH for this run.
 _ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
+    if UV_CMD="$(ensure_uv "$INSTALL_DIR")"; then
+        export PATH="$(dirname "$UV_CMD"):$PATH"
+        return 0
     fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
     _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
     return 1
 }
@@ -942,17 +929,17 @@ _ensure_runtime() {
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
 
-    if [[ ! -x "$VENV_PYTHON" ]]; then
+    if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
         if [[ "$have_uv" -eq 1 ]]; then
             _step 'Creating venv via uv...'
             _versioned_slot_clean
-            uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
+            invoke_uv_venv_resilient "$UV_CMD" "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
                 || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
         else
             _step 'Creating venv via python -m venv...'
             "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
         fi
-        [[ -x "$VENV_PYTHON" ]] || { _fail "Venv creation failed -- $VENV_PYTHON not found"; exit 1; }
+        [[ -x "$VENV_PYTHON" && -f "$VENV_DIR/pyvenv.cfg" ]] || { _fail "Venv creation failed -- missing Python or pyvenv.cfg at $VENV_DIR"; exit 1; }
         _ok 'Venv created'
     else
         _skip 'Venv already exists'
@@ -1053,7 +1040,7 @@ _ensure_runtime() {
             for pkg in "${_STALE_CACHE_REFRESH_PACKAGES[@]}"; do
                 refresh_flags+=(--reinstall-package "$pkg" --refresh-package "$pkg")
             done
-            uv pip install --python "$VENV_PYTHON" "${refresh_flags[@]}" "$1"
+            invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" "${refresh_flags[@]}" "$1"
             rc=$?
         else
             # Two sequential pip calls, not one: the first (--force-reinstall
@@ -1263,40 +1250,8 @@ _write_manifest() {
         [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
         echo "$commit $branch $dirty"
     }
-    local manifest="$INSTALL_DIR/deploy-manifest.json"
-    local kind ver commit branch dirty
-    kind="$(_source_kind "$PLUGIN_DIR")"
-    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-    commit="null"; branch="null"; dirty="false"
-    if [[ "$kind" == "local" ]]; then
-        local repo_root _c _b _d
-        repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
-        read -r _c _b _d <<< "$(_git_info "$repo_root")"
-        commit="\"$_c\""; branch="\"$_b\""; dirty="$_d"
-    fi
-    local tmp="$manifest.tmp"
-    cat > "$tmp" << EOF
-{
-  "schema_version": 3,
-  "service": "agent-dispatch",
-  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$kind",
-    "path": "$PLUGIN_DIR",
-    "repo": "copilot-extensions",
-    "plugin": "agent-dispatch",
-    "version": "$ver",
-    "commit": $commit,
-    "branch": $branch,
-    "dirty": $dirty
-  },
-  "venv": "$VENV_DIR",
-  "runtime": "python"
-}
-EOF
-    mv -f "$tmp" "$manifest"
-    _ok "Deploy manifest written (source: $kind)"
+    write_deploy_manifest "agent-dispatch" "agent-dispatch" "$INSTALL_DIR" \
+        "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$SRC_VERSION"
 }
 
 # Register the worktree-picker "Tasks" pivot (best-effort; never fatal).
