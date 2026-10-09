@@ -45,6 +45,7 @@ _LOCAL_PATH_PACKAGES = (
     "agent-dropin-registry",
     "agent-plugin-activation",
     "agent-remote-login-shell",
+    "agent-machine-transport",
 )
 
 
