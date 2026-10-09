@@ -56,7 +56,11 @@ function uv {{
 $PluginDir = '{plugin_dir}'
 $BuildSrcDir = '{plugin_dir}'
 $VenvPython = 'unused'
+$UvCommand = 'uv'
 $prevEAP = 'Continue'
+. '{PLUGIN.parents[1] / 'libs/installer-engine/installer-engine.ps1'}'
+function Write-Warn {{ param($Message) Write-Host $Message }}
+function Start-Sleep {{ param($Seconds) }}
 {_preinstall_loop()}
 """
     return subprocess.run(

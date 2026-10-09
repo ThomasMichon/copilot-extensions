@@ -16,6 +16,7 @@ agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
 agent-ssh mesh-status
+agent-ssh fleet-targets registry.yaml --module transports\direct\module.yaml --provider-instance lab-ssh --target my-machine
 agent-ssh refresh-mesh --json
 agent-ssh copilot-config set my-machine --workspace /workspaces/repo
 agent-ssh copilot my-machine
@@ -26,6 +27,22 @@ agent-ssh copilot my-machine --stop
 The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
+
+`fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
+normalized registry and matching transport recipe as `emit-profile`, validates
+both through the emitter, and returns an `agent-fleet.driver-snapshot` schema-v1
+record for only the explicit `--target` selections. Target IDs preserve canonical
+registry spelling; selection is case-insensitive and duplicate/unknown names
+fail. `--provider-instance` explicitly qualifies this driver's identity, while
+the source revision hashes the exact registry/module snapshot. It is metadata,
+not an enrollment credential or authority.
+
+This command never probes SSH, writes a profile, executes a transport, starts a
+tunnel, enrolls a connector or discovers every host automatically. `configured`
+and capability `ssh` describe a declared route, NOT verified connectivity or
+service readiness. Creation, deletion, leases and bootstrap are not offered.
+Only names/capabilities and a source digest are emitted: proxy recipes, private
+keys, file paths, host addresses and credentials stay local with their owner.
 
 `copilot <ssh-target>` attaches a real interactive Copilot CLI session in this
 terminal through the SSH target, matching the venue contract of
@@ -113,7 +130,11 @@ reconciles this machine's *outbound* reach into the mesh: it re-runs the
 transport's own discovery (e.g. `dtssh discover` for the dtssh transport) to
 capture live tunnel/host ids, re-renders this machine's managed
 `config.d` fragment from that live state, and probes reachability of every
-declared alias. It never trusts a previously cached id -- transports such as
+declared alias *other than this machine's own* -- an alias whose declared
+`hostname` (or, when `hostname` is omitted, its `machines.yaml` key) matches
+this machine's own raw hostname is reported reachable without an outbound SSH
+dial, since a machine never needs a network hop through its own relay/tunnel
+to reach itself. It never trusts a previously cached id -- transports such as
 dtssh rotate tunnel ids on every host restart, and nothing else re-validates a
 peer's cached id once it goes stale. `agent-machines`' hourly `watchdog`
 self-update tier calls this on every opted-in machine, so a stale cached id

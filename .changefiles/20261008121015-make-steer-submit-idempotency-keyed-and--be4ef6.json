@@ -1,9 +1,0 @@
-{
-  "comment": "Make steer submit idempotency-keyed and safe to retry on an ambiguous read-timeout, so a slow-but-already-committed answer is never reported as a lost delivery. Retries are gated on a coordinator-advertised capability so an older coordinator mid zero-downtime update is never retried against.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

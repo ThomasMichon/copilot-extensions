@@ -6,6 +6,7 @@ import io
 import json
 import shutil
 import time
+import types
 
 import pytest
 
@@ -1402,6 +1403,133 @@ def test_override_disable_enable_roundtrip_via_cli(monkeypatch, tmp_path, capsys
     assert ov.load_overrides(ovpath) == {}
 
 
+def test_override_parser_shapes_the_machine_flag():
+    args = _args(["supervise", "override", "disable", "u1", "--machine", "peer-box"])
+    assert args.machine == "peer-box"
+    args = _args(["supervise", "override", "enable", "u1", "--machine", "peer-box"])
+    assert args.machine == "peer-box"
+    # list carries no --machine flag at all (Phase 2 scope)
+    with pytest.raises(SystemExit):
+        _args(["supervise", "override", "list", "--machine", "peer-box"])
+
+
+def test_override_disable_with_machine_local_is_unaffected(monkeypatch, tmp_path, capsys):
+    """`--machine` naming *this* machine (or left unset) must behave exactly
+    like no `--machine` at all -- `is_peer_machine` already returns False for
+    the local machine, so the existing local code path runs unchanged."""
+    import json
+
+    from agent_dispatch import overrides as ov
+
+    ovpath = tmp_path / "overrides.json"
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(ovpath))
+    from agent_dispatch import remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "this-box")
+
+    args = _args(["supervise", "override", "disable", "u1", "--machine", "this-box"])
+    assert args.func(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["id"] == "u1" and out["overridden_off"] is True
+    assert ov.overridden_off_ids(ov.load_overrides(ovpath)) == {"u1"}
+
+
+def test_override_disable_with_machine_dispatches_remotely(monkeypatch, capsys):
+    """`--machine <peer>` must run the mutation *on the peer* over SSH,
+    streaming its JSON straight through -- never touch this machine's own
+    override store."""
+    from agent_dispatch import remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "this-box")
+    captured = {}
+
+    def fake_browse_remote(machine, argv, **kwargs):
+        captured["machine"] = machine
+        captured["argv"] = argv
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"id": "u1", "overridden_off": True, "reason": "boom"}) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse_remote)
+
+    args = _args(
+        ["supervise", "override", "disable", "u1", "--machine", "peer-box", "--reason", "boom"]
+    )
+    rc = args.func(args)
+    assert rc == 0
+    assert captured["machine"] == "peer-box"
+    assert captured["argv"] == [
+        "agent-dispatch", "supervise", "override", "disable", "u1",
+        "--reason", "boom",
+    ]
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"id": "u1", "overridden_off": True, "reason": "boom"}
+
+
+def test_override_enable_with_machine_dispatches_remotely(monkeypatch, capsys):
+    from agent_dispatch import remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "this-box")
+    captured = {}
+
+    def fake_browse_remote(machine, argv, **kwargs):
+        captured["machine"] = machine
+        captured["argv"] = argv
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"id": "u1", "overridden_off": False, "cleared": True}) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse_remote)
+
+    args = _args(["supervise", "override", "enable", "u1", "--machine", "peer-box"])
+    rc = args.func(args)
+    assert rc == 0
+    assert captured["argv"] == ["agent-dispatch", "supervise", "override", "enable", "u1"]
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"id": "u1", "overridden_off": False, "cleared": True}
+
+
+def test_override_with_machine_propagates_remote_failure(monkeypatch, capsys):
+    """A failed remote mutation (non-zero exit) surfaces the same diagnosed
+    error `_browse_peer` already produces for a peer-queue browse, and the
+    command's own exit code reflects the remote failure."""
+    from agent_dispatch import remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "this-box")
+
+    def fake_browse_remote(machine, argv, **kwargs):
+        return types.SimpleNamespace(returncode=127, stdout="", stderr="")
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse_remote)
+
+    args = _args(["supervise", "override", "disable", "u1", "--machine", "peer-box"])
+    rc = args.func(args)
+    assert rc == 127
+    err = capsys.readouterr().err
+    assert "peer-box" in err
+    assert "not installed" in err
+
+
+def test_override_with_machine_reports_unavailable_ssh(monkeypatch, capsys):
+    from agent_dispatch import remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "this-box")
+
+    def fake_browse_remote(machine, argv, **kwargs):
+        raise remote_dispatch.RemoteDispatchUnavailable("ssh not found on PATH")
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse_remote)
+
+    args = _args(["supervise", "override", "disable", "u1", "--machine", "peer-box"])
+    rc = args.func(args)
+    assert rc == 2
+    assert "unavailable" in capsys.readouterr().err
+
+
 def test_parser_create_flags():
     args = build_parser().parse_args(
         [
@@ -2153,6 +2281,73 @@ def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "--spawn skipped" in err
     assert "t1" in err
+
+
+def test_do_spawn_forwards_resume_worktree_for_reused_allocation(monkeypatch):
+    """The one-shot ``create --spawn`` path must apply the same reused/
+    retired-conversation decision as the supervisor's headless factory
+    (``spawn_factories.resume_worktree_eligible``) -- otherwise this entry
+    point still reuses the directory while calling plain ``create`` when
+    the carried handle is missing, the exact history-loss path strict
+    resume exists to close."""
+    import argparse
+
+    from agent_dispatch import __main__, bridge
+
+    captured = {}
+
+    def fake_spawn_or_resume_worker(*_a, **kwargs):
+        captured.update(kwargs)
+        import subprocess
+
+        return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(bridge, "spawn_or_resume_worker", fake_spawn_or_resume_worker)
+    args = argparse.Namespace(
+        spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
+    )
+    task = {
+        "id": "t1",
+        "spawn_worktree": "wt-1",
+        "spawn_worktree_ownership": "reused",
+        "spawn_conversation_retired": False,
+        "spawn_session_handle": None,
+    }
+    __main__._do_spawn(args, task)
+    assert captured["resume_worktree"] is True
+
+
+def test_do_spawn_withholds_resume_worktree_for_retired_conversation(monkeypatch):
+    """The mirror case: a reused allocation whose carried conversation was
+    deliberately retired (an operator rearm) must NOT pass
+    ``resume_worktree=True`` -- that fallback would resurrect the retired
+    session via the worktree directory's own latest session, bypassing the
+    already-correctly-dropped ``spawn_session_handle``."""
+    import argparse
+
+    from agent_dispatch import __main__, bridge
+
+    captured = {}
+
+    def fake_spawn_or_resume_worker(*_a, **kwargs):
+        captured.update(kwargs)
+        import subprocess
+
+        return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(bridge, "spawn_or_resume_worker", fake_spawn_or_resume_worker)
+    args = argparse.Namespace(
+        spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
+    )
+    task = {
+        "id": "t1",
+        "spawn_worktree": "wt-1",
+        "spawn_worktree_ownership": "reused",
+        "spawn_conversation_retired": True,
+        "spawn_session_handle": None,
+    }
+    __main__._do_spawn(args, task)
+    assert captured["resume_worktree"] is False
 
 
 def test_parser_worktree_status():

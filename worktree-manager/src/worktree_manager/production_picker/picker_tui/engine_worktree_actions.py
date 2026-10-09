@@ -153,10 +153,10 @@ class PickerScreenWorktreeActionsMixin:
             # blank-start, #1026). A worktree that only *looks* sessionless
             # because tracking lost its head session is repaired by Refresh.
             acts = ["Open"]
-        # "Launch in new window" (#5210) / "Resume prompt…" (Phase 2):
-        # local-only decision modifiers riding Open/Resume eligibility.
         if rec.get("is_local", True) and ("Open" in acts or "Resume" in acts):
-            acts += ["Launch in new window", "Resume prompt…"]
+            acts.append("Launch in new window")
+        if rec.get("is_local", True) and "Resume" in acts:
+            acts.append("Resume prompt…")
         # Read-only "Messages" peek -- an auxiliary, non-lifecycle verb offered
         # for any worktree that could have a session to peek (not positively
         # sessionless) and is not in the inconsistent WARNING state. Independent

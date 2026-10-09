@@ -72,6 +72,9 @@ def _run_manifest_harness(tmp_path: Path, *, plugin_path: str, source_override: 
     return json.loads((install_path / "deploy-manifest.json").read_text(encoding="utf-8"))
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="native POSIX shell harness; Windows uses the PS1 counterpart",
+)
 def test_manifest_kind_uses_staged_source_when_no_override(tmp_path: Path) -> None:
     manifest = _run_manifest_harness(
         tmp_path,
@@ -81,6 +84,9 @@ def test_manifest_kind_uses_staged_source_when_no_override(tmp_path: Path) -> No
     assert manifest["source"]["kind"] == "marketplace"
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="native POSIX shell harness; Windows uses the PS1 counterpart",
+)
 def test_manifest_kind_uses_override_path_classification(tmp_path: Path) -> None:
     manifest = _run_manifest_harness(
         tmp_path,

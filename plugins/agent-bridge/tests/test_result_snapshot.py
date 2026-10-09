@@ -913,10 +913,8 @@ def test_process_replacement_requires_a_new_session_id(
         {"id": "1", "type": "assistant.message", "data": {"content": "before"}},
     )
     first = client.get("/api/v1/live-sessions/live-1/result").json()
-    app.state.db.execute_write(
-        "UPDATE live_sessions SET status='expired' WHERE session_id=?",
-        ("live-1",),
-    )
+    # Another process while live-1's own still runs (an expired row is instead
+    # revived by its resumed conversation: test_live_session_reincarnation).
     response = client.post(
         "/api/v1/live-sessions",
         json={

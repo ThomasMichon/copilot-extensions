@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-10-02
-- **Status:** Active <!-- Phase 1 done; Phase 2 landed (PR #4993 merged); Phase 3 (docs) next -->
+- **Status:** Active <!-- Phase 1 done; Phase 2 landed (PR #4993 merged); Phase 3 (docs) landed; Phase 4 (cross-origin plugin:/repo extends: addressing) landed; Phase 5 (agent-recommended, lower priority) and the deferred motivating-consumer validation remain open -->
 - **Vision:** `visions/plugins/agent-dispatch/README.md` §*extend-any-declaration*
   (added by this effort's own Provenance entry) — generalizes *loop-recipes*
   and *The recipe* from "extend one of four named, plugin-shipped archetypes
@@ -282,16 +282,82 @@ fit an existing archetype.
       silent gap.
 
 ### Phase 3 — Docs
-- [ ] `plugins/agent-dispatch/README.md`: document the generalized
+- [x] `plugins/agent-dispatch/README.md`: document the generalized
       `extends:` chaining (any base, multi-hop) and the `script` provider,
       with a worked migration example (a hand-written custom-backlog
       `command:` emitter → its `script`-provider `repository_issue_loop`
-      equivalent).
-- [ ] Update `visions/plugins/agent-dispatch/README.md`'s
+      equivalent). **Landed:** new subsections in the *Registrar `extends:`*
+      section — chaining semantics (per-hop directory resolution, the
+      cycle/depth guard, the known path-dependent-field gap), the `script`
+      forge provider's request/response contract table, and the worked
+      migration example.
+- [x] Update `visions/plugins/agent-dispatch/README.md`'s
       *extend-any-declaration* Provenance entry to mark implementation
-      landed, citing the merged PRs.
+      landed, citing the merged PRs. **Landed:** cites
+      `ThomasMichon/copilot-extensions#4968` (Phase 1) and `#4993`
+      (Phase 2), names the remaining open gap (`#5174`) and the deferred
+      motivating-consumer validation.
 
-### Phase 4 — Further script-hook points _(agent-recommended, lower priority)_
+### Phase 4 — Cross-origin `extends:` addressing (plugin↔plugin, plugin↔repo, repo↔repo)
+- [x] Confirm/close the gap: a repo's declaration could already extend
+      another repo (cross-repo path) and this plugin's own built-in
+      recipes (`global:<name>`), but nothing let one declaration name a
+      recipe shipped by a *different* installed plugin, nor let one
+      plugin's own recipe extend another plugin's by name. **Landed:** a
+      new `plugin:<name>[@marketplace]:<relative-path>` ref kind
+      (`registrar_recipes.py`), resolved against the named plugin's own
+      currently-active, identity-verified live root via
+      `plugin_activation.resolve_active_plugins()` -- the same resolution
+      `registrar_registry.py` already uses to validate a `registrar.d`
+      manifest's own `plugin_root`. Two active plugins sharing a bare name
+      across marketplaces is rejected as ambiguous (naming every candidate
+      source) unless disambiguated with `@<marketplace>`; a ref whose path
+      escapes the named plugin's own root (`..`, or an absolute path) is
+      rejected outright -- scoping to that plugin's own content is the
+      entire point of naming it.
+- [x] All four origin-crossing directions now work, proven with dedicated
+      tests: **repo→repo** (already shipped, re-confirmed), **repo→plugin**
+      (a repo's declaration naming any active plugin's recipe, not only
+      this plugin's own `global:` set), **plugin→plugin** (one plugin's
+      own bundled recipe extending another active plugin's, by name), and
+      **plugin→repo** (a plugin's own recipe reaching into one specific,
+      already-known repo's file via a plain path -- mechanically identical
+      to repo→repo; no name-based ref exists for this direction since a
+      plugin should not generally depend on knowing a specific consuming
+      repo at all).
+- [x] Per-hop directory provenance (Phase 1's own guarantee) extends
+      cleanly to the new address space with no special-casing: a
+      `plugin:` ref's `_ref_identity` already resolves to a real absolute
+      path (unlike a bare `global:` ref), so the existing "next hop's
+      base directory is this hop's resolved file's own directory" logic
+      in `resolve_extends` picks up the named plugin's root automatically
+      -- proven with a dedicated nested-ref test (a plugin-to-plugin chain
+      whose second hop's own relative ref resolves against *that* plugin's
+      root, with a same-named decoy file in the extending plugin's root
+      proving it wasn't picked up by mistake).
+- [x] **Circular-dependency prevention is origin-agnostic by construction,
+      not a separate rule:** the existing cycle/depth guard tracks each
+      ref's resolved *identity* (an absolute path, or a `global:<name>`
+      string) regardless of which ref kind produced it, so a cycle
+      crossing between two plugins, or mixing a `plugin:` ref with a
+      plain repo path, is caught by the same mechanism a same-origin
+      cycle always was -- proven with two dedicated tests (a
+      plugin↔plugin cycle, and a cycle mixing a `plugin:` ref with a
+      repo file-path ref).
+- [x] Docs: `plugins/agent-dispatch/README.md`'s *Registrar `extends:`*
+      section gained a *Cross-origin addressing* subsection with the
+      four-direction matrix and the circular-dependency-prevention
+      explanation.
+- [x] Tests: 13 new cases in `test_registrar_recipes.py` -- `plugin:` ref
+      parsing/resolution (bare name, `@marketplace` disambiguation,
+      ambiguous-name rejection, unknown-plugin rejection, malformed-ref
+      rejection, absolute-path rejection, root-escape rejection) plus the
+      four cross-origin `resolve_extends` chains and the two
+      mixed-origin cyclic-chain cases. Full `agent-dispatch` suite
+      unaffected (61 pre-existing `test_registrar_recipes.py` cases plus
+      `test_registrar_registry.py`/`test_cli.py` all still green).
+
+### Phase 5 — Further script-hook points _(agent-recommended, lower priority)_
 - [ ] _(agent-recommended)_ If a concrete future consumer needs a
       script-path hook in a different engine (e.g. `reviewer-loop`'s
       verdict-application step), extend the same subprocess-JSON pattern
@@ -306,7 +372,9 @@ fit an existing archetype.
       declaration (repo-local, cross-repo, `global:`) resolves identically
       to its pre-effort behavior — zero regression in
       `agent-dispatch-recipe-library`'s own shipped surface. (Re-confirmed
-      after Phase 2: 836+480+494+622+600+773, all 6 sub-suites.)
+      after Phase 2: 836+480+494+622+600+773, all 6 sub-suites; re-confirmed
+      after Phase 4: `test_registrar_recipes.py` 74/74,
+      `test_registrar_registry.py` + `test_cli.py` all green.)
 - [x] A 2-hop and a 3-hop `extends:` chain resolve to the identical
       `ProfileDeclaration` a hand-written equivalent direct declaration
       would produce (byte-for-byte dict equality before `load_declaration`
@@ -321,6 +389,10 @@ fit an existing archetype.
       real `Popen` calls, round-tripping `list_open_issues` → `reserve` →
       `claim` → `release` and persisting each reservation marker to disk
       across the four separate invocations.
+- [x] All four `extends:` origin-crossing directions (plugin↔plugin,
+      plugin↔repo, repo↔plugin, repo↔repo) resolve correctly, each with a
+      dedicated test; a cycle crossing origins is rejected by the same
+      guard as a same-origin cycle (two dedicated tests).
 - [ ] The motivating consumer's own emitter need is provably expressible as
       a `script`-provider `repository_issue_loop` extension with zero
       bespoke command-emitter code — confirmed with that consumer's own
@@ -333,6 +405,76 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-08 — Phase 4 complete: cross-origin `extends:` addressing
+- Operator ask (post-handoff): make sure one registrar can `extends:`
+  another across all four origin crossings -- plugin↔plugin, plugin↔repo,
+  repo↔plugin, repo↔repo -- with circular-dependency prevention. Audited
+  the existing mechanism first: repo↔repo (plain cross-repo path) and
+  repo→this-plugin's-own-`global:` set already worked; nothing let a
+  declaration reach a *different* installed plugin's own recipes by name,
+  nor let one plugin's recipe extend another's.
+- New `plugin:<name>[@marketplace]:<relative-path>` ref kind
+  (`registrar_recipes.py`): resolves `<name>` against every currently
+  active plugin via `plugin_activation.resolve_active_plugins()` (cached
+  per-process, `_reset_active_plugins_cache()` for tests) -- the exact
+  identity-verified live-root resolution `registrar_registry.py` already
+  trusts for a `registrar.d` manifest's own `plugin_root`. An ambiguous
+  bare name across marketplaces, an unknown plugin, a malformed ref, an
+  absolute relpath, and a relpath escaping the named plugin's own root
+  each raise a clear, distinct `RegistrarError`.
+- Refactored `_load_recipe_document`'s read/decode/suffix-check logic into
+  a shared `_read_recipe_document` helper, and `_ref_identity`'s
+  `.resolve()` error classification into a shared `_safe_resolve_ref_path`
+  helper -- both now serve the file-path and `plugin:` ref kinds
+  identically, with zero duplicated error handling.
+- Per-hop directory provenance (Phase 1's guarantee) and cycle/depth
+  detection both extend to the new address space with **zero special-case
+  code**: a `plugin:` ref's `_ref_identity` already returns a real
+  resolved path (unlike `global:`), so the existing "next hop's base_dir
+  is this hop's resolved file's own directory" and "track each ref's
+  resolved identity for cycle detection" logic picks it up automatically.
+  This is the concrete reason the cycle guard is origin-agnostic by
+  construction rather than needing its own rule.
+- 13 new tests in `test_registrar_recipes.py`: `plugin:` ref
+  parsing/resolution (7 cases: bare name, `@marketplace`, ambiguous,
+  unknown, malformed, absolute path, root-escape) plus the four
+  cross-origin `resolve_extends` chains (plugin→plugin, plugin→plugin
+  with a nested ref proving per-hop directory provenance, repo→plugin,
+  plugin→repo) and two mixed-origin cyclic-chain cases. Full suite
+  re-confirmed green: `test_registrar_recipes.py` 74/74,
+  `test_registrar_registry.py` + `test_cli.py` unaffected,
+  `check-module-size.py` clean.
+- Docs: `plugins/agent-dispatch/README.md` gained a *Cross-origin
+  addressing* subsection (the four-direction matrix, the `plugin:` ref
+  contract, and why circular-dependency prevention needs no origin-aware
+  special case).
+- Next: Phase 5 (agent-recommended, lower priority, no concrete consumer
+  yet) and the Validation Plan's last item (motivating consumer's own
+  emitter validation).
+
+### 2026-10-08 — Phase 3 (docs) complete
+- `plugins/agent-dispatch/README.md`'s *Registrar `extends:`* section
+  gained three new subsections: **Chaining `extends:`** (multi-hop
+  resolution semantics, per-hop directory resolution for nested refs, the
+  cycle/depth guard's `RegistrarError` shape, and the known narrower gap —
+  per-hop provenance for a few path-dependent declared fields outside
+  `kind: emitter`'s own `spec.cwd`, refused outright as a relative
+  inherited path rather than silently misresolved); the **`script` forge
+  provider** (the request/response JSON contract table for its four
+  operations, error handling, path resolution, `forge.namespace`/
+  `forge.backlog`); and a **worked migration example** turning a
+  hand-written `command:`-backed custom-backlog emitter into its
+  `script`-provider `repository_issue_loop` equivalent.
+- `visions/plugins/agent-dispatch/README.md`'s *extend-any-declaration*
+  Provenance entry updated from "implementation not yet landed" to cite
+  both merged PRs (`ThomasMichon/copilot-extensions#4968` Phase 1, `#4993`
+  Phase 2) and name the two still-open items (the `#5174` path-provenance
+  gap; the motivating consumer's own deferred validation).
+- Remaining open items, unchanged by this phase: Phase 4 (agent-
+  recommended, lower priority, no concrete consumer yet) and the
+  Validation Plan's last item (motivating consumer's own emitter
+  validation, owned by that consumer's own effort).
 
 ### 2026-10-04 — PR #4993 merged: Phase 2 (`script` forge provider) complete
 - 25 automated review rounds processed across the push-fix loop

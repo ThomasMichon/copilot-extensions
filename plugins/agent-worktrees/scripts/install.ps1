@@ -1363,7 +1363,8 @@ function Enter-VersionedSlotLease {
        like a dirty slot and refuse to build, but should tell those two
        causes apart in their own message: `$script:VersionedSlotLeaseFailureReason`
        is 'contention' for a genuine sharing violation (ERROR_SHARING_VIOLATION
-       /ERROR_LOCK_VIOLATION), or the raw exception message for anything else --
+       /ERROR_LOCK_VIOLATION on Windows, EAGAIN/EWOULDBLOCK on Unix), or the
+       raw exception message for anything else --
        catching bare `[System.IO.IOException]` would otherwise misreport every
        cause (disk full, permission denied, path too long, ...) as "another
        process is building this slot", sending an operator chasing a retry
@@ -1382,7 +1383,12 @@ function Enter-VersionedSlotLease {
         $ERROR_SHARING_VIOLATION = 32
         $ERROR_LOCK_VIOLATION = 33
         $nativeCode = $_.Exception.HResult -band 0xFFFF
-        if ($nativeCode -eq $ERROR_SHARING_VIOLATION -or $nativeCode -eq $ERROR_LOCK_VIOLATION) {
+        $contentionCodes = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            @($ERROR_SHARING_VIOLATION, $ERROR_LOCK_VIOLATION)
+        } else {
+            @(11, 35) # EAGAIN/EWOULDBLOCK on Linux and BSD/macOS.
+        }
+        if ($nativeCode -in $contentionCodes) {
             $script:VersionedSlotLeaseFailureReason = 'contention'
         } else {
             $script:VersionedSlotLeaseFailureReason = $_.Exception.Message
@@ -1407,6 +1413,58 @@ function Exit-VersionedSlotLease {
     if ($script:VersionedSlotLeaseHandle) {
         try { $script:VersionedSlotLeaseHandle.Dispose() } catch {}
         $script:VersionedSlotLeaseHandle = $null
+    }
+}
+
+function Wait-ForVersionedSlotLease {
+    <# Bounded join for genuine lease contention (phase-3-runtime-admission,
+       #5472/#5788): polls for the lease on a real wall-clock deadline
+       (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC) instead of refusing on the
+       first contention observation, so a concurrent first build that
+       finishes within the budget is picked up automatically rather than
+       requiring an operator (or an unattended resumed launch) to re-run
+       manually. The caller's OWN post-acquisition Test-SlotAlreadyComplete
+       re-check (already required by #5439) is what lets a finished winner
+       be reused here rather than raced. Only genuine contention is
+       retried -- any OTHER Enter-VersionedSlotLease failure (permission/
+       path/storage) returns immediately, since waiting out a persistent,
+       non-transient failure would just convert a fast, actionable error
+       into a slow, identical one. Returns $true iff the lease was
+       ultimately acquired. #>
+    if (Enter-VersionedSlotLease) { return $true }
+    if ($script:VersionedSlotLeaseFailureReason -ne 'contention') { return $false }
+
+    $waitSeconds = 180
+    $waitRaw = $env:AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC
+    if ($waitRaw) {
+        $parsedWait = 0
+        if ([int]::TryParse([string]$waitRaw, [ref]$parsedWait)) { $waitSeconds = $parsedWait }
+    }
+    $pollMs = 1000
+    $pollRaw = $env:AGENT_WORKTREES_SLOT_LEASE_POLL_MS
+    if ($pollRaw) {
+        $parsedPoll = 0
+        if ([int]::TryParse([string]$pollRaw, [ref]$parsedPoll) -and $parsedPoll -gt 0) {
+            $pollMs = $parsedPoll
+        }
+        # A non-positive or unparseable override is ignored (keeps the
+        # 1000ms default) rather than passed through: 0 would busy-spin
+        # this loop, and a negative value makes Start-Sleep throw.
+    }
+    if ($waitSeconds -le 0) { return $false }
+
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $remainingMs = ($waitSeconds * 1000) - $deadline.Elapsed.TotalMilliseconds
+        if ($remainingMs -le 0) { return $false }
+        # Cap this poll's sleep to whatever budget remains, so the final
+        # iteration can never itself overshoot the configured deadline
+        # (a large AGENT_WORKTREES_SLOT_LEASE_POLL_MS must not silently
+        # turn a short wait budget into a much longer actual wait).
+        $sleepMs = [Math]::Min($pollMs, $remainingMs)
+        Start-Sleep -Milliseconds ([Math]::Max(1, [int]$sleepMs))
+        if (Enter-VersionedSlotLease) { return $true }
+        if ($script:VersionedSlotLeaseFailureReason -ne 'contention') { return $false }
     }
 }
 
@@ -2233,19 +2291,18 @@ function Deploy-Venv {
     # $VenvPython after a lease holder creates it (and skip straight past
     # this function into concurrent package deployment), or remove an
     # in-progress slot out from under an active builder.
-    if (-not (Enter-VersionedSlotLease)) {
-        # Another live process already holds the exclusive build lease for
-        # this exact version -- it's actively building (or about to), so
-        # treat this exactly like a dirty slot and refuse to race it.
-        # Enter-VersionedSlotLease distinguishes that genuine contention
-        # from any OTHER lease-file failure (permission/path/storage) via
-        # $script:VersionedSlotLeaseFailureReason -- never attribute the
-        # latter to "another process" and send an operator chasing a
-        # retry loop instead of the real, persistent failure.
+    if (-not (Wait-ForVersionedSlotLease)) {
+        # Another live process still holds the exclusive build lease for
+        # this exact version after the caller's full bounded wait
+        # (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC, default 180s) -- we do not
+        # race it. $script:VersionedSlotLeaseFailureReason distinguishes
+        # genuine, still-unresolved contention from any OTHER lease-file
+        # failure (permission/path/storage) -- never attribute the latter
+        # to "another process".
         if ($script:VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention') {
             Write-ServiceErr "Could not acquire the build lease for runtime slot ($SrcVersion): $script:VersionedSlotLeaseFailureReason"
         } else {
-            Write-ServiceErr "Another process is already building this runtime slot ($SrcVersion) -- refusing to race it. Re-run update once the other build finishes."
+            Write-ServiceErr "Another process is still building this runtime slot ($SrcVersion) after waiting -- refusing to race it. Re-run update once the other build finishes, or raise AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC if builds routinely take longer."
         }
         return $false
     }
@@ -2399,7 +2456,7 @@ function Deploy-Wrappers {
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {

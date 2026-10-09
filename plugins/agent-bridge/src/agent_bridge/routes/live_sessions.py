@@ -46,6 +46,7 @@ from ..live_controls import (
     SetModeRequest,
     SetModeResult,
 )
+from .. import live_backfill as _backfill
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
@@ -54,7 +55,6 @@ from ..live_representation import (
     translate_reconnect_cursor,
 )
 from ..result_tokens import retarget
-from ..db_live_session_aliases import PROCESS_START_TOLERANCE_SECONDS
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
@@ -239,27 +239,8 @@ async def register_live_session(
     _require_finite_start(body.process_started_at)
     db = _db(request)
     now = time.time()
-    prior = db.get_live_session(body.session_id)
-    # The pid alone can be reused; a known, different process start time is a
-    # different process even when the pid matches (same tolerance as rollover).
-    prior_started, started = (prior or {}).get("process_started_at"), body.process_started_at
-    pid_changed = bool(
-        prior
-        and prior.get("pid") is not None
-        and body.pid is not None
-        and prior.get("pid") != body.pid
-    ) or bool(
-        prior_started is not None and started is not None
-        and abs(prior_started - started) >= PROCESS_START_TOLERANCE_SECONDS
-    )
-    if pid_changed:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "reason": "incarnation_mismatch",
-                "session_id": body.session_id,
-            },
-        )
+    # Whether another process may take this id over is decided inside the
+    # atomic upsert (``_incarnation_mismatch``): never a live row, always a dead one.
     status = db.register_live_session(
         body.session_id,
         machine=body.machine,
@@ -294,6 +275,7 @@ async def register_live_session(
     if store is not None:
         for alias_id in db.live_session_aliases_to(row["session_id"]):
             store.alias(alias_id, row["session_id"])
+    _backfill.on_registration(request, row)  # a session that lost its history in a restart replays it
     return _to_info(row)
 
 
@@ -568,7 +550,7 @@ async def deregister_live_session(
 
 @router.post("/{session_id}/events", response_model=IngestLiveEventsResult)
 async def ingest_live_events(
-    session_id: str, body: IngestLiveEventsRequest, request: Request
+    session_id: str, body: IngestLiveEventsRequest, request: Request, replay: bool = False
 ) -> IngestLiveEventsResult:
     """Ingest a batch of raw SDK events from a represented session's extension.
 
@@ -586,11 +568,10 @@ async def ingest_live_events(
     session_id = registration["session_id"]
     store = _store(request)
     raw = [e.model_dump() for e in body.events]
-    ingested = store.ingest(
-        session_id,
-        raw,
-        worktree_id=registration.get("worktree_id"),
-    )
+    ingested = _backfill.ingest(request, registration, raw, replay=replay)  # held while a replay is awaited
+    if replay:  # an older history, replayed: it never re-derives the session's current state
+        return IngestLiveEventsResult(session_id=session_id, ingested=ingested,
+                                      last_id=_backfill.latest_id(store, session_id))
     # Phase 7 Channel A: fold the raw batch into a coarse turn_state so the
     # tracker sees running/idle/stalled -- objective and token-free.
     prior = (db.get_live_session(session_id) or {}).get("turn_state")

@@ -1,9 +1,0 @@
-{
-  "comment": "Report aggregate instruction-projection budget debt without gating sync, promotion, or periodic reprojection",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

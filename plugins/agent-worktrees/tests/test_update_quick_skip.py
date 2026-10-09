@@ -107,6 +107,25 @@ def test_force_reruns_installer_when_current(wired, monkeypatch):
     assert _installer_ran(wired), "--force must re-deploy even when current"
 
 
+@pytest.mark.parametrize(("deadline", "expected"), [("900", 930), ("1", 600), ("0", 600)])
+def test_self_installer_extends_budget_without_losing_existing_minimum(
+    wired, monkeypatch, deadline, expected,
+):
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev10")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "1.5.3-dev9")
+    monkeypatch.setenv("AGENT_WORKTREES_INSTALL_DEADLINE_SEC", deadline)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _Completed()
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert m.cmd_update(_args()) == 0
+    installer = next(kwargs for argv, kwargs in calls if "install.sh" in " ".join(argv))
+    assert installer["timeout"] == expected
+
+
 def test_required_runtime_failure_makes_update_fail(wired, monkeypatch):
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(

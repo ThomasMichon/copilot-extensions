@@ -22,20 +22,47 @@ behavior change, not a pure de-duplication.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
 import yaml
 
 __all__ = [
+    "AmbiguousMachineError",
+    "MachineIdentity",
     "MachineEntry",
     "SSHEnvironment",
     "find_machine_entry",
     "machine_name",
     "merge_machines_yaml",
+    "parse_machines_yaml",
     "parse_machines_yaml_file",
 ]
+
+
+class AmbiguousMachineError(ValueError):
+    """A configured identity matches more than one machine or SSH target."""
+
+
+class MachineIdentity(Protocol):
+    """Read-only identity fields shared by consumer-specific machine records."""
+
+    @property
+    def key(self) -> str: ...
+
+    @property
+    def alias(self) -> str: ...
+
+    @property
+    def hostname(self) -> str: ...
+
+    @property
+    def display_name(self) -> str: ...
+
+
+_Machine = TypeVar("_Machine", bound=MachineIdentity)
 
 
 @dataclass(frozen=True)
@@ -45,6 +72,8 @@ class SSHEnvironment:
     name: str
     alias: str
     shell: str = ""
+    port: int = 22
+    user: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,8 +132,25 @@ def parse_machines_yaml_file(
     if not isinstance(raw, dict) or not isinstance(raw.get("machines"), dict):
         raise ValueError(f"machines.yaml at {path} is missing 'machines' key")
 
+    return parse_machines_yaml(raw, require_alias=require_alias)
+
+
+def parse_machines_yaml(
+    raw: dict[str, Any], *, require_alias: bool = False,
+    default_ssh_alias_to_key: bool = False, default_ssh_shell: str = "",
+    keep_unnamed_environments: bool = False, preserve_environment_values: bool = False,
+) -> dict[str, MachineEntry]:
+    """Parse resolved registry data, with explicit legacy consumer defaults.
+
+    File consumers retain their existing defaults. Bridge opts into key aliases,
+    bash shells and unnamed environments; explicit empty values stay explicit.
+    Missing-value policies do not change normalization. Consumers preserving
+    historical raw environment values must explicitly opt in.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("machines", {}), dict):
+        raise ValueError("machines.yaml 'machines' must be a mapping")
     entries: dict[str, MachineEntry] = {}
-    for key, data in raw["machines"].items():
+    for key, data in raw.get("machines", {}).items():
         if not isinstance(data, dict):
             continue
         description_raw = data.get("description", "")
@@ -135,21 +181,28 @@ def parse_machines_yaml_file(
         for env in ssh_block.get("environments", []) or []:
             if not isinstance(env, dict):
                 continue
-            if require_alias:
-                if "name" not in env or "alias" not in env:
+            if preserve_environment_values or require_alias:
+                name = env.get("name", "")
+                if not name and not keep_unnamed_environments and not require_alias:
                     continue
-                ssh_envs.append(SSHEnvironment(
-                    name=env["name"], alias=env["alias"],
-                    shell=env.get("shell", ""),
-                ))
-            else:
-                name = str(env.get("name") or "").strip()
-                if not name:
+                if require_alias and ("name" not in env or "alias" not in env):
                     continue
                 ssh_envs.append(SSHEnvironment(
                     name=name,
-                    alias=str(env.get("alias") or "").strip(),
-                    shell=str(env.get("shell") or "").strip(),
+                    alias=env.get("alias", str(key) if default_ssh_alias_to_key else ""),
+                    shell=env.get("shell", default_ssh_shell),
+                    port=env.get("port", 22),
+                    user=env.get("user"),
+                ))
+            else:
+                name = str(env.get("name") or "").strip()
+                if not name and not keep_unnamed_environments:
+                    continue
+                ssh_envs.append(SSHEnvironment(
+                    name=name,
+                    alias=str(env.get("alias", str(key) if default_ssh_alias_to_key else "") or "").strip(),
+                    shell=str(env.get("shell", default_ssh_shell) or "").strip(),
+                    port=env.get("port", 22), user=env.get("user"),
                 ))
         # Coerce the entry's own identity fields to ``str`` unconditionally
         # (not just in the permissive branch above): a YAML key/value that
@@ -200,8 +253,8 @@ def machine_name(entry: MachineEntry) -> str:
 
 
 def find_machine_entry(
-    entries: dict[str, MachineEntry], name: str,
-) -> MachineEntry | None:
+    entries: Mapping[str, _Machine], name: str, *, reject_ambiguous: bool = False,
+) -> _Machine | None:
     """Look up a machine by key, alias, ``hostname`` field, or
     ``display_name`` (case-insensitive).
 
@@ -209,20 +262,22 @@ def find_machine_entry(
     reports COMPUTERNAME in mixed case but tooling often lowercases it).
     Matching the explicit ``hostname`` field lets a machine keyed by a
     friendly name still be found by its raw COMPUTERNAME. Returns ``None``
-    if no entry matches.
+    if no entry matches. ``reject_ambiguous`` rejects multiple non-exact matches
+    instead of returning the first; exact keys always retain precedence.
     """
     if not name:
         return None
     if name in entries:
         return entries[name]
     name_lower = name.lower()
+    matches: list[_Machine] = []
     for key, entry in entries.items():
-        if key.lower() == name_lower:
-            return entry
-        if entry.alias and entry.alias.lower() == name_lower:
-            return entry
-        if entry.hostname and entry.hostname.lower() == name_lower:
-            return entry
-        if entry.display_name and entry.display_name.lower() == name_lower:
-            return entry
-    return None
+        if any(value and value.lower() == name_lower for value in (
+            key, entry.alias, entry.hostname, entry.display_name,
+        )):
+            if not reject_ambiguous:
+                return entry
+            matches.append(entry)
+    if len(matches) > 1:
+        raise AmbiguousMachineError(f"Machine '{name}' is ambiguous in topology")
+    return matches[0] if matches else None

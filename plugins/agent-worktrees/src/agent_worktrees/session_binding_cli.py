@@ -9,7 +9,7 @@ import sys
 import yaml
 
 from . import activity, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity
-from . import config as cfg, session_context as session_context_mod
+from . import config as cfg, hook_ipc, session_context as session_context_mod
 from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
 
 
@@ -777,6 +777,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
             handoff_ordinal = None
 
     _note_disposition_snapshot(wt_id, summary=summary, kind="handoff", session_id=session_id)
+    hook_ipc.send_best_effort("handoffWake", {"worktree_id": wt_id})
     output._json_output(
         {
             "noted": True,

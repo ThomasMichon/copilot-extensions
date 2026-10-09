@@ -357,6 +357,13 @@ def cmd_get(args: argparse.Namespace) -> int:
                 session_cwd = None
             if session_cwd is not None:
                 _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(str(session_cwd))
+        if not cfg.active_project():
+            # Neither the session's binding nor its recorded cwd names an adopted
+            # project (it started outside one): resolve from the caller's own
+            # directory, as every project-scoped command does. The session's cwd
+            # then carries no identity here.
+            session_cwd = None
+            _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(None)
 
     try:
         config = cfg.load_config(
@@ -390,6 +397,8 @@ def cmd_get(args: argparse.Namespace) -> int:
     session_is_anchor = False
     if session_cwd is not None and not wt_id:
         try:
+            from agent_procutil import no_window_kwargs
+
             proc = subprocess.run(
                 ["git", "-C", str(session_cwd), "rev-parse", "--show-toplevel"],
                 capture_output=True,
@@ -397,6 +406,7 @@ def cmd_get(args: argparse.Namespace) -> int:
                 timeout=5,
                 env=git_ops.repository_identity_env(),
                 stdin=subprocess.DEVNULL,
+                **no_window_kwargs(),
             )
             session_is_anchor = proc.returncode == 0 and git_ops._normalize_wt_path(
                 proc.stdout.strip()

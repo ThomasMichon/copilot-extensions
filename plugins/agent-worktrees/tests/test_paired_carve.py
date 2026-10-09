@@ -374,6 +374,7 @@ class TestCarvePairedKnowledgeAttributionPolicy:
 
         from agent_worktrees import codename_tracking
         from agent_worktrees import config as cfg_mod
+        from agent_worktrees import worktree_creation
 
         k_anchor = tmp_path / "knowledge"
         k_anchor.mkdir()
@@ -460,10 +461,12 @@ class TestCarvePairedKnowledgeAttributionPolicy:
 
         try:
             m._create_worktree_core(harness_config)
-        except codename_tracking.CodenameAttributionPolicyError as exc:
+        except worktree_creation.LaunchSeedStagingFailure as exc:
+            assert isinstance(exc.__cause__, codename_tracking.CodenameAttributionPolicyError)
+            failure = exc
             message = str(exc)
         else:
-            raise AssertionError("expected CodenameAttributionPolicyError")
+            raise AssertionError("expected identity-preserving LaunchSeedStagingFailure")
 
         # The HARNESS worktree's own creation already happened (the harness
         # itself was never policy-blocked and the config only flipped
@@ -475,6 +478,11 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         harness_id = tk.list_records(tracking_path=tmp_path / "tracking")[
             0
         ].worktree_id
+        assert failure.worktree["id"] == harness_id
+        assert failure.worktree["path"] == str(harness_worktree_root / harness_id)
+        assert failure.worktree["branch"] == f"worktree/{harness_id}"
+        assert failure.payload()["created"] is True
+        assert failure.payload()["recovery"]["repeat_new"] is False
         # The surfaced message embeds the path via `!r}` (repr), which on
         # Windows renders backslashes doubled -- compare against that same
         # repr, not the plain path string, or this never matches on Windows.

@@ -1,9 +1,0 @@
-{
-  "comment": "Index exact activity-log filters incrementally and select limited tails without rescanning historical records",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

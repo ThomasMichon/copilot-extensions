@@ -983,19 +983,19 @@ def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
     sibling ``bin/`` directory of launcher scripts -- like
     ``worktree-manager/bin/launch-session.{sh,ps1,cmd}`` -- deploys to
     ``<slot>/bin/`` with no self-install code change. This proves that
-    mechanism generically with a synthetic script, independent of the real
-    launcher scripts' content."""
+    mechanism with the shipped file-based pane entrypoint on a synthetic
+    payload, without building a runtime."""
     pd = _fake_payload(tmp_path, "4.4.4")
     (pd / "bin").mkdir()
-    (pd / "bin" / "launch-session.sh").write_text("#!/usr/bin/env bash\necho hi\n")
+    (pd / "bin" / "pane-launch.ps1").write_bytes((Path(__file__).resolve().parents[1] / "bin" / "pane-launch.ps1").read_bytes())
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
     _patch_provider_registry(monkeypatch, tmp_path)
     self_install(pd, root=root, dry_run=False)
     slot = version_slot("4.4.4", root)
-    deployed = slot / "bin" / "launch-session.sh"
+    deployed = slot / "bin" / "pane-launch.ps1"
     assert deployed.exists()
-    assert deployed.read_text() == (pd / "bin" / "launch-session.sh").read_text()
+    assert deployed.read_bytes() == (pd / "bin" / "pane-launch.ps1").read_bytes()
 
 
 def test_relocated_launchers_resolve_pane_wrappers_from_their_own_bin():

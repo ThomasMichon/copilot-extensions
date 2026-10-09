@@ -16,15 +16,58 @@ rule.
 from __future__ import annotations
 
 import contextlib
+import asyncio
+import json
 import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
 from agent_bridge import local_cache_refresh as lcr
+
+
+def test_cleanup_is_not_installation_and_safety_details_survive_budget_warnings():
+    result = lcr._render_result(json.dumps({
+        "operation": "render-local-cache", "changed": ["removed"], "written": [],
+        "removed": ["removed"], "unchanged": [], "warnings": 3, "blocking": 1,
+        "findings": [
+            {"severity": "warning", "check": "budget", "path": "large", "message": "audit"}
+        ] * 3 + [{"severity": "blocking", "check": "unsafe", "path": "foreign", "message": "refused"}],
+    }), 1)
+    assert result.status == "failed"
+    assert result.changed == 0
+    assert result.removed == 1
+    assert "unsafe: foreign: refused" in result.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gitfile", [False, True])
+async def test_nested_local_cwd_renders_checkout_root(tmp_path, monkeypatch, gitfile):
+    root = tmp_path / "checkout"
+    root.mkdir()
+    if gitfile:
+        (root / ".git").write_text("gitdir: ../tracking", encoding="utf-8")
+    else:
+        (root / ".git").mkdir()
+    nested = root / "src" / "component"
+    nested.mkdir(parents=True)
+    monkeypatch.setattr(lcr, "_resolve_cli_script", AsyncMock(return_value=tmp_path))
+    monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
+    runner = AsyncMock(return_value=lcr._RunResult("completed", json.dumps({
+        "operation": "render-local-cache", "changed": [], "unchanged": ["guidance"],
+        "written": [], "removed": [],
+        "warnings": 0, "blocking": 0, "findings": [],
+    }), 0))
+    monkeypatch.setattr(lcr, "_run_bounded_result", runner)
+    result = await lcr.refresh_local_cache(nested)
+    assert result.status == "ready"
+    assert Path(runner.await_args.args[0][3]) == root
+    assert not (nested / ".github").exists()
 
 # `_process_start_time` (below) has a Windows and a Linux (`/proc`) backend
 # only -- macOS has neither, so it returns `None` there, which would make
@@ -43,6 +86,97 @@ _requires_descendant_safety_net = pytest.mark.skipif(
         "leaking the test's own grandchild process if cleanup regresses"
     ),
 )
+
+
+class TestSessionHostConnectionLocalCacheOrdering:
+    @pytest.mark.asyncio
+    async def test_awaits_refresh_after_resolution_before_spawn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent_bridge.session_host_connection import _SessionHostConnectionMixin
+        from agent_bridge.transport import SpawnTarget
+
+        events = []
+        refreshing = asyncio.Event()
+        release = asyncio.Event()
+
+        async def resolve(*args: Any, **kwargs: Any) -> tuple[list[str], str, dict[str, str]]:
+            events.append("resolve")
+            return ["agent"], str(tmp_path), {}
+
+        async def refresh(root: str) -> lcr.RefreshResult:
+            assert root == str(tmp_path)
+            events.append("refresh-start")
+            refreshing.set()
+            await release.wait()
+            events.append("refresh-end")
+            return lcr.RefreshResult("ready")
+
+        class SpawnReached(Exception):
+            pass
+
+        async def spawn(*args: Any, **kwargs: Any) -> None:
+            assert kwargs["cwd"] == str(tmp_path)
+            events.append("spawn")
+            raise SpawnReached
+
+        monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
+        monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
+        task = asyncio.create_task(_SessionHostConnectionMixin._connect_via_session_host(
+            SimpleNamespace(),
+            SpawnTarget(type="local", project="example", cwd=None),
+            tracker=SimpleNamespace(stage=lambda *args: contextlib.nullcontext()),
+            session_id="test-session",
+            on_acp_event=None,
+            permission_callback=None,
+            spawner=SimpleNamespace(boundary="local", spawn=spawn),
+        ))
+        try:
+            await asyncio.wait_for(refreshing.wait(), timeout=2)
+            await asyncio.sleep(0)
+            assert events == ["resolve", "refresh-start"]
+            release.set()
+            with pytest.raises(SpawnReached):
+                await asyncio.wait_for(task, timeout=2)
+            assert events == ["resolve", "refresh-start", "refresh-end", "spawn"]
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, SpawnReached):
+                await task
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("cancelled", [False, True])
+    async def test_refresh_error_logging_and_cancellation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture, cancelled: bool,
+    ) -> None:
+        from agent_bridge.session_host_connection import _SessionHostConnectionMixin
+        from agent_bridge.transport import SpawnTarget
+
+        monkeypatch.setattr(
+            "agent_bridge.transport.resolve_local_launch",
+            AsyncMock(return_value=(["agent"], str(tmp_path), {})),
+        )
+        error = asyncio.CancelledError() if cancelled else RuntimeError("refresh defect")
+        monkeypatch.setattr(lcr, "refresh_local_cache", AsyncMock(side_effect=error))
+        spawn = AsyncMock(side_effect=RuntimeError("spawn reached"))
+        with pytest.raises(asyncio.CancelledError if cancelled else RuntimeError):
+            await _SessionHostConnectionMixin._connect_via_session_host(
+                SimpleNamespace(),
+                SpawnTarget(type="local", cwd=str(tmp_path)),
+                tracker=SimpleNamespace(stage=lambda *args: contextlib.nullcontext()),
+                session_id="test-session",
+                on_acp_event=None,
+                permission_callback=None,
+                spawner=SimpleNamespace(boundary="local", spawn=spawn),
+            )
+        if cancelled:
+            spawn.assert_not_awaited()
+        else:
+            spawn.assert_awaited_once()
+            assert "Local guidance refresh failed before spawn" in caplog.text
 
 
 class TestSelectGlobalRoot:
@@ -67,6 +201,17 @@ class TestSelectGlobalRoot:
         )
 
         assert lcr._select_global_root(tmp_path) == plugin_root
+
+    def test_global_lookup_never_requests_registered_projects(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        def resolve(*, home: Path, include_projects: bool = True) -> SimpleNamespace:
+            assert home == tmp_path
+            assert include_projects is False, "unrelated project discovery on hot path"
+            return SimpleNamespace(active={})
+
+        monkeypatch.setattr("plugin_activation.resolve_active_plugins", resolve)
+        assert lcr._select_global_root(tmp_path) is None
 
     def test_ignores_an_active_plugin_with_a_different_name(
         self, tmp_path: Path, monkeypatch
@@ -332,8 +477,13 @@ class TestRefreshLocalCache:
         local_sibling = destination.parent / "fallback.local.instructions.md"
         assert not local_sibling.exists()
 
-        await lcr.refresh_local_cache(repo, home=tmp_path, timeout=30.0)
+        monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
+        started = time.monotonic()
+        result = await lcr.refresh_local_cache(repo, home=tmp_path)
 
+        assert result.status == "ready", result.diagnostic
+        assert result.changed == 1
+        assert time.monotonic() - started < lcr.LOCAL_SPAWN_MAX_TIMEOUT_S
         assert local_sibling.is_file(), (
             "refresh_local_cache never produced the local-cache sibling"
         )
@@ -352,7 +502,7 @@ class TestRefreshLocalCache:
         async def _boom(*a, **k):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(lcr, "_run_bounded", _boom)
+        monkeypatch.setattr(lcr, "_run_bounded_result", _boom)
         repo = tmp_path / "repo"
         repo.mkdir()
         # Must not raise.
@@ -377,9 +527,9 @@ class TestRefreshLocalCache:
 
         async def _fake_run_bounded(argv, **kwargs):
             calls.append((argv, kwargs))
-            return "{}"
+            return lcr._RunResult("completed", "{}", 0)
 
-        monkeypatch.setattr(lcr, "_run_bounded", _fake_run_bounded)
+        monkeypatch.setattr(lcr, "_run_bounded_result", _fake_run_bounded)
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -394,7 +544,7 @@ class TestRefreshLocalCache:
         ]
         assert argv[6] == str(tmp_path / ".copilot" / "installed-plugins")
         assert argv[7:] == ["--agent-worktrees-path", "/bin/agent-worktrees"]
-        assert kwargs["timeout"] == 12.0 - lcr._RESOLUTION_TIMEOUT_S
+        assert 11.0 < kwargs["timeout"] <= 12.0
 
     @pytest.mark.asyncio
     async def test_omits_agent_worktrees_path_when_unresolved(
@@ -413,9 +563,9 @@ class TestRefreshLocalCache:
 
         async def _fake_run_bounded(argv, **kwargs):
             calls.append(argv)
-            return "{}"
+            return lcr._RunResult("completed", "{}", 0)
 
-        monkeypatch.setattr(lcr, "_run_bounded", _fake_run_bounded)
+        monkeypatch.setattr(lcr, "_run_bounded_result", _fake_run_bounded)
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -446,9 +596,9 @@ class TestRefreshLocalCache:
 
         async def _fake_run_bounded(argv, **kwargs):
             calls.append(argv)
-            return "{}"
+            return lcr._RunResult("completed", "{}", 0)
 
-        monkeypatch.setattr(lcr, "_run_bounded", _fake_run_bounded)
+        monkeypatch.setattr(lcr, "_run_bounded_result", _fake_run_bounded)
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -648,19 +798,149 @@ class TestRefreshLocalCache:
         monkeypatch.setattr(
             lcr, "_resolve_cli_script", AsyncMock(return_value=script)
         )
+        clock = iter([100.0, 100.5])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+        monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
         calls = []
 
         async def _fake_run_bounded(argv, **kwargs):
             calls.append(argv)
             return "{}"
 
-        monkeypatch.setattr(lcr, "_run_bounded", _fake_run_bounded)
+        monkeypatch.setattr(lcr, "_run_bounded_result", _fake_run_bounded)
 
         repo = tmp_path / "repo"
         repo.mkdir()
-        await lcr.refresh_local_cache(repo, home=tmp_path, timeout=0.5)
+        result = await lcr.refresh_local_cache(repo, home=tmp_path, timeout=0.5)
 
         assert calls == []
+        assert result.status == "timeout"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "payload,exit_code,status",
+        [
+            ({"warnings": 2}, 0, "ready"),
+            ({"blocking": 1}, 1, "partial"),
+            ({"changed": [], "written": [], "unchanged": [], "blocking": 1}, 1, "failed"),
+            ({}, 3, "failed"),
+            ({"operation": "error"}, 0, "failed"),
+            ({"changed": 1}, 0, "failed"),
+            ({"unchanged": [False]}, 0, "failed"),
+            ({"warnings": True}, 0, "failed"),
+            ({"blocking": -1}, 0, "failed"),
+            ({"findings": None}, 0, "failed"),
+        ],
+    )
+    async def test_validates_renderer_outcomes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture, payload: dict[str, Any],
+        exit_code: int, status: lcr.RefreshStatus,
+    ) -> None:
+        data = {
+            "operation": "render-local-cache",
+            "changed": ["guidance.local.instructions.md"],
+            "written": ["guidance.local.instructions.md"],
+            "removed": [],
+            "unchanged": ["existing.local.instructions.md"],
+            "warnings": 0,
+            "blocking": 0,
+            "findings": [],
+        }
+        data.update(payload)
+        monkeypatch.setattr(lcr, "_resolve_cli_script", AsyncMock(return_value=tmp_path))
+        monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
+        monkeypatch.setattr(
+            lcr, "_run_bounded_result",
+            AsyncMock(return_value=lcr._RunResult("completed", json.dumps(data), exit_code, "renderer stderr")),
+        )
+        result = await lcr.refresh_local_cache(tmp_path)
+        assert result.status == status
+        assert "renderer stderr" in result.detail
+        if status in ("ready", "partial"):
+            assert (result.changed, result.unchanged) == (1, 1)
+            assert result.warnings == data["warnings"]
+            assert result.blocking == data["blocking"]
+        if status != "ready" or data["warnings"]:
+            assert result.diagnostic in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("output", ["not json", "{}", "[]"])
+    async def test_invalid_cli_json_is_visible(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture, output: str,
+    ) -> None:
+        monkeypatch.setattr(lcr, "_resolve_cli_script", AsyncMock(return_value=tmp_path))
+        monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
+        monkeypatch.setattr(
+            lcr, "_run_bounded_result",
+            AsyncMock(return_value=lcr._RunResult("completed", output, 0)),
+        )
+        result = await lcr.refresh_local_cache(tmp_path)
+        assert result.status == "failed"
+        assert result.detail and result.diagnostic in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "run,status",
+        [
+            (lcr._RunResult("timeout", detail="deadline exceeded"), "timeout"),
+            (lcr._RunResult("failed", detail="containment unavailable"), "failed"),
+            (lcr._RunResult("completed", "", 0), "unavailable"),
+            (lcr._RunResult("completed", "", 0, "discovery error"), "failed"),
+            (lcr._RunResult("completed", "", 2, "discovery error"), "failed"),
+        ],
+    )
+    async def test_discovery_failure_is_visible(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture, run: lcr._RunResult, status: lcr.RefreshStatus,
+    ) -> None:
+        runner = AsyncMock(return_value=run)
+        monkeypatch.setattr(lcr, "_run_bounded_result", runner)
+        result = await lcr.refresh_local_cache(tmp_path, home=tmp_path)
+        assert result.status == status
+        assert result.detail and result.diagnostic in caplog.text
+        assert runner.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_render_timeout_is_visible(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setattr(lcr, "_resolve_cli_script", AsyncMock(return_value=tmp_path))
+        monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
+        monkeypatch.setattr(
+            lcr, "_run_bounded_result",
+            AsyncMock(return_value=lcr._RunResult("timeout", detail="deadline exceeded")),
+        )
+        result = await lcr.refresh_local_cache(tmp_path)
+        assert result.status == "timeout"
+        assert result.diagnostic in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_render_gets_actual_remaining_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resolver = AsyncMock(return_value=tmp_path)
+        runner = AsyncMock(return_value=lcr._RunResult("completed", "{}", 0))
+        clock = iter([100.0, 100.1])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+        monkeypatch.setattr(lcr, "_resolve_cli_script", resolver)
+        monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
+        monkeypatch.setattr(lcr, "_run_bounded_result", runner)
+        await lcr.refresh_local_cache(tmp_path)
+        assert resolver.await_args.kwargs["timeout"] == lcr._RESOLUTION_TIMEOUT_S
+        assert runner.await_args.kwargs["timeout"] == pytest.approx(4.9)
+
+    @pytest.mark.asyncio
+    async def test_refresh_propagates_cancellation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            lcr, "_resolve_cli_script", AsyncMock(side_effect=asyncio.CancelledError)
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await lcr.refresh_local_cache(tmp_path)
 
     @_requires_descendant_safety_net
     @pytest.mark.asyncio

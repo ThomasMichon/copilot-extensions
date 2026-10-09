@@ -366,7 +366,13 @@ realized in `main`; unchecked items are the remaining delta.
       `AHP+no-mux` launch-path regression; together with the existing
       `direct+mux`, `direct+no-mux`, and `AHP+mux` coverage, the four-way
       matrix is now explicit rather than inferred indirectly from separate
-      tests.
+      tests. **Proof boundary:** these injected-capability selection/composition
+      tests do not prove production AHP mux wrapping. The Picker's AHP branch
+      still uses `launcher.launch` with the default unavailable mux capability
+      and bypasses relocated-script dispatch. The script's persisted-AHP/mux
+      machinery is not reached by that route. The explicitly deferred follow-up
+      from `phase-3b-mux-relocation.md` and `#2062` is now tracked as `#5898`;
+      production four-way acceptance remains ahead.
 - [x] Keep both mechanics fully functional through the relocation — this is a
       location and ownership change, not a behavior regression; existing
       worktrees with a recorded `session_backend` binding must keep resolving
@@ -377,10 +383,15 @@ realized in `main`; unchecked items are the remaining delta.
       [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891)
       revalidated that contract while closing the Picker-independence follow-on.
 
-Phase 3b is complete: the AHP backend now lives in Worktree Manager, mux
+Phase 3b relocation is complete: the AHP backend now lives in Worktree Manager, mux
 launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
+This is not a claim of complete provider-neutral hosting or production AHP/mux
+parity. `#5898` retains the separately excluded presentation follow-up; direct
+handoff choreography and the intentional standalone remux/restore lane require
+their own ownership reconciliation under `#2062`, not removal or an inferred
+reopening of this relocation slice.
 
 ### Phase 3c — Picker non-blocking I/O (Done — Steps 1-5 landed; optional progress-envelope follow-up tracked in #4274)
 - [x] Make every I/O-touching Picker surface — pivot loads (built-in and
@@ -849,6 +860,15 @@ worktree-manager.
       smaller opt-out-toggle cleanup this supersedes).
 
 ### Phase 7 — Health, updating & presets (Ongoing)
+- [ ] **Windows daemon PID ownership prerequisite (#5800).** New daemon
+      launches must bypass a venv redirector so the published process handle
+      belongs to the actual runtime. The selected approach is
+      `direct_interpreter`: reuse the shared windowless-interpreter and
+      venv-environment helpers, and fail clearly when a Windows venv cannot
+      bypass its launcher. Cover ordinary and passive starts. Existing live
+      launcher/child pairs remain a separate classification gate before
+      automatic retirement; do not treat their two inventory rows as two
+      independently disposable daemons.
 - [x] **Stranded cutover passive blocking a bare `self-install`.** A passive
       mux-daemon left behind by a crashed/interrupted `self_update()`
       (`spawn_passive` pins its `cwd` inside the version slot being cut
@@ -1176,6 +1196,25 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-08** — Confirmed the Phase 3 client-resolution design merged
+  through #5795 (`f148d1c0`), with its implementation validation still open.
+  A read-only Windows inventory exposed a prerequisite: one venv launcher
+  and its listening child were reported as two daemons, and routing named
+  the launcher while generation lookup requires an exact runtime PID.
+  Tracked this in #5800 and claimed the newly spawned process fix.
+  The operator selected **`direct_interpreter`**: use the existing direct
+  interpreter helpers and fail clearly if a Windows venv cannot bypass its
+  launcher. No live process was stopped and no live routing record was
+  changed. Existing launcher/child classification remains open before any
+  retirement implementation.
+  Implemented the selected interpreter path for ordinary and passive starts.
+  **102 focused tests passed**, including a real Windows venv launch that
+  verifies returned PID, socket-serving runtime PID, venv prefix, and routing
+  generation agreement. Full-suite execution produced **1765 passed,
+  13 skipped, 2 failed**; both failures match the existing tracked Picker
+  tab-mount flake #5168 and were reported there, not dismissed as untracked
+  baseline debt. No Picker code was changed in this slice.
 
 - **2026-10-08** — Confirmed #5573 merged (`a633a66d`) after approved review
   and green checks. Reconciled the concurrent journal addition without

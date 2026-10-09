@@ -116,7 +116,7 @@ from . import (
     reclaim,
     sessions,
     sessions_pane_retire,  # noqa: F401 -- compatibility re-export (handoff_cutover.py tests patch m.sessions_pane_retire)
-    tracking, tracking_lifecycle,
+    terminal_identity, tracking, tracking_lifecycle,
 )
 from . import claimant as claimant_mod
 from . import config as cfg
@@ -2110,18 +2110,9 @@ def _preflight_launch(
     work_dir: str,
 ) -> LaunchPreflight:
     """Validate normalized setup state before any launch-side mutation."""
-    recovery = getattr(args, "recovery", False)
-    repo = config.default_repo
-    plat_key = config.platform if config.platform != "wsl" else "linux"
-    launch_map = repo.launch_recovery if recovery else repo.launch
-    config_root = None
-    if not recovery and plat_key not in launch_map and repo.setup_hook.get(plat_key):
-        config_root = state_root_mod.resolve_config_root(
-            config,
-            cwd=work_dir,
-            project=cfg.active_project(),
-        )
-    return LaunchPreflight(config_root=config_root)
+    from .resolve_launch_cli import preflight_launch
+
+    return preflight_launch(config, args, work_dir)
 
 
 def _launch_preflight_error(
@@ -2129,13 +2120,9 @@ def _launch_preflight_error(
     *,
     json_output: bool = False,
 ) -> int:
-    """Emit a controlled launch error in the caller's established format."""
-    message = preflight.error or "launch preflight failed"
-    if json_output:
-        return output._json_error(message, exit_code=3)
-    print(f"  \u2717 {message}", file=sys.stderr)
-    _emit_plan({"action": "error", "error": message, "exit_code": 3})
-    return 3
+    from .resolve_launch_cli import emit_launch_preflight_error
+
+    return emit_launch_preflight_error(preflight, json_output=json_output)
 
 
 def _build_launch_cmd(
@@ -4069,6 +4056,7 @@ def _run_session_lifecycle(
     result: dict = {}
     project_process = None
     _write_session_lifecycle_receipt(payload, "started")
+    terminal_identity.record_session_terminal(payload, session_environment)
     try:
         project_process = _start_project_session_hook(cwd, session_environment)
         nudge = _registration_nudge_context(cwd)
@@ -4080,6 +4068,10 @@ def _run_session_lifecycle(
 
         _migrate_legacy_marketplace_overrides(payload, cwd)
         _reconcile_knowledge_plugin_overlay(payload, cwd)
+
+        from . import local_cache_refresh
+
+        diagnostics += local_cache_refresh.sessionstart_diagnostic(cwd, deadline=deadline) or ""
 
         registration_args = argparse.Namespace(
             worktree_id=None,
@@ -4119,10 +4111,6 @@ def _run_session_lifecycle(
 
         if deadline is None or time.time() < deadline - 1.0:
             diagnostics += _anchor_hygiene_diagnostic(cwd)
-        if deadline is None or time.time() < deadline - 1.0:
-            from . import local_cache_refresh
-
-            local_cache_refresh.sessionstart_diagnostic(cwd, deadline=deadline)
         if deadline is None or time.time() < deadline - 1.0:
             if provisioning_start_event is None:
                 diagnostics += _start_provisioning_if_needed(cwd, session_environment)

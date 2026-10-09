@@ -869,7 +869,7 @@ def _push_changes_pr(
             pushed = pr_publish.push_checked(
                 record, push_to, feature, cwd=worktree_path,
                 expected_head_repo=push_target.head_repo, expected_head_identity=push_target.head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=True,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=True, repo=repo,
             )
         if not pushed:
             output.err(f"Failed to push {feature} to {push_to}.")
@@ -886,20 +886,17 @@ def _push_changes_pr(
                 tracking.save_record(record)
             return False
 
-        head_sha = git_ops.git(
+        head_sha = getattr(pushed, "published_head_sha", "") or git_ops.git(
             "rev-parse", feature, cwd=worktree_path, check=False
         ).stdout.strip()
         pr_publish.record_pushed_head(config, record, worktree_id, pushed_pr, head_sha,
                                       remote=push_to, head_repo=pushed.head_repo,
-                                      head_identity=getattr(pushed, "head_identity", ""))
+                                      head_identity=getattr(pushed, "head_identity", ""), rebase_base_sha=getattr(pushed, "rebase_base_sha", ""))
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
         )
-        output.ok(
-            f"Preserved the published PR tip on '{feature}' and pushed "
-            f"incremental updates from '{wt_branch}'."
-        )
+        output.ok(pr_publish.push_history_message(pushed, feature, wt_branch))
         output.ok(
             f"Pushed {feature} to {push_to}. "
             f"The open PR is updated."
@@ -1010,7 +1007,7 @@ def _push_changes_pr_refspec(
             pushed = pr_publish.push_checked(
                 record, push_to, f"{wt_branch}:refs/heads/{feature}",
                 cwd=worktree_path, expected_head_repo=push_target.head_repo, expected_head_identity=push_target.head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=True,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=True, repo=repo,
             )
         if not pushed:
             output.err(f"Failed to push {wt_branch} to {push_to}/{feature}.")
@@ -1027,20 +1024,17 @@ def _push_changes_pr_refspec(
                 tracking.save_record(record)
             return False
 
-        head_sha = git_ops.git(
+        head_sha = getattr(pushed, "published_head_sha", "") or git_ops.git(
             "rev-parse", "HEAD", cwd=worktree_path, check=False
         ).stdout.strip()
         pr_publish.record_pushed_head(config, record, worktree_id, pushed_pr, head_sha,
                                       remote=push_to, head_repo=pushed.head_repo,
-                                      head_identity=getattr(pushed, "head_identity", ""))
+                                      head_identity=getattr(pushed, "head_identity", ""), rebase_base_sha=getattr(pushed, "rebase_base_sha", ""))
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
         )
-        output.ok(
-            f"Preserved the published PR tip and pushed incremental updates "
-            f"directly to PR head '{feature}'."
-        )
+        output.ok(pr_publish.push_history_message(pushed, feature, wt_branch))
         output.ok(
             f"Pushed {wt_branch} to {push_to}/{feature}. "
             f"The open PR is updated."

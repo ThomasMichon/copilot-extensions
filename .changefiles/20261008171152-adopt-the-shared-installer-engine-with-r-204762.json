@@ -1,9 +1,0 @@
-{
-  "comment": "Adopt the shared installer engine with resilient uv operations and self-contained stamped snapshots",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

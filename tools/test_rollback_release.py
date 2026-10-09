@@ -18,6 +18,7 @@ _TOOLS = Path(__file__).resolve().parent
 _REQUIRED_TOOLS = (
     "accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py",
     "nested_uv_editable_ref.py",
+    "standalone_consumers.py",
 )
 
 
@@ -372,4 +373,3 @@ def test_land_via_pr_surfaces_create_failure(monkeypatch, repo: Path):
         rb._land_via_pr(
             repo=repo, branch="whatever", base_ref="main", title="t", body="b",
         )
-

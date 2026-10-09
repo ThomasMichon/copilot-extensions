@@ -19,17 +19,17 @@ without making a Copilot plugin or a particular container controller the service
 owner. Preserve lightweight clients, native host deployment, the durable
 embedding engine, corpus state and task sequencing.
 
-The current slice is a reviewed vision and architecture proposal, plus the
-bounded repair of the existing local recovery path. Starting this effort does
-not authorize an unreviewed live migration or implement the proposed service
-split in the planning PR.
+Phase 1 established the reviewed proposal and repaired the existing native host.
+Implementation now proceeds in incremental reviewed slices, preserving the
+native instance as a health-gated canary. No slice authorizes an unreviewed live
+deployment or destructive migration of durable data.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Coordinator | Proposal, integration and existing recovery repair | Managed upstream worktree |
-| Service implementer | Future independently packaged service slices | Separate managed worktree after proposal review |
+| Coordinator | Integration, implementation and canary rollout | Managed upstream worktree |
+| Service implementer | Bounded independently packaged service slices | Separate managed worktree when delegated |
 
 ## Coordination
 
@@ -83,6 +83,21 @@ Subsequent operator decision: do **not** enable the optional Windows Scheduled
 Task tier for the current host. The recovery repair and proposal must not
 silently introduce that tier.
 
+Subsequent operator request:
+
+> Great. Continue driving. Make sure our instance stays healthy as we upgrade it
+> as a guinea pig during this work
+
+Architecture clarification, verbatim:
+
+> I mean, arguably the system decomposes into four pieces:
+> 1. API surface and master controller
+> 2. Indexing/embedding engine
+> 3. Actual DB
+> 4. Client wrapper
+> 1-3 could run in independent containers if needed. We should break it down in a
+> reasonable manner.
+
 ## Plan
 
 ### Phase 1 - Existing recovery and reviewed proposal
@@ -97,6 +112,8 @@ silently introduce that tier.
   registration alone. _(agent-recommended validation clarification)_
 
 ### Phase 2 - Independent service distribution
+- [ ] Align component contracts with the API/controller, execution, persistence
+  and client decomposition before moving or distributing code.
 - [ ] Define the service package, executable and portable release descriptor
   outside the plugin marketplace.
 - [ ] Extract or compose the existing hosted query, indexing and worker code
@@ -104,6 +121,8 @@ silently introduce that tier.
 - [ ] Implement the version-slot installer and durable configuration/state
   contract, including health-gated activation and rollback.
 - [ ] Preserve existing CLI, configuration and non-container host compatibility.
+- [ ] Keep the live native canary healthy across reviewed upgrades; retain a
+  validated previous slot, verify worker adoption and protect the warm engine.
 - [ ] Define and test schema/queue rollback limits explicitly rather than assuming
   immutable executable slots make data rollback safe. _(agent-recommended)_
 
@@ -132,6 +151,11 @@ silently introduce that tier.
 - [ ] Queued full/incremental sequencing, worker adoption and corpus preservation
   through update, failed activation and supported rollback.
 - [ ] Optional container restart, persistent volumes and graceful termination.
+- [ ] Independently hosted API/controller, execution and persistence contracts,
+  without cross-container database-handle or shared-SQLite assumptions.
+- [ ] Authenticated inter-component transport and component/job/source-scoped
+  authorization: reject unauthenticated, invalid-identity, cross-role and
+  cross-scope operations without mutating queue or corpus state.
 - [ ] Released snapshot/artifact pinning, digest/version verification, controller
   outage, repeated poll idempotence and concurrent-updater exclusion.
 - [ ] Live target deployment belongs to a separately authorized downstream slice;
@@ -186,3 +210,72 @@ boundaries from implementation decisions and deployment-specific policy.
 - Phase 1 is complete. Remaining service distribution and container/controller
   implementation belongs to Phases 2 and 3, tracked by #5768, not to a claim
   that the reviewed proposal already shipped that implementation.
+
+### 2026-10-08 - Four-piece implementation and native canary
+- Operator authorized continued implementation and explicitly selected the
+  current native instance as a canary.
+- Operator refined the architecture to API/master controller, indexing/embedding
+  execution, actual database and client wrapper. Independent containers for the
+  first three are optional deployment choices, not a mandatory first migration.
+- Implementation will reuse existing queue/query/store/engine behavior while
+  making those boundaries explicit. The existing embedding package alone is
+  not the hosted indexer, and a renamed embedding executable would not satisfy
+  the requested split.
+- Baseline native service and warm engine are healthy, active indexing remains
+  adopted, and a complete previous native version slot is retained. A bounded
+  development health check is active; it is not new permanent service supervision.
+- Four-piece/authenticated-boundary amendment #5830 merged after review and
+  passing required CI. Component/job/source-scoped authorization and rejected
+  unauthenticated/cross-role operations are acceptance requirements for remote
+  adapters.
+- Initial code slice adds a normal `agent-index-service` API/controller program
+  with explicit repository-independent local component composition, preserving
+  existing client and core behavior. The embedding program is not renamed.
+  The existing standalone-consumer release mechanism is extended; no second
+  plugin or changefile schema is introduced.
+- Installed-core contained standalone suite: 68 tests passed, including two
+  real isolated zdd deployments, persisted query compatibility and synthetic
+  worker adoption. Core boundary/explicit-source/lazy-import selection: 37
+  passed with 2 platform skips. Release/materialization/rollback regressions
+  pass after repairing fixture dependency closure and a Windows symlink-target
+  identity assertion. Code is still awaiting publication and canary eligibility.
+- Canary API and warm engine remain healthy through existing fleet maintenance.
+  An incumbent indexing run ended partial after embedding read timeouts on two
+  sources; a successor incremental worker is active. A short warm-engine query
+  remains responsive. Live rollout changes are paused while that CPU/batch
+  timeout risk is classified; no worker is cancelled or engine cold-restarted.
+
+### 2026-10-09 - Merge-only pause boundary
+- Operator narrowed the current objective to landing existing PR #5863, then
+  pausing. No additional implementation, native canary migration or deployment
+  is authorized by this slice; the development health-check schedule is stopped.
+- The first review identified unconditional exhaustive PR CI and a stale
+  documentation limitation. Required Linux/Windows CI now path-gates the
+  controller contract smoke; full hosted/deployment coverage remains in
+  promotion and manual execution. CI integration is no longer documented as
+  deferred. The contained smoke passed 62 tests in 4.27 seconds; runner/workflow
+  policy regressions passed 30 tests.
+- Phases 2 and 3 remain open under #5768. This API/controller composition is
+  not the version-slot installer, a separated database/execution adapter, a
+  release reconciler or an authorized live service migration. Resume those
+  tracked slices only after the operator lifts the pause.
+- The next review found two containment defects in the new test surface.
+  Non-finite/nonpositive wall limits now fail before admission. POSIX hosted
+  children stay attached to the outer runner instead of creating escape
+  sessions; an abrupt-worker-exit regression runs in Linux CI. Windows retains
+  nested kill-on-close Job teardown. The full contained Windows standalone
+  suite passed 68 tests; runner/workflow regressions passed 35 with the Linux
+  process-group test explicitly deferred to its Linux CI lane.
+- Follow-up review identified the pre-seam core dependency floor and the new
+  registry's missing version-bump test path. Both base/native wheel requirements
+  now exclude the currently released `0.10.11-dev1` core and require
+  `0.10.12-dev1` or newer; the runtime seam check remains fail-closed. Test
+  preparation uses an explicit same-checkout core override (including native
+  extras) because `dev` freezes its source version. Actual preparation plus the
+  full contained suite passed 68 tests; wheel assertions reject the old core.
+  Registry-only changes now trigger the existing version-bump-engine suite.
+- Review also required smoke preparation itself to stay lightweight, not just
+  test selection. A genuinely fresh smoke environment passed 63 contracts in
+  2.32 seconds and contains no FastAPI/uvicorn/NumPy/pyarrow/LanceDB/tree-sitter
+  packages. Full preparation retains native extras. Runner/workflow regressions
+  passed 36 tests with one Linux-only process-group regression deferred to CI.

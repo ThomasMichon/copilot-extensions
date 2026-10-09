@@ -1,9 +1,0 @@
-{
-  "comment": "Update stale efforts/active/agent-dispatch-recipe-library path references (comments only) to its new archived path now that the effort is Done",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "dev"
-    }
-  ]
-}

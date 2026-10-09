@@ -65,6 +65,8 @@
   this deserve its own vision" — only on actually building it, per the
   Plan below.
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
+- **Sub-issues:** #5890 (closed-signature recurrence and bounded-attempt policy;
+  the existing Phase 3 decision remains open)
 
 ## Guiding Intent
 

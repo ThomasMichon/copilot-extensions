@@ -1,35 +1,94 @@
-# Standalone indexer architecture proposal
+# Standalone indexer architecture and four-piece decomposition
 
-Back to the [effort](README.md). **Status: proposed, not implemented.**
+Back to the [effort](README.md). **Status: reviewed four-piece design; initial
+native API/controller composition implemented for validation, not deployed.**
 
 ## Boundary and ownership
 
-The proposed `agent-index-service` is a normal service distribution with its own
-executable, release identity and installer, not another marketplace plugin.
-It owns hosted query HTTP, source ingestion, the durable task queue, index
-storage and indexing-worker supervision. Reuse the existing implementation;
-extraction is a boundary change, not a rewrite.
+The system decomposes into four logical components with explicit contracts,
+not four mandatory containers. The API/controller, execution and persistence
+components may be independently hosted; native installation may colocate them.
+The client remains lightweight. Standalone service distributions have their own
+executables, release identities and installers rather than marketplace identities.
+Reuse the existing implementation: extraction is a boundary change, not a rewrite.
 
 The optional `agent-index` plugin/client keeps agent skills, configuration
 resolution, trusted transport and read commands. It can describe how to reach
 or explicitly provision a service, but plugin loading is not the service's
 installation, update or restart authority.
 
-Keep `agent-index-engine` as the separate embedding program. Service updates
-must not rebuild its model stack or cold-restart a healthy engine. A native host
-may colocate the programs; a container deployment may separate them. Neither
-choice is baked into the client.
+Keep the existing `agent-index-engine` as the warm model/embedding program within
+the execution component. Indexing workers perform source acquisition, chunking
+and embedding coordination. They may share an execution deployment or use a
+separate model companion; that physical choice does not collapse the API,
+persistence or client responsibilities.
 
 | Component | Owns | Does not own |
 |---|---|---|
 | Client/plugin adapter | Activation, scoped reads, transport, integration | Host provisioning on reads, store/model dependencies |
-| Standalone indexing service | Query API, queue, connectors, store, workers | Fleet placement, model-runtime upgrades |
-| Embedding engine | Model lifecycle and embedding RPC | Corpus/queue ownership, deployment-controller policy |
+| API/master controller | Public API, admission, orchestration, worker assignment, query coordination | Direct database handles, model loading, fleet-specific placement |
+| Indexing/embedding execution | Source acquisition, chunking, embedding, progress/result reporting | Queue arbitration, direct ownership of another component's database files |
+| Persistence/actual DB | Durable jobs, corpus/vector state, query/storage operations and atomic state transitions | Worker/model execution, public client routing |
 | Selected lifecycle authority | Restart, candidate activation, routing continuity | Private credentials encoded in portable artifacts |
 | External release reconciler | Poll cadence, desired released version, deployment selection | A second implementation of installer/activation logic |
 
 An embedding runtime is not interchangeable with the hosted indexing service.
 The existing engine package split is prior art, not completion of this effort.
+
+## Contracts and incremental extraction
+
+The initial deployment remains colocated and backward-compatible. Establish
+high-level component interfaces first, backed by the existing local adapters;
+introduce remote adapters only after their contracts are exercised.
+
+- **Controller to persistence:** durable enqueue/claim/progress/completion and
+  source-scoped full/incremental ordering. The persistence owner commits state
+  transitions atomically; multiple controller or worker processes must not
+  bypass that arbitration.
+- **Execution to persistence:** source checkpoints and idempotent content/vector
+  batches, followed by safe reconciliation. Preserve existing crash-safe
+  deletion ordering and content/vector fidelity guarantees.
+- **Controller to execution:** typed task assignments, progress and cancellation/
+  drain semantics; worker adoption remains valid across controller upgrades.
+- **Query path:** the controller composes query embedding with persistence
+  search/hydration. The client does not know which processes perform those steps.
+
+The current persistence implementation is embedded LanceDB plus SQLite job
+state and local checkpoint data. A DB container therefore needs a real storage
+service adapter, not a mount that lets every component open those files.
+Do not share SQLite files over a network filesystem or export LanceDB handles
+as a pretend remote interface. Existing storage adapters remain valid for
+colocated native deployment; a remote persistence adapter must enforce the
+same behavioral contracts and schema/version compatibility.
+
+### Authenticated boundaries and role authority
+
+Cross-process/container/host calls must use an explicitly configured,
+already-authenticated transport per `docs/patterns/service-transport.md`.
+A reachable address, loopback bind or shared container network is not authority.
+Keep endpoints private to their own namespace and cross trust boundaries through
+the pattern's opt-in authenticated tunnel; do not add a public database or
+control listener merely to connect components.
+
+Authorize component identities for specific operations: client reads do not
+grant worker/job mutation; an execution worker may report or write only work
+assigned to its authorized source/job scope; controller admission and queue
+control do not imply unrestricted database administration. Persistence validates
+both caller identity and operation/job scope before any state transition.
+Control, drain, activation and configuration mutations retain the existing
+owner-bound authorization contract.
+
+Credentials/trust anchors are supplied through operator-owned runtime mechanisms,
+not embedded in images, descriptors or logs. Missing/invalid identity and
+cross-role or cross-scope calls fail explicitly without changing durable state.
+Remote adapters are not accepted until those negative cases are covered, as
+well as successful authorized requests. Transport choice is a deployment
+adapter, not a new unauthenticated public control plane.
+
+**Package naming/location remain implementation choices.** The first standalone
+API/controller program may compose the existing core as a normal Python library
+while ownership is extracted incrementally. It must not rename the embedding
+program and claim that the master/controller or DB separation has been built.
 
 ## Distribution and version-slot installation
 
@@ -152,6 +211,25 @@ single-writer queue authority and supported rollback.
 
 See the effort's [validation plan](README.md#validation-plan) for acceptance.
 The current proposal is not permission to migrate an existing live index.
+
+## Initial implementation slice
+
+`agent-index-service/` is the first normal service distribution and executable.
+It runs the existing API/master and local persistence/worker adapters through a
+normal `agent-index` Python-library dependency, with explicit standalone source,
+data/routing and external warm-engine configuration. It does not require plugin
+loading or repository discovery.
+
+This establishes a real program boundary, not a completed remote DB or worker
+split. Its independent release identity uses the existing registered standalone
+consumer/changefile path, not marketplace metadata. An admission-controlled
+contained test runner and native Windows/Linux CI gate exercise installed-core
+hosting and zdd cutover.
+
+Version-slot bootstrap, schema-aware rollback, sustained native supervision,
+further component ownership extraction and authenticated remote adapters remain
+the next implementation slices. No live canary is migrated merely by adding
+this package.
 
 ## Prior art
 

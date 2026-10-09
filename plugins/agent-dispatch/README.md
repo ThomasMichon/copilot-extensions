@@ -102,8 +102,15 @@ do not load hooks, and adopters should not create a duplicate marked block.
 
 `scripts/install.{sh,ps1}` is a lifecycle manager --
 `stamp | provision | install | update | status | start | stop | uninstall`
-(`init.{sh,ps1}` is a thin alias for `install`). `stamp` only writes the
-self-provisioning binstub + payload marker; `provision`/`install`/`update` build
+(`init.{sh,ps1}` is a thin alias for `install`). `stamp` publishes the
+self-provisioning binstub + payload marker without building a venv. PowerShell
+materializes a standalone snapshot with both installer-engine files and all
+declared local libraries; local-checkout stamps use content-addressed snapshot
+identities over the materialized tree. Unchanged stamps reuse one snapshot,
+while source, engine or library edits publish a new immutable identity.
+Delayed same-version local stamps reject a superseded snapshot candidate before
+publishing markers or launchers. POSIX
+retains its owning-payload pointer. `provision`/`install`/`update` build
 a versioned runtime under `~/.agent-dispatch/versions/<v>/` (published by the
 `current-version` marker), an `agent-dispatch` binstub in `~/.local/bin`, a
 deploy manifest, the **"Tasks" picker pivot** (see below), and -- unless
@@ -111,6 +118,15 @@ deploy manifest, the **"Tasks" picker pivot** (see below), and -- unless
 coordinator, matching agent-bridge).
 `update` is downgrade-guarded (a stale checkout won't silently roll back a newer
 deployed runtime; override with `--force`).
+
+Both installers source the canonical installer engine during development;
+release tooling materializes byte-identical payload-local copies. The engine
+owns pinned, checksum-verified uv acquisition, transient venv/package retries
+and deploy-manifest writing. Dispatch retains dependency order, build-artifact
+scrubbing, optional `[mcp]` fallback, launchers, and coordinator/supervisor
+lifecycle. Windows prefers signed Python with `--copies` and validates the
+result independently of its exit code before accepting it; Python venv/pip
+remains the fallback when uv is unavailable.
 
 The installer also manages optional, label-gated **embody supervisor** services.
 The primary supervisor reads `~/.agent-dispatch/supervisor.env` and installs as
@@ -670,6 +686,16 @@ adds string-valued environment variables. `lease_scope` defaults to
 `emitter:<id>` and can be supplied explicitly when several declarations share
 one producer election.
 
+`supervise override disable|enable` also accepts `--machine <name>`: the
+override store is per-machine (`~/.agent-dispatch/overrides.json` on whichever
+host the daemon actually runs), so naming a different machine (its SSH alias)
+runs the mutation *there* over SSH -- the same `ssh <alias> <remote argv>`
+transport `agent-dispatch create --machine` already uses, reusing `list`/
+`inbox --machine`'s own peer-queue-browse plumbing rather than a second one.
+Naming this machine itself (or omitting `--machine`) is unaffected and edits
+the local store directly, no SSH involved. `supervise override list` has no
+`--machine` -- it always reports this machine's own store.
+
 `agent-dispatch emitter tick|serve SPEC --holder HOST` is the diagnostic/direct
 surface used by the supervised child. Normal deployments declare the emitter
 rather than wiring cron, a Scheduled Task, or another external timer.
@@ -1116,6 +1142,196 @@ The repo still owns the genuinely local parts (its discovery command,
 evaluator registration, worker agent name, and any lane-specific
 concurrency/filtering), but the shared standing-reviewer charter and headless
 body type are no longer a repo-local copy.
+
+**Chaining `extends:` (any already-resolved declaration is a valid base).**
+`extends:` is not fenced to the eight named `global:` recipes above -- any
+ref (`global:<name>`, a repo-local path, or a cross-repo path) may itself
+point at a document that carries its *own* `extends:` key, and that is
+resolved recursively before merging. A declaration can chain through
+several hops:
+
+```yaml
+# recipes/review-loop.yaml (repo-local, itself extends a global recipe)
+extends: "global:reviewer"
+stale_after_days: 7
+
+# the concrete declaration:
+name: external-review
+extends: "./recipes/review-loop.yaml"
+repo: github.com/example/project
+```
+
+resolves the same as writing out `global:reviewer`'s own fields, then
+`review-loop.yaml`'s overrides (`stale_after_days: 7`), then the concrete
+declaration's own overrides (`repo: ...`) -- each hop's overrides deep-merge
+over the previous hop's resolved result, closest override wins, same rule
+as a single-hop `extends:`. Each hop's own nested `extends:` ref resolves
+against *that hop's own* file's directory (or the plugin root for a
+`global:` ref) -- never the original declaration's directory -- so a
+cross-repo base's own repo-relative ref still resolves correctly against
+its own repository rather than the consuming repo. A chain that revisits
+the same resolved ref (`A` extends `B` extends `A`) raises a clear
+`RegistrarError` naming the full chain (`A -> B -> A`), never a
+`RecursionError`; an excessively long (but non-cyclic) chain raises the
+same way once it exceeds a fixed maximum depth. Placeholder substitution
+and the override deep-merge both apply correctly at every hop, in order.
+
+One known, narrower gap: per-hop directory tracking for *resolving a
+chain's own nested `extends:` refs* is unconditional, but per-hop
+provenance for a few **path-dependent declared fields** is not yet
+generalized beyond `kind: emitter`'s own `spec.cwd`. A `reviewer-loop`'s
+`emitter.cwd` and a `repository-issue-loop`'s `worker_identity`/
+`forge.command`/`forge.cwd` resolve against the chain's outermost leaf
+file, not the specific hop that actually supplied the field -- extending a
+cross-repo `reviewer-loop`/`repository-issue-loop` base through a chain
+and inheriting one of those fields *as a relative path* is refused outright
+at registration (a clear `RegistrarError`) rather than silently
+misresolving; declare the field directly, or with an absolute path, to
+work around it. Tracked as explicit follow-up work, not a silent gap.
+
+**Cross-origin addressing (`plugin:<name>:<path>`) -- any registrar can
+extend any other, regardless of where each lives.** A reference's *origin*
+(a repo checkout's own declarations, or a specific installed plugin's own
+bundled recipes) is independent of its *direction*: all four crossings
+work --
+
+| Extending declaration lives in... | ...extending a recipe in | Ref form |
+|---|---|---|
+| A repo | Another repo (cross-repo) | a plain path, e.g. `"../other-repo/.../recipe.yaml"` |
+| A repo | A plugin | `global:<name>` (this plugin's own built-ins) or `plugin:<name>:<path>` (**any** active plugin's own bundled recipes, addressed by name) |
+| A plugin | Another plugin | `plugin:<name>:<path>`, resolved against the named plugin's own live root |
+| A plugin | A repo | a plain path naming that specific repo's file (mechanically identical to the repo-to-repo case -- a plugin that needs to reach one known repo's file names it directly; there is no name-based "address a repo" ref, since a plugin generally should not know, or depend on, a specific consuming repo) |
+
+`plugin:<name>:<relative-path>` resolves `<name>` against every
+currently **active** plugin (`plugin_activation.resolve_active_plugins()`
+-- the same identity-verified live-root resolution a `registrar.d`
+manifest's own `plugin_root` is validated against), then reads
+`<relative-path>` relative to that plugin's root. Two active plugins
+sharing the same bare name across different marketplaces is ambiguous and
+rejected with a clear error naming every candidate source; disambiguate
+with `plugin:<name>@<marketplace>:<path>`. A `plugin:` ref's path must
+stay inside the named plugin's own root (no `..` escape, no absolute
+path) -- it exists specifically to scope a reference to *that plugin's
+own* content, and an escaping ref fails loudly rather than silently
+reaching unrelated content. A plugin-owned recipe reached this way is
+itself first-class in the chain: its own nested `extends:` ref (`global:`,
+another `plugin:`, or a plain path) resolves against *its own* root, the
+same per-hop directory-provenance guarantee repo-to-repo chaining already
+has -- a plugin-to-plugin-to-plugin chain is exactly as safe as a
+repo-to-repo-to-repo one.
+
+**Circular-dependency prevention is origin-agnostic.** The existing
+cycle/depth guard (`A -> B -> A` raises a clear `RegistrarError` naming the
+full chain; an excessively long acyclic chain raises once it exceeds a
+fixed maximum depth) tracks each ref's **resolved identity** -- a
+`global:<name>` string, or a fully-resolved absolute path -- regardless of
+whether that path was reached through a plain repo-local/cross-repo ref or
+through a `plugin:` ref's name-based lookup. A cycle that crosses between
+two plugins, between a plugin and a repo, or any mix of the four
+directions above, is caught exactly the same way a same-origin cycle is;
+there is no separate, origin-aware cycle rule to maintain.
+
+**`script` forge provider (a script-path hook inside `repository-issue-loop`'s
+own engine).** When no named recipe fits a domain's backlog source --
+nothing forge-shaped to poll -- `repository_issue_loop`'s `forge.provider`
+may be `script` instead of `github`/`azure-devops`/`gitea`. The declaration
+names a script; `repository_issue_loop` keeps owning the loop (scheduling,
+leasing, quiet-period, dedup) and invokes that script once per backlog
+operation -- the script supplies only the domain-specific decision, never
+the loop shape:
+
+```yaml
+name: internal-health-queue
+extends: "global:repository-issue-loop"
+repo: internal-health-queue          # the script's own backlog label -- not `owner/name`
+source: internal-health-queue
+task_label: internal-health-queue-work
+cadence_seconds: 300
+forge:
+  provider: script
+  command: ["python", "scripts/health_queue_backlog.py"]
+  # cwd and timeout_seconds are optional -- cwd defaults to the declaring
+  # repo root, timeout_seconds defaults to 30s (matching ScriptEvaluator).
+reservation: {label: agent-reserved}
+pool:
+  max_active_processes: 1
+  body: {agent: health-worker}
+```
+
+The script is invoked once per operation, named via a trailing
+`--op <name>` argument (`list_open_issues` / `reserve` / `claim` /
+`release`), with a structured JSON request object on stdin and expected to
+print a structured JSON response object on stdout:
+
+| Op | Request (stdin) | Response (stdout) |
+|---|---|---|
+| `list_open_issues` | `{"repo": "<repo>"}` | `{"issues": [{"number": int, "title": str, "url": str, "labels": [str, ...], "created_at": number, "updated_at": number, "reservations": [...]}]}` |
+| `reserve` | `{"repo", "issue", "reservation"}` | (ignored) |
+| `claim` | `{"repo", "issue", "reservation", "task_id"}` | (ignored) |
+| `release` | `{"repo", "issue", "reservation", "reason"}` | (ignored) |
+
+Every request also carries `producer_login` when the declaration sets one.
+A non-zero exit is always a real error (the script's stderr is surfaced,
+truncated, in the raised exception); a timeout, a start failure, or a
+malformed/non-JSON/wrongly-shaped stdout are equally real errors -- never
+silently treated as an empty success. `forge.command`'s first element (the
+script path) and `forge.cwd`, when relative, resolve against the declaring
+repo root, never the daemon's own incidental working directory; a `.py`/
+`.sh`/`.ps1` script is automatically prefixed with the interpreter/shell its
+suffix requires so it runs on Windows too. An optional `forge.namespace`
+pins the coordinator resource-key identity explicitly (recommended for a
+redundant/failover deployment); absent one, it is derived from the
+declaration's own as-declared command/cwd/repo-identity. An optional
+`forge.backlog` decouples the label the script sees from `repo`, which
+otherwise also doubles as the task's own routing lane.
+
+**Worked migration example: a hand-written `command:`-backed emitter
+becomes a `script`-provider `repository_issue_loop`.** A bespoke emitter
+polling an internal API directly, reimplementing scheduling and dedup
+itself:
+
+```yaml
+name: internal-health-queue
+kind: emitter
+spec:
+  command: ["python", "scripts/poll_health_queue.py"]
+  interval_seconds: 300
+  cwd: "."
+  task_output: json
+pool:
+  max_active_processes: 1
+  body: {type: headless, agent: health-worker}
+```
+
+Its own `poll_health_queue.py` owns everything: polling cadence, which
+items are already claimed, leasing, and producing one task per eligible
+item -- all logic this package's `repository_issue_loop` engine already
+provides generically. Migrated to a `script`-provider
+`repository_issue_loop`, the engine takes over scheduling/leasing/dedup and
+the script shrinks to the four backlog operations above:
+
+```yaml
+name: internal-health-queue
+extends: "global:repository-issue-loop"
+repo: internal-health-queue
+source: internal-health-queue
+task_label: internal-health-queue-work
+cadence_seconds: 300
+forge:
+  provider: script
+  command: ["python", "scripts/health_queue_backlog.py"]
+reservation: {label: agent-reserved}
+pool:
+  max_active_processes: 1
+  body: {agent: health-worker}
+```
+
+`scripts/health_queue_backlog.py` replaces `poll_health_queue.py`'s mixed
+polling-and-leasing logic with four small, stateless operations (read the
+queue and report open items; mark one reserved; mark one claimed once a
+task starts; mark one released on abandonment) -- the reusable
+`repository_issue_loop` engine now owns the scheduling, leasing, and dedup
+that the bespoke emitter previously had to reimplement itself.
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
@@ -2053,5 +2269,13 @@ configuration over token flags where process arguments may be observable.
   reconciles in the background; a running coordinator writes
   `running-version.json` so the launcher can distinguish the live imported
   version from the on-disk slot.
+- On Windows, `reconcile-status.json` records each background install's attempt,
+  worker PID and birth time, versions, exit code, and completion. Installer output
+  is captured in `reconcile.log`. The hook tracks the worker rather than its
+  console wrapper, clears inherited staging flags so the installer watchdog
+  remains effective, and retires only a verified stale worker tree. Legacy PID-only
+  ownership is reported for manual diagnosis, never used to kill an unverified
+  process. Stale retirement allows the installer deadline plus a grace period
+  before replacing an attempt, including graceful coordinator cutover.
 - Wildcard binds (`0.0.0.0`, `::`) require `AGENT_DISPATCH_TOKEN`; otherwise the
   server refuses to start rather than expose the task-control API on the LAN.

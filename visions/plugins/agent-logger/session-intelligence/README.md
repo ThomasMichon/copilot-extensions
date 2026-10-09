@@ -3,7 +3,7 @@
 - **Subject:** agent-logger's portable corpus, digest, accounting, and aggregation backend
 - **Scope:** leaf
 - **Status:** Draft
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-09
 - **Reality docs:** [agent-logger architecture](../../../../plugins/agent-logger/docs/architecture.md)
 
 ## Purpose & Intent
@@ -64,6 +64,14 @@ Digests and catalog metadata preserve enough identity, origin, chronology, and
 provenance for later cross-machine indexing and summarization. Accounting
 exports do not need transcript contents to explain usage.
 
+### structured-work-item-session-associations
+Recorded associations between external work items and sessions are
+independently discoverable without matching transcript prose. Durable metadata
+preserves those associations through live, synced, and archived storage, while
+query indexes can be rebuilt from that evidence. Consumers retain ownership of
+their tracker, review workflow, and enrichment policy; association retrieval
+does not absorb those workflows into the catalog.
+
 ## Behaviors
 
 ### identity-survives-storage-transitions
@@ -115,3 +123,9 @@ aggregator to seize ownership.
 - Parent: [agent-logger](../README.md).
 - [agent-index](../../agent-index/README.md) - independent retrieval consumer.
 - [plugin services](../../../plugin-services/README.md) - portable hosting.
+
+## Provenance
+
+- **2026-10-09** - Folded back structured work-item/session associations and
+  rebuildable lookup from durable annotation evidence, retaining independent
+  consumer workflow ownership.

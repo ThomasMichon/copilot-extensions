@@ -8,9 +8,12 @@ import platform
 import sys
 import threading
 
-from . import activity, embody_resume, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
+from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
+from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
+from .launch_seed_exec import deferred_command
+from .worktree_creation import LaunchSeedStagingFailure
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 
 
@@ -278,6 +281,12 @@ def add_parsers(sub) -> None:
         "from routine cleanup)",
     )
     parser.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
+    parser.add_argument(
+        "--defer-new-seed", action="store_true", default=True,
+        help="Keep creation prompts queued until the returned command executes",
+    )
+    parser.add_argument("--stage-launch-seed", action="store_true", help="Require typed launch-seed staging")
+    parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
     parser.add_argument(
         "--environment",
@@ -344,7 +353,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     except _ResolveEarlyExit as exc:
         return exc.exit_code
 
-    requested_seed = getattr(state.args, "seed", None)
+    requested_seed = getattr(state.args, "seed", None) or getattr(state.args, "seed_id", None)
+    if getattr(state.args, "seed_id", None) and state.use_new:
+        message = "--seed-id requires an existing --worktree-id."
+        if state.use_json:
+            return output._json_error(message)
+        output.err(message)
+        return 1
     if requested_seed and not state.use_new and not state.worktree_id:
         # --seed is valid with --new (persisted onto a newly created
         # record -- resume-prompt-durable-seed-and-mux-fix) and with
@@ -376,16 +391,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         output.err(message)
         return 2
 
-    if requested_seed and getattr(state.args, "bare_resume", False):
-        # --bare-resume deliberately skips seed injection in BOTH resume
-        # code paths (it launches Copilot in HOME with no --resume at all,
-        # to dodge a cwd-start bug -- there is no resumed conversation, and
-        # arguably no well-defined "worktree session," for the seed to
-        # join). Without this guard, a caller combining --bare-resume with
-        # --seed got a silent, confusing partial success: the command
-        # exits 0 but the prompt is quietly dropped. Reject the
-        # combination explicitly instead.
-        message = "--seed is not supported together with --bare-resume."
+    incompatible_seed_mode = next(
+        (flag for flag in ("bare_resume", "restore") if getattr(state.args, flag, False)),
+        None,
+    )
+    if requested_seed and incompatible_seed_mode:
+        flag = incompatible_seed_mode.replace("_", "-")
+        message = f"--seed is not supported together with --{flag}; Resume prompt is cold-start-only."
         if state.use_json:
             return output._json_error(message)
         output.err(message)
@@ -487,6 +499,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _resolve_json_mode(state: ResolveCommandState) -> int:
+    if state.use_new and getattr(state.args, "dry_run", False):
+        return output._json_error(
+            "--json --new --dry-run is unsupported; no worktree or guidance was created"
+        )
     try:
         config = state.load_config()
     except Exception as exc:
@@ -564,6 +580,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         launch_preflight = _preflight_launch(config, state.args, work_dir)
         if launch_preflight.error:
             return output._json_error(launch_preflight.error, exit_code=3)
+        local_cache_refresh.prepare_for_launch(
+            work_dir, dry_run=getattr(state.args, "dry_run", False)
+        )
         launch_cmd = _build_launch_cmd(
             config,
             state.args,
@@ -599,6 +618,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
+        except LaunchSeedStagingFailure as exc:
+            return exc.emit(json_out=True)
         except RuntimeError as exc:
             return output._json_error(str(exc))
         output._json_output(result)
@@ -616,9 +637,16 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
+    try:
+        staged_seed = seed_for_attempt(yaml_path, record, state.args)
+    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+        return output._json_error(f"Could not stage launch prompt: {exc}", exit_code=3)
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
+    local_cache_refresh.prepare_for_launch(
+        record.worktree_path, dry_run=getattr(state.args, "dry_run", False)
+    )
     if getattr(state.args, "restore", False):
         session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
         restored = _perform_remux(
@@ -630,6 +658,18 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
         if not restored.get("ok"):
             return output._json_error(restored.get("reason", "could not restore the session"))
+    verdict = sessions.verify_worktree_active(record)
+    if staged_seed is not None and plain_live_open(state.args, verdict):
+        staged_seed = None
+    if staged_seed is not None and not getattr(state.args, "bare_resume", False):
+        seed_error = cold_start_error(verdict, staged_seed.kind)
+        if seed_error:
+            return output._json_error(seed_error, exit_code=3)
+        if staged_seed.handoff_id:
+            return output._json_error(
+                "Previous launch-prompt handoff is unconfirmed; the seed is retained "
+                "but will not be automatically submitted twice.", exit_code=3,
+            )
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
         tracking.mark_resumed(record, save=False)
@@ -681,91 +721,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     elif not no_resume:
         _emit_parent_context_hint(record, to_stderr=True)
 
-    # Durable seed delivery (resume-prompt-durable-seed-and-mux-fix): a
-    # `--interactive` argument on this SAME returned command line, never a
-    # mux pane send-keys side-channel -- works identically whether the real
-    # launcher (launch-session.{ps1,sh}, which wraps or doesn't wrap this
-    # exact `cmd` in a mux pane independently of anything decided here)
-    # ends up muxed or `--no-mux`, since there is no pane to target either
-    # way. `bare_resume` skips claiming/injecting entirely (mirrors
-    # `resolve_launch_cli._resolve_resume_context`'s identical guard) --
-    # there is no resumed conversation, and arguably no well-defined
-    # "worktree session," for a seed to join, and a persisted
-    # `pending_seed` must stay queued for a later real resume rather than
-    # being silently consumed here. An explicit `--seed` on this call wins;
-    # either way, any record-persisted `pending_seed` (queued at creation
-    # time by `resolve --new --seed`, for the Picker's own two-hop
-    # new-worktree flow, which re-resolves by --worktree-id here) is
-    # claimed (cleared) under the existing race-safe write-guard so
-    # `agent-worktrees embody`'s own fallback claim-and-send-keys delivery
-    # never finds it again and double-delivers the same turn.
-    #
-    # Known, accepted scope boundary: claiming happens here, at
-    # PLAN-BUILD time -- before the external launcher
-    # (launch-session.{ps1,sh}) has actually exec'd this `cmd`. That script
-    # still performs its own update/preflight work and (for a muxed launch)
-    # mux-session creation AFTER this process already returned; a failure
-    # there, before `cmd` ever starts, loses the claimed seed with no
-    # restore. Deliberately not solved here: a true fix needs the launcher
-    # itself to report "I failed before exec" back through
-    # `pending_seed.restore_pending_seed` (the exact primitive `embody`'s
-    # own mux-pane delivery already uses for its own post-attempt restore),
-    # which means teaching the launcher scripts about this contract --
-    # explicitly out of this phase's scope (tracked as a Phase 3 follow-up
-    # in this effort's own README). Accepted because `resolve` already
-    # performs several other irreversible side effects before returning
-    # (`mark_resumed`/`save_record`, activity logging) with the same
-    # "the external launcher might still fail after this" exposure, so this
-    # is a known risk class for this function, not a new one introduced
-    # here, and the alternative (never clearing a pending seed from this
-    # function at all) reintroduces real double-delivery on every
-    # subsequent successful resume instead of this narrow, infrequent loss
-    # window.
-    #
-    # Live-mux parity with `resolve_launch_cli._resolve_resume_context`:
-    # the JSON path is the Picker's own real code path, and both launcher
-    # scripts (`launch-session.{sh,ps1}`) probe for an existing live mux
-    # session themselves BEFORE this `cmd` would ever run -- if one exists,
-    # they reattach it and never exec `cmd` at all, exactly the scenario
-    # the non-JSON path's own `verdict.mux_live` branch already guards.
-    # Without the identical check here, a seed claimed/embedded above would
-    # be silently discarded on every JSON-mode live-mux reattach, which is
-    # worse than the non-JSON path's own narrow, queued-but-delayed
-    # limitation -- here the seed was never queued at all.
-    #
-    # A degraded probe is NOT the same as a confirmed "no live mux": it
-    # means genuinely unknown, and claiming/embedding the seed on an
-    # uncertain verdict risks the exact same silent loss a real live mux
-    # would cause. Treat "uncertain" the same as "live" here -- the safer,
-    # queue-not-embed branch -- rather than only gating on the narrower
-    # `mux_live` flag. Specifically `mux_probe_ok` (the MUX probe's own
-    # success), never the aggregate `probes_ok` (which also goes False on
-    # an UNRELATED reclaim/lock-probe failure): a reclaim failure with a
-    # conclusive "no mux" from the mux probe itself is not mux uncertainty,
-    # and wrongly queuing in that case loses the prompt entirely on a
-    # `--no-mux` launch (which execs the seedless command directly -- there
-    # is no pane to later deliver a queued seed to).
-    try:
-        verdict = sessions.verify_worktree_active(record)
-    except Exception:
-        verdict = None
-    live_or_uncertain_mux = verdict is None or not getattr(verdict, "mux_probe_ok", True) or getattr(verdict, "mux_live", False)
-    seed_claimed = False
-    seed_queue_failed = False
-    if not getattr(state.args, "bare_resume", False) and not live_or_uncertain_mux:
-        explicit_seed = getattr(state.args, "seed", None)
-        claimed_seed = pending_seed_mod.claim_pending_seed(yaml_path)
-        delivered_seed = explicit_seed or claimed_seed
-        if delivered_seed:
-            launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
-            seed_claimed = True
-    elif not getattr(state.args, "bare_resume", False) and live_or_uncertain_mux:
-        explicit_seed = getattr(state.args, "seed", None)
-        if explicit_seed:
-            seed_queue_failed = not pending_seed_mod.set_pending_seed(yaml_path, explicit_seed)
-        # A persisted `pending_seed` (no explicit one given) is deliberately
-        # left untouched here too -- never claimed, so it stays queued for
-        # whatever next attach actually delivers it.
+    seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
+    if seed_pending:
+        launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
 
     launch = {
         "action": "exec",
@@ -775,24 +733,13 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         "worktree_id": record.worktree_id,
         "post_exit": True,
         "no_mux": True,
-        # Explicit provenance: a delegated caller (the Worktree Manager's
-        # relocated-launch re-invocation) must not GUESS whether `cmd`'s
-        # trailing `--interactive <value>` pair is the seed
-        # this call claimed, versus a configured launch/profile argument
-        # that coincidentally ends the same way -- `_build_launch_cmd` can
-        # legitimately produce either shape. True only when THIS call
-        # itself appended the seed via `embody_resume.with_seed` above.
-        "seed_claimed": seed_claimed,
+        # The delegated hop carries the exact staged identity, never text
+        # inferred from a configured command's trailing argv.
+        "seed_claimed": False,
+        "seed_pending": seed_pending,
+        "seed_id": staged_seed.seed_id if seed_pending else None,
+        "seed_kind": staged_seed.kind if seed_pending else None,
     }
-    if seed_queue_failed:
-        # Honest, non-fatal degradation: `set_pending_seed` failed (lock
-        # contention, an unreadable record, or a write failure) while
-        # queuing an explicit seed for later delivery on a live-mux
-        # reattach. The launch itself still proceeds (losing only the
-        # seed, not the whole resume) -- surfaced here so a caller (the
-        # Picker) can tell the operator their prompt did not make it in,
-        # rather than silently discarding it with no signal at all.
-        launch["seed_queue_failed"] = True
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     project = config.repo_name

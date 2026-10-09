@@ -83,7 +83,7 @@ an empty queue.
 ### Phase 2 — Built-in adapters ([sources.md](sources.md#built-in-adapters))
 
 - [x] `dispatch`: steering asks, holds, unconfirmed completion claims, and stalled queues. (ThomasMichon/copilot-extensions#5668)
-- [x] `bridge`, with its sibling `agent-bridge --json attention <session>` read (HTTP protocol 27).
+- [x] `bridge`, with its sibling `agent-bridge --json attention <session>` read (HTTP protocol 29).
 - [x] `pr`, with `agent-worktrees claims find pr` extended across every project and repo.
 - [x] A per-source timeout bounds each adapter; a timeout is that source's `failed`.
 
@@ -132,7 +132,7 @@ Open questions for review:
 
 ### 2026-10-08 — The `bridge` and `pr` sources
 - `agent-bridge --json attention <session>...` reads the bridge's current
-  attention reason for an owned or a represented session (HTTP protocol 27,
+  attention reason for an owned or a represented session (HTTP protocol 29,
   `CURRENT_ATTENTION_PROTOCOL_VERSION`; `unsupported` against an older daemon).
   The bridge source reads each candidate by its worktree handle, so the answer
   and the action follow the session heading the worktree now.

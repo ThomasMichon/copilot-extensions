@@ -163,3 +163,19 @@ def test_worktree_manager_version_surfaces_must_match(tmp_path: Path) -> None:
     init_path.write_text('__version__ = "0.1.0-dev27"\n', encoding="utf-8")
     [violation] = checker._worktree_manager_version_violations(manager)
     assert violation.startswith("worktree-manager: version mismatch")
+
+
+def test_standalone_index_service_version_surfaces_must_match(tmp_path: Path) -> None:
+    service = tmp_path / "agent-index-service"
+    package = service / "src" / "agent_index_service"
+    package.mkdir(parents=True)
+    (service / "pyproject.toml").write_text(
+        '[project]\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    init = package / "__init__.py"
+    init.write_text('__version__ = "0.1.0-dev1"\n', encoding="utf-8")
+
+    assert checker._standalone_version_violations(service, "agent-index-service") == []
+    init.write_text('__version__ = "0.1.0-dev2"\n', encoding="utf-8")
+    [violation] = checker._standalone_version_violations(service, "agent-index-service")
+    assert violation.startswith("agent-index-service: version mismatch")

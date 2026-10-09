@@ -1,9 +1,0 @@
-{
-  "comment": "Ignore background sub-agent events (envelope agentId / parentToolCallId) when deriving a live session's turn state, and deliver an interrupt to a session with no running main turn without aborting (which would cancel its background sub-agents)",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

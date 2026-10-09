@@ -98,17 +98,26 @@ _LIVE_CLI_HOLDS_WORKTREE = "live_cli_holds_worktree"
 
 def _resume(
     worktree_id: str, *, exe: Sequence[str], force: bool, timeout: float | None,
+    strict: bool = False,
 ) -> tuple[subprocess.CompletedProcess, str | None]:
-    """Run ``agent-bridge --json resume <worktree_id> [--force]`` once.
+    """Run ``agent-bridge --json resume <worktree_id> [--force] [--strict]``
+    once.
 
     Returns ``(completed_process, session_id_or_none)``. ``session_id`` is
     ``None`` on any failure to parse it out, whether from a nonzero
     returncode or a 0-returncode, unparseable (legacy-daemon) response --
     the caller distinguishes those via ``completed_process.returncode``.
+
+    ``strict`` is the identity-preserving contract (see
+    ``agent_bridge.routes.worktrees.resume_worktree``): a missing bridge
+    record or a failed resume each refuse (409) instead of silently
+    starting a fresh replacement conversation.
     """
     resume_cmd = [*exe, "--json", "resume", worktree_id]
     if force:
         resume_cmd.append("--force")
+    if strict:
+        resume_cmd.append("--strict")
     resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         resume_cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
@@ -281,6 +290,7 @@ def resume_worktree_and_send(
     wait: bool,
     json_output: bool,
     timeout: float | None,
+    allow_takeover: bool = True,
 ) -> subprocess.CompletedProcess:
     """Take over ``worktree_id`` (killing a live interactive CLI holder first
     if one exists) and deliver ``prompt`` attributed to ``caller``.
@@ -288,6 +298,13 @@ def resume_worktree_and_send(
     ``agent`` is accepted for API symmetry with ``bridge.spawn_worker`` (the
     worktree's own bound agent resolves the resumed/created session, not this
     parameter) but is otherwise unused here.
+
+    ``allow_takeover=False`` is the non-forcing conversation-recovery path:
+    a live interactive holder raises ``BridgeCarriedSessionBusy`` without a
+    stop, restart, or forced resume. It also requests the bridge's
+    identity-preserving ``strict`` resume contract, so a missing bridge
+    record or a failed resume refuse closed instead of silently returning a
+    brand-new replacement conversation.
 
     Tries a plain (non-forcing) resume first. On a genuine 409
     ``live_cli_holds_worktree`` refusal, delegates the whole
@@ -301,13 +318,23 @@ def resume_worktree_and_send(
     reason to echo an id the caller already knows.
     """
     _ = agent
-    resumed, session_id = _resume(worktree_id, exe=exe, force=False, timeout=timeout)
+    resumed, session_id = _resume(
+        worktree_id, exe=exe, force=False, timeout=timeout,
+        strict=not allow_takeover,
+    )
     if session_id is None:
         if resumed.returncode == 0:
             return _no_session_id_failure(resumed)
         reason, holder = _resume_refusal(resumed)
         if reason != _LIVE_CLI_HOLDS_WORKTREE:
             return resumed
+        if not allow_takeover:
+            from .bridge import BridgeCarriedSessionBusy
+
+            raise BridgeCarriedSessionBusy(
+                f"worktree {worktree_id!r} has a live interactive holder; "
+                "refusing takeover during conversation resume"
+            )
         if not isinstance(holder, str) or not holder:
             # No usable holder id to fence the stop on -- forcing through
             # would run 'agent-bridge restart-worktree' unfenced (no
@@ -331,6 +358,13 @@ def resume_worktree_and_send(
         json_output=json_output, timeout=timeout,
     )
     if sent.returncode == _SEND_BUSY_EXIT:
+        if not allow_takeover:
+            from .bridge import BridgeCarriedSessionBusy
+
+            raise BridgeCarriedSessionBusy(
+                f"resumed conversation {session_id!r} is busy; "
+                "refusing to end or replace it during conversation resume"
+            )
         # The reused session is mid-turn -- this path only runs when the
         # caller already judged the worktree safe to take over, so end the
         # busy turn and resume again for its replacement (end deletes the

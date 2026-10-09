@@ -757,6 +757,9 @@ def cmd_detach(
             plan["scope_id"], reservation, plan["venue"], expected=resume_target(copilot_args),
             claimed=session_id, timeout=min(args.register_timeout, 75.0), ttl_seconds=_RESERVATION_TTL,
         )
+        if not session_id:  # its placeholder registered, then exited; the resumed id never did
+            return _fail("the resumed session never registered with the host bridge (the placeholder that "
+                         "claimed the launch exited)", plan, pane_tail=_pane_tail(args.name, plan["mux_session"]))
         owner.hold(
             args.name, plan["tenant"], daemon_port=daemon_port,
             mux_session=plan["mux_session"], confirmed=True,

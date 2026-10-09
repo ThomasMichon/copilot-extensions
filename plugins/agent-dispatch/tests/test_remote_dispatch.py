@@ -382,6 +382,20 @@ def test_build_remote_browse_argv_inbox_forwards_board_without_status():
     assert "--awaiting-steer" not in argv
 
 
+def test_build_remote_override_argv_disable_with_reason():
+    argv = remote_dispatch.build_remote_override_argv("disable", "logical:x:y", reason="flaky")
+    assert argv == [
+        "agent-dispatch", "supervise", "override", "disable", "logical:x:y",
+        "--reason", "flaky",
+    ]
+
+
+def test_build_remote_override_argv_enable_omits_reason_when_unset():
+    argv = remote_dispatch.build_remote_override_argv("enable", "logical:x:y")
+    assert argv == ["agent-dispatch", "supervise", "override", "enable", "logical:x:y"]
+    assert "--reason" not in argv
+
+
 def test_browse_remote_builds_ssh_command(monkeypatch):
     captured = {}
 

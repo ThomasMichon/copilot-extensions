@@ -76,8 +76,16 @@ def run_resume(
     json_out,
     match_agents,
     startup_request_timeout,
+    strict: bool = False,
 ) -> None:
-    """Implementation of ``agent-bridge resume`` with singleton fallback."""
+    """Implementation of ``agent-bridge resume`` with singleton fallback.
+
+    ``strict`` is the identity-preserving contract for the worktree-resume
+    branch below: never a silent fresh replacement conversation. A missing
+    bridge record or a failed resume each surface as the SAME structured
+    409 ``live_cli_holds_worktree``-style refusal path does today, rather
+    than quietly succeeding with a new session.
+    """
 
     def _fail(message: str, *, reason: str = "") -> None:
         if as_json:
@@ -147,6 +155,7 @@ def run_resume(
             result = client.resume_worktree(
                 worktree_id,
                 reclaim=reclaim,
+                strict=strict,
                 request_timeout=startup_request_timeout(
                     resume=True,
                     fresh_fallback=True,

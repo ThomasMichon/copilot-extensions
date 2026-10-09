@@ -10,7 +10,7 @@
   one stance of a sibling Active vision — see Non-Goals and Provenance)
 - **Status:** Draft — pre-validation. Nothing here authorizes changing any
   default today; see *default-promotion-requires-proof* in Behaviors.
-- **Last revised:** 2026-10-02
+- **Last revised:** 2026-10-09
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/mux.md`](../../plugins/agent-worktrees/docs/mux.md) ·
   upstream `github/copilot-agent-runtime` (`src/cli/acp/server.ts`,
@@ -49,27 +49,23 @@ scoping is correct about what it covers: it was built for observation and
 limited steering of a session a human already started, not for an agent
 being able to create a session, fully control it, and cleanly end it the way
 ACP + Session Host already can. That is a real, important distinction this
-draft must not blur: **ACP already has native session create/terminate** —
-`session/new` and `session/close` are ordinary ACP methods Session Host
-already relies on. The gap this vision is actually about is narrower and
+draft must not blur: the proposed path must provide explicit session
+creation or fresh-context lifecycle and owned, deliberate termination,
+comparable to the existing **ACP + Session Host flow**. Those guarantees are
+not a claim that downstream termination uses a particular native ACP method.
+The gap this vision is actually about is narrower and
 more concrete: **agent-bridge's own CLI-side extension today only supports
 reporting on user-launched sessions and offering limited steering** — it was
 never built to create a session, drive it end-to-end, and gracefully end it.
 This session's research turned up concrete facts suggesting that gap may now
 be closable:
 
-- **Extensions do not auto-load in ACP mode today, and nothing can make them.**
-  `src/cli/acp/server.ts` has zero references to "extension" anywhere in the
-  file. The runtime's gate
-  (`requestExtensions === true || (enableConfigDiscovery === true &&
-  featureFlags.EXTENSIONS === true)`, `sdkServerHost.ts:3549-3550`) is never
-  satisfied by any CLI flag, environment variable, or ACP wire parameter in
-  the ACP session-construction path — confirmed by direct inspection, not
-  inferred. An ACP-driven session is therefore invisible to plugin-provided
-  sub-agents, skills, and hook-based extensions unless upstream CAR adds a
-  flag or wire parameter that does not exist today. A muxed interactive
-  session has none of this gap: ambient marketplace extensions load the same
-  way they would for a human.
+- **Launch-time SDK-extension presence must be proven independently.**
+  Extension availability depends on the selected launch mechanism and supported
+  native version floor. The proposed path must establish the extension presence,
+  permissions and routing it depends on rather than assume them from a working
+  command or transport. Absence of ambient SDK-extension loading does not
+  establish absence of plugin-provided skills, agents or MCP composition.
 - **`--plugin-dir` is not an ACP-exclusive advantage.** Both the ACP branch
   and the ordinary interactive-startup path in `src/cli/index.ts`
   independently call the identical `scanPluginDirs()` →
@@ -83,14 +79,11 @@ be closable:
   host-only-gated. The genuine, confirmed gap is session **creation** (a
   joined extension cannot call an equivalent of `session/new`) and the
   **ask_user/elicitation routing**, both detailed in Concepts below.
-- **ACP's native session create/terminate has no current equivalent in
-  agent-bridge's own extension, but mux already offers one.** Session Host
-  relies on ACP's `session/new`/`session/close` for full lifecycle control;
-  agent-bridge's current CLI-side extension has nothing equivalent because it
-  was built only for reporting/steering on human-launched sessions. A
-  human-equivalent `/clear` or `/exit` typed into the mux pane is a real,
-  available way to close that **specific** gap for a mux-driven session —
-  parity with what ACP already does natively, not a capability ACP lacks.
+- **Creation and owned termination require full lifecycle parity.**
+  Reporting/steering an existing CLI session does not supply those guarantees.
+  A narrow `/clear`/`/exit` bridge is a candidate mechanism for fresh context
+  and deliberate termination; its identity, outcome and safety must be validated
+  against the existing ACP + Session Host flow, not inferred from command names.
 
 The north star, if validation succeeds: a `copilot` process launched *anywhere*
 — any machine, any repo checkout, any CodeSpace, any container, any Dev Box —
@@ -166,11 +159,11 @@ otherwise block on a human:
    (`onElicitationRequest`) has first-class `"decline"`/`"cancel"` actions —
    but they are **final**, not deferrable; there is no "pending, I'll answer
    out-of-band shortly" state in the SDK today.
-4. **TTY command bridge**, closing the one place agent-bridge's own extension
-   still trails ACP's native lifecycle control: typing `/clear` for a fresh
+4. **TTY command bridge**, supplying the proposed path's full lifecycle:
+   typing `/clear` for a fresh
    context window, or `/exit` for a graceful process end, into the mux pane,
-   as the mux-driven equivalent of ACP's `session/new`/`session/close` (which
-   Session Host already has and relies on). Scoped to a small, named set of
+   with creation/fresh-context and owned termination guarantees comparable to
+   ACP + Session Host. Scoped to a small, named set of
    recognized slash-commands — not a general automation mechanism.
 5. **Worst case: full TTY screen-scrape driving.** Acknowledged explicitly
    as large, fragile, last-resort code that this vision does not propose
@@ -213,8 +206,9 @@ driving processes cannot race the same session.
 
 A narrow, named set of slash-commands (starting with `/clear`, `/exit`)
 deliberately typed into the pane, closing agent-bridge's own extension's gap
-against ACP's native `session/new`/`session/close` — parity with Session
-Host's existing lifecycle control, not a capability beyond it.
+against the existing ACP + Session Host lifecycle flow. Creation/fresh context
+and owned, deliberate termination remain required guarantees, not capabilities
+proved solely by slash-command or protocol names.
 
 ### layered-blocked-interaction-escalation
 
@@ -250,7 +244,9 @@ This vision's Status stays **Draft**, and
 `opt-in-not-ambient-default` / `explicit-per-request-mode` features remain
 authoritative, until a controlled validation plan — at minimum: (a) a
 cross-venue extension-injection reliability test (local machine, CodeSpace,
-container, at least one Dev Box image), (b) a driver-exclusivity test proving
+container, at least one Dev Box image), including functional launch-time
+presence at the explicitly selected minimum supported native version,
+(b) a driver-exclusivity test proving
 two concurrent driving attempts cannot corrupt a session, (c) a blocked-
 interaction test exercising all five escalation rungs against real tool
 calls and at least one genuine ask_user/elicitation case, and (d) a side-by-
@@ -322,3 +318,10 @@ editing any sibling vision's default-mechanism language.
   matches what Session Host provides for survivability, but not for driver
   exclusivity. No validation work has yet been performed; see
   *default-promotion-requires-proof*.
+- **2026-10-09** — Reconciled lifecycle and extension-presence framing against
+  the current coordination implementation. Creation/fresh context and owned
+  termination remain required, without attributing downstream termination to
+  native `session/close`. Distinguished SDK-extension availability from
+  plugin/skill/MCP composition and retained the independent launch-time proof.
+  Historical native-source observations above are not a fresh validation of
+  every supported native version. No default or promotion gate changed.

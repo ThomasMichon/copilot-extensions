@@ -274,12 +274,25 @@ the engine versus only consuming search — is resolved from **configuration**
 list baked into the plugin.
 
 ### independently-packaged-indexer-service
-The indexing service has its own distribution and release identity independent
-of plugin enablement. Its hosted query surface, durable task queue, source
-ingestion and indexing workers form one coherent service boundary. The
-embedding engine remains a separately managed heavy runtime rather than being
-reinstalled with every service update. Existing client, configuration and
-non-container host workflows retain a supported migration path.
+The indexing system has four explicit responsibilities: its API/master
+controller, indexing and embedding execution, persistence, and a lightweight
+client. The first three can be independently deployed and supervised when that
+placement is useful, without turning them into plugins. They also support a
+colocated native installation behind the same contracts.
+
+The API/controller admits and coordinates work; execution workers crawl,
+chunk and embed; persistence owns durable corpus, vector and job state; clients
+consume the public service without acquiring its storage or model stack.
+Process boundaries must not depend on sharing private database handles or
+assuming all components run in one filesystem. The embedding runtime remains
+warm and separately managed within the execution tier. Existing client,
+configuration and non-container host workflows retain a supported migration
+path.
+
+Cross-component calls use authenticated, explicitly trusted transports and
+component-scoped authorization. Network reachability or container membership
+alone never grants the ability to enqueue work, claim jobs, change configuration
+or mutate corpus state. Credentials and role policy remain operator-owned.
 
 ### released-version-controller-contract
 An optional operator-owned controller can discover released versions and

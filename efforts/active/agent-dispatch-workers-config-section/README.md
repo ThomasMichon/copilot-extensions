@@ -5,7 +5,7 @@
   picker-support plugins)
 - **Branch(es):** per-slice worktrees
 - **Created:** 2026-10-06
-- **Status:** Draft
+- **Status:** Active <!-- Phase 1 landed (status + local toggle glue); Phase 2 landed (native --machine); Phase 3 (config_sections manifest entry + Picker confirmation gap) next -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md)'s
   plugin-pivot-extensibility behavior (a plugin's own pivot manifest
   contributes Picker surface without Picker-side code) and
@@ -141,27 +141,86 @@ Intent).
 ## Plan
 
 ### Phase 1 — Confirm the exact status/toggle contract
-- [ ] Confirm `agent-dispatch registrar discover --json` (or an equivalent
+- [x] Confirm `agent-dispatch registrar discover --json` (or an equivalent
       narrower query) gives enough per-pool data — name, `max_active_processes`
       or lane count, current override state — to render a `ConfigSection`
       status line within the 200-char budget without a new query surface.
-- [ ] Confirm `agent-dispatch supervise override list --json` reports enough
+      **Confirmed, with a nuance:** `registrar discover`'s own
+      `_declaration_summary` already reports `name`/`owner`/`concurrency`/
+      `max_active_processes`/`body`/`filters` for a `supervised-lane`
+      declaration, and discovery already rejects duplicate names across
+      sources — a bare pool name is enough to identify one pool
+      unambiguously. It carries **no** override state, though (discovery
+      and the override store are genuinely separate concerns); that half
+      comes from the override store directly (see next item).
+- [x] Confirm `agent-dispatch supervise override list --json` reports enough
       to distinguish "active, not overridden" / "active, overridden off" /
-      "no declaration found" for a given pool name.
-- [ ] Write the thin CLI glue (a small script or a new `agent-dispatch`
+      "no declaration found" for a given pool name. **Confirmed, with a
+      correction:** `override list` alone reports only the raw override
+      store (`path`/`overridden_off` ids/`overrides` records with reasons)
+      — it has no notion of "active" or "declared" at all, since it never
+      reads `registrar discover`. The glue therefore reads both: a pool's
+      declared state from `registrar discover`, and its override state by
+      checking whether `logical:<owner>:<name>` (the override store's own
+      **logical** override token — `overrides.logical_override_id`, no
+      concrete registration id needed) is in `overridden_off_ids`. This
+      combination gives exactly the three states the item asks for.
+- [x] Write the thin CLI glue (a small script or a new `agent-dispatch`
       subcommand, whichever this phase finds is the better fit) that
       `config_sections[].run` invokes: given a pool key, print a ≤200-char
-      status line and accept a toggle argument.
+      status line and accept a toggle argument. **Landed:** a new
+      `agent-dispatch workers config-section <name> [--toggle
+      enable|disable] [--reason R] [--owner O] [--json]` subcommand
+      (`workers_config_cli.py`). Default output is a single ≤200-char line
+      (`"<name>: <N> lane(s) declared -- active"` / `"-- overridden off
+      (<reason>)"` / `"<name>: no declaration found"`, truncated with an
+      ellipsis if a long reason would overflow the budget); `--json` emits
+      the full structured detail for debugging/future callers. `--toggle`
+      applies the override via the existing `set_override`/`clear_override`
+      primitives *before* reporting status, addressed by the pool's logical
+      override id — this works even for a not-yet-synced declaration (the
+      override is independent of a live registration), and the command's
+      own exit code (0 found / 1 not found) is consistent across both the
+      text and `--json` output paths. 12 new unit tests
+      (`tests/test_workers_config_cli.py`): parser shape, status line for
+      singular/plural lane counts, not-found and non-`supervised-lane`-kind
+      declarations, the toggle round-trip (disable→status reflects it,
+      enable clears it, a toggle on an unknown pool still applies via its
+      logical id), JSON shape (found and not-found), `--owner`
+      disambiguation when two declarations share a name across owners, and
+      the status-line truncation budget.
 
 ### Phase 2 — Native `--machine` on `supervise override`
-- [ ] Add `--machine <name>` to `agent-dispatch supervise override
+- [x] Add `--machine <name>` to `agent-dispatch supervise override
       enable|disable`, reusing `remote_dispatch.py`'s existing
       `dispatch_to_remote`/`build_remote_create_argv` mutating SSH path
       (the same one `agent-dispatch create --machine` already uses) rather
-      than a new transport.
-- [ ] Unit/contract tests: local (no `--machine`) behavior is byte-for-byte
+      than a new transport. **Landed, with a refinement:** rather than
+      reusing `build_remote_create_argv` (tightly coupled to `create`'s own
+      argument model), added a new `build_remote_override_argv(action,
+      unit_id, *, reason=None)` builder and reused the already-generic
+      `browse_remote`/`diagnose_remote_failure` transport
+      `list`/`inbox --machine`'s own peer-queue-browse path already uses
+      (`task_query_cli.py`'s `_browse_peer`) -- the SSH mechanics
+      (`run_ssh_command`, `BatchMode`, alias lowercasing) were already
+      shared infrastructure; only the argv shape is new. `supervise
+      override`'s own `_cmd_supervise_override` checks
+      `remote_dispatch.is_peer_machine(machine)` and dispatches remotely
+      for `disable`/`enable` only (`list` has no `--machine`, unchanged).
+- [x] Unit/contract tests: local (no `--machine`) behavior is byte-for-byte
       unchanged; remote behavior round-trips against a test double of the
       SSH transport the way `remote_dispatch.py`'s own existing tests do.
+      **Landed:** 12 new tests -- 2 in `test_remote_dispatch.py`
+      (`build_remote_override_argv` with/without `--reason`) and 10 in
+      `test_cli.py` (parser shape including `list`'s own missing
+      `--machine` flag; `--machine` naming the local machine is a no-op
+      change in behavior; `--machine <peer>` dispatches `disable`/`enable`
+      remotely and streams the peer's JSON through unchanged; a failed
+      remote mutation surfaces the same diagnosed error peer-queue browse
+      already produces; an unavailable `ssh` client is reported the same
+      way). Full `test_cli.py` (259 passed, 1 skipped) and
+      `test_remote_dispatch.py` re-confirmed green;
+      `check-module-size.py` clean.
 
 ### Phase 3 — `config_sections` manifest entry
 - [ ] Add a `config_sections` entry to `agent-dispatch`'s own pivot manifest:
@@ -201,15 +260,78 @@ Intent).
 - [ ] Toggling disable/enable from the Picker round-trips to
       `agent-dispatch supervise override list` reflecting the change.
 - [ ] A `--machine`-targeted toggle round-trips against a second real or
-      test machine over `remote_dispatch.py`'s SSH transport.
-- [ ] Existing `supervise override` unit tests remain green; new tests cover
-      the `--machine` path explicitly.
+      test machine over `remote_dispatch.py`'s SSH transport. **Partially
+      covered:** proven against a mocked SSH transport (the same style
+      `remote_dispatch.py`'s own existing tests use) -- a live second
+      machine was not available this session; deferred to whoever next
+      has one, or to the Phase 3 config-section's own live validation.
+- [x] Existing `supervise override` unit tests remain green; new tests cover
+      the `--machine` path explicitly. **Landed:** 12 new tests (2 in
+      `test_remote_dispatch.py`, 10 in `test_cli.py`); full `test_cli.py`
+      (259 passed, 1 skipped) and `test_remote_dispatch.py` green.
 
 ## Proposal
 
 _Pending — Phase 1's exact query/glue shape firms this up._
 
 ## Journal
+
+### 2026-10-08 — Phase 2 landed: native `--machine` on `supervise override`
+- Added `--machine <name>` to `supervise override disable|enable` (not
+  `list`, unchanged per scope). Reused the already-generic
+  `browse_remote`/`diagnose_remote_failure` SSH transport
+  `list`/`inbox --machine`'s own peer-queue-browse path
+  (`task_query_cli.py`'s `_browse_peer`) already provides, adding only a
+  new `build_remote_override_argv(action, unit_id, *, reason=None)` argv
+  builder -- `dispatch_to_remote`/`build_remote_create_argv` turned out to
+  be too tightly coupled to `create`'s own argument model to reuse
+  directly, so this phase reused the transport layer underneath both
+  (`run_ssh_command`, `BatchMode`, alias lowercasing) instead of literally
+  calling the `create`-specific builder the Plan item named.
+- `_cmd_supervise_override` checks `remote_dispatch.is_peer_machine(machine)`
+  up front: unset, or naming this machine, falls through to the existing
+  local code path completely unchanged (byte-for-byte, confirmed by the
+  pre-existing tests still passing verbatim); naming a different machine
+  builds the remote argv, runs it over SSH, and streams the peer's JSON
+  straight through, mirroring `_browse_peer`'s own shape for errors
+  (unavailable `ssh` client, a failed remote exit) exactly.
+- 12 new tests (2 in `test_remote_dispatch.py`, 10 in `test_cli.py`):
+  parser shape (including confirming `list` carries no `--machine` flag at
+  all), the local-machine-named-explicitly no-op case, remote dispatch for
+  both `disable` and `enable` (argv shape + JSON passthrough), remote
+  failure diagnosis, and an unavailable-SSH report. Full `test_cli.py`
+  (259 passed, 1 skipped), `test_remote_dispatch.py`, and
+  `check-module-size.py` all green.
+- Docs: `plugins/agent-dispatch/README.md`'s emitter-override paragraph
+  gained a `--machine` explainer.
+- A live second-machine round-trip (this effort's own Validation Plan)
+  was not available this session -- deferred, proven against a mocked SSH
+  transport instead (the same style `remote_dispatch.py`'s own tests use).
+- Next: Phase 3 (the `config_sections` pivot-manifest entry itself, which
+  needs the separate Worktree Manager app repo's own Picker-side
+  conditional-confirmation gap closed first -- not buildable from existing
+  primitives alone, per that phase's own Plan item).
+
+### 2026-10-08 — Phase 1 landed: status/toggle CLI glue
+- Investigated the exact contract (see Phase 1's own checked-off items for
+  the detailed findings): `registrar discover` supplies declared per-pool
+  data (name/owner/concurrency), `supervise override`'s store supplies
+  override state keyed by a **logical** override id
+  (`logical:<owner>:<name>`) independent of any live registration; neither
+  alone is sufficient, so the new glue reads both.
+- New `agent-dispatch workers config-section <name>` subcommand
+  (`workers_config_cli.py`, wired into `__main__.py` alongside the other
+  command-family registrations): default output is a single ≤200-char
+  status line; `--toggle enable|disable` applies the local override first;
+  `--json` emits full structured detail. 12 new unit tests, all green;
+  full `test_cli.py` (210 passed) and `check-module-size.py` re-confirmed
+  clean.
+- Next: Phase 2 (native `--machine` on `supervise override`), then Phase 3
+  (the actual `config_sections` pivot-manifest entry + the Picker-side
+  conditional-confirmation gap, which lives in the separate Worktree
+  Manager app repo, not this one — Phase 3's own Plan item already flags
+  this as "not yet buildable from existing primitives" until that UI gap
+  closes).
 
 ### 2026-10-06 — Kickoff
 - Effort opened from a private operator peer effort's Phase 2 items 4-5,

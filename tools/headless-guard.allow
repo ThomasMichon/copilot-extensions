@@ -39,7 +39,6 @@ plugins/agent-worktrees/src/agent_worktrees/claim_handoff_accept_support.py:126 
 plugins/agent-worktrees/src/agent_worktrees/claim_history_mirror.py:521  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/claimant.py:351  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/codename_reverse_lookup.py:178  pre-existing at rule introduction, see #5518
-plugins/agent-worktrees/src/agent_worktrees/context_cli.py:393  pre-existing at rule introduction, see #5518 (line shifted by an unrelated context_cli.py edit)
 plugins/agent-worktrees/src/agent_worktrees/delegate_cli.py:344  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/effort_focus.py:165  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/finalize.py:492  pre-existing at rule introduction, see #5518

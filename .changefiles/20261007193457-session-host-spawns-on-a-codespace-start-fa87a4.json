@@ -1,9 +1,0 @@
-{
-  "comment": "Session Host spawns on a CodeSpace (start and resume) ask the host launch policy via agent-codespaces launch-check; a refused start fails with a launch_refused event",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

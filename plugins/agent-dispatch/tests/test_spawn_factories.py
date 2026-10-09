@@ -22,7 +22,40 @@ from agent_dispatch.spawn_factories import (
     make_label_routed_spawn,
     make_script_spawn,
     make_redrive_sender,
+    resume_worktree_eligible,
 )
+
+
+def test_resume_worktree_eligible_requires_reused_and_not_retired():
+    assert resume_worktree_eligible({
+        "spawn_worktree_ownership": "reused", "spawn_conversation_retired": False,
+    }) is True
+
+
+def test_resume_worktree_eligible_false_when_not_reused():
+    assert resume_worktree_eligible({
+        "spawn_worktree_ownership": "created", "spawn_conversation_retired": False,
+    }) is False
+
+
+def test_resume_worktree_eligible_false_when_explicitly_retired():
+    assert resume_worktree_eligible({
+        "spawn_worktree_ownership": "reused", "spawn_conversation_retired": True,
+    }) is False
+
+
+def test_resume_worktree_eligible_fails_closed_on_missing_marker():
+    """A version-skew hazard: an older coordinator's reservation response
+    predates ``conversation_retired`` entirely, so the task payload carries
+    no ``spawn_conversation_retired`` key at all (not even ``False``). This
+    must be treated as unknown and fail CLOSED (not eligible) -- coercing
+    the missing marker to "not retired" would silently re-open the exact
+    resurrection bug this contract exists to close during a coordinator/
+    client version-skew window."""
+    assert resume_worktree_eligible({"spawn_worktree_ownership": "reused"}) is False
+    assert resume_worktree_eligible({
+        "spawn_worktree_ownership": "reused", "spawn_conversation_retired": None,
+    }) is False
 
 
 def test_parse_fleet_body_handle_is_directly_importable():

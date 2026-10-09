@@ -160,16 +160,32 @@ COOPERATIVE_STOP_PROTOCOL_VERSION = 25
 # for it, since an older resident daemon launches without asking.
 CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION = 26
 
+# Current HTTP wire-contract version this build speaks -- bumped alongside the
+# constant just above it.
+TARGET_PREFERENCES_PROTOCOL_VERSION = 27
+
+# First version whose ``POST /worktrees/{id}/resume`` honors ``strict=true``
+# (the identity-preserving no-fresh-fallback contract, copilot-extensions#5699):
+# a missing bridge session record or a failed resume each refuse (409) instead
+# of silently starting a brand-new replacement conversation. This is a real
+# behaviorful request parameter, not an additive/tolerant-reader field -- an
+# older daemon simply ignores an unrecognized ``strict`` query parameter and
+# falls through to its own pre-existing fresh-session-fallback behavior,
+# silently defeating the exact history-loss guarantee this flag promises. A
+# caller gates sending ``strict=true`` on this rather than risk that silent
+# downgrade against an older, independently-installed daemon.
+STRICT_RESUME_PROTOCOL_VERSION = 28
+
 # First version that serves ``GET /api/v1/sessions/{ref}/attention/current``:
 # a session's current attention reason, never a wait, for an owned session and
 # for a represented (registered interactive) one. ``agent-bridge attention``
 # gates on it and reports ``unsupported`` against an older daemon rather than
 # sending a request it would 404 on.
-CURRENT_ATTENTION_PROTOCOL_VERSION = 27
+CURRENT_ATTENTION_PROTOCOL_VERSION = 29
 
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 27
+HTTP_PROTOCOL_VERSION = 29
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

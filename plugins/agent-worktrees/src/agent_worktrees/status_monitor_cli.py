@@ -7,6 +7,7 @@ import os
 import sys
 
 from . import config as cfg
+from .sessions_pane_args import sweep_mux_pane_args
 
 #: Bounded grace period a shutdown/handoff (runtime superseded, a newer
 #: monitor taking ownership, or the empty-strike idle-exit path) waits for
@@ -104,7 +105,16 @@ def _kind_wakes_sweep(kind: str, targets: list[str] | None) -> bool:
     pure predicate so the "which kinds push" policy is directly unit-testable
     without needing a live ``HookIpcServer``/``_ResidentHookPolicy.ready()``
     to drive ``_decide`` end-to-end.
+
+    ``handoffWake`` (sent by ``cmd_note_handoff`` via
+    ``hook_ipc.send_best_effort`` after it persists a pending handoff) always
+    wakes, unconditionally -- it carries no ``targets`` of its own because
+    the thing that changed is a handoff record, not a cached status segment;
+    the whole point of this kind is "something actionable was just
+    registered, stop waiting out the backstop interval for it."
     """
+    if kind == "handoffWake":
+        return True
     return kind == "postToolUse" and (targets is None or bool(targets))
 
 
@@ -387,16 +397,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     provisioning_start_event=provisioning_start_event,
                 )
                 lifecycle_completed = True
-                if kind == "postToolUse":
-                    targets = hook_policy.mutation_targets(payload)
-                    if _kind_wakes_sweep(kind, targets):
-                        # This tool call actually invalidated one or more
-                        # cached segments (or all of them, when targets is
-                        # None) -- wake the sweep loop now rather than
-                        # waiting out `interval`, same as an explicit
-                        # `status` push (resident_push.notify). A read-only
-                        # tool call (empty targets) never wakes.
-                        wake_event.set()
+                targets = hook_policy.mutation_targets(payload) if kind == "postToolUse" else None
+                if _kind_wakes_sweep(kind, targets):
+                    # This tool call actually invalidated one or more
+                    # cached segments (or all of them, when targets is
+                    # None), or this was an explicit non-postToolUse wake
+                    # kind (e.g. handoffWake) -- wake the sweep loop now
+                    # rather than waiting out `interval`, same as an
+                    # explicit `status` push (resident_push.notify). A
+                    # read-only postToolUse tool call (empty targets)
+                    # never wakes.
+                    wake_event.set()
                 return result
             finally:
                 state_lock.release()
@@ -731,6 +742,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
                 _locks.write_lock(lock, extra=_lock_extra())
 
+                sweep_mux_pane_args()
                 picker_projects = monitor_roots.live_picker_projects()
                 demand_projects = core.list_cache.recent_demand_projects()
                 external_projects = picker_projects | demand_projects

@@ -6,14 +6,45 @@ import dataclasses
 import enum
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 from . import config as cfg
 from . import git_ops, output
 from .installer_capabilities import posix_zero_downtime_flag_supported
+
+
+def _installer_timeout(
+    name: str, environment: Mapping[str, str], plugin_dir: Path | None = None,
+) -> int:
+    """Leave the installer watchdog time to terminate its tree and publish failure."""
+    variable = re.sub(r"[^A-Za-z0-9]+", "_", name).upper() + "_INSTALL_DEADLINE_SEC"
+    raw = environment.get(variable) or environment.get("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
+    deadline = 480
+    if raw:
+        try:
+            deadline = int(raw)
+        except ValueError as error:
+            raise ValueError(f"{name}: invalid installer deadline {raw!r}; expected integer seconds") from error
+    elif plugin_dir is not None:
+        manifest = plugin_dir / "plugin.json"
+        try:
+            manifest_text = manifest.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            pass
+        else:
+            data = json.loads(manifest_text)
+            if not isinstance(data, dict):
+                raise ValueError(f"{name}: installer manifest must be an object")
+            deadline = data.get("installerDeadlineSeconds", 480)
+            if type(deadline) is not int or deadline <= 0:
+                raise ValueError(f"{name}: installerDeadlineSeconds must be a positive integer")
+    # Disabling the inner watchdog must not disable the updater's safety bound.
+    return (deadline if deadline > 0 else 480) + 30
 
 
 def _core():
@@ -520,7 +551,7 @@ def _reconcile_one_runtime(name: str, platform_name: str, *, force: bool) -> str
         r = subprocess.run(
             argv,
             cwd=pdir,
-            timeout=300,
+            timeout=_installer_timeout(name, child_environment, pdir),
             env=child_environment,
         )
     except subprocess.TimeoutExpired:
@@ -707,6 +738,12 @@ def _update_modules(
             output.ok(f"{name} already at {mod_deployed_ver} -- skipping installer")
             results.append((name, "SKIPPED (current)"))
             continue
+        try:
+            installer_timeout = _installer_timeout(name, runtime_env, module_dir)
+        except (OSError, ValueError) as error:
+            output.warn(str(error))
+            results.append((name, "invalid installer deadline"))
+            continue
 
         if platform_name == "windows":
             installer = module_dir / "scripts" / "install.ps1"
@@ -748,7 +785,7 @@ def _update_modules(
             r = subprocess.run(
                 [*shell_prefix, *update_args],
                 cwd=module_dir,
-                timeout=300,
+                timeout=installer_timeout,
                 env=runtime_env,
             )
             if r.returncode == 0:
@@ -768,7 +805,7 @@ def _update_modules(
             r = subprocess.run(
                 [*shell_prefix, "install"],
                 cwd=module_dir,
-                timeout=300,
+                timeout=installer_timeout,
                 env=runtime_env,
             )
             if r.returncode == 0:

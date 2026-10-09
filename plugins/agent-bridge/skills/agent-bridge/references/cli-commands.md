@@ -312,7 +312,7 @@ be discarded (or the cancel signature *persists* across sends). See the
 # (input_required, permission_required, policy_required, failed, unreachable,
 # turn_complete, ...) or null when nothing is pending; availability
 # unknown_after_restart marks a request this daemon generation can't answer.
-# A daemon older than HTTP protocol 27 reports every session unsupported (no
+# A daemon older than HTTP protocol 29 reports every session unsupported (no
 # request is sent).
 <agent-bridge catalog argv[0]> --json attention <session|worktree> [<session|worktree> ...]
 

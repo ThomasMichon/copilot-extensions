@@ -1202,3 +1202,26 @@ def test_registration_credentials_fails_without_locking_tool(tmp_path):
     assert result.returncode != 0
     assert "cannot lock active.json" in result.stderr
     assert not (tmp_path / ".agent-bridge" / "active.json").exists()
+
+
+class TestLiveSessionFor:
+    def test_a_failed_bridge_read_is_empty_by_default_but_raises_when_strict(self) -> None:
+        from venue_copilot import live_session_for
+
+        def failing(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+            return _FakeCompletedProcess("", 1, "agent-bridge: daemon unreachable")
+
+        def raising(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+            raise OSError("agent-bridge not found")
+
+        for run in (failing, raising):
+            assert live_session_for("sid-9", run=run) == {}
+            with pytest.raises((VenueCopilotError, OSError)):
+                live_session_for("sid-9", run=run, strict=True)
+
+    def test_a_handle_that_resolves_to_nothing_is_confirmed_absent_even_when_strict(self) -> None:
+        from venue_copilot import live_session_for
+
+        assert live_session_for("sid-9", run=_run_returning({}), strict=True) == {}
+        row = {"session_id": "sid-9", "status": "live"}
+        assert live_session_for("sid-9", run=_run_returning(row), strict=True) == row

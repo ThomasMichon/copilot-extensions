@@ -248,7 +248,17 @@ def test_remove_system_retains_record_when_yaml_unlink_fails(
     record.worktree_path = ""
     record.branch = ""
 
-    with patch("pathlib.Path.unlink", side_effect=PermissionError("locked")):
+    yaml_path = tracking_dir / "managed-1.yaml"
+    original_unlink = Path.unlink
+    attempted = []
+
+    def unlink(path, *args, **kwargs):
+        if path == yaml_path:
+            attempted.append(path)
+            raise PermissionError("locked")
+        return original_unlink(path, *args, **kwargs)
+
+    with patch("pathlib.Path.unlink", unlink):
         removed, warnings = cli._remove_managed_worktree(
             record,
             _config(tmp_path).default_repo,
@@ -257,8 +267,9 @@ def test_remove_system_retains_record_when_yaml_unlink_fails(
         )
 
     assert removed is False
-    assert warnings == ["tracking record remove failed: locked"]
-    assert (tracking_dir / "managed-1.yaml").exists()
+    assert attempted == [yaml_path]
+    assert warnings == ["launch-seed remove failed: locked"]
+    assert yaml_path.exists()
 
 
 def test_worktree_registration_probe_can_fail_closed(tmp_path):

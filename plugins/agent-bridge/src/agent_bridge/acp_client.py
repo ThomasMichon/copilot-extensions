@@ -67,6 +67,10 @@ from .acp_subagents import (
     subagent_event_meta,
 )
 from .procgroup import safe_killpg, terminate_windows_tree
+from .acp_preferences import (
+    AcpPreferencesMixin, _ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID,
+    _ACP_MODEL_ENV, _ACP_EFFORT_ENV, _ACP_PROPAGATE_OFF_ENV, _first_env,
+)
 
 log = logging.getLogger("agent-bridge")
 
@@ -310,22 +314,11 @@ class ToolCallRecord:
 # create and resume, for CodeSpace, elevated-local, and container dispatch alike.
 
 # ACP select-option ids copilot advertises.
-_ACP_MODEL_CONFIG_ID = "model"
-_ACP_EFFORT_CONFIG_ID = "reasoning_effort"
 
 # Env overrides (bridge-native names first, agent-codespaces aliases for
 # back-compat with the retired ``acp-model-flags`` seam).
-_ACP_MODEL_ENV = ("AGENT_BRIDGE_ACP_MODEL", "AGENT_CODESPACES_ACP_MODEL")
-_ACP_EFFORT_ENV = ("AGENT_BRIDGE_ACP_EFFORT", "AGENT_CODESPACES_ACP_EFFORT")
-_ACP_PROPAGATE_OFF_ENV = ("AGENT_BRIDGE_MODEL_PROPAGATE", "AGENT_CODESPACES_MODEL_PROPAGATE")
 
 
-def _first_env(names: tuple[str, ...]) -> str | None:
-    for name in names:
-        value = os.environ.get(name)
-        if value is not None and value.strip():
-            return value.strip()
-    return None
 
 
 def _host_copilot_model_settings() -> dict[str, str]:
@@ -374,23 +367,19 @@ def resolve_acp_model_config() -> dict[str, str]:
     return cfg
 
 
-def _cfg_attr(obj: Any, attr: str, key: str) -> Any:
-    """Read a field from an ACP config-option that may be a pydantic model or a
-    plain dict. Prefers the model attribute (snake_case), falls back to the dict
-    key (camelCase wire form). Returns ``None`` when absent.
-    """
-    value = getattr(obj, attr, None)
-    if value is None and isinstance(obj, dict):
-        value = obj.get(key)
-    return value
 
 
-class AcpClient:
+
+
+class AcpClient(AcpPreferencesMixin):
     """Wraps a single Copilot CLI subprocess running in ACP mode.
 
     Handles the ACP protocol (initialize, session/new, session/prompt)
     and pushes streaming events to a callback for the session's EventLog.
     """
+
+    def _resolve_caller_preferences(self) -> dict[str, str]:
+        return resolve_acp_model_config()
 
     MAX_STDERR_LINES = 50
     # Cap the number of child-stderr lines persisted as ``acp_child_log`` events
@@ -412,6 +401,12 @@ class AcpClient:
         ) = None,
         model_override: str | None = None,
         effort_override: str | None = None,
+        preference_source: str = "caller-settings",
+        context_override: str | None = None,
+        target_preferences: dict[str, Any] | None = None,
+        launch_preferences: dict[str, str] | None = None,
+        confirmed_preferences: dict[str, str] | None = None,
+        provider_intent: bool = False,
     ) -> None:
         self._on_event = on_event
         self._on_permission = on_permission
@@ -422,6 +417,10 @@ class AcpClient:
         # See ``_apply_model_config``.
         self.model_override = model_override
         self.effort_override = effort_override
+        self._initialize_preferences(
+            preference_source, context_override, target_preferences,
+            launch_preferences, confirmed_preferences, provider_intent,
+        )
 
         self._process: asyncio.subprocess.Process | None = None
         self._connection: ClientSideConnection | None = None
@@ -722,6 +721,7 @@ class AcpClient:
         dotfiles#1478).
         """
         self._acp_session_id = acp_session_id
+        self._preferences_ready = True
 
     async def load_session(
         self,
@@ -775,121 +775,12 @@ class AcpClient:
         # Re-assert the model/effort on resume: a reloaded session may report
         # the agent's default in its config options (dotfiles#790).
         started = time.monotonic()
-        await self._apply_model_config(getattr(result, "config_options", None))
+        await self._apply_model_config(getattr(result, "config_options", None), resuming=True)
         if timing_callback is not None:
             timing_callback("session_load_model_config", time.monotonic() - started)
 
-    async def _apply_model_config(self, config_options: Any) -> None:
-        """Set the session's ``model`` / ``reasoning_effort`` via ACP.
 
-        Copilot ignores ``--model`` / ``--reasoning-effort`` in ``--acp`` mode;
-        the model is chosen here, per-session, by ``session/set_config_option``
-        against the *select* options the agent advertised in its
-        ``session/new`` / ``session/load`` response. Only options the agent
-        actually offers (with the desired value among their choices) are set,
-        and only when they differ from the current value. Degrade-safe: any
-        resolution or RPC failure is logged and swallowed so it never breaks the
-        session (it just keeps the agent's default model). See dotfiles#790.
-        """
-        if not self._connection or not self._acp_session_id:
-            return
-        try:
-            desired = resolve_acp_model_config()
-        except Exception as exc:
-            log.debug("ACP model-config resolution failed: %s", exc)
-            desired = {}
-        # A per-session override (``agent-bridge create --model/--effort``) wins
-        # over the env / host-settings resolution: this session was explicitly
-        # asked to run a specific model/effort, so it must not be masked by the
-        # daemon's ambient default (dotfiles#790 gave a global default; this is
-        # the per-session dial on top of it).
-        if self.model_override:
-            desired[_ACP_MODEL_CONFIG_ID] = self.model_override
-        if self.effort_override:
-            desired[_ACP_EFFORT_CONFIG_ID] = self.effort_override
-        if not desired:
-            return
 
-        # Index the advertised options by id -> (current_value, {allowed values}).
-        advertised: dict[str, tuple[str | None, set[str]]] = {}
-        for opt in (config_options or []):
-            oid = _cfg_attr(opt, "id", "id")
-            if not oid:
-                continue
-            current = _cfg_attr(opt, "current_value", "currentValue")
-            values: set[str] = set()
-            for choice in (_cfg_attr(opt, "options", "options") or []):
-                val = _cfg_attr(choice, "value", "value")
-                if isinstance(val, str):
-                    values.add(val)
-            advertised[oid] = (current, values)
-
-        applied: dict[str, str] = {}
-        fallbacks: list[dict[str, Any]] = []
-        for config_id in (_ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID):
-            value = desired.get(config_id)
-            if not value:
-                continue
-            entry = advertised.get(config_id)
-            if entry is None:
-                log.warning(
-                    "ACP agent does not advertise config option %r; the dispatched "
-                    "agent keeps its default (requested %s=%s)",
-                    config_id, config_id, value,
-                )
-                fallbacks.append(
-                    {"config": config_id, "requested": value, "reason": "not-advertised"}
-                )
-                continue
-            current, allowed = entry
-            if allowed and value not in allowed:
-                log.warning(
-                    "ACP config %s=%r not offered by agent (%d options); the "
-                    "dispatched agent keeps its default",
-                    config_id, value, len(allowed),
-                )
-                fallbacks.append(
-                    {"config": config_id, "requested": value, "reason": "not-offered",
-                     "offered": sorted(allowed)}
-                )
-                continue
-            if current == value:
-                # Already the desired value -- still "applied" (record it so the
-                # operator can verify, e.g. via status).
-                applied[config_id] = value
-                continue
-            try:
-                await self._connection.set_config_option(
-                    config_id=config_id,
-                    session_id=self._acp_session_id,
-                    value=value,
-                )
-                applied[config_id] = value
-                log.info(
-                    "ACP session %s: set %s=%s", self._acp_session_id, config_id, value,
-                )
-            except Exception as exc:
-                log.warning("ACP set_config_option %s=%s failed: %s", config_id, value, exc)
-                fallbacks.append(
-                    {"config": config_id, "requested": value, "reason": "rpc-failed",
-                     "error": str(exc)}
-                )
-
-        # Surface the outcome so the model is VERIFIABLE (not just set-and-hope):
-        # record the applied model on the session (routed to ``usage_model`` ->
-        # ``status``) and emit a loud, event-log-visible warning on any fallback
-        # so a silent downgrade can't hide (dotfiles#790/#1274 WS1-model).
-        applied_model = applied.get(_ACP_MODEL_CONFIG_ID)
-        if applied_model:
-            self._emit("usage_update", {"model": applied_model})
-        if applied:
-            self._emit("model_applied", dict(applied))
-        if fallbacks:
-            self._emit("model_fallback", {
-                "requested": dict(desired),
-                "applied": dict(applied),
-                "fallbacks": fallbacks,
-            })
 
     async def send_prompt(self, text: str) -> dict[str, Any]:
         """Send a prompt and block until the turn completes.
@@ -1091,7 +982,14 @@ class AcpClient:
         if self._loading_session and self._suppress_replay:
             return
 
-        if isinstance(update, AgentMessageChunk):
+        if isinstance(update, ConfigOptionUpdate):
+            if (
+                self.preference_source == "target-settings" and self._preferences_ready
+                and not self._loading_session
+            ):
+                self._remember_preferences(getattr(update, "config_options", None))
+
+        elif isinstance(update, AgentMessageChunk):
             content = update.content
             if isinstance(content, TextContentBlock):
                 self._maybe_open_out_of_turn()

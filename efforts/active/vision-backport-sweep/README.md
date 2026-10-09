@@ -50,7 +50,68 @@
   to stop/start) · `ThomasMichon/copilot-extensions#5754` (recovery runs before
   acquiring lifecycle-transition authority) ·
   `ThomasMichon/copilot-extensions#5791` (explicit scoped gh identity degrades
-  to ambient execution after token minting fails)
+  to ambient execution after token minting fails) ·
+  `ThomasMichon/copilot-extensions#5833` (distinct attributed raw head override
+  is not surfaced by the inspected Mux Companion UI) ·
+  `ThomasMichon/copilot-extensions#5842` (claim acceptance releases source
+  responsibility before consumer commit) ·
+  `ThomasMichon/copilot-extensions#5843` (lost carrier responses can repeat
+  admitted mutating operations) ·
+  `ThomasMichon/copilot-extensions#5851` (source build/cleanup stages mutate
+  repository checkouts) ·
+  `ThomasMichon/copilot-extensions#5852` (ambient installer project inference
+  changes repository hooksPath) ·
+  `ThomasMichon/copilot-extensions#5853` (installation overrides explicit
+  Copilot experimental preference) ·
+  `ThomasMichon/copilot-extensions#5855` (semantic config migration overrides
+  an explicitly disabled idle reaper) ·
+  `ThomasMichon/copilot-extensions#5861` (fleet named deployment/config
+  reconciliation follow-on) ·
+  `ThomasMichon/copilot-extensions#5862` (fleet subscribed observation/recovery
+  follow-on) ·
+  `ThomasMichon/copilot-extensions#5868` (test-environment preparation precedes
+  containment and aggregate budgets) ·
+  `ThomasMichon/copilot-extensions#5869` (ignored sandbox cleanup failures can
+  preserve a successful result) ·
+  `ThomasMichon/copilot-extensions#5877` (named scoped noncredential
+  host-resource realization) ·
+  `ThomasMichon/copilot-extensions#580` (pre-existing relay stability tracker;
+  source-proven pinned-port eviction without occupant ownership/staleness proof) ·
+  `ThomasMichon/copilot-extensions#5890` (existing unresolved closed-signature
+  recurrence and bounded automated-attempt policy) ·
+  `ThomasMichon/copilot-extensions#5896` (unreadable context sources silently
+  omitted from budget attribution) ·
+  `ThomasMichon/copilot-extensions#5898` (production AHP Picker mux presentation;
+  an explicitly excluded follow-up, not a new relocation regression) ·
+  `ThomasMichon/copilot-extensions#5900` (optional process-spawn provenance
+  realization through existing telemetry seams) ·
+  `ThomasMichon/copilot-extensions#5903` (tolerant endpoint JSON-shape access
+  raises outside its declared unavailable outcome) ·
+  `ThomasMichon/copilot-extensions#5904` (endpoint owner-check/unlink publication
+  race after the completed PID-guard slice) ·
+  `ThomasMichon/copilot-extensions#5908` (Sessions overlay loses provider failure
+  and renders empty history) ·
+  `ThomasMichon/copilot-extensions#5909` (unknown execution observation becomes
+  affirmative Picker labels) ·
+  `ThomasMichon/copilot-extensions#5910` (durable gitless core-source discovery
+  after installed invocation/self-update) ·
+  `ThomasMichon/copilot-extensions#5912` (venue subtitle durable-title authority) ·
+  `ThomasMichon/copilot-extensions#5913` (declared New-venue provision/embody
+  bindings, beyond the completed design-only handoff) ·
+  `ThomasMichon/copilot-extensions#5918` (explicit-cell Vault WSL endpoint
+  fallback accepts unattributed legacy provenance) ·
+  `ThomasMichon/copilot-extensions#5921` (empty clean-room outcome report
+  accepted as green) ·
+  `ThomasMichon/copilot-extensions#5922` (Bridge solo absent-base witness
+  declared but not enforced) ·
+  `ThomasMichon/copilot-extensions#5924` (model-dependent subject witnesses
+  versus the agent-free Tier P contract) ·
+  `ThomasMichon/copilot-extensions#5926` (attached Container launch loses
+  accepted seed-file input) ·
+  `ThomasMichon/copilot-extensions#5927` (remote repo-plugin resolution
+  failure erased into supported-empty discovery) ·
+  `ThomasMichon/copilot-extensions#5930` (remote-driver exclusive,
+  generation-fenced mutation ownership)
 
 ## Guiding Intent
 
@@ -126,6 +187,10 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
 - Confirmed sibling slug: **"adopter-material-refresh"**
 - Repository identity contract: **"Strict for explicit choices; preserve
   unconfigured ambient defaults"**
+
+Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
+- Source artifacts: **"Strict: stage builds and cleanup outside the source checkout"**
+- Updater orchestration: **"Keep installer phases machine-local; allow intentional higher-level source-sync orchestration"**
 
 ## Plan
 
@@ -286,8 +351,8 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
             Closed stale feature-delivery issues `#2595` and `#2596` with
             direct source/owning-effort evidence; their umbrella `#2594`
             remains open, not inferred complete from these two closures.
-      - [ ] `visions/plugins/agent-bridge/README.md` — observation and
-            attribution slice reconciled: evidence-backed presence, reported
+      - [x] `visions/plugins/agent-bridge/README.md` — scoped observation,
+            attribution, generation, control, and carrier slices: evidence-backed presence, reported
             consumption with per-figure provenance and rollup coverage,
             conservative sub-agent attribution, creator identity distinct
             from caller affinity, and continuity-aware backward history
@@ -297,9 +362,15 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
             recovery before serialization is `#5754`; native supervisor
             binding/coherence remains under `#4022`/`#5225`. The control
             slice additionally covers delivery decisions and
-            cooperative stop/confirmation. The rest of hosting, routing, and
-            protocol contracts remain to be reconciled;
-            this is not a completed full-leaf sweep.
+            cooperative stop/confirmation. The carrier slice additionally
+            reconciles shared remote-control
+            reach, isolated logical subscriptions, hosting-owned replay/cursor
+            acknowledgement, and explicit unsupported-capability fallback.
+            Uncertain mutating retries remain a source-proven violation
+            (`#5843`), not a realized no-repeat guarantee.
+      - [ ] `visions/plugins/agent-bridge/README.md` — remaining hosting,
+            routing, and protocol surfaces beyond the completed scoped slices;
+            the full-leaf sweep is still open.
       - [ ] `visions/agent-fabric/README.md` — layer/venue/memory seam slice
             reconciled: attended and unattended session peers, shared
             coordination versus provider-owned lifecycle, capability-honest
@@ -335,8 +406,206 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
       - [ ] `visions/plugins/agent-worktrees/README.md` — remaining parent
             reconciliation beyond the account slice, including head/claims,
             contribution roles, daemon authority, and lifecycle coverage.
+      - [x] `visions/plugins/agent-worktrees/README.md` and
+            `visions/agent-fabric/README.md` — scoped finalization/claim-bundle
+            acceptance audit. Existing intent already states atomic accepted
+            transfer; source releases responsibility before consumer completion,
+            carved as `#5842`. This does not complete either parent vision.
+      - [x] `visions/test-portfolio/README.md` — shared-host admission slice
+            reconciled across direct-host and devcontainer entry points. Folded back
+            protection of shared mutable test environments, explicit bounded
+            contention, and read-only inventory availability; corrected the
+            owning effort's stale guard/collection exemption. No tests were
+            removed or reclassified.
+      - [ ] `visions/test-portfolio/README.md` — remaining contract-map,
+            effectiveness, tier/effect, and portfolio-observability audit beyond
+            the completed admission slice.
+      - [x] `visions/test-portfolio/README.md` — scoped declaration,
+            preparation/collection, contained-process and cleanup trace.
+            Folded back the separate preparation capability without treating
+            declared markers as measured assurance. Carved concrete preparation
+            and cleanup-status violations (`#5868`/`#5869`); complete family
+            inventory/effectiveness/growth policy and ownership proofs remain
+            with `#1303` and the still-open full-leaf audit.
+      - [x] `visions/coverage-guided-ci/README.md` — scoped source reconciliation of
+            baseline collection, promoted pointer correlation, ancestor/source
+            coordinates, debt, selection, and tier-restricted fallback. Existing
+            vision passages already cover the observed intent; no new fold-back
+            or source-proven deviation was established. Real artifact and
+            consumer acceptance remain with the owning `coverage-guided-ci`
+            effort, not inferred complete from this reconciliation.
+      - [x] `visions/coverage-guided-ci/README.md` — ordinary-CI invocation and
+            activation source audit. The real workflow still runs collect-only
+            plus guards; selection is a bounded, non-blocking shadow annotation,
+            not executable test selection. The owner retains Phase 4 live
+            activation and runtime-covered acceptance under `#4453`; no new
+            vision intent or redundant activation ticket was required.
+      - [x] `visions/mux-companion/README.md` — scoped normal explicit cutover,
+            read-only status/lineage boundaries, and refresh source trace
+            inspected. No new fold-back was established.
+      - [ ] `visions/mux-companion/README.md` — remaining raw force-head
+            capability/attribution (`#5833`), missing-data presentation,
+            live summon, and other-provider paths.
+      - [x] `visions/plugin-services/installation-cells/README.md` — scoped explicit
+            context resolution, canonical receipts, activation generation,
+            ambiguous legacy refusal, and Windows payload invocation traced.
+            No new intent or source-proven cross-cell violation was established.
+      - [ ] `visions/plugin-services/installation-cells/README.md` — remaining
+            endpoint discovery, POSIX invocation, all-plugin lifecycle and
+            cleanup/rollback coverage.
+      - [x] `visions/machine-fleet/README.md` — current-stage vision/proposal
+            ownership reconciliation. The owning foundation explicitly claims
+            a proposed fixed-service route, not implemented runtime; preserved
+            static-driver/service/credential/lifecycle authorities and optional
+            standalone/direct operation. No missing embodied intent was found.
+            Kept `#5789` intact and carved its excluded named reconciliation
+            and subscribed-observation vision scope as `#5861`/`#5862`.
+            Runtime realization and its acceptance proofs stay with those
+            objectives; no global runtime absence or conformance is inferred.
+      - [x] `visions/host-resource-providers/README.md` — current-stage
+            reconciliation of the complete vision against the credential-source,
+            provider-profile and relay endpoint seams. Existing intent already
+            covers the inspected capabilities; no new vision prose was needed.
+            The supported credential shape is narrower than a general named
+            resource catalog or ensure/release contract (`#5877`). Added the
+            concrete pinned-port occupant-eviction violation to existing `#580`,
+            preserving dynamic-port startup and verified owned recovery.
+            General resource realization and full credential/session lifecycle
+            proof are not claimed by this source audit.
+      - [x] `visions/plugins/efforts/README.md` — payload-only policy delivery
+            reconciliation. Static projection and directly callable staged
+            producers were distinguished from registered automatic hooks.
+            Existing vision intent already covers the policy; no new runtime
+            validator, daemon, or counter requirement was manufactured from
+            unproved agent conduct. The historical owner is archived, not lost.
+      - [x] `visions/plugins/agent-dispatch/task-outputs-and-review/README.md` —
+            scoped conversation-source comparison and durable unsubmitted-draft
+            fold-back. Retained independent confirmation, exact review, history,
+            and affirmative delivery ahead of current implementation; the
+            canonical backend owner's Phases 5-7 remain under `#3681`.
+      - [ ] `visions/plugins/agent-dispatch/task-outputs-and-review/README.md` —
+            remaining creation-policy, post-completion enrichment/retry and
+            complete consumer/adapter acceptance beyond the inspected paths.
+      - [x] `visions/plugins/agent-logger/README.md` and session-intelligence
+            child — scoped preservation/derivation/catalog/consumer-source
+            comparison; folded back structured work-item/session associations.
+            Existing `#1817`/`#5676`/`#5677`/`#5678` retain their respective
+            configuration, preservation, accounting and adoption objectives.
+            Manifest preparation was not mistaken for final log rendering.
+      - [ ] Logger remaining rescue replacement, qualified cold retrieval,
+            persistent digest-reader paths, full accounting/aggregation and
+            released consumer adoption beyond this source cohort.
+      - [x] `visions/ci-failure-remediation/README.md` — current-stage watchdog,
+            trusted verification, compiled scope/output gates and charter source
+            reconciliation. No missing vision-level intent was established.
+            Open-issue recurrence is not another automated dispatch; closed
+            recurrence is a distinct unresolved policy, now tracked as `#5890`
+            in its existing owner. No live fix-agent run was triggered.
+      - [ ] CI-remediation complete external acceptance and charter-enforcement
+            reconciliation beyond inspected source gates; owner validation
+            remains explicit, not inferred from compiled workflow presence.
+      - [x] `visions/harness-guidance/README.md` — scoped ownership, static/local
+            delivery and context-accounting source comparison. Existing intent
+            covers the inspected guarantees; repaired only duplicate section
+            placement without removing intent. Reproduced silent source-read
+            omission in the real budget API with mocked discovery (`#5896`).
+      - [ ] Harness-guidance remaining routing/budget adapters, trust/recovery,
+            native-host composition and complete contributor delivery beyond
+            this scoped source audit.
+      - [x] `visions/process-registry/README.md` — complete current-stage
+            vision/proposal comparison. The existing `#5559` owner explicitly
+            leaves placement and implementation open; proposed admission,
+            broker, query, journal and retention rules are not runtime evidence.
+            No new intent or implementation-absence claim was manufactured.
+      - [x] `visions/process-telemetry/README.md` — scoped existing lifecycle
+            emitters, sink/spool and two real shared-spawn callers compared.
+            No missing vision-level intent was found. Per-site instrumentation
+            is optional; generic process publication remains unproved, tracked
+            as north-star realization `#5900`, not per-site violation tickets.
+      - [ ] Remaining telemetry adopter/publication and closing-resource paths
+            beyond the inspected renderer/SSH routes; no global absence or
+            released cross-platform instrumentation is inferred.
+      - [x] `visions/session-hosting/README.md` — scoped provider/agency,
+            selection, interaction, replay/reconnect, fencing and retirement
+            source audit. Existing vision covers the observed intent. Pure
+            production-routing/composition proof confirmed the known deferred
+            AHP/mux gap (`#5898`); narrowed direct handoff choreography to a
+            partial provider-boundary question under `#2062`.
+      - [ ] Remaining hosting title, represented-human, generalized-provider
+            and full-restart acceptance paths beyond this source slice.
+      - [x] `visions/installer/README.md` — scoped bootstrap, real core/module
+            invocation, update fallback and doctor/readiness source audit.
+            Existing intent covers the inspected capabilities. Withdrew the
+            filesystem-presence-as-false-ready and blanket provisioning-abort
+            claims; only bounded gitless source discovery was carved (`#5910`).
+      - [ ] Installer remaining autonomous-refresh, readiness-consumer, broader
+            adoption/presets and safe-dependent-restart paths beyond this trace;
+            the active control-plane campaign and open `#356`/`#357` retain
+            their scope. `#352`/`#355`/`#1160`/`#1278` are closed historical
+            foundation slices, not current implementation-completion proof.
+      - [x] `visions/picker/README.md` — scoped row identity/disposition/
+            observation, selection/action routing and history presentation trace.
+            Existing intent covers the source; carved unknown-observation label
+            loss (`#5909`) and false-empty history (`#5908`). Existing `#1193`
+            and `#3587` retain neutral Worktrees contribution and search facets.
+            New cold-prompt intent was already backported under `#5415`, not
+            redundantly added here.
+      - [ ] Picker remaining broader recovery, host-context/version display,
+            complete contribution/runtime parity and uninspected surfaces.
+      - [x] `visions/venue-pivots-ux/README.md` — scoped symmetric adapter,
+            shared-renderer, provider-action and creation-contribution trace.
+            Replaced stale pre-overhaul absence claims with pure standing
+            intent; preserved title precedence, ranking, lifecycle differences,
+            Open/New, supervision and every boundary. Carved title content
+            (`#5912`) and per-venue creation binding (`#5913`); `#3657` and
+            `#3507` retain supervision/actions and transferred live validation.
+      - [ ] Venue remaining exact session/mux reattachment, title-preserving
+            truncation, complete claim-contribution admission and live parity
+            beyond the inspected source; shared labels are not full conformance.
+      - [x] `visions/clean-room-validation/README.md` — scoped runner,
+            report-admission, Bridge-solo and judge-contract source comparison.
+            Existing vision intent covers the inspected guarantees. Carved
+            empty-report admission (`#5921`), absent-base enforcement (`#5922`)
+            and model-dependent Tier P witnesses (`#5924`); retained useful
+            subject coverage and the declared no-model lane.
+      - [ ] Clean-room remaining scenario admission and judgment-consumer
+            source reconciliation; fresh sessions are not fresh machines, but
+            no accepted contaminated verdict was established in this slice.
+      - [x] `visions/venue-parity/README.md` — scoped shared launch, seed
+            forwarding, plugin composition, preference and detach comparison.
+            Existing intent already covers those capabilities. Carved attached
+            Container seed-file loss (`#5926`) and remote plugin-discovery
+            false-empty (`#5927`); distinct detach implementations alone are
+            not proof of a parity violation.
+      - [ ] Venue-parity remaining source routes and preference-failure
+            authority semantics; no blanket target-authority or resume-failure
+            claim was established by the inspected paths.
+      - [x] `visions/cli-default-bridging/README.md` — current-stage Draft,
+            prototype and existing ACP lifecycle comparison. Corrected native
+            close-method attribution and distinguished SDK-extension proof
+            from plugin/skill/MCP composition. Retained every promotion gate,
+            the existing default and sibling opt-in scope; `#5930` links the
+            required mutation arbitration to its existing Phase 2 owner.
+            Native callback support was not freshly proved from this checkout.
 
 ### Phase 3 — Full design/service-invariant audit
+- [x] Explicit-cell Vault WSL fallback source audit. The scoped launch gate
+      carries identity/run-root/port-zero policy, but Windows-profile fallback
+      accepts an unattributed legacy record even with an expected installation
+      identity. An entirely synthetic use of the actual discovery body selected
+      that record (`#5918`); preserve unconfigured legacy discovery and explicit
+      recovery rather than globally removing them.
+- [x] Scoped endpoint discovery/publication/cleanup API and two shutdown
+      consumers inspected. Shared transport/alternate/override/legacy metadata
+      and conservative PID/probe evidence are real foundations, not whole-cell
+      or all-plugin conformance. In-memory use of actual APIs reproduced
+      malformed-object access (`#5903`) and a publication after the final owner
+      read being deleted by cleanup (`#5904`). No endpoint, PID, socket, service
+      or live cutover was used for either proof.
+- [ ] Remaining endpoint scopes, cross-cell legacy fallback, native permissions,
+      exposure and consumer lifecycle ordering beyond this library/Dispatch/
+      Vault slice; neither API proof establishes a live outage or all-runtime
+      acceptance.
 - [x] Ran a slice of the `plugin-services` invariant audit against every
       `agent-*` plugin's runtime-deploy path, scored against **two separate
       questions per plugin**: does a same-version, content-changed update
@@ -382,12 +651,45 @@ Follow-up decisions, 2026-10-08 (verbatim selections):
       the correct contract precisely ("once a version's venv is built it is
       never edited in place"); the gap is conformance across nearly every
       plugin, not a missing or imprecise invariant.
-- [ ] The *rest* of the `plugin-services` behaviors list (self-contained-
-      runtime, single-instance-lease, work-coalescing-singleton, discoverable-
-      local-endpoint, and the remaining ~20 invariants) is **not yet audited**
-      — this slice covered only the cutover/immutable-runtime angle `#5356`
-      originally surfaced. Tracked as a follow-up stretch of this same Phase,
-      not assumed complete.
+- [x] Scoped `install-adopt-boundary` source-effect matrix across thirteen
+      installer-bearing runtimes, including `budget-guidance`, against snapshot
+      `3ea7d5844d61`. Inspected Windows/POSIX entry dispatch and reachable
+      mutation bodies; no installer was executed by the evidence agents.
+      The cited violation-producing files remained unchanged when pulled
+      forward for integration. This is a scoped matrix, not whole-runtime
+      conformance or a fresh all-venue execution result.
+
+      | Runtime | Scoped status | Concrete source effect / coverage | Delta |
+      |---|---|---|---|
+      | agent-worktrees | Violates | `install.ps1:566-627` / `install.sh:438-516` can infer a project from CWD; update reaches `Deploy-GitHooksPath`, whose bodies change repository-local `core.hooksPath` (`3475-3503` / `2413-2428`). Experimental-setting helpers (`3440-3473` / `2529-2561`) overwrite a known false preference. | `#5852`, `#5853`; explicit integration remains supported. |
+      | agent-dispatch | Violates | POSIX install/provision reaches `_pip_install` and `_scrub_payload_build_artifacts` (`install.sh:927-1099`); `1000-1044` deletes source build/egg-info, including src/vendored artifacts. This establishes source-tree deletion, not observed tracked-file deletion. | `#5851`; preserve clean package output in an owned stage. |
+      | agent-vault | Violates | Install/update/provision passes the original plugin source to shared installer-engine cleanup (`install.ps1:737-874`, `install.sh:501-614`); the helper deletes source build/root egg-info after packaging. | `#5851`; source installation stays supported. |
+      | agent-pull-requests | Violates | A build-triggering install passes the source cleanup target (`install.ps1:578-579`, `install.sh:450-459`). A matching completed slot skips the build; no integration action is needed for the source cleanup path. | `#5851`; keep immutable-slot and no-op guarantees. |
+      | agent-codespaces | Partial | Host install/provision writes runtime/adoption-schema/service state; explicit config init/migrate has separate repo effects (`config.py:2176-2220`). Source backend writes and full integration authority were not closed. | No proven new gap; remaining coverage stays open. |
+      | agent-containers | Partial | Runtime/container-schema migration and provider/SSH/source projections target machine state; explicit remote workspace provisioning is a separate capability. Source backend and custom-root/helper effects remain unclosed. | No inferred conformance or missing capability. |
+      | agent-ssh | Violates | Direct source install passes `PluginDir` as `PayloadDirToScrub` (`install.ps1:239-240,938-942`, `install.sh:131`), reaching shared source artifact deletion. Snapshot first-use is a different path. | `#5851`; retain SSH/user-level projection and source install. |
+      | agent-machines | Partial | Host runtime installation differs from explicit `migrate --repo --apply` and default-preview restore (`layout.py:403-470`, CLI dispatch). Cell helpers/backend and full explicit migration authority remain unclosed. | No blanket install-versus-restore equivalence. |
+      | agent-bridge | Violates | Cold deployment/start reaches `migrate_config` (`service_start_cli.py:118-120`); `config.py:252-267` changes an unmarked zero idle TTL to 600. POSIX local package install also scrubs source artifacts (`install.sh:406-436,1411-1420`). | `#5855`, `#5851`; preserve configured cleanup and unconfigured-default handling. |
+      | agent-index | Partial | Service/engine state and user-level registration are distinct from explicit `setup` repo designation (`config.py:625-659`). Cell recovery/cutover and configured source descendants remain unclosed. | No inference from a named repository or contract doc. |
+      | agent-logger | Violates | Local source install/update/provision passes the source cleanup target (`install.ps1:1113`, `install.sh:865-872`) to shared artifact deletion. Configured sync/prune is separately declared source policy, not proof of incidental installer mutation. | `#5851`; retain configured source capability. |
+      | agent-mcp | Partial | Host package/lifecycle work differs from caller-selected `materialize` projection (`materialize.py:372-449`). Cutover/reaper, cell and bridge descendants remain unclosed. | Explicit projection is not ambient adoption. |
+      | budget-guidance | Partial | Host slots/markers/binstubs/user PATH are concrete; shared installer/prerequisite descendants were not exhaustively traced. No register/adopt writer appeared in the inspected CLI. | Search absence is not whole-runtime conformance. |
+
+      Shared artifact deletion is in
+      `libs/installer-engine/installer-engine.ps1:63-69` and `.sh:29-47`;
+      local custom scrubs are listed separately above. Machine snapshots and
+      marketplace staging are not confused with original checkout mutation.
+      Only this invariant was scored. The matrix does not score every package
+      backend, arbitrary configured callback, or lifecycle descendant.
+- [ ] Complete the remaining install/adopt source coverage: namespaced
+      lifecycle helpers, package-backend/prerequisite effects, and
+      ownership/contribution enforcement for explicit integration/projection
+      routes identified as partial above.
+- [ ] Audit the remaining `plugin-services` contracts beyond the completed
+      cutover/immutable-runtime and scoped installation-boundary stretches,
+      including self-contained runtime, all lease/coalescing paths,
+      discovery/exposure, lifecycle registration, and other applicable
+      invariants. Neither table is full Phase 3 completion.
 
 ### Phase 4 — Decide the material-refresh relationship
 - [x] Decide whether user-facing material refresh (docs, Picker preview
@@ -415,6 +717,399 @@ sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
 
+### 2026-10-09 — Clean-room, venue-parity, Draft and explicit-cell proof boundaries
+- UI/endpoint reconciliation merged as `#5914` with current-head Copilot
+  approval, zero findings and actual required CI, then finalized. Fixed the
+  reviewer-identified reversed endpoint IDs (`#5903` JSON shape, `#5904`
+  cleanup race) and removed a newly invented unavailable UI category rather
+  than changing the existing LIVE/IDLE/blank grammar without reviewed design.
+- Compared three bounded read-only source tracks against the current leaf
+  visions; integration base `077ef9d6b2ec` retains the source evidence and
+  existing Draft/default boundaries. The separate Vault fallback proof used
+  synthetic records only, without a file, network, secret or live service.
+
+  | Inspected contract | Scoped source evidence | Decision / owner |
+  |---|---|---|
+  | Clean-room verdict admission | `tools/clean-room/verdict.sh`'s embedded reducer defaults missing failed-count evidence to zero. Actual reduction of `{}` returned `ok: true` and exit zero, while valid success/failure controls remained distinct. | Carved `#5921`; report existence/parsing is not sufficient outcome evidence. |
+  | Solo composition witness | Bridge-solo declares without-base coverage, but `scenario.sh` emits INFO when the base is present and does not later reject that admission. | Carved `#5922`. Rejected the separate allegation that every read verb must return zero; that is not the scenario's contract. |
+  | Programmatic lane | Tier P invokes Copilot as the subject rather than an agentic judge, but those witnesses still depend on model execution. | Carved `#5924` against the declared no-model lane; preserve useful subject coverage under a truthful lane rather than weaken the invariant. |
+  | Repetition / judging | Runner setup occurs once and repetitions create fresh sessions, not independent fresh machines. The judge is an instruction contract; runner output reports `judged: false`. | Shared state is established, an accepted contaminated false pass is not. No live judge artifacts were examined; no blanket contamination or judge-compliance finding. |
+  | Attached venue seed | Container accepts `--seed-file` but the attached caller forwards `args.seed` without reading that file; CodeSpace and detached routes do read it. | Actual parser/caller proof carved `#5926`; retain shared launch and detached behavior. |
+  | Plugin-discovery fidelity | Shared remote repo-plugin resolution turns failure into empty composition and feeds the same ACP arguments as supported-empty discovery. | Carved `#5927`; caller recovery must preserve the distinction. Preference-read failure needs narrower authority analysis; no speculative target-authority violation. |
+  | CLI default / prototype | ACP + Session Host remains the headless default; CLI is explicit. The default-disabled remote-driver prototype supports authenticated send/steer/abort/events, but the bearer token does not arbitrate exclusive mutation generation. | Carved `#5930`, linked to existing Phase 2. Separate detach orchestration is partial symmetry, not universal failure. No default promotion or sibling status change. |
+  | Lifecycle / native proof | Existing downstream creation is ACP; termination is owned Host/process-tree lifecycle. `acp_agent.close_session` is an upstream adapter, not proof of a downstream native close. Repo-plugin staging and SDK-extension loading are distinct. | Corrected Draft and owning plan in place. Current native callback/extension support was not independently revalidated; retain launch-time and lifecycle proof gates, not unsupported absolute capability claims. |
+  | Cell provenance | Namespaced Vault gate supplies explicit identity/scoped roots/port zero. `_discover_endpoint`'s WSL Windows fallback accepts missing installation identity from unscoped legacy locations despite the expected identity. | Pure actual-body selection of an unattributed synthetic record carved `#5918`; preserve ambient legacy behavior when no explicit cell was selected. |
+
+- Superset review retains creation/fresh context, owned termination, driver
+  fencing, every escalation rung, narrow TTY scope, independent launch-time
+  extension proof and all default-promotion gates. No additional positive
+  clean-room or venue-parity intent was missing; their violations are additive
+  implementation work, not permission to weaken the visions.
+- Review identified that the supported native-version floor was stated but
+  not explicit in promotion track (a). Added functional launch-time proof at
+  the selected minimum supported version to the vision gate, owner Phase 1
+  and matching Validation Plan. No particular version was chosen or claimed
+  validated; current-client coverage alone cannot close that gate.
+- Publication changes documentation only. Source counterexamples are not fixes
+  or fresh runtime/unit, clean-room, model, native-host or live-venue acceptance.
+  Those obligations remain with the named implementation owners. Whole-index,
+  remaining service invariants and this sweep's global Validation Plan remain
+  open; the independent material-refresh objective is unchanged.
+
+### 2026-10-09 — UI ownership/fidelity and endpoint discovery source reconciliation
+- Guidance/provider-proof slice merged as `#5902`, current-head Copilot
+  approval with zero findings and actual required CI, then finalized. The parent
+  effort remains Active. Three read-only UI/installer tracks retained source
+  versus runtime distinction; no Picker, venue or installer was driven.
+- Evidence started at `d05137b297dd`. Within the inspected scopes, integration
+  base `27a7fe57bb98` changed Picker prompt eligibility/forwarding, not the
+  reported history/unknown-state or venue/endpoint effect bodies. Verified the
+  concrete diff rather than treating a supplied SHA as perpetual HEAD.
+
+  | Inspected contract | Scoped source result | Decision / retained owner |
+  |---|---|---|
+  | Bootstrap/core readiness | Real setup invokes the owning core installer; Manager update delegates the unified in-plugin flow; absent-Manager fallback executes. Filesystem `core_status` intentionally means artifact presence, while lazy stubs and complete-slot resolution supply different structural checks. | Withdrew false command-readiness/global repair-suppression claims. Readiness declarations and doctor output are not full consumer execution. Closed `#352`/`#1160`/`#1278` are historical foundations; active campaign/open phase ownership remains intact. |
+  | Restart/failure handling | Setup's restart advisory is late, but independent provisioning need not abort all actions; bootstrap and the real installer have their own prerequisite/PATH checks. | No blanket unsafe-continuation ticket. Unsafe dependent-tool cases remain unproved and require targeted acceptance under the existing owner. |
+  | Gitless source discovery | Initial tar bootstrap retains a full nested extraction and CWD setup can work. Installed external-CWD resolution checks ancestors/flat staging; gitless self-update retains Manager/libs, not core installer sources. | Carved bounded `#5910`; closed `#540`/`#551` fixed CWD/full-flat-staging, not every later staging shape. No global source-absence claim or Git mandate. |
+  | Picker observation/protection | Unknown/opaque execution state is retained but its protection Boolean becomes ACTIVE/PROC/ACP in normalization; details omit uncertainty/age. Conservative active/unknown launch protection is valid. | Carved `#5909` for presentation loss, not a demand to set protection false. `#3935` is a distinct missing positive after confirmed mux launch. |
+  | Sessions history | Local engine errors and remote failed envelopes become `[]`; the worker reports no error and the overlay says no registered sessions. A separate Messages error channel does not repair this route. | Carved `#5908`; genuine empty success must remain distinct from unavailable. No real SSH/session/history mutation. |
+  | Neutral contribution/search | Production still requires the engine and hard-coded Worktrees data/view/actions. Its local filter omits codename/activity/claims. | Existing exact owners `#1193`/`#3587` retained; posted source evidence instead of duplicate tickets. Alternative contract app is not production conformance proof. |
+  | Venue presentation/ownership | Both providers really declare grouped columns, subtitles, session/activity joins, claims/navigation and lifecycle gates. Generic enrichment supplies a separate task column, not the required subtitle title; Container supervisor-derived navigation and original-lease claims/session paths can diverge. | Corrected stale vision framing without weakening durable intent. Title precedence `#5912`; effort/supervision/action paths remain under `#3657`. Different provider lifecycle verbs are legitimate, not parity violations. |
+  | Worker action capability | IDLE may mean holder-only; Send then explicitly rejects missing binding, Watch opens general UI, and unsupported-new-window Inspect falls back to ordinary Open. | Advertisement/binding mismatch is not silent delivery success. Existing `#3657` retains binding-aware actions and non-displacing Inspect; no live worker control. |
+  | Declared creation | Generic row-independent create prompting/execution/refresh exists; venue manifests do not declare it. The archived campaign and closed `#3258` explicitly delivered design only. | Carved per-venue wiring as `#5913`, not missing schema/global creation. `#3507` retains real Docker-host validation and the archived original campaign remains Done for its transferred scope. |
+  | Endpoint error/ownership fidelity | Shared and Dispatch tolerant readers access decoded JSON before object validation. Cleanup checks owner twice then unlinks by path, allowing a successor publication after the final read. Current shutdown consumers call that helper. | Actual API proofs were fully mocked and process-free: array JSON raised `AttributeError` (`#5903`); owner A was checked twice while synthetic B was deleted at final unlink (`#5904`). Closed strict-readiness `#1284` and PID-check `#1424` remain completed narrower slices, not full-contract proof. |
+
+- Checked the newer cold-prompt source/vision amendment: local New retains a
+  seed with No Mux and Resume prompt eligibility is cold-only. Picker already
+  states the relevant intent under `#5415`, with hosting delivery evidence a
+  separate authority. UI forwarding, comments and fake-capability tests were
+  not treated as actual session consumption or live-race refusal.
+- Verified tracker states instead of accepting local historical references as
+  current owners: `#352`/`#355`/`#1160`/`#1278` are closed; `#356`/`#357`
+  and `#5415` remain open. The active control-plane campaign retains its
+  broader objectives. No completed foundation or archived design-only phase was
+  reopened merely to represent this audit's narrower follow-ups.
+- The venue revision retains the existing row grammar, exact title precedence,
+  accumulating activity, ADO-scoped PR auto-claim, all eight tunable prominence
+  tiers, contribution extensibility, live/resumable Open, row-independent New,
+  both supervision directions and all non-goals. Historical implementation/
+  gap-list prose was removed from standing concepts; source findings live here.
+- These are documentation/source-audit artifacts, not runtime fixes. No live
+  registry/endpoint, process retirement, provider action, Docker fleet or
+  production UI was tested. New runtime unit/component, clean-room and live
+  acceptance remain implementation-owner obligations. Whole-index, remaining
+  service contracts and the global Validation Plan remain open.
+
+### 2026-10-09 — Guidance attribution and hosting/provenance proof boundaries
+- Durable conversation/evidence cohort merged as `#5895` with current-head
+  Copilot approval, zero findings and actual required CI; its child finalized.
+  A review-transition waiter timed out after baselining an already-present
+  approval. Read the actual current-head reviewer/body and required checks
+  instead of treating that timeout or its stale convenience note as a verdict.
+- Source snapshots were verified through `e38752be78ad` and the relevant
+  inspected files remained unchanged at integration base `1b0a9bc25ad0`.
+  Three bounded read-only tracks retained coordinator ownership; no runtime,
+  process, check-in or live hosting operation was used as a reproduction.
+
+  | Subject / contract | Scoped source evidence | Decision and retained owner |
+  |---|---|---|
+  | Guidance delivery/ownership | Projection manager serializes local rendering, resolves contributors under its own lock, preserves foreign/tracked files, records errors and treats guidance budget excess as advisory within separate safety bounds. | Existing vision intent retained. Restored behavior/boundary placement after a duplicate `Non-Goals / Boundaries` heading; no policy was removed, weakened or silently reassigned. Full host/contributor acceptance remains open. |
+  | Context-accounting attribution | `context_budget.py:_measure_files` catches `OSError` and drops the source; `build_context_budget` has no failed static/metadata-source entry. A fully mocked call to the real API with one unreadable synthetic source returned zero entries/bytes and no read-failure record. | Carved `#5896`. This was an in-memory shape proof, not a permission change, personal-guidance scan, dynamic hook execution or live-runtime test. Keep fail-open delivery separate from explicit audit uncertainty. |
+  | Process registry | `agent-process-self-report-registry` architecture is explicitly Draft and disclaims an implemented/deployed broker. Placement, client/adopter, admission, reconciliation, journal/retention and validation remain unchecked. | Existing `#5559` owns realization. Stopped at the documented proposal gate rather than treating schemas, budgets or owner recommendations as enforced runtime behavior or searching absence into a global claim. |
+  | Process telemetry | Dispatch coordinator and Bridge event reduction really publish lifecycle records. Optional sink installation and JSONL spooling are real; exception fail-open is not latency isolation. Shared procutil renderer/SSH calls provide spawn effects but no inspected connected process-publication proof. | Per-site adoption is explicitly optional. The never-delay promise concerns adopted spawn records, not every legacy lifecycle callback. `#2501` was vision-only authoring; scoped tracker searches found no realization owner, so carved `#5900` without claiming global absence or mandatory instrumentation. |
+  | AHP presentation | Production `_run_launch` ensures/attaches AHP and returns through `launcher.launch`; effective default capability is unavailable despite mux requested. A process-free use of actual routing/composition bodies showed the same direct result for new/resume; the real PowerShell wrapping route is bypassed. | This is already expressly deferred by Phase 3b, not a new regression. Carved excluded scope as `#5898` and clarified the owner's injected-capability matrix proof versus production acceptance. `#5892`/`#5878` remain separate transparent Windows handoff work, not superseded. |
+  | Handoff provider ownership | Direct agency-side mux creation/control/retirement remains in the inspected path. Identity guards and the deliberate zero-provider fallback remain meaningful; physical directory placement alone is not an ownership violation. | Rejected the blanket foreign-pane/ownership-violation claim. Posted the narrower provider-boundary reconciliation under existing `#2062`, preserving co-packaged owning adapters, standalone behavior, head/claims authority and safe retirement. |
+
+- The registry source chain and full process-publication/hosting matrices are
+  realization obligations, not completed by a proposal, script relocation,
+  fake-capability test, opaque identity record or CLI command name. No
+  SDK/App/third-party conformance or observed duplicate/foreign retirement was
+  inferred.
+- This publication changes documentation only. The budget reproduction proves
+  the reported source omission, not its eventual fix. No new runtime unit/
+  component, clean-room or live external acceptance is claimed; identified
+  owners retain those gates. The original whole-index, remaining service
+  invariants and global Validation Plan remain open.
+
+### 2026-10-09 — Durable conversation/evidence and CI policy source cohort
+- Host-resource reconciliation merged as `#5886` with current-head Copilot
+  approval, zero findings and actual required CI; its child finalized. Replied
+  on `#5875`'s low citation finding with that merged fix-forward. The Active
+  sweep's whole-index and remaining service/Validation gates are unchanged.
+- Source cohorts used bounded read-only inspection, not contract documents as
+  runtime proof. Relevant plugin, vision and CI effect files were checked
+  unchanged from `fca474463dcf` through integration snapshot `36dc5153009c`.
+  Finalization could move a reference checkout's HEAD; the supplied base alone
+  was not treated as a freshly observed HEAD.
+
+  | Subject | Accepted source comparison | Retained boundary / owner |
+  |---|---|---|
+  | Efforts policy | `plugin.json` registers no hook; `instruction-projections.json` delivers the static completion fallback. `emit-policy.py`/`.ps1` directly validate adoption and emit bounded attributable policy; `.sh` is a staged wrapper. | Producers are not automatically hooked. The vision governs agent conduct and does not demand an executable completion validator. Archived owner: `efforts/2026/08/28 effort-driven-session-loops/README.md`. No new machinery delta was inferred. |
+  | Task drafts and conversation | `queue_steering.save_card_draft/clear_card_draft`, client and coordinator routes persist unfinished answers separately from acceptance. Backend submission/review/history and outbox bodies provide concrete foundations. | Added only durable unsubmitted-draft intent. Default non-verification/self-attestation, optional exact-review fences, overwritten card/result revisions and consumption reconciliation remain with `#3681`'s Phases 5-7; source evidence was posted there. |
+  | Logger association and derivation | `sessions.write_review_annotation` preserves durable association sidecars; `ReviewCatalogIndex.rebuild_from_sidecars` supplies rebuildable lookup. Sync, archive/segment readers, catalog, chronicle factory/source/writer and consumer seams were traced. | Added generic recorded work-item/session association retrieval, not a bundled tracker or workflow. Complete accounting, archive/rescue paths, aggregate execution authorization and released adoption were not declared conforming. Existing owners remain intact. |
+  | Chronicle retry/admission | Default `ManifestWriter` prepares the same manifest and returns no rendered-log paths; same-holder re-reservation is intentional and tested. Independent same-holder calls can interfere through failure release, which checks state/holder rather than invocation. | Rejected the overbroad duplicate-rendered-log claim. Actual rendering and single-flight lease authority belong to the external host. Narrow active-call release/adoption evidence was posted on `#5678`; legitimate retries remain supported. |
+  | Ordinary-CI targeting | `ci.yml:worktrees-smoke` runs collection and guards before invoking `coverage_guided_selection/cli.py` only in shadow mode, with a separate two-minute bound. CLI records selected/fallback/error decisions but does not execute them. | Audit complete; live activation and runtime-covered acceptance remain owner Phase 4 (`#4453`). Manual prototype integration is not ordinary PR selection or a replacement for the unchanged required gate. |
+  | CI-failure response | `ci_failure_watchdog.py` detects, dedups and re-verifies signatures; trusted report/verification jobs and compiled agent-success/scope/threat/output gates preserve the ordinary draft contribution path. | Prompt intent triage is not proof of model compliance. Per-run output limits are not a signature budget. Closed-tracker recurrence can create a new issue/dispatch; existing owner Phase 3 leaves that policy undecided, carved as `#5890`. |
+
+- Checked current tracker state rather than accepting historical references as
+  ownership: `#5701` is the merged steer retry/idempotency PR, `#5668` the
+  merged attention PR; neither owns the amendment implementation. `#3681`,
+  `#1817`, `#5677` and `#5678` remain open canonical owners.
+- Source-first superset review retained every existing positive, negative and
+  ownership boundary in the two edited leaves. New passages record deliberate
+  existing capabilities at intent altitude, not wire/schema/port details.
+  No runtime changes, source cleanup, task mutation, live chronicle execution,
+  concurrent render, or production CI-agent dispatch occurred.
+- Documentation-only structure/whitespace and real PR gates cover publication.
+  No new runtime unit/component, clean-room or external acceptance is claimed;
+  identified implementation owners retain those obligations. Partial source
+  paths above and the full parent completion gate remain open.
+
+### 2026-10-09 — Host-resource current-stage and relay ownership reconciliation
+- Read the complete host-resource vision against the credential relay README,
+  `CredentialSource`, `RelayBuilder`, server actions and startup, and Bridge's
+  provider-profile process boundary. Source snapshot `fca474463dcf` retained
+  the inspected effect-producing files from the preceding slice. The vision
+  already preserves provider independence, one authorized shared channel,
+  session-neutral reach, bounded public surfaces and provider lifecycle
+  ownership; no unsupported capability was promoted into a realized claim.
+
+  | Vision / applicable service contract | Scoped result | Evidence / delta |
+  |---|---|---|
+  | Named pluggable capabilities | Partial: concrete credential-source foundation | `sources/__init__.py` defines credential supports/resolve and a source name; `registry.py:add_source` deduplicates that internal name. This is not a remotely discoverable noncredential capability catalog. `#5877` owns generalization. |
+  | Shared channel and session-neutral reach | Credential foundation retained; generic acceptance unproved | Bridge's provider-profile CLI seam registers sources without importing provider packages on the primary path; relay actions and advertised capabilities remain credential-specific. The general resource contract must reuse the selected authorized channel without requiring a particular session-host mode (`#5877`). |
+  | Provider-owned lifecycle and scoped public surface | General realization remains ahead | Credential policy, request-scoped token authorizers and provider-owned issuance are not a generic resource ensure/idempotency/release protocol. `#5877` preserves those authorities and requires synthetic-provider acceptance; `#5775` retains its distinct session-retirement work. |
+  | Discoverable endpoint and collision-free live-owner preservation | Partial; pinned-port reclaim violates ownership | Server startup publishes the actually-bound endpoint and supports dynamic binding/fallback. But `server.py:100-120,288-335` calls PID termination after pinned-port contention without proving relay identity, staleness or yielded authority; only the current PID is excluded. Added this evidence to existing `#580`, whose expected live-occupant fallback already covers it. |
+
+- The pinned-port defect is a reachable source branch, not an observed foreign
+  process termination. Existing `test_port_reclaim.py` labels a generic
+  listening child stale without an ownership proof. The requested fix must
+  preserve live unrelated non-self listeners, verify any owned stale recovery,
+  and retain safe fallback/actual-endpoint publication. No host service was
+  evicted and no credential or noncredential provider was deployed for this
+  comparison.
+- Dedup retained `#580` for its explicit live-occupant fallback requirement;
+  `#4011` remote-forward cleanup and `#4309` connection-owner architecture
+  remain separate. `#5877` is north-star realization, not global absence
+  inferred from search or an order to extend credential wire framing per
+  capability. No custody policy or standalone operation was removed.
+- Corrected the previous preparation table's citation from `88-181` to
+  `88-170`, addressing the low finding on merged `#5875`; the source file has
+  170 lines. Its substantive source-effect findings and open whole-leaf gate
+  are unchanged. Preparation reconciliation merged and its child finalized;
+  neither it nor this reconciliation completes the Active parent sweep.
+- This slice changes audit documentation only. No new runtime unit/component,
+  clean-room or live-provider proof is claimed; those obligations remain with
+  the identified implementation owners.
+
+### 2026-10-09 — Preparation, collection and assurance boundaries
+- Traced current `pytest_portfolio_guard.py` declarations into
+  `run-plugin-tests.py:run_plugin` and `plugin_test_containment.py`.
+  The guard validates declared tier/effect combinations and explicit-tier
+  access, while untagged tests remain permitted and contract attribution is
+  informational. None is a complete contract map or effectiveness measurement.
+  The owning triage framework keeps unknown evidence distinct from deletion
+  proof and places census/calibration/removal gates under `#1303`.
+- Folded back separable dependency/environment preparation and the distinction
+  between executable collection and read-only inventory. Kept bootstrap
+  capability, editable-source testing, existing tiers and safe cached reuse;
+  did not weaken host/state/resource ownership to bless the preparation path.
+
+  | Inspected contract | Scoped result | Evidence / delta |
+  |---|---|---|
+  | Declared tier/effect validation | Embodied, bounded to declarations | `pytest_portfolio_guard.py:88-170` rejects malformed/forbidden declarations and gates T3/T4; it does not prove actual effects or unique family value. |
+  | Separable preparation | Embodied capability; ownership/budget violation | `_ensure_venv` uses direct unbounded `subprocess.run`; `run_plugin` calls it before sandbox, isolated environment, contained process and aggregate clock. `#5868` owns the gap. |
+  | Contained execution/collection | Scoped source support, not whole-host proof | `run_plugin` loads the policy plugin inside `run_contained`; the worker waits for assignment, Windows uses Job ownership, POSIX uses group accounting/termination, and registry drift is detected without rolling back another actor's state. |
+  | Cleanup-result fidelity | Violates on the suppression path | `TemporaryDirectory(ignore_cleanup_errors=True)` can suppress failed sandbox removal while pytest success survives; no subsequent cleanup verification establishes a clean host. `#5869` owns the gap. |
+
+- Complete OS descendant/effect ownership, reproducible family census, runtime/
+  reliability history, mutation evidence and new-growth metadata policy remain
+  under the existing portfolio effort. No source-absence claim or redundant
+  runtime ticket was manufactured from a missing marker or planned inventory.
+  `#4123` fixture symlinks and `#2214` long-run resource accumulation retain
+  their distinct ownership.
+- These are source-effect paths, not unsafe live repros. No test family was
+  removed, moved, or reclassified and no fixture/process storm was executed.
+  No fresh unit, admitted component, clean-room or live portfolio proof is
+  claimed; actual implementation fixes retain those validation obligations.
+- Current-stage fleet reconciliation merged as `#5865` after quota-aware
+  review recovery and real required CI. Neither that planning comparison nor
+  this scoped source trace completes the parent sweep.
+
+### 2026-10-09 — Machine-fleet current-stage ownership and excluded scope
+- Compared the complete machine-fleet vision with the owning
+  `machine-fleet-routing-foundation` README/architecture and current tracker
+  `#5789`. The proposal explicitly makes no implemented-runtime claim and
+  gates code behind plan review; source searches and catalog absence were not
+  used as proof that no controller exists anywhere.
+- Existing intent covers the inspected driver, service, credential, role,
+  bounded-resource and lifecycle boundaries. No capability was removed and no
+  spec-level wire/package choice was promoted into the vision. Controller/
+  connector execution conformance is not established by a proposed contract;
+  standalone, process, clean-room and live proofs remain in the foundation.
+- Carved only genuinely untracked scope expressly excluded by that campaign:
+  named deployment/config reconciliation (`#5861`) and subscribed coherent
+  observation/recovery (`#5862`). Snapshot and replay are both valid recovery
+  shapes; no replay-only requirement or rival task/worktree/session ledger was
+  invented. Provider-specific enrollment, credentials and live migration stay
+  adopter-owned, not new public implementation scope.
+- Verified `#5771` is the provider-confirmed merged vision-authoring artifact
+  for `#5767`; authoring is distinct from foundation/runtime delivery.
+  Reported incorrect source-relative vision/lifecycle links cooperatively on
+  `#5789`, then corrected only those paths and added the vision's realization
+  planning link. The Draft plan's scope, status and review gates are unchanged.
+- No runtime code, service, enrollment or venue was changed by this slice.
+  Documentation structure, relative-target checks and whitespace are the
+  applicable validation here, not a claimed Gateway process or deployment test.
+  The original sweep's remaining indexed/source/service coverage and global
+  Validation Plan remain open.
+
+### 2026-10-09 — Installation boundary intent and thirteen-runtime matrix
+- The source-effect comparison exposed a genuine scope question: source
+  packaging cleanup versus higher-level declared anchor synchronization.
+  The operator chose the two literal boundaries recorded in Request.
+  Clarified the standing service vision without removing source installation,
+  clean packaging, explicit integration, or source synchronization.
+- Accepted concrete checkout cleanup, ambient hooksPath, and chosen-setting
+  effects as `#5851`, `#5852`, `#5853`, and `#5855`. Rejected the higher-level
+  updater's separate source-sync stage as an automatic installer violation.
+  Generated-artifact deletion was not represented as observed tracked-file
+  deletion; partial helper/backend routes were not marked conforming.
+- Source citations are pinned and the effect-producing files were unchanged
+  after pull-forward. Historical comment-only issue numbers were not accepted
+  as ownership proof; an apparent migration reference resolved to an unrelated
+  PR. Dedup used current trackers. Existing `#3444` packaging-fidelity work is
+  preserved by staging, not superseded or weakened.
+- Evidence agents executed no installers, tests, live configuration, or remote
+  venue operations. Separate required consumer deployment follow-through is not
+  a conformance test. Documentation structure/whitespace gates are appropriate
+  here; real source-install, configuration, clean-room, and live platform
+  acceptance remains required for the eventual implementation fixes.
+- One fourth-issue posting command stalled without an acknowledgement. Stopped
+  only that owned CLI process, verified non-creation through the authoritative
+  unindexed issue listing, then performed one successful retry (`#5855`);
+  no blind duplicate write or shared-service reset occurred.
+- The original sweep remains Active, with the partial paths, every other
+  applicable service invariant, remaining indexed visions, and global
+  Validation Plan still open. The independent material effort remains Draft
+  and execution-unassigned.
+
+### 2026-10-09 — Claim acceptance atomicity and carrier retry corrections
+- Traced the actual finalization gate through nonterminal handoff bundles,
+  pending creation identities, offered reservations, and explicit transfer.
+  Rejected a candidate based on the legacy `obligations.gate_mode` helper:
+  the actual gate no longer lets that legacy mode release creator obligations.
+- The acceptance path does violate existing `agent-fabric` resource-claims
+  intent: `claim_handoffs.accept` calls `accept_source` before
+  `_finish_accept_consumer_side`; source claims are removed and terminal
+  accepted is persisted before consumer existence/conflict, resource ownership,
+  lease transfer, and record-save checks can fail. Accepted is excluded from
+  `active_bundle_ids_for_source`, so this can open source finalization without
+  consumer responsibility being committed. Carved `#5842` after dedup and
+  cross-linked closed contract `#1090` and distinct readiness gate `#1602`.
+  No vision weakening, live claim manipulation, or implementation PR occurred.
+- Review of `#5840` identified a separate carrier effect-admission gap.
+  Confirmed `RemoteOperationService._request` retries reconnectable failures for
+  mutating operations; `carrier_transport.py` marks lost pending responses
+  reconnectable, while `carrier_requests.py` assigns fresh request IDs.
+  A remote create or unkeyed live message may have completed before its response
+  is lost, so bounded reconnection is not no-duplicate proof. Carved `#5843`
+  rather than treating the new intent as realized.
+- Kept the uncertainty-preserving vision guarantee and clarified that it covers
+  same-route retry as well as alternate channels, while retaining safe proven
+  idempotent/deduplicated retries and replayable observation. The inspected
+  unsupported-capability fallback remains distinct from this retry violation.
+- These are concrete source-effect paths, unchanged in freshly fetched trunk,
+  not fresh live reproductions. Existing synthetic acceptance fixtures were
+  inspected, not presented as fault-injection passes. Broader head, role,
+  daemon, hosting, and service audits remain open.
+
+### 2026-10-09 — Bounded evidence cohorts and accepted source coverage
+- Three read-only evidence tracks mapped twelve indexed visions, then compared
+  owning surfaces. The initial reports were partial: document contracts,
+  legacy path names, design-only proposals, search absence, and effort checkboxes
+  were not accepted as implementation conformance or gap proof. Proposed
+  fold-backs that merely repeated existing vision promises were rejected.
+- A narrower source follow-up established the coverage-guided CI foundations:
+  `baseline.py` and `validate-and-promote.yml` measure pinned source form;
+  `correlation.py` and `promote_release.py` validate and publish correlated
+  pointers; `ancestor_resolution.py` preserves or invalidates source coordinates;
+  `debt.py`, `decide.py`, `selection.py`, and `fallback.py` retain explicit
+  eligibility, uncertainty, and tier-restricted fallback at the orchestration
+  boundary. These are already covered by the vision's baseline correlation,
+  source-form attribution, debt, graceful degradation, and auditable-fallback
+  passages. No vision edit or duplicate runtime issue was warranted from this
+  scoped comparison. The actual ordinary-CI consumer activation/invocation
+  source path remains to be audited separately.
+- That source audit is not proof of a fresh all-plugin promotion artifact, an
+  actual ancestor/asset consumer run, or measured production fallback cost and
+  coverage. Those acceptance obligations stay in the owning
+  `coverage-guided-ci` effort. A design or pointer present in source is not
+  itself a successfully published baseline.
+- Mux Companion source follow-up traced read-only engine/handoff observations,
+  the explicit normal Cut over handler, the engine trigger, and refresh. The
+  inspected UI has no distinct raw force-head handler or action; carved the
+  additive UI feature delta as `#5833` after issue/PR dedup. `#4369` owns normal
+  manual-only cutover and `#84` owns ground-layer lifecycle, not this UI action.
+  Missing
+  enumeration/parse results may be omitted, which does not by itself prove
+  uncertainty is sufficiently visible. Live summon, raw attribution, and
+  other-provider validation remain open; no whole-leaf completion is claimed.
+- Installation-cell source follow-up traced `resolve_context`, canonical
+  receipt validators, `_activation_result`, `attribute_legacy_state`, and
+  `invoke-payload-runtime.ps1`. Foreign, stale-generation, and ambiguous
+  contexts have concrete refusal paths. Endpoint selection, POSIX dispatch,
+  uninstall/rollback and every runtime remain unscored. Documented legacy roots
+  alone were not accepted as a cross-cell violation.
+- The other nine cohort visions retain incomplete source reconciliation. No
+  source was edited by evidence agents; the coordinator owns integration,
+  issue decisions, review gates, and the original sweep completion judgment.
+
+### 2026-10-09 — Bridge shared-carrier routing/protocol slice
+- Traced source snapshot `389b55303a67` from the public local remote-operation
+  surface through bridge-owned carrier acquisition, connectivity-layer
+  connection identity/pooling, far-side request gates and hosting-owned
+  replay/cursor acknowledgement. Checked aggregate observation and a concrete
+  Dispatch consumer without inferring conformance from archived effort status.
+- Folded back shared transport over equivalent connection/access contexts,
+  independently identified logical observations, hosting-owned durable replay,
+  consumer acknowledgement, explicit reconciliation on continuity loss, and
+  absence versus uncertain admitted effects as standing intent. Retained the compatibility path
+  for explicit pre-admission refusal, including an older carrier rejecting a
+  requested charter before creating work. No existing positive or intended
+  provider, relay, hosting, or protocol capability was removed.
+- Evidence anchors: `agent_bridge/carrier.py:acquire_remote_carrier`,
+  `ssh_manager/manager.py:_carrier_transport_identity` and `acquire_carrier`,
+  `agent_bridge/remote_operations.py:CarrierRequestRouter` and
+  `RemoteOperationService`, `routes/remote.py:multiplex_remote_session_events`,
+  and `agent_dispatch/bridge_remote.py` with `bridge.py`/`embody.py` consumers.
+  The archived `persistent-ssh-carrier` effort (`#1763`) remains provenance,
+  not fresh all-venue proof.
+
+  | Applicable invariant | Scoped status | Evidence and retained delta |
+  |---|---|---|
+  | `a-la-carte-installability` / `graceful-composition` | Conforms in the inspected carrier/consumer boundary | Bridge owns transport through the shared connectivity library; Dispatch uses its public service boundary and preserves unsupported-capability fallback, not sibling runtime imports. |
+  | `work-coalescing-singleton` / `process-count-scales-with-services-not-sessions` | Conforms in the inspected transport-sharing path only | The connection manager pools under complete transport identity and a lock; logical subscriptions retain leases and release them. This does not score all Bridge processes or service leases. |
+  | `version-skew-tolerant-contracts` / `interoperate-across-version-skew` | Partial runtime audit | Request-specific versions reject unsupported semantics before admission and preserve older supported operations; this is not proof of every session-envelope/recovery/writer-fence path under `#1460`/`#1468`. |
+  | Bridge `single-stream-message-admission` / uncertainty-preserving control | Violates in the mutating retry path | Lost responses are retried with fresh carrier request IDs even after possible effects; tracked as `#5843`. Safe unsupported-capability fallback is not proof of safe in-route retry. |
+  | `endpoint-discovered-not-assumed` | Conforms in the inspected consumer boundary | The client resolves the active authenticated local endpoint; explicit endpoints must be loopback. Transport does not add a public prompt socket. |
+  | `minimal-network-exposure` | Partial Bridge audit | Ephemeral authenticated loopback is not proof of the invariant's preference for a native local endpoint. The inspected carrier adds no new listener; native-endpoint conformance for the existing HTTP control plane remains under the broader transport audit (`#54`). |
+
+- Broader bridge hosting/protocol and global service audits remain open.
+  Existing cutover gaps `#5750`/`#5754` and mixed-contract work retain their
+  ownership; this transport slice does not close them or file duplicate gaps.
+- Native mapping reconciliation merged in `#5814`, after corrected canonical
+  sections, resolved review feedback, current-head approval and actual required
+  CI/PR gates. The sweep remains Active. Consumer refresh was attempted and
+  ended nonzero; projection synchronization still refused local ownership
+  conflicts without changing tracked files. No private deployment data is
+  used as public conformance proof here.
+- Focused contained carrier/remote-operation verification was attempted but
+  refused a live host-admission holder. No lease was cleared. Source and
+  documentation gates do not constitute fresh mixed-version, clean-room, or
+  live SSH/venue execution; those proof tiers remain with the implementation
+  and broader service-audit owners.
+
 ### 2026-10-09 — Remaining native mapping audit and sibling publication
 - Finished native root/catalog/working-boundary source reconciliation against
   snapshot `ed8c1cfee`. The owning effort now records the evidence table,
@@ -436,6 +1131,36 @@ sibling plan proves that the sibling's materials have been refreshed.
   makes no fresh native integration, clean-room, or live-host proof claim.
   Those lanes require native mapping changes and contract evidence in the
   owning convergence effort, rather than being substitutes for this source audit.
+
+### 2026-10-09 — Test-portfolio shared-host admission slice
+- Audited source snapshot `8a64b81af867` against the existing test-portfolio
+  vision, `TESTING.md`, and owning effort `#1303`. Folded back the admission
+  contract, not implementation grammar or resource constants. Preserved every
+  existing positive, tier, and boundary; no negative requires removing a real
+  capability. Corrected the owning plan's obsolete implication that guards and
+  collection may bypass shared-environment protection.
+- Scoped source evidence: `tools/_admission_protocol.py` defines the shared
+  per-user host namespace; `run-plugin-tests.py` acquires before environment
+  preparation and releases in `finally`; `_devcontainer_host_admission.py` and
+  `run_tests_in_devcontainer.py` use that same host authority before container
+  work. Existing admission tests cover contention, bounded retry, all-target
+  lifetime, and guard/collection/preparation modes. Reading those tests is not
+  a fresh execution result.
+- Simple direct-host entry-point evidence: `run-plugin-tests.py --all --list`
+  returned its twenty-suite inventory successfully without requiring admission.
+  The prior focused run refused contention and its requested
+  180-second wait expired; neither result proves successful admitted execution,
+  stale-owner recovery, descendant cleanup, or full portfolio conformance.
+- This tooling leaf deploys no runtime of its own; installer/service invariants
+  are not newly scored here. Shared admission is embodied intent already using
+  the common lease primitive, not a new service authority or a missing
+  plugin-services invariant. No runtime gap was established or duplicate issue
+  filed; broader portfolio work remains under `#1303`.
+- The attempted focused contained-suite run was blocked by host admission.
+  Clean-room and live Linux devcontainer execution were not exercised for this
+  documentation-only slice; the present Windows host and source comparison do
+  not substitute for those lanes. Whole-leaf and global sweep validation remain
+  open.
 
 ### 2026-10-05 — Kickoff + Phase 1 slice
 - Effort created as the tracker for the operator's vision-backport +

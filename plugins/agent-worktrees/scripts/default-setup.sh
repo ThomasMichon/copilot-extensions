@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# agent-worktrees:launch-seed-boundary-v1
 # Default / normalized session setup script for repos.
 #
 # Used by agent-worktrees as the normalized launcher. Prepends any
@@ -24,6 +25,9 @@ ENV_SCRIPT=""
 COPILOT_PATH_OVERRIDE=""
 CONFIG_ROOT=""
 RUNTIME_PYTHON=""
+LAUNCH_SEED_RECORD=""
+LAUNCH_SEED_ID=""
+LAUNCH_SEED_RUNTIME_PYTHON=""
 COPILOT_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +40,9 @@ while [[ $# -gt 0 ]]; do
         --copilot-path) COPILOT_PATH_OVERRIDE="$2"; shift 2 ;;
         --config-root)  CONFIG_ROOT="$2"; shift 2 ;;
         --runtime-python) RUNTIME_PYTHON="$2"; shift 2 ;;
+        --launch-seed-record) LAUNCH_SEED_RECORD="$2"; shift 2 ;;
+        --launch-seed-id) LAUNCH_SEED_ID="$2"; shift 2 ;;
+        --launch-seed-runtime-python) LAUNCH_SEED_RUNTIME_PYTHON="$2"; shift 2 ;;
         *)              COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
@@ -186,20 +193,32 @@ _log_copilot_invoked() {
 }
 
 # -- Launch Copilot -------------------------------------------------------
+_exec_copilot_backend() {
+    if [[ -n "$LAUNCH_SEED_RECORD" ]]; then
+        if [[ -z "$LAUNCH_SEED_RUNTIME_PYTHON" || ! -x "$LAUNCH_SEED_RUNTIME_PYTHON" ]]; then
+            echo 'ERROR: Launch-seed runtime is unavailable; the prompt remains staged.' >&2
+            exit 3
+        fi
+        exec "$LAUNCH_SEED_RUNTIME_PYTHON" -I -m agent_worktrees.launch_seed_exec \
+            --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" -- "$@" "${COPILOT_ARGS[@]}"
+    fi
+    exec "$@" "${COPILOT_ARGS[@]}"
+}
+
 if [[ -n "$COPILOT_PATH_OVERRIDE" ]]; then
     if command -v "$COPILOT_PATH_OVERRIDE" &>/dev/null; then
         _log_copilot_invoked
-        exec "$COPILOT_PATH_OVERRIDE" "${COPILOT_ARGS[@]}"
+        _exec_copilot_backend "$COPILOT_PATH_OVERRIDE"
     else
         echo "ERROR: Configured Copilot executable not found: $COPILOT_PATH_OVERRIDE" >&2
         exit 1
     fi
 elif command -v copilot &>/dev/null; then
     _log_copilot_invoked
-    exec copilot "${COPILOT_ARGS[@]}"
+    _exec_copilot_backend copilot
 elif command -v gh &>/dev/null; then
     _log_copilot_invoked
-    exec gh copilot "${COPILOT_ARGS[@]}"
+    _exec_copilot_backend gh copilot
 else
     echo "ERROR: Neither copilot nor gh found on PATH." >&2
     exit 1

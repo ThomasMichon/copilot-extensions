@@ -2,9 +2,10 @@
 
 - **Slug:** `mutable-dev-slot`
 - **Repo:** copilot-extensions
-- **Branch(es):** per-phase `pr/<slug>` worktrees -> landed to `main`
+- **Branch(es):** per-phase PRs to `dev`; normal release promotion to `main`
 - **Created:** 2026-09-23
 - **Status:** Active
+- **Coordination:** #5472
 - **Vision:** [`docs/patterns/mutable-dev-slot.md`](../../../docs/patterns/mutable-dev-slot.md)
   (a deliberate, narrow exception to
   [`docs/patterns/durable-vs-versioned-runtime.md`](../../../docs/patterns/durable-vs-versioned-runtime.md)'s
@@ -22,13 +23,20 @@ that has repeatedly cost real diagnosis time this repo's own contributors
 have hit (most recently: diagnosing/fixing
 ThomasMichon/copilot-extensions#3323 -> #3340).
 
-## Request
+## Participants
 
-Operator ask, paraphrased: add a `dev` version slot per plugin with a
-mutable venv; a config flag (or worktree-default detection) selects it; a
-worktree "claims" dev mode for a plugin so two worktrees can't clobber each
-other; `agent-worktrees finalize` must force worktrees to release/disable
-dev mode on finalization; none of this may break real deployments.
+| Participant | Role | Reached via |
+|-------------|------|-------------|
+| Slot-admission coordinator | Owns the Phase 3 shared contract, reviewed implementation slices, and adopter sequencing | Normal managed worktree and PR flow |
+
+## Coordination
+
+The Slot-admission coordinator drives #5472 through the existing Phase 3,
+starting with [runtime admission and build coalescing](phase-3-runtime-admission.md).
+Runtime code stays installer-owned and independently vendored. Evidence tracks
+are read-only; implementation slices receive exclusive file ownership, and the
+coordinator integrates and publishes the combined change. Phased adopters do
+not imply that the portfolio or another concurrently owned effort is complete.
 
 ## Context
 
@@ -49,6 +57,21 @@ iteration* gotcha, itself written up after diagnosing/fixing
 ThomasMichon/copilot-extensions#3323 -> #3340 this same session). See
 [`docs/patterns/mutable-dev-slot.md`](../../../docs/patterns/mutable-dev-slot.md)
 for the full design.
+
+## Request
+
+Operator ask, paraphrased: add a `dev` version slot per plugin with a
+mutable venv; a config flag (or worktree-default detection) selects it; a
+worktree "claims" dev mode for a plugin so two worktrees can't clobber each
+other; `agent-worktrees finalize` must force worktrees to release/disable
+dev mode on finalization; none of this may break real deployments.
+
+Operator follow-on, verbatim (2026-10-08):
+> Help build out durable fixes and guidance for the correct flow
+
+The runtime-admission/coalescing execution detail below is agent-recommended
+under that request and the existing immutability contract; it is not a new
+operator directive to remove the explicit claimed-dev exception.
 
 ## Plan
 
@@ -119,6 +142,13 @@ for the full design.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
+- [ ] Review the shared
+      [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
+      before per-plugin code changes, then execute it through the shared core
+      and phased adopter changes. This closes published-slot overwrite and
+      transient first-builder contention at their owning seams, while preserving
+      the full per-plugin guard/dev/distinct-generation repair gate below.
+
 - [ ] Repeat Phase 2's pilot shape for the other 12 plugins currently
       vendoring `versioned_runtime.py` (see `tools/sync-versioned-runtime.py`'s
       target list; 13 vendoring plugins total, `agent-codespaces` is the
@@ -184,6 +214,18 @@ for the full design.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-08 — Durable admission and coalesced-build continuation
+
+The operator requested durable fixes and guidance after a concurrent initial
+runtime build exposed fail-fast creation ownership and a source trace exposed
+same-version in-place package deployment. The existing #5472 and this effort's
+Phase 3 are the canonical home, not a new overlapping campaign. Added the
+agent-recommended execution decomposition covering shared admission, bounded
+builder joining, immutable publication, complete adopter rollout, and honest
+operator/contributor guidance. Runtime implementation awaits its review gate;
+the existing immutable-versioned-runtime and explicit-dev exception remain
+unchanged.
 
 ### 2026-10-06 — Cross-linked from a separate invariant audit
 - A separate `vision-backport-sweep` effort's design/service-invariant

@@ -36,6 +36,7 @@ import agent_procutil
 _AGENT_BRIDGE_MODULES = (
     "__init__.py",
     "winjob.py",
+    "session_preferences.py",
     "session_host/__init__.py",
     "session_host/protocol.py",
     "session_host/host.py",

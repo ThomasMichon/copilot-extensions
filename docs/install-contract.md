@@ -282,6 +282,25 @@ platform-appropriate publication primitive described above.
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.
 
+**agent-worktrees' own versioned-slot build lease** (`Enter-VersionedSlotLease`/
+`_acquire_versioned_slot_lease`, a plugin-local OS-backed exclusive lock
+distinct from the cell-root provisioning lock above) refuses to build into a
+slot another live process is already constructing. A caller that needs to
+tolerate ordinary contention rather than fail on first refusal uses the
+bounded-wait wrapper (`Wait-ForVersionedSlotLease`/
+`_wait_for_versioned_slot_lease`): it polls for the lease on a real wall-clock
+deadline, configurable via `AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC` (default 180
+seconds), with a poll interval via `AGENT_WORKTREES_SLOT_LEASE_POLL_MS`
+(PowerShell, default 1000) or `AGENT_WORKTREES_SLOT_LEASE_POLL_SEC` (bash,
+default 1). Only genuine contention is retried; any other failure of the
+authoritative gate (permission/path/storage) fails immediately regardless of
+the configured budget. The PowerShell adapter classifies the platform's native
+lock errors: Win32 sharing/lock violations on Windows and EAGAIN/EWOULDBLOCK
+on Unix; a Unix permission error must not be mistaken for contention.
+Reaching the deadline without acquiring the lease fails the
+build with an actionable error naming the env var to raise if builds routinely
+take longer than the default.
+
 An operative plugin adapter holds one cell-root provisioning lock across the
 entire snapshot, slot reservation, venv/package build, completion, cutover, and
 deploy-manifest publication transaction. Receipt primitives retain their own
@@ -1486,6 +1505,47 @@ default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so 
 download degrades to "failed + retryable" rather than wedging. Backstop:
 `bootstrap-check`'s single-flight + stale-reap.
 
+Unified `agent-worktrees update` gives module and registered-runtime installers
+the selected positive watchdog deadline plus 30 seconds for cleanup and failure
+publication, instead of preempting the default watchdog at 300 seconds. A disabled
+watchdog (`<=0`) still leaves a finite 510-second updater safety bound. The
+worktrees self-installer retains its existing 600-second minimum, extended when
+a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
+values fail explicitly before launching the installer.
+
+Plugins with a watchdog default other than 480 seconds declare that positive
+integer as `installerDeadlineSeconds` in `plugin.json`; unified update reads it
+only when neither deadline environment override is set. The declaration must
+match the plugin's own cross-platform installer defaults. Agent-dispatch declares
+1050 seconds for its longer activation/cutover lifecycle, so its default caller
+budget is 1080 seconds; an explicit disabled-watchdog override still uses the
+finite 510-second fallback. Invalid declarations fail before installer launch.
+
+The **agent-bridge Windows hook** serializes reconcile admission and status
+publication with an installation-root-scoped global mutex, including across
+Windows login sessions. Each launch has an
+`attempt_id`; after the launch record is published, `launched_pid` identifies
+the actual PowerShell installer supervisor, with `worker_started_at` guarding
+against PID reuse and `wrapper_pid` retaining the headless console wrapper for
+diagnostics (`wrapper_started_at` protects the initial pre-worker record).
+Legacy live PIDs without birth evidence are not automatically force-reaped.
+Stale reaping terminates that supervisor's whole tree, not only
+the console wrapper. The target's native handle is pinned and its birth identity
+revalidated immediately before signaling. Completion updates only its own
+attempt, so a late worker
+cannot overwrite a replacement's status. Invalid prior ownership metadata
+defers reconciliation with a diagnostic instead of risking another installer.
+The supervisor invokes the installer in a separate PowerShell `-File` process
+and records that process's exit code, not a possibly stale native-command code
+from inside a successfully completed installer script. Its file-backed stdout
+(`log`) and stderr (`stderr_log`) capture avoids waiting for EOF on pipes that
+an installer descendant may retain after the installer exits. Watchdog diagnostics
+continue using the separate `reconcile.err.log`.
+The launcher starts outside the singleton payload and clears inherited
+`COPILOT_PLUGIN_INSTALL_STAGED` / `COPILOT_PLUGIN_STAGED_FROM` in the worker;
+staging and its watchdog belong to this installer invocation, not to an
+unrelated parent installer.
+
 ### Agent Machines Windows first-use diagnostics
 
 The [Agent Machines Windows dispatcher](../plugins/agent-machines/scripts/invoke-payload-runtime.ps1)
@@ -1577,9 +1637,8 @@ update/start lifecycle (drain → stop → stage → start, or a zero-downtime
 cutover) is **currently in flight** — seconds to a couple of minutes, during
 which the daemon can legitimately be briefly down or mid-handoff. Before
 this, nothing locally visible could distinguish "correctly mid-transition"
-from "actually dead and never came back" (the originating incident:
-agent-bridge sat dead for 3+ days after an interrupted cutover,
-aperture-labs#7890 §3), so a local liveness watchdog had to rely on a
+from "actually dead and never came back" (an interrupted agent-bridge cutover
+left its daemon unavailable for several days), so a local liveness watchdog had to rely on a
 caller-side wrapper around every manual update — exactly the kind of
 fragile convention this marker eliminates, including for *automatic*
 self-update cutovers that nothing ever wraps.
@@ -1967,6 +2026,22 @@ PowerShell `stamp` materializes both engine files and all declared local
 libraries into the snapshot, rewriting canonical references to snapshot-local
 paths before publishing it. POSIX `stamp` retains its owning-payload pointer;
 release materialization makes that payload self-contained before staging.
+
+`agent-dispatch` uses the same canonical-reference form. Its PowerShell
+snapshots materialize both engine files and all six declared local libraries,
+including snapshot-local, non-editable dependency references. Local-checkout
+`stamp` uses a content-addressed identity over the complete materialized tree:
+unchanged stamps reuse one snapshot, while plugin, engine or library edits
+publish a new immutable identity. Direct local builds retain their checkout
+paths. The POSIX stamp remains an owning-payload pointer. Dispatch
+records the latest same-version local snapshot candidate under the snapshot
+lock and rechecks it under the publication lock, so a delayed stamp cannot
+overwrite newer content or launchers. The locks remain sequential to avoid
+inverting runtime installation's lock order. Dispatch
+owns signed-Python validation/recovery, pre/post-build artifact scrubbing,
+dependency order, optional MCP-extra fallback, launchers and its complete
+coordinator/supervisor lifecycle; only shared acquisition, retry and manifest
+mechanics move into the engine.
 
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine

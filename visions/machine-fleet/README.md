@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-09
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -211,3 +211,4 @@ cannot silently restore a retired feeder role on a client.
 - Cutover: [graceful daemon cutover](../../docs/patterns/graceful-daemon-cutover.md)
 - Auth-relay reality: [credential-relay](../../libs/credential-relay/README.md)
 - Reality: [architecture](../../docs/architecture.md), [configuration](../../docs/configuration.md)
+- Realization planning: [routing foundation](../../efforts/active/machine-fleet-routing-foundation/README.md)

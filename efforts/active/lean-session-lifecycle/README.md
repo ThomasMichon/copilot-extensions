@@ -77,21 +77,26 @@ The operator approved the slug and two-slice scope.
   attributing costs to duplicate workers.
 - [x] Deduplicate against #5579, #5664, #2619, and the independently driven #5637.
 - [x] Publish the measured evidence and claim the bounded implementation slices.
-- [ ] Land this plan through the repository's review gate before implementation.
+- [x] Land this plan through the repository's review gate before implementation.
 
 ### Phase 2 - Affirmative handoff registration
 
-- [ ] Trace extension and CLI trigger, save, abort, consume, successor-ready,
+- [x] Trace extension and CLI trigger, save, abort, consume, successor-ready,
   and predecessor-retirement transitions against the current host boundary.
-- [ ] Persist an idempotent, identity-validated request through the owning
+- [x] Persist an idempotent, identity-validated request through the owning
   worktree command, then wake the existing monitor with the affected key.
-- [ ] Process only registered pending work and its bounded retries; remove
-  handoff-discovery full-history scans from ordinary monitor ticks.
-- [ ] Recover outstanding requests after monitor restart or lost notification
+- [ ] Process only registered pending work and its bounded retries. (The
+  "remove handoff-discovery full-history scans from ordinary monitor ticks"
+  half of this item is already satisfied -- see Journal, #5742 -- by a
+  separately-driven, more general fix; the bounded-retry/pending-work half
+  remains open.)
+- [x] Recover outstanding requests after monitor restart or lost notification
   from durable current state, not replay of machine-global diagnostic history.
-- [ ] Preserve `auto`, `manual-only`, and `off` behavior, cancellation,
+  (Already structurally satisfied -- see Journal: the wake is latency-only.)
+- [x] Preserve `auto`, `manual-only`, and `off` behavior, cancellation,
   successor readiness, and safe predecessor identity/ownership checks.
-- [ ] Land code, tests, documentation, and required changefiles; update this
+  (Unaffected -- see Journal: the wake adds no new mode-gated behavior.)
+- [x] Land code, tests, documentation, and required changefiles; update this
   effort with the merged outcome.
 
 ### Phase 3 - Remove wait-only launch layers
@@ -166,3 +171,118 @@ two measured forwarding roles, with live process-tree evidence.)_
   cap. #5637's existing driver has already claimed the latter repair. Resolve
   the publication gate without bypassing it or duplicating that active work,
   then land the reviewed plan before starting Phase 2.
+
+### 2026-10-08 - Plan published and merged; Phase 2 slice 1 superseded
+
+- The plan PR landed as #5725 (module-size blockers had already been
+  resolved on `dev` in the interim by other work -- no separate blocker fix
+  was needed). Phase 1 is complete.
+- Traced the full note-handoff/trigger/consume/retire path and confirmed the
+  precise Phase 2 hot-path root cause: `activity.read_events()` re-scanned
+  and re-filtered the ENTIRE machine-global event history on every call --
+  `jsonl_cache` already parses the underlying file incrementally, but
+  `read_events()`'s own Python-level filtering was still O(total history),
+  called up to 3x per worktree per monitor tick for every worktree with a
+  pending/active handoff. Matches this effort's measured profiler evidence.
+- Built and reviewed a fix (a per-`(worktree_id, event)` incremental index)
+  as PR #5739, including two rounds of real Copilot-review-caught
+  concurrency/correctness fixes (a cross-caller snapshot-bounding race, and
+  an `id()`-based generation token CPython could coincidentally reuse).
+  Before merge, discovered **#5742** ("Index lifecycle activity queries
+  incrementally"), landed independently to `dev` during the same window by
+  a different session under the same account -- solving the identical
+  problem more generally (a generic multi-field `match=` index built inside
+  `jsonl_cache`'s own single existing lock, which structurally avoids the
+  need for a second lock or a separate generation token at all). Verified
+  via an actual rebase that every hunk of #5739's diff was redundant once
+  #5742's version was taken, and that #5742's own test coverage
+  (`test_activity_index.py`, including a concurrent-access test) was at
+  least as thorough. Operator confirmed: abandoned #5739 rather than land a
+  no-op PR duplicating already-landed work.
+- Net effect for this effort: the "remove handoff-discovery full-history
+  scans from ordinary monitor ticks" half of Phase 2's third Plan item is
+  now satisfied -- by #5742, not by a PR of this effort's own. The
+  remaining Phase 2 work (persist-then-affirmatively-wake the resident
+  monitor via its existing `hook_ipc` channel instead of relying on its
+  periodic tick to discover a newly registered handoff; bounded-retry
+  pending-work processing; restart/mode-preservation guarantees) is
+  unaffected by #5742 and remains open.
+- Lesson for future slices: check `git log --oneline HEAD..origin/dev`
+  immediately before opening a review-ready PR (not just once at branch
+  start) when a slice targets a shared, actively-touched module -- this
+  cost one full review cycle that a fresher pre-push check would have
+  caught before investing in the review itself.
+
+### 2026-10-08 - Phase 2 slice 2: affirmative cross-process wake
+
+- Traced the resident monitor's existing wake machinery end to end:
+  `resident_push.notify()` is in-process only (a `threading.Event`); the
+  ONLY existing cross-process channel into an already-running resident is
+  `hook_ipc.HookIpcServer`, today reached only by a live Copilot session's
+  own `postToolUse`/`sessionStart`/etc. hook callbacks (via the standalone,
+  package-import-free `scripts/hook_client.py`, invoked as a subprocess by
+  `hooks.json`) -- `note-handoff`'s CLI path never spoke to it at all, so a
+  newly registered handoff sat durably persisted but undiscovered until the
+  monitor's next periodic sweep tick.
+- Added `hook_ipc.send_best_effort(kind, payload, *, lock_path=None,
+  timeout=1.0)`: an in-package client counterpart to the existing server,
+  reading the same `status-monitor.lock` rendezvous file and speaking the
+  same wire protocol as `scripts/hook_client.py` (deliberately NOT shared
+  code -- that script must stay import-free of this package for
+  bootstrap-before-install reasons). Never raises; a missing/unreachable
+  resident, a stale lock, a bad token, or an explicit fallback response all
+  resolve to `False` -- a missed wake costs only latency, the periodic
+  sweep interval remains the unconditional backstop (per
+  `_wake_interruptible_wait`'s own existing docstring).
+  `status_monitor_cli._kind_wakes_sweep` gained a new `"handoffWake"` kind
+  that wakes the sweep loop unconditionally (no `targets` semantics of its
+  own -- unlike `postToolUse`, it is never about invalidating a cached
+  status segment). `cmd_note_handoff` now calls `send_best_effort` with the
+  worktree id AFTER its existing durable persist (`tracking.open_handoff`/
+  `_note_disposition_snapshot`) -- persist-then-notify, never the reverse.
+  Deliberately did NOT touch `__main__.py`'s `_resident_hook_decision`
+  dispatch: it already falls through to an unconditional `return {}` for
+  any unrecognized `kind`, which is exactly the right no-op for this one,
+  and `__main__.py` sits EXACTLY at its 6,979-line shrink-only ceiling (a
+  first attempt to add an explicit branch there pushed it 2 lines over;
+  reverted once the no-op fallthrough was recognized as sufficient).
+- Phase 2's remaining restart-recovery and mode-preservation Plan items are
+  satisfied by this design directly, not by new code: the wake is a pure
+  latency optimization layered on top of the SAME already-durable
+  `tracking.open_handoff` persistence and the SAME `auto`/`manual-only`/
+  `off` mode gating `cmd_note_handoff`/the monitor's sweep already enforced
+  before this slice -- nothing about restart recovery or mode semantics
+  changed, so both items are checked off with that rationale rather than
+  new code.
+- Confirmed no overlapping work landed on `dev` before opening this slice's
+  PR (applying the lesson above).
+- Only Phase 2's third Plan item (bounded-retry/pending-work processing,
+  independent of the already-resolved history-scan half) remains open.
+- Landed as PR #5849 after 6 review rounds. Rounds 1-5 each caught a
+  genuine, distinct bug (never a restated/duplicate finding), consistent
+  with this effort's earlier #5739 experience: a cross-caller
+  snapshot-bounding-style class of issue recurred in miniature (a
+  stale/mismatched installation-context lock accepted as reachable), plus
+  a test that passed for the wrong reason (a double-started real server
+  silently swallowed by production's own startup guard, masked because the
+  test's dial happened to race ahead of that failure), a
+  persist-before-notify test that only checked the call happened rather
+  than the ordering, a test that only covered the legacy-mode branch of a
+  new validation function, and two narrow never-raises gaps (a port outside
+  1-65535 and an overflowing timeout each raising `OverflowError`, not
+  `OSError`). Round 6 added no new finding -- it repeated the
+  already-addressed oversized-port comment's wording in its summary while
+  listing only the persistent cutover-statement thread below, confirming
+  the fixes had converged. One review thread (a required **Graceful
+  cutover impact** PR-description statement) stayed marked "active" across
+  every round despite the statement being verified present
+  in the live PR body each time (`gh pr view --json body`) -- treated as a
+  non-blocking tooling artifact per the repo's own commented-verdict
+  fallback policy, not a genuine gap, after independently confirming
+  compliance with `CONTRIBUTING.md`'s actual requirement text. Merged via
+  `pr-merge --now`; worktree reconciled via `pr-complete`.
+- Also filed #5856 (tracked, not fixed -- out of this effort's scope): an
+  unrelated, confirmed-pre-existing `dev` test failure
+  (`resolve_active_plugins()` lost its `include_projects` kwarg, breaking
+  `local_cache_refresh.py`), discovered incidentally while validating this
+  slice and verified via `git stash` against plain `dev` before filing.
