@@ -2053,5 +2053,13 @@ configuration over token flags where process arguments may be observable.
   reconciles in the background; a running coordinator writes
   `running-version.json` so the launcher can distinguish the live imported
   version from the on-disk slot.
+- On Windows, `reconcile-status.json` records each background install's attempt,
+  worker PID and birth time, versions, exit code, and completion. Installer output
+  is captured in `reconcile.log`. The hook tracks the worker rather than its
+  console wrapper, clears inherited staging flags so the installer watchdog
+  remains effective, and retires only a verified stale worker tree. Legacy PID-only
+  ownership is reported for manual diagnosis, never used to kill an unverified
+  process. Stale retirement allows the installer deadline plus a grace period
+  before replacing an attempt, including graceful coordinator cutover.
 - Wildcard binds (`0.0.0.0`, `::`) require `AGENT_DISPATCH_TOKEN`; otherwise the
   server refuses to start rather than expose the task-control API on the LAN.
