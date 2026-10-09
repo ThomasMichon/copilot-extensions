@@ -42,7 +42,8 @@ def _prepare(pr_repo, *, legacy=False):
 
 def _point(path, *, pending=False):
     checkpoint = pr_recovery._pending_path(str(path)) if pending else pr_recovery._path(str(path))
-    return json.loads(checkpoint.read_text(encoding="utf-8"))
+    data = json.loads(checkpoint.read_text(encoding="utf-8"))
+    return data["checkpoints"][data["latest"]] if data.get("version") == 2 else data
 
 
 @pytest.mark.guard
@@ -157,6 +158,62 @@ def test_recovery_point_survives_abort_and_distinguishes_repeated_syncs(pr_repo)
     assert _git("rev-parse", initial["local_ref"], cwd=path) == old
     assert repeated["published_head"] == old
     assert finalize.push_changes(wid, config)
+
+
+def test_recovery_ref_writes_ignore_inherited_foreign_git_context(pr_repo, monkeypatch):
+    config, wid, path, remote, _, old = _prepare(pr_repo)
+    record = _record(wid)
+    foreign = remote.parent / "foreign.git"
+    _git("clone", "--bare", str(path), str(foreign), cwd=remote.parent)
+    with monkeypatch.context() as patch:
+        patch.setenv("GIT_DIR", str(foreign))
+        patch.setenv("GIT_WORK_TREE", str(remote.parent))
+        patch.setenv("GIT_INDEX_FILE", str(foreign / "index"))
+        point = pr_recovery.prepare(
+            wid, f"worktree/{wid}", "origin/master", record, cwd=str(path),
+        )
+    for ref in (point.local_ref, point.published_ref, point.lineage_ref):
+        assert _git("rev-parse", ref, cwd=path) == old
+    assert not _git(
+        "--git-dir", str(foreign), "for-each-ref", "--format=%(refname)",
+        "refs/agent-worktrees/recovery", cwd=path,
+    )
+
+
+def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo):
+    config, wid, path, remote, branch, _ = _prepare(pr_repo)
+    assert git_collab.sync_forward(wid, config)
+    completed = _point(path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    _git("reflog", "expire", "--expire=now", "--all", cwd=path)
+    _git("checkout", "-b", "unrelated", "origin/master", cwd=path)
+    assert git_collab.sync_forward(wid, config)
+    assert _point(path) == completed
+    assert not pr_recovery._pending_path(str(path)).exists()
+    _git("checkout", f"worktree/{wid}", cwd=path)
+    assert finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+
+
+def test_another_live_pr_checkpoint_does_not_replace_older_publication_authority(pr_repo):
+    config, wid, path, remote, branch, _ = _prepare(pr_repo)
+    assert git_collab.sync_forward(wid, config)
+    completed = _point(path)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    record = _record(wid)
+    record.prs.append(tracking.PRRecord(
+        state="open", branch=f"pr/another-{git_ops.worktree_suffix(wid)}",
+        head_sha=tip, pr_id="another", opened_at="2099-01-01T00:00:00",
+    ))
+    tracking.save_record(record)
+    assert git_collab.sync_forward(wid, config)
+    assert pr_recovery._points(str(path))[completed["pr_id"]] == completed
+    assert _point(path)["pr_id"] == "another"
+    _git("reflog", "expire", "--expire=now", "--all", cwd=path)
+    _git("checkout", "-B", branch, tip, cwd=path)
+    result = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
+    assert result["success"], result
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
 
 
 def test_backup_never_refreshes_concurrent_remote_lease(pr_repo):

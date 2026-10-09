@@ -57,6 +57,27 @@ def _pending_path(cwd: str) -> Path:
     return _path(cwd).with_name("agent-worktrees-pr-recovery-pending.json")
 
 
+def _points(cwd: str) -> dict[str, dict]:
+    path = _path(cwd)
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or type(data.get("version")) is not int:
+        raise ValueError("Invalid PR recovery checkpoint")
+    if data["version"] == 1:
+        if not isinstance(data.get("pr_id"), str):
+            raise ValueError("Invalid PR recovery checkpoint")
+        return {data["pr_id"]: data}
+    points = data.get("checkpoints")
+    if (
+        data["version"] != 2 or not isinstance(points, dict)
+        or not all(isinstance(value, dict) for value in points.values())
+        or not isinstance(data.get("latest"), str) or data["latest"] not in points
+    ):
+        raise ValueError("Invalid PR recovery checkpoint collection")
+    return points
+
+
 def selected_pr(worktree_id: str, branch: str, record):
     if record is None:
         return None
@@ -94,11 +115,20 @@ def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> 
         association=_association(pr) if pr is not None else "",
         lineage_head=lineage, lineage_ref=f"{root}/lineage" if lineage else "",
     )
-    git_ops.git("update-ref", point.local_ref, local, "0" * len(local), cwd=cwd)
+    git_ops.git(
+        "update-ref", point.local_ref, local, "0" * len(local),
+        cwd=cwd, isolated_repository=True,
+    )
     if published:
-        git_ops.git("update-ref", point.published_ref, published, "0" * len(published), cwd=cwd)
+        git_ops.git(
+            "update-ref", point.published_ref, published, "0" * len(published),
+            cwd=cwd, isolated_repository=True,
+        )
     if lineage:
-        git_ops.git("update-ref", point.lineage_ref, lineage, "0" * len(lineage), cwd=cwd)
+        git_ops.git(
+            "update-ref", point.lineage_ref, lineage, "0" * len(lineage),
+            cwd=cwd, isolated_repository=True,
+        )
     tracking._atomic_write(_pending_path(cwd), json.dumps(asdict(point), sort_keys=True) + "\n")
     if published and not lineage:
         raise ValueError(
@@ -112,17 +142,20 @@ def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> 
 
 def complete(point: RecoveryPoint, *, cwd: str) -> None:
     """Bind the supported operation's result without depending on Git's reflog."""
-    result = replace(point, synced_head=_rev("HEAD", cwd))
-    tracking._atomic_write(_path(cwd), json.dumps(asdict(result), sort_keys=True) + "\n")
+    if point.pr_id and point.published_head:
+        result = replace(point, synced_head=_rev("HEAD", cwd))
+        points = _points(cwd)
+        points[point.pr_id] = asdict(result)
+        collection = {"version": 2, "latest": point.pr_id, "checkpoints": points}
+        tracking._atomic_write(_path(cwd), json.dumps(collection, sort_keys=True) + "\n")
     _pending_path(cwd).unlink(missing_ok=True)
 
 
 def synced(record, pr, expected: str, head: str, *, cwd: str) -> RecoveryPoint | None:
     """A saved sync authorizes only its original association and descendant tip."""
-    path = _path(cwd)
-    if not path.exists():
+    data = _points(cwd).get(pr.pr_id)
+    if data is None:
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ValueError("Invalid PR recovery checkpoint")
     try:

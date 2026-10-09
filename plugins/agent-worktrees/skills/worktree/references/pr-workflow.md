@@ -587,7 +587,7 @@ legacy bare-id record resolves to its canonical `worktree/<id>` branch.
 Synchronization selects the matching live PR when a private head is checked
 out, and the live active PR on the canonical owning branch. Terminal-only
 records and unrelated branches still receive local recovery refs but no PR
-rewrite checkpoint.
+rewrite checkpoint, and cannot replace an existing valid PR checkpoint.
 
 Before `git sync` changes HEAD, it preserves the committed local tip and the
 recorded published tip under unique worktree-scoped
@@ -606,6 +606,8 @@ Preparation writes a separate pending point. The last completed checkpoint is
 replaced only after a successful synchronization result is durably recorded;
 a conflict, abort or checkpoint-write failure preserves that last completed
 authority even after its rebase journals expire.
+Completed points are retained per PR identity, so synchronizing another live
+PR also cannot overwrite an older PR's valid authority.
 The first backed sync requires the pre-sync source to contain the saved
 published tip. Repeated syncs may continue a prior completed backed result;
 they retain its original lineage under a separate ref. An unrelated reset
