@@ -1,0 +1,9 @@
+{
+  "comment": "Prevent maintenance and installer processes from retaining replaceable payload working directories",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

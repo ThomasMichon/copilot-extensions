@@ -773,11 +773,8 @@ def _agent_worktrees_test_environment(
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(payload / "src"),
-                    str(payload / "libs" / "config-migrate" / "src"),
-                    str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(_agent_procutil_src(payload)),
-                    str(payload / "libs" / "dropin-registry" / "src"),
-                    str(payload / "libs" / "plugin-activation" / "src"),
+                    *(str(path) for path in sorted((payload / "libs").glob("*/src"))),
+                    *(str(path) for path in sorted((REPO / "libs").glob("*/src"))),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -2636,6 +2633,7 @@ def test_windows_templates_preserve_context_and_release_payload_cwd(
         content for path, content in generated.items() if path.suffix == ".ps1"
     )
     assert "[IO.Directory]::SetCurrentDirectory($_outside)" in powershell
+    assert "[IO.Directory]::GetCurrentDirectory()" in powershell
     assert "StartsWith($_payloadPrefix" in powershell
     assert "[IO.FileShare]::None" in powershell
 
@@ -2703,6 +2701,23 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
     assert payload_result.stdout.strip() == (
         f"{project}|status"
     )
+    split_location_command = [
+        pwsh, "-NoProfile", "-Command",
+        f"Set-Location -LiteralPath '{str(sibling).replace(chr(39), chr(39) * 2)}'; "
+        f"& '{str(plugin / 'bin' / 'payload' / 'agent-example.ps1').replace(chr(39), chr(39) * 2)}' status",
+    ]
+    split_result = subprocess.run(
+        split_location_command, cwd=plugin, env=env,
+        capture_output=True, text=True, check=True,
+    )
+    assert split_result.stdout.strip() == f"{project}|status"
+    for unsafe_project in (plugin, plugin / "scripts"):
+        env["COPILOT_PROJECT_DIR"] = str(unsafe_project)
+        fallback_result = subprocess.run(
+            command, cwd=plugin, env=env,
+            capture_output=True, text=True, check=True,
+        )
+        assert fallback_result.stdout.strip() == f"{home}|status"
 
 
 @pytest.mark.skipif(

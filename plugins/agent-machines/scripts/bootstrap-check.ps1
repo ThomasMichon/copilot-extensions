@@ -212,7 +212,7 @@ if (-not (Test-Path $Manifest)) {
                 $enc = [Convert]::ToBase64String(
                     [Text.Encoding]::Unicode.GetBytes($command)
                 )
-                Start-Process -FilePath 'conhost.exe' `
+                Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
                     -WindowStyle Hidden | Out-Null
             }
@@ -270,7 +270,7 @@ if (-not (Test-Path $Manifest)) {
         }
         $command = "& `"$payloadInit`" stamp *> `$null"
         $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-        Start-Process -FilePath 'conhost.exe' `
+        Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE `
             -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
             -WindowStyle Hidden | Out-Null
     }
@@ -382,7 +382,7 @@ try {
         $enc = [Convert]::ToBase64String(
             [Text.Encoding]::Unicode.GetBytes($command)
         )
-        Start-Process -FilePath 'conhost.exe' `
+        Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE `
             -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
             -WindowStyle Hidden | Out-Null
         Exit-SessionStart
@@ -415,7 +415,7 @@ try {
     # it as a window -- -WindowStyle Hidden ALONE is ignored by DefTerm (see
     # agent-bridge). Base64-encode the reconcile command to avoid arg quoting.
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("& `"$init`""))
-    Start-Process -FilePath 'conhost.exe' `
+    Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
         -WindowStyle Hidden | Out-Null
 } catch { }

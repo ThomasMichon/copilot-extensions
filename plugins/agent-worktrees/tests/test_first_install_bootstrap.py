@@ -314,6 +314,9 @@ def test_windows_context_stage_preserves_argument_boundaries() -> None:
     assert "ArgumentList.Add([string]$argument)" in context
     assert "ConvertTo-NativeArgument ([string]$_)" in context
     assert "Start-Process -FilePath $hostExe" not in context
+    assert "$contextStart.WorkingDirectory = $env:USERPROFILE" in context
+    assert "$env:COPILOT_PLUGIN_INSTALL_STAGED -ne 'context-install'" in context
+    assert "-match '/\\.copilot/installed-plugins/'" in context
 
 
 def test_windows_context_stage_preserves_default_for_invalid_deadline() -> None:
@@ -339,6 +342,9 @@ def test_posix_context_stage_reaps_child_group_before_exit() -> None:
     assert 'kill -- -"$__aw_child"' in context
     assert 'wait "$__aw_child"' in context
     assert "trap '__aw_stop_context_child 143' TERM" in context
+    assert 'exec bash -c "$__aw_watchdog"' in context
+    assert 'cd "$__aw_staged_payload"' not in context
+    assert '${COPILOT_PLUGIN_INSTALL_STAGED:-}" != context-install' in context
 
 
 def test_installers_preserve_activation_during_inventory_bootstrap() -> None:

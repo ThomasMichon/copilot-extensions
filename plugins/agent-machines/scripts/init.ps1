@@ -183,7 +183,8 @@ if ($Action -eq 'stamp-binstub' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
 # Get-SourceKind the payload was really the marketplace (see below). Env-guarded
 # against re-exec loops; the stage-dir path (not under installed-plugins) is a
 # second guard. Best-effort, non-blocking reap of old stage dirs.
-if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
+if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
+    (($PSScriptRoot -replace '\\', '/') -match '/\.copilot/installed-plugins/')) {
     try {
         $__selfStageScriptDir = $PSScriptRoot
         $__selfStagePayload = (Resolve-Path (Join-Path $__selfStageScriptDir '..')).Path
@@ -199,10 +200,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                 # re-root the process CWD OFF the payload BEFORE the copy (absolute
                 # paths make this safe). Set the WIN32 cwd (the real dir handle),
                 # not just the PS provider location.
-                try {
-                    Set-Location -LiteralPath $env:USERPROFILE
-                    [System.IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-                } catch {}
+                Set-Location -LiteralPath $env:USERPROFILE
+                [System.IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
                 $__selfStageRoot = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") '.install-stage'
                 $__selfStageDir = Join-Path $__selfStageRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
                 New-Item -ItemType Directory -Force -Path $__selfStageDir | Out-Null
@@ -269,7 +268,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
-                    -WorkingDirectory $__selfStagedPayload `
+                    -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
@@ -282,10 +281,13 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                 }
                 $__wdChild.WaitForExit()
                 exit $__wdChild.ExitCode
+            } else {
+                throw 'self-stage requires a plugin identity before leaving the payload'
             }
         }
     } catch {
-        Write-Host "  [WARN] self-stage failed, running in place: $_" -ForegroundColor Yellow
+        [Console]::Error.WriteLine("self-stage failed; refusing to run from the replaceable payload: $_")
+        exit 1
     }
 }
 # === end install-contract:v4 self-stage ===
@@ -319,6 +321,7 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
             ran_from     = $PSScriptRoot
             staged_from  = [string]$env:COPILOT_PLUGIN_STAGED_FROM
             staged       = [bool]$env:COPILOT_PLUGIN_INSTALL_STAGED
+            working_dir  = [System.IO.Directory]::GetCurrentDirectory()
             child_pid    = $PID
             grandchild_pid = $__smokeGrandPid
         } | ConvertTo-Json -Compress) | Set-Content -LiteralPath (Join-Path $__smokeHome 'smoke.json')
