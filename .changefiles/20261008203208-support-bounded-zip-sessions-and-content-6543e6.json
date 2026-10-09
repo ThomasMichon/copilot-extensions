@@ -1,0 +1,9 @@
+{
+  "comment": "Support bounded ZIP sessions and content-proven archive format de-duplication",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

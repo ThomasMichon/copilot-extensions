@@ -42,6 +42,111 @@ Optional missing stores contribute no physical observations. This is not
 evidence of zero usage, complete coverage, or a final session. A corrupt or
 unsupported archive fails when its existing codec reader consumes it.
 
+## Session archive formats
+
+The shared `agent_logger.sessions` registry supports `<id>.tar.gz` and
+`<id>.zip`. Tar+gzip remains the default; ZIP is explicitly selected with
+`archive_session(..., codec="zip")`. Existing selector sidecars remain
+uncompressed and use the same session ID. A session ID must be one safe path
+component; invalid archive stems fail instead of escaping sidecar, lookup, or
+materialization paths. Compression formats never create extra logical sessions.
+
+Both containers hold files relative to the session contents, without a leading
+session-ID directory. ZIP accepts stored and deflated files, benign root
+directory entries, and standard single-volume ZIP64 end records. Multi-volume,
+encrypted, unsupported compression, special/link members, unsafe paths,
+normalized duplicate names, and Windows case-fold collisions fail explicitly.
+ZIP extraction creates new files only, never overwriting existing destination
+evidence. Each member is decoded and verified in an exclusively owned, private
+staging directory on the destination filesystem, then published with an atomic,
+non-overwriting hard link. Failures remove only the staging directory, never
+unlinking a caller-owned destination path. A concurrently created destination
+is retained and reported as a conflict. Filesystems without hard-link support
+fail explicitly; extraction does not fall back to unsafe pathname cleanup.
+Previously completed members remain, so extraction is not an all-or-nothing
+restore transaction. New ZIP creation uses a unique temporary file, verifies
+file content and CRCs before replacement, rejects observed source changes, and leaves the
+source directory intact. Settled-source selection and any source retirement
+remain the caller's separately authorized responsibilities.
+
+The shared archive-member and session-ID validator rejects Windows-invalid
+characters, control characters, device basenames, and trailing dots/spaces on
+every platform, including `CONIN$`, `CONOUT$`, and superscript-digit `COM`/`LPT`
+devices. ZIP validates the original member name before the standard
+library can truncate a NUL-containing name.
+Both archive writers validate generated member names before publication;
+generated names must already be canonical, so literal POSIX backslashes cannot
+silently become path separators. Unsupported source filenames leave the source
+and any prior archive intact.
+ZIP readers still normalize benign names such as `./events.jsonl`; writer
+canonicality does not prohibit content-equal reader-compatible representations.
+
+Session archive publication checks every existing same-ID format before
+updating selector sidecars or returning a reference to reclamation callers.
+Conflicting or unprovable representations remain on disk and the live session
+is retained. Verification also checks overlaps, so hub reconciliation cannot
+retire a live directory based on one valid archive beside a divergent sibling.
+Ordinary single-format tar verification remains unchanged.
+Hub reconciliation counts logical sessions once in both dry-run and actual
+removal, not once per format; failed removals do not count.
+Removing one archive representation retains the ID's shared selector sidecars
+while any other registered representation remains, even if that sibling is
+unreadable. Removing the last representation also removes its sidecars.
+
+ZIP descriptor mutation checks include size, mtime, and ctime. POSIX ctime
+detects same-size in-place rewrites even if the writer restores mtime; Windows
+ctime is creation time and does not provide that same guarantee. These checks
+do not freeze concurrent writers or continuously pin mutable directory ancestors.
+
+ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
+decoded file bytes. ZIP readers and tar representation comparison also limit
+physical compressed input to 2 GiB + 64 MiB before parsing. Tar comparison caps
+bytes consumed by its sequential compressed reader even if the file grows
+after the size check; ZIP admission caps each member's declared compressed size
+and their total before content decoding. This bounds input work even for streams
+that produce no decoded bytes. Ordinary single-format tar reads remain unchanged.
+Tar comparison also consumes through gzip EOF to validate its trailer before
+returning digests, with a separate 2 GiB + 64 MiB decoded-container budget for
+members, metadata, and trailing padding.
+Creation also bounds inspected source entries and excludes
+linked/name-surrogate directories without descending into them. Source entries
+are admitted incrementally before retention, rather than allocating an entire
+directory listing before checking the limit; admitted batches are sorted for
+deterministic traversal. The central
+directory has a 16 MiB budget checked before the standard ZIP parser allocates
+its index. Preflight scans and bounds the actual directory records, rejects
+malformed framing and inconsistent counts, and does not trust the end record's
+advertised entry count as an allocation limit.
+File/directory conflict checks search sorted names by descendant
+prefix rather than rebuilding every ancestor of deeply nested names; cost is
+linear in name length and logarithmic in the bounded member count.
+Equality comparison uses the same decoded-content budgets.
+Tar comparison streams at most 10,000 raw headers,
+including directories and extended headers; extended metadata has a cumulative
+16 MiB budget enforced before its payload is decoded. Old GNU and PAX GNU sparse
+encodings are rejected before their extent parsers can read or allocate
+unbudgeted metadata. This restriction applies to representation comparison,
+not ordinary single-format tar reads. ZIP verification derives
+membership and integrity from one descriptor snapshot and returns false for
+CRC, decompression, or truncation failures. Other content-read errors
+and permission failures are not empty/missing evidence. These checks do not
+claim a continuous descriptor-pinned transaction over mutable ancestor paths.
+
+When two archive formats exist for one ID in one store, the reader compares
+every regular member's size and SHA-256 before yielding an archive observation.
+Identical readable contents produce one reference, preferring the legacy
+tar.gz representation; divergent, corrupt, unsafe, or unprovable contents
+raise while retaining both files. A valid live session still takes precedence,
+and explicitly ordered archive stores retain their existing precedence.
+Archive-store discovery uses two incremental directory scans, retaining only
+the current ID's format references rather than materializing the store. The
+first pass prevalidates observed overlaps before archive output; the second
+revalidates each observation before yielding. There is no new store-entry limit
+or global archive ordering guarantee. These scans do not freeze directory
+changes between observations.
+Across different source roots, provenance-based reconciliation and accounting
+remain the consumer/backend's responsibility.
+
 Two physical roots with the same recorded source identity remain two
 observations. Consumers must reconcile compatible session/event evidence,
 preserve divergent versions, and retain their own workflow state; the iterator
