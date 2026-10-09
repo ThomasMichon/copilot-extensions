@@ -404,3 +404,33 @@ def test_backend_initialization_failure_releases_lease(
     assert world.lease.closed
     assert not world.backend.claimed
     assert world.spawns == 0
+
+
+@pytest.mark.parametrize("during_transition", [False, True])
+def test_pidfd_close_error_cannot_skip_cleanup_or_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, during_transition: bool,
+) -> None:
+    world = World(tmp_path)
+    events: list[str] = []
+
+    def failed_close(reference: FakeReference) -> None:
+        events.append("reference-close")
+        reference.closed = True
+        raise OSError("injected pidfd close failure")
+
+    def cleanup() -> None:
+        events.append("descendant-cleanup")
+        world.backend.cleaned = True
+
+    def release() -> None:
+        events.append("lease-release")
+        world.lease.closed = True
+
+    monkeypatch.setattr(FakeReference, "close", failed_close)
+    monkeypatch.setattr(world.backend, "cleanup", cleanup)
+    monkeypatch.setattr(world.lease, "close", release)
+    kwargs = {} if during_transition else {"resolve_update": lambda: ["relative-command"]}
+    with pytest.raises(OSError, match="pidfd close failure"):
+        world.manager(**kwargs).run()
+    assert events == ["reference-close", "descendant-cleanup", "lease-release"]
+    assert world.backend.cleaned and world.lease.closed

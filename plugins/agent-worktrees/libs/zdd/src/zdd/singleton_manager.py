@@ -237,8 +237,9 @@ class SingletonManager:
                     code = child.poll() if child is not None else None
                     if reference is None or not reference.alive() or code is not None:
                         if reference is not None:
-                            reference.close()
+                            closing = reference
                             reference = None
+                            closing.close()
                         child = None
                         state = self._discovering(state, code if code is not None else 1)
                 if state.phase == "discovering":
@@ -254,13 +255,15 @@ class SingletonManager:
                 self._maybe_exec(lease)
                 self.sleep(self.poll_interval)
         finally:
-            if reference is not None:
-                reference.close()
             try:
-                if claimed:
-                    self.backend.cleanup()
+                if reference is not None:
+                    reference.close()
             finally:
-                lease.close()
+                try:
+                    if claimed:
+                        self.backend.cleanup()
+                finally:
+                    lease.close()
 
 
 def run(
