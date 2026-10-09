@@ -14,6 +14,7 @@ receiver-side atomic admission exists yet for those transports).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -57,13 +58,18 @@ def _unlink_owned_temp(path: Path, file_id: tuple[int, int]) -> bool:
     return True
 
 
-def _dest_entry_names(dest: Path) -> list[str]:
-    """List *dest*'s direct children through an extended-path-safe scan."""
+def _destination_has_content(dest: Path) -> bool:
+    """Refuse an unowned leaf after its first child, without materializing a list."""
     try:
         with os.scandir(windows_extended_path(dest)) as entries:
-            return [entry.name for entry in entries]
+            return next(entries, None) is not None
     except FileNotFoundError:
-        return []
+        return False
+
+
+def _publication_lock_path(dest: Path) -> Path:
+    key = os.path.normcase(dest.name).encode("utf-8")
+    return dest.parent / f".publication-admission-{hashlib.sha256(key).hexdigest()}.lock"
 
 
 def _read_marker(marker_path: Path) -> dict[str, str | None] | None:
@@ -161,7 +167,7 @@ def check_publication_identity(
                 "(no receiver/cloud-side atomic admission for this transport yet)"
             ),
         )
-    lock_file = dest.parent / f".{dest.name}.publication-admission.lock"
+    lock_file = _publication_lock_path(dest)
     try:
         with sync_lock(lock_file, timeout=30) as acquired:
             return _admit_under_lock(dest, identity, lock_file, acquired)
@@ -205,8 +211,7 @@ def _admit_under_lock(
             ),
         )
     try:
-        names = _dest_entry_names(dest)
-        has_content = bool(names)
+        has_content = _destination_has_content(dest)
     except OSError as exc:
         return PushResult(ok=False, detail=f"cannot inspect destination: {exc}")
     if has_content:

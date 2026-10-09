@@ -22,6 +22,7 @@ from agent_logger.sync.targets.publication_admission import (
     MAX_MARKER_BYTES,
     PUBLICATION_IDENTITY_MARKER,
     check_publication_identity,
+    _publication_lock_path,
 )
 from agent_logger.sync.targets.ssh import SshTarget
 from agent_logger.source_publication import load_source_identity_file
@@ -336,7 +337,7 @@ def test_check_publication_identity_handles_lock_setup_errors(tmp_path: Path) ->
     ``FilesystemTarget.push`` promises ``PushResult`` on every path."""
     dest = tmp_path / "dest" / "m1"
     dest.mkdir(parents=True)
-    lock_path = dest.parent / f".{dest.name}.publication-admission.lock"
+    lock_path = _publication_lock_path(dest)
     lock_path.mkdir()  # forces sync_lock's open to fail: not a regular file
     identity = _Identity(
         provider="github", host="source-host", repository="example", venue="codespace"
@@ -612,6 +613,65 @@ def test_same_short_repository_cannot_claim_another_full_repository(
     assert not result.ok
     assert "mismatch" in result.detail
     assert load_source_identity_file(root / first.namespace / PUBLICATION_IDENTITY_MARKER) == first
+
+
+def test_empty_leaf_check_stops_after_first_child(tmp_path: Path, monkeypatch) -> None:
+    from agent_logger.sync.targets import publication_admission as admission
+
+    class Entries:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if getattr(self, "visited", False):
+                raise AssertionError("emptiness check enumerated more than one child")
+            self.visited = True
+            return object()
+
+    monkeypatch.setattr(admission.os, "scandir", lambda path: Entries())
+    assert admission._destination_has_content(tmp_path)
+
+
+def test_maximum_length_identity_uses_bounded_lock_name(tmp_path: Path) -> None:
+    identity = SourceIdentity("machine", "copilot", host="m" * 255)
+    source = _make_source(tmp_path)
+    root = tmp_path / "archives"
+    result = LocalTarget({"path": str(root)}).push(
+        source, identity.namespace, source_identity=identity
+    )
+    assert result.ok, result.detail
+    lock_path = _publication_lock_path(root / identity.namespace)
+    assert len(lock_path.name.encode()) < 255
+    assert load_source_identity_file(
+        root / identity.namespace / PUBLICATION_IDENTITY_MARKER
+    ) == identity
+
+
+def test_new_claim_directory_chain_flushes_each_parent(tmp_path: Path, monkeypatch) -> None:
+    from agent_logger.sync import provenance
+
+    flushed = []
+    original_fsync = provenance.fsync_directory
+
+    def recording_fsync(path):
+        flushed.append(path)
+        original_fsync(path)
+
+    monkeypatch.setattr(provenance, "fsync_directory", recording_fsync)
+    root = tmp_path / "archives"
+    group = root / "source-host.containers"
+    dest = group / "worker"
+    identity = SourceIdentity("container", "containers", host="source-host", venue_name="worker")
+    assert check_publication_identity(dest, identity) is None
+    assert tmp_path in flushed
+    assert root in flushed
+    assert group in flushed
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows lock opener")

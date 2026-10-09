@@ -292,6 +292,7 @@ def ensure_real_directory(path: Path) -> Path:
             except FileExistsError:
                 pass
             mode = _lstat(current).st_mode
+            fsync_directory(current.parent)
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"directory is unsafe: {current}")
     return absolute
