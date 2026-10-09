@@ -244,7 +244,9 @@ This vision's Status stays **Draft**, and
 `opt-in-not-ambient-default` / `explicit-per-request-mode` features remain
 authoritative, until a controlled validation plan — at minimum: (a) a
 cross-venue extension-injection reliability test (local machine, CodeSpace,
-container, at least one Dev Box image), (b) a driver-exclusivity test proving
+container, at least one Dev Box image), including functional launch-time
+presence at the explicitly selected minimum supported native version,
+(b) a driver-exclusivity test proving
 two concurrent driving attempts cannot corrupt a session, (c) a blocked-
 interaction test exercising all five escalation rungs against real tool
 calls and at least one genuine ask_user/elicitation case, and (d) a side-by-

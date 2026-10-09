@@ -243,6 +243,9 @@ and ordering before Phase 0 work begins.)_
 - [ ] Scaffold and install it on at least one local machine, one CodeSpace,
       and one container, proving launch-time presence without an
       agent-worktrees or agent-bridge install in the venue itself.
+      Select and record the minimum supported native version, and prove
+      functional launch-time presence at that floor; latest-client results
+      alone do not close Validation Plan track (a).
       (Phase 0 update: `agent-ssh` now also has an attached-by-default
       `copilot <host>` CLI entry point — PR #4913 — so an SSH-reachable
       machine is a now-reachable fifth venue candidate alongside the four
@@ -452,7 +455,9 @@ without unacceptable regression before Phase 5 can promote anything:
 - [ ] **(a) Cross-venue extension-injection reliability** — the Phase 1
       remote-driver extension is present and functional at launch on: a
       local machine, a CodeSpace, a trusted container, and at least one Dev
-      Box image.
+      Box image. Select and record the minimum supported native version and
+      exercise functional launch-time presence at that floor explicitly;
+      do not infer it from current-client cross-venue results.
 - [ ] **(b) Driver-exclusivity** — two concurrent driving attempts against
       the same live mux-hosted session cannot corrupt it (Phase 2).
 - [ ] **(c) Blocked-interaction escalation** — all rungs of Phase 3's ladder

@@ -745,6 +745,11 @@ sibling plan proves that the sibling's materials have been refreshed.
   extension proof and all default-promotion gates. No additional positive
   clean-room or venue-parity intent was missing; their violations are additive
   implementation work, not permission to weaken the visions.
+- Review identified that the supported native-version floor was stated but
+  not explicit in promotion track (a). Added functional launch-time proof at
+  the selected minimum supported version to the vision gate, owner Phase 1
+  and matching Validation Plan. No particular version was chosen or claimed
+  validated; current-client coverage alone cannot close that gate.
 - Publication changes documentation only. Source counterexamples are not fixes
   or fresh runtime/unit, clean-room, model, native-host or live-venue acceptance.
   Those obligations remain with the named implementation owners. Whole-index,
