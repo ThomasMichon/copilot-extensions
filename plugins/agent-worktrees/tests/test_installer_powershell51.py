@@ -773,6 +773,57 @@ Exit-VersionedSlotLease
     assert lease_path.exists()
 
 
+@pytest.mark.parametrize(
+    "native_code,platform,contention",
+    [(11, "Linux", True), (35, "OSX", True), (35, "Linux", False),
+     (11, "OSX", False), (11, "Windows", False), (32, "Windows", True),
+     (33, "Windows", True), (13, "Linux", False)],
+)
+def test_wrapped_slot_lease_io_errors_keep_platform_specific_reasons(
+    tmp_path: Path, native_code: int, platform: str, contention: bool,
+):
+    powershell = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+    functions = _extract_lease_functions(INSTALLER.read_text(encoding="utf-8"))
+    functions = functions.replace("[System.IO.File]::Open(", "[FixtureLeaseFile]::Open(")
+    functions = functions.replace(
+        "[System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform",
+        "[FixtureLeasePlatform]::IsOSPlatform",
+    )
+    script = f"""
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+public static class FixtureLeaseFile {{
+    public static FileStream Open(string path, FileMode mode, FileAccess access, FileShare share) {{
+        throw new IOException("fixture I/O failure", {native_code});
+    }}
+}}
+public static class FixtureLeasePlatform {{
+    public static bool IsOSPlatform(OSPlatform requested) {{
+        return requested == OSPlatform.{platform};
+    }}
+}}
+'@
+{functions}
+$VersionedRuntime=$true
+$InstallDir='{tmp_path}'
+$SrcVersion='1.2.3'
+$env:OS='{"Windows_NT" if platform == "Windows" else "Fixture_Posix"}'
+if (Enter-VersionedSlotLease) {{ throw 'unexpected lease acquisition' }}
+$isContention=$script:VersionedSlotLeaseFailureReason -eq 'contention'
+if ($isContention -ne ${str(contention).lower()}) {{ throw "wrong failure classification: $script:VersionedSlotLeaseFailureReason" }}
+if (-not $isContention -and $script:VersionedSlotLeaseFailureReason -notlike '*fixture I/O failure*') {{ throw 'persistent error lost' }}
+"""
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_deploy_venv_calls_uv_retry_helper():
     """Deploy-Venv's uv fallback must go through the shared retry helper
     (behavior is covered standalone by the Invoke-UvVenvWithRetry tests
