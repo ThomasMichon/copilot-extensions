@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux pidfd/subreaper contract")
+# These four tests drive real fork/exec/signal process trees (repeated
+# detached cutovers, a real same-process exec, and a pidfd above
+# FD_SETSIZE) rather than mocked kernel state like the other singleton
+# suites in this package. PR CI runs only the always-safe smoke tier by
+# setting ZDD_SINGLETON_SMOKE_ONLY=1 (see .github/workflows/ci.yml); the
+# full, unfiltered suite still runs via `test-supervisor`/local dev and via
+# the scheduled/manual `zdd-singleton-stress` workflow, matching the
+# crash-diagnostics-stress.yml precedent for real-process regressions that
+# are not safe to gate every PR on.
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "linux", reason="Linux pidfd/subreaper contract"),
+    pytest.mark.skipif(
+        os.environ.get("ZDD_SINGLETON_SMOKE_ONLY") == "1",
+        reason="real-process singleton regression; see zdd-singleton-stress workflow",
+    ),
+]
 
 _CUTOVER_DRIVER = r'''
 import json, os, subprocess, sys, time

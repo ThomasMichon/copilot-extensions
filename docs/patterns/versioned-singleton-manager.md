@@ -697,8 +697,12 @@ view — "is the unit's main process still running" — needs no other change).
 This holds on every launch, Windows included: `run()` is always what the
 launcher ends up blocked inside, never skipped in favor of exiting early.
 
-## Validation (planned — the implementation lands in a follow-up PR)
+## Validation
 
+The Linux unit/stress tiers below are now delivered (`libs/zdd/tests/`,
+224 passing through the bounded test-supervisor as of this PR); the
+end-to-end real-systemd and Windows-specific tiers remain planned, tracked
+by the [implementation effort](../../efforts/active/versioned-singleton-manager/README.md).
 
 - **Unit (mocked):** every branch of the child-exit decision — planned-cutover
   adoption, real-crash propagation, the manager's own unexpected death,
