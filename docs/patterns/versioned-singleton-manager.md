@@ -198,42 +198,24 @@ successor already running in my own tree?*
    handle captured back at spawn time. A match means a **planned
    cutover** — adopt that pid (that handle, on Windows) as the new watched
    child and keep running, no exit. Anything else (no entry, a dead pid, no
-   registered handle for it) means a **real crash**. On Linux, `active.json`
-   itself carries no process-identity token (only a pid and a routing
-   generation, which order publications but do not by themselves rule out
-   **PID reuse** — the recorded pid exiting and an unrelated process reusing
-   that exact number before this check runs). A token comparison that only
-   checks **internal self-consistency** — reading the same token twice in
-   quick succession and requiring the two reads to agree — is not enough:
-   it only proves the pid held one identity across that one short window,
-   never that it is the *same* identity originally adopted. A process can
-   exit and have its pid reused by an unrelated descendant *between* two
-   separate polls; two adjacent reads taken entirely after that swap would
-   still agree with **each other** and wrongly pass. The manager therefore
-   never compares a fresh read only to another fresh read: at the moment of
-   **first legitimate adoption** of a given pid (immediately after the
-   ancestry/handle check above passes), it captures a process-start-time
-   token (`zdd.diagnostics.process_start_time` — has a Linux and a Windows
-   backend, used identically on both platforms here) for that pid and
-   persists it as a durable **baseline**, keyed to that pid, in the
-   manager's own `daemon` record (`manager_state_dir`, per the Consumer
-   contract below — never just held in memory, since item 5's `execve`
-   path wipes memory and must survive the same way). The capture itself is
-   still bracketed around the ancestry/handle check (read immediately
-   before, run the check, read immediately after, require both non-`None`
-   reads to agree) purely to close the TOCTOU window *at the single moment
-   of capture* — but the resulting baseline, once persisted, is what every
-   later poll is compared against, not another fresh pair of reads. Every
-   subsequent liveness poll of the adopted process — however much later —
-   reads the pid's *current* token and compares it to this one persisted
-   baseline: a match means it is still provably the same process originally
-   adopted; any mismatch, or the pid no longer resolving to a live process
-   at all, means a **real crash**, even if a same-numbered replacement
-   process now exists and would have passed a bare self-consistency check.
-   (On Windows this baseline comparison is a secondary belt-and-suspenders
-   check — the duplicated handle itself already rules out pid reuse by
-   construction, since it names the kernel object directly rather than a
-   numeric pid.)
+   registered handle for it) means a **real crash**. Linux adoption additionally
+   requires the route's publication-time `process_start_time` token. The
+   routing library records this optional field when publishing a live PID;
+   a spawner holding an earlier baseline can supply it and publication
+   refuses a changed or unverifiable identity. Legacy routes without this
+   token remain readable by ordinary clients but are not adoptable by an
+   identity-bound manager.
+
+   Sampling a fresh token only when adopting a stale route is insufficient:
+   the PID may already belong to another manager descendant before either
+   sample or the ancestry walk starts. The manager requires both identity
+   reads bracketing ancestry validation to match the **published** token,
+   not merely each other. It persists that validated baseline in its own
+   `daemon` record under `manager_state_dir` and compares every later poll
+   and post-exec recovery to it. Missing identity or a mismatch never
+   authorizes adoption. On Windows this comparison remains supplementary
+   to spawn-time handle custody; routing metadata does not replace the
+   native handle-registration contract.
 3. **Reap every other live descendant before exiting on a real crash.**
    Exiting the manager does **not** by itself clear its tree: a subreaper
    claim or Job Object membership only governs *reparenting*, not lifetime —

@@ -793,6 +793,11 @@ def delete_codespace(
     claim-provider reclaim) should pass its own already-minted token here
     to close that gap entirely (claim-provider-pattern effort review
     finding: "Preserve validated credentials during status and reclaim").
+
+    Without ``force``, a refusal caused only by GitHub's (often stale)
+    "unsaved changes" flag triggers an SSH audit of every checkout on the box
+    (:mod:`unsaved_guard`): all clean -> retried with gh's ``--force``; anything
+    dirty or unauditable -> :class:`unsaved_guard.UnsavedWorkError` naming it.
     """
     from . import gh_account
 
@@ -815,6 +820,18 @@ def delete_codespace(
         creationflags=_creation_flags(),
         env=env,
     )
+    if result.returncode != 0 and not force:
+        # GitHub's cached "unsaved changes" flag is often stale: audit every
+        # checkout on the box and force only that refusal when all are clean.
+        from .unsaved_guard import force_args_if_checkouts_clean
+
+        forced = force_args_if_checkouts_clean(
+            name, args, result.stderr, account=account, token=token)
+        if forced is not None:
+            log.info("All checkouts on %s verified clean; overriding stale "
+                     "unsaved-changes flag", name)
+            result = subprocess.run(forced, capture_output=True, text=True, timeout=60,
+                                    creationflags=_creation_flags(), env=env)
 
     if result.returncode != 0:
         raise RuntimeError(f"gh codespace delete failed: {result.stderr.strip()}")

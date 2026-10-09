@@ -25,7 +25,8 @@ File layout (``<config_dir>/active.json``)::
 
     {
       "active":   {"bind": "127.0.0.1", "port": 9281, "pid": 1234,
-                   "version": "0.4.0", "generation": 7},
+                   "version": "0.4.0", "generation": 7,
+                   "process_start_time": "98765"},
       "previous": {"bind": "127.0.0.1", "port": 9282, "pid": 1200,
                    "version": "0.4.0", "generation": 6},
       "epoch": "2026-06-26T22:40:00Z"
@@ -89,6 +90,7 @@ class Endpoint:
     pid: int | None = None
     version: str | None = None
     generation: int = 0
+    process_start_time: str | None = None
 
     @property
     def client_host(self) -> str:
@@ -110,12 +112,18 @@ class Endpoint:
     @classmethod
     def from_dict(cls, data: dict) -> Endpoint | None:
         try:
+            start_time = data.get("process_start_time")
+            if start_time is not None and (
+                not isinstance(start_time, str) or not start_time.isdigit()
+            ):
+                return None
             return cls(
                 bind=str(data["bind"]),
                 port=int(data["port"]),
                 pid=(int(data["pid"]) if data.get("pid") is not None else None),
                 version=(str(data["version"]) if data.get("version") else None),
                 generation=int(data.get("generation", 0)),
+                process_start_time=start_time,
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -301,13 +309,33 @@ def _publish_active_unlocked(
     version: str | None = None,
     generation: int | None = None,
     demote_existing: bool = False,
+    process_start_time: str | None = None,
+    capture_process_identity: bool = True,
 ) -> tuple[Endpoint, Endpoint | None]:
+    # diagnostics also imports routing; resolve the shared primitive at call time.
+    from .diagnostics import process_start_time as read_process_start_time
+
+    if process_start_time is not None:
+        if not isinstance(process_start_time, str) or not process_start_time.isdigit():
+            raise ValueError("process_start_time must be a non-empty numeric string")
+        if pid is None or pid <= 0:
+            raise ValueError("process_start_time requires a positive pid")
+        if read_process_start_time(pid) != process_start_time:
+            raise ActivePublicationRefused("process identity changed before publication")
+    elif capture_process_identity and pid is not None and pid > 0:
+        process_start_time = read_process_start_time(pid)
+        if process_start_time is None:
+            log.warning(
+                "Publishing pid %d without a process identity token; "
+                "identity-bound supervision must reject this route", pid,
+            )
     path = routing_table_path(config_dir)
     current = read_table(config_dir) or {}
     gen = generation if generation is not None else _next_generation(current)
 
     new_active = Endpoint(
-        bind=bind, port=port, pid=pid, version=version, generation=gen
+        bind=bind, port=port, pid=pid, version=version, generation=gen,
+        process_start_time=process_start_time,
     )
     table: dict = {"active": new_active.to_dict()}
 
@@ -337,6 +365,7 @@ def _same_endpoint(left: Endpoint | None, right: Endpoint | None) -> bool:
         and left.pid == right.pid
         and left.version == right.version
         and left.generation == right.generation
+        and left.process_start_time == right.process_start_time
     )
 
 
@@ -370,6 +399,7 @@ def publish_active(
     version: str | None = None,
     generation: int | None = None,
     demote_existing: bool = False,
+    process_start_time: str | None = None,
 ) -> Endpoint:
     """Publish ``host:port`` as the active endpoint, atomically.
 
@@ -377,6 +407,10 @@ def publish_active(
     *different* port, it is recorded as ``previous`` (the cutover flip). When it
     is the same port (a plain restart re-announcing itself) it is simply
     replaced. ``generation`` defaults to one past the highest recorded value.
+    A live ``pid`` is recorded with its process start token at publication,
+    not reconstructed by a later reader. A caller holding a spawn-time
+    baseline can supply ``process_start_time``; changed or unverifiable
+    identity then refuses publication without modifying the existing route.
     """
     with _routing_lock(config_dir):
         active, _previous = _publish_active_unlocked(
@@ -387,6 +421,7 @@ def publish_active(
             version=version,
             generation=generation,
             demote_existing=demote_existing,
+            process_start_time=process_start_time,
         )
         return active
 
@@ -400,6 +435,7 @@ def publish_active_with_previous(
     version: str | None = None,
     generation: int | None = None,
     demote_existing: bool = False,
+    process_start_time: str | None = None,
 ) -> tuple[Endpoint, Endpoint | None]:
     """Publish an active endpoint and return the endpoint it atomically demoted.
 
@@ -416,6 +452,7 @@ def publish_active_with_previous(
             version=version,
             generation=generation,
             demote_existing=demote_existing,
+            process_start_time=process_start_time,
         )
 
 
@@ -431,6 +468,7 @@ def publish_active_with_previous_guarded(
     expected_active: Endpoint | None = None,
     refuse_current: Callable[[dict | None], str | None] | None = None,
     require_expected_active: bool = True,
+    process_start_time: str | None = None,
 ) -> tuple[Endpoint, Endpoint | None]:
     """Publish active while validating the current active row under the lock.
 
@@ -460,6 +498,7 @@ def publish_active_with_previous_guarded(
             version=version,
             generation=generation,
             demote_existing=demote_existing,
+            process_start_time=process_start_time,
         )
 
 
@@ -497,6 +536,7 @@ def restore_previous_if_owner(
                 pid=previous.pid,
                 version=previous.version,
                 generation=_next_generation(data),
+                process_start_time=previous.process_start_time,
             )
             table["active"] = restored.to_dict()
         _atomic_write(routing_table_path(config_dir), table)
@@ -637,6 +677,8 @@ def _reap_stale_active_unlocked(
                 _publish_active_unlocked(
                     config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                     version=prev.version, demote_existing=False,
+                    process_start_time=prev.process_start_time,
+                    capture_process_identity=False,
                 )
                 result["promoted_port"] = prev.port
                 result["reason"] = (
@@ -683,6 +725,8 @@ def _reap_stale_active_unlocked(
             _publish_active_unlocked(
                 config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                 version=prev.version, demote_existing=False,
+                process_start_time=prev.process_start_time,
+                capture_process_identity=False,
             )
             promoted = True
             result["promoted_port"] = prev.port

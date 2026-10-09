@@ -13,6 +13,11 @@ from pathlib import Path
 
 import pytest
 
+from .installer_test_support import (
+    assert_installer_isolated,
+    guard_installer_payload,
+    isolate_installer_environment,
+)
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALL = PLUGIN / "scripts" / "install.ps1"
@@ -36,13 +41,19 @@ def _write_fake_uv(tmp_path: Path) -> Path:
     driver = tmp_path / "fake_uv.py"
     driver.write_text(
         """
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 args = sys.argv[1:]
+with Path(os.environ["TEST_UV_LOG"]).open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps(args) + "\\n")
 mode = os.environ["TEST_UV_MODE"]
+if args == ["--version"]:
+    print("uv test")
+    raise SystemExit(0)
 if mode == "fail-all":
     raise SystemExit(23)
 if args and args[0] == "run":
@@ -92,7 +103,7 @@ raise SystemExit(2)
         encoding="utf-8",
     )
     (fake_bin / "uv.cmd").write_text(
-        '@"%TEST_BASE_PYTHON%" "%TEST_FAKE_UV%" %*\n',
+        '@"%TEST_BASE_PYTHON%" "%TEST_FAKE_UV%" %*\n@exit /b %ERRORLEVEL%\n',
         encoding="ascii",
     )
     return fake_bin
@@ -114,13 +125,18 @@ def _environment(
         {
             "USERPROFILE": str(home),
             "OS": "Windows_Test",
-            "PATH": str(fake_bin) if uv_only else str(fake_bin) + os.pathsep + env["PATH"],
             "TEST_BASE_PYTHON": sys.executable,
             "TEST_FAKE_UV": str(driver),
             "TEST_UV_MODE": mode,
             "TEST_UV_SIGNAL": str(fake_bin.parent / "uv-started"),
+            "TEST_UV_LOG": str(fake_bin.parent / "uv.jsonl"),
         }
     )
+    isolate_installer_environment(env, home, fake_bin, PWSH)
+    if not uv_only:
+        (fake_bin / "python.cmd").write_text(
+            '@"%TEST_BASE_PYTHON%" %*\n@exit /b %ERRORLEVEL%\n', encoding="ascii",
+        )
     return env
 
 
@@ -134,10 +150,15 @@ def _run(
     force: bool = False,
     uv_only: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    if install == INSTALL:
+        payload = fake_bin.parent / "source"
+        if not payload.exists():
+            _copy_plugin_tree(payload)
+        install = payload / "scripts" / "install.ps1"
     args = [PWSH, "-NoProfile", "-File", str(install), action]
     if force:
         args.append("-Force")
-    return subprocess.run(
+    result = subprocess.run(
         args,
         cwd=home,
         env=_environment(
@@ -153,6 +174,11 @@ def _run(
         timeout=120,
         check=False,
     )
+    assert_installer_isolated(fake_bin)
+    if action == "install":
+        calls = [json.loads(line) for line in (fake_bin.parent / "uv.jsonl").read_text().splitlines()]
+        assert ["--version"] in calls, result.stdout
+    return result
 
 
 def _slot(home: Path) -> Path:
@@ -168,16 +194,20 @@ def _copy_plugin_tree(dst: Path) -> None:
         dst,
         ignore=ignored,
     )
-    sources = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
-    for _name, spec in sources.get("tool", {}).get("uv", {}).get("sources", {}).items():
-        rel = spec.get("path") if isinstance(spec, dict) else None
-        if not isinstance(rel, str) or not rel.startswith("../../libs/"):
-            continue
-        lib_name = Path(rel).name
-        target = dst / "libs" / lib_name
-        if target.exists():
-            continue
-        shutil.copytree((PLUGIN / rel).resolve(), target, ignore=ignored)
+    repo = PLUGIN.parents[1]
+    sys.path.insert(0, str(repo / "tools"))
+    try:
+        import materialize_main
+    finally:
+        sys.path.pop(0)
+    logs = materialize_main.materialize_uv_editable_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=dst, canonical_root=repo,
+    )
+    logs += materialize_main.materialize_installer_engine_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=dst, canonical_root=repo,
+    )
+    assert not any(line.startswith("SKIP") for line in logs), logs
+    guard_installer_payload(dst)
 
 
 def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) -> None:
@@ -364,6 +394,10 @@ def test_first_use_propagates_provision_failure(tmp_path: Path) -> None:
 
     assert result.returncode != 0, result.stdout
     assert "provisioning failed" in result.stdout
+    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    assert calls[0] == ["--version"], result.stdout
+    assert any(call[0] == "venv" for call in calls), result.stdout
+    assert_installer_isolated(fake_bin)
 
 
 def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
@@ -393,6 +427,7 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
 
     assert result.returncode == 0, result.stdout
     assert not (home / ".agent-codespaces").exists()
+    assert_installer_isolated(fake_bin)
     assert not (home / ".local" / "bin" / "agent-codespaces.ps1").exists()
     assert not (home / ".local" / "bin" / "agent-codespaces.cmd").exists()
 
@@ -438,3 +473,7 @@ def test_marketplace_staged_uninstall_waits_without_holding_runtime_cwd(
     assert install_process.returncode != 0, install_output
     assert uninstall.returncode == 0, uninstall.stdout
     assert not (home / ".agent-codespaces").exists()
+    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    assert ["--version"] in calls, install_output
+    assert any(call[:2] == ["pip", "install"] for call in calls), install_output
+    assert_installer_isolated(fake_bin)
