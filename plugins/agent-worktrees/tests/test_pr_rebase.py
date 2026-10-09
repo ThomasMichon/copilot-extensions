@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_publish, tracking
+from agent_worktrees import pr_rebase
 
 # Each case exercises multiple real publications and bounded Git graph probes.
 pytestmark = pytest.mark.timeout(180)
+exhaustive = pytest.mark.skipif(
+    os.environ.get("AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE") != "1",
+    reason="Run PR rebase full or set AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE=1",
+)
 
 
 def _git(*args, cwd):
@@ -53,10 +61,10 @@ def _publish(command, config, wid):
 
 
 @pytest.mark.parametrize("scheme,command,flow", [
-    ("snapshot", "push-changes", "sync"),
-    ("snapshot", "create-pr", "manual"),
-    ("refspec", "push-changes", "manual"),
-    ("refspec", "create-pr", "sync"),
+    pytest.param("snapshot", "push-changes", "sync", marks=exhaustive),
+    pytest.param("snapshot", "create-pr", "manual", marks=exhaustive),
+    pytest.param("refspec", "push-changes", "manual", marks=pytest.mark.guard),
+    pytest.param("refspec", "create-pr", "sync", marks=exhaustive),
 ])
 def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, scheme, command, flow):
     config, wid, path, remote, branch, old = _prepare(pr_repo, scheme)
@@ -89,7 +97,10 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, scheme, command,
         assert _publish(command, config, wid)
 
 
-@pytest.mark.parametrize("command", ["push-changes", "create-pr"])
+@pytest.mark.parametrize("command", [
+    pytest.param("push-changes", marks=pytest.mark.guard),
+    pytest.param("create-pr", marks=exhaustive),
+])
 def test_owned_pr_rebase_rejects_concurrent_reviewer_commit(pr_repo, command):
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
@@ -110,6 +121,7 @@ def test_owned_pr_rebase_rejects_concurrent_reviewer_commit(pr_repo, command):
     assert _record(wid).pr.head_sha == old
 
 
+@exhaustive
 @pytest.mark.parametrize("mutation", ["reset", "same-tree-reset", "amend", "drop"])
 def test_owned_pr_rebase_refuses_unproved_source_rewrite(pr_repo, mutation):
     config, wid, path, remote, branch, old = _prepare(pr_repo)
@@ -134,6 +146,7 @@ def test_owned_pr_rebase_refuses_unproved_source_rewrite(pr_repo, mutation):
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
 
 
+@exhaustive
 def test_owned_pr_rebase_does_not_authorize_shared_default_or_foreign_heads(pr_repo):
     config, wid, path, remote, original_branch, old = _prepare(pr_repo)
     onto = _advance(config, path)
@@ -153,6 +166,7 @@ def test_owned_pr_rebase_does_not_authorize_shared_default_or_foreign_heads(pr_r
     assert _git("--git-dir", str(remote), "rev-parse", original_branch, cwd=path) == old
 
 
+@exhaustive
 def test_owned_pr_rebase_keeps_generic_push_fail_closed(pr_repo):
     config, _, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
@@ -170,6 +184,7 @@ def test_owned_pr_rebase_keeps_generic_push_fail_closed(pr_repo):
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
 
 
+@exhaustive
 def test_owned_pr_rebase_publishes_legacy_checked_out_private_head(pr_repo):
     config, wid, path, remote, branch, old = _prepare(pr_repo, "snapshot")
     _git("checkout", branch, cwd=path)
@@ -182,6 +197,7 @@ def test_owned_pr_rebase_publishes_legacy_checked_out_private_head(pr_repo):
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
 
 
+@exhaustive
 def test_owned_pr_rebase_recovers_legacy_stale_published_patch_cache(pr_repo):
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
     original_patch = _record(wid).pr.patch_id
@@ -207,7 +223,10 @@ def test_owned_pr_rebase_recovers_legacy_stale_published_patch_cache(pr_repo):
     assert (path / "reviewed-feedback.txt").read_text() == "already published\n"
 
 
-@pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
+@pytest.mark.parametrize("scheme", [
+    pytest.param("snapshot", marks=exhaustive),
+    pytest.param("refspec", marks=pytest.mark.guard),
+])
 def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo, scheme, capsys):
     config, wid, path, remote, branch, old = _prepare(pr_repo, scheme)
     _advance(config, path)
@@ -224,6 +243,7 @@ def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo, scheme, capsys)
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
 
 
+@exhaustive
 @pytest.mark.parametrize("command", ["push-changes", "create-pr"])
 def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, command):
     config, wid, path, remote, branch, old = _prepare(pr_repo)
@@ -247,3 +267,47 @@ def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, comma
     metadata = Path(_git("rev-parse", "--absolute-git-dir", cwd=path))
     proof = json.loads((metadata / "agent-worktrees-pr-rebase.json").read_text())
     assert proof["conflict_replays"] == [[old, tip]]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("changed_message", [" Message\n", "Message\n\n"])
+def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch, changed_message):
+    def fake_git(*args, cwd, check):
+        if args[0] == "rev-list":
+            stdout = "old\n" if args[-1] == "base..original" else "new\n"
+        else:
+            message = "Message\n" if args[-1] == "old" else changed_message
+            stdout = "Author\x00author@example.com\x002026-01-01T00:00:00Z\x00" + message
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(git_ops, "git", fake_git)
+    assert pr_rebase._conflict_lineage(
+        "base", "original", "onto", "finished", ["old-patch"], ["new-patch"], [],
+        [("new", "rebase (continue): Message")], "unused",
+    ) is None
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32" or os.environ.get("AGENT_WORKTREES_NATIVE_HEADLESS_TEST") != "1",
+    reason="Opt-in native Windows consoleless-parent observation",
+)
+def test_owned_pr_rebase_native_headless_two_cycles(pr_repo, tmp_path):
+    from agent_procutil import no_window_kwargs
+
+    _config, _wid, path, _remote, _branch, head = _prepare(pr_repo)
+    base = _record(_wid).pr.base_sha
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    assert pythonw.is_file()
+    result = tmp_path / "window-observation.json"
+    source = Path(git_ops.__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [str(pythonw), "-I", str(Path(__file__).with_name("native_pr_rebase_headless.py")),
+         str(source), str(path), base, head, str(result)],
+        capture_output=True, text=True, timeout=90, **no_window_kwargs(),
+    )
+    assert proc.returncode == 0, proc.stderr
+    observation = json.loads(result.read_text(encoding="utf-8"))
+    assert observation["cycles"] == 2
+    assert observation["observed_descendants"] > 0
+    assert observation["visible_windows"] == observation["foreground_owned"] == 0
+    assert observation["errors"] == []

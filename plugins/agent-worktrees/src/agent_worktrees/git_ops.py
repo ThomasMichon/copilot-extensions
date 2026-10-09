@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import env_scrub, push_timeout
 
 log = logging.getLogger("agent-worktrees")
@@ -101,6 +103,7 @@ def resolve_to_anchor(repo_path: Path) -> Path:
                 ["git", "-C", str(repo_path), "rev-parse", "--git-common-dir"],
                 capture_output=True, text=True, timeout=5,
                 env=repository_identity_env(),
+                **no_window_kwargs(),
             )
             if r.returncode == 0:
                 common = Path(r.stdout.strip())
@@ -1203,7 +1206,7 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
         # context points at (see :func:`repository_identity_env`).
         probe = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--git-dir"],
-            capture_output=True, text=True, timeout=10, env=env,
+            capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
         )
         if probe.returncode != 0:
             return False
@@ -1222,12 +1225,12 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
             with _credential_pin_lock(path, git_dir):
                 subprocess.run(
                     ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
-                    capture_output=True, text=True, timeout=10, env=env,
+                    capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
                 )
                 subprocess.run(
                     ["git", "-C", str(path), "config", "--local", "--unset-all",
                      f"{key}.username"],
-                    capture_output=True, text=True, timeout=10, env=env,
+                    capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
                 )
             return False
         with _credential_pin_lock(path, git_dir):
@@ -1238,20 +1241,20 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
             )
             subprocess.run(
                 ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
             subprocess.run(
                 ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", ""],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
             subprocess.run(
                 ["git", "-C", str(path), "config", "--local", f"{key}.username", login],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
             result = subprocess.run(
                 ["git", "-C", str(path), "config", "--local", "--add",
                  f"{key}.helper", helper_script],
-                capture_output=True, text=True, timeout=10, env=env,
+                capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
             )
         return result.returncode == 0
     except Exception:

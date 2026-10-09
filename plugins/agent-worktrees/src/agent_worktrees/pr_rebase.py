@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from agent_procutil import no_window_kwargs
 
 from . import git_ops, hooks, tracking
 
@@ -31,8 +32,12 @@ class RebaseProof:
 
 
 def _git(*args: str, cwd: str) -> str:
+    return _git_raw(*args, cwd=cwd).strip()
+
+
+def _git_raw(*args: str, cwd: str) -> str:
     result = git_ops.git(*args, cwd=cwd, check=False)
-    return result.stdout.strip() if result.returncode == 0 else ""
+    return result.stdout if result.returncode == 0 else ""
 
 
 def _ancestor(old: str, new: str, cwd: str) -> bool:
@@ -59,7 +64,7 @@ def _series(base: str, head: str, cwd: str) -> list[str] | None:
             ["git", "patch-id", "--verbatim"], input=diff, cwd=cwd,
             env=git_ops.repository_identity_env(), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -142,8 +147,8 @@ def _conflict_lineage(
     conflicts = []
     for (old_sha, old_patch), new_sha, new_patch, (_, action) in zip(candidates, new_shas, new, steps):
         identity = "--format=%an%x00%ae%x00%aI%x00%B"
-        before = _git("show", "-s", identity, old_sha, cwd=cwd)
-        after = _git("show", "-s", identity, new_sha, cwd=cwd)
+        before = _git_raw("show", "-s", identity, old_sha, cwd=cwd)
+        after = _git_raw("show", "-s", identity, new_sha, cwd=cwd)
         if not before or before != after:
             return None
         if old_patch != new_patch:
