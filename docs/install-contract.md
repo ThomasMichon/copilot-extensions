@@ -292,9 +292,9 @@ bounded-wait wrapper (`Wait-ForVersionedSlotLease`/
 deadline, configurable via `AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC` (default 180
 seconds), with a poll interval via `AGENT_WORKTREES_SLOT_LEASE_POLL_MS`
 (PowerShell, default 1000) or `AGENT_WORKTREES_SLOT_LEASE_POLL_SEC` (bash,
-default 1). Only genuine contention is retried; any other lease-machinery
-failure (permission/path/storage) fails immediately regardless of the
-configured budget. Reaching the deadline without acquiring the lease fails the
+default 1). Only genuine contention is retried; any other failure of the
+authoritative gate (permission/path/storage) fails immediately regardless of
+the configured budget. Reaching the deadline without acquiring the lease fails the
 build with an actionable error naming the env var to raise if builds routinely
 take longer than the default.
 

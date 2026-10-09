@@ -1154,7 +1154,14 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
         return 1
     fi
 
-    if ! IFS= read -r -t 10 -u 7 line; then
+    # The status read's own timeout defaults to 10s, but
+    # _wait_for_versioned_slot_lease (via bash's dynamic scoping of `local`
+    # across callees) caps it to whatever of its own wall-clock budget
+    # actually remains -- otherwise this blocking read alone could consume
+    # up to 10s beyond a much shorter caller-configured deadline.
+    local read_timeout="${_VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT:-10}"
+    case "$read_timeout" in (*[!0-9]*|'') read_timeout=10 ;; esac
+    if ! IFS= read -r -t "$read_timeout" -u 7 line; then
         line=""
     fi
     exec 7>&- || true
@@ -1316,20 +1323,6 @@ _wait_for_versioned_slot_lease() {
     # waiting out a persistent, non-transient failure would just convert a
     # fast, actionable error into a slow, identical one. Returns 0 iff the
     # lease was ultimately acquired.
-    #
-    # Every _acquire_versioned_slot_lease call below forces
-    # _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT (visible to the mkdir
-    # fallback via bash's dynamic scoping of `local` across callees): the
-    # mkdir fallback's OWN default retry loop is itself up to ~10 nested
-    # one-second sleeps, which would silently let a single poll iteration
-    # here blow straight through a short caller-configured budget (e.g.
-    # AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC=2) before this function's own
-    # deadline check ever runs again. Collapsing each attempt to a single,
-    # near-instant check keeps the caller's wall-clock budget authoritative.
-    local _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT=1
-    if _acquire_versioned_slot_lease; then return 0; fi
-    [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
-
     local wait_seconds="${AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC:-180}"
     local poll_seconds="${AGENT_WORKTREES_SLOT_LEASE_POLL_SEC:-1}"
     case "$wait_seconds" in (*[!0-9]*|'') wait_seconds=180 ;; esac
@@ -1343,24 +1336,51 @@ _wait_for_versioned_slot_lease() {
     [[ "$poll_seconds" -gt 0 ]] || poll_seconds=1
     [[ "$wait_seconds" -gt 0 ]] || return 1
 
-    local start_epoch now_epoch elapsed remaining sleep_for
+    local start_epoch now_epoch elapsed remaining
     start_epoch="$(date +%s)"
     while :; do
         now_epoch="$(date +%s)"
         elapsed=$((now_epoch - start_epoch))
-        if [[ "$elapsed" -ge "$wait_seconds" ]]; then
+        remaining=$((wait_seconds - elapsed))
+        if [[ "$remaining" -le 0 ]]; then
+            return 1
+        fi
+        # Every _acquire_versioned_slot_lease call below forces TWO
+        # dynamically-scoped locals (visible to the mkdir fallback and the
+        # no-flock Python fallback via bash's dynamic scoping of `local`
+        # across callees), capping each to whatever budget actually
+        # remains THIS iteration: the mkdir fallback's own default retry
+        # loop is up to ~10 nested one-second sleeps, and the no-flock
+        # fallback's status read blocks up to 10 seconds on its own --
+        # either would otherwise let a single attempt silently blow
+        # straight through a short caller-configured budget (e.g.
+        # AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC=2) before this function's own
+        # deadline check ever runs again. Collapsing each attempt (and
+        # bounding the helper's own internal wait) to the remaining budget
+        # keeps the caller's wall-clock deadline authoritative end to end.
+        local _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT=1
+        local _VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT="$remaining"
+        if [[ "$_VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT" -gt 10 ]]; then
+            _VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT=10
+        fi
+        if _acquire_versioned_slot_lease; then return 0; fi
+        [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
+
+        # Re-measure: the attempt above may itself have consumed real
+        # time (e.g. the no-flock fallback's bounded status read).
+        now_epoch="$(date +%s)"
+        elapsed=$((now_epoch - start_epoch))
+        remaining=$((wait_seconds - elapsed))
+        if [[ "$remaining" -le 0 ]]; then
             return 1
         fi
         # Cap this poll's sleep to whatever budget remains, so the final
         # iteration can never itself overshoot the configured deadline.
-        remaining=$((wait_seconds - elapsed))
-        sleep_for="$poll_seconds"
+        local sleep_for="$poll_seconds"
         if [[ "$sleep_for" -gt "$remaining" ]]; then
             sleep_for="$remaining"
         fi
         sleep "$sleep_for"
-        if _acquire_versioned_slot_lease; then return 0; fi
-        [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
     done
 }
 

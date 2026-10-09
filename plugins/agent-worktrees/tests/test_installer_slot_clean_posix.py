@@ -675,15 +675,21 @@ def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the
     )
 
     assert 'exec 7<>"$out_fifo"' in fallback_body
-    read_idx = fallback_body.index("IFS= read -r -t 10")
+    read_idx = fallback_body.index('IFS= read -r -t "$read_timeout"')
     open_idx = fallback_body.index('exec 7<>"$out_fifo"')
     assert open_idx < read_idx, (
         "the read-write fd on out_fifo must be opened BEFORE the helper "
         "is launched, so the subsequent bounded read never performs its "
         "own blocking read-only open"
     )
-    assert "read -r -t 10 -u 7 line" in fallback_body
-    assert '<"$out_fifo"' not in fallback_body.split("IFS= read -r -t 10", 1)[1][:30]
+    assert 'read -r -t "$read_timeout" -u 7 line' in fallback_body
+    assert '<"$out_fifo"' not in fallback_body.split(
+        'IFS= read -r -t "$read_timeout"', 1
+    )[1][:30]
+    # The 10s default is still the effective bound for every caller that
+    # doesn't override it (only _wait_for_versioned_slot_lease does, to
+    # cap this read against its own remaining wall-clock budget).
+    assert 'read_timeout="${_VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT:-10}"' in fallback_body
 
 
 def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
