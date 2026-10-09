@@ -1495,7 +1495,9 @@ against PID reuse and `wrapper_pid` retaining the headless console wrapper for
 diagnostics (`wrapper_started_at` protects the initial pre-worker record).
 Legacy live PIDs without birth evidence are not automatically force-reaped.
 Stale reaping terminates that supervisor's whole tree, not only
-the console wrapper. Completion updates only its own attempt, so a late worker
+the console wrapper. The target's native handle is pinned and its birth identity
+revalidated immediately before signaling. Completion updates only its own
+attempt, so a late worker
 cannot overwrite a replacement's status. Invalid prior ownership metadata
 defers reconciliation with a diagnostic instead of risking another installer.
 The launcher starts outside the singleton payload and clears inherited

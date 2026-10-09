@@ -209,11 +209,24 @@ try {
                     [Console]::Error.WriteLine("[$name] stale legacy reconcile ownership is unverified; not reaping its PID")
                     Exit-SessionStart
                 }
-                & taskkill.exe /PID $prevPid /T /F *> $null
-                if ($LASTEXITCODE -ne 0 -and
-                    (Get-Process -Id $prevPid -ErrorAction SilentlyContinue)) {
-                    [Console]::Error.WriteLine("[$name] could not reap stale reconcile tree; leaving it recorded")
-                    Exit-SessionStart
+                $reapProcess = Get-Process -Id $prevPid -ErrorAction SilentlyContinue
+                if (-not $reapProcess) { Exit-SessionStart }
+                try {
+                    # Pin the process object so its PID cannot be recycled while
+                    # taskkill acts; check this fresh handle's identity, not cache.
+                    [void]$reapProcess.Handle
+                    if ($reapProcess.HasExited -or
+                        $reapProcess.StartTime.ToUniversalTime() -ne $startedAt.UtcDateTime) {
+                        [Console]::Error.WriteLine("[$name] reconcile identity changed before reaping; leaving it recorded")
+                        Exit-SessionStart
+                    }
+                    & taskkill.exe /PID $prevPid /T /F *> $null
+                    if ($LASTEXITCODE -ne 0 -and -not $reapProcess.HasExited) {
+                        [Console]::Error.WriteLine("[$name] could not reap stale reconcile tree; leaving it recorded")
+                        Exit-SessionStart
+                    }
+                } finally {
+                    $reapProcess.Dispose()
                 }
             }
         }

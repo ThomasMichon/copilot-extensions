@@ -297,3 +297,47 @@ def test_terminating_installer_error_is_recorded_in_status_and_log(reconcile):
     assert status["exit_code"] == 1 and status["success"] is False
     assert "fixture failure" in read_log(runtime / "reconcile.log")
     assert status["attempt_id"] in read_log(runtime / "reconcile.log")
+
+
+def test_identity_change_at_final_reap_lookup_is_not_signaled(reconcile):
+    runtime, run_hook, read, plugin = reconcile
+    (runtime / "block").touch()
+    run_hook()
+    stub = wait_for(lambda: read("stub.json"), lambda s: s.get("child"))
+    status = read("reconcile-status.json")
+    status["at"] = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+    (runtime / "reconcile-status.json").write_text(json.dumps(status), encoding="utf-8")
+    scripts = plugin / "scripts"
+    (scripts / HOOK.name).rename(scripts / "real-bootstrap.ps1")
+    (scripts / HOOK.name).write_text(
+        r"""
+$global:reapQueries = 0
+function Get-Process {
+    [CmdletBinding()]
+    param([int]$Id)
+    $process = Microsoft.PowerShell.Management\Get-Process -Id $Id -ErrorAction Stop
+    if ($Id -eq [int]$env:REAP_TEST_PID) {
+        $global:reapQueries++
+        if ($global:reapQueries -eq 2) {
+            $changed = [pscustomobject]@{
+                Handle = $process.Handle
+                HasExited = $false
+                StartTime = $process.StartTime.AddDays(1)
+            }
+            $changed | Add-Member -MemberType ScriptMethod -Name Dispose -Value {}
+            return $changed
+        }
+    }
+    return $process
+}
+function taskkill.exe {
+    Set-Content (Join-Path $env:USERPROFILE '.agent-bridge\unexpected-kill') 'called'
+    $global:LASTEXITCODE = 0
+}
+& (Join-Path $PSScriptRoot 'real-bootstrap.ps1')
+""", encoding="utf-8")
+    result = run_hook(extra_env={"REAP_TEST_PID": str(stub["pid"])})
+    assert "identity changed before reaping" in result.stderr
+    assert not (runtime / "unexpected-kill").exists()
+    assert alive(stub["pid"]) and alive(stub["child"])
+    assert read("reconcile-status.json")["attempt_id"] == status["attempt_id"]
