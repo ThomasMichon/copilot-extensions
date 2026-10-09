@@ -224,3 +224,23 @@ boundaries from implementation decisions and deployment-specific policy.
 - Baseline native service and warm engine are healthy, active indexing remains
   adopted, and a complete previous native version slot is retained. A bounded
   development health check is active; it is not new permanent service supervision.
+- Four-piece/authenticated-boundary amendment #5830 merged after review and
+  passing required CI. Component/job/source-scoped authorization and rejected
+  unauthenticated/cross-role operations are acceptance requirements for remote
+  adapters.
+- Initial code slice adds a normal `agent-index-service` API/controller program
+  with explicit repository-independent local component composition, preserving
+  existing client and core behavior. The embedding program is not renamed.
+  The existing standalone-consumer release mechanism is extended; no second
+  plugin or changefile schema is introduced.
+- Installed-core contained standalone suite: 68 tests passed, including two
+  real isolated zdd deployments, persisted query compatibility and synthetic
+  worker adoption. Core boundary/explicit-source/lazy-import selection: 37
+  passed with 2 platform skips. Release/materialization/rollback regressions
+  pass after repairing fixture dependency closure and a Windows symlink-target
+  identity assertion. Code is still awaiting publication and canary eligibility.
+- Canary API and warm engine remain healthy through existing fleet maintenance.
+  An incumbent indexing run ended partial after embedding read timeouts on two
+  sources; a successor incremental worker is active. A short warm-engine query
+  remains responsive. Live rollout changes are paused while that CPU/batch
+  timeout risk is classified; no worker is cancelled or engine cold-restarted.

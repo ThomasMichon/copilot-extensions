@@ -85,7 +85,7 @@ def _lib_copies() -> dict[str, list[Path]]:
             for lib in sorted(libs.iterdir()):
                 if lib.is_dir():
                     copies.setdefault(lib.name, []).append(lib)
-    for extra in ("worktree-manager",):
+    for extra in uer._EXTRA_CONSUMER_DIRS:
         libs = REPO / extra / "libs"
         if not libs.is_dir():
             continue

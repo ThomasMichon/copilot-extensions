@@ -127,7 +127,7 @@ POINTER_NAME = "VENDOR_POINTER.json"
 # same way -- kept in one place so every lib-copy-locating path (agreement
 # checks, --materialize, --pointerize) resolves a consumer consistently
 # instead of each hardcoding "plugins/<x>" and silently missing these.
-_EXTRA_CONSUMER_DIRS = ("worktree-manager",)
+_EXTRA_CONSUMER_DIRS = uer._EXTRA_CONSUMER_DIRS
 
 _IGNORE_PARTS = {
     ".git",

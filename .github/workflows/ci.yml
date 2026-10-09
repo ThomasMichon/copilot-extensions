@@ -807,6 +807,24 @@ jobs:
           tools/test_run_plugin_tests.py
           tools/test_run_tests_in_devcontainer.py
 
+  agent-index-service:
+    name: agent-index-service (${{ matrix.os }}, out-of-plugin)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test standalone controller with installed core and host containment
+        run: python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60
+
   test-runner-windows:
     name: test runner (windows-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
@@ -1124,6 +1142,7 @@ jobs:
       - windows-python-artifact-builder
       - windows-hooks
       - worktree-manager
+      - agent-index-service
       - test-runner-linux
       - test-runner-windows
       - archive-sources-windows

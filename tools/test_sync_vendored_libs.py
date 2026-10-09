@@ -44,7 +44,7 @@ def repo(tmp_path: Path) -> Path:
     # purely to keep it under this repo's per-module line-count cap) --
     # an isolated tree carrying only the script itself would otherwise
     # fail every subprocess invocation with ModuleNotFoundError.
-    for sibling in ("uv_editable_ref.py",):
+    for sibling in ("uv_editable_ref.py", "standalone_consumers.py"):
         src = SCRIPT.parent / sibling
         (r / "tools" / sibling).write_bytes(src.read_bytes())
     return r

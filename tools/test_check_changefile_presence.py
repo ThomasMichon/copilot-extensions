@@ -25,7 +25,7 @@ SCRIPT = TOOLS_DIR / "check-changefile-presence.py"
 # test in this file (and was never caught, because this suite isn't wired
 # into CI at all; see the ci.yml note added alongside this fix).
 DEP_SCRIPTS = ["check-version-bump.py", "changefile.py", "uv_editable_ref.py",
-               "installer_engine_ref.py"]
+               "installer_engine_ref.py", "standalone_consumers.py"]
 
 
 def _git(repo: Path, *args: str) -> None:

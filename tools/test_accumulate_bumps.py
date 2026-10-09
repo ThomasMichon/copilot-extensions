@@ -216,6 +216,27 @@ def test_compute_and_apply_bumps_a_standalone_consumer(isolated: Path):
     assert 'version = "0.1.0-dev96"' in pp
 
 
+def test_index_service_bumps_without_marketplace_plugin(isolated: Path):
+    _standalone(isolated, "agent-index-service", "0.1.0-dev1")
+    package = isolated / "agent-index-service" / "src" / "agent_index_service"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        '__version__ = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    changefile.write_changefile(
+        [{"plugin": "agent-index-service", "type": "patch"}], "standalone controller"
+    )
+
+    result = acc.compute(acc.pending_bumps())
+    assert result == {"agent-index-service": ("0.1.0-dev1", "0.1.1-dev1")}
+    assert acc.apply(result) == ["agent-index-service"]
+    assert 'version = "0.1.1-dev1"' in (
+        isolated / "agent-index-service" / "pyproject.toml"
+    ).read_text()
+    assert '__version__ = "0.1.1-dev1"' in (package / "__init__.py").read_text()
+    assert not (isolated / "plugins" / "agent-index-service").exists()
+
+
 def test_standalone_write_only_touches_project_table_version(isolated: Path):
     """A standalone consumer's `pyproject.toml` may legitimately carry an
     earlier, unrelated table with its OWN `version` key (e.g. a build
