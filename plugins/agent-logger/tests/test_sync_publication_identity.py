@@ -497,6 +497,39 @@ def test_exclusive_temp_collision_never_deletes_preexisting_file(
     assert collided[0].read_bytes() == b"another writer's content"
 
 
+@pytest.mark.parametrize("replacement", ["regular", "symlink"])
+def test_post_creation_temp_replacement_is_preserved(
+    tmp_path: Path, monkeypatch, replacement: str,
+) -> None:
+    from agent_logger.sync.targets import publication_admission as admission
+
+    dest = tmp_path / "dest"
+    replacement_path = tmp_path / "replacement"
+    replacement_path.write_bytes(b"another writer's content")
+    swapped = []
+
+    def replace_created_temp(temp_path: Path, marker_path: Path) -> None:
+        if replacement == "regular":
+            os.replace(replacement_path, temp_path)
+        else:
+            temp_path.unlink()
+            try:
+                temp_path.symlink_to(replacement_path)
+            except OSError:
+                pytest.skip("symlink creation is unavailable")
+        swapped.append(temp_path)
+        raise OSError("injected replacement after creation")
+
+    monkeypatch.setattr(admission, "_publish_marker_no_replace", replace_created_temp)
+    result = check_publication_identity(
+        dest, SourceIdentity("machine", "copilot", host="source-host")
+    )
+    assert result is not None and not result.ok
+    assert "identity changed" in result.detail
+    assert swapped[0].read_bytes() == b"another writer's content"
+    assert swapped[0].is_symlink() == (replacement == "symlink")
+
+
 def test_windows_marker_move_is_write_through_without_replacement(
     tmp_path: Path, monkeypatch,
 ) -> None:

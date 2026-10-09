@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
@@ -41,11 +42,19 @@ PUBLICATION_IDENTITY_MARKER = ".archive-source.json"
 #: by definition one the caller does not yet own) and a new claim write.
 MAX_MARKER_BYTES = 1024 * 1024
 
-def _unlink_if_exists(path: Path) -> None:
+def _unlink_owned_temp(path: Path, file_id: tuple[int, int]) -> bool:
     try:
-        os.unlink(windows_extended_path(path))
+        info = os.stat(windows_extended_path(path), follow_symlinks=False)
     except FileNotFoundError:
-        pass
+        return True
+    if (
+        (info.st_dev, info.st_ino) != file_id
+        or not stat.S_ISREG(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & 0x00000400
+    ):
+        return False
+    os.unlink(windows_extended_path(path))
+    return True
 
 
 def _dest_entry_names(dest: Path) -> list[str]:
@@ -209,7 +218,7 @@ def _admit_under_lock(
             ),
         )
     temp_path = dest / f".{PUBLICATION_IDENTITY_MARKER}.{short_unique_id()}.tmp"
-    created_temp = False
+    created_file_id: tuple[int, int] | None = None
     failure: PushResult | None = None
     try:
         ensure_real_directory(dest)
@@ -220,8 +229,9 @@ def _admit_under_lock(
         # overwritten (see _publish_marker_no_replace).
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
         fd = os.open(windows_extended_path(temp_path), flags, 0o644)
-        created_temp = True
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            created = os.fstat(handle.fileno())
+            created_file_id = created.st_dev, created.st_ino
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
@@ -232,9 +242,13 @@ def _admit_under_lock(
     except OSError as exc:
         failure = PushResult(ok=False, detail=f"cannot claim destination: {exc}")
     finally:
-        if created_temp:
+        if created_file_id is not None:
             try:
-                _unlink_if_exists(temp_path)
+                if not _unlink_owned_temp(temp_path, created_file_id):
+                    detail = "claim temporary file identity changed; replacement left untouched"
+                    if failure is not None:
+                        detail = f"{failure.detail}; {detail}"
+                    failure = PushResult(ok=False, detail=detail)
             except OSError as exc:
                 detail = f"cannot remove owned claim temporary file: {exc}"
                 if failure is not None:
