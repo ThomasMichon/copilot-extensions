@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 import pytest
 
 from machine_transport.identity import is_local_machine
@@ -15,6 +16,16 @@ def _loader(entries):
 
 
 class TestIsLocalMachine:
+    @pytest.mark.parametrize("configured", ["", "unregistered"])
+    def test_consumer_identity_without_optional_scope_fields(self, configured):
+        entry = SimpleNamespace(
+            key="legacy-box", alias="", hostname="local-host", display_name="Legacy",
+        )
+        assert is_local_machine(
+            entry.key, config_machine=configured,
+            load_entries=lambda: {entry.key: entry}, real_hostname=entry.hostname,
+        )
+
     def test_exact_match_against_config_machine(self):
         assert is_local_machine(
             "aurora-cloud2", config_machine="aurora-cloud2",

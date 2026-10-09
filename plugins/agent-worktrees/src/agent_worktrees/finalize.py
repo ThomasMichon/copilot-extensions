@@ -1195,9 +1195,10 @@ def _settle_current_session_claim(
     from . import locks as _locks
     from . import status_monitor_runtime as _smr
     from . import tracking_write
+    from .execution_spaces import ExecutionSpaceError
 
     try:
-        tracking_write.dispatch(
+        result = tracking_write.dispatch(
             "claim_settle",
             {
                 "worktree_id": record.worktree_id,
@@ -1212,7 +1213,11 @@ def _settle_current_session_claim(
             ),
             min_version=2,
         )
+        if result.get("error") == "rejected":
+            raise ExecutionSpaceError(result["message"])
         record = tracking.load_record(yaml_path)
+    except ExecutionSpaceError:
+        raise
     except Exception:
         pass
     return record, current_session_ref
@@ -1569,9 +1574,14 @@ def validate_and_finalize(
     # job to reclaim -- not solved here, to keep this slice's scope to the
     # register/deregister/finalize wiring itself.
     current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    record, current_session_ref = _settle_current_session_claim(
-        yaml_path, record, current_session_id,
-    )
+    from .execution_spaces import ExecutionSpaceError
+    try:
+        record, current_session_ref = _settle_current_session_claim(
+            yaml_path, record, current_session_id,
+        )
+    except ExecutionSpaceError as exc:
+        output.err(str(exc))
+        return False
     _advise_other_live_sessions(record, current_session_ref)
 
     # pr-merge-obligation-gate defense 2: refresh the tracked PR(s) against

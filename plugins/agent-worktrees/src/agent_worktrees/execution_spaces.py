@@ -99,7 +99,7 @@ def registry_for_config(config: Any) -> dict[str, MachineEntry]:
         return cfg.load_machines_yaml(anchor)
     except FileNotFoundError:
         return {}
-    except ValueError as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
 
 
@@ -120,9 +120,10 @@ def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = Tru
             )
         from .config import detect_platform
 
-        if current.execution_platform != detect_platform():
+        platform = detect_platform()
+        if current.execution_platform != platform or getattr(config, "platform", None) != platform:
             raise ExecutionSpaceError(
-                "configured execution-space key does not match the current execution platform"
+                "configured execution-space key and platform must match the current execution platform"
             )
         if target is None or not target.execution_platform or (canonical_ref and owner != target.key):
             raise ExecutionSpaceError(
@@ -149,6 +150,10 @@ def require_record_mutation(record: Any, config: Any) -> None:
     if not require_owner_identity(record.machine, config):
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} belongs to a different execution space"
+        )
+    if getattr(record, "platform", None) != config.platform:
+        raise ExecutionSpaceError(
+            f"record {record.worktree_id!r} has a different or unproven execution platform"
         )
     if record.owner_ref:
         owner = tracking.parse_claim_ref(record.owner_ref)
@@ -181,6 +186,8 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
         entries = cfg.load_machines_yaml(anchor)
     except FileNotFoundError:
         return
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
     if not any(entry.execution_platform for entry in entries.values()):
         return
     require_record_mutation(record, cfg.load_config())
