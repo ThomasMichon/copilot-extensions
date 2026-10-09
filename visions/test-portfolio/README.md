@@ -3,7 +3,7 @@
 - **Subject:** the repository-wide portfolio of automated tests for plugins and shared libraries
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-08-28
+- **Last revised:** 2026-10-09
 - **Reality docs:** [`TESTING.md`](../../TESTING.md)
 
 ## Purpose & Intent
@@ -98,6 +98,16 @@ state, network sessions, or host mutations behind after success, failure,
 interruption, or timeout. Tests that cannot satisfy that guarantee run in a
 disposable or explicitly opt-in venue.
 
+### shared-host admission
+
+Runs sharing a host and operator scope coordinate admission before preparing,
+rebuilding, or using shared mutable test environments. The same authority
+applies across checkouts and execution entry points, including an isolated
+venue whose host-side work still shares those resources. A cheap tier or
+collection-only label does not exempt work that can alter an environment another
+run is using. Genuinely read-only inventory remains available independently;
+contention is explicit, and any requested wait is bounded.
+
 ### cheapest faithful tier
 
 A behavior is tested at the lowest-cost tier that can genuinely falsify it.
@@ -153,3 +163,10 @@ force unrelated contributors to debug an entire subsystem.
 - Current runner: [`tools/run-plugin-tests.py`](../../tools/run-plugin-tests.py)
 - Realization effort:
   [`test-portfolio-rationalization`](../../efforts/active/test-portfolio-rationalization/README.md)
+
+## Provenance
+
+- **2026-10-09** — Folded back shared-host admission and protection of mutable
+  test environments from the common direct-host/devcontainer admission protocol.
+  Distinguished inexpensive feedback from read-only exemption without changing
+  tier availability, assurance-preserving reduction, or containment intent.
