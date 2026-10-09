@@ -654,6 +654,42 @@ def test_zip_raw_nul_name_is_rejected_before_zipfile_truncation(tmp_path: Path) 
         sessions.CODECS["zip"].list_members(archive)
 
 
+@pytest.mark.parametrize("shadowed", [False, True])
+def test_zip_deep_path_conflicts_do_not_reconstruct_all_ancestor_prefixes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shadowed: bool
+) -> None:
+    archive = tmp_path / "deep.zip"
+    deep = "a/" * 32_000 + "leaf"
+    members = [("events.jsonl", b"{}\n"), (deep, b"evidence")]
+    if shadowed:
+        members.extend([(deep + "-sibling", b"sibling"), (deep + "/child", b"conflict")])
+    _zip(archive, members)
+
+    def forbidden_ancestors(path: object) -> None:
+        raise AssertionError("ZIP admission must not rebuild every ancestor prefix")
+
+    monkeypatch.setattr(session_codecs.PurePosixPath, "parents", property(forbidden_ancestors))
+    if shadowed:
+        with pytest.raises(ValueError, match="file shadows a directory"):
+            sessions.CODECS["zip"].list_members(archive)
+    else:
+        assert set(sessions.CODECS["zip"].list_members(archive)) == {"events.jsonl", deep}
+        assert sessions.CODECS["zip"].read_member(archive, deep) == b"evidence"
+
+
+@pytest.mark.parametrize("insensitive", [False, True])
+@pytest.mark.parametrize("order", [("a", "a-/sibling", "a/child"), ("a/child", "a-/sibling", "a")])
+def test_zip_conflict_prefix_search_skips_intervening_siblings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, insensitive: bool, order: tuple[str, ...]
+) -> None:
+    archive = tmp_path / "conflict.zip"
+    monkeypatch.setattr(session_codecs, "_CASE_INSENSITIVE", insensitive)
+    members = [(name.upper() if insensitive and "/" not in name else name, b"x") for name in order]
+    _zip(archive, members)
+    with pytest.raises(ValueError, match="file shadows a directory"):
+        sessions.CODECS["zip"].list_members(archive)
+
+
 @pytest.mark.parametrize("kind", [stat.S_IFLNK, stat.S_IFIFO, stat.S_IFCHR])
 def test_zip_rejects_non_regular_members(tmp_path: Path, kind: int) -> None:
     info = zipfile.ZipInfo("events.jsonl")

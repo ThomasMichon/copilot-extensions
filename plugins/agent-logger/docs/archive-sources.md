@@ -99,7 +99,10 @@ are admitted incrementally before retention, rather than allocating an entire
 directory listing before checking the limit; admitted batches are sorted for
 deterministic traversal. The central
 directory has a 16 MiB budget checked before the standard ZIP parser allocates
-its index. Equality comparison uses the same decoded-content budgets.
+its index. File/directory conflict checks search sorted names by descendant
+prefix rather than rebuilding every ancestor of deeply nested names; cost is
+linear in name length and logarithmic in the bounded member count.
+Equality comparison uses the same decoded-content budgets.
 Tar comparison streams at most 10,000 raw headers,
 including directories and extended headers; extended metadata has a cumulative
 16 MiB budget enforced before its payload is decoded. Old GNU and PAX GNU sparse

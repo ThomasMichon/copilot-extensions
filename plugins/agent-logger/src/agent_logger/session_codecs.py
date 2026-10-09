@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 import zipfile
 from abc import ABC, abstractmethod
+from bisect import bisect_left
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -292,12 +293,12 @@ def _zip_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
         if total > MAX_ARCHIVE_BYTES:
             raise ValueError("session ZIP exceeds its total byte budget")
         result[name] = info
-    file_keys = {name.casefold() if _CASE_INSENSITIVE else name for name in result}
-    for name in result:
-        for parent in PurePosixPath(name).parents:
-            key = str(parent).casefold() if _CASE_INSENSITIVE else str(parent)
-            if key in file_keys:
-                raise ValueError(f"session ZIP file shadows a directory: {name!r}")
+    file_keys = sorted(name.casefold() if _CASE_INSENSITIVE else name for name in result)
+    for index, name in enumerate(file_keys):
+        prefix = name + "/"
+        descendant = bisect_left(file_keys, prefix, lo=index + 1)
+        if descendant < len(file_keys) and file_keys[descendant].startswith(prefix):
+            raise ValueError(f"session ZIP file shadows a directory: {name!r}")
     return result
 
 
