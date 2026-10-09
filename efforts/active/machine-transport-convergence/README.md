@@ -292,3 +292,31 @@ identity authority: reconcile `machine-transport` with #5689's
   rebase and validation. No additional coordination response is needed while
   they work; dependent Dispatch and agent-machines slices still wait for it.
   This campaign remains Active.
+
+### 2026-10-09 - Promoted repair and real consumer publication
+- The repair reached `main` in release #5901 as
+  `db57da73b5ff9795380e9dec2d349861fba5c79a`. Unified `update --force`
+  refreshed installed plugin payloads. Runtime installation initially refused
+  another live build lease; that builder subsequently completed, and the
+  catalog command selected `agent-worktrees 1.24.32-dev1` without a forced
+  lease clear or runtime edit.
+- The deployed command successfully published the actual blocked Bridge
+  source-owned rebase to #5765. A subsequent provider read confirmed the new
+  head, so this is live-consumer evidence, not only a read-only proof.
+  A later sync against current `dev` exposed only an effort-index conflict;
+  reconciled current upstream rows with this campaign's Active status and
+  retained a pre-rebase backup. Rebased Bridge contracts:
+  **242 passed, 1 skipped**.
+- Harness projection reconciliation is in `gim-home/odsp-web-harness#845`.
+  Its fifteen-file diff changes only projection provenance versions and their
+  derived hashes; installed templates and guidance behavior remain unchanged.
+  Local synchronization and harness lint passed; review recommends approval
+  with zero findings. Required CI and merge remain pending.
+- The new exhaustive workflow's first live run, `37914963861`, failed on both
+  platforms during action setup, before running tests: `setup-uv@v9` does not
+  resolve. Follow-up #5905 uses the verified `v9.0.0` tag already used by the
+  successful release pipeline. Both-platform external exhaustive evidence
+  remains unresolved until that fix is reviewed, promoted and executed.
+- No broader completion is claimed. Bridge review/merge, the exhaustive lane,
+  dependent identity consumers, remaining inventory and deployment evidence
+  remain campaign gates.
