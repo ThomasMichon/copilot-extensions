@@ -8,6 +8,7 @@ import time
 
 from fastapi.testclient import TestClient
 
+from agent_bridge import db_live_session_aliases as aliases
 from agent_bridge.app import create_app
 from agent_bridge.db import Database
 from agent_bridge.db_core import LIVE_SESSION_STALE_SECONDS
@@ -31,12 +32,24 @@ def test_an_expired_row_is_revived_by_its_resumed_conversation(tmp_db: Database)
     assert (row["status"], row["pid"]) == ("live", 200)
 
 
-def test_a_live_row_past_its_lease_is_revived_before_the_sweep_marks_it(tmp_db: Database) -> None:
+def test_a_live_row_past_its_lease_is_revived_before_the_sweep_marks_it(tmp_db: Database, monkeypatch) -> None:
+    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: False)
     now = time.time()
     lapsed = now - LIVE_SESSION_STALE_SECONDS - 5
     assert _register(tmp_db, "conv-2", lapsed, pid=100, started=lapsed) == "live"
     assert _register(tmp_db, "conv-2", now, pid=200, started=now) == "live"
     assert tmp_db.get_live_session("conv-2")["pid"] == 200
+
+
+def test_a_lapsed_row_whose_local_process_still_runs_is_not_taken_over(tmp_db: Database, monkeypatch) -> None:
+    """The reaper's rule: a lapsed local row whose pid is alive is wedged, not
+    dead, so admission does not depend on whether the sweep ran yet."""
+    monkeypatch.setattr(aliases, "local_pid_alive", lambda pid: True)
+    now = time.time()
+    lapsed = now - LIVE_SESSION_STALE_SECONDS - 5
+    assert _register(tmp_db, "conv-5", lapsed, pid=100, started=lapsed) == "live"
+    assert _register(tmp_db, "conv-5", now, pid=200, started=now) == "incarnation_mismatch"
+    assert tmp_db.get_live_session("conv-5")["pid"] == 100
 
 
 def test_a_fresh_live_row_is_never_taken_over_by_another_process(tmp_db: Database) -> None:

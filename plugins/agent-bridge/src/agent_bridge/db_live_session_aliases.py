@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any
 
-from .db_core import LIVE_SESSION_STALE_SECONDS
+from .db_core import LIVE_SESSION_STALE_SECONDS, local_pid_alive
 
 log = logging.getLogger("agent-bridge")
 
@@ -105,20 +105,23 @@ def _incarnation_mismatch(
     re-registration may still move machines, as before). Omitted fields never
     conflict -- an id-only heartbeat keeps the row's metadata -- and a
     taken-over row is left to the write's own rejection. A dead row -- ``expired``,
-    or still ``live`` but past its heartbeat lease -- belongs to no running
-    process, so the new incarnation revives it: that is a conversation resumed
-    in a new process (after a restart, or its CodeSpace stopping), which keeps
-    its session id."""
+    or still ``live`` but past its heartbeat lease and not provably running
+    here (the reaper's own rule: a lapsed row whose local pid is alive is
+    ``wedged``, never dead) -- belongs to no running process, so the new
+    incarnation revives it: that is a conversation resumed in a new process
+    (after a restart, or its CodeSpace stopping), which keeps its session id."""
     row = conn.execute(
-        "SELECT machine, pid, process_started_at, status, updated_at FROM live_sessions WHERE session_id=?",
+        "SELECT machine, pid, process_started_at, status, updated_at, venue "
+        "FROM live_sessions WHERE session_id=?",
         (session_id,),
     ).fetchone()
     if row is None:
         return False
     status = row["status"] or "live"
-    if status == "taken-over":
+    if status in ("taken-over", "expired"):
         return False
-    if status == "expired" or (status == "live" and (row["updated_at"] or 0) < now - LIVE_SESSION_STALE_SECONDS):
+    if (status == "live" and (row["updated_at"] or 0) < now - LIVE_SESSION_STALE_SECONDS
+            and (row["venue"] or local_pid_alive(row["pid"]) is not True)):
         return False
     if (aliased and machine and row["machine"]
             and machine.casefold() != str(row["machine"]).casefold()):
