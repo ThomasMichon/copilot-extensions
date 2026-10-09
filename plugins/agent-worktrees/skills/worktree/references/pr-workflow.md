@@ -589,6 +589,12 @@ The destination is recorded only as a SHA-256 fingerprint; raw Git push URLs
 can carry credentials and are never copied into the checkpoint.
 Proof queries disable Git replacement objects, including ancestry, patch and
 commit-message checks, so they inspect the raw history that is actually pushed.
+Patch IDs are diagnostic metadata only: they discard hunk locations. Authorization
+reconstructs each source commit's three-way tree on its new parent with
+`git merge-tree --write-tree --merge-base` and requires the actual replay tree.
+Only a genuine conflict with an explicit sequencer continuation may change it;
+an unchanged reconstructed tree proves an already-applied source commit. A Git
+version without this plumbing capability refuses recovery explicitly.
 Older runtimes could leave the cached patch ID behind after an incremental
 push; recovery records both that cache and the reconstructed published patch,
 but authorizes only the freshly verified full source replay, never the cache.

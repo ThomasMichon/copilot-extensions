@@ -56,8 +56,9 @@ def _ancestor(old: str, new: str, cwd: str) -> bool:
 
 
 def _series(base: str, head: str, cwd: str) -> list[str] | None:
-    """Exact ordered patch IDs, including whitespace and binary changes.
+    """Ordered diagnostic patch IDs, including whitespace and binary changes.
 
+    They do not bind hunk locations; tree reconstruction authorizes the replay.
     Merge commits and empty/unreadable patches are not evidence of a replay.
     """
     commits = _git("rev-list", "--reverse", "--parents", f"{base}..{head}", cwd=cwd)
@@ -128,41 +129,73 @@ def _replay(branch: str, head: str, cwd: str) -> tuple[str, str, str, list[tuple
     return None
 
 
+def _merge_tree(parent: str, onto: str, commit: str, cwd: str) -> tuple[str, bool]:
+    args = ("--no-replace-objects", "merge-tree", "--write-tree", "--merge-base", parent, onto, commit)
+    try:
+        result = git_ops.git(*args, cwd=cwd, check=False, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        raise git_ops.GitError(["git", *args], 124, f"timed out after {exc.timeout} seconds") from exc
+    tree = result.stdout.splitlines()[0] if result.stdout else ""
+    if result.returncode not in (0, 1) or not re.fullmatch(r"[0-9a-f]{40,64}", tree):
+        raise git_ops.GitError(["git", *args], result.returncode, result.stderr or "No replay tree returned")
+    return tree, result.returncode == 1
+
+
 def _conflict_lineage(
     base: str, original: str, onto: str, finished: str,
-    old: list[str], new: list[str], applied: list[str],
+    old: list[str], new: list[str],
     steps: list[tuple[str, str]], cwd: str,
 ) -> tuple[tuple[str, str], ...] | None:
-    """Verify every original commit was picked, explicitly continued, or already applied.
+    """Reconstruct every source change at its real location on the new parent.
 
-    Conflict continuation is a source-owned content decision, not patch equality.
-    Only that Git sequencer action may change a patch; author/message identity
-    and the one-to-one linear replay must still match. Reword/edit/squash/skip,
-    synthesized journals lacking either endpoint, and unmapped commits fail closed.
+    Patch IDs are metadata, never permission: they discard hunk locations.
+    A clean three-way replay must produce the actual new tree. A no-op tree
+    proves already-applied work; only a real conflict with an explicit continue
+    may differ, still preserving one-to-one raw author/message provenance.
     """
-    old_shas = _git("rev-list", "--reverse", f"{base}..{original}", cwd=cwd).splitlines()
-    new_shas = _git("rev-list", "--reverse", f"{onto}..{finished}", cwd=cwd).splitlines()
-    if len(old_shas) != len(old) or len(new_shas) != len(new):
+    old_rows = [row.split() for row in _git(
+        "rev-list", "--reverse", "--parents", f"{base}..{original}", cwd=cwd,
+    ).splitlines()]
+    new_rows = [row.split() for row in _git(
+        "rev-list", "--reverse", "--parents", f"{onto}..{finished}", cwd=cwd,
+    ).splitlines()]
+    if (
+        len(old_rows) != len(old) or len(new_rows) != len(new)
+        or any(len(row) != 2 for row in [*old_rows, *new_rows])
+        or [sha for sha, _ in steps] != [row[0] for row in new_rows]
+    ):
         return None
-    candidates = list(zip(old_shas, old))
-    for patch in applied:
-        match = next((i for i, (_, p) in enumerate(candidates) if p == patch), None)
-        if match is not None:
-            candidates.pop(match)
-    if len(candidates) != len(new) or [sha for sha, _ in steps] != new_shas:
-        return None
-    conflicts = []
-    for (old_sha, old_patch), new_sha, new_patch, (_, action) in zip(candidates, new_shas, new, steps):
+    conflicts: list[tuple[str, str]] = []
+    current = onto
+    index = 0
+    for old_sha, old_parent in old_rows:
+        tree, conflicted = _merge_tree(old_parent, current, old_sha, cwd)
+        current_tree = _git("rev-parse", f"{current}^{{tree}}", cwd=cwd)
+        if not current_tree:
+            return None
+        if not conflicted and tree == current_tree:
+            continue
+        if index >= len(new_rows):
+            return None
+        new_sha, new_parent = new_rows[index]
+        if new_parent != current:
+            return None
         identity = "--format=%an%x00%ae%x00%aI%x00%B"
         before = _git_bytes("show", "--encoding=none", "-s", identity, old_sha, cwd=cwd)
         after = _git_bytes("show", "--encoding=none", "-s", identity, new_sha, cwd=cwd)
         if not before or before != after:
             return None
-        if old_patch != new_patch:
-            if not action.startswith("rebase (continue): "):
+        new_tree = _git("rev-parse", f"{new_sha}^{{tree}}", cwd=cwd)
+        if not new_tree or new_tree == current_tree:
+            return None
+        if conflicted:
+            if not steps[index][1].startswith("rebase (continue): "):
                 return None
             conflicts.append((old_sha, new_sha))
-    return tuple(conflicts)
+        elif tree != new_tree:
+            return None
+        current, index = new_sha, index + 1
+    return tuple(conflicts) if index == len(new_rows) and current == finished else None
 
 
 def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) -> RebaseProof | None:
@@ -223,22 +256,13 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) 
     published_patch = published_ids[0].decode("ascii")
     old = _series(pr.base_sha, original, cwd)
     new = _series(onto, finished, cwd)
-    applied = _series(pr.base_sha, onto, cwd)
-    if old is None or new is None or applied is None or not old:
+    if old is None or new is None or not old:
         return None
-    # Git may omit already-applied patches, but never unexplained source work.
-    remaining = list(old)
-    for patch in applied:
-        if patch in remaining:
-            remaining.remove(patch)
-    conflicts: tuple[tuple[str, str], ...] = ()
-    if new != old and new != remaining:
-        lineage = _conflict_lineage(
-            pr.base_sha, original, onto, finished, old, new, applied, steps, cwd,
-        )
-        if lineage is None:
-            return None
-        conflicts = lineage
+    conflicts = _conflict_lineage(
+        pr.base_sha, original, onto, finished, old, new, steps, cwd,
+    )
+    if conflicts is None:
+        return None
     url = _git("remote", "get-url", "--push", remote, cwd=cwd)
     if not url:
         return None

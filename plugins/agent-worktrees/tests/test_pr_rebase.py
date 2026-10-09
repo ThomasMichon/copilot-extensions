@@ -295,7 +295,12 @@ def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, comma
 @pytest.mark.parametrize("changed_message", [" Message\n", "Message\n\n"])
 def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch, changed_message):
     def fake_git(*args, cwd, check):
-        stdout = "old\n" if args[-1] == "base..original" else "new\n"
+        if args[-1] == "base..original":
+            stdout = "old base\n"
+        elif args[-1] == "onto..finished":
+            stdout = "new onto\n"
+        else:
+            stdout = "current-tree\n"
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     def fake_run(args, **kwargs):
@@ -306,8 +311,9 @@ def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypa
 
     monkeypatch.setattr(git_ops, "git", fake_git)
     monkeypatch.setattr(pr_rebase.subprocess, "run", fake_run)
+    monkeypatch.setattr(pr_rebase, "_merge_tree", lambda *a: ("replay-tree", True))
     assert pr_rebase._conflict_lineage(
-        "base", "original", "onto", "finished", ["old-patch"], ["new-patch"], [],
+        "base", "original", "onto", "finished", ["old-patch"], ["new-patch"],
         [("new", "rebase (continue): Message")], "unused",
     ) is None
 
@@ -338,6 +344,51 @@ def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tm
 
 
 @pytest.mark.guard
+def test_owned_pr_rebase_repeated_regions_require_actual_tree_replay(tmp_path, monkeypatch):
+    path = tmp_path / "repeated-regions"
+    path.mkdir()
+    _git("init", cwd=path)
+    _git("config", "user.name", "Developer", cwd=path)
+    _git("config", "user.email", "developer@example.com", cwd=path)
+    monkeypatch.setenv("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+    region = "zero\none\ntwo\ntarget\nfour\nfive\nsix\nseven\n"
+    original_text = region * 2
+    data = path / "data.txt"
+
+    def commit(content, parent, message):
+        data.write_text(content)
+        _git("add", "data.txt", cwd=path)
+        tree = _git("write-tree", cwd=path)
+        args = ("-p", parent) if parent else ()
+        return _git("commit-tree", tree, *args, "-m", message, cwd=path)
+
+    base = commit(original_text, None, "base")
+    first = original_text.replace("target\n", "edited\n", 1)
+    second = region + region.replace("target\n", "edited\n", 1)
+    original = commit(first, base, "edit repeated region")
+    onto = commit("upstream prefix\n" + original_text, base, "shift line numbers")
+    correct = commit("upstream prefix\n" + first, onto, "edit repeated region")
+    relocated = commit("upstream prefix\n" + second, onto, "edit repeated region")
+    old = pr_rebase._series(base, original, str(path))
+    correct_ids = pr_rebase._series(onto, correct, str(path))
+    relocated_ids = pr_rebase._series(onto, relocated, str(path))
+    assert old and old == correct_ids == relocated_ids
+    assert pr_rebase._conflict_lineage(
+        base, original, onto, correct, old, correct_ids,
+        [(correct, "rebase (pick): edit repeated region")], str(path),
+    ) == ()
+    assert pr_rebase._conflict_lineage(
+        base, original, onto, relocated, old, relocated_ids,
+        [(relocated, "rebase (pick): edit repeated region")], str(path),
+    ) is None
+    wrong_applied = commit(second, base, "edit repeated region")
+    assert pr_rebase._series(base, wrong_applied, str(path)) == old
+    assert pr_rebase._conflict_lineage(
+        base, original, wrong_applied, wrong_applied, old, [], [], str(path),
+    ) is None
+
+
+@pytest.mark.guard
 def test_owned_pr_rebase_proof_reads_raw_objects_despite_replacement_refs(tmp_path):
     path = tmp_path / "replacement-refs"
     path.mkdir()
@@ -363,7 +414,7 @@ def test_owned_pr_rebase_proof_reads_raw_objects_despite_replacement_refs(tmp_pa
     assert pr_rebase._git("show", "-s", "--format=%s", changed, cwd=str(path)) == "changed"
     assert pr_rebase._series(base, changed, str(path)) == expected
     assert pr_rebase._conflict_lineage(
-        base, original, base, changed, ["original-patch"], ["changed-patch"], [],
+        base, original, base, changed, ["original-patch"], ["changed-patch"],
         [(changed, "rebase (continue): original")], str(path),
     ) is None
     descendant = _git("commit-tree", tree, "-p", original, "-m", "descendant", cwd=path)
