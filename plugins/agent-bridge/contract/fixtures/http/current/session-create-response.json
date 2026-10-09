@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "6ede6750a11bc5fedbc673e42e1557bb684c0c04",
+    "commit": "c93f5e9780268d397e0a509e1ccb1d54ae395881",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 27,
+    "protocol_generation": 26,
     "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-    "source_git_blob": "e315994cc84c26faf267e72c5f6848c823bcb31b",
-    "source_sha256": "046889f3bac77cc404a9ece6ca84d32a03a978c3f77b28e1541c919009c490fc"
+    "source_git_blob": "ba8fd765397da3c1aa6611e6c9692724d722acb7",
+    "source_sha256": "69dda545e57c5e8cae56e609c343b5802c1ebfbc937682956439aa7798cde061"
   },
   "response": {
     "status_code": 201,
@@ -14,7 +14,7 @@
       "name": "example-session",
       "status": "idle",
       "caller_session_id": null,
-      "protocol_version": 27,
+      "protocol_version": 26,
       "min_protocol_version": 1,
       "parity_fault_result": null
     }

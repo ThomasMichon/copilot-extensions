@@ -46,6 +46,7 @@ from pathlib import Path
 
 from agent_logger import sessions
 from agent_logger.segmenter.collate import read_workspace
+from agent_logger.source_roots import iter_archive_sources, validate_session_ref
 from agent_logger.sync.origin import read_origin_sidecar
 from agent_logger.sync.provenance import (
     RESCUE_SNAPSHOT_PROVENANCE,
@@ -378,51 +379,28 @@ class SyncedSessionSource(SessionSource):
         settle_seconds: int = DEFAULT_SETTLE_SECONDS,
     ) -> None:
         super().__init__(reservations, settle_seconds=settle_seconds)
-        self.corpus_root = corpus_root
+        self.corpus_root = corpus_root.expanduser().absolute()
 
     def scan(self, *, now: datetime | None = None) -> list[DiscoveredSession]:
         corpus_root = existing_real_directory(self.corpus_root)
         if corpus_root is None:
             return []
         out: list[DiscoveredSession] = []
-        for raw_machine_dir in sorted(corpus_root.iterdir()):
-            machine_dir = existing_real_directory(raw_machine_dir)
-            if machine_dir is None:
-                continue
+        for source in iter_archive_sources(corpus_root):
+            machine_dir = source.path
             generation = _machine_generation(machine_dir)
             if generation is None or _has_active_replacement(machine_dir):
                 continue
             machine_out: list[DiscoveredSession] = []
-            ss = existing_real_directory(machine_dir / "session-state")
-            if ss is not None:
-                for raw_session_dir in sorted(ss.iterdir()):
-                    session_dir = existing_real_directory(raw_session_dir)
-                    if session_dir is None:
-                        continue
-                    discovered = self._discover(machine_dir, session_dir, now=now)
-                    if discovered is not None:
-                        machine_out.append(discovered)
-            # Cold sessions compacted into the sibling ``archived/`` tree. A live
-            # dir of the same id shadows an archive (a compaction/reconcile
-            # race), so ``iter_session_refs`` yields only the un-shadowed
-            # archives here.
-            archived_store = existing_real_directory(machine_dir / "archived")
-            if archived_store is not None:
-                live_store = ss or machine_dir / ".absent-session-state"
-                for ref in sessions.iter_session_refs(live_store, archived_store):
-                    if ref.kind != "archive":
-                        continue
-                    try:
-                        mode = ref.path.lstat().st_mode
-                    except OSError:
-                        continue
-                    if is_link_or_reparse(ref.path, mode):
-                        continue
-                    discovered = self._discover_archived(
-                        machine_dir, ref, now=now
-                    )
-                    if discovered is not None:
-                        machine_out.append(discovered)
+            for ref in sorted(
+                source.iter_sessions(), key=lambda ref: (ref.kind != "live", ref.id)
+            ):
+                if ref.kind == "live":
+                    discovered = self._discover(machine_dir, ref.path, now=now)
+                else:
+                    discovered = self._discover_archived(machine_dir, ref, now=now)
+                if discovered is not None:
+                    machine_out.append(discovered)
             snapshots_root = existing_real_directory(
                 machine_dir / ".session-sync-rescue-captures"
             )
@@ -459,16 +437,21 @@ class SyncedSessionSource(SessionSource):
                 not _has_active_replacement(machine_dir)
                 and _machine_generation(machine_dir) == generation
             ):
+                source.validate()
                 out.extend(machine_out)
         return out
+
+    def _source_key(self, machine_dir: Path) -> str:
+        return machine_dir.relative_to(self.corpus_root).as_posix()
 
     def _discover_archived(
         self, machine_dir: Path, ref: sessions.SessionRef, *, now: datetime | None
     ) -> DiscoveredSession | None:
+        validate_session_ref(ref)
         if not sessions.verify_archive(ref):
             return None
         provenance = read_provenance(machine_dir, ref.id)
-        seg = _segment_ref(machine_dir.name, ref.id, provenance)
+        seg = _segment_ref(self._source_key(machine_dir), ref.id, provenance)
         # I4: never re-file a journaled unit -- keyed on the same SegmentRef the
         # session had while live, so archiving never re-chronicles it.
         if self.is_journaled(seg):
@@ -500,7 +483,7 @@ class SyncedSessionSource(SessionSource):
         )
         return DiscoveredSession(
             session_id=ref.id,
-            machine=machine_dir.name,
+            machine=self._source_key(machine_dir),
             session_path=content_path,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),
@@ -539,7 +522,7 @@ class SyncedSessionSource(SessionSource):
         # routing (derive-the-origin-never-guess); the raw workspace repository
         # remains as display metadata and a pre-backfill routing fallback.
         origin = read_origin_sidecar(content_path)
-        ref = _segment_ref(machine_dir.name, session_dir.name, provenance)
+        ref = _segment_ref(self._source_key(machine_dir), session_dir.name, provenance)
         # I4: never re-file the same local session or rescued capture.
         if self.is_journaled(ref):
             return None
@@ -548,7 +531,7 @@ class SyncedSessionSource(SessionSource):
         )
         return DiscoveredSession(
             session_id=session_dir.name,
-            machine=machine_dir.name,
+            machine=self._source_key(machine_dir),
             session_path=content_path,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),
@@ -585,7 +568,7 @@ class SyncedSessionSource(SessionSource):
             or rescue_snapshot_path(machine_dir, session_id, capture_id) != snapshot
         ):
             return None
-        ref = _segment_ref(machine_dir.name, session_id, provenance)
+        ref = _segment_ref(self._source_key(machine_dir), session_id, provenance)
         if self.is_journaled(ref):
             return None
         ws = read_workspace(snapshot)
@@ -595,7 +578,7 @@ class SyncedSessionSource(SessionSource):
         )
         return DiscoveredSession(
             session_id=session_id,
-            machine=machine_dir.name,
+            machine=self._source_key(machine_dir),
             session_path=snapshot,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),

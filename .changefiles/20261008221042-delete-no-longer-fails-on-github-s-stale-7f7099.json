@@ -1,0 +1,9 @@
+{
+  "comment": "Delete no longer fails on GitHub's stale 'unsaved changes' flag: audit every checkout on the box (nested repos, dotfiles, linked worktrees) and force only that refusal when all are clean, else list the dirty checkouts",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

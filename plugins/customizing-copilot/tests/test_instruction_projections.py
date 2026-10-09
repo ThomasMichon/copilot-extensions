@@ -2090,7 +2090,7 @@ def test_rollback_does_not_overwrite_a_concurrent_edit(
     assert any("rollback also failed" in finding.message for finding in result.findings)
 
 
-def test_file_and_aggregate_budgets_are_blocking(tmp_path: Path) -> None:
+def test_file_budget_blocks_but_aggregate_budget_is_advisory(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _plugin, oversized = _write_plugin(
@@ -2118,9 +2118,14 @@ def test_file_and_aggregate_budgets_are_blocking(tmp_path: Path) -> None:
         for index in range(4)
     ]
     aggregate_result = projections.sync_repository(aggregate_repo, sources)
+    assert aggregate_result.blocking == 0
+    assert len(aggregate_result.changed) == 4
+    assert aggregate_result.lock_updated
     assert any(
-        finding.check == "projection-budget"
+        finding.check == "projection-aggregate-budget"
+        and finding.severity == projections.WARNING
         and "aggregate" in finding.message
+        and "over by" in finding.message
         for finding in aggregate_result.findings
     )
 
@@ -2157,8 +2162,12 @@ def test_local_cache_advisory_budgets_leave_checked_in_scan_strict(
     checked_in = [_projection(repo, f"policy-{i}") for i in range(4)]
     before = lock_path.read_bytes(), [p.read_bytes() for p in checked_in]
     audit = projections.scan_repository(repo, sources)
-    assert sum(f.check == "projection-budget" for f in audit.findings) == 5
-    assert audit.blocking >= 5
+    assert sum(f.check == "projection-budget" for f in audit.findings) == 4
+    assert audit.blocking == 4
+    assert any(
+        f.check == "projection-aggregate-budget" and f.severity == projections.WARNING
+        for f in audit.findings
+    )
     sync = projections.sync_repository(repo, sources)
     assert sync.blocking > 0
     assert sync.changed == []
@@ -2231,11 +2240,69 @@ def test_repository_config_can_lower_the_aggregate_budget(tmp_path: Path) -> Non
     result = projections.sync_repository(repo, sources)
 
     assert any(
-        finding.check == "projection-budget"
+        finding.check == "projection-aggregate-budget"
+        and finding.severity == projections.WARNING
         and "aggregate" in finding.message
         and str(projections.MIN_AGGREGATE_BYTES) in finding.message
         for finding in result.findings
     )
+    assert result.blocking == 0
+
+
+def test_over_budget_plugin_update_and_adoption_reproject_immediately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sources = [
+        _write_plugin(
+            tmp_path, "market", f"policy-{index}", body="x" * 2700 + "\n",
+        )[1]
+        for index in range(4)
+    ]
+    monkeypatch.setattr(
+        manager, "discover_enabled_sources", lambda *args, **kwargs: sources,
+    )
+    assert manager.main(["sync", str(repo), "--json"]) == 0
+    initial = json.loads(capsys.readouterr().out)
+    assert initial["blocking"] == 0
+    assert len(initial["changed"]) == 4
+    assert any(
+        f["check"] == "projection-aggregate-budget"
+        and f["severity"] == projections.WARNING for f in initial["findings"]
+    )
+
+    plugin = sources[0].payload_root
+    template = plugin / "instructions" / "fallback.instructions.md"
+    template.write_text(
+        '---\napplyTo: "**"\n---\n\n# Updated policy\n\n' + "y" * 2700 + "\n",
+        encoding="utf-8",
+    )
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "policy-0", "version": "1.0.1"}), encoding="utf-8",
+    )
+    sources.append(_write_plugin(tmp_path, "market", "new-policy")[1])
+    assert manager.main(["sync", str(repo), "--json"]) == 0
+    updated = json.loads(capsys.readouterr().out)
+    assert len(updated["changed"]) == 2
+    assert b"Updated policy" in _projection(repo, "policy-0").read_bytes()
+    entries = {entry["destination"]: entry for entry in _lock(repo)["projections"]}
+    updated_path = _projection(repo, "policy-0").relative_to(repo).as_posix()
+    assert entries[updated_path]["pluginVersion"] == "1.0.1"
+    assert _projection(repo, "new-policy").exists()
+    assert manager.main(["scan", str(repo), "--json"]) == 0
+    audit = json.loads(capsys.readouterr().out)
+    assert audit["blocking"] == 0
+    assert audit["findings"][0]["check"] == "projection-aggregate-budget"
+
+    owned = _projection(repo, "policy-0")
+    owned.write_bytes(owned.read_bytes() + b"unreviewed local edit\n")
+    before = owned.read_bytes(), (repo / projections.LOCK_RELATIVE).read_bytes()
+    assert manager.main(["sync", str(repo), "--json"]) == 1
+    refused = json.loads(capsys.readouterr().out)
+    assert refused["blocking"] > 0
+    assert refused["changed"] == []
+    assert (owned.read_bytes(), (repo / projections.LOCK_RELATIVE).read_bytes()) == before
 
 
 @pytest.mark.parametrize(
@@ -2292,9 +2359,15 @@ def test_malformed_or_out_of_range_config_is_blocking_and_uses_default(
 
     result = projections.sync_repository(repo, sources)
 
-    assert any(finding.check == "projection-config" for finding in result.findings)
+    assert result.blocking > 0
+    assert result.changed == []
     assert any(
-        finding.check == "projection-budget"
+        finding.check == "projection-config" and finding.severity == projections.BLOCKING
+        for finding in result.findings
+    )
+    assert any(
+        finding.check == "projection-aggregate-budget"
+        and finding.severity == projections.WARNING
         and str(projections.MAX_AGGREGATE_BYTES) in finding.message
         for finding in result.findings
     )

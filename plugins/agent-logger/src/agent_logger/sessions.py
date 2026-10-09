@@ -309,18 +309,19 @@ def _iter_archive_refs(store: Path) -> Iterator[SessionRef]:
 
 
 def iter_session_refs(
-    state_root: Path, *archive_stores: Path
+    state_root: Path | None, *archive_stores: Path
 ) -> Iterator[SessionRef]:
     """Yield every session across a live root and any archive stores.
 
     A live session shadows an archived one with the same id (a session being
     reactivated), so live refs are yielded first and duplicate archive ids are
-    skipped.
+    skipped. Pass ``None`` for an archive-only source without a live store.
     """
     seen: set[str] = set()
-    for ref in _iter_live_refs(state_root):
-        seen.add(ref.id)
-        yield ref
+    if state_root is not None:
+        for ref in _iter_live_refs(state_root):
+            seen.add(ref.id)
+            yield ref
     for store in archive_stores:
         for ref in _iter_archive_refs(store):
             if ref.id in seen:

@@ -1,0 +1,9 @@
+{
+  "comment": "Record publication-time process identity in shared zdd routing for identity-bound supervision.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

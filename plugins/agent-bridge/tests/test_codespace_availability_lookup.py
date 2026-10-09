@@ -204,3 +204,29 @@ async def test_target_name_is_encoded_as_one_api_path_component(run_gh):
     assert run_gh.call_args.args[0][2] == (
         "/user/codespaces/example%2Ftarget%3Fstate%3DAvailable"
     )
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("Available", True),
+        ("Shutdown", False),
+        ("Archived", False),
+        ("Starting", None),
+        ("ShuttingDown", None),
+        ("Provisioning", None),
+        ("Rebuilding", None),
+    ],
+)
+async def test_relay_reconnect_gate_retires_only_on_stopped_states(
+    run_gh, state, expected,
+):
+    run_gh.return_value = _result({"name": NAME, "state": state})
+    transport = codespace_transport.CodeSpaceTransport(NAME)
+
+    if expected is None:
+        # Transitional: inconclusive, so the relay backs off and re-checks.
+        with pytest.raises(RuntimeError, match=state):
+            await transport.reconnect_allowed()
+    else:
+        assert await transport.reconnect_allowed() is expected

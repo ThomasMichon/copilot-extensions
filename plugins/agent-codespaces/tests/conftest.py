@@ -6,6 +6,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _mock_gh_presence(monkeypatch):
+    """Mock tool presence for CLI units that already mock GitHub operations.
+
+    Missing-tool tests override this seam explicitly; no unit needs a live,
+    authenticated host gh installation just to reach its mocked command.
+    """
+    monkeypatch.setattr("agent_codespaces.__main__._gh_binary_available", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _disable_codespace_claim(monkeypatch):
     """Disable the #897 exclusive-claim enforcement by default in unit tests.
 
@@ -72,6 +82,15 @@ def _isolate_launch_memory(monkeypatch, tmp_path):
     from agent_codespaces import launch_memory
 
     monkeypatch.setattr(launch_memory, "LAUNCHES_DIR", tmp_path / "launches")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_launch_policy(monkeypatch, tmp_path):
+    """Keep this machine's registered launch policy (if any) out of unit tests."""
+    from agent_codespaces import launch_policy
+
+    monkeypatch.setattr(launch_policy, "POLICY_FILE", tmp_path / "launch-policy.json")
+    monkeypatch.setattr(launch_policy, "bridge_enforcement", lambda: None)  # no daemon probe
 
 
 @pytest.fixture(autouse=True)

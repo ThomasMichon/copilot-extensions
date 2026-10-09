@@ -45,6 +45,7 @@ from agent_logger.config import (
     OBJECTIVE_NARRATION_INSTRUCTION,
     resolve_narration_style,
 )
+from agent_logger.source_roots import SourceLayoutError
 from agent_logger.sync.provenance import (
     RESCUE_SNAPSHOT_PROVENANCE,
     rescue_snapshot_path,
@@ -233,7 +234,8 @@ def test_scan_rejects_linked_session_directory(tmp_path: Path) -> None:
         settle_seconds=0,
     )
 
-    assert source.scan() == []
+    with pytest.raises(SourceLayoutError, match="linked session directory"):
+        source.scan()
 
 
 def test_scan_rejects_linked_session_member(tmp_path: Path) -> None:
@@ -253,7 +255,8 @@ def test_scan_rejects_linked_session_member(tmp_path: Path) -> None:
         settle_seconds=0,
     )
 
-    assert source.scan() == []
+    with pytest.raises(SourceLayoutError, match="not regular"):
+        source.scan()
 
 
 def test_scan_discards_machine_when_generation_changes(

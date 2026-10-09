@@ -154,6 +154,12 @@ CALLER_SESSION_ID_PROTOCOL_VERSION = 24
 # against an older daemon it refuses rather than risk undoing a racing stop.
 COOPERATIVE_STOP_PROTOCOL_VERSION = 25
 
+# First version whose Session Host spawns on a CodeSpace (a fresh start, or a
+# respawn on resume) ask the host's registered launch policy first
+# (``agent-codespaces launch-check``). A host that registers a policy checks
+# for it, since an older resident daemon launches without asking.
+CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION = 26
+
 # First version that serves ``GET /api/v1/sessions/{ref}/attention/current``:
 # a session's current attention reason, never a wait, for an owned session and
 # for a represented (registered interactive) one. ``agent-bridge attention``

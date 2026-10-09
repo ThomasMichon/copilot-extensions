@@ -35,12 +35,14 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from .driving_worktrees import codespace_claim_owner_worktrees
 from .lease import Lease, list_leases
+from .live_users import claim_orphaned, codespaces_in_use
+from .live_users import holder_worktree_gone as _holder_worktree_gone  # noqa: F401
 from .lifecycle import CodespaceInfo, classify_state, list_codespaces
 from .status import STATE_PRUNABLE, STATE_RECOVERED, list_status
 
@@ -142,12 +144,15 @@ def derive_disposition(
     idle_age: float | None,
     stale_after: float,
     has_l2_hold: bool = False,
+    has_live_users: bool = False,
 ) -> str:
     """Classify one CodeSpace's disposition from its derived signals.
 
     Precedence (first match wins):
+      0. a live local user (lock holder, SSH ControlMaster/forward, gh ssh) or an
+         unknown process census                                 -> IN_USE
       1. terminal-failed gh state            -> FAILED
-      2. a live lease OR a cross-machine beacon/L2 hold -> IN_USE
+      2. a live lease or a cross-machine beacon/L2 hold         -> IN_USE
       3. genuinely still-coming-up gh state  -> PROVISIONING
       4. a ``prunable`` marker               -> STALE
       5. a ``recovered`` marker              -> CLEAN
@@ -165,6 +170,8 @@ def derive_disposition(
     Shutdown+recovered box is ``clean``, an unmarked one ``idle``/``stale``).
     """
     bucket = classify_state(state)
+    if has_live_users:
+        return IN_USE
     if bucket == "failed":
         return FAILED
     if has_live_lease or has_beacon or has_l2_hold:
@@ -178,26 +185,6 @@ def derive_disposition(
     if idle_age is not None and idle_age > stale_after:
         return STALE
     return IDLE
-
-
-def _holder_worktree_gone(worktree_path: str | None) -> bool:
-    """True when a #897 **claim**'s owner worktree PATH is positively gone.
-
-    A cheap, host-local check (no subprocess): the host-local ``leases.json``
-    only records claims made on THIS host, so the claim's worktree path is local
-    -- an absolute path no longer on disk means the owning worktree was
-    finalized/pruned while the lease lingered (an **orphaned** lock). Conservative
-    (biased toward alive): a non-path/legacy owner (an advisory borrow's effort)
-    or an unreadable path is treated alive, so a live hold is never false-flagged,
-    and a cross-machine hold (which rides the beacon/L2 overlay, not a local
-    lease) is never seen here at all.
-    """
-    if not worktree_path or not os.path.isabs(worktree_path):
-        return False
-    try:
-        return not os.path.exists(worktree_path)
-    except OSError:
-        return False
 
 
 @dataclass
@@ -257,6 +244,8 @@ class PoolMember:
     # reuses its own box instead of steering clear of it as if foreign. Annotated
     # by the command after resolving the caller's own ClaimRef; default False.
     held_by_self: bool = False
+    # Live local users (lock holder, ControlMasters, forwards...) -- live_users.
+    live_users: list = field(default_factory=list)
 
     @property
     def holder_owner(self) -> str | None:
@@ -299,6 +288,7 @@ class PoolMember:
             # (agent-claim-awareness) -- so a consumer reuses its own box instead
             # of treating it as foreign and steering clear.
             "held_by_self": self.held_by_self,
+            "live_users": self.live_users,
         }
 
 
@@ -334,6 +324,7 @@ def build_pool(
     markers: dict[str, str] | None = None,
     l2_leases: dict | None = None,
     clean_records: dict | None = None,
+    live: dict | None = None,
 ) -> tuple[list[PoolMember], Budget]:
     """Derive the full pool view (members + budget) from the owning layers.
 
@@ -346,6 +337,9 @@ def build_pool(
     **degrade-safe** -- an unavailable/unreadable L2 store yields ``None`` and the
     overlay is simply absent, so the pool view is identical to the pre-overlay
     behavior. Pass ``{}`` in tests to assert the no-overlay path without shelling.
+
+    ``live`` is the live-local-user overlay (``{name: [LiveUser]}`` from
+    ``live_users.codespaces_in_use``); omit -> one process scan. Pass ``{}`` in tests.
 
     ``clean_records`` is the per-box **cleanliness beacon** overlay (a
     ``{name: CleanRecord}`` map from ``coordination.list_cleanliness``): the last
@@ -379,6 +373,9 @@ def build_pool(
         except Exception:
             clean_records = {}
 
+    if live is None:  # live local users (one process scan); None = census unknown
+        live = codespaces_in_use([cs.name for cs in codespaces])
+    census_unknown, live = live is None, live or {}
     lease_by_cs = {ls.codespace: ls for ls in leases}
 
     members: list[PoolMember] = []
@@ -416,6 +413,7 @@ def build_pool(
             idle_age=idle_age,
             stale_after=stale_after,
             has_l2_hold=has_l2_hold,
+            has_live_users=bool(live.get(cs.name)) or census_unknown,
         )
 
         if running:
@@ -449,7 +447,9 @@ def build_pool(
             l2_expires_at=l2_expires_at,
             display_name=cs.display_name or "",
             # 3b: flag an orphaned claim (holder worktree positively gone).
-            orphaned=_holder_worktree_gone(lease.worktree if lease else None),
+            orphaned=(not census_unknown
+                      and claim_orphaned(lease.worktree if lease else None, live.get(cs.name))),
+            live_users=[u.to_dict() for u in live.get(cs.name, ())],
             # Cleanliness-beacon verdict (venue-pool Phase 3): tri-state safety
             # gate for the destructive Recycle -- True/False/None (unknown).
             off_box_safe=off_box_safe,

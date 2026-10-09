@@ -245,10 +245,18 @@ safe paths, source identity, tracked destinations and foreign files. Oversized
 local guidance remains refreshable and reconcilable within those safety bounds.
 Those protections are not context-budget enforcement.
 
-The checked-in `scan`/`sync` path keeps its independent budget findings and
-reviewed transaction policy. Existing periodic audits can report budget debt
-without making a worktree's immediate guidance delivery depend on that audit
-or on a projection-sync PR.
+The checked-in `scan`/`sync` path also reports aggregate excess as an
+attributable `projection-aggregate-budget` warning, never as an admission
+gate for updated or newly enabled plugin instructions. Its per-file bounds,
+configuration validation, ownership checks and reviewed transaction policy
+remain enforced. A deterministic sync worker retains these aggregate warnings
+for audit without routing them as conflicts or opening repeat no-diff PRs.
+
+Use the existing periodic audit to balance the aggregate: `scan --json`
+reports total bytes, the configured budget and the overrun; the customization
+scanner's `--from-settings --context-budget` inventory attributes context to
+sources and categories. Budget debt is remedied by trimming or moving detailed
+guidance on demand, not by withholding an otherwise-safe re-projection.
 
 ## Rationale
 

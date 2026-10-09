@@ -22,7 +22,9 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def lifecycle_lock(name: str) -> Iterator[object]:
+def lifecycle_lock(
+    name: str, *, refuse_live_users: str | None = None, force: bool = False,
+) -> Iterator[object]:
     """Acquire (and always release) the widened lock for *name*.
 
     Yields the acquired ``ssh_manager.TargetLock``, which a caller passes
@@ -31,12 +33,22 @@ def lifecycle_lock(name: str) -> Iterator[object]:
     ``ssh_manager.TargetBusyError`` unchanged when another process already
     holds it -- each caller decides how to report that (print + exit 1,
     skip this pass, emit a modal error frame, etc).
+
+    ``refuse_live_users`` (the operation's name, e.g. ``"delete"``): once the
+    lock is held, also refuse when any other live local process still rides the
+    box -- a detached SSH ControlMaster, forward, or ``gh codespace ssh`` that
+    outlived the lock writer -- by raising ``live_users.CodespaceInUseError`` (a
+    ``TargetBusyError``). ``force`` skips that check (not the lock itself).
     """
     from ssh_manager import TargetLock
 
     lock = TargetLock(name, op="codespace-lifecycle")
     lock.acquire(force=False)
     try:
+        if refuse_live_users and not force:
+            from .live_users import refuse_if_in_use
+
+            refuse_if_in_use(name, refuse_live_users)
         yield lock
     finally:
         lock.release()

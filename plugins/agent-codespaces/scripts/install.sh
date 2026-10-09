@@ -312,6 +312,8 @@ _fail()    { echo "  [FAIL] $*" >&2; }
 _step()    { echo "  ...    $*"; }
 _header()  { echo ""; echo "=== $* ==="; }
 
+. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
+
 # -- Helpers ---------------------------------------------------------------
 
 _bootstrap_python() {
@@ -422,34 +424,12 @@ _git_info() {
 }
 
 _assert_uv() {
-    command -v uv &>/dev/null && return 0
-    # Vendor a standalone uv into the runtime tool dir. A governed/pristine box
-    # ships no uv (the #1 provisioning blocker), so rather than dead-end we fetch
-    # a self-contained uv via the official installer (curl/wget/python3 -- no pip,
-    # no venv needed) into ~/.agent-codespaces/tool and put it on PATH for this run.
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl &>/dev/null; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget &>/dev/null; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 &>/dev/null; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
+    if ! UV_CMD="$(ensure_uv "$INSTALL_DIR")"; then
+        _fail "uv is required but acquisition failed. Install uv, then retry."
+        return 1
     fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        # The installer honors UV_INSTALL_DIR for a self-contained, unmanaged drop
-        # and INSTALLER_NO_MODIFY_PATH so it never edits the user's shell profile.
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    # The installer may drop uv directly in tooldir or under tooldir/bin.
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
-    _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
-    exit 1
+    # Command substitution cannot propagate ensure_uv's PATH export.
+    export PATH="$(dirname "$UV_CMD"):$PATH"
 }
 
 # uv pip install the vendored libs (ssh-manager, credential-relay, zdd,
@@ -500,45 +480,22 @@ _install_package_into() {
         _fail "remote-login-shell source not found at $REMOTE_LOGIN_SHELL_DIR"
         return 1
     fi
-    if [[ "$mode" == "--editable" ]]; then
-        uv pip install --python "$py" --editable "$SSH_MGR_DIR" --quiet || {
-            _fail "ssh-manager install failed"; return 1; }
-        uv pip install --python "$py" --editable "$CRED_RELAY_DIR" --quiet || {
-            _fail "credential-relay install failed"; return 1; }
-        uv pip install --python "$py" --editable "$CFG_MIGRATE_DIR" --quiet || {
-            _fail "config-migrate install failed"; return 1; }
-        uv pip install --python "$py" --editable "$ZDD_DIR" --quiet || {
-            _fail "zdd install failed"; return 1; }
-        uv pip install --python "$py" --editable "$VENUE_COPILOT_DIR" --quiet || {
-            _fail "venue-copilot install failed"; return 1; }
-        uv pip install --python "$py" --editable "$SESSION_LIVENESS_PROBE_DIR" --quiet || {
-            _fail "session-liveness-probe install failed"; return 1; }
-        uv pip install --python "$py" --editable "$SINGLE_INSTANCE_LEASE_DIR" --quiet || {
-            _fail "single-instance-lease install failed"; return 1; }
-        uv pip install --python "$py" --editable "$REMOTE_LOGIN_SHELL_DIR" --quiet || {
-            _fail "remote-login-shell install failed"; return 1; }
-        uv pip install --python "$py" --editable "$PLUGIN_DIR" --quiet || {
-            _fail "agent-codespaces install failed"; return 1; }
-        return 0
-    fi
-    uv pip install --python "$py" --reinstall-package agent-ssh-manager "$SSH_MGR_DIR" --quiet || {
-        _fail "ssh-manager install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet || {
-        _fail "credential-relay install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet || {
-        _fail "config-migrate install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-zdd "$ZDD_DIR" --quiet || {
-        _fail "zdd install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-venue-copilot "$VENUE_COPILOT_DIR" --quiet || {
-        _fail "venue-copilot install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-session-liveness-probe "$SESSION_LIVENESS_PROBE_DIR" --quiet || {
-        _fail "session-liveness-probe install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-single-instance-lease "$SINGLE_INSTANCE_LEASE_DIR" --quiet || {
-        _fail "single-instance-lease install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-remote-login-shell "$REMOTE_LOGIN_SHELL_DIR" --quiet || {
-        _fail "remote-login-shell install failed"; return 1; }
-    uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
-        _fail "agent-codespaces install failed"; return 1; }
+    local packages=(agent-ssh-manager agent-credential-relay agent-config-migrate
+        agent-zdd agent-venue-copilot agent-session-liveness-probe
+        agent-single-instance-lease agent-remote-login-shell agent-codespaces)
+    local sources=("$SSH_MGR_DIR" "$CRED_RELAY_DIR" "$CFG_MIGRATE_DIR"
+        "$ZDD_DIR" "$VENUE_COPILOT_DIR" "$SESSION_LIVENESS_PROBE_DIR"
+        "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$PLUGIN_DIR")
+    local i output mode_args
+    for i in "${!packages[@]}"; do
+        mode_args=(--reinstall-package "${packages[$i]}")
+        [[ "$mode" == "--editable" ]] && mode_args=(--editable)
+        if ! output="$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$py" \
+            "${mode_args[@]}" "${sources[$i]}" --quiet 2>&1)"; then
+            _fail "${packages[$i]} install failed: $output"
+            return 1
+        fi
+    done
 }
 
 # Stamp _build_info.py into the INSTALLED site-packages copy (post-install).
@@ -595,12 +552,16 @@ _ensure_uv_index() {
 }
 
 deploy_venv() {
-    _assert_uv
+    _assert_uv || return 1
     _ensure_uv_index
     mkdir -p "$VENV_DIR"
     _versioned_slot_clean || return 1
-    if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
-        uv venv "$VENV_DIR" --allow-existing 2>/dev/null || true
+    local venv_out
+    if ! venv_out="$(invoke_uv_venv_resilient "$UV_CMD" "$VENV_DIR" --python 3.11 --allow-existing 2>&1)"; then
+        if ! venv_out="$(invoke_uv_venv_resilient "$UV_CMD" "$VENV_DIR" --allow-existing 2>&1)"; then
+            _fail "Venv creation failed: $venv_out"
+            return 1
+        fi
     fi
     if [[ ! -f "$VENV_PYTHON" ]]; then
         _fail "Venv creation failed"
@@ -668,12 +629,16 @@ do_dev() {
     dev_dir="$INSTALL_DIR/versions/dev"
     dev_python="$dev_dir/bin/python"
 
-    _assert_uv
+    _assert_uv || return 1
     _ensure_uv_index
-    if [[ ! -f "$dev_python" ]]; then
+    if [[ ! -f "$dev_python" || ! -f "$dev_dir/pyvenv.cfg" ]]; then
         mkdir -p "$dev_dir"
-        if ! uv venv "$dev_dir" --python 3.11 --allow-existing 2>/dev/null; then
-            uv venv "$dev_dir" --allow-existing 2>/dev/null || true
+        local venv_out
+        if ! venv_out="$(invoke_uv_venv_resilient "$UV_CMD" "$dev_dir" --python 3.11 --allow-existing 2>&1)"; then
+            if ! venv_out="$(invoke_uv_venv_resilient "$UV_CMD" "$dev_dir" --allow-existing 2>&1)"; then
+                _fail "dev venv creation failed: $venv_out"
+                return 1
+            fi
         fi
         if [[ ! -f "$dev_python" ]]; then
             _fail "dev venv creation failed at $dev_dir"
@@ -856,40 +821,9 @@ STUB
     _ok "Binstub: $stub_path (self-provisioning)"
 }
 
-write_deploy_manifest() {
-    local manifest_path="$INSTALL_DIR/deploy-manifest.json"
-    local kind ver commit branch dirty
-    kind="$(_source_kind "$PLUGIN_DIR")"
-    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-    commit="null"; branch="null"; dirty="false"
-    if [[ "$kind" == "local" ]]; then
-        local c b d
-        read -r c b d <<< "$(_git_info "$REPO_ROOT")"
-        commit="\"$c\""; branch="\"$b\""; dirty="$d"
-    fi
-    local tmp="$manifest_path.tmp"
-    cat > "$tmp" << MANIFEST
-{
-  "schema_version": 3,
-  "service": "agent-codespaces",
-  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$kind",
-    "path": "$PLUGIN_DIR",
-    "repo": "copilot-extensions",
-    "plugin": "agent-codespaces",
-    "version": "$ver",
-    "commit": $commit,
-    "branch": $branch,
-    "dirty": $dirty
-  },
-  "venv": "$VENV_DIR",
-  "runtime": "python"
-}
-MANIFEST
-    mv -f "$tmp" "$manifest_path"
-    _ok "Deploy manifest written (source: $kind)"
+_write_codespaces_deploy_manifest() {
+    write_deploy_manifest "agent-codespaces" "agent-codespaces" \
+        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
 }
 
 # -- Actions ---------------------------------------------------------------
@@ -1014,7 +948,7 @@ do_install() {
         | sed 's/^/  /' || _warn "Config migration skipped"
 
     # Write manifest
-    write_deploy_manifest
+    _write_codespaces_deploy_manifest
 
     # Verify (import from the venv -- no PYTHONPATH)
     local check
@@ -1214,7 +1148,7 @@ do_update() {
         | sed 's/^/  /' || _warn "Config migration skipped"
 
     # Update manifest
-    write_deploy_manifest
+    _write_codespaces_deploy_manifest
 
     # Connection Owner daemon (config-gated; default on unless opted out).
     _sync_owner_service
@@ -1249,7 +1183,7 @@ do_provision() {
     _versioned_activate || return 1
     PYTHONUTF8=1 "$VENV_PYTHON" -m agent_codespaces config-migrate 2>&1 \
         | sed 's/^/  /' || _warn "Config migration skipped"
-    write_deploy_manifest
+    _write_codespaces_deploy_manifest
     local check
     check="$("$LINK_PYTHON" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
     if [[ "$check" == "OK" ]]; then

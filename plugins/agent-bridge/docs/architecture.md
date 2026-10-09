@@ -98,6 +98,27 @@ before ACP readiness or prompt delivery. A relay-enabled resume fails explicitly
 when that readiness cannot be proven; fleets with relay disabled skip the gate.
 This resume contract is separate from broader relay port-stability policy.
 
+Session-Host sessions carry the relay's reverse-forward on a dedicated,
+self-healing supervisor (`ssh_manager.SupervisedRelayForward`) owned per
+session. That ownership ends with the session: the bridge stops a session's
+relay supervisors -- and their whole SSH process tree, including a
+`gh codespace ssh` ProxyCommand -- when the session is marked failed, ends, or
+is explicitly stopped (a redeploy detach keeps it for the surviving turn, and a
+later resume re-supervises it from the durable endpoint). A CodeSpace relay's
+supervisor also checks the CodeSpace's state through the GitHub API before any
+reconnect: it retires instead of reconnecting when the CodeSpace is stopped,
+and backs off without connecting while it is in a transitional state (e.g.
+starting or shutting down), so a relay never re-wakes a CodeSpace that was
+stopped on purpose yet still recovers across a restart.
+
+Teardown terminates a live SSH root together with its process tree on every
+platform. A ProxyCommand child that has already outlived its root is swept only
+where ownership can be proven safely: on Linux (with pidfds) by a
+per-supervisor environment token, and on Windows by the registered ProxyCommand
+owner. On other POSIX platforms such a stdio ProxyCommand is left to exit on
+its own when its closed pipes reach EOF; it is never re-spawned, because the
+retired supervisor does not reconnect.
+
 The relay speaks the git credential protocol over TCP and supports the standard
 `get`/`fill`, `store`/`approve`, and `erase`/`reject` shapes plus token actions
 such as `get-github-token`, `get-azure-token`, and `get-access-token`; provider
@@ -745,6 +766,27 @@ protocol versions. The remaining boundary is **wire compatibility**: if a future
 frontend cannot speak a surviving host's protocol, version-mux leaves that host
 running until its child stops (or until an opt-in stale-host reap bound fires)
 rather than killing the child mid-turn.
+
+### CodeSpace launch gate
+
+Before a Session Host spawns on a CodeSpace (a fresh start, or a respawn on
+resume), the daemon asks the host's registered launch policy through
+`venue_launch_policy.py`: it runs `launch-check <codespace> --json` via the
+active `codespace` provider's absolute command from `providers.d` (the service
+`PATH` normally lacks sibling binstubs; that command also runs in the
+provider's own installation context), falling back to a `PATH` lookup. It
+passes `--deadline` (its own 60 s timeout less a 5 s margin), so the policy's
+timeout shrinks to fit a slow start-up and the check's own tree-kill cleanup
+always runs before the daemon would kill the check. Only an
+exit 0 carrying `{"refuse": null}` allows the spawn; a refusal, a timeout, or
+malformed output refuses it. A refused start or resume is recorded as
+`launch_refused` (a refused resume is terminal); a refused resync stops the
+session and is logged. When no check is possible (no provider, or one that predates
+`launch-check`), the spawn is allowed only if no registration file exists. The
+gate is a spawner subclass built in `codespace_transport.build_codespace_spawner`,
+and `transport.spawn` asks the same policy before any raw-transport CodeSpace
+spawn (a resync, or a resume without a Session Host),
+advertised as HTTP generation 26 (`codespace_launch_policy`).
 
 ## Persistence
 

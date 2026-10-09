@@ -35,8 +35,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import capture_cli, dial_log_cli
+from . import capture_cli, dial_log_cli, launch_policy
 from . import claim_provider_cli
+from .leases_cli import _hold_is_self, _self_claim_identity, _short_owner
+from .live_users import busy_report as _busy_report
+from .live_users import recheck_before as _recheck_before
 from . import pool as pool_mod
 from . import relay_launch
 from .codespace_config import CodespaceSource
@@ -358,16 +361,17 @@ def main(argv: list[str] | None = None) -> int:
     delete_parser = sub.add_parser("delete", help="Delete a CodeSpace")
     delete_parser.add_argument("name", help="CodeSpace name")
     delete_parser.add_argument(
-        "--force", action="store_true", help="Force deletion",
+        "--force", action="store_true",
+        help="Force deletion (also skips the live-local-user check)",
     )
     delete_parser.add_argument(
         "--no-sync", action="store_true",
         help="Skip the pre-delete Copilot session recovery",
     )
 
-    claim_provider_cli.add_claim_provider_parsers(sub)
-    capture_cli.add_capture_parser(sub)
-    dial_log_cli.add_dial_log_parser(sub)
+    for add in (claim_provider_cli.add_claim_provider_parsers, capture_cli.add_capture_parser,
+                dial_log_cli.add_dial_log_parser, launch_policy.add_launch_policy_parsers):
+        add(sub)
     # --- finalize ---
     finalize_parser = sub.add_parser(
         "finalize",
@@ -383,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="With --delete: delete even if recovery failed -- diagnose the "
              "failure first, do not use for routine hiccups (destroys "
-             "unrecovered sessions)",
+             "unrecovered sessions). Also skips the live-local-user check",
     )
     finalize_parser.add_argument(
         "--timeout", type=float, default=300.0,
@@ -424,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
     stop_parser.add_argument(
         "--no-sync", action="store_true",
         help="Skip the pre-stop Copilot session recovery",
+    )
+    stop_parser.add_argument(
+        "--force", action="store_true",
+        help="Stop even while live local processes (SSH ControlMaster, forwards, "
+             "gh codespace ssh) still use the CodeSpace",
     )
     stop_parser.add_argument(
         "--timeout", type=float, default=300.0,
@@ -533,6 +542,14 @@ def main(argv: list[str] | None = None) -> int:
         "--json", dest="json_output", action="store_true",
         help="Emit machine-readable JSON instead of the human table",
     )
+    in_use_p = sub.add_parser(
+        "in-use",
+        help="Is a CodeSpace in use by a live local process (target lock, SSH "
+             "ControlMaster, forward, gh codespace ssh)? Exit 0 idle, 75 in use, 3 "
+             "unknown (process table unreadable)",
+    )
+    in_use_p.add_argument("name", help="CodeSpace name")
+    in_use_p.add_argument("--json", dest="json_output", action="store_true")
 
     # --- claim / release-claim (#897: exclusive, worktree-keyed control) ------
     # The process-to-process seam the agent-bridge daemon shells out to (it
@@ -966,6 +983,10 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_release(args)
         if args.command == "leases":
             return _cmd_leases(args)
+        if args.command == "in-use":
+            from .live_users import cmd_in_use
+
+            return cmd_in_use(args)
         if args.command == "claim":
             return _cmd_claim(args)
         if args.command == "release-claim":
@@ -1150,8 +1171,8 @@ async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN0
 
 @_context_admitted
 def _cmd_ssh(args: argparse.Namespace) -> int:
-    """SSH into a CodeSpace using ssh-manager."""
-    return _ssh_session(args)
+    """SSH into a CodeSpace using ssh-manager (``--stdio`` asks the launch policy first)."""
+    return launch_policy.stdio_refused_exit_code(args) or _ssh_session(args)
 
 
 def _ssh_session(
@@ -3298,7 +3319,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     from .lifecycle_lock import lifecycle_lock
 
     try:
-        with lifecycle_lock(args.name) as lock:
+        with lifecycle_lock(args.name, refuse_live_users="delete", force=args.force) as lock:
             if not getattr(args, "no_sync", False):
                 res = sync_codespace_sessions(args.name, verbose=args.verbose, lock=lock)
                 if res.get("ok"):
@@ -3307,10 +3328,11 @@ def _cmd_delete(args: argparse.Namespace) -> int:
                 else:
                     print(f"[WARN] Pre-delete session recovery failed (continuing): "
                           f"{res.get('detail')}", file=sys.stderr)
+            _recheck_before(args.name, "delete", force=args.force)
             delete_codespace(args.name, force=args.force)
             print(f"Deleted: {args.name}")
     except TargetBusyError as busy:
-        print(f"[BUSY] {busy}", file=sys.stderr)
+        print(_busy_report(args.name, busy), file=sys.stderr)
         return 1
     _release_lease_quietly(args.name)
     return 0
@@ -3393,7 +3415,8 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
             return 2
 
     try:
-        with lifecycle_lock(args.name) as lock:
+        with lifecycle_lock(args.name, refuse_live_users="finalize",
+                            force=args.force) as lock:
             # Preserving path may skip booting a Shutdown box; the destructive --delete
             # path must recover first (booting if needed) before the box is gone.
             res = sync_codespace_sessions(
@@ -3421,6 +3444,7 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
                     return 1
 
             if args.delete:
+                _recheck_before(args.name, "finalize", force=args.force)
                 delete_codespace(args.name, force=args.force)
                 print(f"Deleted: {args.name}")
                 _release_lease_quietly(args.name)
@@ -3428,6 +3452,7 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
                 return 0 if res.get("ok") else 1
 
             # Default preserve path: stop (idempotent) then mark recovered.
+            _recheck_before(args.name, "finalize", force=args.force)
             try:
                 stopped = stop_codespace(args.name)
                 print(f"Stopped: {args.name} (preserved -- boots on next connect)"
@@ -3447,7 +3472,7 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
                   f"is preserved, so retry `finalize {args.name}` later)", file=sys.stderr)
             return 1
     except TargetBusyError as busy:
-        print(f"[BUSY] {busy}", file=sys.stderr)
+        print(_busy_report(args.name, busy), file=sys.stderr)
         return 1
 
 
@@ -3492,7 +3517,8 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
         from .lifecycle_lock import lifecycle_lock
 
         try:
-            with lifecycle_lock(name) as lock:
+            with lifecycle_lock(name, refuse_live_users="finalize",
+                                force=args.force) as lock:
                 emit({"type": "progress", "pct": 5.0,
                       "msg": f"Recovering Copilot sessions from {name}\u2026"})
                 res = sync_codespace_sessions(
@@ -3517,6 +3543,7 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
 
                 if args.delete:
                     emit({"type": "progress", "pct": 70.0, "msg": f"Deleting {name}\u2026"})
+                    _recheck_before(name, "finalize", force=args.force)
                     delete_codespace(name, force=args.force)
                     _release_lease_quietly(name)
                     _clear_status_quietly(name)
@@ -3527,6 +3554,7 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
                 # Preserve path: stop (idempotent) then mark recovered.
                 emit({"type": "progress", "pct": 70.0,
                       "msg": f"Stopping {name} (preserving)\u2026"})
+                _recheck_before(name, "finalize", force=args.force)
                 try:
                     stop_codespace(name)
                 except RuntimeError as exc:
@@ -3631,7 +3659,8 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     from .lifecycle_lock import lifecycle_lock
 
     try:
-        with lifecycle_lock(args.name) as lock:
+        with lifecycle_lock(args.name, refuse_live_users="stop",
+                            force=getattr(args, "force", False)) as lock:
             if not getattr(args, "no_sync", False):
                 res = sync_codespace_sessions(
                     args.name, timeout=args.timeout, verbose=args.verbose,
@@ -3649,6 +3678,7 @@ def _cmd_stop(args: argparse.Namespace) -> int:
                           f"CodeSpace is preserved, so sessions can be recovered "
                           f"later): {res.get('detail')}", file=sys.stderr)
 
+            _recheck_before(args.name, "stop", force=getattr(args, "force", False))
             stopped = stop_codespace(args.name)
             if stopped:
                 print(f"Stopped: {args.name} (preserved -- boots on next connect)")
@@ -3656,7 +3686,7 @@ def _cmd_stop(args: argparse.Namespace) -> int:
                 print(f"Already stopped: {args.name}")
         return 0
     except TargetBusyError as busy:
-        print(f"[BUSY] {busy}", file=sys.stderr)
+        print(_busy_report(args.name, busy), file=sys.stderr)
         return 1
 
 
@@ -3761,7 +3791,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
         from .lifecycle_lock import lifecycle_lock
 
         try:
-            with lifecycle_lock(name) as lock:
+            with lifecycle_lock(name, refuse_live_users="prune") as lock:
                 # Destructive path: recover even a Shutdown box (boot if needed) first.
                 res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
                 if not (res.get("ok") or res.get("skipped")):
@@ -3769,6 +3799,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
                           f"(diagnose): {res.get('detail')}", file=sys.stderr)
                     continue
                 try:
+                    _recheck_before(name, "prune")
                     delete_codespace(name, force=False)
                 except RuntimeError as exc:
                     print(f"[WARN] Delete failed for {name}: {exc}", file=sys.stderr)
@@ -3822,11 +3853,12 @@ def _reclaim_for_quota(err: str) -> str | None:
             from .lifecycle_lock import lifecycle_lock
 
             try:
-                with lifecycle_lock(name) as lock:
+                with lifecycle_lock(name, refuse_live_users="prune") as lock:
                     res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
                     if not (res.get("ok") or res.get("skipped")):
                         continue
                     try:
+                        _recheck_before(name, "prune")
                         delete_codespace(name, force=False)
                     except RuntimeError:
                         continue
@@ -3849,9 +3881,14 @@ def _reclaim_for_quota(err: str) -> str | None:
         for cs in running:
             st = get_status(cs.name)
             if st and st.state in (STATE_RECOVERED, STATE_PRUNABLE):
-                try:
-                    stop_codespace(cs.name)
-                except RuntimeError:
+                from ssh_manager import TargetBusyError
+
+                from .lifecycle_lock import lifecycle_lock
+
+                try:  # never stop a box still in use; check + stop under the lock
+                    with lifecycle_lock(cs.name, refuse_live_users="stop"):
+                        stop_codespace(cs.name)
+                except (RuntimeError, TargetBusyError):
                     continue
                 return f"stopped eligible running box '{cs.name}' to free running quota"
         return None
@@ -4003,117 +4040,10 @@ def _cmd_release(args: argparse.Namespace) -> int:
     return 1
 
 
-def _short_owner(owner: str) -> str:
-    """A readable owner label: the basename of a worktree path, else as-is.
-
-    A claim's owner is an absolute worktree path (long); an advisory borrow's
-    owner is a short effort name. Show the basename for a path so the ``pool`` /
-    ``leases`` tables stay legible (#904).
-    """
-    if owner and os.path.isabs(owner):
-        return os.path.basename(owner.rstrip("/\\")) or owner
-    return owner
-
-
-def _self_claim_identity() -> tuple[str | None, str | None]:
-    """Resolve THIS caller's own claim identity for ``(you)`` self-marking.
-
-    Returns ``(self_owner, self_worktree_id)``: ``self_owner`` is the calling
-    worktree's L1 claim-owner (from ``resolve_owner_worktree`` -- matches a
-    lease's ``worktree`` field); ``self_worktree_id`` is the worktree id parsed
-    from the caller's qualified ClaimRef (matches the worktree id in an L2 holder
-    ref, and cross-machine-independent). Both best-effort -> ``None`` when not in
-    a worktree, so the surfaces degrade to no marker (never wrong). Lets an agent
-    recognize a claim it holds itself instead of steering clear of its own box
-    (#1362 / agent-claim-awareness).
-    """
-    self_owner = None
-    self_wtid = None
-    try:
-        from .lease import resolve_owner_worktree
-        self_owner = resolve_owner_worktree() or None
-    except Exception:
-        self_owner = None
-    try:
-        from . import coordination
-        ref = coordination.owner_ref()
-        if ref:
-            self_wtid = ref.split("/")[-1].split("#")[0].strip() or None
-    except Exception:
-        self_wtid = None
-    if self_wtid is None and self_owner:
-        self_wtid = os.path.basename(self_owner.rstrip("/\\")) or None
-    return self_owner, self_wtid
-
-
-def _hold_is_self(owner: str | None, l2_holder: str | None,
-                  self_owner: str | None, self_wtid: str | None) -> bool:
-    """Is a hold (L1 owner and/or L2 holder ref) held by THIS caller? (#1362)."""
-    if self_owner and owner and owner == self_owner:
-        return True
-    if self_wtid:
-        if owner and os.path.basename(str(owner).rstrip("/\\")) == self_wtid:
-            return True
-        if l2_holder and l2_holder.split("/")[-1].split("#")[0].strip() == self_wtid:
-            return True
-    return False
-
-
 def _cmd_leases(args: argparse.Namespace | None = None) -> int:
-    """Show active CodeSpace leases (advisory borrows and #897 claims).
+    from .leases_cli import cmd_leases
 
-    ``--owner`` filters to one worktree/effort's own leases/claims; ``--json``
-    emits a machine-readable list instead of the human table -- the read-only
-    query surface a caller (e.g. ``agent-worktrees finalize``'s claim-warning
-    step) uses to discover exactly which CodeSpaces a worktree still has
-    claimed, WITHOUT releasing anything itself.
-    """
-    from .lease import list_leases
-
-    leases = list_leases()
-    owner_filter = getattr(args, "owner", None) if args is not None else None
-    if owner_filter:
-        leases = [
-            lease for lease in leases
-            if (lease.worktree or lease.effort) == owner_filter
-        ]
-    json_output = bool(getattr(args, "json_output", False)) if args is not None else False
-    if json_output:
-        print(json.dumps([
-            {
-                "codespace": lease.codespace,
-                "owner": lease.worktree or lease.effort,
-                "kind": "claim" if lease.worktree else "borrow",
-                "host": lease.host,
-                "pid": lease.pid,
-            }
-            for lease in leases
-        ]))
-        return 0
-    if not leases:
-        print("No active leases.")
-        return 0
-    self_owner, self_wtid = _self_claim_identity()
-    any_self = False
-    print(f"{'CODESPACE':<40} {'OWNER':<28} {'KIND':<7} {'HOST':<16} {'PID'}")
-    for lease in leases:
-        # A claim keys its owner on ``worktree`` (with ``effort`` empty); an
-        # advisory borrow keys on ``effort``. Show the single owner + which
-        # flavor recorded it, so a dispatched (claimed) CodeSpace is no longer a
-        # blank row (#904).
-        owner = lease.worktree or lease.effort
-        kind = "claim" if lease.worktree else "borrow"
-        is_self = _hold_is_self(owner, None, self_owner, self_wtid)
-        any_self = any_self or is_self
-        label = _short_owner(owner) + ("  (you)" if is_self else "")
-        print(
-            f"{lease.codespace:<40} {label:<28} {kind:<7} "
-            f"{lease.host:<16} {lease.pid}"
-        )
-    if any_self:
-        print("\n(you) = held by THIS worktree -- reuse it; you already own it "
-              "(no need to create a new box or --force-claim).")
-    return 0
+    return cmd_leases(args)
 
 
 @_context_admitted

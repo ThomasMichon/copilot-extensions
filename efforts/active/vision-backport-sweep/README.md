@@ -48,7 +48,9 @@
   failed succession-promotion outcomes) ·
   `ThomasMichon/copilot-extensions#5750` (failed new-version cutover falls back
   to stop/start) · `ThomasMichon/copilot-extensions#5754` (recovery runs before
-  acquiring lifecycle-transition authority)
+  acquiring lifecycle-transition authority) ·
+  `ThomasMichon/copilot-extensions#5791` (explicit scoped gh identity degrades
+  to ambient execution after token minting fails)
 
 ## Guiding Intent
 
@@ -69,9 +71,9 @@ coherent slice per session (one vision reconciled + its deltas carved) and
 hand off the rest.
 
 A companion, independent concern — refreshing stale user-facing docs,
-README capability claims, and Picker preview screenshots/images — is not yet
-tracked anywhere; whether it becomes its own effort or a later phase of this
-one is still undecided (see Phase 4 and Proposal below).
+README capability claims, and Picker preview screenshots/images — is tracked
+separately as `adopter-material-refresh` (`#5799`), per the operator's Phase 4
+decision. Its implementation does not expand this sweep's completion gate.
 
 ## Participants
 
@@ -118,6 +120,12 @@ Operator, end of a long multi-repo session:
 > strong adherence, and so we'll need to do some adaptation. The docs,
 > preview images, and other user-facing materials are also getting out of
 > date with all the new improvements, enforcements, and capabilities."
+
+Follow-up decisions, 2026-10-08 (verbatim selections):
+- Material-refresh relationship: **"Separate sibling effort"**
+- Confirmed sibling slug: **"adopter-material-refresh"**
+- Repository identity contract: **"Strict for explicit choices; preserve
+  unconfigured ambient defaults"**
 
 ## Plan
 
@@ -310,11 +318,23 @@ Operator, end of a long multi-repo session:
             work. Phase B `#987` is closed with an unrelated closing artifact;
             its mapping scope remains under open umbrella `#985`, not inferred
             complete from that issue state.
-      - [ ] `visions/native-convergence/README.md` — remaining root/catalog/
-            working-boundary source coverage beyond this proof-boundary slice.
-            Verify actual mapping/interop and existing tracker disposition;
-            do not substitute help presence, issue closure, or projection-only
-            tests for that audit.
+      - [x] `visions/native-convergence/README.md` — remaining root/catalog/
+            working-boundary source audit recorded in the owning
+            `native-construct-convergence` effort. Configured roots, direct Git
+            creation, harness-owned catalogs, native identity consumption, and
+            native trust/permission integration were distinguished from proof of
+            native mapping. No additional vision-level fold-back was required.
+            Existing `#985`/`#986`/`#988` retain the unproved implementation
+            scope; unrelated closure of `#987` is not Phase B completion.
+            This completes the reconciliation audit, not native convergence.
+      - [x] `visions/plugins/agent-worktrees/README.md` — account-boundary slice:
+            account-catalog/routing separation, scoped credentials,
+            inspectable choice, and explicit authentication failure versus
+            ambient consent. Filed `#5791` for the concrete CLI fallback;
+            retained the separate Copilot inference-identity safety boundary.
+      - [ ] `visions/plugins/agent-worktrees/README.md` — remaining parent
+            reconciliation beyond the account slice, including head/claims,
+            contribution roles, daemon authority, and lifecycle coverage.
 
 ### Phase 3 — Full design/service-invariant audit
 - [x] Ran a slice of the `plugin-services` invariant audit against every
@@ -370,9 +390,11 @@ Operator, end of a long multi-repo session:
       not assumed complete.
 
 ### Phase 4 — Decide the material-refresh relationship
-- [ ] Decide whether user-facing material refresh (docs, Picker preview
+- [x] Decide whether user-facing material refresh (docs, Picker preview
       screenshots, README capability claims) becomes a sub-stream of this
-      effort or its own sibling effort. Not yet decided — see Open Questions.
+      effort or its own sibling effort. Operator chose a separate sibling,
+      confirmed `adopter-material-refresh`, and its independently reviewed
+      planning/execution is tracked by `#5799`.
 
 ## Validation Plan
 - [ ] Every vision file touched passes the superset check (no unintended
@@ -385,15 +407,35 @@ Operator, end of a long multi-repo session:
 
 ## Proposal
 
-**Open question — not yet decided:** should the user-facing material refresh
-(docs, Picker preview screenshots, README capability claims) fold into this
-effort as a later phase, or become its own sibling effort? Both streams are
-"reality has outpaced the standing record," but they have different
-audiences (vision = contributor-facing design intent; materials =
-adopter-facing). Deferred to Phase 4 — ask the operator if it comes up before
-then rather than assuming either answer.
+**Settled:** user-facing material refresh is the independent
+`adopter-material-refresh` sibling (`#5799`). This sweep owns vision
+reconciliation and invariant-audit evidence; the sibling owns adopter-facing
+documentation and assets. Neither closing a sweep slice nor publishing the
+sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Remaining native mapping audit and sibling publication
+- Finished native root/catalog/working-boundary source reconciliation against
+  snapshot `ed8c1cfee`. The owning effort now records the evidence table,
+  distinguishes native identity consumption from unproved native root/catalog
+  mappings, and requires proof of the proposed native layout before migration.
+  The standing vision already covers the inspected intended capabilities; no
+  positive capability or boundary was removed or weakened.
+- Kept implementation ownership under `#985` and its existing phase trackers;
+  did not reopen `#987`, manufacture native contract proof, or create a duplicate
+  mapping issue. The branch itself deploys no runtime; this is not a further
+  plugin-services conformance result.
+- The independent material proposal merged as `#5807` with current-head
+  approval and required CI/PR gates. Recorded its planning-publication closure
+  in the sibling plan and on `#5799`; execution remains unassigned and the
+  sweep's overall Phase 2/3 and Validation Plan remain open.
+- Focused local root/trust/session-contract tests could not obtain the shared
+  host test-admission lease, including a bounded 180-second wait. No lease was
+  cleared and no other test run was interrupted. This documentation-only slice
+  makes no fresh native integration, clean-room, or live-host proof claim.
+  Those lanes require native mapping changes and contract evidence in the
+  owning convergence effort, rather than being substitutes for this source audit.
 
 ### 2026-10-05 — Kickoff + Phase 1 slice
 - Effort created as the tracker for the operator's vision-backport +
@@ -1149,3 +1191,66 @@ then rather than assuming either answer.
   proof-boundary slice done and split remaining root/catalog/working-boundary
   source coverage into its own open item. The completed slice does not
   silently complete the remaining native audit or its implementation phases.
+
+### 2026-10-08 — Phase 2 agent-worktrees account-boundary slice
+- Read the full worktree-parent vision, then scoped source comparison to
+  repository-account resolution and operation credentials, not a full
+  head/claims/daemon rewrite. Reality evidence: `accounts.py`'s descriptive
+  catalog, `repos.resolve_account`'s routing precedence, token lookup in
+  `git_ops.py`, `_gh_env_for_repo`, the `repos gh` execution branch, and
+  repository-local Git credential pinning.
+- Fold-back: the account catalog describes identity/authentication expectations
+  separately from which repositories choose those identities; the credential
+  store remains owned by the authentication provider. Scoped invocation and
+  local pinning avoid a machine-global account switch. The code's Git pinning
+  is a selective, best-effort capability with provider/scope limits; no
+  universal bare-Git pin was claimed from that implementation.
+- Carved `#5791` after dedup: for an explicitly intended account whose token
+  minting fails, `_gh_env_for_repo` returns an unchanged ambient environment;
+  `repos_cli.py:666-669` warns and still launches arbitrary `gh` arguments.
+  The warning is real, so this is not described as a silent failure. The gap
+  is execution under replacement identity after explicit intent resolved.
+  The vision requirement and issue's fix direction distinguish an explicit
+  override/map from the derived-owner heuristic so an unconfigured organization
+  is not accidentally treated as a mandatory authenticated user. No runtime
+  guard was implemented here and no live wrong-account mutation was attempted.
+- Existing `#2755` concerns short-name resolution and `#330` stale minted
+  tokens; neither is this subsequent missing-token execution fallback.
+  The issue names no-subprocess regression obligations for failed explicit
+  choices and preserves ordinary unconfigured ambient behavior.
+- Superset check: retained all existing positives and negatives, especially
+  independent Copilot inference identity and its shared-machine idle/explicit
+  correction boundary. No OAuth scopes, helper grammar, environment variables,
+  file layouts, or credential data enter the vision. Refusing an unavailable
+  explicit account implements the already-stated intended-identity contract;
+  it does not remove unconfigured ambient operation.
+- Scoped conformance: successful token injection and target account mapping
+  embody per-operation identity isolation; token-unavailable explicit choices
+  remain partial (`#5791`). This is not a claim that all Git helpers, SSH
+  identities, Copilot identity correction, or role-derived contribution
+  operations were freshly audited. The remaining parent vision stays open.
+- Validation: both touched READMEs pass the structure guard and whitespace
+  check. Existing contained Windows account-catalog/routing/token-environment
+  contracts report **25 passed, 7524 deselected**. They preserve current
+  behavior, including the token-unavailable environment result; they do not
+  implement or prove the new no-ambient-execution requirement. Selective Git
+  pinning is source-inspection evidence only in this slice. The new issue owns
+  the missing no-subprocess regression. No live auth switch, public mutation
+  probe, clean-room install, or provider credential experiment was performed.
+- PR `#5793` review exposed an existing-contract ambiguity: the old universal
+  no-global-account wording conflicted with the preserved unconfigured ambient
+  default. Asked the operator before qualifying it. The explicit decision
+  above scopes the strict guarantee to declared repository/account-map choices
+  while retaining ordinary unconfigured ambient behavior. Qualified both
+  affected paragraphs; independent Copilot inference identity is unchanged.
+
+### 2026-10-08 — Phase 4 material-refresh relationship decided
+- Operator selected **"Separate sibling effort"** and confirmed
+  **"adopter-material-refresh"**. Created independent umbrella `#5799` after
+  tracker/active-effort dedup and verified target effort adoption with the
+  exact read-only probe. The new plan clears its own repository review gate
+  before execution; no README rewrite or preview capture occurred here.
+- Decision capture was checked against the literal selections before updating
+  Request, Guiding Intent, Proposal, and Plan. No firm choice remains phrased
+  as an open question. Material execution is not silently added to the vision
+  sweep's remaining Phase 2/3 or Validation Plan.

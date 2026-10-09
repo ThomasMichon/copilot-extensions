@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs against `dev`
 - **Created:** 2026-10-08
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [agent-index](../../../../visions/plugins/agent-index/README.md):
   `lightweight-client-and-declared-host-service`,
   `independently-packaged-indexer-service`,
@@ -89,10 +89,10 @@ silently introduce that tier.
 - [x] Restore the existing host using its durable launcher; verify live routing
   and preserve the warm engine and queue.
 - [x] Fix effective-config activation parity and management-Job survival (#5769);
-  source regressions and isolated real-process checks pass, deployment pending.
-- [ ] Revise the vision and review the [architecture proposal](architecture.md).
-- [ ] Land the proposal/recovery PR, observe release promotion and deploy the repair.
-- [ ] Record which recovery is event-driven and which requires a continuously
+  source regressions and isolated real-process checks pass; deployed in `0.10.10-dev1`.
+- [x] Revise the vision and review the [architecture proposal](architecture.md).
+- [x] Land the proposal/recovery PR, observe release promotion and deploy the repair.
+- [x] Record which recovery is event-driven and which requires a continuously
   running lifecycle authority; do not claim unattended restart from logon
   registration alone. _(agent-recommended validation clarification)_
 
@@ -163,3 +163,26 @@ boundaries from implementation decisions and deployment-specific policy.
   Full installer clean-room and live external-venue execution are deferred to
   the standalone implementation slices; the current recovery was reproduced
   and checked on a Windows native host. No external deployment was provisioned.
+- #5779 merged after an approving Copilot review and passing required CI.
+  Review corrected the lifecycle note to reflect the active installer `ensure`
+  hook and added explicit fail-closed resolver-error handling with a bounded
+  diagnostic on both installer platforms. The contribution landed on `dev`;
+  release promotion and local deployment remain part of Phase 1.
+- The proposal is reviewed, not an implemented standalone distribution.
+  Phases 2 and 3 remain future service-package and deployment-adapter slices;
+  no downstream host-routing migration has started.
+- Release #5794 merged on `main`. Its activation-helper content matched the
+  validated source exactly; contribution-SHA ancestry was not used as proof.
+  Unified update deployed agent-index `0.10.10-dev1` through a clean, non-forced
+  active/passive cutover.
+- Post-deployment: the successor served after the updater exited. Two actual
+  installer `ensure` invocations selected the layered host configuration and
+  preserved the healthy instance/route; configured CLI retrieval returned
+  populated hits. The original indexing worker remained alive and adopted,
+  and the warm embedding engine remained loaded at background priority.
+- No Scheduled Tasks were added. Recovery through session-start `ensure`,
+  explicit `ensure` and update is event-driven; continuous unattended crash
+  supervision remains a separately selected lifecycle-authority contract.
+- Phase 1 is complete. Remaining service distribution and container/controller
+  implementation belongs to Phases 2 and 3, tracked by #5768, not to a claim
+  that the reviewed proposal already shipped that implementation.

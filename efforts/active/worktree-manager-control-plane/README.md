@@ -988,7 +988,12 @@ worktree-manager.
         first, even though Phase 3 is built/landed later. Write Phase 3's
         design (a short planning doc, matching the Phase 3b/3e precedent)
         before claiming Phase 2's implementation slice, or claim Phase 3's
-        design-only slice first and let Phase 2 follow it.
+        design-only slice first and let Phase 2 follow it. The proposed
+        [client-resolution design](phase-7-daemon-client-resolution.md)
+        reconciles the premise with today's per-request sockets and
+        rendezvous reads, separates data selection from target-bound control,
+        and gates retirement on client conformance and explicit legacy
+        compatibility. Its validation items remain open.
 - [x] `doctor`/validation breadth: plugin-catalog alignment (coverage)
       reporting landed (PR #4986), covering unmet-plugin-prerequisite/
       cross-plugin-drift detection. The governing vision
@@ -1171,6 +1176,20 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-08** — Confirmed #5573 merged (`a633a66d`) after approved review
+  and green checks. Reconciled the concurrent journal addition without
+  changing the implementation; the full Manager suite on the updated base
+  passed with **1760 passed, 13 skipped**. The earlier local failures did
+  not reproduce on that base. Released the completed writer-slice
+  reservation on #4564, leaving its remaining scope open. Refreshed consumer
+  payloads through the unified update flow and landed the deterministic
+  projection-provenance alignment through the consumer's own review/CI gate.
+  Claimed #5001's **Phase 3 client re-resolution design-only slice** before
+  Phase 2 implementation: first reconcile actual RPC/subscriber lifetimes
+  and endpoint discovery, then state safe boundaries and validation
+  obligations. This is not the separate wire-attribution redesign and does
+  not yet implement a retirement sweep.
 
 - **2026-10-08** — Implemented the attached-client observation portion of
   [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564) in
