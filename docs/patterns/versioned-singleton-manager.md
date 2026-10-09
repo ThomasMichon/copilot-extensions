@@ -293,16 +293,16 @@ successor already running in my own tree?*
    `daemon` record (the watched pid and its `process_start_time` token)
    into a **manager-scoped state directory distinct from `config_dir`** —
    see the Consumer contract below for why these cannot share one path —
-   and on every entry to `run()` — a fresh launch, a crash restart, *and*
-   an `execve` self-update alike — the manager's first action is to check
-   that record before ever considering a call to `spawn`: if the recorded
-   pid's current token still matches the persisted baseline per item 2's
-   adoption check, the manager re-adopts that pid as the watched child and
-   resumes supervising it; only an empty record or a baseline mismatch
-   means there is truly nothing to adopt, and `spawn` is the right call.
-   This is one single adoption path, not a special case for `execve` —
-   item 2's baseline-comparison check is what both a routine child-exit
-   poll and a just-exec'd fresh image call into.
+   and every entry to `run()` checks that state before considering a
+   spawn. **Linux state recovery is scoped to same-process exec:** both the
+   recorded manager identity and the watched daemon's baseline/ancestry
+   must still validate. An exec preserves the manager's kernel ownership;
+   a new process after a real crash does not inherit the old subreaper's
+   ancestry merely by reading its state file. Systemd's required
+   control-group cleanup removes the old tree before that restart. If an
+   old incumbent nevertheless survives, bootstrap refuses it rather than
+   claiming foreign ownership or spawning a duplicate. A matching PID/start
+   token alone never authorizes cross-manager Linux recovery.
    Windows has no pid-preserving exec equivalent, so a real process
    boundary is unavoidable there — but unlike the daemon's own cutover, the
    **manager** has no in-flight request to protect across that boundary; it

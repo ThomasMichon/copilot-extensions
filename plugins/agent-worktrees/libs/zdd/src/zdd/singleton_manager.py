@@ -98,11 +98,34 @@ class SingletonManager:
             raise RuntimeError("manager backend is not initialized")
         return self._backend
 
+    def _parse_endpoint(self, raw: object) -> routing.Endpoint | None:
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            raise ValueError("ownership routing endpoint must be an object")
+        pid, port, bind = raw.get("pid"), raw.get("port"), raw.get("bind")
+        generation = raw.get("generation", 0)
+        version, token = raw.get("version"), raw.get("process_start_time")
+        if (
+            type(pid) is not int or pid <= 0
+            or type(port) is not int or not 0 < port <= 65535
+            or not isinstance(bind, str) or not bind
+            or type(generation) is not int or generation < 0
+            or (version is not None and not isinstance(version, str))
+            or (token is not None and (
+                not isinstance(token, str) or not token.isascii() or not token.isdigit()
+            ))
+        ):
+            raise ValueError("ownership routing endpoint has invalid field types or values")
+        return routing.Endpoint(
+            bind, port, pid, version, generation, process_start_time=token,
+        )
+
     def _route_identity(self) -> tuple[int, ProcessIdentity | None] | None:
         table = routing.read_table(self.config_dir, strict=True)
         raw = table.get("active") if isinstance(table, dict) else None
-        endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-        if endpoint is None or type(endpoint.pid) is not int or endpoint.pid <= 0:
+        endpoint = self._parse_endpoint(raw)
+        if endpoint is None or endpoint.pid is None:
             return None
         identity = (
             ProcessIdentity(endpoint.pid, endpoint.process_start_time, self.backend.boot_id)
@@ -173,13 +196,9 @@ class SingletonManager:
             raw = table.get(key)
             if raw is None:
                 continue
-            if not isinstance(raw, dict):
-                raise ValueError(f"{key} routing endpoint is unparseable")
-            endpoint = routing.Endpoint.from_dict(raw)
-            if endpoint is None:
-                raise ValueError(f"{key} routing endpoint is unparseable")
-            if type(endpoint.pid) is not int or endpoint.pid <= 0:
-                raise UnmanagedDaemonError("routing incumbent has unverifiable process ownership")
+            endpoint = self._parse_endpoint(raw)
+            if endpoint is None or endpoint.pid is None:
+                raise ValueError("ownership endpoint requires a process identity")
             expected = (
                 ProcessIdentity(endpoint.pid, endpoint.process_start_time, self.backend.boot_id)
                 if endpoint.process_start_time is not None else None

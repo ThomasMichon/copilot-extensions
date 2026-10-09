@@ -478,3 +478,20 @@ def test_proven_dead_route_permits_fresh_spawn(tmp_path: Path) -> None:
     result = world.manager().run()
     assert world.spawns == 1
     assert result.last_watched_pid == 30
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("pid", "99999"), ("pid", True), ("port", "1234"), ("port", True),
+     ("bind", 123), ("generation", "1"), ("generation", False)],
+)
+def test_ownership_routes_never_coerce_malformed_fields(
+    tmp_path: Path, field: str, value: object,
+) -> None:
+    world = World(tmp_path)
+    raw = {"bind": "127.0.0.1", "port": 1234, "pid": 99999, "generation": 1}
+    raw[field] = value
+    world.routing.joinpath("active.json").write_text(json.dumps({"active": raw}))
+    with pytest.raises(ValueError, match="field types"):
+        world.manager().run()
+    assert world.spawns == 0

@@ -109,6 +109,21 @@ def _parent_pid(pid: int) -> int | None:
     return stat[1] if stat is not None else None
 
 
+def _threads_stopped(pid: int) -> bool:
+    task_dir = Path(f"/proc/{pid}/task")
+    try:
+        tids = {int(entry.name) for entry in task_dir.iterdir() if entry.name.isdigit()}
+        if not tids:
+            return False
+        for tid in tids:
+            stat = _process_stat(tid)
+            if stat is None or stat[0] not in ("T", "t"):
+                return False
+        return tids == {int(entry.name) for entry in task_dir.iterdir() if entry.name.isdigit()}
+    except FileNotFoundError:
+        return False
+
+
 class LinuxBackend:
     def __init__(self) -> None:
         if sys.platform != "linux":
@@ -210,6 +225,14 @@ class LinuxBackend:
                 except ChildProcessError:
                     pass  # Another completed child may already have been waited.
 
+    def _wait_stopped(self, reference: ProcessReference, deadline: float) -> None:
+        while reference.alive():
+            if _threads_stopped(reference.identity.pid):
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError("descendant did not stop before cleanup deadline")
+            time.sleep(0.001)
+
     def cleanup(self, timeout: float = 5.0) -> None:
         """Freeze to a bounded fixed point, then kill only held descendant pidfds."""
         deadline = time.monotonic() + timeout
@@ -226,9 +249,15 @@ class LinuxBackend:
                     reference = self.open_process(identity)
                     if reference is None:
                         continue
-                    if self.owns(reference):
+                    try:
+                        owned = self.owns(reference)
+                    except BaseException:
+                        reference.close()
+                        raise
+                    if owned:
                         frozen[identity] = reference
                         reference.send_signal(signal.SIGSTOP)
+                        self._wait_stopped(reference, deadline)
                         added = True
                     else:
                         reference.close()
