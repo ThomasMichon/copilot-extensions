@@ -293,16 +293,16 @@ successor already running in my own tree?*
    `daemon` record (the watched pid and its `process_start_time` token)
    into a **manager-scoped state directory distinct from `config_dir`** —
    see the Consumer contract below for why these cannot share one path —
-   and on every entry to `run()` — a fresh launch, a crash restart, *and*
-   an `execve` self-update alike — the manager's first action is to check
-   that record before ever considering a call to `spawn`: if the recorded
-   pid's current token still matches the persisted baseline per item 2's
-   adoption check, the manager re-adopts that pid as the watched child and
-   resumes supervising it; only an empty record or a baseline mismatch
-   means there is truly nothing to adopt, and `spawn` is the right call.
-   This is one single adoption path, not a special case for `execve` —
-   item 2's baseline-comparison check is what both a routine child-exit
-   poll and a just-exec'd fresh image call into.
+   and every entry to `run()` checks that state before considering a
+   spawn. **Linux state recovery is scoped to same-process exec:** both the
+   recorded manager identity and the watched daemon's baseline/ancestry
+   must still validate. An exec preserves the manager's kernel ownership;
+   a new process after a real crash does not inherit the old subreaper's
+   ancestry merely by reading its state file. Systemd's required
+   control-group cleanup removes the old tree before that restart. If an
+   old incumbent nevertheless survives, bootstrap refuses it rather than
+   claiming foreign ownership or spawning a duplicate. A matching PID/start
+   token alone never authorizes cross-manager Linux recovery.
    Windows has no pid-preserving exec equivalent, so a real process
    boundary is unavoidable there — but unlike the daemon's own cutover, the
    **manager** has no in-flight request to protect across that boundary; it
@@ -536,18 +536,20 @@ successor already running in my own tree?*
    daemon-handle transfer); it never does any of the manager's own
    supervisory work and never outlives the handoff it exists for.
 
-> **Validation status.** This pattern is a **design, not yet an
-> implementation** — the code (the `zdd.singleton_manager` module, both
-> platform backends, and its own unit + stress tests) lands in a follow-up
-> PR, not this one. The intent is for the Linux mechanisms above (subreaper
-> reparenting, `/proc`-based ancestry, identity-bound reaping, `execve`
-> self-update) to be exercised against real subprocesses and real kernel
-> primitives before that PR lands; the **Windows** mechanisms additionally
-> need a real Windows-host process-boundary test (kill the manager outright,
-> confirm the daemon and every descendant die with it; force a self-update
-> handoff, confirm the Job survives it) before Windows adoption is
-> considered production-ready, not merely code-complete. Nothing in this
-> section should be read as already-validated.
+> **Implementation status.** The shared library supplies a **Linux-only**
+> `zdd.singleton_manager` API, with native pidfd custody, subreaper ownership,
+> persisted state/lease recovery, bounded descendant cleanup, and a
+> consumer-provided update-argv resolver polled before child exit. Real
+> subprocess tests exercise detached cutovers, orphan cleanup, exec preserving
+> the manager PID without a duplicate spawn, and exec while a successor is
+> still pending. See [`libs/zdd/README.md`](../../libs/zdd/README.md) for the
+> executable API rather than treating every cross-platform design mechanism
+> below as shipped code. Consumer launcher wiring and real systemd restart
+> proof remain open. **Windows is still design-only and explicitly rejected
+> by the native backend**; it requires its own implementation and real
+> Job/Scheduled Task tests before adoption is production-ready. The
+> [implementation effort](../../efforts/active/versioned-singleton-manager/README.md)
+> owns these remaining delivery and validation gates.
 
 ## What does **not** change
 
@@ -695,8 +697,19 @@ view — "is the unit's main process still running" — needs no other change).
 This holds on every launch, Windows included: `run()` is always what the
 launcher ends up blocked inside, never skipped in favor of exiting early.
 
-## Validation (planned — the implementation lands in a follow-up PR)
+## Validation
 
+The Linux unit tier below is fully delivered. The real-process tier is
+delivered for repeated detached cutovers, real exec recovery (preserving
+the manager PID/lease across a same-process exec, including a pending
+successor discovery), and a pidfd opened above FD_SETSIZE -- see
+`libs/zdd/tests/test_singleton_linux_processes.py` (225 passing through the
+bounded test-supervisor as of this PR). The remaining stress obligations
+below (overlapping/concurrent cutover attempts, `SIGKILL` injected
+mid-cutover, repeated crash-loop induction, an orphan storm) are not yet
+covered, and the end-to-end real-systemd and Windows-specific tiers remain
+planned; all three are tracked by the
+[implementation effort](../../efforts/active/versioned-singleton-manager/README.md).
 
 - **Unit (mocked):** every branch of the child-exit decision — planned-cutover
   adoption, real-crash propagation, the manager's own unexpected death,
