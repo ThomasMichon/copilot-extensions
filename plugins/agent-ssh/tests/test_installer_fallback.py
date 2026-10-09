@@ -170,6 +170,8 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     (plugin / "libs" / "zdd" / "pyproject.toml").write_text("", encoding="utf-8")
     (plugin / "libs" / "remote-login-shell").mkdir(parents=True)
     (plugin / "libs" / "remote-login-shell" / "pyproject.toml").write_text("", encoding="utf-8")
+    (plugin / "libs" / "fleet-contracts").mkdir(parents=True)
+    (plugin / "libs" / "fleet-contracts" / "pyproject.toml").write_text("", encoding="utf-8")
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
     fake_python.write_text(
@@ -191,6 +193,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
                 "_resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }",
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
+                "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -219,6 +222,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     assert str(plugin / "libs" / "venue-copilot") in fallback_args
     assert str(plugin / "libs" / "zdd") in fallback_args
     assert str(plugin / "libs" / "remote-login-shell") in fallback_args
+    assert str(plugin / "libs" / "fleet-contracts") in fallback_args
     assert str(plugin) in fallback_args
 
 
@@ -264,6 +268,9 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     canonical_remote_login_shell = repo_root / "libs" / "remote-login-shell"
     canonical_remote_login_shell.mkdir(parents=True)
     (canonical_remote_login_shell / "pyproject.toml").write_text("", encoding="utf-8")
+    canonical_fleet_contracts = repo_root / "libs" / "fleet-contracts"
+    canonical_fleet_contracts.mkdir(parents=True)
+    (canonical_fleet_contracts / "pyproject.toml").write_text("", encoding="utf-8")
 
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
@@ -286,6 +293,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
                 "_resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }",
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
+                "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -313,6 +321,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     assert str(canonical_venue_copilot.resolve()) in fallback_args
     assert str(canonical_zdd.resolve()) in fallback_args
     assert str(canonical_remote_login_shell.resolve()) in fallback_args
+    assert str(canonical_fleet_contracts.resolve()) in fallback_args
 
 
 def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> None:
@@ -330,3 +339,6 @@ def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> N
     assert "function Resolve-Zdd" in installer
     assert "Resolve-VendoredLib -LibName 'zdd'" in installer
     assert "$zddDir = Resolve-Zdd" in installer
+    assert "function Resolve-FleetContracts" in installer
+    assert "Resolve-VendoredLib -LibName 'fleet-contracts'" in installer
+    assert "$fleetContractsDir = Resolve-FleetContracts" in installer

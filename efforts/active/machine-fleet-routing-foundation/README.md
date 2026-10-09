@@ -236,3 +236,9 @@ They remain vision deltas, not features claimed by this routing foundation.
   both files and guard markers to the projection and static-driver contract tests.
 - Fresh guard-lane verification: 116 passed, 4 native-platform skips. This
   collects the canonical pure suite as well as static-driver/CLI contracts.
+- Copilot APPROVED the corrected production head. Linux CI then exposed two
+  isolated pip-fallback fixtures still omitting the newly required library
+  resolver and source directory (330 passed, 7 skips, 2 fixture failures).
+  Update both local-vendored and canonical-source harnesses and assert that
+  `fleet-contracts` reaches pip's arguments. Do not merge around this failed CI.
+  Local supported fallback checks pass; native shell proof is the next CI gate.
