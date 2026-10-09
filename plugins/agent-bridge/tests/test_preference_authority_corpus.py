@@ -67,3 +67,6 @@ def test_frozen_terminal_component_contract():
     assert fixture["component_digest"] == a.component_digest()
     assert fixture["binding_environment"] == [a.FD_ENV, a.NONCE_ENV, a.DIGEST_ENV, a.MODE_ENV, a.TARGET_ENV]
     assert fixture["exec_requires_host_consent"] and fixture["exec_preserves_pid"]
+    consent = read("wrapper-consent.json")
+    assert consent["authority_modules"] == list(a.AUTHORITY_MODULES)
+    assert consent["component_digest"] == a.component_digest()

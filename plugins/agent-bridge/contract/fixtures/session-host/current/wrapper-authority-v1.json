@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "d834b9f4dbaf250f349fde3bf878836402f8b5cc",
+    "commit": "147d5829ceebdb6eec0bfbfaa976cd5d8647b3e5",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
-    "source_git_blob": "78d3e7df09ec70f880cbf689a09ae9f461154cc0",
-    "source_sha256": "c7bf80c08ca633fabd9d0ceb21450d7fd0ab13aa0a51c7c51c4730f6a8e77d2e"
+    "source_git_blob": "cfc60efa921c38e1d8683c59cd07a6ae72261148",
+    "source_sha256": "328543932b380484e7c454f90e6bc0c31c45b515087a7a94b5907158f2613868"
   },
   "wrapper_version": 1,
   "receipt_version": 2,
@@ -25,7 +25,7 @@
     },
     "authority": {
       "kind": "wrapper-v1",
-      "digest": "42c72452e124ccf8c5b482b372d3c5932a6f7251e57a3b4031a579e002a40584",
+      "digest": "d201186f855710cabc0761ed00bc1f0a19f3e702c5e90ba121c24c89f8b95885",
       "mode": "defaults",
       "target": "9032997c94da9512223bde48704c19c2d587c4ff4f1105f61204524b68662819",
       "start": "99",
