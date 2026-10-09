@@ -1210,6 +1210,7 @@ def _settle_current_session_claim(
             ensure_monitor=(
                 _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
             ),
+            min_version=2,
         )
         record = tracking.load_record(yaml_path)
     except Exception:

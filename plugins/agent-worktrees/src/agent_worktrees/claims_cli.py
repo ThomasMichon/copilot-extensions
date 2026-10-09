@@ -408,6 +408,7 @@ def _dispatch_claim(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
+        min_version=2,
     )
 
 

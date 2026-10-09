@@ -243,6 +243,6 @@ def apply_claim_settle(args: dict) -> dict:
     return {"ok": True, "kind": settled.kind, "disposition": disposition}
 
 
-tracking_write.register_verb("claim_add", apply_claim_add)
-tracking_write.register_verb("claim_release", apply_claim_release)
-tracking_write.register_verb("claim_settle", apply_claim_settle)
+tracking_write.register_verb("claim_add", apply_claim_add, version=2)
+tracking_write.register_verb("claim_release", apply_claim_release, version=2)
+tracking_write.register_verb("claim_settle", apply_claim_settle, version=2)

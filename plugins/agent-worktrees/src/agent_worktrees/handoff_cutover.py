@@ -727,15 +727,12 @@ def _maybe_emit_stage_13(
 
 
 def _dispatch_handoff_repair(verb: str, verb_args: dict):
-    """Dispatch a confirmed-retire repair verb (``claim_settle``/
-    ``session_conclude``) through the daemon's write path when reachable,
-    else the identical in-process code (logged) -- mirrors
-    ``session_tracking_cli._dispatch_session_lifecycle``/
-    ``claims_cli._dispatch_claim``. Both callers reuse those same public
-    verbs, distinguished only by their own opt-in no-op guard/lock-policy
-    args. May raise ``tracking_write.AmbiguousWriteOutcome``; both callers'
-    existing best-effort ``except``/``contextlib.suppress(Exception)``
-    swallow it -- an *unknown* outcome composes like a *confirmed* one."""
+    """Dispatch confirmed-retire repair to a compatible daemon or local code.
+
+    Claim settlement requires execution-space-aware verb version 2; an older
+    handler is never dialed. A sent request's ambiguous outcome still raises
+    ``tracking_write.AmbiguousWriteOutcome`` and must not be auto-retried.
+    """
     from . import status_monitor_runtime as _smr
     from . import tracking_write
 
@@ -744,6 +741,7 @@ def _dispatch_handoff_repair(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
+        min_version=2 if verb == "claim_settle" else 1,
     )
 
 
