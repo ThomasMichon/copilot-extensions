@@ -1262,8 +1262,8 @@ class LiveVerdict:
     mux might exist and would reattach instead of exec'ing a fresh command`
     (e.g. seed-delivery gating) should check THIS, not the aggregate: a
     reclaim failure with a conclusive "no mux" from the mux probe itself is
-    not mux uncertainty -- treating it as such can wrongly queue a prompt a
-    `--no-mux` launch then never delivers (there is no pane to queue it to)."""
+    not mux uncertainty. Cold-start Resume prompts require the aggregate
+    ``probes_ok`` as well, because a live un-muxed Copilot also forbids them."""
 
 
 def verify_worktree_active(record) -> LiveVerdict:

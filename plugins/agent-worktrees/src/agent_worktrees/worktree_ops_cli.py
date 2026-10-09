@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .worktree_creation import LaunchSeedStagingFailure
+
 import argparse
 import json
 import os
@@ -363,6 +365,8 @@ def cmd_create(args: argparse.Namespace) -> int:
                 no_pair=getattr(args, "no_pair", False),
                 pending_seed=getattr(args, "seed", None),
             )
+        except LaunchSeedStagingFailure as exc:
+            return exc.emit(json_out=args.json)
         except claims_cli.CoordinationReadinessFailure as exc:
             return claims_cli._emit_coordination_rejection(exc.readiness, json_out=args.json)
         except Exception as e:

@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-09-25
+- **Last revised:** 2026-10-08
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -136,6 +136,19 @@ into a new terminal window**, leaving the Picker itself running and ready to
 launch the next one — so recovering a whole fleet after a lost multiplexer
 server means stepping down the list and opening each into its own window,
 never closing and reopening the Picker per worktree.
+
+### cold-start-resume-prompt
+When resuming a stopped worktree, the operator can supply the first prompt
+alongside the prior conversation's resume target, equally with or without a
+multiplexer. New and Resume prompts retain their distinct launch intent in
+daemon-owned worktree state until Copilot takes responsibility. A failed
+attempt leaves its prompt available for the next cold attempt; successful
+handoff discards it so it cannot be submitted again. An already-running session offers **Open**, never
+Resume with a prompt, even if no turn has been submitted yet. If the target
+becomes live before launch, the prompted resume refuses visibly rather than
+silently attaching, injecting a turn, or starting a competing session.
+New-worktree prompts remain a separate creation capability. Staged prompts
+are never injected into an Open/live session.
 
 ### worktree-search-and-filter
 A lightweight, keyboard-summoned search narrows the worktree list by substring

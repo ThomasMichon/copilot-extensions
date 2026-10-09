@@ -1,0 +1,9 @@
+{
+  "comment": "Offer cold-start Resume prompts and preserve typed New/Resume intent for failed-attempt retry; Open never injects staged Resume text.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

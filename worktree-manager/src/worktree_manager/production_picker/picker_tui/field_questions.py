@@ -26,6 +26,7 @@ type rather than a caller-specific id.
 
 from __future__ import annotations
 
+from textual.css.query import NoMatches
 from textual.widgets import TabbedContent
 
 from .field_widgets import _OTHER_SENTINEL
@@ -102,6 +103,16 @@ class FieldQuestionsMixin:
     def _sync_conditional_fields(self) -> None:
         """Show/hide dependent tabs after their controlling choice changes."""
         tabs = next(iter(self.query(TabbedContent)), None)
+        if tabs is not None:
+            try:
+                ready = all(tabs.get_tab(f"tab-{i}").is_mounted for i in range(len(self._q)))
+            except NoMatches:
+                ready = False
+            if not ready:
+                # Screen mount and initial choice events can precede the
+                # TabbedContent children's mount; retry after their refresh.
+                self.call_after_refresh(self._sync_conditional_fields)
+                return
         for i, rec in enumerate(self._q):
             visible = self._condition_matches(rec)
             rec["visible"] = visible

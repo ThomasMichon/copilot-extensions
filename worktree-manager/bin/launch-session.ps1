@@ -993,6 +993,41 @@ function Test-AwJoiningLiveSession {
     }
 }
 
+function Assert-AwColdResume {
+    param([switch]$LiveSessionKnown)
+    if (-not $plan.seed_claimed -and -not $plan.seed_pending -and
+        $CopilotArgs -notcontains '--seed' -and $CopilotArgs -notcontains '--seed-id') { return }
+    $message = 'Launch prompt is cold-start-only; a live session appeared. Use Open or retry after it stops. The seed remains staged.'
+    if (-not $LiveSessionKnown) {
+        $checkArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) { $checkArgs += @('--project', $script:LaunchProject) }
+        $checkArgs += @('worktree-status-bundle', '--worktree', $plan.worktree_id, '--force-refresh', '--json')
+        try {
+            $rawBundle = & $VenvPython @checkArgs
+            $checkExit = $LASTEXITCODE
+            $bundle = ($rawBundle -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            $liveness = $bundle.facts.liveness
+            if ($checkExit -eq 0 -and $bundle.worktree_id -eq $plan.worktree_id -and
+                $liveness.confirmed -is [bool] -and $liveness.confirmed -eq $true -and
+                $liveness.value.active -is [bool] -and $liveness.value.active -eq $false) {
+                return
+            }
+            if ($checkExit -ne 0 -or $bundle.worktree_id -ne $plan.worktree_id -or
+                $liveness.confirmed -ne $true -or $liveness.value.active -isnot [bool]) {
+                $message = 'Could not verify cold launch target; refresh and retry. The seed remains staged.'
+            }
+        } catch {
+            $message = "Could not verify cold launch target: $($_.Exception.Message). The seed remains staged."
+        }
+    }
+    if ($plan.seed_pending) {
+        $message = 'Could not start the staged launch prompt on a confirmed cold target. The seed remains staged for retry.'
+    }
+    Write-SetupLog $message 'ERROR'
+    [Console]::Error.WriteLine("ERROR: $message")
+    exit 3
+}
+
 # ── Join the background update + apply, before the psmux handoff (#1430) ──
 # The Picker has closed, so it is now safe to swap the runtime venv. This waits
 # for the staged marketplace download, runs the installer if it changed the
@@ -1000,6 +1035,7 @@ function Test-AwJoiningLiveSession {
 # pre-launch self-update and plugin reconcile, so Copilot starts on the
 # finished update.
 $joiningLiveSession = Test-AwJoiningLiveSession
+Assert-AwColdResume
 if ($joiningLiveSession) {
     Write-SetupLog 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
     if ($script:StageJob) {
@@ -1043,6 +1079,7 @@ Write-SetupLog "Runtime refreshed before knowledge preflight: $VenvPython"
 # that's actually still on disk.
 if ($plan.cmd) {
     $planCmd = @($plan.cmd)
+    if ($plan.seed_pending) { $planCmd[0] = $VenvPython }
     for ($i = 0; $i -lt $planCmd.Count - 1; $i++) {
         if ($planCmd[$i] -in @('-RuntimePython', '--runtime-python')) {
             if ($planCmd[$i + 1] -ne $VenvPython) {
@@ -1278,6 +1315,7 @@ if ($ahpArgs.Count -gt 0) {
 # --no-mux / WORKTREE_NO_MUX=1 bypasses psmux for debugging.
 
 $noMux = ($env:WORKTREE_NO_MUX -eq '1') -or [bool]$plan.no_mux
+Assert-AwColdResume
 if ($noMux) {
     Write-SetupLog 'Mux disabled; launching directly'
 }
@@ -1694,6 +1732,7 @@ if (-not $noMux) {
     # Note: psmux does not support tmux's "=" exact-match prefix on -t.
     $null = & $script:AwPsmuxBin has-session -t $sessName 2>&1
     if ($LASTEXITCODE -eq 0) {
+        Assert-AwColdResume -LiveSessionKnown
         if ($nested) {
             Write-Host "Session already exists: $sessName (open a new terminal to join)"
         } else {
@@ -1712,24 +1751,6 @@ if (-not $noMux) {
         # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
         Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
-        # resume-prompt-durable-seed-and-mux-fix Phase 3: this is the ONE
-        # ground-truth point that knows a reattach (not a fresh launch) is
-        # happening -- the engine's own `resolve --json` call, run earlier
-        # in a separate process, can only guess at mux liveness and
-        # conservatively leaves an explicit seed QUEUED (`pending_seed`)
-        # rather than embedding it into a `cmd` this script discards right
-        # here. Deliver it now, the same way a worktree's first-ever
-        # session creation below already does -- `Invoke-SeedDeliverySafe`
-        # is a no-op when nothing is queued. Dispatched detached (see its
-        # own definition above), so it cannot delay the attach below.
-        #
-        # Called BEFORE the `$nested` early-exit right below (mirroring the
-        # CREATE branch's own ordering): a nested launch (already running
-        # inside a mux pane) never attaches here at all -- it only reports
-        # the session exists and exits -- but a queued seed must still be
-        # delivered into the ALREADY-RUNNING pane regardless of whether
-        # THIS invocation attaches to it.
-        Invoke-SeedDeliverySafe $plan.worktree_id
         if ($nested) {
             exit 0
         }
@@ -1906,6 +1927,7 @@ if (-not $noMux) {
     while ($retryCycle) {
         $retryCycle = $false
         for ($attempt = 1; $attempt -le $maxCreateAttempts; $attempt++) {
+            Assert-AwColdResume
             $totalCreateAttempts++
             $newSessionExit = 1
             $newSessionError = ''
@@ -2041,7 +2063,9 @@ if (-not $noMux) {
         # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
         Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
-        Invoke-SeedDeliverySafe $plan.worktree_id
+        if (-not $plan.seed_pending) {
+            Invoke-SeedDeliverySafe $plan.worktree_id
+        }
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
             exit 0

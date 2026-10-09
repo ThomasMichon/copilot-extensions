@@ -27,6 +27,7 @@ import argparse
 import os
 import secrets
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -44,6 +45,45 @@ from . import (
     tracking,
 )
 from . import config as cfg
+from .tracking_write import AmbiguousWriteOutcome
+
+
+class LaunchSeedStagingFailure(RuntimeError):
+    """Creation succeeded, but seed staging did not produce a confirmed result."""
+
+    def __init__(self, record, seed_id: str, cause: Exception):
+        self.worktree = {
+            "id": record.worktree_id, "path": record.worktree_path,
+            "branch": record.branch, "repo": record.repo,
+        }
+        self.seed_id = seed_id
+        self.ambiguous = isinstance(cause, AmbiguousWriteOutcome)
+        super().__init__(
+            f"Worktree {record.worktree_id} was created at {record.worktree_path}, "
+            f"but launch-prompt staging did not confirm: {cause}. "
+            f"Do not retry --new; recover this existing --worktree-id {record.worktree_id}."
+        )
+
+    def payload(self) -> dict:
+        return {
+            "error": str(self), "created": True, "worktree": self.worktree,
+            "launch_seed": {
+                "seed_id": self.seed_id, "status": "unknown" if self.ambiguous else "unconfirmed",
+            },
+            "recovery": {
+                "action": "inspect-and-retry-existing",
+                "worktree_id": self.worktree["id"], "repeat_new": False,
+            },
+        }
+
+    def emit(self, *, json_out: bool) -> int:
+        from . import output
+
+        if json_out:
+            output._json_output(self.payload())
+        else:
+            output.err(str(self))
+        return 3
 
 
 def _core():
@@ -515,10 +555,9 @@ def _create_worktree_core(
     a narrower, per-call sibling of the blunt whole-host
     ``AGENT_WORKTREES_NO_PAIR`` env var; either one skips the carve.
 
-    ``pending_seed`` persists an optional first-turn prompt onto the new
-    record -- this function never launches Copilot, so it can only be
-    stored here; `agent-worktrees embody`/`copilot` deliver and clear it
-    on the first attach.
+    ``pending_seed`` stages an optional New first-turn intent in external
+    worktree state through the daemon writer. This function never launches
+    Copilot; its returned plan carries the intent identity without claiming it.
 
     Raises ``RuntimeError`` on failure.
     """
@@ -769,137 +808,81 @@ def _create_worktree_core(
                 # an explicit --owner-ref). Absent = unclaimed.
                 owner_ref=owner_ref or None,
                 bound_agent=bound_agent or None,
-                pending_seed=pending_seed or None,
+                pending_seed=None,
             )
         finally:
             if owner_guard is not None:
                 owner_guard.__exit__(None, None, None)
 
-    # Clone permissions
-    if permissions.clone_permissions(repo.anchor, worktree_path):
-        print("Copied Copilot permissions to worktree path.", file=sys.stderr)
+    from . import launch_seed_state
+    from .launch_seed_exec import deferred_command
 
-    activity.log_event(
-        "worktree_created",
-        worktree_id=worktree_id,
-        branch=branch,
-    )
-
-    # Trust the new worktree path
-    if permissions.add_trusted_folder(worktree_path):
-        print("Added worktree path to trustedFolders.", file=sys.stderr)
-
-    # Pre-approve the facility's own extension-permission-access gate so the
-    # first launch here never blocks on an interactive prompt no one is
-    # necessarily present to answer (a known Copilot CLI extension-load gate).
-    if permissions.ensure_extension_permission_approvals(worktree_path):
-        print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
-
-    # Worktree-scoped dynamic guidance (docs/patterns/worktree-scoped-
-    # dynamic-guidance.md): refresh every enabled source's gitignored
-    # *.local.instructions.md sibling now, before the first session here
-    # even starts, so a directory-scanning harness may pick it up with no
-    # reliance on the repo-wide catch-all. Best-effort with diagnostics -- see
-    # local_cache_refresh's own docstring.
-    local_cache_refresh.refresh_local_cache(worktree_path)
-
-    # citadel paired -harness/-knowledge worktree lifecycle (#957): when this is
-    # a stateless harness bound to a knowledge repo, carve/stamp the knowledge
-    # pair together with this worktree and cross-stamp the linkage. Only for
-    # plain session worktrees (never system/bridge), and fully fail-safe -- a
-    # pairing failure never breaks the harness carve. Applies regardless of
-    # `origin` (see the preflight comment above for why); `no_pair` is the
-    # explicit per-call opt-out.
-    if kind == "session" and not no_pair:
-        try:
-            pair_stamp = core._carve_paired_knowledge(
-                config,
-                harness_id=worktree_id,
-                timestamp=timestamp,
-                suffix=suffix,
-                plat=plat,
-                plat_short=plat_short,
+    seed_id = uuid.uuid4().hex
+    try:
+        staged_seed = None
+        if pending_seed:
+            staged_seed = launch_seed_state.stage(
+                record.yaml_path, kind="new", text=pending_seed, seed_id=seed_id,
             )
-        except codename_tracking.CodenameAttributionPolicyError:
-            # codename-attribution-by-default (round-10/11 finding): this is
-            # NOT an ordinary pairing glitch -- it is the paired-knowledge
-            # allocation policy correctly refusing to leak a custom
-            # vocabulary term. Re-raise (abort `create` outright) rather
-            # than degrading to a logged warning and a silent `pair_stamp =
-            # None`, which would defeat the policy entirely.
-            raise
-        except Exception as exc:  # pragma: no cover - defensive
-            print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
-            pair_stamp = None
-        core._stamp_and_compose_paired_knowledge(config, record, worktree_path, pair_stamp)
-
-    # Copilot discovers repository settings before sessionStart. A committed
-    # relative-path directory marketplace source (this repo's own) resolves
-    # live against whichever checkout is active, so no local override seeding
-    # is needed here (#marketplace-override-retirement).
-
-    result = {"worktree": core._worktree_to_dict(record)}
-    if not launches_copilot:
+        if permissions.clone_permissions(repo.anchor, worktree_path):
+            print("Copied Copilot permissions to worktree path.", file=sys.stderr)
+        activity.log_event("worktree_created", worktree_id=worktree_id, branch=branch)
+        if permissions.add_trusted_folder(worktree_path):
+            print("Added worktree path to trustedFolders.", file=sys.stderr)
+        if permissions.ensure_extension_permission_approvals(worktree_path):
+            print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
+        local_cache_refresh.refresh_local_cache(worktree_path)
+        if kind == "session" and not no_pair:
+            try:
+                pair_stamp = core._carve_paired_knowledge(
+                    config, harness_id=worktree_id, timestamp=timestamp,
+                    suffix=suffix, plat=plat, plat_short=plat_short,
+                )
+            except codename_tracking.CodenameAttributionPolicyError:
+                raise
+            except Exception as exc:  # pragma: no cover - existing fail-safe pairing policy
+                print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
+                pair_stamp = None
+            core._stamp_and_compose_paired_knowledge(config, record, worktree_path, pair_stamp)
+        result = {"worktree": core._worktree_to_dict(record)}
+        if not launches_copilot:
+            return result
+        assert fake_args is not None
+        assert launch_preflight is not None
+        selection = _launch_profile_selection(
+            config, fake_args, record, lane="new", generation_key=f"new:{worktree_id}",
+            ordinary_profile=profile, explicit_profile=profile if profile_is_explicit else None,
+        )
+        _reflect_assignment(record, selection)
+        launch_cmd = core._build_launch_cmd(
+            config, fake_args, worktree_path, profile=selection.profile,
+            preflight=launch_preflight,
+        )
+        if staged_seed is not None:
+            launch_cmd = deferred_command(
+                launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
+            )
+        env = _apply_assignment_env(
+            core._build_env(
+                selection.profile, core._repo_session_env(config, worktree_path),
+                work_dir=worktree_path,
+            ), selection,
+        )
+        result["worktree"] = core._worktree_to_dict(record)
+        result["launch"] = {
+            "action": "exec", "work_dir": worktree_path, "cmd": launch_cmd, "env": env,
+            "worktree_id": worktree_id, "post_exit": True, "no_mux": no_mux,
+            "seed_claimed": False, "seed_pending": staged_seed is not None,
+            "seed_id": staged_seed.seed_id if staged_seed else None,
+            "seed_kind": staged_seed.kind if staged_seed else None,
+            "project": config.repo_name,
+        }
+        if selection.assignment is not None:
+            result["launch"]["profile_assignment"] = profile_assignment.metadata(selection.assignment)
         return result
-
-    # Build launch command (for caller to use).
-    assert fake_args is not None
-    assert launch_preflight is not None
-    selection = _launch_profile_selection(
-        config,
-        fake_args,
-        record,
-        lane="new",
-        generation_key=f"new:{worktree_id}",
-        ordinary_profile=profile,
-        explicit_profile=profile if profile_is_explicit else None,
-    )
-    _reflect_assignment(record, selection)
-    launch_cmd = core._build_launch_cmd(
-        config,
-        fake_args,
-        worktree_path,
-        profile=selection.profile,
-        preflight=launch_preflight,
-    )
-    # Durable seed delivery (resume-prompt-durable-seed-and-mux-fix): this
-    # plan's OWN `cmd` deliberately does NOT also embed `pending_seed` here
-    # -- `pending_seed` stays the single, unambiguous owner of "queued but
-    # not yet delivered." Embedding it in BOTH this plan's argv AND leaving
-    # it persisted would let a direct caller that execs this `cmd` deliver
-    # the prompt once, while the record still advertises it as
-    # undelivered -- a later `embody`/first real-launch fallback (or the
-    # Picker's own two-hop flow re-resolving by --worktree-id through
-    # `resolve_launch_cli._resolve_resume_context`, the mechanism's real
-    # delivery point) would then claim and redeliver the SAME prompt a
-    # second time. A direct caller that wants immediate, synchronous
-    # delivery should follow up with `resolve --worktree-id --seed` (or
-    # simply let the next real resume/attach claim it) rather than relying
-    # on this one-shot creation plan to also carry it.
-    env = _apply_assignment_env(
-        core._build_env(
-            selection.profile,
-            core._repo_session_env(config, worktree_path),
-            work_dir=worktree_path,
-        ),
-        selection,
-    )
-    result["worktree"] = core._worktree_to_dict(record)
-    result["launch"] = {
-        "action": "exec",
-        "work_dir": worktree_path,
-        "cmd": launch_cmd,
-        "env": env,
-        "worktree_id": worktree_id,
-        "post_exit": True,
-        "no_mux": no_mux,
-        # Authoritative for downstream out-of-process calls (e.g. the
-        # launcher's `execution-leg get`), which must scope to the
-        # project that actually owns this worktree -- not whatever ambient
-        # project the launcher itself started with, nor the mutable
-        # process-global `cfg.active_project()` (#2338).
-        "project": config.repo_name,
-    }
-    if selection.assignment is not None:
-        result["launch"]["profile_assignment"] = profile_assignment.metadata(selection.assignment)
-    return result
+    except LaunchSeedStagingFailure:
+        raise
+    except Exception as exc:
+        # The record already exists. Re-raise every tail failure with its
+        # identity and original cause; never disguise it as a failed create.
+        raise LaunchSeedStagingFailure(record, seed_id, exc) from exc
