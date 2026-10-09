@@ -1470,6 +1470,12 @@ conversations until their evaluator accepts or abandons them.
 Upgrade the coordinator and supervisor runtime before enabling a consumer
 evaluator that emits `reject`; older runtimes reject the new decision rather
 than implementing recovery. No registration or database migration is needed.
+For a staged rollout, activate supervisor retention first, then the coordinator,
+and only then enable consumer rejection decisions. Existing installer-driven
+coordinator cutover and supervisor singleton handoff remain the activation seams;
+rejection does not introduce another resident process or change their drain
+protocols. A retirement begun by an older supervisor remains a surfaced recovery
+blocker, not permission to resurrect its session.
 Domain evidence and feedback remain the evaluator's responsibility: dispatch
 does not infer stale verdicts, PR freshness, or terminal domain state from queue
 rounds or head snapshots. For a review that lasts until merge/abandonment, a

@@ -17,7 +17,7 @@ from agent_dispatch.verification import evaluate_submitted_task
 from tests._helpers import RepoDefaultingQueue as TaskQueue, TEST_REPO
 
 
-def _submitted(q, *, owner="host-a/wt-1", session="session-1", reserve=False):
+def _submitted(q, *, owner="host-a/wt-1", session="session-1", reserve=False, held=False):
     task = q.create(
         "finish the whole goal", require_verification=True, evaluator_ref="goal",
         goal="Reach the external terminal condition",
@@ -27,6 +27,8 @@ def _submitted(q, *, owner="host-a/wt-1", session="session-1", reserve=False):
     q.claim_one(owner, task_id=task.id, now=10)
     q.start(task.id, owner, owner_session_id=session, now=11)
     q.record_progress(task.id, owner, phase="review", summary="verdict posted", now=12)
+    if held:
+        q.set_hold(task.id, actor="operator", reason="do not resume", now=12.5)
     return q.complete(
         task.id, owner, result={"verdict": "stale"}, result_ref="artifact:old", now=13,
     )
@@ -256,3 +258,21 @@ def test_submission_rejection_does_not_repair_retiring_session(tmp_path):
         _reject(q, task)
     assert q.get(task.id) == task
     assert q.steer_log(task.id) == q.list_wakes(task.id) == []
+
+
+def test_submission_rejection_respects_operator_hold_and_refreshed_recovery(tmp_path):
+    q = TaskQueue(tmp_path / "tasks.db")
+    task = _submitted(q, held=True)
+    before = q.events(task.id)
+    with pytest.raises(TaskError, match="held"):
+        _reject(q, task)
+    assert q.get(task.id) == task and q.events(task.id) == before
+    assert q.steer_log(task.id) == q.list_wakes(task.id) == []
+    refreshed = q.clear_hold(task.id, actor="operator", now=14)
+    with pytest.raises(TaskError, match="changed"):
+        _reject(q, task)
+    outcome = _reject(q, refreshed)
+    assert outcome.task.status == Status.STARTED
+    assert outcome.task.hold_reason is None
+    assert q.steer_log(task.id)[0]["fields"]["verification_rejection"]["submission"]["result"] == task.result
+    assert len(q.list_wakes(task.id)) == 1
