@@ -1432,14 +1432,11 @@ class TestLocalResolveBridgeFallback:
         assert "lc/proj/wt-caller" in calls[0]
 
     @pytest.mark.asyncio
-    async def test_local_retries_bare_when_owner_ref_unknown(self):
-        # A stale runtime rejects --owner-ref -> retry drops all new extras.
-        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+    async def test_local_rejects_when_owner_ref_unknown(self):
         target = SpawnTarget(type="local", cwd="/c", project="proj",
-                             caller_owner_ref="lc/proj/wt-caller")
+                             caller_owner_ref="workstation/proj/wt-caller")
         results = [
             self._proc(2, b"", b"unrecognized arguments: --owner-ref"),
-            self._proc(0, json.dumps(plan).encode()),
         ]
         calls = []
 
@@ -1449,22 +1446,18 @@ class TestLocalResolveBridgeFallback:
 
         with patch("os.path.exists", return_value=True), \
              patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
-            out = await _resolve_worktree(target, {})
+            with pytest.raises(RuntimeError, match="exit 2.*--owner-ref"):
+                await _resolve_worktree(target, {})
 
-        assert out == plan
-        assert len(calls) == 2
+        assert len(calls) == 1
         assert "--owner-ref" in calls[0]
-        assert "--owner-ref" not in calls[1]
 
     @pytest.mark.asyncio
-    async def test_local_retries_bare_when_caller_flag_unknown(self):
-        # An old runtime rejects --caller-worktree -> retry drops all new extras.
-        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+    async def test_local_rejects_when_caller_flag_unknown(self):
         target = SpawnTarget(type="local", cwd="/c", project="proj",
-                             caller_worktree="lc-win-caller-1")
+                             caller_worktree="wt-caller")
         results = [
             self._proc(2, b"", b"unrecognized arguments: --caller-worktree"),
-            self._proc(0, json.dumps(plan).encode()),
         ]
         calls = []
 
@@ -1474,13 +1467,11 @@ class TestLocalResolveBridgeFallback:
 
         with patch("os.path.exists", return_value=True), \
              patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
-            out = await _resolve_worktree(target, {})
+            with pytest.raises(RuntimeError, match="exit 2.*--caller-worktree"):
+                await _resolve_worktree(target, {})
 
-        assert out == plan
-        assert len(calls) == 2
+        assert len(calls) == 1
         assert "--caller-worktree" in calls[0] and "--bridge" in calls[0]
-        assert "--caller-worktree" not in calls[1]
-        assert "--bridge" not in calls[1]
 
 
 class TestAgentWorktreesPython:
@@ -1755,4 +1746,3 @@ class TestAgentProcessKillGracefulWindows:
             await agent_proc.kill()
 
         mock_win.assert_not_awaited()
-

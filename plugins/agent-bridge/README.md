@@ -312,6 +312,18 @@ On failure, a `connect_failed` event carries `{stage, stage_name, retryable,
 message}`. A host agent can surface the connection checkpoints with
 `agent-bridge read <session> --expand all`.
 
+Worktree resolver failures retain their nonzero exit code and connection stage.
+The bridge prefers a bounded `error` message from JSON stdout, including a
+string `stage` or `code` when supplied, and appends a short stderr diagnostic.
+Credential-shaped values are redacted; launch-plan environment dictionaries
+and opaque stdout are never echoed as failure diagnostics.
+
+Version-skew fallback never drops a supplied `--owner-ref` or
+`--caller-worktree`. Such requests fail closed when the resolver rejects their
+flags. Only an ownerless, callerless request rejected by the argument parser
+for `--bridge` may retry using legacy flags. This protects ownership metadata;
+it does not add cross-registry allocation authority or receipt reconciliation.
+
 ### On-device breadcrumb
 
 Just before the remote binstub runs, agent-bridge writes a timestamped

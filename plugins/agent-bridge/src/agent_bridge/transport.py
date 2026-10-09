@@ -28,6 +28,11 @@ from ssh_manager import SSHProfileSource, get_default_manager
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .procgroup import safe_killpg, terminate_windows_tree
 from .relay_state import get_live_relay_port
+from .resolver_diagnostics import (
+    can_retry_legacy_resolve,
+    resolver_failure_detail,
+    structured_resolver_error,
+)
 
 log = logging.getLogger("agent-bridge")
 
@@ -416,10 +421,8 @@ async def _resolve_worktree(
     else:
         base_args.append("--new")
 
-    # New-worktree extras that a stale runtime may not recognize (argparse exits
-    # non-zero on an unknown flag). Kept OUT of base_args so the fallback below
-    # can drop them wholesale and still resolve. --bridge marks the worktree
-    # agent-owned; --caller-worktree records the caller for the Picker (#2178).
+    # --bridge marks an agent-owned worktree; optional caller metadata records
+    # its origin. A stale resolver must not retry by dropping supplied metadata.
     new_extra: list[str] = []
     if creating_new:
         new_extra.append("--bridge")
@@ -442,27 +445,24 @@ async def _resolve_worktree(
         out, err = await p.communicate()
         return p.returncode, out, err
 
-    # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
-    # Picker hides it by default and routine cleanup leaves it alone. A stale
-    # local agent-worktrees runtime won't recognize --bridge / --caller-worktree /
-    # --owner-ref (argparse exits non-zero); detect that and retry without the
-    # extras so the spawn still resolves (the worktree just isn't bridge-marked /
-    # caller-linked / owner-stamped).
+    # The shared compatibility policy never discards supplied caller metadata.
     returncode, stdout, stderr = await _run(new_extra)
-    if (creating_new and returncode != 0 and new_extra
-            and any(f in stderr.decode(errors="replace")
-                    for f in ("--bridge", "--caller-worktree", "--owner-ref"))):
+    if creating_new and new_extra and can_retry_legacy_resolve(
+        exit_code=returncode,
+        stdout=stdout.decode(errors="replace"),
+        stderr=stderr.decode(errors="replace"),
+        caller_owner_ref=target.caller_owner_ref,
+        caller_worktree=target.caller_worktree,
+    ):
         log.info("local agent-worktrees lacks new resolve flags; retrying bare")
         returncode, stdout, stderr = await _run([])
 
-    if stderr:
-        for line in stderr.decode(errors="replace").strip().splitlines():
-            log.debug("resolve stderr: %s", line)
-
     if returncode != 0:
-        err_text = stderr.decode(errors="replace").strip()
+        detail = resolver_failure_detail(
+            stdout.decode(errors="replace"), stderr.decode(errors="replace"),
+        )
         raise RuntimeError(
-            f"Worktree resolve failed (exit {returncode}): {err_text}"
+            f"Worktree resolve failed (exit {returncode}): {detail}"
         )
 
     try:
@@ -585,8 +585,8 @@ async def _resolve_worktree_remote(
     else:
         base_args.append("--new")
 
-    # New-worktree extras a version-skewed remote may not recognize; kept out of
-    # base_args so the fallback can drop them wholesale (#2178).
+    # New-worktree extras a version-skewed remote may not recognize. The
+    # legacy fallback is limited to requests with no caller ownership metadata.
     new_extra: list[str] = []
     if creating_new:
         new_extra.append("--bridge")
@@ -600,17 +600,15 @@ async def _resolve_worktree_remote(
         log.info("Resolving remote worktree on %s: %s", target.host, cmd)
         return await manager.exec_command(target.host, cmd, timeout=timeout)
 
-    # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
-    # remote Picker hides it by default and routine cleanup leaves it alone.
-    # An older remote agent-worktrees won't recognize --bridge / --caller-worktree
-    # / --owner-ref (argparse exits non-zero); detect that and retry without the
-    # extras so a version-skewed remote still spawns. Mirrors the data_ssh
-    # --classify fallback.
+    # The shared compatibility policy never discards supplied caller metadata.
     result = await _run(new_extra)
-    if (creating_new and not result.timed_out and result.exit_code != 0
-            and new_extra
-            and any(f in (result.stderr or "")
-                    for f in ("--bridge", "--caller-worktree", "--owner-ref"))):
+    if creating_new and not result.timed_out and new_extra and can_retry_legacy_resolve(
+        exit_code=result.exit_code,
+        stdout=result.stdout or "",
+        stderr=result.stderr or "",
+        caller_owner_ref=target.caller_owner_ref,
+        caller_worktree=target.caller_worktree,
+    ):
         log.info("remote %s lacks new resolve flags; retrying bare", target.host)
         result = await _run([])
 
@@ -618,14 +616,16 @@ async def _resolve_worktree_remote(
         raise RuntimeError(f"remote worktree resolve timed out after {timeout}s")
     if result.exit_code != 0:
         stderr = (result.stderr or "").strip()
-        if _looks_unprovisioned_project(target.project, stderr, result.exit_code):
+        stdout = result.stdout or ""
+        if (structured_resolver_error(stdout) is None
+                and _looks_unprovisioned_project(target.project, stderr, result.exit_code)):
             raise RemoteProjectNotProvisioned(
                 f"project {target.project!r} is not provisioned on host "
                 f"{target.host!r} (no {target.project!r} worktree binstub there)"
             )
         raise RuntimeError(
             f"remote worktree resolve failed (exit {result.exit_code}): "
-            f"{stderr[:400]}"
+            f"{resolver_failure_detail(stdout, stderr)}"
         )
 
     plan = _extract_json_object(result.stdout)
