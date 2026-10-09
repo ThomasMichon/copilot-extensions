@@ -1743,13 +1743,20 @@ class FilesystemTarget(Target):
                 detail=f"detritus cleanup failed for {relative}: {exc}",
             )
         try:
-            marker_rel = Path(publication_admission.PUBLICATION_IDENTITY_MARKER)
+            marker_name_casefold = publication_admission.PUBLICATION_IDENTITY_MARKER.casefold()
             source_files = _iter_regular_source_files(source, detritus.roots)
             for src_file in source_files:
                 rel = src_file.relative_to(source)
                 # Marker reserved at the publication root only (see
                 # publication_admission.check_publication_identity).
-                if _is_excluded_name(src_file.name) or rel == marker_rel:
+                # Case-insensitive: a case-insensitive destination
+                # filesystem resolves any differently-cased spelling to
+                # the same real marker path.
+                is_root_marker = (
+                    rel.parent == Path(".")
+                    and src_file.name.casefold() == marker_name_casefold
+                )
+                if _is_excluded_name(src_file.name) or is_root_marker:
                     continue
                 if not is_session_path_included(rel, include_sessions, batch_mode=batch_mode):
                     continue

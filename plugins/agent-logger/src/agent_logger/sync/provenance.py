@@ -268,7 +268,15 @@ def existing_real_directory(path: Path) -> Path | None:
 
 
 def ensure_real_directory(path: Path) -> Path:
-    """Create a directory only through real directory components."""
+    """Create a directory only through real directory components.
+
+    Tolerates a concurrent creator: two processes racing to create the same
+    component (e.g. two cross-writer identity-admission claims resolving
+    the same destination lock's parent directory for the first time) must
+    both succeed rather than one seeing an uncaught ``FileExistsError`` --
+    the component still gets the same real-directory validation below
+    either way.
+    """
     absolute = anchored_path(path)
     current = Path(absolute.anchor)
     anchor_mode = _lstat(current).st_mode
@@ -279,7 +287,10 @@ def ensure_real_directory(path: Path) -> Path:
         try:
             mode = _lstat(current).st_mode
         except FileNotFoundError:
-            _mkdir(current)
+            try:
+                _mkdir(current)
+            except FileExistsError:
+                pass
             mode = _lstat(current).st_mode
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"directory is unsafe: {current}")

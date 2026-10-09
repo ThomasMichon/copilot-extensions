@@ -172,6 +172,33 @@ def test_filesystem_push_never_copies_source_marker_over_ownership_claim(
     assert recorded["provider"] == "github"
 
 
+def test_filesystem_push_excludes_a_differently_cased_root_marker(
+    tmp_path: Path,
+) -> None:
+    """A case-insensitive destination filesystem resolves any differently
+    cased spelling of the marker name to the same real path -- the
+    root-marker exclusion must match case-insensitively, not just the
+    exact-case spelling."""
+    src = _make_source(tmp_path)
+    (src / ".ARCHIVE-SOURCE.JSON").write_text(
+        '{"provider": "forged", "host": "x", "repository": "y", "venue": "z"}',
+        encoding="utf-8",
+    )
+    dest_root = tmp_path / "dest"
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = LocalTarget({"path": str(dest_root)}).push(
+        src, "m1", source_identity=identity
+    )
+    assert result.ok
+    marker = dest_root / "m1" / ".archive-source.json"
+    recorded = json.loads(marker.read_text(encoding="utf-8"))
+    assert recorded["host"] == "lambda-core"
+    assert recorded["provider"] == "github"
+    assert not (dest_root / "m1" / ".ARCHIVE-SOURCE.JSON").is_file()
+
+
 def test_filesystem_push_preserves_a_nested_legitimately_named_file(
     tmp_path: Path,
 ) -> None:
