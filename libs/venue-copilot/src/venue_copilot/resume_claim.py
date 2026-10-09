@@ -80,11 +80,16 @@ def settle_resumed_claim(
         if (row is not None and row.get("reservation_id") == reservation.get("reservation_id")
                 and row.get("claimed_by_session_id") == expected):
             return expected, reservation  # the bridge folded the placeholder in
-        resumed, placeholder = vc.live_session_for(expected), vc.live_session_for(claimed)
+        resumed = vc.live_session_for(expected)
+        try:
+            placeholder, placeholder_known = vc.live_session_for(claimed, strict=True), True
+        except unknown:
+            placeholder, placeholder_known = {}, False
         if (row is not None and resumed.get("session_id") == expected
                 and resumed.get("status", "live") == "live"
                 # Gone, or a dead row (an unclean exit leaves it to expire).
-                and (not placeholder or placeholder.get("status") in ("expired", "taken-over"))):
+                and (placeholder_known and (not placeholder
+                                            or placeholder.get("status") in ("expired", "taken-over")))):
             try:
                 vc.release_cli_mode(worktree_id, reservation_id=reservation.get("reservation_id"))
                 renewed = vc.reserve_cli_mode(worktree_id, ttl_seconds=ttl_seconds, venue=venue)
@@ -95,7 +100,9 @@ def settle_resumed_claim(
                 return expected, {}  # live, maybe without CLI mode; nothing for the caller to release
             return expected, (renewed if claimant == expected else {})
         if clock() >= deadline:
-            placeholder_live = (placeholder.get("session_id") == claimed
-                                and placeholder.get("status", "live") == "live")
+            # Only a successful read proves the placeholder gone: an unanswered
+            # one keeps it as the session, as before, never a failed launch.
+            placeholder_live = not placeholder_known or (
+                placeholder.get("session_id") == claimed and placeholder.get("status", "live") == "live")
             return (claimed if placeholder_live else None), reservation
         sleep(_POLL_SECONDS)

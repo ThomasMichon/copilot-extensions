@@ -100,7 +100,8 @@ def seams(monkeypatch):
         venue_copilot, "deregister_live_session",
         lambda sid: calls.deregistered.append(sid) or True,
     )
-    monkeypatch.setattr(venue_copilot, "live_session_for", lambda handle: calls.live_rows.get(handle, {}))
+    monkeypatch.setattr(venue_copilot, "live_session_for",
+                        lambda handle, strict=False: calls.live_rows.get(handle, {}))
     return calls
 
 

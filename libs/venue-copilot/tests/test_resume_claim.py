@@ -31,6 +31,7 @@ def bridge(monkeypatch):
     b = types.SimpleNamespace(
         row={"reservation_id": "r1", "claimed_by_session_id": "placeholder"},
         live={}, released=[], reserved=[], reserve_error=False, renewal_claimant="sid-9", fail_reads=0,
+        fail_lookups=False,
     )
 
     def _reserve(scope, ttl_seconds, venue):
@@ -49,7 +50,14 @@ def bridge(monkeypatch):
         return dict(b.row)
 
     monkeypatch.setattr(venue_copilot, "get_cli_mode_reservation", _get)
-    monkeypatch.setattr(venue_copilot, "live_session_for", lambda h: b.live.get(h, {}))
+    def _lookup(h, strict=False):
+        if b.fail_lookups:
+            if strict:
+                raise venue_copilot.VenueCopilotError("bridge timed out")
+            return {}
+        return b.live.get(h, {})
+
+    monkeypatch.setattr(venue_copilot, "live_session_for", _lookup)
     monkeypatch.setattr(venue_copilot, "reserve_cli_mode", _reserve)
     monkeypatch.setattr(venue_copilot, "release_cli_mode",
                         lambda scope, reservation_id=None: b.released.append(reservation_id) or 1)
@@ -152,6 +160,14 @@ def test_neither_live_is_no_session_never_the_dead_placeholder(bridge):
     assert _settle(timeout=5.0) == (None, {"reservation_id": "r1"})
     bridge.live = {}
     assert _settle(timeout=5.0) == (None, {"reservation_id": "r1"})
+
+
+def test_an_unanswered_lookup_is_never_proof_the_placeholder_is_gone(bridge):
+    """A bridge that can't answer at the deadline keeps the placeholder as the
+    session: a transient outage must not fail (and kill) a healthy launch."""
+    bridge.fail_lookups = True
+    assert _settle(timeout=5.0) == ("placeholder", {"reservation_id": "r1"})
+    assert bridge.reserved == []
 
 
 @pytest.mark.parametrize("claimant", [None, "someone-else"])
