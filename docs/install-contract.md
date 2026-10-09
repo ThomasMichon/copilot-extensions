@@ -1959,6 +1959,15 @@ self-containment constraint (a plugin's installer must not reach across a
 plugin boundary at install time) — see the `vendored-installer-engine`
 effort's Journal for the full git-fetch-vs-vendoring reasoning.
 
+`agent-codespaces` uses the canonical-reference form for both installers.
+Its Connection Owner service, sibling-library install order, and Windows
+signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,
+transient retries, and deploy-manifest writing use the shared engine.
+PowerShell `stamp` materializes both engine files and all declared local
+libraries into the snapshot, rewriting canonical references to snapshot-local
+paths before publishing it. POSIX `stamp` retains its owning-payload pointer;
+release materialization makes that payload self-contained before staging.
+
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine
 files; this is a phased rollout, not a blanket requirement for every runtime

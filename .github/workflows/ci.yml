@@ -826,6 +826,23 @@ jobs:
           libs/single-instance-lease/tests/test_lease.py
           tools/test_run_plugin_tests.py
 
+  archive-sources-windows:
+    name: archive sources (windows-latest)
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.smoke || '[]'), 'agent-logger')
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Native source discovery and chronicler contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          -k "source_roots or chronicle"
+
   discover:
     name: discover suites
     if: >-
@@ -1109,6 +1126,7 @@ jobs:
       - worktree-manager
       - test-runner-linux
       - test-runner-windows
+      - archive-sources-windows
       - discover
       - smoke
       - worktrees-smoke

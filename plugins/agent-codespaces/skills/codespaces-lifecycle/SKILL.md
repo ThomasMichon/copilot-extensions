@@ -455,6 +455,16 @@ and publish a fresh verdict, then retry.
 It also refuses deletion after failed session recovery unless `--force` is
 explicitly supplied.
 
+GitHub's own "codespace has unsaved changes" delete refusal is frequently
+stale. Without `--force`, `finalize --delete`, `delete`, and `prune` answer it
+themselves: they SSH in and audit **every** git checkout on the box (each repo
+under `/workspaces`, nested ones, the dotfiles checkout, and every linked
+`git worktree`) for uncommitted changes, commits on no remote, and branches with
+unpushed commits. All clean -> the delete is retried with gh's `--force` for
+that refusal only (recovery and the other gates are unchanged). Otherwise the
+delete is refused with the exact dirty checkouts listed -- settle that work
+rather than reaching for `--force`.
+
 > 🛑 **If `finalize --delete` refuses, diagnose — don't bypass.** Common causes:
 > unknown/dirty off-box safety (`verify` or push/settle the work), a
 > still-booting CodeSpace, or an SSH/relay hiccup. For a genuinely unrecoverable

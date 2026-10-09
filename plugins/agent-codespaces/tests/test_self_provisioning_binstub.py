@@ -196,42 +196,20 @@ def test_installers_preinstall_uv_editable_workspace_dependencies() -> None:
     install_sh = INSTALL_SH.read_text(encoding="utf-8")
     install_ps1 = INSTALL_PS1.read_text(encoding="utf-8")
 
-    assert 'ZDD_DIR="$PLUGIN_DIR/libs/zdd"' in install_sh
-    assert '--editable "$ZDD_DIR"' in install_sh
-    assert '--reinstall-package agent-zdd "$ZDD_DIR"' in install_sh
-    assert 'VENUE_COPILOT_DIR="$PLUGIN_DIR/libs/venue-copilot"' in install_sh
-    assert '--editable "$VENUE_COPILOT_DIR"' in install_sh
-    assert '--reinstall-package agent-venue-copilot "$VENUE_COPILOT_DIR"' in install_sh
-    assert 'SESSION_LIVENESS_PROBE_DIR="$PLUGIN_DIR/libs/session-liveness-probe"' in install_sh
-    assert '--editable "$SESSION_LIVENESS_PROBE_DIR"' in install_sh
-    assert (
-        '--reinstall-package agent-session-liveness-probe "$SESSION_LIVENESS_PROBE_DIR"'
-        in install_sh
-    )
-    assert 'SINGLE_INSTANCE_LEASE_DIR="$PLUGIN_DIR/libs/single-instance-lease"' in install_sh
-    assert '--editable "$SINGLE_INSTANCE_LEASE_DIR"' in install_sh
-    assert (
-        '--reinstall-package agent-single-instance-lease "$SINGLE_INSTANCE_LEASE_DIR"'
-        in install_sh
-    )
-    assert 'REMOTE_LOGIN_SHELL_DIR="$PLUGIN_DIR/libs/remote-login-shell"' in install_sh
-    assert '--editable "$REMOTE_LOGIN_SHELL_DIR"' in install_sh
-    assert (
-        '--reinstall-package agent-remote-login-shell "$REMOTE_LOGIN_SHELL_DIR"'
-        in install_sh
-    )
-    assert "Join-Path $PluginDir 'libs\\zdd'" in install_ps1
-    assert "'agent-zdd'" in install_ps1
-    assert '"$ZddDir"' in install_ps1
-    assert "Join-Path $PluginDir 'libs\\venue-copilot'" in install_ps1
-    assert "'agent-venue-copilot'" in install_ps1
-    assert '"$VenueCopilotDir"' in install_ps1
-    assert "Join-Path $PluginDir 'libs\\session-liveness-probe'" in install_ps1
-    assert "'agent-session-liveness-probe'" in install_ps1
-    assert '"$SessionLivenessProbeDir"' in install_ps1
-    assert "Join-Path $PluginDir 'libs\\single-instance-lease'" in install_ps1
-    assert "'agent-single-instance-lease'" in install_ps1
-    assert '"$SingleInstanceLeaseDir"' in install_ps1
-    assert "Join-Path $PluginDir 'libs\\remote-login-shell'" in install_ps1
-    assert "'agent-remote-login-shell'" in install_ps1
-    assert '"$RemoteLoginShellDir"' in install_ps1
+    for lib, shell_var, ps_var in (
+        ("zdd", "ZDD_DIR", "ZddDir"),
+        ("venue-copilot", "VENUE_COPILOT_DIR", "VenueCopilotDir"),
+        ("session-liveness-probe", "SESSION_LIVENESS_PROBE_DIR", "SessionLivenessProbeDir"),
+        ("single-instance-lease", "SINGLE_INSTANCE_LEASE_DIR", "SingleInstanceLeaseDir"),
+        ("remote-login-shell", "REMOTE_LOGIN_SHELL_DIR", "RemoteLoginShellDir"),
+    ):
+        assert f'{shell_var}="$PLUGIN_DIR/libs/{lib}"' in install_sh
+        assert f'"${shell_var}"' in install_sh
+        assert f"agent-{lib}" in install_sh
+        assert f"Join-Path $PluginDir 'libs\\{lib}'" in install_ps1
+        assert f"'agent-{lib}' = ${ps_var}" in install_ps1
+    assert 'mode_args=(--reinstall-package "${packages[$i]}")' in install_sh
+    assert 'mode_args=(--editable)' in install_sh
+    assert 'invoke_uv_pip_install_resilient "$UV_CMD" --python "$py"' in install_sh
+    assert "'--editable' } else { '--reinstall-package', $entry.Key }" in install_ps1
+    assert "Invoke-UvPipInstallResilient -UvCommand $UvCommand" in install_ps1

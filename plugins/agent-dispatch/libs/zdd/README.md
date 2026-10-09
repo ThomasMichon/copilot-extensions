@@ -39,6 +39,19 @@ reuses the same port gets mistaken for the real daemon.
 Key API: `Endpoint`, `read_active_endpoint`, `publish_active`,
 `clear_if_owner`, `reap_stale_active`, `routing_table_path`.
 
+Publications for a live PID also record its `process_start_time`, establishing
+the process identity when the route is written rather than sampling a potentially
+reused PID during later adoption. The three publication APIs accept an optional
+spawn-time `process_start_time` baseline and refuse a mismatched or unverifiable
+baseline before changing the route. Active/previous endpoints and guarded
+publication preserve and compare this optional token.
+
+Legacy routes without the field remain readable. If identity cannot be read,
+ordinary publication logs a warning and retains the existing routing behavior;
+an identity-bound supervisor must reject that unverified route, not substitute
+a fresh token. This field does not itself implement a singleton manager, provide
+Windows handle custody, or change listener-based client fallback.
+
 ### `zdd.cutover` -- the cutover orchestrator
 
 `CutoverOrchestrator` drives one active/passive cutover: spawn the new daemon on
