@@ -83,17 +83,19 @@ The operator approved the slug and two-slice scope.
 
 - [x] Trace extension and CLI trigger, save, abort, consume, successor-ready,
   and predecessor-retirement transitions against the current host boundary.
-- [ ] Persist an idempotent, identity-validated request through the owning
+- [x] Persist an idempotent, identity-validated request through the owning
   worktree command, then wake the existing monitor with the affected key.
 - [ ] Process only registered pending work and its bounded retries. (The
   "remove handoff-discovery full-history scans from ordinary monitor ticks"
   half of this item is already satisfied -- see Journal, #5742 -- by a
   separately-driven, more general fix; the bounded-retry/pending-work half
   remains open.)
-- [ ] Recover outstanding requests after monitor restart or lost notification
+- [x] Recover outstanding requests after monitor restart or lost notification
   from durable current state, not replay of machine-global diagnostic history.
-- [ ] Preserve `auto`, `manual-only`, and `off` behavior, cancellation,
+  (Already structurally satisfied -- see Journal: the wake is latency-only.)
+- [x] Preserve `auto`, `manual-only`, and `off` behavior, cancellation,
   successor readiness, and safe predecessor identity/ownership checks.
+  (Unaffected -- see Journal: the wake adds no new mode-gated behavior.)
 - [ ] Land code, tests, documentation, and required changefiles; update this
   effort with the merged outcome.
 
@@ -210,3 +212,49 @@ two measured forwarding roles, with live process-tree evidence.)_
   start) when a slice targets a shared, actively-touched module -- this
   cost one full review cycle that a fresher pre-push check would have
   caught before investing in the review itself.
+
+### 2026-10-08 - Phase 2 slice 2: affirmative cross-process wake
+
+- Traced the resident monitor's existing wake machinery end to end:
+  `resident_push.notify()` is in-process only (a `threading.Event`); the
+  ONLY existing cross-process channel into an already-running resident is
+  `hook_ipc.HookIpcServer`, today reached only by a live Copilot session's
+  own `postToolUse`/`sessionStart`/etc. hook callbacks (via the standalone,
+  package-import-free `scripts/hook_client.py`, invoked as a subprocess by
+  `hooks.json`) -- `note-handoff`'s CLI path never spoke to it at all, so a
+  newly registered handoff sat durably persisted but undiscovered until the
+  monitor's next periodic sweep tick.
+- Added `hook_ipc.send_best_effort(kind, payload, *, lock_path=None,
+  timeout=1.0)`: an in-package client counterpart to the existing server,
+  reading the same `status-monitor.lock` rendezvous file and speaking the
+  same wire protocol as `scripts/hook_client.py` (deliberately NOT shared
+  code -- that script must stay import-free of this package for
+  bootstrap-before-install reasons). Never raises; a missing/unreachable
+  resident, a stale lock, a bad token, or an explicit fallback response all
+  resolve to `False` -- a missed wake costs only latency, the periodic
+  sweep interval remains the unconditional backstop (per
+  `_wake_interruptible_wait`'s own existing docstring).
+  `status_monitor_cli._kind_wakes_sweep` gained a new `"handoffWake"` kind
+  that wakes the sweep loop unconditionally (no `targets` semantics of its
+  own -- unlike `postToolUse`, it is never about invalidating a cached
+  status segment). `cmd_note_handoff` now calls `send_best_effort` with the
+  worktree id AFTER its existing durable persist (`tracking.open_handoff`/
+  `_note_disposition_snapshot`) -- persist-then-notify, never the reverse.
+  Deliberately did NOT touch `__main__.py`'s `_resident_hook_decision`
+  dispatch: it already falls through to an unconditional `return {}` for
+  any unrecognized `kind`, which is exactly the right no-op for this one,
+  and `__main__.py` sits EXACTLY at its 6,979-line shrink-only ceiling (a
+  first attempt to add an explicit branch there pushed it 2 lines over;
+  reverted once the no-op fallthrough was recognized as sufficient).
+- Phase 2's remaining restart-recovery and mode-preservation Plan items are
+  satisfied by this design directly, not by new code: the wake is a pure
+  latency optimization layered on top of the SAME already-durable
+  `tracking.open_handoff` persistence and the SAME `auto`/`manual-only`/
+  `off` mode gating `cmd_note_handoff`/the monitor's sweep already enforced
+  before this slice -- nothing about restart recovery or mode semantics
+  changed, so both items are checked off with that rationale rather than
+  new code.
+- Confirmed no overlapping work landed on `dev` before opening this slice's
+  PR (applying the lesson above).
+- Only Phase 2's third Plan item (bounded-retry/pending-work processing,
+  independent of the already-resolved history-scan half) remains open.
