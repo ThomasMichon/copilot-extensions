@@ -12,6 +12,17 @@ of the `worktree-manager-control-plane` effort.
   cutover argv), then call `agent-worktrees post-exit` for finalization.
 - `pane-wrapper.sh` / `pane-wrapper.ps1` — wrap the actual mux pane command for
   graceful exit-code handling, initial-prompt injection, and AHP token handoff.
+- `pane-launch.ps1` — Windows file-based argument transport. Producers invoke
+  this shipped entrypoint with `pwsh -File` and `-Manifest <JSON path>`, using
+  PowerShell single-quoted paths with doubled apostrophes across PSMux's space
+  join. The version-1 JSON object carries `wrapper` and a non-empty string
+  `argv` array, consumed and deleted before invoking the unchanged wrapper.
+  Each create attempt uses a fresh manifest;
+  failed creation cleans up its unconsumed file after owned-session teardown.
+  AHP credentials still use the separate protected token handoff, not JSON.
+  Relaunching requires a fresh producer command, not replaying a consumed
+  one-shot handoff. Timed-out programmatic mux calls retain their manifest
+  because the pane may still be starting; its consumer owns successful cleanup.
 - `session-options.ps1` / `session-options.sh` — per-session status bar +
   behaviors that `launch-session.ps1`/`.sh` stamp onto each mux session.
   `launch-session.ps1` dot-sources `session-options.ps1` via a

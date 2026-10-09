@@ -28,6 +28,40 @@ from agent_worktrees import worktree_identity
 
 # â”€â”€ build_mux_new_window_argv (pure) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestBuildMuxNewWindowArgv:
+    def test_psmux_resolves_manager_owned_bundle(self, tmp_path, monkeypatch):
+        from agent_worktrees import manager_launch_cli
+
+        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper.write_text("# wrapper\n")
+        launcher = tmp_path / "pane-launch.ps1"
+        launcher.write_text("# launcher\n")
+        monkeypatch.setattr(
+            manager_launch_cli, "_usable_worktree_manager_launcher_dir", lambda: tmp_path,
+        )
+        argv = sessions._mux_pane_cmd("id", ["program"], is_tmux=False)
+        try:
+            manifest = Path(argv[-1][1:-1].replace("''", "'"))
+            assert json.loads(manifest.read_text("utf-8"))["wrapper"] == str(wrapper)
+            assert argv[-3] == "'" + str(launcher).replace("'", "''") + "'"
+        finally:
+            sessions.cleanup_mux_pane_args(argv)
+
+    def test_psmux_missing_file_launcher_fails_closed(self, tmp_path):
+        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper.write_text("# old wrapper\n")
+        with pytest.raises(RuntimeError, match="update Worktree Manager"):
+            sessions._mux_pane_cmd(
+                "id", ["program"], is_tmux=False, pane_wrapper=str(wrapper),
+            )
+
+    def test_cleanup_does_not_delete_verbatim_child_arguments(self, tmp_path):
+        unrelated = tmp_path / "unrelated.json"
+        unrelated.write_text("keep")
+        sessions.cleanup_mux_pane_args(
+            ["psmux", "new-window", "other-program", "-AwArgsFile", str(unrelated)]
+        )
+        assert unrelated.read_text() == "keep"
+
     def test_tmux_no_wrapper_strips_identity_and_propagates_env(self):
         argv = sessions.build_mux_new_window_argv(
             "wt1-abc",
@@ -103,6 +137,8 @@ class TestBuildMuxNewWindowArgv:
         wrapper = tmp_path / "wrapper with spaces" / "pane-wrapper.ps1"
         wrapper.parent.mkdir()
         wrapper.write_text("# test wrapper\n")
+        launcher = wrapper.with_name("pane-launch.ps1")
+        launcher.write_text("# test launcher\n")
         receipt = tmp_path / "receipt path" / "receipt123"
         argv = sessions.build_mux_new_window_argv(
             "id2",
@@ -114,22 +150,44 @@ class TestBuildMuxNewWindowArgv:
             initial_prompt="three word seed",
             prompt_receipt=str(receipt),
         )
-        assert argv[-5:-1] == [
-            "pwsh.exe", "-NoProfile", "-NoLogo", "-EncodedCommand",
+        assert argv[-7:-3] == [
+            "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
         ]
         assert "three word seed" not in argv
         assert str(wrapper) not in argv
-        encoded_script = argv[-1]
-        script = base64.b64decode(encoded_script).decode("utf-16-le")
-        assert "FromBase64String" in script
-        assert base64.b64encode(str(wrapper).encode()).decode() in script
-        args_b64 = script.split("FromBase64String('")[2].split("'")[0]
-        wrapper_args = json.loads(base64.b64decode(args_b64).decode("utf-8"))
+        assert argv[-3] == "'" + str(launcher).replace("'", "''") + "'"
+        assert argv[-2] == "-Manifest"
+        manifest = Path(argv[-1][1:-1].replace("''", "'"))
+        handoff = json.loads(manifest.read_text("utf-8"))
+        assert handoff["version"] == 1
+        assert handoff["wrapper"] == str(wrapper)
+        wrapper_args = handoff["argv"]
+        sessions.cleanup_mux_pane_args(argv)
+        assert not manifest.exists()
         receipt_flag = wrapper_args.index("--aw-prompt-receipt-b64")
         decoded_receipt = base64.b64decode(
             wrapper_args[receipt_flag + 1]
         ).decode("utf-8")
         assert decoded_receipt == str(receipt)
+
+    @pytest.mark.parametrize("builder", [
+        sessions.build_mux_new_window_argv, sessions.build_mux_new_session_argv,
+    ])
+    def test_psmux_manifest_preserves_complete_argv(self, tmp_path, builder):
+        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper.write_text("# test\n")
+        wrapper.with_name("pane-launch.ps1").write_text("# test launcher\n")
+        child = ["program with spaces", "", 'a"quote', "a'quote",
+                 "trailing\\", "--allow-all", "\u03bb"]
+        argv = builder("id", str(tmp_path), child, mux="psmux",
+                       pane_wrapper=str(wrapper))
+        manifest = Path(argv[-1][1:-1].replace("''", "'"))
+        try:
+            assert "-EncodedCommand" not in argv
+            assert json.loads(manifest.read_text("utf-8"))["argv"] == ["-AwWt", "id", *child]
+        finally:
+            sessions.cleanup_mux_pane_args(argv)
+        assert not manifest.exists()
 
     def test_explicit_mux_session_targets_adopted_anchor_session(self):
         argv = sessions.build_mux_new_window_argv(
@@ -162,6 +220,34 @@ class TestBuildMuxNewWindowArgv:
 
 # â”€â”€ mux_new_window / mux_retire_pane (subprocess mocked) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestMuxNewWindow:
+    @pytest.mark.parametrize("launch", [sessions.mux_new_window, sessions.mux_new_session])
+    @pytest.mark.parametrize("failure", ["rejected", "missing_binary", "timeout"])
+    def test_failed_manifest_ownership(self, tmp_path, monkeypatch, launch, failure):
+        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper.write_text("# test\n")
+        wrapper.with_name("pane-launch.ps1").write_text("# test launcher\n")
+        argv = sessions.build_mux_new_window_argv(
+            "id", str(tmp_path), ["program"], mux="psmux", pane_wrapper=str(wrapper),
+        )
+        manifest = Path(argv[-1][1:-1].replace("''", "'"))
+        monkeypatch.setattr(sessions, "build_mux_new_window_argv", lambda *a, **k: argv)
+        monkeypatch.setattr(sessions, "build_mux_new_session_argv", lambda *a, **k: argv)
+
+        def spawn(*args, **kwargs):
+            if failure == "missing_binary":
+                raise FileNotFoundError("no mux binary")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired("psmux", 15)
+            return subprocess.CompletedProcess(argv, 1, "", "rejected")
+
+        monkeypatch.setattr(subprocess, "run", spawn)
+        try:
+            result = launch("id", str(tmp_path), ["program"], mux="psmux")
+            assert not result["ok"]
+            assert manifest.exists() == (failure == "timeout")
+        finally:
+            sessions.cleanup_mux_pane_args(argv)
+
     def test_success_returns_new_pane(self, monkeypatch):
         class R:
             returncode = 0
@@ -457,6 +543,7 @@ class TestPaneWrapperInitialPrompt:
                 pytest.skip("pwsh is required for the Windows pane wrapper")
             wrapper = wrapper_dir / "pane-wrapper.ps1"
             shutil.copy2(root / "bin" / "pane-wrapper.ps1", wrapper)
+            shutil.copy2(root / "bin" / "pane-launch.ps1", wrapper.with_name("pane-launch.ps1"))
             cmd = sessions._mux_pane_cmd(
                 "id",
                 [sys.executable, str(capture)],
@@ -465,6 +552,7 @@ class TestPaneWrapperInitialPrompt:
                 initial_prompt=prompt,
                 prompt_receipt=str(receipt),
             )
+            cmd = [pwsh, "-NoProfile", "-Command", " ".join(cmd)]
         else:
             bash = shutil.which("bash")
             if not bash:

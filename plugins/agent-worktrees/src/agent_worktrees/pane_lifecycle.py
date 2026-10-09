@@ -157,6 +157,7 @@ def pane_create(
         payload_receipt_token=receipt_token,
     )
 
+    argv: list[str] = []
     try:
         if create_kind == "new-window":
             argv = sessions.build_mux_new_window_argv(
@@ -181,6 +182,8 @@ def pane_create(
             )
         result = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        if not isinstance(exc, subprocess.TimeoutExpired):
+            sessions.cleanup_mux_pane_args(argv)
         receipt_path.unlink(missing_ok=True)
         return {
             "ok": False,
@@ -196,6 +199,7 @@ def pane_create(
         }
 
     if result.returncode != 0:
+        sessions.cleanup_mux_pane_args(argv)
         receipt_path.unlink(missing_ok=True)
         return {
             "ok": False,
