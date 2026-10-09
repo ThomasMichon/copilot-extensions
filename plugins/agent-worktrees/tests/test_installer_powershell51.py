@@ -756,6 +756,22 @@ Exit-VersionedSlotLease
             holder.kill()
     assert holder.returncode == 0, holder.stderr.read() if holder.stderr else ""
 
+    # The file intentionally survives release. Its existence must not be
+    # mistaken for a live builder, and deleting it must not be required.
+    lease_path = install_dir / ".build-lease-1.2.3.lock"
+    assert lease_path.exists()
+    after_release = subprocess.run(
+        [
+            pwsh, "-NoProfile", "-Command",
+            common_preamble
+            + "[Console]::Out.Write((Enter-VersionedSlotLease)); Exit-VersionedSlotLease",
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert after_release.returncode == 0, after_release.stderr
+    assert after_release.stdout.strip() == "True"
+    assert lease_path.exists()
+
 
 def test_deploy_venv_calls_uv_retry_helper():
     """Deploy-Venv's uv fallback must go through the shared retry helper
