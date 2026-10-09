@@ -3443,12 +3443,23 @@ class TestPRFinalizeAndPush:
                 )
             },
         )
-        pr_ops.create_pr(wid, config, title="Add feature")
+        created = pr_ops.create_pr(
+            wid, config, title="Add feature", target_repo="example/project",
+        )
+        assert created["success"], created
+        associated = pr_ops.set_pr(
+            wid,
+            url="https://gitea.example.com/example/project/pulls/42",
+            number=42,
+            provider="gitea",
+            config=config,
+        )
+        assert associated["success"], associated
         record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        record.pr.number = 42
-        record.pr.repo = "example/project"
-        record.pr.provider = "gitea"
-        tracking.save_record(record)
+        assert (record.pr.repo, record.pr.number, record.pr.provider) == (
+            "example/project", 42, "gitea",
+        )
+        assert record.pr.head_sha == created["head_sha"]
         captured: dict[str, str] = {}
         publishes = {"count": 0}
 
