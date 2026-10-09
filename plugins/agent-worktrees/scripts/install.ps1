@@ -1410,6 +1410,48 @@ function Exit-VersionedSlotLease {
     }
 }
 
+function Wait-ForVersionedSlotLease {
+    <# Bounded join for genuine lease contention (phase-3-runtime-admission,
+       #5472/#5788): a single Enter-VersionedSlotLease refusal used to be
+       final -- the caller gave up immediately and told the operator to
+       "re-run update once the other build finishes" by hand. That is what
+       turns an ordinary concurrent first build into a visible hang/failure
+       for a resumed launch, which never retries on its own. Poll for the
+       lease instead, bounded by a real wall-clock deadline, so a build that
+       finishes within the budget is picked up automatically; the caller's
+       OWN post-acquisition Test-SlotAlreadyComplete re-check (already
+       required by #5439) is what lets a finished winner be reused here
+       rather than raced. Only genuine contention is retried -- any OTHER
+       Enter-VersionedSlotLease failure (permission/path/storage) returns
+       immediately, since waiting out a persistent, non-transient failure
+       would just convert a fast, actionable error into a slow, identical
+       one. Returns $true iff the lease was ultimately acquired. #>
+    if (Enter-VersionedSlotLease) { return $true }
+    if ($script:VersionedSlotLeaseFailureReason -ne 'contention') { return $false }
+
+    $waitSeconds = 180
+    $waitRaw = $env:AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC
+    if ($waitRaw) {
+        $parsedWait = 0
+        if ([int]::TryParse([string]$waitRaw, [ref]$parsedWait)) { $waitSeconds = $parsedWait }
+    }
+    $pollMs = 1000
+    $pollRaw = $env:AGENT_WORKTREES_SLOT_LEASE_POLL_MS
+    if ($pollRaw) {
+        $parsedPoll = 0
+        if ([int]::TryParse([string]$pollRaw, [ref]$parsedPoll)) { $pollMs = $parsedPoll }
+    }
+    if ($waitSeconds -le 0) { return $false }
+
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($deadline.Elapsed.TotalSeconds -lt $waitSeconds) {
+        Start-Sleep -Milliseconds $pollMs
+        if (Enter-VersionedSlotLease) { return $true }
+        if ($script:VersionedSlotLeaseFailureReason -ne 'contention') { return $false }
+    }
+    return $false
+}
+
 function Invoke-VersionedSlotClean {
     <# Toss an INCOMPLETE prior slot before building so we never `uv venv
        --allow-existing` over a corpse (#935); the current/active slot is never
@@ -2233,19 +2275,23 @@ function Deploy-Venv {
     # $VenvPython after a lease holder creates it (and skip straight past
     # this function into concurrent package deployment), or remove an
     # in-progress slot out from under an active builder.
-    if (-not (Enter-VersionedSlotLease)) {
-        # Another live process already holds the exclusive build lease for
-        # this exact version -- it's actively building (or about to), so
-        # treat this exactly like a dirty slot and refuse to race it.
-        # Enter-VersionedSlotLease distinguishes that genuine contention
-        # from any OTHER lease-file failure (permission/path/storage) via
-        # $script:VersionedSlotLeaseFailureReason -- never attribute the
-        # latter to "another process" and send an operator chasing a
-        # retry loop instead of the real, persistent failure.
+    if (-not (Wait-ForVersionedSlotLease)) {
+        # Another live process already holds (or held, for the whole bounded
+        # wait) the exclusive build lease for this exact version. We do not
+        # race it, but we no longer give up on the very first contention
+        # observation either -- Wait-ForVersionedSlotLease already polled for
+        # the caller's bounded budget (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC,
+        # default 180s), re-attempting acquisition so a build that finishes
+        # inside the budget is picked up automatically instead of leaving the
+        # operator (or a resumed, unattended launch) to "re-run update" by
+        # hand. $script:VersionedSlotLeaseFailureReason distinguishes genuine,
+        # still-unresolved contention from any OTHER lease-file failure
+        # (permission/path/storage) -- never attribute the latter to
+        # "another process".
         if ($script:VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention') {
             Write-ServiceErr "Could not acquire the build lease for runtime slot ($SrcVersion): $script:VersionedSlotLeaseFailureReason"
         } else {
-            Write-ServiceErr "Another process is already building this runtime slot ($SrcVersion) -- refusing to race it. Re-run update once the other build finishes."
+            Write-ServiceErr "Another process is still building this runtime slot ($SrcVersion) after waiting -- refusing to race it. Re-run update once the other build finishes, or raise AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC if builds routinely take longer."
         }
         return $false
     }

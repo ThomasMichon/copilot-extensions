@@ -1286,6 +1286,44 @@ _release_versioned_slot_lease() {
     _release_versioned_slot_lease_mkdir_fallback
 }
 
+_wait_for_versioned_slot_lease() {
+    # Bounded join for genuine lease contention (phase-3-runtime-admission,
+    # #5472/#5788): a single _acquire_versioned_slot_lease refusal used to be
+    # final -- the caller gave up immediately and told the operator to
+    # "re-run update once the other build finishes" by hand. That is what
+    # turns an ordinary concurrent first build into a visible hang/failure
+    # for a resumed launch, which never retries on its own. Poll for the
+    # lease instead, bounded by a real wall-clock deadline, so a build that
+    # finishes within the budget is picked up automatically; the caller's
+    # OWN post-acquisition _test_slot_already_complete re-check (already
+    # required by #5439) is what lets a finished winner be reused here
+    # rather than raced. Only genuine contention is retried -- any OTHER
+    # _acquire_versioned_slot_lease failure (lease machinery itself unusable)
+    # returns immediately, since waiting out a persistent, non-transient
+    # failure would just convert a fast, actionable error into a slow,
+    # identical one. Returns 0 iff the lease was ultimately acquired.
+    if _acquire_versioned_slot_lease; then return 0; fi
+    [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
+
+    local wait_seconds="${AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC:-180}"
+    local poll_seconds="${AGENT_WORKTREES_SLOT_LEASE_POLL_SEC:-1}"
+    case "$wait_seconds" in (*[!0-9]*|'') wait_seconds=180 ;; esac
+    case "$poll_seconds" in (*[!0-9]*|'') poll_seconds=1 ;; esac
+    [[ "$wait_seconds" -gt 0 ]] || return 1
+
+    local start_epoch now_epoch
+    start_epoch="$(date +%s)"
+    while :; do
+        sleep "$poll_seconds"
+        if _acquire_versioned_slot_lease; then return 0; fi
+        [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
+        now_epoch="$(date +%s)"
+        if [[ $((now_epoch - start_epoch)) -ge "$wait_seconds" ]]; then
+            return 1
+        fi
+    done
+}
+
 _versioned_slot_clean() {
     # #935: ensure the target slot exists, tossing it first if a prior build left
     # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
@@ -1566,19 +1604,23 @@ PYEOF
 deploy_venv() {
     # Create venv via uv (--allow-existing handles re-install). Deps come from
     # pyproject at package install time -- no ad-hoc pyyaml here.
-    if ! _acquire_versioned_slot_lease; then
-        # Another live process already holds the exclusive build lease for
-        # this exact version -- it's actively building (or about to), so
-        # treat this exactly like a dirty slot and refuse to race it.
-        # _VERSIONED_SLOT_LEASE_FAILURE_REASON distinguishes that genuine
-        # contention from any OTHER lease-machinery failure (lease file/
-        # FIFOs couldn't be created, helper didn't respond, ...) -- never
-        # attribute the latter to "another process" and send an operator
-        # chasing a retry loop instead of the real, persistent failure.
+    if ! _wait_for_versioned_slot_lease; then
+        # Another live process already holds (or held, for the whole bounded
+        # wait) the exclusive build lease for this exact version. We do not
+        # race it, but we no longer give up on the very first contention
+        # observation either -- _wait_for_versioned_slot_lease already polled
+        # for the caller's bounded budget (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC,
+        # default 180s), re-attempting acquisition so a build that finishes
+        # inside the budget is picked up automatically instead of leaving the
+        # operator (or a resumed, unattended launch) to "re-run update" by
+        # hand. _VERSIONED_SLOT_LEASE_FAILURE_REASON distinguishes genuine,
+        # still-unresolved contention from any OTHER lease-machinery failure
+        # (lease file/FIFOs couldn't be created, helper didn't respond, ...)
+        # -- never attribute the latter to "another process".
         if [[ -n "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" && "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" != "contention" ]]; then
             err "Could not acquire the build lease for runtime slot ($SRC_VERSION): $_VERSIONED_SLOT_LEASE_FAILURE_REASON"
         else
-            err "Another process is already building this runtime slot ($SRC_VERSION) -- refusing to race it. Re-run update once the other build finishes."
+            err "Another process is still building this runtime slot ($SRC_VERSION) after waiting -- refusing to race it. Re-run update once the other build finishes, or raise AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC if builds routinely take longer."
         fi
         return 1
     fi

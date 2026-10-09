@@ -551,20 +551,21 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     """A slot-clean liveness check alone is check-then-act -- two concurrent
     installer invocations could both observe a clean slot (neither has
     started its external build yet) and then both build into it (#5439).
-    `Deploy-Venv` must acquire an OS-level exclusive build lease FIRST, then
-    validate slot liveness/cleanliness UNCONDITIONALLY (before the
+    `Deploy-Venv` must acquire an OS-level exclusive build lease FIRST (via
+    the bounded-wait wrapper, `Wait-ForVersionedSlotLease`), then validate
+    slot liveness/cleanliness UNCONDITIONALLY (before the
     existing-unsigned-venv-removal logic, regardless of whether $VenvPython
     already exists -- an incomplete slot can still contain a stale
-    python.exe), fail immediately if another live process already holds the
-    lease, and `Invoke-VersionedActivate` must release that lease afterward
-    regardless of outcome."""
+    python.exe), fail if another live process still holds the lease after
+    the bounded wait, and `Invoke-VersionedActivate` must release that lease
+    afterward regardless of outcome."""
     installer = INSTALLER.read_text(encoding="utf-8")
     deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
         "function Deploy-Wrappers", 1
     )[0]
     activate_wrapper = installer.split("function Invoke-VersionedActivate {", 1)[1]
 
-    lease_idx = deploy_fn.index("Enter-VersionedSlotLease")
+    lease_idx = deploy_fn.index("Wait-ForVersionedSlotLease")
     clean_idx = deploy_fn.index("Invoke-VersionedSlotClean")
     rebuild_idx = deploy_fn.index("Rebuild an existing venv")
     assert lease_idx < clean_idx < rebuild_idx, (
@@ -575,10 +576,10 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
         "skip validation for an incomplete slot that still has a stale "
         "python.exe)"
     )
-    assert "if (-not (Enter-VersionedSlotLease)) {" in deploy_fn
+    assert "if (-not (Wait-ForVersionedSlotLease)) {" in deploy_fn
     lease_fail_branch = deploy_fn.split(
-        "if (-not (Enter-VersionedSlotLease)) {", 1
-    )[1][:1400]
+        "if (-not (Wait-ForVersionedSlotLease)) {", 1
+    )[1][:2200]
     assert "return $false" in lease_fail_branch
 
     # The wrapper must release the lease in a `finally`, so it runs whether
@@ -626,7 +627,8 @@ def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure
 
     assert "VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention'" in deploy_fn
     assert "Could not acquire the build lease" in deploy_fn
-    assert "Another process is already building this runtime slot" in deploy_fn
+    assert "Another process is still building this runtime slot" in deploy_fn
+    assert "AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC" in deploy_fn
 
 
 def test_versioned_slot_lease_handle_initialized_before_use_under_strict_mode():
@@ -662,6 +664,9 @@ def _extract_lease_functions(installer_text: str) -> str:
     enter_fn = installer_text.split("function Enter-VersionedSlotLease {", 1)[
         1
     ].split("\n}\n", 1)[0]
+    wait_fn = installer_text.split("function Wait-ForVersionedSlotLease {", 1)[
+        1
+    ].split("\n}\n", 1)[0]
     exit_fn = installer_text.split("function Exit-VersionedSlotLease {", 1)[
         1
     ].split("\n}\n", 1)[0]
@@ -673,6 +678,9 @@ function Get-VersionedSlotLeasePath {{
 $script:VersionedSlotLeaseHandle = $null
 function Enter-VersionedSlotLease {{
 {enter_fn}
+}}
+function Wait-ForVersionedSlotLease {{
+{wait_fn}
 }}
 function Exit-VersionedSlotLease {{
 {exit_fn}
@@ -771,6 +779,149 @@ Exit-VersionedSlotLease
     assert after_release.returncode == 0, after_release.stderr
     assert after_release.stdout.strip() == "True"
     assert lease_path.exists()
+
+
+def test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget(tmp_path: Path):
+    """Bounded-join regression (phase-3-runtime-admission, #5472/#5788):
+    a contender calling Wait-ForVersionedSlotLease while another process
+    holds the lease must NOT give up on first contention. It must poll,
+    and once the holder releases (well within the configured budget), the
+    contender must acquire the now-free lease itself -- proving this is a
+    real bounded wait/retry, not merely a renamed single-shot refusal."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    installer = INSTALLER.read_text(encoding="utf-8")
+    lease_functions = _extract_lease_functions(installer)
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    ready_marker = tmp_path / "holder-ready.txt"
+    release_marker = tmp_path / "release-now.txt"
+
+    common_preamble = f"""
+{lease_functions}
+$VersionedRuntime = $true
+$InstallDir = "{install_dir}"
+$SrcVersion = "1.2.3"
+"""
+
+    holder_script = common_preamble + f"""
+[void](Enter-VersionedSlotLease)
+[System.IO.File]::WriteAllText("{ready_marker}", "ready")
+while (-not (Test-Path "{release_marker}")) {{ Start-Sleep -Milliseconds 50 }}
+Exit-VersionedSlotLease
+"""
+    holder = subprocess.Popen(
+        [pwsh, "-NoProfile", "-Command", holder_script],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        for _ in range(100):  # up to ~10s
+            if ready_marker.exists() or holder.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert ready_marker.exists(), "holder process never reported readiness"
+
+        contender_env = dict(os.environ)
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC"] = "20"
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_POLL_MS"] = "100"
+        contender_script = common_preamble + "[Console]::Out.Write((Wait-ForVersionedSlotLease))"
+        contender = subprocess.Popen(
+            [pwsh, "-NoProfile", "-Command", contender_script],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=contender_env,
+        )
+        try:
+            # Let the contender observe genuine contention at least once
+            # before the holder releases, so this actually exercises the
+            # poll/retry path rather than a lucky first-attempt acquisition.
+            time.sleep(0.5)
+            release_marker.write_text("go")
+            out, err = contender.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            contender.kill()
+            pytest.fail("contender's bounded wait did not return within its own budget")
+        assert contender.returncode == 0, err
+        assert out.strip() == "True", (
+            "a bounded-wait contender must acquire the lease once the "
+            "holder releases it within the configured budget"
+        )
+    finally:
+        release_marker.write_text("go")
+        try:
+            holder.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+    assert holder.returncode == 0, holder.stderr.read() if holder.stderr else ""
+
+
+def test_wait_for_versioned_slot_lease_times_out_when_never_released(tmp_path: Path):
+    """The bounded wait must actually be bounded: if the holder never
+    releases, a contender configured with a short budget must return
+    $false at (approximately) that budget, not hang indefinitely."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    installer = INSTALLER.read_text(encoding="utf-8")
+    lease_functions = _extract_lease_functions(installer)
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    ready_marker = tmp_path / "holder-ready.txt"
+    release_marker = tmp_path / "release-now.txt"
+
+    common_preamble = f"""
+{lease_functions}
+$VersionedRuntime = $true
+$InstallDir = "{install_dir}"
+$SrcVersion = "1.2.3"
+"""
+
+    holder_script = common_preamble + f"""
+[void](Enter-VersionedSlotLease)
+[System.IO.File]::WriteAllText("{ready_marker}", "ready")
+while (-not (Test-Path "{release_marker}")) {{ Start-Sleep -Milliseconds 50 }}
+Exit-VersionedSlotLease
+"""
+    holder = subprocess.Popen(
+        [pwsh, "-NoProfile", "-Command", holder_script],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        for _ in range(100):  # up to ~10s
+            if ready_marker.exists() or holder.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert ready_marker.exists(), "holder process never reported readiness"
+
+        contender_env = dict(os.environ)
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC"] = "2"
+        contender_env["AGENT_WORKTREES_SLOT_LEASE_POLL_MS"] = "100"
+        contender_script = common_preamble + "[Console]::Out.Write((Wait-ForVersionedSlotLease))"
+        started = time.monotonic()
+        contender = subprocess.run(
+            [pwsh, "-NoProfile", "-Command", contender_script],
+            capture_output=True, text=True, timeout=30,
+            env=contender_env,
+        )
+        elapsed = time.monotonic() - started
+        assert contender.returncode == 0, contender.stderr
+        assert contender.stdout.strip() == "False", (
+            "a bounded-wait contender must give up, not hang, once its "
+            "configured budget elapses while the holder never releases"
+        )
+        assert elapsed < 15, (
+            f"bounded wait took {elapsed:.1f}s against a 2s budget -- "
+            "the timeout is not actually bounding the wait"
+        )
+    finally:
+        release_marker.write_text("go")
+        try:
+            holder.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+    assert holder.returncode == 0, holder.stderr.read() if holder.stderr else ""
 
 
 def test_deploy_venv_calls_uv_retry_helper():
