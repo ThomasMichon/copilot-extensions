@@ -313,11 +313,11 @@ def record_synced(worktree_id: str, config, cwd: str) -> None:
     record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
     if record is None:
         return
-    pr = record.active_pr()
+    source = _git("symbolic-ref", "--short", "HEAD", cwd=cwd)
+    pr = pr_recovery.selected_pr(worktree_id, source, record)
     if pr is None:
         return
     repo = config.default_repo
-    source = _git("symbolic-ref", "--short", "HEAD", cwd=cwd)
     proof = verify(
         record, repo, pr.remote or repo.remote, f"{source}:refs/heads/{pr.branch}",
         pr.head_sha, cwd=cwd,

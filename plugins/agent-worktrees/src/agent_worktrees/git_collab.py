@@ -55,7 +55,7 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
         dirty = git_ops.get_dirty_files(cwd=worktree_path)
         listing = "\n  ".join(dirty[:20])
         output.err(
-            "Worktree has uncommitted changes; commit them before syncing:\n  "
+            "Worktree has uncommitted changes; make it clean before syncing:\n  "
             + listing
         )
         return False

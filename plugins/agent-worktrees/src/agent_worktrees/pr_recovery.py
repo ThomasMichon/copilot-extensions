@@ -53,11 +53,25 @@ def _association(pr) -> str:
     return hashlib.sha256(json.dumps(fields).encode("utf-8")).hexdigest()
 
 
+def selected_pr(worktree_id: str, branch: str, record):
+    if record is None:
+        return None
+    if branch == f"worktree/{worktree_id}":
+        active = record.active_pr()
+        return active if active is not None and not tracking._pr_is_terminal(active) else None
+    matches = [
+        pr for pr in record.prs if pr.branch == branch and not tracking._pr_is_terminal(pr)
+    ]
+    if len(matches) > 1:
+        raise ValueError("The checked-out private head matches multiple live PR records")
+    return matches[0] if matches else None
+
+
 def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> RecoveryPoint:
     """Retain committed local and recorded published tips before changing HEAD."""
     local = _rev("HEAD", cwd)
     onto = _rev(target, cwd)
-    pr = record.active_pr() if record is not None else None
+    pr = selected_pr(worktree_id, branch, record)
     published = _rev(pr.head_sha, cwd) if pr is not None and pr.head_sha else ""
     lineage = local
     if published and not git_ops.is_commit_ancestor(published, local, cwd=cwd):

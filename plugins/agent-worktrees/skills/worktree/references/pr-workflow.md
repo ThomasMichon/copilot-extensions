@@ -584,6 +584,10 @@ A non-ancestral update is authorized only for a unique, live, tracked private
 The current checkout must be its recorded `worktree/<id>` branch (or that
 same tracked private head in the legacy checked-out-feature flow). An exact
 legacy bare-id record resolves to its canonical `worktree/<id>` branch.
+Synchronization selects the matching live PR when a private head is checked
+out, and the live active PR on the canonical owning branch. Terminal-only
+records and unrelated branches still receive local recovery refs but no PR
+rewrite checkpoint.
 
 Before `git sync` changes HEAD, it preserves the committed local tip and the
 recorded published tip under unique worktree-scoped

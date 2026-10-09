@@ -45,6 +45,21 @@ def _point(path):
 
 
 @pytest.mark.guard
+def test_recovery_selects_only_the_live_pr_for_the_current_branch():
+    older = tracking.PRRecord(state="open", branch="pr/older")
+    newer = tracking.PRRecord(state="open", branch="pr/newer")
+    finished = tracking.PRRecord(state="merged", branch="pr/finished")
+    record = SimpleNamespace(prs=[older, finished, newer], active_pr=lambda: newer)
+    assert pr_recovery.selected_pr("task", "worktree/task", record) is newer
+    assert pr_recovery.selected_pr("task", older.branch, record) is older
+    assert pr_recovery.selected_pr("task", "unrelated", record) is None
+    assert pr_recovery.selected_pr("task", finished.branch, record) is None
+    record = SimpleNamespace(prs=[finished], active_pr=lambda: finished)
+    assert pr_recovery.selected_pr("task", "worktree/task", record) is None
+    assert pr_recovery.selected_pr("task", "worktree/task", None) is None
+
+
+@pytest.mark.guard
 def test_backup_failure_prevents_rebase_contract(tmp_path, monkeypatch, capsys):
     config = SimpleNamespace(default_repo=SimpleNamespace(
         remote="origin", default_branch="main", worktree_root=str(tmp_path),
@@ -73,6 +88,12 @@ def test_backed_sync_publishes_legacy_pr_without_replay_journals(
     config, wid, path, remote, branch, old = _prepare(pr_repo, legacy=True)
     if checkout_head:
         _git("checkout", "-B", branch, old, cwd=path)
+        record = _record(wid)
+        record.prs.append(tracking.PRRecord(
+            state="open", branch=f"pr/newer-{git_ops.worktree_suffix(wid)}",
+            head_sha="1" * 40, pr_id="newer", opened_at="2099-01-01T00:00:00",
+        ))
+        tracking.save_record(record)
     (path / "feedback.txt").write_text("unpublished source work\n")
     _git("add", "feedback.txt", cwd=path)
     _git("commit", "-m", "source feedback", cwd=path)
@@ -90,13 +111,14 @@ def test_backed_sync_publishes_legacy_pr_without_replay_journals(
     monkeypatch.setattr(pr_rebase, "_replay", lambda *_: pytest.fail("backup must replace journal gate"))
     tip = _git("rev-parse", "HEAD", cwd=path)
     if checkout_head:
-        result = pr_ops.create_pr(wid, config, title="Owned change")
+        result = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
         assert result["success"], result
     else:
         assert finalize.push_changes(wid, config)
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
-    assert _record(wid).pr.base_sha == point["target_head"]
-    assert _record(wid).pr.patch_id
+    published = next(pr for pr in _record(wid).prs if pr.branch == branch)
+    assert published.base_sha == point["target_head"]
+    assert published.patch_id
 
 
 def test_sync_aborts_before_rebase_when_backup_cannot_be_written(pr_repo, monkeypatch):
