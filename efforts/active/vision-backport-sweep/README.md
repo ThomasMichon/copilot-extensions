@@ -68,7 +68,11 @@
   `ThomasMichon/copilot-extensions#5861` (fleet named deployment/config
   reconciliation follow-on) ·
   `ThomasMichon/copilot-extensions#5862` (fleet subscribed observation/recovery
-  follow-on)
+  follow-on) ·
+  `ThomasMichon/copilot-extensions#5868` (test-environment preparation precedes
+  containment and aggregate budgets) ·
+  `ThomasMichon/copilot-extensions#5869` (ignored sandbox cleanup failures can
+  preserve a successful result)
 
 ## Guiding Intent
 
@@ -377,6 +381,13 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       - [ ] `visions/test-portfolio/README.md` — remaining contract-map,
             effectiveness, tier/effect, and portfolio-observability audit beyond
             the completed admission slice.
+      - [x] `visions/test-portfolio/README.md` — scoped declaration,
+            preparation/collection, contained-process and cleanup trace.
+            Folded back the separate preparation capability without treating
+            declared markers as measured assurance. Carved concrete preparation
+            and cleanup-status violations (`#5868`/`#5869`); complete family
+            inventory/effectiveness/growth policy and ownership proofs remain
+            with `#1303` and the still-open full-leaf audit.
       - [x] `visions/coverage-guided-ci/README.md` — scoped source reconciliation of
             baseline collection, promoted pointer correlation, ancestor/source
             coordinates, debt, selection, and tier-restricted fallback. Existing
@@ -521,6 +532,40 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — Preparation, collection and assurance boundaries
+- Traced current `pytest_portfolio_guard.py` declarations into
+  `run-plugin-tests.py:run_plugin` and `plugin_test_containment.py`.
+  The guard validates declared tier/effect combinations and explicit-tier
+  access, while untagged tests remain permitted and contract attribution is
+  informational. None is a complete contract map or effectiveness measurement.
+  The owning triage framework keeps unknown evidence distinct from deletion
+  proof and places census/calibration/removal gates under `#1303`.
+- Folded back separable dependency/environment preparation and the distinction
+  between executable collection and read-only inventory. Kept bootstrap
+  capability, editable-source testing, existing tiers and safe cached reuse;
+  did not weaken host/state/resource ownership to bless the preparation path.
+
+  | Inspected contract | Scoped result | Evidence / delta |
+  |---|---|---|
+  | Declared tier/effect validation | Embodied, bounded to declarations | `pytest_portfolio_guard.py:88-181` rejects malformed/forbidden declarations and gates T3/T4; it does not prove actual effects or unique family value. |
+  | Separable preparation | Embodied capability; ownership/budget violation | `_ensure_venv` uses direct unbounded `subprocess.run`; `run_plugin` calls it before sandbox, isolated environment, contained process and aggregate clock. `#5868` owns the gap. |
+  | Contained execution/collection | Scoped source support, not whole-host proof | `run_plugin` loads the policy plugin inside `run_contained`; the worker waits for assignment, Windows uses Job ownership, POSIX uses group accounting/termination, and registry drift is detected without rolling back another actor's state. |
+  | Cleanup-result fidelity | Violates on the suppression path | `TemporaryDirectory(ignore_cleanup_errors=True)` can suppress failed sandbox removal while pytest success survives; no subsequent cleanup verification establishes a clean host. `#5869` owns the gap. |
+
+- Complete OS descendant/effect ownership, reproducible family census, runtime/
+  reliability history, mutation evidence and new-growth metadata policy remain
+  under the existing portfolio effort. No source-absence claim or redundant
+  runtime ticket was manufactured from a missing marker or planned inventory.
+  `#4123` fixture symlinks and `#2214` long-run resource accumulation retain
+  their distinct ownership.
+- These are source-effect paths, not unsafe live repros. No test family was
+  removed, moved, or reclassified and no fixture/process storm was executed.
+  No fresh unit, admitted component, clean-room or live portfolio proof is
+  claimed; actual implementation fixes retain those validation obligations.
+- Current-stage fleet reconciliation merged as `#5865` after quota-aware
+  review recovery and real required CI. Neither that planning comparison nor
+  this scoped source trace completes the parent sweep.
 
 ### 2026-10-09 — Machine-fleet current-stage ownership and excluded scope
 - Compared the complete machine-fleet vision with the owning
