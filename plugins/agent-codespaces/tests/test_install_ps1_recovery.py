@@ -43,6 +43,9 @@ from pathlib import Path
 
 args = sys.argv[1:]
 mode = os.environ["TEST_UV_MODE"]
+if args == ["--version"]:
+    print("uv test")
+    raise SystemExit(0)
 if mode == "fail-all":
     raise SystemExit(23)
 if args and args[0] == "run":
@@ -168,16 +171,19 @@ def _copy_plugin_tree(dst: Path) -> None:
         dst,
         ignore=ignored,
     )
-    sources = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
-    for _name, spec in sources.get("tool", {}).get("uv", {}).get("sources", {}).items():
-        rel = spec.get("path") if isinstance(spec, dict) else None
-        if not isinstance(rel, str) or not rel.startswith("../../libs/"):
-            continue
-        lib_name = Path(rel).name
-        target = dst / "libs" / lib_name
-        if target.exists():
-            continue
-        shutil.copytree((PLUGIN / rel).resolve(), target, ignore=ignored)
+    repo = PLUGIN.parents[1]
+    sys.path.insert(0, str(repo / "tools"))
+    try:
+        import materialize_main
+    finally:
+        sys.path.pop(0)
+    logs = materialize_main.materialize_uv_editable_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=dst, canonical_root=repo,
+    )
+    logs += materialize_main.materialize_installer_engine_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=dst, canonical_root=repo,
+    )
+    assert not any(line.startswith("SKIP") for line in logs), logs
 
 
 def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) -> None:

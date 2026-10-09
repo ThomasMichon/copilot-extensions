@@ -242,6 +242,13 @@ if ($hasServiceUtils) {
     function Ensure-InstallDir    { param([string]$Dir) if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null } }
 }
 
+function Write-Ok   { param([string]$Msg) Write-ServiceOk $Msg }
+function Write-Warn { param([string]$Msg) Write-ServiceWarn $Msg }
+function Write-Fail { param([string]$Msg) Write-ServiceErr $Msg }
+function Write-Step { param([string]$Msg) Write-Host "  ...    $Msg" }
+
+. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
+
 # -- Metadata -------------------------------------------------------------
 
 $ServiceName     = 'Agent Codespaces'
@@ -618,8 +625,9 @@ BUILD_INFO: dict[str, str] = {
 }
 
 function Assert-Uv {
-    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        throw "uv is required but not found on PATH. Install uv and retry."
+    $script:UvCommand = Ensure-Uv -InstallRoot $InstallDir
+    if (-not $script:UvCommand) {
+        throw "uv is required but acquisition failed. Install uv and retry."
     }
 }
 
@@ -675,71 +683,25 @@ function Install-PackageInto {
     # a fresh one (Windows denies overwriting an in-use .exe -- os error 5; the
     # stale binstub or a live `agent-codespaces ssh` session may hold it open).
     Remove-ConsoleTrampolines -VenvDir (Split-Path -Parent (Split-Path -Parent $Python))
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-ssh-manager' })
-    & uv pip install --python $Python @modeArgs "$SshMgrDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "ssh-manager install failed"
-        return $false
+    $sources = [ordered]@{
+        'agent-ssh-manager' = $SshMgrDir
+        'agent-credential-relay' = $CredRelayDir
+        'agent-config-migrate' = $CfgMigrateDir
+        'agent-zdd' = $ZddDir
+        'agent-venue-copilot' = $VenueCopilotDir
+        'agent-session-liveness-probe' = $SessionLivenessProbeDir
+        'agent-single-instance-lease' = $SingleInstanceLeaseDir
+        'agent-remote-login-shell' = $RemoteLoginShellDir
+        'agent-codespaces' = $PluginDir
     }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-credential-relay' })
-    & uv pip install --python $Python @modeArgs "$CredRelayDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "credential-relay install failed"
-        return $false
-    }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-config-migrate' })
-    & uv pip install --python $Python @modeArgs "$CfgMigrateDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "config-migrate install failed"
-        return $false
-    }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-zdd' })
-    & uv pip install --python $Python @modeArgs "$ZddDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "zdd install failed"
-        return $false
-    }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-venue-copilot' })
-    & uv pip install --python $Python @modeArgs "$VenueCopilotDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "venue-copilot install failed"
-        return $false
-    }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-session-liveness-probe' })
-    & uv pip install --python $Python @modeArgs "$SessionLivenessProbeDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "session-liveness-probe install failed"
-        return $false
-    }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-single-instance-lease' })
-    & uv pip install --python $Python @modeArgs "$SingleInstanceLeaseDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "single-instance-lease install failed"
-        return $false
-    }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-remote-login-shell' })
-    & uv pip install --python $Python @modeArgs "$RemoteLoginShellDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-ServiceErr "remote-login-shell install failed"
-        return $false
-    }
-    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-codespaces' })
-    & uv pip install --python $Python @modeArgs "$PluginDir" --quiet 2>&1 | Out-Null
-    $rc = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
-    if ($rc -ne 0) {
-        Write-ServiceErr "agent-codespaces install failed (exit $rc)"
-        return $false
+    foreach ($entry in $sources.GetEnumerator()) {
+        $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', $entry.Key })
+        $result = Invoke-UvPipInstallResilient -UvCommand $UvCommand `
+            -Arguments (@('--python', $Python) + $modeArgs + @($entry.Value, '--quiet'))
+        if ($result.ExitCode -ne 0) {
+            Write-ServiceErr "$($entry.Key) install failed (exit $($result.ExitCode)): $($result.Output)"
+            return $false
+        }
     }
     # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused).
     Remove-ConsoleTrampolines -VenvDir (Split-Path -Parent (Split-Path -Parent $Python))
@@ -816,12 +778,10 @@ function Invoke-Dev {
 
     Assert-Uv
     if (-not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & uv venv $devDir --python 3.11 --allow-existing 2>&1 | Out-Null
-        $ErrorActionPreference = $prevEAP
-        if (-not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
-            Write-ServiceErr "dev venv creation failed at $devDir"
+        $result = Invoke-UvVenvResilient -VenvDir $devDir `
+            -Arguments @('--python', '3.11', '--allow-existing') -UvCommand $UvCommand
+        if ($result.ExitCode -ne 0 -or -not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
+            Write-ServiceErr "dev venv creation failed at ${devDir}: $($result.Output)"
             return $false
         }
         Write-ServiceOk "dev venv created at $devDir"
@@ -903,7 +863,10 @@ function Deploy-Venv {
             }
         }
     }
-    if (-not (Invoke-VersionedSlotClean)) { return $false }
+    if (-not (Invoke-VersionedSlotClean)) {
+        $ErrorActionPreference = $prevEAP
+        return $false
+    }
     if ($signedBase -and (Test-Path $VenvPython)) {
         try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
     }
@@ -926,13 +889,14 @@ function Deploy-Venv {
         }
     }
     if (-not (Test-Path $VenvPython)) {
-        & uv venv $VenvDir --python 3.11 --allow-existing 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                $rc = $LASTEXITCODE
+        $result = Invoke-UvVenvResilient -VenvDir $VenvDir `
+            -Arguments @('--python', '3.11', '--allow-existing') -UvCommand $UvCommand
+        if ($result.ExitCode -ne 0 -or -not (Test-Path (Join-Path $VenvDir 'pyvenv.cfg'))) {
+            $result = Invoke-UvVenvResilient -VenvDir $VenvDir `
+                -Arguments @('--allow-existing') -UvCommand $UvCommand
+            if ($result.ExitCode -ne 0 -or -not (Test-Path (Join-Path $VenvDir 'pyvenv.cfg'))) {
                 $ErrorActionPreference = $prevEAP
-                Write-ServiceErr "Venv creation failed (exit $rc)"
+                Write-ServiceErr "Venv creation failed (exit $($result.ExitCode)): $($result.Output)"
                 return $false
             }
         }
@@ -1066,44 +1030,11 @@ exit /b %ERRORLEVEL%
     }
 }
 
-function Write-DeployManifest {
-    <# Unified schema_version 3 manifest. Records the source footprint
-       (local vs marketplace) and is written atomically (temp+move). #>
-    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-    $kind = Get-SourceKind -PluginPath $PluginDir
-    $ver = '0.0.0'
-    $pyproj = Join-Path $PluginDir 'pyproject.toml'
-    if (Test-Path $pyproj) {
-        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
-    }
-    $commit = $null; $branch = $null; $dirty = $false
-    if ($kind -eq 'local') {
-        $git = Get-GitInfo -Path $RepoRoot
-        $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
-    }
-    $manifest = [ordered]@{
-        schema_version = 3
-        service        = 'agent-codespaces'
-        deployed_at    = (Get-Date -Format 'o')
-        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
-        source         = [ordered]@{
-            kind    = $kind
-            path    = ($PluginDir -replace '\\', '/')
-            repo    = 'copilot-extensions'
-            plugin  = 'agent-codespaces'
-            version = $ver
-            commit  = $commit
-            branch  = $branch
-            dirty   = $dirty
-        }
-        venv           = ($LinkDir -replace '\\', '/')
-        runtime        = 'python'
-    }
-    $tmp = "$manifestPath.tmp"
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
-    Write-ServiceOk "Deploy manifest written (source: $kind)"
+function Write-CodespacesDeployManifest {
+    Write-DeployManifest -Service 'agent-codespaces' -Plugin 'agent-codespaces' `
+        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
+        -GetSourceKind { param($path) Get-SourceKind -PluginPath $path } `
+        -GetGitInfo { param($path) Get-GitInfo -Path $RepoRoot }
 }
 
 # -- Actions ---------------------------------------------------------------
@@ -1267,7 +1198,7 @@ function Invoke-Install {
     }
 
     # Write manifest
-    Write-DeployManifest
+    Write-CodespacesDeployManifest
 
     # Verify the package imports from the venv (no PYTHONPATH). Retry briefly
     # for transient AV file locks.
@@ -1539,12 +1470,75 @@ function Invoke-Update {
     }
 
     # Update manifest
-    Write-DeployManifest
+    Write-CodespacesDeployManifest
 
     # Connection Owner daemon (config-gated; default on unless opted out).
     Sync-ConnectionOwnerService
 
     Write-ServiceOk "$ServiceName updated"
+}
+
+function Materialize-SnapshotDependencies {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $libsDir = Join-Path $SnapshotDir 'libs'
+    New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
+    $libraries = [ordered]@{
+        'agent-ssh-manager' = 'ssh-manager'
+        'agent-credential-relay' = 'credential-relay'
+        'agent-config-migrate' = 'config-migrate'
+        'agent-plugin-resolve' = 'plugin-resolve'
+        'agent-procutil' = 'agent-procutil'
+        'agent-dropin-registry' = 'dropin-registry'
+        'agent-plugin-activation' = 'plugin-activation'
+        'agent-venue-copilot' = 'venue-copilot'
+        'agent-zdd' = 'zdd'
+        'agent-session-liveness-probe' = 'session-liveness-probe'
+        'agent-single-instance-lease' = 'single-instance-lease'
+        'agent-remote-login-shell' = 'remote-login-shell'
+    }
+    $pyproject = Join-Path $SnapshotDir 'pyproject.toml'
+    $text = [IO.File]::ReadAllText($pyproject)
+    foreach ($entry in $libraries.GetEnumerator()) {
+        $source = Join-Path (Join-Path $PluginDir 'libs') $entry.Value
+        if (-not (Test-Path -LiteralPath (Join-Path $source 'pyproject.toml'))) {
+            $source = Join-Path (Join-Path $RepoRoot 'libs') $entry.Value
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $source 'pyproject.toml'))) {
+            throw "Cannot locate required snapshot library: $($entry.Value)"
+        }
+        $destination = Join-Path $libsDir $entry.Value
+        if (Test-Path -LiteralPath $destination) {
+            Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
+        }
+        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
+        $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value
+        $text = $text.Replace($oldLine, $newLine)
+        $nestedProject = Join-Path $destination 'pyproject.toml'
+        $nestedText = [IO.File]::ReadAllText($nestedProject).Replace(', editable = true }', ' }')
+        [IO.File]::WriteAllText($nestedProject, $nestedText, $utf8NoBom)
+    }
+    [IO.File]::WriteAllText($pyproject, $text, $utf8NoBom)
+
+    foreach ($ext in @('sh', 'ps1')) {
+        $name = "installer-engine.$ext"
+        $source = Join-Path $PSScriptRoot $name
+        if (-not (Test-Path -LiteralPath $source)) {
+            $source = Join-Path (Join-Path $RepoRoot 'libs\installer-engine') $name
+        }
+        Copy-Item -LiteralPath $source -Destination (Join-Path (Join-Path $SnapshotDir 'scripts') $name) -Force
+    }
+    $installSh = Join-Path $SnapshotDir 'scripts\install.sh'
+    $shText = [IO.File]::ReadAllText($installSh).Replace(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"',
+        '. "$SCRIPT_DIR/installer-engine.sh"')
+    [IO.File]::WriteAllText($installSh, $shText, $utf8NoBom)
+    $installPs1 = Join-Path $SnapshotDir 'scripts\install.ps1'
+    $ps1Text = [IO.File]::ReadAllText($installPs1).Replace(
+        '. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')',
+        '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')')
+    [IO.File]::WriteAllText($installPs1, $ps1Text, $utf8NoBom)
 }
 
 function Invoke-Stamp {
@@ -1571,6 +1565,7 @@ function Invoke-Stamp {
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
+    Materialize-SnapshotDependencies -SnapshotDir $snapTmp
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)

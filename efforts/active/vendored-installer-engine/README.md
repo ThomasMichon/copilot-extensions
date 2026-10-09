@@ -398,9 +398,11 @@ engine under this effort.
       good second-mover to prove the engine covers a second plugin's needs).
 - [x] `agent-vault` (smaller installer, low risk).
 - [x] `agent-ssh` (smaller installer, low risk).
-- [ ] `agent-codespaces`, `agent-index` (each carries genuine per-service
-      logic beyond the engine — sibling package installs / separate engine
-      venv — prove the config schema handles these before doing the rest).
+- [ ] `agent-codespaces` — implementation and isolated regression coverage
+      complete; review, merge and deployed verification remain. See the
+      2026-10-08 journal entry and issue #5802.
+- [ ] `agent-index` (separate engine venv — prove the config schema handles
+      this before completing the remaining adopters).
 - [ ] `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-machines`.
 - [ ] **`agent-worktrees` is a decided permanent exception, not a deferred
       evaluation, and not part of the non-exempt adopter set above.** It is
@@ -1023,6 +1025,29 @@ appropriately larger/riskier for one sitting):
   - `python3 tools/check-changefile-presence.py --base origin/dev`
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-vault --reinstall --admission-wait 540`
     -> PASS (`260 passed, 12 skipped`)
+
+### 2026-10-08 — `agent-codespaces` conversion prepared for review
+
+- Resumed the pending adopter and reconciled its launch-memory fixture
+  correction with the current contribution branch, preserving private
+  directory/file permissions and the upstream compatibility test.
+- Both installer wrappers source the canonical engine on `dev`. Shared uv
+  acquisition, transient pip/venv retries and manifest writing replace local
+  copies. Connection Owner lifecycle, dependency order, editable development
+  installs and Windows signed-Python health/recovery remain plugin-owned.
+- PowerShell snapshot creation materializes the engine pair and all declared
+  local libraries before publishing the snapshot. Regression coverage proves
+  that provisioning does not need the authoring checkout afterward.
+- Installer wrappers shrink by 71 lines; the canonical engine is unchanged.
+- Validation: isolated Codespaces suite 1653 passed / 56 skipped; host suite
+  including available PowerShell coverage 1696 passed / 13 skipped; shared
+  materialization and install-contract tooling 145 passed. Sync, install
+  contract, vendored-library, version, module-size, documentation and lint
+  guards pass. Test fixtures no longer depend on ambient `gh` presence or an
+  unmocked live stop operation.
+- Review, merge and deployed verification are still required; this entry
+  records implementation, not effort completion. Next requested adopter is
+  `agent-dispatch`, after this slice lands. Public tracking: #5802.
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-pull-requests --reinstall --admission-wait 540`
     -> PASS (`21 passed`) after the shared POSIX binstub helper picked up the
     same success-without-runtime exit fix this leg needed for agent-vault
