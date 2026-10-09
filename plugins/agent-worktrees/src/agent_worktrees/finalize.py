@@ -41,6 +41,8 @@ import shutil
 import time
 from pathlib import Path
 
+from agent_procutil import no_window_flags, no_window_kwargs
+
 from . import (
     activity,
     env_scrub,
@@ -91,8 +93,6 @@ def _warn_of_codespace_claims_for_worktree(worktree_id: str) -> None:
     """
     import json
     import subprocess
-
-    from agent_procutil import no_window_flags
 
     binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
@@ -466,6 +466,7 @@ def push_changes(
             result = subprocess.run(
                 expanded, capture_output=True, text=True,
                 env=env_scrub.scrub_python_runtime_env(os.environ.copy()),
+                **no_window_kwargs(),
             )
             if result.returncode != 0:
                 output.warn("Core validation failed. Worktree preserved for fixes.")
@@ -494,7 +495,7 @@ def push_changes(
                     ["pwsh.exe", "-NoProfile", "-File", str(validate_script),
                      "-WorktreePath", worktree_path, "-DefaultBranch", upstream],
                     capture_output=True, text=True,
-                    env=env_scrub.scrub_python_runtime_env(os.environ.copy()))
+                    env=env_scrub.scrub_python_runtime_env(os.environ.copy()), **no_window_kwargs())
                 if result.returncode != 0:
                     output.warn("Core validation failed. Worktree preserved for fixes.")
                     print(result.stdout)

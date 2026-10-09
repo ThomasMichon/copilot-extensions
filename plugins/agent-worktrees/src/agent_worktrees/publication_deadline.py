@@ -6,6 +6,9 @@ import math
 
 from .push_timeout import DEFAULT_PUSH_TIMEOUT
 
+# Poll-based waits use signed 32-bit millisecond budgets on supported platforms.
+MAX_WAIT_SECONDS = (2**31 - 1) / 1000
+
 
 def validate(value: object) -> float:
     """Reject settings that would disable or overflow a bounded publication."""
@@ -16,7 +19,7 @@ def validate(value: object) -> float:
         timeout = float(value)
     except (OverflowError, ValueError):
         raise ValueError(error) from None
-    if not math.isfinite(timeout) or timeout <= 0 or not math.isfinite(4 * timeout + 180):
+    if not math.isfinite(timeout) or timeout <= 0 or 4 * timeout + 180 > MAX_WAIT_SECONDS:
         raise ValueError(error)
     return timeout
 

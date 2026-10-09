@@ -473,6 +473,7 @@ def test_configured_validate_hook_scrubs_python_runtime_env(tmp_path: Path, monk
     def fake_run(cmd, **kw):
         if cmd[:1] == ["python"]:
             captured["env"] = kw.get("env")
+            captured["spawn"] = kw
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return real_run(cmd, **kw)
 
@@ -482,6 +483,7 @@ def test_configured_validate_hook_scrubs_python_runtime_env(tmp_path: Path, monk
 
     assert ok is True
     assert captured, "validate_hook subprocess.run was never called"
+    assert all(captured["spawn"][key] == value for key, value in finalize.no_window_kwargs().items())
     for name in env_scrub._PYTHON_RUNTIME_ENV:
         assert name not in captured["env"]
 
@@ -510,6 +512,7 @@ def test_legacy_validate_core_ps1_scrubs_python_runtime_env(tmp_path: Path, monk
     def fake_run(cmd, **kw):
         if cmd[:1] == ["pwsh.exe"]:
             captured["env"] = kw.get("env")
+            captured["spawn"] = kw
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return real_run(cmd, **kw)
 
@@ -519,6 +522,6 @@ def test_legacy_validate_core_ps1_scrubs_python_runtime_env(tmp_path: Path, monk
 
     assert ok is True
     assert captured, "legacy validate-core.ps1 subprocess.run was never called"
+    assert all(captured["spawn"][key] == value for key, value in finalize.no_window_kwargs().items())
     for name in env_scrub._PYTHON_RUNTIME_ENV:
         assert name not in captured["env"]
-

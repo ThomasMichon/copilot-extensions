@@ -454,7 +454,8 @@ If legitimate validation needs longer than the default 180 seconds, configure
 `.copilot-extensions/agent-worktrees/config.yaml` (or the machine-local
 `repos.<name>.pr` block). The same per-attempt bound covers `create-pr` reruns
 and PR-mode `push-changes`; publication-lock wait and stale-lock budgets scale
-with it. Only positive, finite numbers are accepted—there is no unbounded
+with it. Only positive, finite numbers whose dependent budgets fit portable
+signed 32-bit millisecond wait limits are accepted—there is no unbounded
 setting. A timeout still kills the entire push/hook process tree. See the
 [configuration reference](../../../docs/config-reference.md#pr-workflow--reposnamepr-machine-local-or-in-repo).
 

@@ -18,7 +18,7 @@ def test_configured_deadline(raw, expected):
 
 @pytest.mark.parametrize("value", [
     None, True, False, 0, -1, float("inf"), float("-inf"), float("nan"),
-    "", "300", "invalid", [], {}, 10 ** 400, 1e308,
+    "", "300", "invalid", [], {}, 10 ** 400, 1e308, 1e300,
 ])
 def test_invalid_deadline_fails_explicitly_before_publication(value, monkeypatch):
     def no_git(*args, **kwargs):
@@ -132,3 +132,20 @@ def test_verified_rebase_retains_configured_bound(monkeypatch):
     )
     assert result.ok and attempts == [300, 300]
     assert result.published_head_sha == "source"
+
+
+def test_maximum_deadline_is_usable_by_real_subprocess(tmp_path):
+    import math
+    import os
+    import sys
+
+    from agent_worktrees import publication_deadline
+
+    maximum = (publication_deadline.MAX_WAIT_SECONDS - 180) / 4
+    assert publication_deadline.validate(maximum) == maximum
+    with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*finite positive"):
+        publication_deadline.validate(math.nextafter(maximum, math.inf))
+    result = push_timeout.run_bounded(
+        [sys.executable, "-c", "pass"], cwd=tmp_path, env=os.environ.copy(), timeout=maximum,
+    )
+    assert result.returncode == 0, result.stderr
