@@ -22,6 +22,17 @@ writer agent.
 
 ## Components
 
+### Archive source discovery (`agent_logger.source_roots`)
+
+One source-root enumerator covers flat roots, legacy `.codespaces` groups,
+host-qualified containers, and short-repository-qualified CodeSpaces.
+Producer-recorded identity remains independent of physical aliases. Session
+and process-log leaf reads compose with the existing readers rather than
+introducing per-consumer recursive scanners. The chronicler retains full source
+keys and its existing admission/replacement gates. See
+[archive source discovery](archive-sources.md) for the identity, failure,
+compatibility, and platform contracts.
+
 ### Process-log evidence (`agent_logger.process_logs`)
 
 A library reader enumerates live, gzip, and flat ZIP process-log observations

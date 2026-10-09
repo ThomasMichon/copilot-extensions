@@ -252,7 +252,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate. |
+| `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. |
 | `copilot-review-gate.yml` | `pull_request_target` → `dev` | Requests an automatic Copilot review, Maintainer-authored PRs only (see [Review automation](#3-review-automation)). |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` | Required check: fails if a protected path (`.github/workflows/`, `.github/actions/`, `.github/CODEOWNERS`) is touched by anyone but the repo owner (see [Workflow/CODEOWNERS lockdown](#4-workflowcodeowners-lockdown)). |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Posts a one-time comment asking a non-owner author to retarget a PR against `main` to `dev` (see [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake)). Never checks out or executes PR code. |
