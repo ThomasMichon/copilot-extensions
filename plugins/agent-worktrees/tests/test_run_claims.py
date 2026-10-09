@@ -95,6 +95,15 @@ class TestJournalRunClaim:
         # tracking_dir() at the temp dir so the lookup resolves there.
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                             lambda: tmp_path)
+        from agent_worktrees import config as cfg
+
+        project_dir = cfg.project_dir("test-chamber")
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / "config.yaml").write_text(json.dumps({
+            "machine": "anomalous-potato", "platform": "wsl",
+            "repo_name": "test-chamber",
+            "repos": {"test-chamber": {"anchor": str(tmp_path)}},
+        }), encoding="utf-8")
         return tracking.create_new_record(
             "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
             "anomalous-potato", "wsl", tmp_path,

@@ -704,3 +704,164 @@ def test_finalize_session_settlement_propagates_authority_rejection(
     )
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="foreign ledger"):
         finalize._settle_current_session_claim(tmp_path / "wt-owner.yaml", record, "session-1")
+
+
+@pytest.mark.parametrize("platform", ["wsl", None])
+def test_pr_reconciliation_never_persists_foreign_fresh_record(
+    platform, tmp_path, scoped_config, monkeypatch, caplog,
+):
+    from agent_worktrees import prune
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+    )
+    record.prs = [tracking.PRRecord(number=1, repo="owner/example", state="open")]
+    tracking.save_record(record)
+    fresh = tracking.load_record(record.yaml_path)
+    fresh.platform = platform
+    tracking.save_record(fresh)
+    before = record.yaml_path.read_bytes()
+    changes = prune.reconcile_and_persist_best_effort(
+        record, lambda *args: SimpleNamespace(merged=True),
+    )
+    assert changes == [(1, "open", "merged")]
+    assert record.yaml_path.read_bytes() == before
+    assert "execution platform" in caplog.text
+
+
+@pytest.mark.parametrize("owner_locked", [False, True])
+def test_reciprocal_claim_rejects_foreign_record_behind_current_space_reference(
+    owner_locked, tmp_path, scoped_config, monkeypatch, capfd,
+):
+    from agent_worktrees import worktree_creation
+
+    monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path)
+    path = tmp_path / "worktrees"
+    path.mkdir()
+    record = tracking.create_new_record(
+        "wt-parent", "worktree/wt-parent", str(tmp_path), "project",
+        scoped_config.machine, "wsl", path,
+    )
+    before = record.yaml_path.read_bytes()
+    assert not worktree_creation._journal_owner_reciprocal_claim(
+        scoped_config, "wt-child", f"{scoped_config.machine}/project/wt-parent",
+        owner_locked=owner_locked,
+    )
+    assert record.yaml_path.read_bytes() == before
+    assert "execution platform" in capfd.readouterr().err
+
+
+def test_run_claim_journal_rejects_foreign_fresh_owner(tmp_path, scoped_config, monkeypatch):
+    from agent_worktrees import worktree_ops_cli
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    record = tracking.create_new_record(
+        "wt-parent", "worktree/wt-parent", str(tmp_path), "project",
+        scoped_config.machine, "wsl", tmp_path,
+    )
+    before = record.yaml_path.read_bytes()
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
+        worktree_ops_cli._journal_run_claim(
+            f"{scoped_config.machine}/project/wt-parent",
+            json.dumps({"worktree": {
+                "id": "wt-child", "machine": scoped_config.machine, "repo": "project",
+            }}),
+        )
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("race_after_creation", [False, True])
+def test_run_reservation_and_settlement_fence_fresh_owner(
+    race_after_creation, tmp_path, scoped_config, monkeypatch, capfd,
+):
+    from agent_worktrees import worktree_ops_cli
+
+    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+    monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(
+        claims_cli, "_coordination_readiness_for_owner_ref",
+        lambda *args: SimpleNamespace(ready=True),
+    )
+    record = tracking.create_new_record(
+        "wt-parent", "worktree/wt-parent", str(tmp_path), "project",
+        scoped_config.machine, "windows" if race_after_creation else "wsl",
+        tmp_path / "worktrees",
+    )
+    before = record.yaml_path.read_bytes()
+    created = []
+    raced_bytes = []
+
+    def create_resource(*args, **kwargs):
+        assert race_after_creation, "unauthorized owner reached resource creation"
+        fresh = tracking.load_record(record.yaml_path)
+        assert len(fresh.resources) == 1
+        assert fresh.resources[0].ref.startswith("pending-run:")
+        fresh.platform = "wsl"
+        tracking.save_record(fresh)
+        raced_bytes.append(record.yaml_path.read_bytes())
+        created.append(True)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"worktree": {
+            "id": "wt-child", "machine": scoped_config.machine, "repo": "project",
+        }}))
+
+    monkeypatch.setattr(worktree_ops_cli.subprocess, "run", create_resource)
+    assert worktree_ops_cli.cmd_run(SimpleNamespace(
+        inner_command=["new --json"],
+        owner_ref=f"{scoped_config.machine}/project/wt-parent",
+    )) == 1
+    assert bool(created) == race_after_creation
+    assert record.yaml_path.read_bytes() == (raced_bytes[0] if race_after_creation else before)
+    assert "execution platform" in capfd.readouterr().out
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_resume_reports_raced_authority_rejection_as_structured_error(
+    json_mode, tmp_path, scoped_config, monkeypatch, capfd,
+):
+    from agent_worktrees import resolve_cli, resolve_launch_cli
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+    )
+    before = record.yaml_path.read_bytes()
+    fresh = tracking.load_record(record.yaml_path)
+    fresh.owner_ref = "workstation-wsl/project/wt-new-parent"
+    module = resolve_cli if json_mode else resolve_launch_cli
+    monkeypatch.setattr(module, "seed_for_attempt", lambda *args: None)
+    monkeypatch.setattr(
+        module, "_preflight_launch", lambda *args: SimpleNamespace(error=None),
+    )
+    monkeypatch.setattr(
+        tracking, "save_record",
+        lambda *args, **kwargs: pytest.fail("late authority rejection saved the foreign record"),
+    )
+    args = SimpleNamespace(json=True, base=False, dry_run=False, bare_resume=False)
+    if json_mode:
+        reads = iter([record, fresh])
+        monkeypatch.setattr(tracking, "load_record", lambda *args: next(reads))
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(module, "_relocate_active_project_for_worktree", lambda *args: False)
+        monkeypatch.setattr(module.worktree_identity, "_resolve_worktree_id", lambda value: value)
+        monkeypatch.setattr(module, "_validate_profile_assignment_config", lambda *args: None)
+        monkeypatch.setattr(module.local_cache_refresh, "prepare_for_launch", lambda *args, **kw: None)
+        monkeypatch.setattr(module.sessions, "verify_worktree_active", lambda *args: None)
+        state = module.ResolveCommandState(
+            args=args, use_json=True, use_base=False, use_new=False,
+            requested_machine=None, worktree_id=record.worktree_id, config=scoped_config,
+        )
+        assert module._resolve_json_mode(state) == 3
+        assert "cross-space" in json.loads(capfd.readouterr().out)["error"]
+    else:
+        monkeypatch.setattr(tracking, "load_record", lambda *args: fresh)
+        monkeypatch.setattr(module, "_dispatch_validate_profile_assignment_config", lambda *args: None)
+        plans = []
+        monkeypatch.setattr(module, "_emit_plan", plans.append)
+        assert module._resolve_resume_context(module.ResolveLaunchContext(
+            config=scoped_config, args=args, record=record,
+        )) == 3
+        assert plans[-1]["action"] == "error"
+        assert plans[-1]["exit_code"] == 3
+        assert "cross-space" in plans[-1]["error"]
+    assert record.yaml_path.read_bytes() == before

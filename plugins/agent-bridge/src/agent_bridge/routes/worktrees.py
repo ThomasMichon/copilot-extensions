@@ -532,8 +532,17 @@ def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
     hostname = socket.gethostname().lower()
     host_lower = ssh_host.lower()
 
-    from ..agent_registry import _detect_local_machine
-    machine, platform = _detect_local_machine(resolver.machines)
+    machine, platform = resolver._local_machine, resolver._local_platform
+    if any(entry.execution_platform for entry in resolver.machines.values()):
+        return bool(
+            machine and (
+                host_lower == machine.key.lower()
+                or any(
+                    env.alias and env.alias.lower() == host_lower and env.name == platform
+                    for env in machine.ssh_environments
+                )
+            )
+        )
     if not machine:
         # Can't identify our own machine -- only match exact hostname.
         return host_lower == hostname
