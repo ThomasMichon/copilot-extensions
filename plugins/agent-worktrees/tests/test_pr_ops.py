@@ -4789,15 +4789,44 @@ class TestPRFinalizeAndPush:
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.number, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner = None, "fork", "alice/ext", "alice"
+        original_tip = (rec.pr.base_sha, rec.pr.head_sha, rec.pr.patch_id)
         tracking.save_record(rec)
         pr_ops.set_pr(wid, number=7, config=config)  # first number: still that PR
         rec = tracking.load_record(path)
         assert (rec.pr.number, rec.pr.remote, rec.pr.head_owner) == (7, "fork", "alice")
+        assert (rec.pr.base_sha, rec.pr.head_sha, rec.pr.patch_id) == original_tip
+        pr_ops.set_pr(wid, number=7, config=config)
+        rec = tracking.load_record(path)
+        assert (rec.pr.base_sha, rec.pr.head_sha, rec.pr.patch_id) == original_tip
         # A different PR: set_pr saves over the on-disk record that still names the old fork;
         # the save's field merge must not put it back.
         pr_ops.set_pr(wid, number=99, config=config)
         rec = tracking.load_record(path)
         assert (rec.pr.number, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner) == (99, "", "", "")
+
+    @pytest.mark.parametrize("identity", ["number", "repo", "provider"])
+    def test_set_pr_reassignment_discards_previous_tip_and_lifecycle(self, pr_repo, identity):
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.pr.number, rec.pr.repo, rec.pr.provider = 7, "acme/ext", "github"
+        rec.pr.base_sha, rec.pr.head_sha, rec.pr.patch_id = "old-base", "old-head", "old-patch"
+        rec.pr.state, rec.pr.opened_at, rec.pr.closed_at = "merged", "old-open", "old-close"
+        tracking.save_record(rec)
+        stale = tracking.load_record(path)
+        kwargs = {
+            "number": {"number": 99},
+            "repo": {"url": "https://github.com/other-org/other-repo/pull/7", "number": 7},
+            "provider": {"provider": "ado"},
+        }[identity]
+        assert pr_ops.set_pr(wid, config=config, **kwargs)["success"]
+        stale.title = "unrelated stale update"
+        tracking.save_record(stale)
+        updated = tracking.load_record(path).pr
+        assert (updated.base_sha, updated.head_sha, updated.patch_id) == ("", "", "")
+        assert updated.state == "open"
+        assert updated.opened_at and updated.opened_at != "old-open"
+        assert updated.closed_at == ""
 
     def test_set_pr_reassigning_a_numberless_record_to_another_repo_clears_its_fork(self, pr_repo):
         """A numberless record moved to a PR in another repository: the on-disk copy still
