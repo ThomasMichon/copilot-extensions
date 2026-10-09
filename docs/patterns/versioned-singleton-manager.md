@@ -699,10 +699,17 @@ launcher ends up blocked inside, never skipped in favor of exiting early.
 
 ## Validation
 
-The Linux unit/stress tiers below are now delivered (`libs/zdd/tests/`,
-224 passing through the bounded test-supervisor as of this PR); the
-end-to-end real-systemd and Windows-specific tiers remain planned, tracked
-by the [implementation effort](../../efforts/active/versioned-singleton-manager/README.md).
+The Linux unit tier below is fully delivered. The real-process tier is
+delivered for repeated detached cutovers, real exec recovery (preserving
+the manager PID/lease across a same-process exec, including a pending
+successor discovery), and a pidfd opened above FD_SETSIZE -- see
+`libs/zdd/tests/test_singleton_linux_processes.py` (225 passing through the
+bounded test-supervisor as of this PR). The remaining stress obligations
+below (overlapping/concurrent cutover attempts, `SIGKILL` injected
+mid-cutover, repeated crash-loop induction, an orphan storm) are not yet
+covered, and the end-to-end real-systemd and Windows-specific tiers remain
+planned; all three are tracked by the
+[implementation effort](../../efforts/active/versioned-singleton-manager/README.md).
 
 - **Unit (mocked):** every branch of the child-exit decision — planned-cutover
   adoption, real-crash propagation, the manager's own unexpected death,

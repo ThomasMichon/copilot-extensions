@@ -270,15 +270,15 @@ class SingletonManager:
                         child = None
                         state = self._discovering(state, code if code is not None else 1)
                 if state.phase == "discovering":
+                    if state.deadline is not None and self.clock() >= state.deadline:
+                        log.warning("No verified successor; cleaning owned descendants before exit")
+                        return ManagerResult(state.exit_code, "no verified successor", state.watched.pid)
                     candidate = self._candidate()
                     if candidate is not None:
                         reference = candidate
                         state = ManagerState(self.backend.owner, candidate.identity)
                         self.store.write(state)
                         log.info("Singleton manager adopted cutover successor pid %d", state.watched.pid)
-                    elif state.deadline is not None and self.clock() >= state.deadline:
-                        log.warning("No verified successor; cleaning owned descendants before exit")
-                        return ManagerResult(state.exit_code, "no verified successor", state.watched.pid)
                 self._maybe_exec(lease)
                 self.sleep(self.poll_interval)
         finally:

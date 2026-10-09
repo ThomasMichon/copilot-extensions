@@ -213,6 +213,24 @@ def test_exec_discovery_retains_original_deadline(tmp_path: Path) -> None:
     assert world.spawns == 0
 
 
+def test_expired_discovery_does_not_adopt_a_late_successor(tmp_path: Path) -> None:
+    # A persisted discovery deadline already in the past (e.g. recovered after
+    # a long manager-down window) must refuse to adopt, even when a candidate
+    # that would otherwise be owned is live on the published route -- expiry
+    # is checked before candidate discovery runs, never only when no
+    # candidate was found.
+    world = World(tmp_path)
+    world.backend.live.update({20: False, 30: True})
+    world.route(30, "300")
+    StateStore(world.state).write(ManagerState(
+        world.backend.owner, world.backend.identities[20], "discovering", -1.0,
+    ))
+    result = world.manager().run()
+    assert result.reason == "no verified successor"
+    assert world.spawns == 0
+    assert world.backend.references == []
+
+
 @pytest.mark.parametrize("token", [None, "300"])
 def test_live_foreign_route_blocks_bootstrap(tmp_path: Path, token: str | None) -> None:
     world = World(tmp_path)
