@@ -1,0 +1,9 @@
+{
+  "comment": "Add read-only static fleet target description and bounded portable registration/request contracts",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

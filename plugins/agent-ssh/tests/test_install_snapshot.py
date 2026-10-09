@@ -13,6 +13,10 @@ import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _HARNESS_TIMEOUT_SECONDS = 30
+_RUNTIME_LIBS = (
+    "agent-procutil", "ssh-manager", "venue-copilot", "zdd", "remote-login-shell",
+    "fleet-contracts",
+)
 
 
 def _isolated_install_env(home: Path) -> dict[str, str]:
@@ -67,6 +71,7 @@ def _stage_payload(tmp_path: Path) -> Path:
         "venue-copilot",
         "zdd",
         "remote-login-shell",
+        "fleet-contracts",
     ):
         shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib)
     return payload
@@ -139,6 +144,7 @@ def _isolate_path_without_python3(env: dict[str, str]) -> dict[str, str]:
     os.name == "nt" or shutil.which("uv") is None,
     reason="POSIX snapshot coverage",
 )
+@pytest.mark.timeout(120)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if bash is None:
@@ -176,7 +182,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     assert ". (Join-Path $PSScriptRoot 'installer-engine.ps1')" in (
         snapshot / "scripts" / "install.ps1"
     ).read_text(encoding="utf-8")
-    for lib in ("agent-procutil", "ssh-manager", "venue-copilot", "zdd", "remote-login-shell"):
+    for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
 
     shutil.rmtree(payload)
@@ -382,7 +388,10 @@ def test_shared_binstub_generator_quotes_snapshot_installer_path(tmp_path: Path)
     os.name == "nt" or shutil.which("uv") is None,
     reason="POSIX snapshot coverage",
 )
-def test_stamp_fails_before_publish_when_required_library_missing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts"])
+def test_stamp_fails_before_publish_when_required_library_missing(
+    tmp_path: Path, missing_library: str,
+) -> None:
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash is unavailable")
@@ -390,7 +399,7 @@ def test_stamp_fails_before_publish_when_required_library_missing(tmp_path: Path
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
-    shutil.rmtree(tmp_path / "libs" / "ssh-manager")
+    shutil.rmtree(tmp_path / "libs" / missing_library)
 
     stamp = subprocess.run(
         [
@@ -407,7 +416,7 @@ def test_stamp_fails_before_publish_when_required_library_missing(tmp_path: Path
         check=False,
     )
     assert stamp.returncode != 0
-    assert "Cannot locate required snapshot library: ssh-manager" in stamp.stderr
+    assert f"Cannot locate required snapshot library: {missing_library}" in stamp.stderr
     assert not (home / ".agent-ssh" / "payload-dir").exists()
 
 
@@ -460,8 +469,9 @@ def test_stamp_fails_before_publish_when_payload_copy_fails(tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
+@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts"])
 def test_powershell_stamp_fails_before_publish_when_required_library_missing(
-    tmp_path: Path,
+    tmp_path: Path, missing_library: str,
 ) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -470,7 +480,7 @@ def test_powershell_stamp_fails_before_publish_when_required_library_missing(
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
-    shutil.rmtree(tmp_path / "libs" / "ssh-manager")
+    shutil.rmtree(tmp_path / "libs" / missing_library)
 
     stamp = subprocess.run(
         [
@@ -491,7 +501,7 @@ def test_powershell_stamp_fails_before_publish_when_required_library_missing(
         check=False,
     )
     assert stamp.returncode != 0
-    assert "Cannot locate required snapshot library: ssh-manager" in stamp.stderr
+    assert f"Cannot locate required snapshot library: {missing_library}" in stamp.stderr
     assert not (home / ".agent-ssh" / "payload-dir").exists()
 
 
@@ -518,6 +528,7 @@ def test_stamp_does_not_reuse_snapshot_when_runtime_markers_disagree(tmp_path: P
     (old_snapshot / "libs" / "venue-copilot").mkdir(parents=True, exist_ok=True)
     (old_snapshot / "libs" / "zdd").mkdir(parents=True, exist_ok=True)
     (old_snapshot / "libs" / "remote-login-shell").mkdir(parents=True, exist_ok=True)
+    (old_snapshot / "libs" / "fleet-contracts").mkdir(parents=True, exist_ok=True)
     for rel in (
         "scripts/installer-engine.sh",
         "scripts/installer-engine.ps1",
@@ -526,6 +537,7 @@ def test_stamp_does_not_reuse_snapshot_when_runtime_markers_disagree(tmp_path: P
         "libs/venue-copilot/pyproject.toml",
         "libs/zdd/pyproject.toml",
         "libs/remote-login-shell/pyproject.toml",
+        "libs/fleet-contracts/pyproject.toml",
     ):
         path = old_snapshot / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -583,6 +595,7 @@ def test_stamp_does_not_publish_older_snapshot_over_newer_marketplace_payload(
         "libs/venue-copilot/pyproject.toml",
         "libs/zdd/pyproject.toml",
         "libs/remote-login-shell/pyproject.toml",
+        "libs/fleet-contracts/pyproject.toml",
     ):
         path = newer_snapshot / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -681,6 +694,7 @@ def test_stamp_waiting_on_publication_lock_does_not_overwrite_newer_snapshot(
             "libs/venue-copilot/pyproject.toml",
             "libs/zdd/pyproject.toml",
             "libs/remote-login-shell/pyproject.toml",
+            "libs/fleet-contracts/pyproject.toml",
         ):
             path = newer_snapshot / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -826,6 +840,7 @@ def test_stamp_publication_lock_no_flock_fails_closed_without_owner_file(
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
+@pytest.mark.timeout(120)
 def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -883,7 +898,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
     snapshot = Path((home / ".agent-ssh" / "payload-dir").read_text(encoding="utf-8").strip())
     assert (snapshot / "scripts" / "installer-engine.sh").is_file()
     assert (snapshot / "scripts" / "installer-engine.ps1").is_file()
-    for lib in ("agent-procutil", "ssh-manager", "venue-copilot", "zdd", "remote-login-shell"):
+    for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
 
     shutil.rmtree(payload)
