@@ -89,7 +89,7 @@ silently introduce that tier.
 - [x] Restore the existing host using its durable launcher; verify live routing
   and preserve the warm engine and queue.
 - [x] Fix effective-config activation parity and management-Job survival (#5769);
-  source regressions and isolated real-process checks pass, deployment pending.
+  source regressions and isolated real-process checks pass; deployed in `0.10.10-dev1`.
 - [x] Revise the vision and review the [architecture proposal](architecture.md).
 - [x] Land the proposal/recovery PR, observe release promotion and deploy the repair.
 - [x] Record which recovery is event-driven and which requires a continuously
