@@ -36,12 +36,15 @@ def _git(*args: str, cwd: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def _git_bytes(*args: str, cwd: str) -> bytes:
+def _git_bytes(*args: str, cwd: str, stdin: bytes | None = None) -> bytes:
     cmd = ["git", *args]
-    result = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, timeout=30,
-        env=git_ops.repository_identity_env(), **no_window_kwargs(),
-    )
+    try:
+        result = subprocess.run(
+            cmd, cwd=cwd, input=stdin, capture_output=True, timeout=30,
+            env=git_ops.repository_identity_env(), **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise git_ops.GitError(cmd, 124, f"timed out after {exc.timeout} seconds") from exc
     if result.returncode:
         raise git_ops.GitError(cmd, result.returncode, result.stderr.decode("utf-8", errors="replace"))
     return result.stdout
@@ -66,17 +69,10 @@ def _series(base: str, head: str, cwd: str) -> list[str] | None:
         "log", "--reverse", "--format=commit %H", "--binary", "--full-index", "--encoding=none",
         "--no-ext-diff", "--no-textconv", "-p", f"{base}..{head}", cwd=cwd,
     )
-    try:
-        result = subprocess.run(
-            ["git", "patch-id", "--verbatim"], input=diff, cwd=cwd,
-            env=git_ops.repository_identity_env(), capture_output=True, timeout=30,
-            **no_window_kwargs(),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    pairs = [line.split() for line in result.stdout.splitlines()]
+    output = _git_bytes("patch-id", "--verbatim", cwd=cwd, stdin=diff)
+    pairs = [line.split() for line in output.splitlines()]
     if (
-        result.returncode or len(pairs) != len(rows)
+        len(pairs) != len(rows)
         or any(
             len(pair) != 2 or pair[1] != row[0].encode("ascii")
             or not re.fullmatch(rb"[0-9a-f]{40,64}", pair[0])

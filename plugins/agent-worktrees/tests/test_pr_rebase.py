@@ -315,6 +315,25 @@ def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tm
     assert patches[2] != patches[3]
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("command", ["log", "patch-id"])
+def test_owned_pr_rebase_binary_timeouts_are_reported_as_git_errors(monkeypatch, command):
+    def timeout(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 30)
+
+    monkeypatch.setattr(pr_rebase.subprocess, "run", timeout)
+    with pytest.raises(git_ops.GitError, match="timed out after 30 seconds") as error:
+        pr_rebase._git_bytes(command, cwd="unused", stdin=b"patch" if command == "patch-id" else None)
+    assert error.value.returncode == 124
+    monkeypatch.setattr(
+        pr_rebase, "verify",
+        lambda *a, **k: pr_rebase._git_bytes(command, cwd="unused"),
+    )
+    result = pr_rebase.push(None, None, "origin", "source:target", "expected", cwd="unused")
+    assert not result
+    assert "timed out after 30 seconds" in result.stderr
+
+
 @pytest.mark.skipif(
     sys.platform != "win32" or os.environ.get("AGENT_WORKTREES_NATIVE_HEADLESS_TEST") != "1",
     reason="Opt-in native Windows consoleless-parent observation",

@@ -7,13 +7,27 @@ permissions:
   contents: read
 
 jobs:
-  exhaustive:
-    name: owned PR replay (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  linux:
+    name: owned PR replay (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9
+      - name: Run exhaustive owned-PR replay contracts
+        env:
+          AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE: "1"
+          AGENT_WORKTREES_NATIVE_HEADLESS_TEST: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          -k owned_pr_rebase
+          --subsuite-timeout 1800 --plugin-timeout 1800
+  windows:
+    name: owned PR replay (Windows)
+    runs-on: windows-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import subprocess
 
+from agent_procutil import no_window_kwargs
+
 from . import git_ops
 
 
@@ -27,6 +29,7 @@ def _patch_id(base: str, head: str, *, cwd: str) -> str:
             ["git", "patch-id", "--stable"],
             input=diff.stdout, cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -47,6 +50,7 @@ def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
         log_process = subprocess.Popen(
             ["git", "log", "--no-merges", "--format=commit %H", "-p", f"{base}..{head}"],
             cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            **no_window_kwargs(),
         )
         if log_process.stdout is None:
             log_process.kill()
@@ -56,6 +60,7 @@ def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
             ["git", "patch-id", "--stable"],
             cwd=cwd, env=env, stdin=log_process.stdout, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+            **no_window_kwargs(),
         )
         log_process.stdout.close()
         output, _ = patch_process.communicate(timeout=30)

@@ -10,7 +10,7 @@ from ctypes import wintypes as w
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
-from agent_worktrees import git_ops, pr_rebase  # noqa: E402
+from agent_worktrees import git_ops, pr_ops, pr_rebase  # noqa: E402
 
 
 class ProcessEntry(ctypes.Structure):
@@ -119,6 +119,8 @@ try:
     assert not hasattr(subprocess.Popen.__init__, "_aw_headless")
     for _ in range(2):
         assert pr_rebase._series(sys.argv[3], sys.argv[4], sys.argv[2])
+        assert pr_ops._patch_id(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
+        assert pr_ops._commit_patch_ids(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
         assert git_ops.resolve_to_anchor(Path(sys.argv[2])).exists()
         cycles += 1
         time.sleep(0.1)
