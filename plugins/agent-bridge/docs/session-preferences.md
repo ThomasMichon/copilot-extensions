@@ -35,24 +35,28 @@ their meanings.
 
 ## Execution-side receipt and capability boundary
 
-The execution-side Session Host resolves only `model`, `effortLevel`, and
-`contextTier` from its executing user's `.copilot/settings.json` (including
-line comments). It returns a bounded version-1 receipt bound to the spawned
-child PID, with per-field provenance and a distinct resolution status:
-`resolved`, `missing`, `error`, or `unsupported`. Neither whole settings files
-nor home-directory paths travel in this receipt.
+The local settings reader handles only `model`, `effortLevel`, and `contextTier`
+from its executing user's `.copilot/settings.json` (including line comments),
+with candidate states `resolved`, `missing`, or `error`. Reading the Host's
+settings does not attest the eventual child's execution context.
+
+Version-1 Host receipts therefore report `unsupported` for configured launchers
+whose executable provenance and identity-preserving behavior are unverified.
+A basename such as `copilot`/`copilot.exe` is not proof: a script or configured
+executable can change HOME or identity. Candidate settings cannot be accepted
+as a trusted receipt. Neither whole settings files nor home-directory paths
+travel in the receipt.
 
 The optional JSON receipt follows the existing 16-byte HELLO cursor/PID
 prefix. Legacy clients still read that prefix. New clients validate version,
 shape, size and child binding; a legacy host or invalid receipt is an
 unavailable capability, **never permission to use caller settings**.
 
-The current authority supports direct `copilot` / `copilot.exe` children
-created under the host's execution identity, with the supplied launch
-environment. Shell commands, `.cmd` wrappers, custom scripts, and explicit
-home-environment changes cannot attest their eventual execution identity or
-profile: they report `unsupported`. This includes opaque SSH/command launches
-and provider shell launchers. Their explicit request/profile selections still
+Target-default inheritance remains held until a target-local attestor supplies
+verified execution-context authority; this is a separate wrapper-authority
+follow-up, not a guessed path/name mapping. Configured executables, shell
+commands, `.cmd` wrappers and custom scripts report `unsupported`. Their
+explicit request/profile selections still
 work when ACP verifies them; target-settings inheritance itself is not claimed.
 Without a resolvable model intent, a new target-mode session fails rather than
 becoming ready on an unrelated agent default. No transport is

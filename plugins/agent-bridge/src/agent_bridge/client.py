@@ -1024,7 +1024,7 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         from .protocol import TARGET_PREFERENCES_PROTOCOL_VERSION
         from .session_preferences import SOURCE_ENV, CONTEXT_ENV, SOURCES
 
-        selected_source = preference_source or (env or {}).get(SOURCE_ENV)
+        selected_source = preference_source if preference_source is not None else (env or {}).get(SOURCE_ENV)
         if selected_source is not None and selected_source not in SOURCES:
             raise ValueError("unsupported preference_source")
         if selected_source is not None or context is not None or (env or {}).get(CONTEXT_ENV):

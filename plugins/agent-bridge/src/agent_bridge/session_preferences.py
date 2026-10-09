@@ -61,17 +61,21 @@ def launch_preferences(argv: list[str], env: dict[str, str]) -> dict[str, str]:
 def execution_receipt(
     argv: list[str], env: dict[str, str] | None, child_pid: int,
 ) -> dict[str, Any]:
-    """Resolve on the execution host, not by translating a caller's home path.
+    """Configured executable names do not establish execution authority."""
+    return {"version": RECEIPT_VERSION, "child_pid": child_pid,
+            "status": "unsupported", "reason": "unverified-executable-provenance",
+            "values": {}, "sources": {}}
 
-    Shell/script launchers can alter identity or environment after host spawn.
-    Without their own execution-side adapter they cannot attest preferences.
+
+def execution_settings(
+    argv: list[str], env: dict[str, str] | None, child_pid: int,
+) -> dict[str, Any]:
+    """Read local candidate settings; not an authenticated authority receipt.
+
+    Only a target-local attestor may seal this data after establishing its final
+    execution context. Session Hosts must not infer that context from argv.
     """
     effective_env = {**os.environ, **(env or {})}
-    executable = Path(argv[0]).name.lower() if argv else ""
-    if executable not in {"copilot", "copilot.exe"}:
-        return {"version": RECEIPT_VERSION, "child_pid": child_pid,
-                "status": "unsupported", "reason": "opaque-launch", "values": {},
-                "sources": {}}
     if any(key in (env or {}) and env[key] != os.environ.get(key)
            for key in ("HOME", "USERPROFILE")):
         return {"version": RECEIPT_VERSION, "child_pid": child_pid,
@@ -123,10 +127,14 @@ def validate_receipt(receipt: Any, child_pid: int) -> dict[str, Any] | None:
         return None
     if receipt.get("status") not in {"resolved", "missing", "unsupported", "error"}:
         return None
+    if receipt["status"] != "unsupported":
+        return None
     if "provider_selected" in receipt and not isinstance(receipt["provider_selected"], bool):
         return None
     values, sources = receipt.get("values"), receipt.get("sources")
     if not isinstance(values, dict) or not isinstance(sources, dict):
+        return None
+    if values or sources or receipt.get("provider_selected"):
         return None
     if any(key not in KEYS.values() or not clean(value) for key, value in values.items()):
         return None

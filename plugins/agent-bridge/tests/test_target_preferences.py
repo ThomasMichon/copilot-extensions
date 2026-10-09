@@ -21,7 +21,8 @@ from agent_bridge.session_host import protocol
 from agent_bridge.session_host.client import SessionHostClient
 from agent_bridge.session_host.host import SessionHost
 from agent_bridge.session_preferences import (
-    PreferenceApplicationError, SOURCE_ENV, client_preferences, execution_receipt, validate_receipt,
+    PreferenceApplicationError, SOURCE_ENV, client_preferences, execution_receipt,
+    execution_settings, validate_receipt,
 )
 
 pytestmark = pytest.mark.contract("agent_bridge.target_preferences")
@@ -91,9 +92,9 @@ def test_execution_side_settings(monkeypatch, tmp_path, raw, status):
         settings = tmp_path / ".copilot" / "settings.json"
         settings.parent.mkdir()
         settings.write_text(raw, encoding="utf-8")
-    receipt = execution_receipt(["copilot"], {}, 123)
+    receipt = execution_settings(["copilot"], {}, 123)
     assert receipt["status"] == status
-    assert validate_receipt(receipt, 123) == receipt
+    assert validate_receipt(receipt, 123) is None  # Unsealed data is not authority.
     if status == "resolved":
         assert receipt["values"] == {
             "model": "target", "reasoning_effort": "medium", "context": "long_context",
@@ -102,7 +103,7 @@ def test_execution_side_settings(monkeypatch, tmp_path, raw, status):
 
 def test_backend_profile_and_opaque_launch(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    receipt = execution_receipt(
+    receipt = execution_settings(
         ["copilot", "--model", "local", "--reasoning-effort=medium"],
         {"COPILOT_PROVIDER_BASE_URL": "http://localhost:1", "COPILOT_MODEL": "other"}, 123,
     )
@@ -113,8 +114,28 @@ def test_backend_profile_and_opaque_launch(monkeypatch, tmp_path):
     assert validate_receipt({**receipt, "version": 2}, 123) is None
 
 
+def test_executable_basename_cannot_attest_execution_identity(monkeypatch, tmp_path):
+    fake = tmp_path / "copilot"
+    fake.write_text("#!/bin/sh\nHOME=/other exec real-copilot\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    for executable in (str(fake), "copilot", "copilot.exe"):
+        receipt = execution_receipt([executable], {}, 123)
+        assert receipt["status"] == "unsupported"
+        assert receipt["values"] == {}
+        assert receipt["reason"] == "unverified-executable-provenance"
+
+
+def test_unattested_v1_values_and_provider_claims_are_rejected():
+    receipt = {"version": 1, "child_pid": 123, "status": "unsupported",
+               "values": {"model": "target"}, "sources": {"model": "target-settings"}}
+    assert validate_receipt(receipt, 123) is None
+    receipt.update(values={}, sources={}, provider_selected=True)
+    assert validate_receipt(receipt, 123) is None
+
+
 @pytest.mark.parametrize("receipt", [
     None, {"version": 1, "child_pid": 123, "status": "missing", "values": {}, "sources": {}},
+    {"version": 1, "child_pid": 123, "status": "unsupported", "values": {}, "sources": {}},
     {"version": 1, "child_pid": 999, "status": "missing", "values": {}, "sources": {}},
     b"not-json",
 ])
@@ -131,7 +152,10 @@ def test_hello_extension_and_legacy_peer(receipt):
         hello = await SessionHostClient(reader, writer).attach()
         assert (hello.max_seq, hello.child_pid) == (7, 123)
         assert protocol.unpack_u64(payload[:8]) == 7
-        valid = isinstance(receipt, dict) and receipt["child_pid"] == 123
+        valid = (
+            isinstance(receipt, dict) and receipt["child_pid"] == 123
+            and receipt["status"] == "unsupported"
+        )
         assert hello.preference_receipt == (receipt if valid else None)
     asyncio.run(scenario())
 
@@ -155,7 +179,7 @@ def test_host_sends_execution_bound_receipt():
         stdout.feed_eof()
         child = SimpleNamespace(pid=123, returncode=0, stdout=stdout, stdin=None,
                                 wait=AsyncMock(return_value=0))
-        receipt = {"version": 1, "child_pid": 123, "status": "missing",
+        receipt = {"version": 1, "child_pid": 123, "status": "unsupported",
                    "values": {}, "sources": {}}
         host = SessionHost(child, preference_receipt=receipt)
         sock = None
@@ -171,7 +195,7 @@ def test_host_sends_execution_bound_receipt():
     asyncio.run(scenario())
 
 
-def test_golden_preference_receipt_decodes():
+def test_golden_unsealed_settings_are_not_accepted_as_authority():
     async def scenario():
         fixture = json.loads((
             Path(__file__).parents[1] / "contract" / "fixtures" / "session-host"
@@ -183,7 +207,7 @@ def test_golden_preference_receipt_decodes():
         writer = MagicMock()
         writer.drain = AsyncMock()
         hello = await SessionHostClient(reader, writer).attach()
-        assert hello.preference_receipt == fixture["receipt"]
+        assert hello.preference_receipt is None
     asyncio.run(scenario())
 
 
@@ -197,7 +221,7 @@ def test_connection_propagates_host_authority():
         manager._db.execute_read.return_value = []
         manager._timeouts = SimpleNamespace(session_start=1, session_new=1)
         manager._host_index = None
-        receipt = {"version": 1, "child_pid": 123, "status": "missing",
+        receipt = {"version": 1, "child_pid": 123, "status": "unsupported",
                    "values": {}, "sources": {}}
         spawned = SimpleNamespace(local_port=1, child_pid=123, nonce="nonce", boundary="test")
         spawner = SimpleNamespace(boundary="test", spawn=AsyncMock(return_value=spawned))
@@ -467,6 +491,16 @@ def test_client_capability_gate_and_legacy_default():
         bridge.start_session(preference_source="target-settings", context="long_context")
         assert request.call_args.args[2]["preference_source"] == "target-settings"
     assert ServiceConfig().preference_source == "caller-settings"
+
+
+@pytest.mark.parametrize("policy", ["", False, 0, {}, []])
+def test_client_rejects_every_explicit_invalid_policy_before_request(policy):
+    bridge = BridgeClient("http://localhost:1", "test")
+    bridge._daemon_proto = (TARGET_PREFERENCES_PROTOCOL_VERSION - 1, 1)
+    with patch.object(bridge, "_request", return_value={}) as request:
+        with pytest.raises(ValueError, match="unsupported preference_source"):
+            bridge.start_session(preference_source=policy)
+        request.assert_not_called()
 
 
 @pytest.mark.parametrize("policy", ["target-settings", "target-setting", "null", "false", "''"])
