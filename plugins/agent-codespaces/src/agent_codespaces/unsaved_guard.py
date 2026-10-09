@@ -6,8 +6,8 @@ work. That flag is frequently stale, so a box that is actually clean cannot be
 deleted without ``--force`` -- which skips any real check.
 
 When (and only when) gh refuses for that reason, this module audits **every**
-git checkout on the box over SSH -- each repo under ``/workspaces`` (up to three
-levels deep), the dotfiles checkout, and every linked ``git worktree`` those
+git checkout on the box over SSH -- every repo found by a full traversal of
+``/workspaces`` (``node_modules`` skipped), the dotfiles checkout, and every linked ``git worktree`` those
 repos know about -- for uncommitted changes, commits on no remote, and local
 branches carrying unpushed commits. All clean -> the caller retries with gh's
 ``--force`` for that specific refusal. Anything dirty, or an audit that cannot
@@ -125,8 +125,8 @@ _AUDIT_SCRIPT = r"""
 shopt -s nullglob dotglob 2>/dev/null
 declare -A seen common
 list=()
-wl=$(mktemp) || exit 1
-trap 'rm -f "$wl"' EXIT
+wl=$(mktemp) && cf=$(mktemp) && fe=$(mktemp) || exit 1
+trap 'rm -f "$wl" "$cf" "$fe"' EXIT
 err() { printf 'CHECKOUT_ERR\t%s\n' "$1"; }
 add() {
   case "$1" in *$'\n'*|*$'\t'*) err unsafe-path; return 0;; esac
@@ -136,12 +136,19 @@ add() {
   [ -n "${seen[$1]}" ] && return 0
   seen[$1]=1; list+=("$1")
 }
-# Discovery must be able to descend: an unreadable (non-dot) directory within
-# the scanned depth could hide a checkout, so it fails closed too.
-for d in @ROOT@/[!.]* @ROOT@/[!.]*/[!.]*; do
-  [ -d "$d" ] && ! { [ -r "$d" ] && [ -x "$d" ]; } && err "$d"
-done
-for g in @ROOT@/*/.git @ROOT@/*/*/.git @ROOT@/*/*/*/.git @EXTRAS@; do
+# Full traversal (dot-directories included; node_modules skipped as dependency
+# trees). Any traversal error (e.g. an unreadable directory that could hide a
+# checkout) fails closed.
+if [ -d @ROOT@ ]; then
+  if ! find @ROOT@ -name node_modules -type d -prune -o -name .git -print0 -prune \
+      >"$cf" 2>"$fe"; then
+    err "workspace traversal incomplete"
+    head -n 5 "$fe" | tr '\t' ' ' | while IFS= read -r l; do err "traversal: $l"; done
+  fi
+fi
+cands=()
+while IFS= read -r -d '' g; do cands+=("$g"); done <"$cf"
+for g in "${cands[@]}" @EXTRAS@; do
   [ -e "$g" ] || continue
   top=$(git -C "$(dirname "$g")" rev-parse --show-toplevel 2>/dev/null) \
     || { err "$(dirname "$g")"; continue; }

@@ -206,8 +206,30 @@ def test_audit_script_blocks_on_missing_or_unreadable_checkouts(tmp_path):
         hidden_parent.chmod(0o755)
         opaque.chmod(0o755)
     errs = {c.path for c in audit.checkouts if c.error}
-    assert {str(linked), str(gone), str(opaque)} <= errs
+    assert {str(linked), str(gone), "workspace traversal incomplete"} <= errs
+    assert any(e.startswith("traversal: ") and "opaque" in e for e in errs)
     assert not audit.all_clean
+
+
+@pytest.mark.skipif(not (shutil.which("git") and shutil.which("bash")),
+                    reason="needs git + bash")
+def test_audit_script_finds_deep_and_dot_dir_repos(tmp_path):
+    remotes = tmp_path / "remotes"
+    root = tmp_path / "ws"
+    deep = root / "a" / "b" / "c" / "d" / "deep"
+    dotted = root / ".hidden" / "x" / "dotrepo"
+    for p in (deep, dotted):
+        p.mkdir(parents=True)
+        _repo(p, remotes)
+    skipped = root / "app" / "node_modules" / "pkg"
+    skipped.mkdir(parents=True)
+    _git("init", "-q", str(skipped), cwd=skipped.parent)
+    (deep / "new.txt").write_text("x\n")
+    audit = _run_audit(root)
+    paths = {c.path for c in audit.checkouts}
+    assert {str(deep), str(dotted)} <= paths
+    assert str(skipped) not in paths
+    assert [c.path for c in audit.dirty_checkouts] == [str(deep)]
 
 
 # --- delete_codespace integration -------------------------------------------
