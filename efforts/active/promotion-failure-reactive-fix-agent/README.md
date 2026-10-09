@@ -2747,3 +2747,24 @@ unavailable and no verified automatic fix PR was produced. Five independently
 fixed signature issues were closed after targeted current-dev checks; the
 timeout and existing execution-defect trackers remain open. The effort's
 Validation Plan stays unresolved.
+
+### 2026-10-09 - Disabled fixer dispatch does not amplify reporting failures
+
+[Issue #5975](https://github.com/ThomasMichon/copilot-extensions/issues/5975)
+tracks a real reporter failure: after detecting and filing a signature, the
+optional fixer dispatch returned HTTP 422 because its workflow was disabled.
+The reporting job then failed independently of the validation failure it
+had already recorded.
+
+The dispatch step checks workflow state once per batch and visibly skips a
+disabled fixer without sending requests. If disablement races with a dispatch,
+one state recheck stops the remaining batch without retrying. Duplicate input
+IDs dispatch at most once; unknown states and genuine API/dispatch errors remain
+failures. Detection, signature deduplication, permissions, and authorization
+gates are unchanged. Regression coverage executes the actual workflow shell
+with a network-free `gh` fixture, rather than manufacturing a live CI failure.
+
+This is a deliberate reporter maintenance change, not a fix-attempt agent
+editing its own guardrails. It does not resolve the separate per-signature
+attempt cap or any remaining direct-PR, protected-scope, or intent-preservation
+validation. The effort remains Active.
