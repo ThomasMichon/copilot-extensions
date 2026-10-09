@@ -9,7 +9,7 @@ import re
 _INPUT_LIMIT = 65536
 _SECRET_KEY = r"[\w-]*(?:token|secret|password|passwd|api[_-]?key|authorization|cookie|credential)[\w-]*"
 _SECRET_ASSIGNMENT = re.compile(
-    rf"""(?i)(\b{_SECRET_KEY}["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)"""
+    rf"""(?i)(\b{_SECRET_KEY}["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n]+)"""
 )
 _SECRET_ENV = re.compile(_SECRET_KEY, re.IGNORECASE)
 _ANSI = re.compile(
@@ -37,12 +37,6 @@ def _safe_text(text: str, limit: int) -> str:
     # Cleanup must precede matching: otherwise it can reconstruct a sensitive
     # key or value only after the redactors have already inspected the text.
     text = _normalized_text(text)
-    for name, value in os.environ.items():
-        if value and _SECRET_ENV.fullmatch(name):
-            normalized_value = _normalized_text(value)
-            if normalized_value:
-                text = text.replace(normalized_value, "[REDACTED]")
-    text = _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", text)
     text = re.sub(r"(?i)\bBearer\s+[^\s,;\"']+", "Bearer [REDACTED]", text)
     text = re.sub(r"://[^/\s@]+@", "://[REDACTED]@", text)
     text = re.sub(
@@ -50,6 +44,14 @@ def _safe_text(text: str, limit: int) -> str:
         "[REDACTED]",
         text,
     )
+    text = _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", text)
+    # Literal values can overlap labels or schemes, so replace them only after
+    # the structural redactors have inspected the complete diagnostic.
+    for name, value in os.environ.items():
+        if value and _SECRET_ENV.fullmatch(name):
+            normalized_value = _normalized_text(value)
+            if normalized_value:
+                text = text.replace(normalized_value, "[REDACTED]")
     return text[:limit] + ("..." if len(text) > limit else "")
 
 

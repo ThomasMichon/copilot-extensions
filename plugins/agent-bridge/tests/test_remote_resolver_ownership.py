@@ -184,6 +184,34 @@ def test_control_cleanup_cannot_reveal_credentials_after_redaction(text, secret,
     assert "\x00" not in detail
 
 
+@pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
+@pytest.mark.parametrize("scheme", ["Bear" + "er", "Basic", "Digest"])
+@pytest.mark.parametrize("separator", [": ", "="])
+def test_authorization_assignments_redact_the_scheme_and_complete_value(scheme, separator):
+    header = "Authorization" + separator + " ".join((scheme, "example-header-secret"))
+    detail = resolver_failure_detail(json.dumps({"error": header}), header)
+    assert "example-header-secret" not in detail
+    assert "[REDACTED]" in detail
+
+
+@pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
+@pytest.mark.parametrize("known_value", ["Bear", "TOKEN"])
+def test_known_value_replacement_cannot_destroy_credential_detection(known_value, monkeypatch):
+    monkeypatch.setenv("EXAMPLE_API_TOKEN", known_value)
+    scheme = "Bear" + "er"
+    for text in ("TOKEN=unknown-field-secret", " ".join((scheme, "unknown-field-secret"))):
+        detail = resolver_failure_detail(json.dumps({"error": text}), text)
+        assert "unknown-field-secret" not in detail
+
+
+@pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
+def test_cookie_and_multiword_assignment_values_are_fully_redacted():
+    text = "Cookie: first=example-cookie-one; second=example-cookie-two"
+    detail = resolver_failure_detail(json.dumps({"error": text}), text)
+    assert "example-cookie-one" not in detail
+    assert "example-cookie-two" not in detail
+
+
 @pytest.mark.asyncio
 @pytest.mark.contract("agent_bridge.transport.resolver_diagnostics")
 @pytest.mark.parametrize("stdout", [
