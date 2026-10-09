@@ -1382,7 +1382,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 "attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}"
-            _aw_deliver_pending_seed "$WORKTREE_ID"
+            if [[ "$_PENDING_NEW_SEED" != "1" ]]; then
+                _aw_deliver_pending_seed "$WORKTREE_ID"
+            fi
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
             else

@@ -2063,7 +2063,9 @@ if (-not $noMux) {
         # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
         Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
-        Invoke-SeedDeliverySafe $plan.worktree_id
+        if (-not $plan.seed_pending) {
+            Invoke-SeedDeliverySafe $plan.worktree_id
+        }
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
             exit 0

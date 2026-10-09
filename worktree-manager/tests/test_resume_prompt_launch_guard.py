@@ -122,6 +122,12 @@ def test_guards_cover_final_join_and_pre_create_without_live_delivery():
     assert re.search(r"TMUX_CREATE_ATTEMPT\+\+\)\); do\s+aw_assert_cold_resume", sh)
     assert ps.index("Assert-AwColdResume\nif ($noMux)") < ps.index("if ($noMux) {")
     assert sh.index('aw_assert_cold_resume\n    if [[ "$NO_MUX"') < sh.index('if [[ "$NO_MUX" == "1" ]]')
+    assert re.search(
+        r"if \(-not \$plan.seed_pending\) \{\s+Invoke-SeedDeliverySafe", ps,
+    )
+    assert re.search(
+        r'if \[\[ "\$_PENDING_NEW_SEED" != "1" \]\]; then\s+_aw_deliver_pending_seed', sh,
+    )
 
 
 def test_explicit_request_refuses_missing_staged_identity(monkeypatch):

@@ -461,3 +461,25 @@ def test_non_json_resume_seed_is_cold_start_only(
     reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
     assert reloaded.pending_seed is None
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
+
+
+@pytest.mark.parametrize("verdict", [
+    LiveVerdict(active=True, mux_live=True, probes_ok=False),
+    LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
+])
+def test_positive_live_open_keeps_staged_prompt_despite_secondary_probe_failure(
+    tmp_path, monkeypatch, capfd, verdict,
+):
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    saved = launch_seed_state.stage(record.yaml_path, kind="resume", text="retry later")
+    monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: verdict)
+    assert resolve_cli.cmd_resolve(_args()) == 0
+    plan = json.loads(capfd.readouterr().out)["launch"]
+    assert not plan["seed_pending"] and plan["cmd"] == ["copilot"]
+    assert launch_seed_state.peek(record.yaml_path) == saved

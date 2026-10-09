@@ -204,7 +204,8 @@ outside the narrowed Resume feature; retain its historical checklist below
 for explicit follow-up disposition, not as a mandate to expand this change.
 Vision reconciliation: extends `picker`'s `cold-start-resume-prompt` intent.
 Pattern reconciliation: terminal-neutral engine plans, Windows/POSIX parity,
-and fail-loud errors without adding a service or durable Resume queue.
+and fail-loud errors with durable typed retry state through the existing
+daemon/write authority, without adding a separate service.
 
 ### Phase 1 — Durable argv-based seed delivery, no-mux parity (Done)
 - [x] `embody_resume.with_seed(launch_cmd, seed)`: pure helper appending the
@@ -1124,3 +1125,14 @@ _Pending._
   the immediate operator request is current-head passing review/CI and
   actual merge of the single active PR, then pause; no new feature slice is
   authorized during that pause.
+- **2026-10-09** -- Addressed the latest review findings: fresh creation now
+  leaves staged seed delivery solely to its deferred command, rather than
+  also starting the detached legacy helper. Unprompted Open accepts a
+  positively observed live session despite degraded secondary probes;
+  prompted launches retain their cold-only gate. Identity-bearing recovery
+  covers the entire post-record creation tail, including paired stamping
+  and launch-plan construction. Corrected the current pattern reconciliation
+  to describe durable typed retry state through the existing daemon.
+  142 focused engine cases pass (2 platform skips), and 113 Manager cases
+  pass; Ruff, module-size ceilings and diff whitespace checks pass.
+  Publication, current-head review/CI and actual merge remain before pause.

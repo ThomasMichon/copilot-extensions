@@ -29,7 +29,7 @@ def seed_for_attempt(path: Path, record, args) -> launch_seed_state.LaunchSeed |
 def plain_live_open(args, verdict: LiveVerdict | None) -> bool:
     return bool(
         not getattr(args, "seed", None) and not getattr(args, "seed_id", None)
-        and verdict is not None and verdict.probes_ok and verdict.mux_probe_ok and verdict.active
+        and verdict is not None and verdict.active
     )
 
 

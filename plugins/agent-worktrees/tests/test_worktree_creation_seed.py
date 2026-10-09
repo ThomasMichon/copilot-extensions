@@ -150,3 +150,28 @@ def test_post_creation_staging_failure_returns_existing_identity_for_recovery(
         recovered = json.loads(capfd.readouterr().out)
         assert recovered["launch"]["seed_id"] == saved.seed_id
         assert len(tracking.list_records(tracking_path)) == 1
+
+
+@pytest.mark.parametrize("failure_site", ["pair-stamp", "launch-plan"])
+def test_any_post_record_tail_failure_preserves_recovery_identity(
+    tmp_path, monkeypatch, capfd, failure_site,
+):
+    from agent_worktrees import launch_seed_state, resolve_cli, tracking
+    from test_resolve_seed_delivery import _args
+
+    config = _create_config(tmp_path)
+    records = tmp_path / "tracking"
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: records)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    def fail(*a, **k):
+        raise OSError("post-record tail failed")
+    if failure_site == "pair-stamp":
+        monkeypatch.setattr(m, "_stamp_and_compose_paired_knowledge", fail)
+    else:
+        monkeypatch.setattr(m, "_build_launch_cmd", fail)
+    assert resolve_cli.cmd_resolve(_args(new_worktree=True, worktree_id=None, seed="New task")) == 3
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["created"] is True and payload["recovery"]["repeat_new"] is False
+    path = records / f"{payload['worktree']['id']}.yaml"
+    assert path.exists() and launch_seed_state.peek(path).text == "New task"
+    assert len(tracking.list_records(records)) == 1
