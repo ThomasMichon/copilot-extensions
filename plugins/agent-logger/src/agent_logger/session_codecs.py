@@ -22,6 +22,7 @@ MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_MEMBER_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ZIP_DIRECTORY_BYTES = 16 * 1024 * 1024
+MAX_TAR_METADATA_BYTES = 16 * 1024 * 1024
 _CASE_INSENSITIVE = os.name == "nt"
 _RESERVED = re.compile(r"(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\Z", re.IGNORECASE)
 
@@ -179,9 +180,34 @@ class TarGzCodec(Codec):
     def member_digests(self, archive: Path) -> dict[str, ArchiveMemberDigest]:
         result: dict[str, ArchiveMemberDigest] = {}
         total = 0
-        with tarfile.open(archive, "r:gz") as tar:
-            for info in tar.getmembers():
+        headers = 0
+        metadata_bytes = 0
+
+        class BoundedTarInfo(tarfile.TarInfo):
+            @classmethod
+            def frombuf(cls, buf: bytes, encoding: str, errors: str) -> tarfile.TarInfo:
+                nonlocal headers, metadata_bytes
+                info = super().frombuf(buf, encoding, errors)
+                headers += 1
+                if headers > MAX_ARCHIVE_MEMBERS:
+                    raise ValueError("session archive exceeds its member budget")
+                if info.type in (
+                    tarfile.XHDTYPE,
+                    tarfile.XGLTYPE,
+                    tarfile.SOLARIS_XHDTYPE,
+                    tarfile.GNUTYPE_LONGNAME,
+                    tarfile.GNUTYPE_LONGLINK,
+                ):
+                    metadata_bytes += info.size
+                    if info.size < 0 or metadata_bytes > MAX_TAR_METADATA_BYTES:
+                        raise ValueError("session tar exceeds its metadata byte budget")
+                return info
+
+        with tarfile.open(archive, "r|gz", tarinfo=BoundedTarInfo) as tar:
+            for info in tar:
                 if info.isdir():
+                    if info.size:
+                        raise ValueError(f"nonempty session tar directory: {info.name!r}")
                     continue
                 if not info.isfile():
                     raise ValueError(f"non-regular session archive member: {info.name!r}")
@@ -190,8 +216,6 @@ class TarGzCodec(Codec):
                     raise ValueError(f"duplicate or empty session archive member: {info.name!r}")
                 if name != info.name:
                     raise ValueError(f"noncanonical session archive member: {info.name!r}")
-                if len(result) >= MAX_ARCHIVE_MEMBERS:
-                    raise ValueError("session archive exceeds its member budget")
                 if info.size < 0 or info.size > MAX_ARCHIVE_MEMBER_BYTES:
                     raise ValueError("session archive member exceeds its byte budget")
                 source = tar.extractfile(info)
@@ -417,7 +441,7 @@ class ZipCodec(Codec):
             return data
 
     def extract_all(self, archive: Path, dest_dir: Path) -> None:
-        from agent_logger.sync.provenance import ensure_real_directory
+        from agent_logger.sync.provenance import ensure_real_directory, is_link_or_reparse
 
         with _open_zip(archive) as opened:
             members = _zip_members(opened)
@@ -425,10 +449,33 @@ class ZipCodec(Codec):
             for name, info in members.items():
                 out = dest_dir / name
                 ensure_real_directory(out.parent)
-                with opened.open(info) as source, out.open("xb") as target:
-                    copied = _copy_and_digest(source, target, info.file_size)
-                if copied.size != info.file_size:
-                    raise ValueError(f"truncated session ZIP member: {info.filename!r}")
+                created_id: tuple[int, int] | None = None
+                complete = False
+                try:
+                    with out.open("xb") as target:
+                        created = os.fstat(target.fileno())
+                        created_id = created.st_dev, created.st_ino
+                        with opened.open(info) as source:
+                            copied = _copy_and_digest(source, target, info.file_size)
+                        if copied.size != info.file_size:
+                            raise ValueError(f"truncated session ZIP member: {info.filename!r}")
+                    complete = True
+                finally:
+                    if not complete and created_id is not None:
+                        try:
+                            current = out.lstat()
+                        except FileNotFoundError:
+                            current = None
+                        if current is not None:
+                            if (
+                                (current.st_dev, current.st_ino) != created_id
+                                or not stat.S_ISREG(current.st_mode)
+                                or is_link_or_reparse(out, current.st_mode)
+                            ):
+                                raise ValueError(
+                                    f"failed ZIP member identity changed; left untouched: {out}"
+                                )
+                            out.unlink()
 
     def list_members(self, archive: Path) -> list[str]:
         with _open_zip(archive) as opened:

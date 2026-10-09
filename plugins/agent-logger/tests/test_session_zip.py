@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 import stat
 import struct
+import tarfile
 import zipfile
+import zlib
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -162,6 +166,163 @@ def test_empty_eventless_zip_is_not_verified(tmp_path: Path) -> None:
     ref = sessions.SessionRef("eventless", "archive", archive, tmp_path)
     assert not sessions.verify_archive(ref)
     assert sessions.read_member(ref, "events.jsonl") is None
+
+
+def test_tar_comparison_streams_instead_of_materializing_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ref = sessions.archive_session(_session(tmp_path / "live"), tmp_path / "store")
+
+    def forbidden_members(*args: object, **kwargs: object) -> None:
+        raise AssertionError("comparison must not materialize all tar headers")
+
+    monkeypatch.setattr(tarfile.TarFile, "getmembers", forbidden_members)
+    assert "events.jsonl" in sessions.CODECS["targz"].member_digests(ref.path)
+
+
+def test_tar_comparison_counts_directory_headers_toward_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "directories.tar.gz"
+    monkeypatch.setattr(session_codecs, "MAX_ARCHIVE_MEMBERS", 2)
+    with tarfile.open(archive, "w:gz") as output:
+        for name in ("one", "two"):
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            output.addfile(info)
+    assert sessions.CODECS["targz"].member_digests(archive) == {}
+    with tarfile.open(archive, "w:gz") as output:
+        for name in ("one", "two", "three"):
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            output.addfile(info)
+    with pytest.raises(ValueError, match="member budget"):
+        sessions.CODECS["targz"].member_digests(archive)
+
+
+def test_tar_comparison_bounds_extended_metadata_before_decoding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "metadata.tar.gz"
+    monkeypatch.setattr(session_codecs, "MAX_TAR_METADATA_BYTES", 8)
+    with tarfile.open(archive, "w:gz") as output:
+        info = tarfile.TarInfo("././@LongLink")
+        info.type = tarfile.GNUTYPE_LONGNAME
+        info.size = 9
+        output.addfile(info, io.BytesIO(b"longname\0"))
+    with pytest.raises(ValueError, match="metadata byte budget"):
+        sessions.CODECS["targz"].member_digests(archive)
+
+
+def _corrupt_payload(archive: Path, *, deflated: bool) -> None:
+    with zipfile.ZipFile(archive) as opened:
+        info = opened.getinfo("events.jsonl")
+        offset = info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)
+    data = bytearray(archive.read_bytes())
+    if deflated:
+        data[offset] = 7  # Reserved DEFLATE block type.
+    else:
+        data[offset] ^= 1
+    archive.write_bytes(data)
+
+
+def test_deflate_corruption_returns_false_from_verification(tmp_path: Path) -> None:
+    archive = tmp_path / "deflate.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+        output.writestr("events.jsonl", b"{}\n")
+    _corrupt_payload(archive, deflated=True)
+    ref = sessions.SessionRef("deflate", "archive", archive, tmp_path)
+    with pytest.raises(zlib.error):
+        sessions.read_member(ref, "events.jsonl")
+    assert not sessions.verify_archive(ref)
+
+
+def test_truncated_zip_decode_returns_false_from_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "truncated.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+
+    def truncated(*args: object, **kwargs: object) -> None:
+        raise EOFError("truncated decoded member")
+
+    monkeypatch.setattr(session_codecs, "_copy_and_digest", truncated)
+    assert not sessions.verify_archive(sessions.SessionRef("truncated", "archive", archive))
+
+
+def test_failed_zip_cleanup_preserves_a_replaced_member(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "replaced.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    destination = tmp_path / "restore"
+    out = destination / "events.jsonl"
+    original_lstat = Path.lstat
+
+    def fail_copy(*args: object, **kwargs: object) -> None:
+        raise ValueError("interrupted decode")
+
+    def replace_before_cleanup(path: Path):
+        if path == out:
+            path.rename(tmp_path / "failed-owned-member")
+            path.write_bytes(b"unrelated replacement")
+        return original_lstat(path)
+
+    monkeypatch.setattr(session_codecs, "_copy_and_digest", fail_copy)
+    monkeypatch.setattr(Path, "lstat", replace_before_cleanup)
+    with pytest.raises(ValueError, match="identity changed"):
+        sessions.CODECS["zip"].extract_all(archive, destination)
+    assert out.read_bytes() == b"unrelated replacement"
+
+
+@pytest.mark.parametrize("deflated", [False, True])
+def test_failed_zip_restore_leaves_no_partial_member_and_can_retry(
+    tmp_path: Path, deflated: bool
+) -> None:
+    archive = tmp_path / "retry.zip"
+    payload = b"x" * (2 * 1024 * 1024)
+    compression = zipfile.ZIP_DEFLATED if deflated else zipfile.ZIP_STORED
+    with zipfile.ZipFile(archive, "w", compression=compression) as output:
+        output.writestr("events.jsonl", payload)
+    valid = archive.read_bytes()
+    _corrupt_payload(archive, deflated=deflated)
+    destination = tmp_path / "restored" / "retry"
+    destination.mkdir(parents=True)
+    (destination / "keep.txt").write_bytes(b"caller-owned")
+    ref = sessions.SessionRef("retry", "archive", archive, tmp_path)
+    with pytest.raises((zipfile.BadZipFile, zlib.error)):
+        sessions.restore_session(ref, destination.parent)
+    assert list(destination.iterdir()) == [destination / "keep.txt"]
+    assert (destination / "keep.txt").read_bytes() == b"caller-owned"
+    archive.write_bytes(valid)
+    assert sessions.restore_session(ref, destination.parent) == destination
+    assert (destination / "events.jsonl").read_bytes() == payload
+
+
+def test_zip_verification_uses_one_descriptor_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "snapshot.zip"
+    replacement = tmp_path / "replacement.zip"
+    _zip(archive, [("events.jsonl", b"{}\n")])
+    _zip(replacement, [("workspace.yaml", b"id: eventless\n")])
+    original_open = session_codecs._open_zip
+    opens = 0
+
+    @contextmanager
+    def replacing_open(path: Path):
+        nonlocal opens
+        opens += 1
+        with original_open(path) as opened:
+            yield opened
+        if opens == 1:
+            replacement.replace(path)
+
+    monkeypatch.setattr(session_codecs, "_open_zip", replacing_open)
+    ref = sessions.SessionRef("snapshot", "archive", archive, tmp_path)
+    assert sessions.verify_archive(ref)
+    assert opens == 1
+    assert not sessions.verify_archive(ref)
 
 
 @pytest.mark.parametrize("corruption", ["header", "crc"])

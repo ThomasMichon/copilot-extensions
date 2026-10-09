@@ -39,6 +39,7 @@ import stat
 import tarfile
 import tempfile
 import zipfile
+import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -113,8 +114,7 @@ def get_codec(name: str) -> Codec:
         return CODECS[name]
     except KeyError:
         raise ValueError(
-            f"unknown compression codec: {name!r} "
-            f"(known: {', '.join(sorted(CODECS))})"
+            f"unknown compression codec: {name!r} (known: {', '.join(sorted(CODECS))})"
         ) from None
 
 
@@ -139,6 +139,7 @@ def _archive_stem(archive: Path) -> str:
 # ---------------------------------------------------------------------------
 # SessionRef -- a handle over one session (live dir or archive)
 # ---------------------------------------------------------------------------
+
 
 def _validate_session_id(session_id: str) -> None:
     try:
@@ -190,6 +191,7 @@ def _sidecar_name(session_id: str, member: str) -> str:
 # Discovery
 # ---------------------------------------------------------------------------
 
+
 def _iter_live_refs(state_root: Path) -> Iterator[SessionRef]:
     if not state_root.is_dir():
         return
@@ -234,9 +236,7 @@ def _iter_archive_refs(
     yield from selected
 
 
-def iter_session_refs(
-    state_root: Path | None, *archive_stores: Path
-) -> Iterator[SessionRef]:
+def iter_session_refs(state_root: Path | None, *archive_stores: Path) -> Iterator[SessionRef]:
     """Yield every session across a live root and any archive stores.
 
     A live session shadows an archived one with the same id (a session being
@@ -258,9 +258,7 @@ def iter_session_refs(
             yield ref
 
 
-def resolve_ref(
-    session_id: str, state_root: Path, *archive_stores: Path
-) -> SessionRef | None:
+def resolve_ref(session_id: str, state_root: Path, *archive_stores: Path) -> SessionRef | None:
     """Resolve one session id to a :class:`SessionRef` (live preferred)."""
     _validate_session_id(session_id)
     live = state_root / session_id
@@ -282,6 +280,7 @@ def resolve_ref(
 # ---------------------------------------------------------------------------
 # Archive-aware reads
 # ---------------------------------------------------------------------------
+
 
 def read_member(ref: SessionRef, member: str) -> bytes | None:
     """Return raw bytes of ``member`` for ``ref``, or ``None`` if absent.
@@ -534,6 +533,7 @@ def _cleanup_materialized_temps() -> None:
 # Write path (used by the compaction flows)
 # ---------------------------------------------------------------------------
 
+
 def force_rmtree(path: Path) -> bool:
     """Remove a directory tree robustly; return ``True`` if it is gone after.
 
@@ -579,9 +579,7 @@ def is_archived(session_id: str, store: Path, codec: str = "targz") -> bool:
     return (store / f"{session_id}{get_codec(codec).suffix}").is_file()
 
 
-def archive_session(
-    session_dir: Path, store: Path, *, codec: str = "targz"
-) -> SessionRef:
+def archive_session(session_dir: Path, store: Path, *, codec: str = "targz") -> SessionRef:
     """Compress ``session_dir`` into ``store`` and write selector sidecars.
 
     Produces ``<store>/<id><suffix>`` (the bundle) plus uncompressed
@@ -615,14 +613,16 @@ def verify_archive(ref: SessionRef) -> bool:
         return False
     try:
         codec = _codec_for_archive(ref.path)
-        raw_members = codec.list_members(ref.path)
+        raw_members = (
+            list(codec.member_digests(ref.path))
+            if isinstance(codec, ZipCodec)
+            else codec.list_members(ref.path)
+        )
         normalized = [_validate_member_name(member) for member in raw_members]
         if len(normalized) != len(set(normalized)):
             return False
         members = set(normalized)
-        if isinstance(codec, ZipCodec):
-            codec.member_digests(ref.path)
-    except (tarfile.TarError, zipfile.BadZipFile, OSError, ValueError):
+    except (tarfile.TarError, zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError):
         return False
     return EVENTS_MEMBER in members
 

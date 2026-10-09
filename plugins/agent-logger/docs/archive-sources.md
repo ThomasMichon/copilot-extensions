@@ -57,8 +57,11 @@ directory entries, and standard single-volume ZIP64 end records. Multi-volume,
 encrypted, unsupported compression, special/link members, unsafe paths,
 normalized duplicate names, and Windows case-fold collisions fail explicitly.
 ZIP extraction creates new files only, never overwriting existing destination
-evidence. New ZIP creation uses a unique temporary file, verifies file content
-and CRCs before replacement, rejects observed source changes, and leaves the
+evidence. If decoding fails, it removes only the member file created by that
+attempt after checking its identity; a replacement is retained and reported.
+Previously completed members remain, so extraction is not an all-or-nothing
+restore transaction. New ZIP creation uses a unique temporary file, verifies
+file content and CRCs before replacement, rejects observed source changes, and leaves the
 source directory intact. Settled-source selection and any source retirement
 remain the caller's separately authorized responsibilities.
 
@@ -66,7 +69,12 @@ ZIP reads/writes allow at most 10,000 entries, 512 MiB per file, and 2 GiB total
 decoded file bytes. Creation also bounds inspected source entries and excludes
 linked/name-surrogate directories without descending into them. The central
 directory has a 16 MiB budget checked before the standard ZIP parser allocates
-its index. Equality comparison uses the same decoded-content budgets. Errors
+its index. Equality comparison uses the same decoded-content budgets.
+Tar comparison streams at most 10,000 raw headers,
+including directories and extended headers; extended metadata has a cumulative
+16 MiB budget enforced before its payload is decoded. ZIP verification derives
+membership and integrity from one descriptor snapshot and returns false for
+CRC, decompression, or truncation failures. Other content-read errors
 and permission failures are not empty/missing evidence. These checks do not
 claim a continuous descriptor-pinned transaction over mutable ancestor paths.
 
