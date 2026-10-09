@@ -477,15 +477,67 @@ provider's absence.
   No duplicate peer patch or release bypass is authorized by this journal.
   The effort remains Active.
 
+### 2026-10-09 - Reviewed consumer extension and independent Picker slice
+- Plan extension #5976 merged into `dev` as
+  `314b3ac189b92fc193628806fe7b2aa4cd982f29` after current-head approval
+  with zero findings and green required CI. The independent #5972 slice now
+  uses shared strict matching for launch/Picker identities, preserving eligible
+  handoff-target filtering, environment selection and public command-plan shapes.
+  Peer-owned claimant, handoff and host/WSL paths remain untouched.
+- Existing baseline contracts passed **9 tests** before edits. The expanded
+  consumer run passed **229 tests, 12 skipped**, including a real headless
+  subprocess using YAML parsing and the public five-field JSON plan.
+  Ambiguous identities explicitly refuse to emit a plan; exact keys retain
+  precedence and unknown/offline display identities preserve compatibility.
+- Touched-code lint and the headless-spawn guard passed. The full affected
+  suite used the documented 120-second per-test allowance:
+  an unchanged real Git-heavy handoff contract exceeded the default 30-second
+  Windows watchdog, then passed in **66.16 seconds** with that allowance.
+  No production assertion, peer-owned source or module ceiling was weakened.
+- The full run then exposed a stale publication-lock test double: the earlier
+  publication repair passes `push_timeout_seconds`, but the double accepted
+  only the worktree path. It now accepts and explicitly asserts a non-default
+  configured deadline while retaining the lock-error assertion. Combined
+  publication and Picker contracts passed **55 tests**. On publication,
+  independently merged #5989 already contained the stronger parametrized
+  deadline regression; rebasing retained that upstream file verbatim instead
+  of publishing a duplicate fixture fix.
+- A later full run passed its first five file groups, then two real Bash
+  setup-child contracts failed because the selected shell could not find its
+  POSIX utilities on the host PATH. Selecting the existing Git Bash directory
+  through process-local PATH resolved both without code, host configuration
+  or assertion changes. Current rebased Picker, publication-deadline and real
+  setup-child contracts passed **28 tests**. Full-suite evidence remains open.
+- Normal promotion run `37984196435` succeeded. The unified installed-consumer
+  refresh completed, with Worktrees `1.24.36-dev1` and Bridge `0.9.41.dev1`
+  verified. Consumer projection   reconciliation is complete after its required CI's separately tracked
+  fixture lease-isolation failure was repaired and the reviewed reconciliation
+  merged with green required CI.
+  No broader service-health claim follows from this refresh.
+
+### 2026-10-09 - Generated installer-context boundary clarified
+- `tools/sync-installation-context.py` identifies `libs/installation-context`
+  as the canonical owner of the generated script and Python-package copies.
+  The earlier source-absence observation was a discovery error, now corrected.
+- Canonical directory-lock and maintenance-sidecar checks compare physical
+  hostnames to decide local PID liveness and ownership; source URL normalization
+  compares Git network hosts. These are distinct local process-owner and URL
+  contracts, not registry aliases or named-machine SSH routing. Keep them
+  independent of transport identity. No installation-context code was changed.
+- This closes that bounded source-ownership inventory gap, not the remaining
+  shell-only and provider-argv inventory or the whole campaign.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
-additional #5972/#5973/#5974 work is not implemented. The reviewed campaign
-extension precedes the independent Picker matching slice; its existing baseline
-contracts passed **9 tests** before edits. #5689 retains its original host/WSL
+additional #5972 Picker matching slice is implemented locally, with full-suite,
+publication, review and deployment gates still open. Remaining #5972 paths and
+#5973/#5974 are not implemented. The campaign extension is merged.
+#5689 retains its original host/WSL
 implementation owner and remains the overlapping-consumer prerequisite.
 
 #5885 is merged and #5911 is closed: do not rework that completed remediation.
-Verify normal promotion and installed-consumer evidence separately. The effort
+Normal promotion and installed-consumer refresh are verified; consumer projection
+reconciliation is complete; the new Picker slice's deployment remains open. The effort
 and the #5972 issue claim remain active until their complete scopes are resolved
 or explicitly transferred; no single planning or implementation PR closes them.

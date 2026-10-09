@@ -1,0 +1,9 @@
+{
+  "comment": "Use shared strict machine matching for picker labels and eligible handoff plans, preserving environment and SSH command policies.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
