@@ -535,6 +535,7 @@ def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
         for pr in record.prs:
             if pr.repo == source_slug:
                 pr.repo = target_slug
+                pr.pr_revision += 1
         tracking.save_record(record, record_path)
     else:
         tracking.create_new_record(

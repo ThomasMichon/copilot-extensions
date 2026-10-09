@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import types
+from pathlib import Path
+
 import pytest
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, pr_ops, tracking

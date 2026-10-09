@@ -756,6 +756,22 @@ _Pending review of this plan._
   callback in the docs-consistency guard; enumeration now raises the
   original error and a denied-subtree regression proves it fails closed.
   All eight docs-scan regressions pass with unchanged exclusions.
+- Reconciled again onto current `dev` after the PR became conflicting.
+  All 308 upstream PR test methods survive in the split modules; all seven
+  newly changed upstream contracts are AST-identical after relocation,
+  including the new six-case stale-reassignment regression. Retained the
+  already-merged file-based pane launcher rather than resurrecting the old
+  encoded-command transport; receipt/child diagnostics remain, while the
+  encoded-script-only trace prefix is no longer applicable. The underlying
+  original stall's cause remains unknown.
+- The stronger upstream PR identity merge exposed a real seed-copy bug:
+  relocation changed a published record's repository identity without
+  advancing its revision, so an equal-revision on-disk record correctly
+  restored the seed's old identity. The fixture now marks its intentional
+  relocation as a new revision. No production merge protection is weakened.
+  The reconciled contract run passed 85 cases and exposed exactly these
+  two seed-isolation failures; after the fixture correction all eight
+  seed/real-launch/diagnostic cases pass, and touched Python lint is clean.
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged
