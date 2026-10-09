@@ -20,6 +20,7 @@ from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
+    SHORT_ID_HEX_LENGTH,
     ensure_real_directory,
     is_link_or_reparse,
     open_regular_no_follow,
@@ -48,10 +49,17 @@ MAX_MARKER_BYTES = 64 * 1024
 
 _TEMP_MARKER_PREFIX = f".{PUBLICATION_IDENTITY_MARKER}."
 _TEMP_MARKER_SUFFIX = ".tmp"
+_TEMP_MARKER_ID_CHARS = frozenset("0123456789abcdef")
 
 
 def _is_stale_temp_marker(name: str) -> bool:
-    return name.startswith(_TEMP_MARKER_PREFIX) and name.endswith(_TEMP_MARKER_SUFFIX)
+    if not (name.startswith(_TEMP_MARKER_PREFIX) and name.endswith(_TEMP_MARKER_SUFFIX)):
+        return False
+    claim_id = name[len(_TEMP_MARKER_PREFIX) : -len(_TEMP_MARKER_SUFFIX)]
+    # Only our own short_unique_id() shape: anything else is an unrelated
+    # file that merely collides with the prefix/suffix, never ours to
+    # delete (an unowned nonempty leaf must still be refused outright).
+    return len(claim_id) == SHORT_ID_HEX_LENGTH and set(claim_id) <= _TEMP_MARKER_ID_CHARS
 
 
 def _unlink_if_exists(path: Path) -> None:

@@ -266,6 +266,27 @@ def test_check_publication_identity_clears_a_stale_temp_marker(
     assert marker.is_file()
 
 
+def test_check_publication_identity_preserves_a_lookalike_unowned_file(
+    tmp_path: Path,
+) -> None:
+    """Only the exact short_unique_id() claim-id shape counts as a stale
+    temp marker -- a regular file that merely shares the prefix/suffix must
+    never be deleted, and the leaf must still be refused as unowned."""
+    dest = tmp_path / "dest" / "m1"
+    dest.mkdir(parents=True)
+    lookalike = dest / f".{PUBLICATION_IDENTITY_MARKER}.notes.tmp"
+    lookalike.write_text("someone else's file", encoding="utf-8")
+
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = check_publication_identity(dest, identity)
+    assert result is not None and not result.ok
+    assert "unowned" in result.detail
+    assert lookalike.is_file()
+    assert lookalike.read_text(encoding="utf-8") == "someone else's file"
+
+
 def test_onedrive_target_fails_closed_for_identity_admission(tmp_path: Path) -> None:
     """``OneDriveTarget`` inherits the filesystem admission gate but cannot
     serialize cross-writer publication (cloud sync, not this process) --
