@@ -25,10 +25,21 @@ pinned to immutable runtime inputs, not an unversioned marketplace payload or
 checkout. An explicitly claimed dev slot is the existing narrow exception:
 its owner may select the editable worktree input under the parent dev contract,
 never as an implicit ordinary-update fallback.
-Construction ownership is version/installation scoped. Short control-plane
-transactions over selectors, routing, provenance, and claims are separate state
-coordination: they do not authorize modifying a published slot, and must not
-hold code/source trees open during lengthy builds.
+Construction ownership is version/installation scoped. Control-plane guards over
+selectors, routing, provenance, and claims coordinate state, not code-file
+mutation; they never authorize modifying a published slot or require holding
+payload/source trees open.
+
+Repair preserves the existing whole-operation cutover guard: acquire it before
+choosing or allocating replacement generation state, and retain it through
+replacement construction, health gating, confirmed promotion, and drain/
+retirement or the required rollback/commit-forward outcome. When repair needs
+both guards, the cutover/repair guard precedes the target construction lease.
+An ordinary first build releases construction ownership before joining cutover
+coordination, never acquiring the guards in reverse order. Existing installation
+governance lock order also remains binding; allocation/completion callbacks must
+not invert it against these guards. Prove the combined ordering with concurrent
+ordinary-build, repair, and cutover tests before adoption is complete.
 
 ## Existing home and evidence
 
@@ -79,6 +90,8 @@ each adopter is already safe.
       process death. Keep its lifetime scoped to construction, isolated health
       gating, and immutable publication, not unrelated binstub/service work.
       Preserve separate activation/cutover serialization and governance checks.
+      A repair's outer cutover guard retains the whole-operation lifetime above;
+      releasing the inner construction lease does not release repair authority.
 - [ ] Surface timeout and actual storage/permission failures distinctly.
       Diagnostic owner evidence is attributable to the actual lease holder,
       not a completion helper's PID or a mere lock-file timestamp. A surviving
@@ -142,6 +155,9 @@ each adopter is already safe.
 - A failed direct health probe selects a distinct replacement without modifying
   the old slot or its rollback identity. Promotion is confirmed before retirement;
   recovery order and running-generation reports remain coherent after restart.
+  Concurrent repair versus ordinary build/cutover proves the required outer
+  guard, promotion-before-retirement, and absence of lock-order inversion,
+  including installation-cell governance callbacks.
 - Claimed dev/release preserves the original restore target, refuses a competing
   owner, and does not silently activate dev mode for ordinary install/update.
 - Windows, Linux, and macOS behavior is accounted for separately. Record explicit,

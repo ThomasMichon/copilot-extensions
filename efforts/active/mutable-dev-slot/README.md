@@ -5,6 +5,7 @@
 - **Branch(es):** per-phase PRs to `dev`; normal release promotion to `main`
 - **Created:** 2026-09-23
 - **Status:** Active
+- **Coordination:** #5472
 - **Vision:** [`docs/patterns/mutable-dev-slot.md`](../../../docs/patterns/mutable-dev-slot.md)
   (a deliberate, narrow exception to
   [`docs/patterns/durable-vs-versioned-runtime.md`](../../../docs/patterns/durable-vs-versioned-runtime.md)'s
