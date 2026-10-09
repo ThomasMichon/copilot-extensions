@@ -364,7 +364,7 @@ def publish_lock(cwd: str, *, acquire_timeout: float | None = None):
 def push_checked(record, remote: str, refspec: str, *, cwd: str,
                  expected_head_repo: str = "", expected_head_identity: str = "",
                  force_with_lease: bool = False,
-                 force_with_lease_expect: str | None = None) -> git_ops.PushResult:
+                 force_with_lease_expect: str | None = None, repo=None) -> git_ops.PushResult:
     """``git_ops.push`` for a PR head, under :func:`publish_lock`: when it goes to
     the PR's recorded fork, that remote must still name the fork's repo
     (``head_repo``) at push time -- another worktree's fork setup could have
@@ -386,6 +386,13 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                     return git_ops.PushResult(ok=False, stderr=REPOINTED)
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
                                   force_with_lease_expect=force_with_lease_expect)
+            if repo is not None and force_with_lease_expect and result.stderr == (
+                f"Refusing: {force_with_lease_expect} not an ancestor."
+            ):
+                from . import pr_rebase
+                result = pr_rebase.push(
+                    record, repo, remote, refspec, force_with_lease_expect, cwd=cwd,
+                )
             if result:
                 result.head_repo = got
                 result.head_identity = identity
@@ -443,15 +450,29 @@ def record_remote_identity(pr, remote: str, repo_remote: str, head_repo: str = "
     pr.head_owner = (head_owner or pr.head_owner) if fork else ""
 
 
+def push_history_message(pushed, feature: str, source: str) -> str:
+    if getattr(pushed, "rebase_base_sha", ""):
+        return f"Published a verified source-owned PR rebase on '{feature}' from '{source}'."
+    return (
+        f"Preserved the published PR tip on '{feature}' and pushed "
+        f"incremental updates from '{source}'."
+    )
+
+
 def record_pushed_head(
     config, record: tracking.WorktreeRecord, worktree_id: str, pushed_pr, head_sha: str,
-    *, remote: str = "", head_repo: str = "", head_identity: str = "",
+    *, remote: str = "", head_repo: str = "", head_identity: str = "", rebase_base_sha: str = "",
 ) -> None:
     """After a successful head push to *remote*: record the new head (and the
     remote, when it isn't the repo's own -- an older record's fork, found by
     :func:`push_remote`), save, then refresh the provider's head observation and
     the source attribution, warning on either failure."""
     if pushed_pr is not None:
+        if rebase_base_sha:
+            pushed_pr.base_sha = rebase_base_sha
+        if pushed_pr.base_sha:
+            from .pr_ops import _patch_id
+            pushed_pr.patch_id = _patch_id(pushed_pr.base_sha, head_sha, cwd=record.worktree_path)
         pushed_pr.head_sha = head_sha
         pushed_pr.head_observed_at = ""
         pushed_pr.head_observed_api_base = ""

@@ -853,6 +853,8 @@ class PushResult:
     ok: bool
     stderr: str = ""
     stdout: str = ""
+    rebase_base_sha: str = ""
+    published_head_sha: str = ""
 
     def __bool__(self) -> bool:
         return self.ok
@@ -902,6 +904,11 @@ class PushResult:
             parts.append(f"git (stderr): {self.stderr.strip()}")
         return ("\n" + "\n".join(parts)) if parts else ""
 
+def is_commit_ancestor(ancestor: str, descendant: str, *, cwd: str | Path) -> bool:
+    """Strict object ancestry, unlike the content-equivalent merge predicate."""
+    return git("merge-base", "--is-ancestor", ancestor, descendant, cwd=cwd, check=False).returncode == 0
+
+
 def push(
     remote: str,
     branch: str,
@@ -926,28 +933,14 @@ def push(
     must be allowed to block a non-compliant push. Worktree-originated callers wrap this with
     ``hooks.allow_pr_push()``.
     """
-    if force_with_lease_expect is not None and not is_branch_merged(
+    if force_with_lease_expect is not None and not is_commit_ancestor(
         force_with_lease_expect, branch.split(":", 1)[0] if ":" in branch else branch, cwd=cwd):
         return PushResult(ok=False, stderr=f"Refusing: {force_with_lease_expect} not an ancestor.")
-    extra = ([f"--force-with-lease={branch.rsplit(':', 1)[-1]}:{force_with_lease_expect}"]
-             if force_with_lease_expect is not None else
-             ["--force-with-lease"] if force_with_lease else [])
-    auth_args = _auth_config_args(remote, cwd=cwd)
-    # Retry without an injected auth override on failure (#900).
-    attempts = [auth_args, []] if auth_args else [[]]
-    last_stderr = last_stdout = ""
-    for prefix in attempts:
-        try:
-            result = git(
-                *prefix, "push", remote, branch, *extra, "--quiet",
-                cwd=cwd, check=False, timeout=timeout, kill_tree=True,
-            )
-        except subprocess.TimeoutExpired as exc:
-            return PushResult(ok=False, stderr=push_timeout.message(exc, timeout))
-        if result.returncode == 0:
-            return PushResult(ok=True)
-        last_stderr, last_stdout = result.stderr or last_stderr, result.stdout or last_stdout
-    return PushResult(ok=False, stderr=last_stderr, stdout=last_stdout)
+    from .git_push_transport import push as transport
+    return transport(
+        remote, branch, cwd=cwd, force_with_lease=force_with_lease,
+        force_with_lease_expect=force_with_lease_expect, timeout=timeout,
+    )
 
 
 # --- Cross-account authentication (#29) -------------------------------------

@@ -946,10 +946,6 @@ def create_pr(
     )
 
     head_sha = _rev("HEAD", cwd=worktree_path)
-    # Squash-invariant reference for downstream recorders (#898): survives the
-    # server-side squash-merge that rewrites the commit SHA.
-    patch_id = _patch_id(base_sha, "HEAD", cwd=worktree_path)
-
     # Effective per-invocation head scheme. In a refspec repo, a *parallel* PR
     # (--new while another PR is still live) cannot use worktree/<id> as its
     # head -- that branch is the live refspec head of the other PR -- so it
@@ -974,7 +970,7 @@ def create_pr(
             pushed = pr_publish.push_checked(
                 record, publish_remote, f"{wt_branch}:refs/heads/{feature_branch}", cwd=worktree_path,
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -1011,7 +1007,7 @@ def create_pr(
             pushed = pr_publish.push_checked(
                 record, publish_remote, feature_branch, cwd=worktree_path,
                 expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing, repo=repo,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -1024,6 +1020,8 @@ def create_pr(
                 snapshot=True,
             )}
 
+    base_sha, head_sha = getattr(pushed, "rebase_base_sha", "") or base_sha, getattr(pushed, "published_head_sha", "") or head_sha
+    patch_id = _patch_id(base_sha, head_sha, cwd=worktree_path)
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
     if record is not None and target_pr is not None:
@@ -2485,7 +2483,7 @@ def _push_existing_feature(
             record, remote, feature_branch, cwd=worktree_path,
             expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
             force_with_lease_expect=(lease_expect or None),
-            force_with_lease=(existing_target is not None),
+            force_with_lease=(existing_target is not None), repo=repo,
         )
     if not pushed:
         error = f"Failed to (re)push '{feature_branch}' to '{remote}'."
@@ -2526,12 +2524,13 @@ def _push_existing_feature(
         # target is always non-terminal here (a live match or a fresh record).
         target.state = "open"
         pr_publish.record_remote_identity(target, remote, repo.remote, pushed.head_repo, getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
-        target.head_sha = head_sha
+        target.base_sha = getattr(pushed, "rebase_base_sha", "") or target.base_sha
+        head_sha = target.head_sha = getattr(pushed, "published_head_sha", "") or head_sha
         target.head_observed_at = ""
         target.head_observed_api_base = ""
         # Refresh the squash-invariant patch-id after the re-squash (#898).
         target.patch_id = _patch_id(
-            target.base_sha, feature_branch, cwd=worktree_path)
+            target.base_sha, head_sha, cwd=worktree_path)
         target.provider = target.provider or prcfg.provider
         tracking.save_record(record)
     base_sha = target.base_sha if target else ""

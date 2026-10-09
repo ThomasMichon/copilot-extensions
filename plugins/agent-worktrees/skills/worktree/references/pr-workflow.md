@@ -556,6 +556,46 @@ head as a dedicated hidden PR comment. Consumers use the newest source marker
 across the initial body and managed comments. Mutable attribution never
 replaces the authored PR description.
 
+### Reconciling an owned PR after its base moves
+
+Normal review updates are incremental: `push-changes` and a repeated
+`create-pr` do **not** rebase or squash a live PR themselves. When reconciliation
+is necessary, use `git sync`; if it aborts on conflicts, resolve in the owning
+worktree with `git rebase <remote>/<default>` and `git rebase --continue`, then
+publish with `push-changes` (or repeat `create-pr`). Inspect and validate the
+resolution before publishing.
+
+A non-ancestral update is authorized only for a unique, live, tracked private
+`pr/` or legacy `feature/` head carrying this worktree's suffix or codename.
+The current checkout must be its recorded `worktree/<id>` branch (or that
+same tracked private head in the legacy checked-out-feature flow). Both Git
+rebase journals must bind the original source tip, completed replay, and newer
+default-branch base. The published patch is reconstructed from the recorded
+base/head objects, and every source patch must remain in order or already exist on the
+new base. A content-changing conflict resolution additionally requires an
+explicit sequencer `continue` and a one-to-one replay with unchanged original
+author and full commit message; a journal alone never authorizes dropping work.
+Ordinary feedback commits may follow the completed replay.
+
+Successful `git sync` checkpoints this verified evidence in the worktree's own
+Git metadata (`agent-worktrees-pr-rebase.json`). An earlier supported manual
+rebase can recover the same proof at publication from intact Git journals.
+The checkpoint is audit evidence, **not** a reusable rewrite token: publication
+re-verifies the current source, pins its exact object, runs real pre-push hooks,
+and retains the exact **last-observed remote head** lease. Fetching a reviewer
+update never silently advances that lease. After a successful rewrite, tracking
+refreshes the base, head and patch together.
+Older runtimes could leave the cached patch ID behind after an incremental
+push; recovery records both that cache and the reconstructed published patch,
+but authorizes only the freshly verified full source replay, never the cache.
+
+Generic pushes remain ancestry-guarded. Shared/default/protected heads,
+arbitrary refspecs, resets (even to the same tree), amends, unexplained changed
+patches, dropped work, merge-heavy or missing/expired replay evidence, and
+untracked/custom non-private heads fail closed. Do not bypass the refusal:
+inspect the original source and remote history, recover a verifiable replay,
+and re-run validation. There is no blanket rewrite flag.
+
 > **Trust the result -- do not open a second PR.** When `create-pr` returns
 > `pr_opened: true` (or any `number`/`url`), the PR is already open and recorded
 > -- **skip Steps 2-3 entirely**; opening another PR yourself produces a
@@ -574,8 +614,8 @@ replaces the authored PR description.
 > **Never run `create-pr`/`push-changes` for the same worktree from two
 > actors at once -- not even a delegated sub-agent "helping" with the exact
 > PR you're already driving.** The initial `create-pr` squashes and rebases
-> IN PLACE on `worktree/{id}`'s own checkout, and later `create-pr` updates
-> still rewrite that same local branch in place as they publish. A second
+> IN PLACE on `worktree/{id}`'s own checkout; later publication uses that same
+> checkout, even though ordinary updates preserve its history. A second
 > actor (a spawned sub-agent given the same worktree path, or a second session
 > bound to it) committing, stashing, or pushing concurrently corrupts the
 > other's in-flight edits invisibly -- a mid-flight multi-step edit can land

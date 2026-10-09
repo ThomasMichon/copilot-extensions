@@ -812,7 +812,7 @@ class TestCrossAccountAuth:
         LOCAL side being pushed. A locally rebased/reset branch could
         otherwise still satisfy the lease while silently dropping the
         commits it claims to carry forward incrementally; refuse instead."""
-        monkeypatch.setattr(go, "is_branch_merged", lambda *a, **k: False)
+        monkeypatch.setattr(go, "is_commit_ancestor", lambda *a, **k: False)
         git_calls = []
         monkeypatch.setattr(go, "git", lambda *a, **k: git_calls.append(a) or types.SimpleNamespace(
             returncode=1, stdout="", stderr=""))
@@ -825,7 +825,7 @@ class TestCrossAccountAuth:
         assert git_calls == []  # refused before ever attempting the push
 
     def test_push_with_lease_expect_proceeds_when_ancestor(self, monkeypatch):
-        monkeypatch.setattr(go, "is_branch_merged", lambda *a, **k: True)
+        monkeypatch.setattr(go, "is_commit_ancestor", lambda *a, **k: True)
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         git_calls = []
 
@@ -844,11 +844,11 @@ class TestCrossAccountAuth:
         verifies ``src`` (what's actually being pushed)."""
         seen = {}
 
-        def fake_is_branch_merged(expect, ref, *, cwd):
+        def fake_is_commit_ancestor(expect, ref, *, cwd):
             seen["expect"], seen["ref"] = expect, ref
             return True
 
-        monkeypatch.setattr(go, "is_branch_merged", fake_is_branch_merged)
+        monkeypatch.setattr(go, "is_commit_ancestor", fake_is_commit_ancestor)
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         git_calls = []
         monkeypatch.setattr(go, "git", lambda *a, **k: git_calls.append(a) or types.SimpleNamespace(
