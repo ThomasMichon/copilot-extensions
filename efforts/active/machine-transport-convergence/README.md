@@ -420,8 +420,19 @@ provider's absence.
   installer-context references remain an explicit evidence gap.
 - This plan extension must land before the independent Picker implementation.
   Overlapping host/WSL consumer work still waits for #5689's original owner.
-  The release correction is now being validated in its owner's #5885, not
-  duplicated here; #5911 will carry that owner's merge receipt.
+  The release correction was owned by #5885, not duplicated here; its landed
+  receipt and still-open promotion evidence are recorded below.
+
+### 2026-10-09 - Release remediation landed; deployment evidence open
+- The original owner merged #5885 into `dev` as
+  `3b1cbe29706cd8494157b06a5873d8dbb25895b9` and closed #5911 with a
+  merge receipt. The wrapped-I/O source blocker is resolved; do not resume its
+  implementation or treat the old failure entry as the current remediation state.
+- The owner's required guard and native platform-classification evidence passed
+  before merge, without weakening the real bounded-wait assertions.
+  Normal promotion is running; successful promotion and the applicable
+  installed-consumer refresh still need separate verification. Source merge
+  does not close the campaign's deployment evidence.
 
 ### 2026-10-09 - Distinct ambiguity error contract
 - The latest review identified a previously missed API mismatch: strict
