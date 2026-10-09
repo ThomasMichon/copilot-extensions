@@ -1,0 +1,9 @@
+{
+  "comment": "Status monitor retries a handoff cutover whose successor spawn failed before opening any pane or process (up to three attempts), instead of stranding the handoff",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

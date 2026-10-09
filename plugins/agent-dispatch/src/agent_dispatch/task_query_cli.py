@@ -9,6 +9,7 @@ import sys
 import time
 
 from .client import DispatchError
+from .handoff_claim_release import is_handoff_task
 from .loop_commands import _resolve_cli_module
 from .queue_common import worker_id_for
 
@@ -357,13 +358,9 @@ def _cmd_payload(args: argparse.Namespace) -> int:
     return _core()._emit(result)
 
 def _task_is_handoff(task: dict) -> bool:
-    """A task is a *handoff* baton (exactly-once, spent-aware) iff it carries
-    the ``handoff`` label or originates from ``context-handoff`` -- shared by
-    the initial-snapshot check and the refreshed-re-fetch check below so both
-    apply the identical classification rather than drifting apart."""
-    return ("handoff" in (task.get("labels") or [])) or (
-        task.get("source") == "context-handoff"
-    )
+    """Shared by the initial-snapshot check and the refreshed-re-fetch check
+    below so both apply the identical classification rather than drifting apart."""
+    return is_handoff_task(task)
 
 def _fence_consumer_session(
     c, task_id: str, owner: str, *, expected_generation: int | None

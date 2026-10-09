@@ -1,0 +1,9 @@
+{
+  "comment": "attention: a consumed (submitted) handoff baton is spent, never a review item; an unclaimed handoff past AGENT_DISPATCH_ATTENTION_HANDOFF_AFTER_SECS (default 600) is stalled",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

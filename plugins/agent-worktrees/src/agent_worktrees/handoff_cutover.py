@@ -334,8 +334,8 @@ def _handoff_cutover_spawn_result(
         if not result.get("ok"):
             failure = dict(result, ok=False)
             failure["error"] = f"failed to spawn headless successor: {result.get('error')}"
-            activity.log_event(
-                "handoff_successor_spawn_failed", error=result.get("error"), **spawn_event_ctx)
+            activity.log_event("handoff_successor_spawn_failed", error=result.get("error"),
+                               spawned_nothing=result.get("spawned_nothing") is True, **spawn_event_ctx)
             return 4, failure
         pid = result.get("pid")
         activity.log_event(
@@ -422,9 +422,9 @@ def _handoff_cutover_spawn_result(
         "expected_mux_session": expected_mux_session,
         "method": "mux_new_window_interactive_argv",
     }
-    def _spawn_failed(error: object) -> None:
-        activity.log_event(
-            "handoff_successor_spawn_failed", error=error, **spawn_event_ctx)
+    def _spawn_failed(error: object, *, spawned_nothing: bool = False) -> None:
+        activity.log_event("handoff_successor_spawn_failed", error=error,
+                           spawned_nothing=spawned_nothing, **spawn_event_ctx)
     activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
     try:
         result = pane_lifecycle.pane_create(
@@ -438,7 +438,7 @@ def _handoff_cutover_spawn_result(
     if not result.get("ok"):
         failure = dict(result, ok=False)
         failure["error"] = f"failed to open successor window: {result.get('error')}"
-        _spawn_failed(result.get("error"))
+        _spawn_failed(result.get("error"), spawned_nothing=result.get("spawned_nothing") is True)
         return 4, failure
     new_pane = result.get("new_pane")
     activity.log_event(
