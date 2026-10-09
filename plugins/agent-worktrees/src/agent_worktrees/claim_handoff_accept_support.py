@@ -7,6 +7,8 @@ import shlex
 import subprocess
 from collections.abc import Callable
 
+from agent_procutil import no_window_kwargs
+
 from . import claimant
 from . import config as cfg
 from . import machine_identity
@@ -27,12 +29,10 @@ def same_machine(a: str, b: str) -> bool:
     loopback for a same-machine accept. Falls back to the direct string
     comparison (no worse than before) if the registry can't be loaded.
     """
-    if a == b:
-        return True
     try:
         config = cfg.load_config()
     except Exception:
-        return False
+        return a == b
     return machine_identity.is_local_machine(a, config) and machine_identity.is_local_machine(b, config)
 
 
@@ -136,6 +136,7 @@ def remote_accept_source(
             capture_output=True,
             text=True,
             timeout=timeout + 4,
+            **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         raise error_type(

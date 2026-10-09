@@ -101,6 +101,7 @@ class SpawnTarget:
     type: str = "local"  # "local", "ssh", or "command"
     cwd: str | None = None
     host: str | None = None  # SSH alias (from machines.yaml)
+    execution_space_key: str | None = None
     user: str | None = None
     copilot_path: str | None = None
     copilot_args: list[str] = field(default_factory=list)
@@ -141,7 +142,7 @@ class SpawnTarget:
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""
-        return json.dumps(asdict(self))
+        return json.dumps({key: value for key, value in asdict(self).items() if key != "execution_space_key" or value is not None})
 
     @classmethod
     def from_json(cls, raw: str) -> SpawnTarget:
@@ -601,7 +602,6 @@ async def _resolve_worktree_remote(
         log.info("Resolving remote worktree on %s: %s", target.host, cmd)
         return await manager.exec_command(target.host, cmd, timeout=timeout)
 
-    # The shared compatibility policy never discards supplied caller metadata.
     result = await _run(new_extra)
     if creating_new and not result.timed_out and new_extra and can_retry_legacy_resolve(
         exit_code=result.exit_code,

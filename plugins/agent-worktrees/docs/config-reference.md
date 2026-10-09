@@ -54,6 +54,39 @@ that carries no in-repo config.
 
 ---
 
+## Execution-space identity
+
+A machine registry entry opts into independent execution-space identity with
+`execution_platform: windows`, `wsl` or `linux`. Its registry key is canonical;
+`physical_host` is optional grouping metadata, not registry or ownership
+authority. Register Windows and WSL separately, such as `workstation-windows`
+and `workstation-wsl`, even when their OS hostname is identical.
+
+Select the current key through the execution user's own machine-local or global
+configuration:
+
+```yaml
+machine: workstation-windows
+```
+
+The selected key must exist and match the actual execution platform. New
+worktrees, including unowned creations, fail before source fetch when that
+selection is invalid. Invalid registry data cannot supply a hostname fallback.
+Each execution user retains its own validated registry root, project
+registrations and settings; no records or preferences are copied between spaces.
+
+Qualified references retain `registered-space-key/project/worktree-id`.
+Existing records remain readable and are never automatically rebound. After
+opting in, ambiguous legacy records and foreign-space lifecycle mutations are
+refused; review their provenance before any separate migration. Cross-space
+owned creation is still unsupported before allocation. This feature does not
+add reservation/receipt authority.
+
+Registries without explicit execution-space declarations retain their legacy
+lifecycle behavior. Distinct registered keys nevertheless do not become local
+merely through shared hostname metadata. Keys cannot contain whitespace, path
+separators or reference delimiters and must be unique without regard to case.
+
 ## Machine-local config — `~/.{project}/config.yaml`
 
 Optional. Only what is specific to **this machine**, or overrides. The installer

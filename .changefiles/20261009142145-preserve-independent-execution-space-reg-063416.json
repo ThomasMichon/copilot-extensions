@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve independent execution-space registry identity and strict ownership authority in shared machine transport.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -33,6 +33,9 @@ def is_local_machine(name: str, config: cfg.Config) -> bool:
     and, as a final ground-truth check, the real local OS hostname, before
     deciding.
     """
+    from .execution_spaces import require_owner_identity
+
+    require_owner_identity(name, config, canonical_ref=False)
     return _mt_is_local_machine(
         name,
         config_machine=config.machine,

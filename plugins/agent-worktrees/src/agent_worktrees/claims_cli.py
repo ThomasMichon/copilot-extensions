@@ -389,17 +389,8 @@ def _resolve_owner_ref_record_path(
     config: cfg.Config,
 ) -> tuple[Path | None, str, str | None]:
     """Resolve a qualified owner-ref to a local tracking record path."""
-    parsed = tracking.parse_claim_ref(owner_ref)
-    if parsed is None or not parsed.is_qualified:
-        return (
-            None,
-            "",
-            f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
-        )
-    if parsed.machine != config.machine:
-        return (None, parsed.worktree_id, None)
-    path = cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
-    return (path, parsed.worktree_id, None)
+    from .execution_spaces import resolve_owner_record_path
+    return resolve_owner_record_path(owner_ref, config)
 
 
 def _dispatch_claim(verb: str, verb_args: dict):
@@ -412,6 +403,9 @@ def _dispatch_claim(verb: str, verb_args: dict):
     from . import status_monitor_runtime as _smr
     from . import tracking_write
 
+    from .execution_spaces import require_record_mutation
+    yaml_path = Path(verb_args["yaml_path"])
+    require_record_mutation(tracking.load_record(yaml_path), cfg.load_config())
     return tracking_write.dispatch(
         verb,
         verb_args,

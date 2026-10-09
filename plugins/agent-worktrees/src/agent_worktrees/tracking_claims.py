@@ -33,7 +33,7 @@ _CLAIM_LIVE_STATES: tuple[str, ...] = ("", "active", "at-rest")
 
 @dataclass
 class ClaimRef:
-    """A parsed qualified reference to a claimed resource / owning worktree."""
+    """Qualified resource/owner ref; ``machine`` is the registered execution-space key when opted in."""
 
     worktree_id: str
     machine: str | None = None

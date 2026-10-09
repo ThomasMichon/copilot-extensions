@@ -75,6 +75,8 @@ class MachineConfig:
     ssh_ready: bool = False
     auth_hooks: list[AuthHook] = field(default_factory=list)
     alias: str = ""
+    execution_platform: str = ""
+    physical_host: str = ""
 
     def get_ssh_env(self, env_name: str | None = None) -> SshEnvironment | None:
         """Get an SSH environment by name, or the first available one."""
@@ -122,10 +124,13 @@ class MachineConfig:
 def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
     """Parse raw machines.yaml data into typed MachineConfig objects."""
     machines: dict[str, MachineConfig] = {}
-    entries = parse_machine_entries(
-        data, default_ssh_alias_to_key=True, default_ssh_shell="bash",
-        keep_unnamed_environments=True, preserve_environment_values=True,
-    )
+    try:
+        entries = parse_machine_entries(
+            data, default_ssh_alias_to_key=True, default_ssh_shell="bash",
+            keep_unnamed_environments=True, preserve_environment_values=True,
+        )
+    except ValueError as exc:
+        raise TopologyLoadError(str(exc)) from exc
     metadata = {str(key): value for key, value in data.get("machines", {}).items()}
     for entry in entries.values():
         key = entry.key
@@ -163,6 +168,8 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
             ssh_ip=ssh_block.get("ip"),
             ssh_ready=entry.ssh_ready,
             auth_hooks=auth_hooks,
+            execution_platform=entry.execution_platform,
+            physical_host=entry.physical_host,
         )
 
     return machines

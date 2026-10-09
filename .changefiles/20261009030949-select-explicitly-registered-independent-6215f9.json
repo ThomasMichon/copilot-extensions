@@ -1,0 +1,9 @@
+{
+  "comment": "Select explicitly registered independent execution spaces and retain their identity through topology and target resolution.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -425,6 +425,12 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             args.bare_resume = False
 
     bare_resume = getattr(args, "bare_resume", False)
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+    try:
+        require_record_mutation(record, config)
+    except ExecutionSpaceError as exc:
+        output.err(str(exc))
+        return 3
     plan_work_dir = os.path.expanduser("~") if bare_resume else record.worktree_path
     launch_preflight = context.launch_preflight or _preflight_launch(config, args, plan_work_dir)
     if launch_preflight.error:
@@ -432,6 +438,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
 
     with tracking._RecordLock(record.yaml_path):
         fresh = tracking.load_record(record.yaml_path)
+        require_record_mutation(fresh, config)
         tracking.mark_resumed(fresh, save=False)
         tracking.save_record(fresh)
     record.resume_count = fresh.resume_count
