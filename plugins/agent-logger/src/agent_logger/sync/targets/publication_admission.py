@@ -33,7 +33,7 @@ from agent_logger.sync.provenance import (
 from agent_logger.sync.targets.base import PushResult, SourceIdentityLike
 
 if TYPE_CHECKING:
-    from agent_logger.source_roots import SourceIdentity
+    from agent_logger.source_roots import MarkerStamp, SourceIdentity
 
 #: ``O_NOFOLLOW`` has no Windows equivalent; the temp-write path below still
 #: gets Windows-safe no-follow semantics for free because it only ever opens
@@ -78,7 +78,9 @@ def _publication_lock_path(dest: Path) -> Path:
     return dest.parent / f".publication-admission-{hashlib.sha256(key).hexdigest()}.lock"
 
 
-def _read_marker(marker_path: Path) -> tuple[SourceIdentity, tuple[str, ...]] | None:
+def _read_marker(
+    marker_path: Path,
+) -> tuple[SourceIdentity, tuple[str, ...], MarkerStamp] | None:
     """Read through the canonical bounded, schema-validating no-link reader."""
     from agent_logger.source_roots import read_source_metadata
 
@@ -87,8 +89,7 @@ def _read_marker(marker_path: Path) -> tuple[SourceIdentity, tuple[str, ...]] | 
         io_path.lstat()
     except FileNotFoundError:
         return None
-    identity, aliases, _ = read_source_metadata(io_path)
-    return identity, aliases
+    return read_source_metadata(io_path)
 
 
 def _move_marker_no_replace_windows(temp_path: Path, marker_path: Path) -> None:
@@ -119,14 +120,19 @@ def _publish_marker_no_replace(temp_path: Path, marker_path: Path) -> None:
 
 
 def _check_existing_claim(
-    existing: tuple[SourceIdentity, tuple[str, ...]] | None,
+    existing: tuple[SourceIdentity, tuple[str, ...], MarkerStamp] | None,
     incoming: SourceIdentity,
     publication_key: str,
     marker_path: Path,
 ) -> PushResult | None:
     if existing is None:
         return PushResult(ok=False, detail=f"publication marker disappeared: {marker_path}")
-    recorded, aliases = existing
+    recorded, aliases, _ = existing
+    if "/" in publication_key:
+        group = publication_key.split("/", 1)[0]
+        expected_kind = "container" if group.endswith(".containers") else "codespace"
+        if recorded.venue_kind != expected_kind:
+            return PushResult(ok=False, detail="provider group disagrees with recorded venue kind")
     normalize = str.casefold if os.name == "nt" else str
     allowed = {normalize(key) for key in (recorded.namespace, *aliases)}
     if normalize(publication_key) not in allowed:
@@ -143,6 +149,19 @@ def _resolve_post_race_marker(
         existing = _read_marker(marker_path)
     except (OSError, ValueError, RecursionError) as exc:
         return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
+    return _check_existing_claim(existing, incoming, publication_key, marker_path)
+
+
+def _verify_published_marker(
+    marker_path: Path, file_id: tuple[int, int],
+    incoming: SourceIdentity, publication_key: str,
+) -> PushResult | None:
+    try:
+        existing = _read_marker(marker_path)
+    except (OSError, ValueError, RecursionError) as exc:
+        return PushResult(ok=False, detail=f"unreadable published marker: {exc}")
+    if existing is None or existing[2][:2] != file_id:
+        return PushResult(ok=False, detail="published marker differs from the created file")
     return _check_existing_claim(existing, incoming, publication_key, marker_path)
 
 
@@ -282,6 +301,10 @@ def _admit_under_lock(
             _publish_marker_no_replace(temp_path, marker_path)
         except FileExistsError:
             failure = _resolve_post_race_marker(marker_path, incoming, publication_key)
+        else:
+            failure = _verify_published_marker(
+                marker_path, created_file_id, incoming, publication_key
+            )
     except OSError as exc:
         failure = PushResult(ok=False, detail=f"cannot claim destination: {exc}")
     finally:

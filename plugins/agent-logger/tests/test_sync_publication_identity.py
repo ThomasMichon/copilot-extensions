@@ -141,6 +141,19 @@ def test_publication_identity_rejects_undeclared_existing_alias(tmp_path: Path) 
     assert marker.read_bytes() == encoded
 
 
+def test_publication_identity_rejects_alias_in_incompatible_provider_group(tmp_path: Path) -> None:
+    key = "host.containers/worker"
+    dest = tmp_path / key
+    dest.mkdir(parents=True)
+    marker = dest / admission.PUBLICATION_IDENTITY_MARKER
+    encoded = _metadata(_identity(), [key])
+    marker.write_bytes(encoded)
+    result = admission.check_publication_identity(dest, _identity(), publication_key=key)
+    assert result is not None and not result.ok
+    assert "venue kind" in result.detail
+    assert marker.read_bytes() == encoded
+
+
 def test_publication_identity_full_repository_collision(tmp_path: Path) -> None:
     first = SourceIdentity("codespace", "github", repository="owner-a/repo", venue_name="box")
     second = SourceIdentity("codespace", "github", repository="owner-b/repo", venue_name="box")
@@ -321,6 +334,38 @@ def test_publication_identity_post_creation_replacement_preserved(
     assert result is not None and not result.ok
     assert "identity changed" in result.detail
     assert swapped[0].read_bytes() == b"another writer"
+
+
+@pytest.mark.parametrize("replacement", ["matching", "different", "symlink"])
+def test_publication_identity_replaced_temp_cannot_admit_payload(
+    tmp_path: Path, monkeypatch, replacement,
+) -> None:
+    outside = tmp_path / "replacement"
+    provider = "other" if replacement == "different" else "copilot"
+    payload = _metadata(_identity(provider))
+    outside.write_bytes(payload)
+    original_publish = admission._publish_marker_no_replace
+
+    def race(temp, final):
+        if replacement == "symlink":
+            temp.unlink()
+            try:
+                temp.symlink_to(outside)
+            except OSError:
+                pytest.skip("symlinks unavailable")
+        else:
+            os.replace(outside, temp)
+        original_publish(temp, final)
+
+    monkeypatch.setattr(admission, "_publish_marker_no_replace", race)
+    root = tmp_path / "archives"
+    result = LocalTarget({"path": str(root)}).push(
+        _source(tmp_path), "m1", source_identity=_identity()
+    )
+    assert not result.ok
+    assert not (root / "m1" / "session-state").exists()
+    marker = root / "m1" / admission.PUBLICATION_IDENTITY_MARKER
+    assert marker.read_bytes() == payload
 
 
 def test_publication_identity_lock_setup_failure(tmp_path: Path) -> None:
