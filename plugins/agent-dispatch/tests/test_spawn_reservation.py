@@ -423,6 +423,105 @@ def test_retired_session_is_not_recarried_from_legacy_failed_attempt(q):
     assert fresh.worktree_ownership == "reused"
     assert fresh.session_handle is None
     assert fresh.exclusive_key == "review:repo:42"
+    # Distinct from "never had a carried session" -- consumers must be able
+    # to tell a deliberately retired conversation apart from a plain
+    # worktree reuse, so they refuse the worktree-resume recovery fallback
+    # too (not just the session_handle one).
+    assert fresh.conversation_retired is True
+
+
+def test_conversation_retired_marker_survives_a_handle_less_retry(q):
+    """A retired marker must propagate forward across a retry that itself
+    never recorded a fresh session handle -- otherwise the next attempt's
+    own ``prior`` row lookup sees the SAME already-null session_handle, the
+    retired-detection query never re-runs (it's gated on a non-null carried
+    session), and the marker silently resets to False, re-opening the
+    worktree-resume fallback onto the still-retired conversation."""
+    task = q.create("review", exclusive_key="review:repo:43")
+    retired, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        retired.key,
+        session_handle="local-body:session-retired-2",
+        worktree="wt-reviewer-2",
+    )
+    q.request_spawn_release(retired.key)
+    q.retire_spawn(
+        retired.key,
+        exact_absence=True,
+        conclusion_state="complete",
+        conclusion_detail='{"action":"preserved","reason":"test-cleanup-complete"}',
+    )
+
+    # Attempt 2: the retired-detection branch fires, dropping the carried
+    # session and marking conversation_retired -- but this attempt then
+    # fails BEFORE ever recording a replacement session handle (the exact
+    # handle-less-retry shape the finding describes).
+    first_fresh, _ = q.reserve_spawn(task.id)
+    assert first_fresh.conversation_retired is True
+    assert first_fresh.session_handle is None
+    q.fail_spawn(first_fresh.key, detail="bridge unavailable before a session recorded")
+
+    # Attempt 3: must still see the marker, even though its own ``prior``
+    # row lookup only has a null session_handle to go on.
+    second_fresh, reserved = q.reserve_spawn(task.id)
+
+    assert reserved is True
+    assert second_fresh.attempt == 3
+    assert second_fresh.worktree == "wt-reviewer-2"
+    assert second_fresh.session_handle is None
+    assert second_fresh.conversation_retired is True
+
+
+def test_conversation_retired_marker_clears_once_a_fresh_session_lands(q):
+    """The mirror case of the handle-less-retry regression above: once a
+    retired-conversation attempt actually succeeds and records a genuinely
+    NEW, not-yet-retired session, a later reservation carrying THAT session
+    forward must not inherit the stale ``conversation_retired=True`` an
+    earlier row happened to still carry -- the retired-detection
+    re-verification against the live session_handle is authoritative and
+    must not be permanently overridden by an older marker, or the
+    worktree-resume recovery fallback would stay wrongly disabled forever
+    for a conversation that was never itself retired."""
+    task = q.create("review", exclusive_key="review:repo:44")
+    retired, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        retired.key,
+        session_handle="local-body:session-retired-3",
+        worktree="wt-reviewer-3",
+    )
+    q.request_spawn_release(retired.key)
+    q.retire_spawn(
+        retired.key,
+        exact_absence=True,
+        conclusion_state="complete",
+        conclusion_detail='{"action":"preserved","reason":"test-cleanup-complete"}',
+    )
+
+    # Attempt 2: retired-detection fires (conversation_retired=True), but
+    # this time the attempt SUCCEEDS and records a brand-new, genuinely
+    # fresh session on its own row.
+    replacement, _ = q.reserve_spawn(task.id)
+    assert replacement.conversation_retired is True
+    q.record_spawn(
+        replacement.key,
+        session_handle="local-body:session-fresh-1",
+        worktree="wt-reviewer-3",
+    )
+    q.settle_spawn(
+        replacement.key,
+        conclusion_state="complete",
+        conclusion_detail='{"action":"preserved","reason":"test-cleanup-complete"}',
+    )
+
+    # Attempt 3: carries the NEW session forward. Its own retired-detection
+    # re-verification finds no release_requested/terminal row for THIS
+    # handle, so it must come back conversation_retired=False -- not
+    # inherit attempt 2's stale True.
+    third, reserved = q.reserve_spawn(task.id)
+
+    assert reserved is True
+    assert third.session_handle == "local-body:session-fresh-1"
+    assert third.conversation_retired is False
 
 
 def test_exclusive_key_can_take_affinity_as_initial_resume_target(q):

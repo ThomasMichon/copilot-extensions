@@ -21,6 +21,8 @@ import os
 import re
 from pathlib import Path
 
+from standalone_consumers import STANDALONE_CONSUMERS
+
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     # 3.10 support floor -- see worktree_manager.source_config's own
     # identical fallback for the established pattern.
@@ -33,8 +35,8 @@ PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 
 # Consumer trees that sit outside plugins/ but still reference shared libs
-# the same way -- mirrors sync-vendored-libs.py's own _EXTRA_CONSUMER_DIRS.
-_EXTRA_CONSUMER_DIRS = ("worktree-manager",)
+# the same way, shared with release and vendored-source validators.
+_EXTRA_CONSUMER_DIRS = STANDALONE_CONSUMERS
 
 _UV_SOURCES_HEADER_RE = re.compile(r'^\[tool\.uv\.sources\]\s*$', re.MULTILINE)
 _TABLE_HEADER_RE = re.compile(r'^\[', re.MULTILINE)

@@ -41,6 +41,7 @@ def test_module_imports_without_work_coalescing_singleton_installed():
         "        raise ModuleNotFoundError(name)\n"
         "    return real_import(name, *a, **k)\n"
         "builtins.__import__ = fake_import\n"
+        "from agent_worktrees.worktree_creation import LaunchSeedStagingFailure\n"
         "import agent_worktrees.worktree_status_audit\n"
         "import agent_worktrees.__main__\n"
         "print('OK')\n"

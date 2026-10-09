@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from machine_transport import AmbiguousMachineError
 from ssh_manager import CarrierRemoteError
 
 
@@ -25,6 +26,12 @@ class RemoteBridgeError(RuntimeError):
         self.details = dict(details or {})
         self.reconnectable = reconnectable
         super().__init__(message)
+
+    @classmethod
+    def from_resolution_error(cls, error: ValueError) -> RemoteBridgeError:
+        if isinstance(error, AmbiguousMachineError):
+            return cls(400, "ambiguous_host", str(error))
+        return cls(404, "host_not_found", str(error))
 
     @classmethod
     def from_carrier(cls, error: CarrierRemoteError) -> RemoteBridgeError:

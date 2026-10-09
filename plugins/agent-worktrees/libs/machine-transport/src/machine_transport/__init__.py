@@ -12,11 +12,13 @@ from __future__ import annotations
 
 from .identity import is_local_machine
 from .registry import (
+    AmbiguousMachineError,
     MachineEntry,
     SSHEnvironment,
     find_machine_entry,
     machine_name,
     merge_machines_yaml,
+    parse_machines_yaml,
     parse_machines_yaml_file,
 )
 from .transport import (
@@ -28,6 +30,7 @@ from .transport import (
 )
 
 __all__ = [
+    "AmbiguousMachineError",
     "MachineEntry",
     "SSHEnvironment",
     "TransportPlan",
@@ -37,6 +40,7 @@ __all__ = [
     "is_local_machine",
     "machine_name",
     "merge_machines_yaml",
+    "parse_machines_yaml",
     "parse_machines_yaml_file",
     "resolve_ssh_target",
     "wrap_remote_command",

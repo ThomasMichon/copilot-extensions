@@ -59,6 +59,33 @@ be verified at all (git itself unavailable or the probe timed out) is
 reported separately under `repo_registration.unknown` — visible, but never
 treated as confirmed drift.
 
+## Resume prompt
+
+For a local, stopped worktree, **Actions > Resume prompt…** supplies the first
+turn of the cold Copilot start alongside its prior `--resume=<session>` target.
+It uses the full `--interactive` argument, including with **No Mux**. A live
+session offers **Open**, not Resume with a prompt; Open neither queues nor
+injects a turn, even if the live session has not received its first prompt.
+If the target becomes live during launch, the prompted resume refuses visibly.
+New and Resume prompts are stored with their distinct provenance in the
+worktree's external state folder through the daemon's existing write
+authority. Failed attempts keep the prompt for the next cold attempt.
+Both Manager resolve hops carry the exact staged identity, not another copy
+of its text. Successful Copilot handoff discards the prompt; a setup refusal
+or backend-start failure leaves it available for retry. Open never submits a
+staged Resume prompt. Uncertain handoff acknowledgement keeps the intent
+visible but refuses automatic resubmission, avoiding a duplicate turn.
+A later explicitly supplied prompt replaces the pending intent; a stale
+handoff acknowledgement cannot discard that replacement.
+
+Prompted requests require `--stage-launch-seed` support; ordinary seedless
+launches retain older-engine compatibility. Uninstrumented legacy/custom
+prompt launchers refuse without consuming the seed; use normalized setup or
+adopt the engine's documented launch-seed invocation boundary.
+The `gh copilot` intermediary cannot acknowledge actual Copilot startup;
+prompted requests using that fallback retain their seed and require a direct
+Copilot executable. Ordinary seedless fallback launches are unchanged.
+
 ## One-line bootstrap
 
 **Windows (PowerShell):**

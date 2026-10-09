@@ -1412,8 +1412,10 @@ async def test_multi_environment_machine_key_requires_exact_alias() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["host", "HOST"])
 async def test_machine_key_that_is_exact_alias_selects_that_environment(
     monkeypatch,
+    host,
 ) -> None:
     windows = SimpleNamespace(
         alias="host",
@@ -1448,7 +1450,7 @@ async def test_machine_key_that_is_exact_alias_selects_that_environment(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
 
-    lease = await RemoteOperationService(_Resolver())._lease("host")
+    lease = await RemoteOperationService(_Resolver())._lease(host)
 
     assert lease is not None
     assert captured == {

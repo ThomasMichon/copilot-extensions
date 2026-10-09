@@ -1415,6 +1415,7 @@ do_install() {
             --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
             --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
             --reinstall-package agent-remote-login-shell --refresh-package agent-remote-login-shell \
+            --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
@@ -1976,6 +1977,7 @@ _update_core() {
             --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
             --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
             --reinstall-package agent-remote-login-shell --refresh-package agent-remote-login-shell \
+            --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
         return 1

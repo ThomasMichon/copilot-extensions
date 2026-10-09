@@ -22,6 +22,7 @@ from pathlib import Path
 import yaml
 
 from . import activity
+from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd
 from .sessions_pane_retire import (
     _mux_bin,
     _mux_last_window_guard,  # noqa: F401 -- re-export for tests
@@ -1262,8 +1263,8 @@ class LiveVerdict:
     mux might exist and would reattach instead of exec'ing a fresh command`
     (e.g. seed-delivery gating) should check THIS, not the aggregate: a
     reclaim failure with a conclusive "no mux" from the mux probe itself is
-    not mux uncertainty -- treating it as such can wrongly queue a prompt a
-    `--no-mux` launch then never delivers (there is no pane to queue it to)."""
+    not mux uncertainty. Cold-start Resume prompts require the aggregate
+    ``probes_ok`` as well, because a live un-muxed Copilot also forbids them."""
 
 
 def verify_worktree_active(record) -> LiveVerdict:
@@ -1770,10 +1771,8 @@ def _mux_pane_cmd(
     On Linux/WSL (tmux) the command is prefixed with ``env -u <identity vars>``
     and wrapped by ``pane-wrapper.sh`` (when present). On Windows (psmux) the
     server env is already identity-clean; ``pane-wrapper.ps1`` preserves the
-    verbatim ``pwsh -File <script> … --allow-all`` child argv while decoding a
-    space-free base64 control argument after psmux's lossy argv reconstruction.
-    Every pane-command element remains a single token (psmux cannot carry an
-    element containing spaces -- see :func:`build_mux_new_window_argv`).
+    verbatim child argv from a one-shot JSON argument manifest. Only the quoted
+    wrapper and manifest paths cross psmux's space-joined command boundary.
 
     Native interactive handoff seeding requires the wrapper: without it there is
     no safe place after psmux to reconstruct the multi-word prompt, so failing
@@ -1789,6 +1788,15 @@ def _mux_pane_cmd(
         encoded = base64.b64encode(initial_prompt.encode("utf-8")).decode("ascii")
         controls = [_INITIAL_PROMPT_B64_FLAG, encoded, *controls]
     wrapper = pane_wrapper
+    if wrapper is None and not is_tmux:
+        from .manager_launch_cli import _usable_worktree_manager_launcher_dir
+
+        launch_dir = _usable_worktree_manager_launcher_dir()
+        if launch_dir is not None and all(
+            (launch_dir / name).is_file()
+            for name in ("pane-wrapper.ps1", "pane-launch.ps1")
+        ):
+            wrapper = str(launch_dir / "pane-wrapper.ps1")
     if wrapper is None:
         name = "pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"
         wrapper = os.path.expanduser(f"{_LEGACY_BIN_DIR}/{name}")
@@ -1800,33 +1808,7 @@ def _mux_pane_cmd(
             return clean + [
                 "bash", wrapper, "--aw-wt", worktree_id, *controls, *cmd,
             ]
-        # psmux space-joins pane argv, so even the wrapper path itself cannot be
-        # passed literally when a Windows profile contains spaces. Carry the
-        # wrapper path + its complete argv inside PowerShell's space-free
-        # UTF-16LE EncodedCommand payload instead.
-        wrapper_args = ["-AwWt", worktree_id, *controls, *cmd]
-        wrapper_b64 = base64.b64encode(
-            wrapper.encode("utf-8")
-        ).decode("ascii")
-        args_b64 = base64.b64encode(
-            json.dumps(wrapper_args).encode("utf-8")
-        ).decode("ascii")
-        script = (
-            "$w=[Text.Encoding]::UTF8.GetString("
-            f"[Convert]::FromBase64String('{wrapper_b64}'));"
-            "$j=[Text.Encoding]::UTF8.GetString("
-            f"[Convert]::FromBase64String('{args_b64}'));"
-            "$a=@(ConvertFrom-Json -InputObject $j);"
-            "& $w @a;"
-            "exit $LASTEXITCODE"
-        )
-        encoded_command = base64.b64encode(
-            script.encode("utf-16-le")
-        ).decode("ascii")
-        return [
-            "pwsh.exe", "-NoProfile", "-NoLogo",
-            "-EncodedCommand", encoded_command,
-        ]
+        return file_mux_pane_cmd(wrapper, ["-AwWt", worktree_id, *controls, *cmd])
     if controls:
         raise RuntimeError(
             "pane wrapper is required for launch receipt or native interactive prompt transport"
@@ -1949,12 +1931,16 @@ def mux_new_session(
     import subprocess
 
     sess = mux_session_name(worktree_id)
+    argv: list[str] = []
     try:
         argv = build_mux_new_session_argv(worktree_id, work_dir, cmd, env, mux=mux)
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
+        if not isinstance(e, subprocess.TimeoutExpired):
+            cleanup_mux_pane_args(argv)
         return {"ok": False, "session": sess, "new_pane": None, "error": str(e)}
     if r.returncode != 0:
+        cleanup_mux_pane_args(argv)
         return {
             "ok": False, "session": sess, "new_pane": None,
             "error": r.stderr.strip() or f"exit {r.returncode}",
@@ -2505,6 +2491,7 @@ def mux_new_window(
     )
     if receipt_path:
         receipt_path.unlink(missing_ok=True)
+    argv: list[str] = []
     try:
         argv = build_mux_new_window_argv(
             worktree_id,
@@ -2518,8 +2505,11 @@ def mux_new_window(
         )
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
+        if not isinstance(e, subprocess.TimeoutExpired):
+            cleanup_mux_pane_args(argv)
         return {"ok": False, "new_pane": None, "error": str(e)}
     if r.returncode != 0:
+        cleanup_mux_pane_args(argv)
         return {
             "ok": False, "new_pane": None,
             "error": r.stderr.strip() or f"exit {r.returncode}",

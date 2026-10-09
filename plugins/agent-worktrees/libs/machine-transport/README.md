@@ -24,7 +24,8 @@ resolved -- network call to reach a host that is actually the caller itself.
 ## What this library owns
 
 - **`registry`** -- `MachineEntry`/`SSHEnvironment` dataclasses,
-  `parse_machines_yaml_file()` (one file), `merge_machines_yaml()` (additive
+  `parse_machines_yaml()` (resolved raw data), `parse_machines_yaml_file()` (one file),
+  `merge_machines_yaml()` (additive
   legacy+canonical merge), and `find_machine_entry()` (key/alias/hostname/
   display_name matching, case-insensitive).
 - **`identity`** -- `is_local_machine()`: the canonicalized "is this the
@@ -77,6 +78,26 @@ entirely (for a CLI dispatch consumer that always treats "present in
 `ssh_environments`" as "has a usable alias"). Picking the wrong one for an
 existing call site is a real behavior change -- preserve whichever that call
 site already required before switching to this shared parser.
+
+The raw-data parser additionally offers explicit compatibility policies:
+`default_ssh_alias_to_key`, `default_ssh_shell`, and
+`keep_unnamed_environments`. Bridge opts into key aliases, `bash`, and retaining
+unnamed environments to preserve its legacy behavior; file parsing and other
+consumers keep their existing defaults. These policies fill missing fields only,
+not explicitly empty aliases or shells, and do not change normalization of
+unrelated explicit fields. Bridge separately opts into
+`preserve_environment_values=True` for its historical raw environment values;
+this is independent of the missing-value policies. `SSHEnvironment` also carries optional
+`port` and `user` metadata for consumers that need it.
+
+`find_machine_entry(..., reject_ambiguous=True)` rejects a non-exact identity
+shared by multiple machines with `AmbiguousMachineError`, a `ValueError`
+subclass that lets API consumers distinguish ambiguity from a missing entry
+without parsing diagnostic text. Exact registry keys retain precedence. The default
+remains first-match for existing consumers. Bridge opts into strict identity
+matching and separately binds SSH aliases to their precise environment: that
+consumer-specific binding and default environment preference remain outside
+this library, as do its authentication hooks and ACP command shapes.
 
 ## As a Dependency
 

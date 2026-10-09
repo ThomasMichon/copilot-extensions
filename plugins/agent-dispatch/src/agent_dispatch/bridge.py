@@ -312,6 +312,7 @@ def spawn_worker(
     target_dir: str | None = None,
     worktree_id: str | None = None,
     reclaim: bool = False,
+    resume_worktree: bool = False,
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
@@ -344,6 +345,10 @@ def spawn_worker(
     :func:`agent_dispatch.embody.parse_fleet_body_session` /
     :func:`agent_dispatch.embody.local_body_verdict`).
 
+    ``resume_worktree`` resolves a retained allocation through its owning
+    worktree's resume path without taking over a live interactive holder.
+    It cannot be combined with the explicit, potentially forceful ``reclaim``.
+
     ``reclaim`` is agent-dispatch's own judgment that ``worktree_id`` is stale
     and safe to take over (e.g. an unclaimed handoff task past a bounded
     reconciliation window) -- it never implements the in-place replacement
@@ -371,6 +376,16 @@ def spawn_worker(
         raise BridgeUnavailable("agent-bridge CLI not found on PATH")
     if prompt is None:
         prompt = worker_prompt(task_id, worker_id=worker_id, route=route)
+    if resume_worktree:
+        if reclaim or not worktree_id:
+            raise ValueError("resume_worktree requires worktree_id and forbids reclaim")
+        from . import bridge_reclaim
+
+        return bridge_reclaim.resume_worktree_and_send(
+            worktree_id, prompt, exe=exe, agent=agent,
+            caller=f"agent-dispatch:{worker_id}", wait=wait,
+            json_output=json_output, timeout=timeout, allow_takeover=False,
+        )
     record = _resolve_agent_record(
         agent,
         timeout=min(timeout, 8.0) if timeout is not None else 8.0,
@@ -439,6 +454,7 @@ def spawn_or_resume_worker(
     project: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    resume_worktree: bool = False,
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
@@ -448,7 +464,9 @@ def spawn_or_resume_worker(
     Unknown liveness and a live session that rejects the prompt both fail
     closed. A confirmed-gone session is offered one resume attempt first because
     a stopped ACP session remains reusable; only a failed resume after a
-    confirmed-gone verdict permits creating a replacement.
+    confirmed-gone verdict permits creating a replacement. For a retained
+    allocation, ``resume_worktree`` instead recovers the conversation through
+    the worktree owner; missing bridge handles never justify a fresh conversation.
     """
     if prior_session_id:
         verdict = liveness_fn(prior_session_id) if liveness_fn else "unknown"
@@ -484,6 +502,7 @@ def spawn_or_resume_worker(
         project=project,
         target_dir=target_dir,
         worktree_id=worktree_id,
+        resume_worktree=resume_worktree,
         wait=wait,
         json_output=json_output,
         timeout=timeout,

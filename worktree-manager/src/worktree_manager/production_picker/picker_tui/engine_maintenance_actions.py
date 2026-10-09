@@ -7,20 +7,9 @@ import threading
 from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
 
-# picker-new-session-prompt-and-composer Phase A: the prompt collected in
-# the New-worktree dialog's own prompt field (``ScopeDlgScreen``'s
-# ``show_prompt``, folded in -- no separate screen) is persisted
-# (`agent-worktrees create`/`resolve --new --seed`) and delivered end-to-end:
-# `engine_client.resolve_launch_plan()` forwards `--seed`, and
-# `launch-session.{ps1,sh}` call `agent-worktrees embody --worktree-id`
-# right after creating a worktree's FIRST live mux session, triggering
-# embody's own "already embodies this worktree" resume branch to claim +
-# deliver any pending seed. Not delivered for No Mux (direct launch, no mux
-# pane for embody to find), Bare (no Copilot bootstrap at all), Anchor repo,
-# or a remote target (the engine's own resolve CLI rejects `--seed`
-# alongside `--base`/`--machine`) -- `_open_optmenu()` silently drops
-# whatever was typed for any of those instead of forwarding it to a launch
-# that could never deliver it.
+# Local New prompts use the same staged backend handoff with or without mux.
+# Bare/Anchor have no supported worktree Copilot handoff; remote seed relay
+# remains unsupported by the engine.
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
@@ -469,7 +458,7 @@ class PickerScreenMaintenanceActionsMixin:
                 return
             on = {o["label"] for o in dlg["opts"] if o["on"]}
             seed_prompt = ""
-            if show_prompt and not ({"Anchor repo", "Bare", "No Mux"} & on):
+            if show_prompt and not ({"Anchor repo", "Bare"} & on):
                 seed_prompt = scr.seed_prompt
             self._confirm_new_worktree(dlg, seed_prompt=seed_prompt)
         self.app.push_screen(scr, _after)

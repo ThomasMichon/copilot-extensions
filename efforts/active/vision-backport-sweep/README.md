@@ -78,7 +78,26 @@
   `ThomasMichon/copilot-extensions#580` (pre-existing relay stability tracker;
   source-proven pinned-port eviction without occupant ownership/staleness proof) ·
   `ThomasMichon/copilot-extensions#5890` (existing unresolved closed-signature
-  recurrence and bounded automated-attempt policy)
+  recurrence and bounded automated-attempt policy) ·
+  `ThomasMichon/copilot-extensions#5896` (unreadable context sources silently
+  omitted from budget attribution) ·
+  `ThomasMichon/copilot-extensions#5898` (production AHP Picker mux presentation;
+  an explicitly excluded follow-up, not a new relocation regression) ·
+  `ThomasMichon/copilot-extensions#5900` (optional process-spawn provenance
+  realization through existing telemetry seams) ·
+  `ThomasMichon/copilot-extensions#5903` (tolerant endpoint JSON-shape access
+  raises outside its declared unavailable outcome) ·
+  `ThomasMichon/copilot-extensions#5904` (endpoint owner-check/unlink publication
+  race after the completed PID-guard slice) ·
+  `ThomasMichon/copilot-extensions#5908` (Sessions overlay loses provider failure
+  and renders empty history) ·
+  `ThomasMichon/copilot-extensions#5909` (unknown execution observation becomes
+  affirmative Picker labels) ·
+  `ThomasMichon/copilot-extensions#5910` (durable gitless core-source discovery
+  after installed invocation/self-update) ·
+  `ThomasMichon/copilot-extensions#5912` (venue subtitle durable-title authority) ·
+  `ThomasMichon/copilot-extensions#5913` (declared New-venue provision/embody
+  bindings, beyond the completed design-only handoff)
 
 ## Guiding Intent
 
@@ -471,8 +490,77 @@ Follow-up installation-boundary decisions, 2026-10-09 (verbatim selections):
       - [ ] CI-remediation complete external acceptance and charter-enforcement
             reconciliation beyond inspected source gates; owner validation
             remains explicit, not inferred from compiled workflow presence.
+      - [x] `visions/harness-guidance/README.md` — scoped ownership, static/local
+            delivery and context-accounting source comparison. Existing intent
+            covers the inspected guarantees; repaired only duplicate section
+            placement without removing intent. Reproduced silent source-read
+            omission in the real budget API with mocked discovery (`#5896`).
+      - [ ] Harness-guidance remaining routing/budget adapters, trust/recovery,
+            native-host composition and complete contributor delivery beyond
+            this scoped source audit.
+      - [x] `visions/process-registry/README.md` — complete current-stage
+            vision/proposal comparison. The existing `#5559` owner explicitly
+            leaves placement and implementation open; proposed admission,
+            broker, query, journal and retention rules are not runtime evidence.
+            No new intent or implementation-absence claim was manufactured.
+      - [x] `visions/process-telemetry/README.md` — scoped existing lifecycle
+            emitters, sink/spool and two real shared-spawn callers compared.
+            No missing vision-level intent was found. Per-site instrumentation
+            is optional; generic process publication remains unproved, tracked
+            as north-star realization `#5900`, not per-site violation tickets.
+      - [ ] Remaining telemetry adopter/publication and closing-resource paths
+            beyond the inspected renderer/SSH routes; no global absence or
+            released cross-platform instrumentation is inferred.
+      - [x] `visions/session-hosting/README.md` — scoped provider/agency,
+            selection, interaction, replay/reconnect, fencing and retirement
+            source audit. Existing vision covers the observed intent. Pure
+            production-routing/composition proof confirmed the known deferred
+            AHP/mux gap (`#5898`); narrowed direct handoff choreography to a
+            partial provider-boundary question under `#2062`.
+      - [ ] Remaining hosting title, represented-human, generalized-provider
+            and full-restart acceptance paths beyond this source slice.
+      - [x] `visions/installer/README.md` — scoped bootstrap, real core/module
+            invocation, update fallback and doctor/readiness source audit.
+            Existing intent covers the inspected capabilities. Withdrew the
+            filesystem-presence-as-false-ready and blanket provisioning-abort
+            claims; only bounded gitless source discovery was carved (`#5910`).
+      - [ ] Installer remaining autonomous-refresh, readiness-consumer, broader
+            adoption/presets and safe-dependent-restart paths beyond this trace;
+            the active control-plane campaign and open `#356`/`#357` retain
+            their scope. `#352`/`#355`/`#1160`/`#1278` are closed historical
+            foundation slices, not current implementation-completion proof.
+      - [x] `visions/picker/README.md` — scoped row identity/disposition/
+            observation, selection/action routing and history presentation trace.
+            Existing intent covers the source; carved unknown-observation label
+            loss (`#5909`) and false-empty history (`#5908`). Existing `#1193`
+            and `#3587` retain neutral Worktrees contribution and search facets.
+            New cold-prompt intent was already backported under `#5415`, not
+            redundantly added here.
+      - [ ] Picker remaining broader recovery, host-context/version display,
+            complete contribution/runtime parity and uninspected surfaces.
+      - [x] `visions/venue-pivots-ux/README.md` — scoped symmetric adapter,
+            shared-renderer, provider-action and creation-contribution trace.
+            Replaced stale pre-overhaul absence claims with pure standing
+            intent; preserved title precedence, ranking, lifecycle differences,
+            Open/New, supervision and every boundary. Carved title content
+            (`#5912`) and per-venue creation binding (`#5913`); `#3657` and
+            `#3507` retain supervision/actions and transferred live validation.
+      - [ ] Venue remaining exact session/mux reattachment, title-preserving
+            truncation, complete claim-contribution admission and live parity
+            beyond the inspected source; shared labels are not full conformance.
 
 ### Phase 3 — Full design/service-invariant audit
+- [x] Scoped endpoint discovery/publication/cleanup API and two shutdown
+      consumers inspected. Shared transport/alternate/override/legacy metadata
+      and conservative PID/probe evidence are real foundations, not whole-cell
+      or all-plugin conformance. In-memory use of actual APIs reproduced
+      malformed-object access (`#5903`) and a publication after the final owner
+      read being deleted by cleanup (`#5904`). No endpoint, PID, socket, service
+      or live cutover was used for either proof.
+- [ ] Remaining endpoint scopes, cross-cell legacy fallback, native permissions,
+      exposure and consumer lifecycle ordering beyond this library/Dispatch/
+      Vault slice; neither API proof establishes a live outage or all-runtime
+      acceptance.
 - [x] Ran a slice of the `plugin-services` invariant audit against every
       `agent-*` plugin's runtime-deploy path, scored against **two separate
       questions per plugin**: does a same-version, content-changed update
@@ -583,6 +671,81 @@ documentation and assets. Neither closing a sweep slice nor publishing the
 sibling plan proves that the sibling's materials have been refreshed.
 
 ## Journal
+
+### 2026-10-09 — UI ownership/fidelity and endpoint discovery source reconciliation
+- Guidance/provider-proof slice merged as `#5902`, current-head Copilot
+  approval with zero findings and actual required CI, then finalized. The parent
+  effort remains Active. Three read-only UI/installer tracks retained source
+  versus runtime distinction; no Picker, venue or installer was driven.
+- Evidence started at `d05137b297dd`. Within the inspected scopes, integration
+  base `27a7fe57bb98` changed Picker prompt eligibility/forwarding, not the
+  reported history/unknown-state or venue/endpoint effect bodies. Verified the
+  concrete diff rather than treating a supplied SHA as perpetual HEAD.
+
+  | Inspected contract | Scoped source result | Decision / retained owner |
+  |---|---|---|
+  | Bootstrap/core readiness | Real setup invokes the owning core installer; Manager update delegates the unified in-plugin flow; absent-Manager fallback executes. Filesystem `core_status` intentionally means artifact presence, while lazy stubs and complete-slot resolution supply different structural checks. | Withdrew false command-readiness/global repair-suppression claims. Readiness declarations and doctor output are not full consumer execution. Closed `#352`/`#1160`/`#1278` are historical foundations; active campaign/open phase ownership remains intact. |
+  | Restart/failure handling | Setup's restart advisory is late, but independent provisioning need not abort all actions; bootstrap and the real installer have their own prerequisite/PATH checks. | No blanket unsafe-continuation ticket. Unsafe dependent-tool cases remain unproved and require targeted acceptance under the existing owner. |
+  | Gitless source discovery | Initial tar bootstrap retains a full nested extraction and CWD setup can work. Installed external-CWD resolution checks ancestors/flat staging; gitless self-update retains Manager/libs, not core installer sources. | Carved bounded `#5910`; closed `#540`/`#551` fixed CWD/full-flat-staging, not every later staging shape. No global source-absence claim or Git mandate. |
+  | Picker observation/protection | Unknown/opaque execution state is retained but its protection Boolean becomes ACTIVE/PROC/ACP in normalization; details omit uncertainty/age. Conservative active/unknown launch protection is valid. | Carved `#5909` for presentation loss, not a demand to set protection false. `#3935` is a distinct missing positive after confirmed mux launch. |
+  | Sessions history | Local engine errors and remote failed envelopes become `[]`; the worker reports no error and the overlay says no registered sessions. A separate Messages error channel does not repair this route. | Carved `#5908`; genuine empty success must remain distinct from unavailable. No real SSH/session/history mutation. |
+  | Neutral contribution/search | Production still requires the engine and hard-coded Worktrees data/view/actions. Its local filter omits codename/activity/claims. | Existing exact owners `#1193`/`#3587` retained; posted source evidence instead of duplicate tickets. Alternative contract app is not production conformance proof. |
+  | Venue presentation/ownership | Both providers really declare grouped columns, subtitles, session/activity joins, claims/navigation and lifecycle gates. Generic enrichment supplies a separate task column, not the required subtitle title; Container supervisor-derived navigation and original-lease claims/session paths can diverge. | Corrected stale vision framing without weakening durable intent. Title precedence `#5912`; effort/supervision/action paths remain under `#3657`. Different provider lifecycle verbs are legitimate, not parity violations. |
+  | Worker action capability | IDLE may mean holder-only; Send then explicitly rejects missing binding, Watch opens general UI, and unsupported-new-window Inspect falls back to ordinary Open. | Advertisement/binding mismatch is not silent delivery success. Existing `#3657` retains binding-aware actions and non-displacing Inspect; no live worker control. |
+  | Declared creation | Generic row-independent create prompting/execution/refresh exists; venue manifests do not declare it. The archived campaign and closed `#3258` explicitly delivered design only. | Carved per-venue wiring as `#5913`, not missing schema/global creation. `#3507` retains real Docker-host validation and the archived original campaign remains Done for its transferred scope. |
+  | Endpoint error/ownership fidelity | Shared and Dispatch tolerant readers access decoded JSON before object validation. Cleanup checks owner twice then unlinks by path, allowing a successor publication after the final read. Current shutdown consumers call that helper. | Actual API proofs were fully mocked and process-free: array JSON raised `AttributeError` (`#5903`); owner A was checked twice while synthetic B was deleted at final unlink (`#5904`). Closed strict-readiness `#1284` and PID-check `#1424` remain completed narrower slices, not full-contract proof. |
+
+- Checked the newer cold-prompt source/vision amendment: local New retains a
+  seed with No Mux and Resume prompt eligibility is cold-only. Picker already
+  states the relevant intent under `#5415`, with hosting delivery evidence a
+  separate authority. UI forwarding, comments and fake-capability tests were
+  not treated as actual session consumption or live-race refusal.
+- Verified tracker states instead of accepting local historical references as
+  current owners: `#352`/`#355`/`#1160`/`#1278` are closed; `#356`/`#357`
+  and `#5415` remain open. The active control-plane campaign retains its
+  broader objectives. No completed foundation or archived design-only phase was
+  reopened merely to represent this audit's narrower follow-ups.
+- The venue revision retains the existing row grammar, exact title precedence,
+  accumulating activity, ADO-scoped PR auto-claim, all eight tunable prominence
+  tiers, contribution extensibility, live/resumable Open, row-independent New,
+  both supervision directions and all non-goals. Historical implementation/
+  gap-list prose was removed from standing concepts; source findings live here.
+- These are documentation/source-audit artifacts, not runtime fixes. No live
+  registry/endpoint, process retirement, provider action, Docker fleet or
+  production UI was tested. New runtime unit/component, clean-room and live
+  acceptance remain implementation-owner obligations. Whole-index, remaining
+  service contracts and the global Validation Plan remain open.
+
+### 2026-10-09 — Guidance attribution and hosting/provenance proof boundaries
+- Durable conversation/evidence cohort merged as `#5895` with current-head
+  Copilot approval, zero findings and actual required CI; its child finalized.
+  A review-transition waiter timed out after baselining an already-present
+  approval. Read the actual current-head reviewer/body and required checks
+  instead of treating that timeout or its stale convenience note as a verdict.
+- Source snapshots were verified through `e38752be78ad` and the relevant
+  inspected files remained unchanged at integration base `1b0a9bc25ad0`.
+  Three bounded read-only tracks retained coordinator ownership; no runtime,
+  process, check-in or live hosting operation was used as a reproduction.
+
+  | Subject / contract | Scoped source evidence | Decision and retained owner |
+  |---|---|---|
+  | Guidance delivery/ownership | Projection manager serializes local rendering, resolves contributors under its own lock, preserves foreign/tracked files, records errors and treats guidance budget excess as advisory within separate safety bounds. | Existing vision intent retained. Restored behavior/boundary placement after a duplicate `Non-Goals / Boundaries` heading; no policy was removed, weakened or silently reassigned. Full host/contributor acceptance remains open. |
+  | Context-accounting attribution | `context_budget.py:_measure_files` catches `OSError` and drops the source; `build_context_budget` has no failed static/metadata-source entry. A fully mocked call to the real API with one unreadable synthetic source returned zero entries/bytes and no read-failure record. | Carved `#5896`. This was an in-memory shape proof, not a permission change, personal-guidance scan, dynamic hook execution or live-runtime test. Keep fail-open delivery separate from explicit audit uncertainty. |
+  | Process registry | `agent-process-self-report-registry` architecture is explicitly Draft and disclaims an implemented/deployed broker. Placement, client/adopter, admission, reconciliation, journal/retention and validation remain unchecked. | Existing `#5559` owns realization. Stopped at the documented proposal gate rather than treating schemas, budgets or owner recommendations as enforced runtime behavior or searching absence into a global claim. |
+  | Process telemetry | Dispatch coordinator and Bridge event reduction really publish lifecycle records. Optional sink installation and JSONL spooling are real; exception fail-open is not latency isolation. Shared procutil renderer/SSH calls provide spawn effects but no inspected connected process-publication proof. | Per-site adoption is explicitly optional. The never-delay promise concerns adopted spawn records, not every legacy lifecycle callback. `#2501` was vision-only authoring; scoped tracker searches found no realization owner, so carved `#5900` without claiming global absence or mandatory instrumentation. |
+  | AHP presentation | Production `_run_launch` ensures/attaches AHP and returns through `launcher.launch`; effective default capability is unavailable despite mux requested. A process-free use of actual routing/composition bodies showed the same direct result for new/resume; the real PowerShell wrapping route is bypassed. | This is already expressly deferred by Phase 3b, not a new regression. Carved excluded scope as `#5898` and clarified the owner's injected-capability matrix proof versus production acceptance. `#5892`/`#5878` remain separate transparent Windows handoff work, not superseded. |
+  | Handoff provider ownership | Direct agency-side mux creation/control/retirement remains in the inspected path. Identity guards and the deliberate zero-provider fallback remain meaningful; physical directory placement alone is not an ownership violation. | Rejected the blanket foreign-pane/ownership-violation claim. Posted the narrower provider-boundary reconciliation under existing `#2062`, preserving co-packaged owning adapters, standalone behavior, head/claims authority and safe retirement. |
+
+- The registry source chain and full process-publication/hosting matrices are
+  realization obligations, not completed by a proposal, script relocation,
+  fake-capability test, opaque identity record or CLI command name. No
+  SDK/App/third-party conformance or observed duplicate/foreign retirement was
+  inferred.
+- This publication changes documentation only. The budget reproduction proves
+  the reported source omission, not its eventual fix. No new runtime unit/
+  component, clean-room or live external acceptance is claimed; identified
+  owners retain those gates. The original whole-index, remaining service
+  invariants and global Validation Plan remain open.
 
 ### 2026-10-09 — Durable conversation/evidence and CI policy source cohort
 - Host-resource reconciliation merged as `#5886` with current-head Copilot

@@ -251,3 +251,15 @@ def test_resolve_worktree_id_with_bare_resume_and_no_seed_is_unaffected(capfd):
     assert rc != 0
     out = json.loads(capfd.readouterr().out)
     assert "bare" not in out.get("error", "").lower()
+
+
+def test_restore_with_prompt_is_rejected_before_remux(capfd):
+    rc = resolve_cli.cmd_resolve(
+        _args(
+            new_worktree=False, worktree_id="some-wt", seed="must not run",
+            machine=None, restore=True,
+        )
+    )
+    assert rc != 0
+    payload = json.loads(capfd.readouterr().out)
+    assert "--restore" in payload["error"]

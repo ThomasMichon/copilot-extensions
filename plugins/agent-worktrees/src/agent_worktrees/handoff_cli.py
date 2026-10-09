@@ -6,9 +6,10 @@ import argparse
 import time
 from pathlib import Path
 
-from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking, worktree_identity
-from . import pending_seed as pending_seed_mod, embody_resume
+from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
+from . import launch_seed_state, embody_resume
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
+from .worktree_creation import LaunchSeedStagingFailure
 
 
 def _core():
@@ -305,6 +306,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     kind="session",
                     recovery=getattr(args, "recovery", False),
                 )
+        except LaunchSeedStagingFailure as exc:
+            return exc.emit(json_out=True)
         except _core().LaunchPreflightError as e:
             return output._json_error(str(e), exit_code=3)
         except Exception as e:
@@ -342,7 +345,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             # delivery, so an early return (dry-run, a validation failure,
             # a concurrent session) can never consume it undelivered.
             if not seed:
-                seed = getattr(record, "pending_seed", None)
+                seed = launch_seed_state.creation_text(cfg.tracking_dir() / f"{wt_id}.yaml", record)
             backend_error = _unsupported_hosted_launch(
                 record,
                 "embody",
@@ -390,29 +393,26 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return 0
 
     if already:
-        # A pending prompt from creation time may still be unconsumed if
-        # whatever first stood up this worktree's mux pane did so OUTSIDE
-        # this function (the Picker's launch-session.{ps1,sh} creates the
-        # `wt-<id>` pane directly). Deliver it here too -- only against the
-        # registry-identified Copilot pane (never "active pane", which
-        # could be a bare shell); claimed under the write guard so a
-        # concurrent resume can't double-deliver it, restored if unconfirmed.
+        # Legacy New fallback targets only the registered Copilot pane.
+        # Typed Resume intent is never consumed by this path.
         display_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
         copilot_pane = sessions.mux_copilot_pane(wt_id)
         claimed = None
+        creation_receipt = {"seed": None}
         if copilot_pane:
             try:
-                claimed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
-            except Exception:
-                claimed = None
+                creation_receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
+                claimed = creation_receipt["seed"]["text"] if creation_receipt["seed"] else None
+            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+                return output._json_error(f"Could not hand off staged New prompt: {exc}", exit_code=3)
         pending_seed_result, settled = {}, {}
         if claimed:
             pending_seed_result = sessions.mux_seed_pane(
                 copilot_pane, claimed, session_name=sessions.mux_session_name(wt_id),
                 ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
             )
-            settled = pending_seed_mod.settle_claim(
-                cfg.tracking_dir() / f"{wt_id}.yaml", claimed, pending_seed_result)
+            settled = launch_seed_state.settle_creation(
+                cfg.tracking_dir() / f"{wt_id}.yaml", creation_receipt, pending_seed_result)
         output._json_output(
             {
                 "ok": True,
@@ -543,13 +543,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         )
 
     new_pane = result.get("new_pane")
-    # Claim (clear) pending_seed now, right before delivery -- not earlier,
-    # so an exit above can never consume it undelivered. An explicit --seed
-    # still supersedes/clears it; only a claimed (not explicit) value is
-    # restored on a failed delivery below.
+    # Reserve only New intent at delivery; failed typing retains it.
     claimed_seed: str | None = None
+    creation_receipt = {"seed": None}
     if record is not None:
-        claimed_seed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+        try:
+            creation_receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+            return output._json_error(f"Could not hand off staged New prompt: {exc}", exit_code=3)
+        claimed_seed = creation_receipt["seed"]["text"] if creation_receipt["seed"] else None
         if not explicit_seed:
             seed = claimed_seed
     # A freshly-embodied session can be MCP/skill-heavy and take well over the
@@ -564,8 +566,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
-    settled = pending_seed_mod.settle_claim(  # restored only if nothing was typed
-        cfg.tracking_dir() / f"{wt_id}.yaml", None if explicit_seed else claimed_seed, seed_result)
+    settled = launch_seed_state.settle_creation(
+        cfg.tracking_dir() / f"{wt_id}.yaml", creation_receipt, seed_result)
 
     verified = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0
