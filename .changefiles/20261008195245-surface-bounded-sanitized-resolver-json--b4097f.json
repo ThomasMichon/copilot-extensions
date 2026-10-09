@@ -1,0 +1,9 @@
+{
+  "comment": "Surface bounded sanitized resolver JSON errors and refuse compatibility retries that discard caller ownership metadata.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
