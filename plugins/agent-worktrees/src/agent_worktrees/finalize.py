@@ -49,6 +49,7 @@ from . import (
     obligations,
     output,
     permissions,
+    publication_deadline,
     push_diagnostics,
     procs,
     sessions,
@@ -794,12 +795,8 @@ def _push_changes_pr(
         return False
     push_to = push_target.remote
 
-    # Branch-name leak class (pr-attribution-codenames Phase 5): create-pr
-    # validates a NEW feature branch name, but push-changes republishes a
-    # branch recorded earlier -- including one set via `set-pr --branch`, or
-    # one that predates this guard. Re-validate the effective head here too,
-    # so a leaking branch can never be (re)published through this path
-    # either.
+    # Revalidate recorded head names too: set-pr or legacy records can predate
+    # create-pr's attribution guard and must not republish a leaking branch.
     from .providers.attribution import BranchLeakError, validate_effective_head
     try:
         # Both the LIVE config machine and the worktree's originally
@@ -835,7 +832,8 @@ def _push_changes_pr(
             )
         return True
 
-    lock = FinalizeLock(lock_path)
+    budget = publication_deadline.lifecycle_budget(repo.pr)
+    lock = FinalizeLock(lock_path, timeout=budget, stale_after=budget)
     try:
         lock.acquire()
     except TimeoutError:
@@ -868,6 +866,7 @@ def _push_changes_pr(
         with hooks.allow_pr_push():
             pushed = pr_publish.push_checked(
                 record, push_to, feature, cwd=worktree_path,
+                timeout=publication_deadline.configured(repo.pr),
                 expected_head_repo=push_target.head_repo, expected_head_identity=push_target.head_identity,
                 force_with_lease_expect=(lease_expect or None), force_with_lease=True, repo=repo,
             )
@@ -918,11 +917,8 @@ def _push_changes_pr_refspec(
 ) -> bool:
     """Refspec-mode push-changes (#1815): incrementally update the PR head ref.
 
-    The work lives on ``worktree/<id>`` (the only local branch); the PR head is
-    a remote-only ref. Publish the current worktree tip directly to that ref
-    without rebasing the already-published PR history onto newer upstream.
-    No checkout dance; HEAD never leaves ``worktree/<id>``. Never touches
-    master or the base branch on the remote.
+    Publish the worktree tip to the remote-only PR head without rebasing,
+    changing HEAD, or touching the remote base branch.
     """
     repo = config.default_repo
     remote = repo.remote
@@ -978,7 +974,8 @@ def _push_changes_pr_refspec(
         )
         return True
 
-    lock = FinalizeLock(lock_path)
+    budget = publication_deadline.lifecycle_budget(repo.pr)
+    lock = FinalizeLock(lock_path, timeout=budget, stale_after=budget)
     try:
         lock.acquire()
     except TimeoutError:
@@ -1006,6 +1003,7 @@ def _push_changes_pr_refspec(
         with hooks.allow_pr_push():
             pushed = pr_publish.push_checked(
                 record, push_to, f"{wt_branch}:refs/heads/{feature}",
+                timeout=publication_deadline.configured(repo.pr),
                 cwd=worktree_path, expected_head_repo=push_target.head_repo, expected_head_identity=push_target.head_identity,
                 force_with_lease_expect=(lease_expect or None), force_with_lease=True, repo=repo,
             )

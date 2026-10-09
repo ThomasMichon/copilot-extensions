@@ -448,6 +448,16 @@ Set `head_scheme` per repo to choose; the multi-machine system default is `refsp
 
 ### Step 1: `create-pr`
 
+Managed PR pushes retain a bounded deadline and run the real pre-push hook.
+If legitimate validation needs longer than the default 180 seconds, configure
+`pr.push_timeout_seconds: 300` in the repository's
+`.copilot-extensions/agent-worktrees/config.yaml` (or the machine-local
+`repos.<name>.pr` block). The same per-attempt bound covers `create-pr` reruns
+and PR-mode `push-changes`; publication-lock wait and stale-lock budgets scale
+with it. Only positive, finite numbers are accepted—there is no unbounded
+setting. A timeout still kills the entire push/hook process tree. See the
+[configuration reference](../../../docs/config-reference.md#pr-workflow--reposnamepr-machine-local-or-in-repo).
+
 ```
 <agent-worktrees catalog argv[0]> create-pr --title "Concise PR title"
 ```
