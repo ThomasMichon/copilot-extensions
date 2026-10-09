@@ -71,6 +71,45 @@ same two rules everywhere: first confirm a validated live owner from the
 consumer's lock/routing state, then terminate only through an identity-bound
 OS handle tied to the target process's start time.
 
+### `zdd.singleton_manager` -- Linux supervision across cutover and exec
+
+`SingletonManager` claims Linux subreaper ownership before spawning, validates
+successors against publication-time identity and ancestry, and watches them
+through immutable pidfds rather than numeric-PID liveness. It holds a private
+state-directory lease and persists the watched identity, manager identity,
+boot ID, and bounded discovery phase in `manager.json`.
+Run it in a dedicated manager process: its entire descendant tree, including
+helper processes, belongs to this lifecycle. Do not embed it in an unrelated
+long-lived process whose other children must survive manager exit.
+
+Supply distinct `config_dir` and `manager_state_dir` paths and a `spawn`
+callback returning a process with `pid` and `poll()`. A `resolve_update`
+callback may return a new absolute executable/argv when its version marker
+changes, or `None` otherwise. The manager polls it while the daemon is alive;
+successful exec preserves the manager PID and lease. The new image must enter
+the same manager API with the same paths; it recovers the validated watched
+process or pending discovery state without invoking `spawn` again.
+
+The spawn callback must preserve manager ancestry and use the adopter's
+platform-aware launch primitive. Fresh bootstrap refuses a live incumbent
+without same-manager recovery state. On a real crash or an in-process error, cleanup freezes the owned
+tree to a bounded fixed point and signals only held descendant pidfds; the
+caller must propagate `ManagerResult.exit_code` to the service manager.
+This is the manager's service outcome, not transparent child-status forwarding:
+even a zero-status child exit without a verified successor means the continuously
+supervised service has disappeared and yields a nonzero manager status. Intentional
+service stop targets the manager/unit itself, not just its current daemon child.
+State/exec/containment failures raise explicitly rather than continuing with
+weaker guarantees.
+
+This implementation requires Linux subreaper and pidfd support (provided through
+Python or libc). Windows and macOS native backends are explicitly unsupported.
+For abrupt manager death, the launcher must retain systemd's
+`KillMode=control-group`; no in-process cleanup can run after SIGKILL.
+Consumer launch wiring, real systemd validation, Windows ownership/handoff,
+and platform deployment are tracked by the
+[implementation effort](../../efforts/active/versioned-singleton-manager/README.md).
+
 ## Consumer contract
 
 Every side-effecting collaborator is **injected**, so a consuming service stays

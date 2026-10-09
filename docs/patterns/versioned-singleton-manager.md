@@ -536,18 +536,20 @@ successor already running in my own tree?*
    daemon-handle transfer); it never does any of the manager's own
    supervisory work and never outlives the handoff it exists for.
 
-> **Validation status.** This pattern is a **design, not yet an
-> implementation** — the code (the `zdd.singleton_manager` module, both
-> platform backends, and its own unit + stress tests) lands in a follow-up
-> PR, not this one. The intent is for the Linux mechanisms above (subreaper
-> reparenting, `/proc`-based ancestry, identity-bound reaping, `execve`
-> self-update) to be exercised against real subprocesses and real kernel
-> primitives before that PR lands; the **Windows** mechanisms additionally
-> need a real Windows-host process-boundary test (kill the manager outright,
-> confirm the daemon and every descendant die with it; force a self-update
-> handoff, confirm the Job survives it) before Windows adoption is
-> considered production-ready, not merely code-complete. Nothing in this
-> section should be read as already-validated.
+> **Implementation status.** The shared library supplies a **Linux-only**
+> `zdd.singleton_manager` API, with native pidfd custody, subreaper ownership,
+> persisted state/lease recovery, bounded descendant cleanup, and a
+> consumer-provided update-argv resolver polled before child exit. Real
+> subprocess tests exercise detached cutovers, orphan cleanup, exec preserving
+> the manager PID without a duplicate spawn, and exec while a successor is
+> still pending. See [`libs/zdd/README.md`](../../libs/zdd/README.md) for the
+> executable API rather than treating every cross-platform design mechanism
+> below as shipped code. Consumer launcher wiring and real systemd restart
+> proof remain open. **Windows is still design-only and explicitly rejected
+> by the native backend**; it requires its own implementation and real
+> Job/Scheduled Task tests before adoption is production-ready. The
+> [implementation effort](../../efforts/active/versioned-singleton-manager/README.md)
+> owns these remaining delivery and validation gates.
 
 ## What does **not** change
 

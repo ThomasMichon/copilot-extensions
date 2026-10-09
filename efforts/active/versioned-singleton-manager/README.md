@@ -60,12 +60,15 @@ are complete, rather than stopping after the design PR.
 
 ### Phase A - Shared identity and Linux manager
 
-- [ ] Recover and assess the prototype; reuse only mechanisms that meet
-  the current contract.
-- [ ] Establish trusted successor identity before adoption. A PID and a
-  newly sampled start token are not evidence of which process originally
-  published the active route. Add a backward-compatible publication token
-  or spawn-registration contract, and reject unverifiable candidates.
+- [x] Recover and assess the prototype; reuse only mechanisms that meet
+  the current contract. The old best-effort identity and PPID-only paths
+  are not reused as a production backend.
+- [x] Add backward-compatible publication-time identity. Landed in
+  [PR #5803](https://github.com/ThomasMichon/copilot-extensions/pull/5803),
+  including preservation through rollback/watchdog promotion.
+- [ ] Require the published baseline and proven ownership before adopting
+  successors; reject unverifiable candidates rather than sampling a new
+  identity from an already-reused PID.
 - [ ] Implement distinct routing and manager-state paths, atomic versioned
   state, singleton ownership, ancestry checks, stable identity baselines,
   zombie reaping, bounded successor discovery, and crash cleanup.
@@ -153,3 +156,11 @@ requirements or permission to weaken the existing vision.
 - Design PR #5556 is merged; #5655 remains open.
 - Established this target-local implementation contract. No manager code
   or platform production-readiness claim is delivered by this proposal.
+
+### 2026-10-08 - Identity foundation landed; Linux manager implementation
+
+- Plan PR #5801 and publication-identity PR #5803 are merged.
+- The next slice implements a Linux-only pidfd-backed manager, durable
+  state/lease recovery, bounded discovery, and actual re-exec/cutover
+  subprocess proof. It does not wire a production launcher or close the
+  systemd/Windows validation gates.
