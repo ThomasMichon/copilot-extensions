@@ -2061,6 +2061,13 @@ while the independent embedding engine keeps its uv-first policy.
 PowerShell package paths consult only the executable accepted by `Ensure-Uv`;
 a rejected but still-discoverable PATH uv is never selected again for packages.
 If no validated uv remains, CLI/server/engine package paths use Python/pip.
+Index uv acquisition and executable validation use one installation-wide guard
+shared by CLI and durable-engine callers. Windows uses the existing mutex
+adapter's `Uv` scope; POSIX uses fd7 with the same OS advisory locking and
+explicit unlock as its other guards. Acquisition admits for at most 180 seconds
+and releases before package/build/publication work. It never waits while owning
+build fd8 or publication fd9; a cheap cached-engine check releases its build
+guard before any acquisition. The shared canonical engine stays unchanged.
 An exception at the optional server repair boundary warns and retains the
 primary runtime's fallback, restoring the caller's error preference in `finally`.
 

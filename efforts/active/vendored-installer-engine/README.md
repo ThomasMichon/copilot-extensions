@@ -524,6 +524,40 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-09 — Index installation-wide uv acquisition serialized
+
+- Scoped follow-up to PR #5885's shared tool bootstrap race. CLI and durable
+  engine use different build targets but the same installation tool directory;
+  validation, partial executable removal and bootstrap must therefore share an
+  acquisition guard, not their distinct build locks.
+- Added a private Index adapter around the unchanged canonical helpers.
+  Windows `Uv` mutex scope and POSIX advisory fd7 key to the installation root
+  and use bounded 180-second admission. Acquisition releases before build or
+  publication, and never owns those locks while waiting or invoking bootstrap.
+  Cached-engine reuse stays cheap and does not acquire/bootstrap uv.
+- Real concurrent fixture runtime/engine callers start from an absent tool.
+  Exactly one bootstrap writer publishes a complete executable; both consumers
+  validate and use it. Independent build/publication probes prove lock order
+  and distinct fd7/8/9 ownership. Both POSIX flock and stdlib fcntl paths run.
+  No real download, package/model initialization or service operation is used.
+- Existing rejected-PATH/pip fallback, readiness barrier, snapshot authorization,
+  per-version build locks, publication guard and Global-to-Local diagnostics are
+  retained. Canonical bytes and existing changefiles are unchanged; no other
+  plugin or recovery history was edited.
+- Bounded validation: focused installer/acquisition selection 116 passed;
+  disconnected full Index suite 756 passed / 103 skipped; full host suite
+  848 passed / 11 skipped. The initial acquisition fixture omitted its optional
+  server definition and failed explicitly; after completing that fixture,
+  the full matrix passed. One admission deferred with 75 and was retried
+  under the authorized wait policy, without bypass.
+  Relevant engine-sync/materialization/install-contract tooling: 107 passed.
+  Guards, version/changefile checks, F/E9 lint and both installer parsers passed.
+- Measurements: shell 2132 -> 2142 (+10), PowerShell 2656 -> 2671 (+15),
+  wrappers 4788 -> 4813, canonical pair remains 881, aggregate 5669 -> 5694.
+  Native acquisition revalidation remains integration-owner work; preceding
+  native results and the independently resolved upstream guard lane are not
+  claimed as validation of this follow-up. Effort/adopter completion stays open.
+
 ### 2026-10-09 — Index cross-version publication and supported snapshot recovery
 
 - Continued only PR #5885 from published head

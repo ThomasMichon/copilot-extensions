@@ -1020,7 +1020,7 @@ _find_python() {
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
 # governed box) instead of dead-ending; add it to PATH for this run.
 _ensure_uv() {
-    UV_COMMAND="$(ensure_uv "$INSTALL_DIR")" || return $?
+    UV_COMMAND="$(_with_index_advisory_lock "$INSTALL_DIR/uv-acquisition" 7 180 ensure_uv "$INSTALL_DIR")" || return $?
     export PATH="$(dirname "$UV_COMMAND"):$PATH"
 }
 
@@ -1244,7 +1244,9 @@ except OSError as error:
     sys.exit(1)
 PY
     }
-    if [[ "$descriptor" == 8 ]]; then
+    if [[ "$descriptor" == 7 ]]; then
+        exec 7>"$lock" || return 1
+    elif [[ "$descriptor" == 8 ]]; then
         exec 8>"$lock" || return 1
     elif [[ "$descriptor" == 9 ]]; then
         exec 9>"$lock" || return 1
@@ -1260,18 +1262,18 @@ PY
         else
             if ! _python_index_build_lock unlock; then _warn "Cannot unlock runtime build admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
         fi
-        if [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+        if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
         exit "$rc"
     }
     if [[ "$use_flock" == 1 ]]; then
         if ! flock -w "$timeout" "$descriptor"; then
             _warn "Timed out waiting for runtime build admission: $target"
-            if [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+            if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
             return 1
         fi
     else
         if ! _python_index_build_lock lock; then
-            if [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+            if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
             return 1
         fi
     fi
@@ -1319,7 +1321,6 @@ _ensure_runtime() {
     _ok "Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
-    _ensure_uv || exit 1
     _ensure_uv_index
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
@@ -1507,6 +1508,7 @@ _ensure_runtime() {
         *) _step "Add $LOCAL_BIN to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
     esac
     }
+    _ensure_uv || return 1
     _with_index_build_lock "$VENV_DIR" _ensure_runtime_build
 }
 
@@ -1598,8 +1600,6 @@ _install_engine() {
         _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
     fi
     mkdir -p "$ENGINE_HOME"
-    local have_uv=0
-    if _ensure_uv; then have_uv=1; else _warn 'uv acquisition failed -- using the engine pip fallback'; fi
     _ensure_uv_index
     _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" "$py" "$have_uv" || return 1
 
@@ -1692,6 +1692,16 @@ _install_engine() {
     fi
     return 0
     }
+    _engine_cached() {
+        if [[ "${1:-}" != upgrade ]] && _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON"; then return 0; fi
+        return 3
+    }
+    local cached_rc=0
+    _with_index_build_lock "$ENGINE_VENV" _engine_cached "$@" || cached_rc=$?
+    [[ "$cached_rc" != 0 ]] || return 0
+    [[ "$cached_rc" == 3 ]] || return "$cached_rc"
+    local have_uv=0
+    if _ensure_uv; then have_uv=1; else _warn 'uv acquisition failed -- using the engine pip fallback'; fi
     _with_index_build_lock "$ENGINE_VENV" _install_engine_build "$@"
 }
 

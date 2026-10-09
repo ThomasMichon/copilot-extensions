@@ -71,7 +71,7 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
         "function Invoke-WebRequest { throw 'Forbidden bootstrap download' }\n"
         f". '{ENGINE / 'installer-engine.ps1'}'\n"
         + "\n".join(function(name, "ps1") for name in (
-            "Get-VerTuple", "Test-VersionLt", "New-IndexMutex", "Enter-IndexStampLock", "Enter-IndexBuildLock",
+            "Get-VerTuple", "Test-VersionLt", "New-IndexMutex", "Enter-IndexStampLock", "Enter-IndexBuildLock", "Get-IndexUv",
             "Test-IndexPublicationFresh",
         )) + "\n" + script,
         encoding="utf-8",
@@ -311,8 +311,8 @@ if ([bool]$script:Retried -ne ${str(not healthy).lower()}) {{ throw 'wrong recov
 
 def test_windows_cli_preserves_python_fallback_when_uv_acquisition_fails(tmp_path: Path):
     runtime = function("Install-Runtime", "ps1")
-    acquisition = "    $script:UvCommand = Ensure-Uv" + runtime.split(
-        "    $script:UvCommand = Ensure-Uv", 1
+    acquisition = "    $script:UvCommand = Get-IndexUv" + runtime.split(
+        "    $script:UvCommand = Get-IndexUv", 1
     )[1].split("    $buildMutex", 1)[0]
     result = run_ps(tmp_path, function("New-IndexVenv", "ps1") + f"""
 $env:OS = 'Installer_Test'

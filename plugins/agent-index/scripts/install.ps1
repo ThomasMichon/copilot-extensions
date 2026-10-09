@@ -1395,7 +1395,7 @@ function Install-Runtime {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     Write-Ok "Directories: $InstallDir"
-    $script:UvCommand = Ensure-Uv -InstallRoot $InstallDir
+    $script:UvCommand = Get-IndexUv
     if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using Python venv/pip fallback' }
 
     $buildMutex = Enter-IndexBuildLock -VenvPath $VenvDir
@@ -1708,12 +1708,20 @@ function Install-Engine {
         Write-Skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
         return $false
     }
-    $buildMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
+    $cachedMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
     try {
     if ((Test-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython) -and -not $Upgrade) {
         Write-Skip "Engine runtime already provisioned (durable venv preserved): $EngineVenv"
         return $true
     }
+    } finally {
+        [void]$cachedMutex.ReleaseMutex(); $cachedMutex.Dispose()
+    }
+    $script:UvCommand = Get-IndexUv
+    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using the engine pip fallback' }
+    $buildMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
+    try {
+    if ((Test-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython) -and -not $Upgrade) { return $true }
     $pythonCmd = $null
     foreach ($candidate in @('python', 'python3', 'py')) {
         $found = Get-Command $candidate -ErrorAction SilentlyContinue
@@ -1735,8 +1743,6 @@ function Install-Engine {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $script:UvCommand = Ensure-Uv -InstallRoot $InstallDir
-    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using the engine pip fallback' }
     if (-not (New-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython -PythonCmd $pythonCmd -PreferSignedPython $false)) {
         $ErrorActionPreference = $prevEAP
         Write-Warn "Engine venv creation failed -- $EngineVenvPython not found"
@@ -2396,6 +2402,15 @@ function Enter-IndexBuildLock {
     param([string]$VenvPath, [ValidateRange(0, 180)][int]$TimeoutSeconds = 180)
     # Use the established 180-second build admission window, not the short stamp wait.
     return (Enter-IndexStampLock -Scope 'Build' -LockRoot $VenvPath -TimeoutSeconds $TimeoutSeconds)
+}
+
+function Get-IndexUv {
+    $mutex = Enter-IndexStampLock -Scope 'Uv' -LockRoot $InstallDir -TimeoutSeconds 180
+    try {
+        return (Ensure-Uv -InstallRoot $InstallDir)
+    } finally {
+        [void]$mutex.ReleaseMutex(); $mutex.Dispose()
+    }
 }
 
 function Test-IndexPublicationFresh {
