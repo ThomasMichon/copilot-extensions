@@ -108,44 +108,49 @@ class StateStore:
 
 
 class ManagerLease:
-    """The same open file description survives exec, not a second lock attempt."""
+    """Take ownership of the exec-transferred descriptor, including on failure."""
 
     def __init__(self, directory: Path) -> None:
         if sys.platform != "linux":
             raise NotImplementedError("singleton manager lease currently requires Linux")
         import fcntl
 
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        stat = directory.stat()
-        if stat.st_uid != os.getuid() or stat.st_mode & 0o077:
-            raise PermissionError("manager state directory must be private to its owner")
-        path = directory / "manager.lock"
-        inherited = os.environ.get(LEASE_ENV)
-        if inherited is not None:
-            self.fd = int(inherited)
-            descriptor, expected = os.fstat(self.fd), path.stat()
-            if (descriptor.st_dev, descriptor.st_ino) != (expected.st_dev, expected.st_ino):
-                raise ValueError("inherited singleton lease does not match manager state")
-            from .diagnostics import process_start_time
-
-            saved = StateStore(directory).read()
-            boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-            if (
-                saved is None or saved.owner.pid != os.getpid()
-                or saved.owner.start_time != process_start_time(os.getpid())
-                or saved.owner.boot_id != boot_id
-            ):
-                raise ValueError("inherited singleton lease requires same-process exec state")
-        else:
-            self.fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        inherited = os.environ.pop(LEASE_ENV, None)
+        fd: int | None = None
         try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            os.set_inheritable(self.fd, False)
-        except BlockingIOError as exc:
-            os.close(self.fd)
-            raise ManagerAlreadyRunning(f"singleton manager already owns {directory}") from exc
-        except BaseException:
-            os.close(self.fd)
+            if inherited is not None:
+                candidate_fd = int(inherited)
+                os.fstat(candidate_fd)
+                fd = candidate_fd
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            stat = directory.stat()
+            if stat.st_uid != os.getuid() or stat.st_mode & 0o077:
+                raise PermissionError("manager state directory must be private to its owner")
+            path = directory / "manager.lock"
+            if fd is None:
+                fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            else:
+                descriptor, expected = os.fstat(fd), path.stat()
+                if (descriptor.st_dev, descriptor.st_ino) != (expected.st_dev, expected.st_ino):
+                    raise ValueError("inherited singleton lease does not match manager state")
+                from .diagnostics import process_start_time
+
+                saved = StateStore(directory).read()
+                boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+                if (
+                    saved is None or saved.owner.pid != os.getpid()
+                    or saved.owner.start_time != process_start_time(os.getpid())
+                    or saved.owner.boot_id != boot_id
+                ):
+                    raise ValueError("inherited singleton lease requires same-process exec state")
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.set_inheritable(fd, False)
+            self.fd = fd
+        except BaseException as exc:
+            if fd is not None:
+                os.close(fd)
+            if isinstance(exc, BlockingIOError):
+                raise ManagerAlreadyRunning(f"singleton manager already owns {directory}") from exc
             raise
 
     def close(self) -> None:

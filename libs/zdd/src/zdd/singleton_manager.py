@@ -84,12 +84,18 @@ class SingletonManager:
             raise ValueError("routing and manager state directories must be distinct")
         self.store = StateStore(state_dir)
         self.spawn = spawn
-        self.backend: Backend = backend if backend is not None else LinuxBackend()
+        self._backend = backend
         self.lease_factory = lease_factory
         self.resolve_update = resolve_update
         self.execve = execve
         self.clock, self.sleep = clock, sleep
         self.successor_wait_s, self.poll_interval = successor_wait_s, poll_interval
+
+    @property
+    def backend(self) -> Backend:
+        if self._backend is None:
+            raise RuntimeError("manager backend is not initialized")
+        return self._backend
 
     def _route_identity(self) -> tuple[int, ProcessIdentity | None] | None:
         table = routing.read_table(self.config_dir, strict=True)
@@ -110,6 +116,9 @@ class SingletonManager:
         reference = self.backend.open_process(route[1])
         if reference is None:
             return None
+        return self._confirm_owned(reference)
+
+    def _confirm_owned(self, reference: WatchedProcess) -> WatchedProcess | None:
         try:
             if self.backend.owns(reference):
                 return reference
@@ -138,9 +147,9 @@ class SingletonManager:
                 return saved, None, None
             reference = self.backend.open_process(saved.watched)
             if reference is not None:
-                if self.backend.owns(reference):
+                reference = self._confirm_owned(reference)
+                if reference is not None:
                     return saved, reference, None
-                reference.close()
                 raise UnmanagedDaemonError("persisted daemon is not manager-owned")
             return self._discovering(saved), None, None
         if saved is not None:
@@ -177,13 +186,8 @@ class SingletonManager:
             raise RuntimeError("spawned daemon identity could not be established")
         reference = self.backend.open_process(identity)
         if reference is not None:
-            try:
-                owned = self.backend.owns(reference)
-            except BaseException:
-                reference.close()
-                raise
-            if not owned:
-                reference.close()
+            reference = self._confirm_owned(reference)
+            if reference is None:
                 raise UnmanagedDaemonError("spawn callback detached daemon from manager ancestry")
         state = ManagerState(self.backend.owner, identity)
         try:
@@ -220,6 +224,8 @@ class SingletonManager:
         reference: WatchedProcess | None = None
         claimed = False
         try:
+            if self._backend is None:
+                self._backend = LinuxBackend()
             self.backend.claim_tree()
             claimed = True
             state, reference, child = self._startup()

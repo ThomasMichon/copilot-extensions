@@ -363,3 +363,44 @@ def test_live_previous_also_blocks_fresh_spawn(tmp_path: Path) -> None:
     with pytest.raises(UnmanagedDaemonError, match="live route"):
         world.manager().run()
     assert world.spawns == 0
+
+
+def test_persisted_recovery_probe_error_closes_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = World(tmp_path)
+    StateStore(world.state).write(ManagerState(
+        world.backend.owner, world.backend.identities[20],
+    ))
+
+    def fail_probe(reference: FakeReference) -> bool:
+        raise OSError("injected persisted recovery probe failure")
+
+    monkeypatch.setattr(world.backend, "owns", fail_probe)
+    with pytest.raises(OSError, match="persisted recovery probe"):
+        world.manager().run()
+    assert all(reference.closed for reference in world.backend.references)
+    assert world.backend.cleaned and world.lease.closed
+    assert world.spawns == 0
+
+
+def test_backend_initialization_failure_releases_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zdd import singleton_manager
+
+    world = World(tmp_path)
+
+    def fail_backend() -> FakeBackend:
+        raise OSError("injected backend initialization failure")
+
+    monkeypatch.setattr(singleton_manager, "LinuxBackend", fail_backend)
+    manager = SingletonManager(
+        world.routing, world.spawn, manager_state_dir=world.state,
+        lease_factory=lambda directory: world.lease,
+    )
+    with pytest.raises(OSError, match="backend initialization"):
+        manager.run()
+    assert world.lease.closed
+    assert not world.backend.claimed
+    assert world.spawns == 0

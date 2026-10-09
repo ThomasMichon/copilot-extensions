@@ -78,6 +78,9 @@ successors against publication-time identity and ancestry, and watches them
 through immutable pidfds rather than numeric-PID liveness. It holds a private
 state-directory lease and persists the watched identity, manager identity,
 boot ID, and bounded discovery phase in `manager.json`.
+The private inherited-lease environment handoff is consumed once. The receiver
+owns that descriptor on both success and validation failure; a rejected handoff
+closes it rather than retaining the flock and poisoning a same-process retry.
 Run it in a dedicated manager process: its entire descendant tree, including
 helper processes, belongs to this lifecycle. Do not embed it in an unrelated
 long-lived process whose other children must survive manager exit.

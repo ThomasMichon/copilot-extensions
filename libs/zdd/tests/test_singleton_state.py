@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sys
@@ -96,10 +97,14 @@ def test_inherited_descriptor_must_match_state_path(
     wrong = tmp_path / "wrong"
     wrong.touch()
     tmp_path.joinpath("manager.lock").touch()
-    with wrong.open("r") as handle:
-        monkeypatch.setenv(LEASE_ENV, str(handle.fileno()))
-        with pytest.raises(ValueError, match="does not match"):
-            ManagerLease(tmp_path)
+    fd = os.open(wrong, os.O_RDONLY)
+    monkeypatch.setenv(LEASE_ENV, str(fd))
+    with pytest.raises(ValueError, match="does not match"):
+        ManagerLease(tmp_path)
+    with pytest.raises(OSError) as closed:
+        os.fstat(fd)
+    assert closed.value.errno == errno.EBADF
+    assert LEASE_ENV not in os.environ
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux same-process exec lease")
@@ -110,8 +115,51 @@ def test_inherited_lease_cannot_bypass_another_manager_identity(
     first = ManagerLease(tmp_path)
     try:
         StateStore(tmp_path).write(_state())
-        monkeypatch.setenv(LEASE_ENV, str(first.fd))
+        transferred = os.dup(first.fd)
+        monkeypatch.setenv(LEASE_ENV, str(transferred))
         with pytest.raises(ValueError, match="same-process exec"):
             ManagerLease(tmp_path)
+        with pytest.raises(OSError) as closed:
+            os.fstat(transferred)
+        assert closed.value.errno == errno.EBADF
+        os.fstat(first.fd)
     finally:
         first.close()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux inherited lease failure cleanup")
+@pytest.mark.parametrize("contents", ['{broken', '{"schema_version": 99}', None])
+def test_failed_exec_state_releases_transferred_flock_for_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contents: str | None,
+) -> None:
+    monkeypatch.delenv(LEASE_ENV, raising=False)
+    previous = ManagerLease(tmp_path)
+    fd = previous.fd
+    if contents is not None:
+        tmp_path.joinpath("manager.json").write_text(contents)
+    monkeypatch.setenv(LEASE_ENV, str(fd))
+    with pytest.raises(ValueError):
+        ManagerLease(tmp_path)
+    with pytest.raises(OSError) as closed:
+        os.fstat(fd)
+    assert closed.value.errno == errno.EBADF
+    assert LEASE_ENV not in os.environ
+    replacement = ManagerLease(tmp_path)
+    replacement.close()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux pre-validation lease cleanup")
+def test_private_directory_validation_failure_closes_inherited_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(LEASE_ENV, raising=False)
+    previous = ManagerLease(tmp_path)
+    fd = previous.fd
+    tmp_path.chmod(0o755)
+    monkeypatch.setenv(LEASE_ENV, str(fd))
+    with pytest.raises(PermissionError, match="private"):
+        ManagerLease(tmp_path)
+    with pytest.raises(OSError) as closed:
+        os.fstat(fd)
+    assert closed.value.errno == errno.EBADF
+    assert LEASE_ENV not in os.environ
