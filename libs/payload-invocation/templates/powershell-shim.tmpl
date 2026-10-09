@@ -121,6 +121,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
 }
 
 $_cwd = (Get-Location).Path
+$_nativeCwd = [IO.Directory]::GetCurrentDirectory()
 $_separators = [char[]]@(
     [IO.Path]::DirectorySeparatorChar,
     [IO.Path]::AltDirectorySeparatorChar
@@ -128,10 +129,23 @@ $_separators = [char[]]@(
 $_payloadPrefix = $_payloadRoot.TrimEnd($_separators) + [IO.Path]::DirectorySeparatorChar
 if (
     [StringComparer]::OrdinalIgnoreCase.Equals($_cwd, $_payloadRoot) -or
-    $_cwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
+    $_cwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+    [StringComparer]::OrdinalIgnoreCase.Equals($_nativeCwd, $_payloadRoot) -or
+    $_nativeCwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
 ) {
     $_outside = if ($env:COPILOT_PROJECT_DIR) { $env:COPILOT_PROJECT_DIR } else { $HOME }
-    if (-not (Test-Path -LiteralPath $_outside -PathType Container)) { $_outside = [IO.Path]::GetTempPath() }
+    if (Test-Path -LiteralPath $_outside -PathType Container) {
+        $_outside = (Resolve-Path -LiteralPath $_outside).Path
+    }
+    if (
+        -not (Test-Path -LiteralPath $_outside -PathType Container) -or
+        [StringComparer]::OrdinalIgnoreCase.Equals($_outside, $_payloadRoot) -or
+        $_outside.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
+    ) { $_outside = $HOME }
+    if (-not (Test-Path -LiteralPath $_outside -PathType Container)) {
+        [Console]::Error.WriteLine("[$_command] cannot leave the payload: HOME is unavailable.")
+        exit 1
+    }
     Set-Location -LiteralPath $_outside
     [IO.Directory]::SetCurrentDirectory($_outside)
 }

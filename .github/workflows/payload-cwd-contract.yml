@@ -1,0 +1,54 @@
+name: Payload CWD contract
+
+on:
+  pull_request:
+    paths:
+      - "plugins/*/scripts/install.*"
+      - "plugins/*/scripts/init.*"
+      - "plugins/*/scripts/bootstrap-check.*"
+      - "libs/payload-invocation/**"
+      - "tools/test_payload_cwd_contract.py"
+      - ".github/workflows/payload-cwd-contract.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "27 11 * * 3"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - name: Focused PR smoke
+        if: github.event_name == 'pull_request'
+        run: >-
+          python -m pytest tools/test_payload_cwd_contract.py -q
+          -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog"
+      - name: Full contract matrix
+        if: github.event_name != 'pull_request'
+        run: python -m pytest tools/test_payload_cwd_contract.py -q
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - name: Focused PR smoke
+        if: github.event_name == 'pull_request'
+        run: >-
+          python -m pytest tools/test_payload_cwd_contract.py -q
+          -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
+      - name: Full contract matrix
+        if: github.event_name != 'pull_request'
+        run: python -m pytest tools/test_payload_cwd_contract.py -q

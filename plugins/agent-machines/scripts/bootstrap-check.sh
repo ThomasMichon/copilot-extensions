@@ -187,9 +187,9 @@ if [ ! -f "$Manifest" ]; then
       init="$PluginDir/scripts/init.sh"
       if [ -f "$init" ]; then
         echo "[agent-machines] active cell has no runtime; reconciling in background..." >&2
-        nohup bash "$init" cell-provision \
+        (cd "$HOME" && exec nohup bash "$init" cell-provision \
           --context "$ContextPath" \
-          --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1 &
+          --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1) &
       fi
     fi
     exit 0
@@ -280,9 +280,9 @@ print("\x1c".join((
   init="$PluginDir/scripts/init.sh"
   [ -f "$init" ] || exit 0
   echo "[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background..." >&2
-  nohup bash "$init" cell-provision \
+  (cd "$HOME" && exec nohup bash "$init" cell-provision \
     --context "$ContextPath" \
-    --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1 &
+    --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1) &
   exit 0
 fi
 
@@ -305,6 +305,6 @@ init="$pluginDir/scripts/init.sh"
 
 legacy_mutation_allowed || exit 0
 echo "[agent-machines] runtime $deployed -> $current; reconciling in background..." >&2
-nohup bash "$init" >/dev/null 2>&1 &
+(cd "$HOME" && exec nohup bash "$init" >/dev/null 2>&1) &
 
 exit 0
