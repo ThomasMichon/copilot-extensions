@@ -110,9 +110,25 @@ def register_supervise_commands(sub) -> None:
     od = op_sub.add_parser("disable", help="disable a supervised unit now")
     od.add_argument("id")
     od.add_argument("--reason")
+    od.add_argument(
+        "--machine",
+        help=(
+            "apply the override on this machine's own store instead of the "
+            "local one, over SSH (the machine's SSH alias) -- the override "
+            "store is per-machine, so a cross-machine toggle must genuinely "
+            "run there"
+        ),
+    )
     od.set_defaults(func=_resolve_cli_module()._cmd_supervise)
     oe = op_sub.add_parser("enable", help="clear a unit's override")
     oe.add_argument("id")
+    oe.add_argument(
+        "--machine",
+        help=(
+            "clear the override on this machine's own store instead of the "
+            "local one, over SSH (the machine's SSH alias)"
+        ),
+    )
     oe.set_defaults(func=_resolve_cli_module()._cmd_supervise)
     ol = op_sub.add_parser("list", help="list the current operator overrides")
     ol.set_defaults(func=_resolve_cli_module()._cmd_supervise)
