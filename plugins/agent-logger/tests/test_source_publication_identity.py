@@ -440,6 +440,37 @@ def test_publication_identity_unsupported_barrier_fails_closed(tmp_path: Path, m
     assert not (tmp_path / "m1" / admission.PUBLICATION_IDENTITY_MARKER).exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory durability barrier")
+def test_publication_identity_retries_failed_post_link_barrier(tmp_path: Path, monkeypatch) -> None:
+    import errno
+    import stat
+
+    dest = tmp_path / "m1"
+    marker = dest / admission.PUBLICATION_IDENTITY_MARKER
+    original = os.fsync
+    failing = True
+    failures = []
+
+    def fail_marker_barrier(fd):
+        info = os.fstat(fd)
+        if failing and marker.exists() and stat.S_ISDIR(info.st_mode):
+            directory = dest.stat()
+            if (info.st_dev, info.st_ino) == (directory.st_dev, directory.st_ino):
+                failures.append(fd)
+                raise OSError(errno.EIO, "injected directory barrier failure")
+        return original(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_marker_barrier)
+    first = _claim(dest)
+    assert first is not None and not first.ok
+    assert marker.is_file()
+    second = _claim(dest)
+    assert second is not None and not second.ok
+    assert len(failures) == 2
+    failing = False
+    assert _claim(dest) is None
+
+
 def test_publication_identity_creation_interleaving(tmp_path: Path, monkeypatch) -> None:
     from agent_logger.sync.targets import filesystem
 

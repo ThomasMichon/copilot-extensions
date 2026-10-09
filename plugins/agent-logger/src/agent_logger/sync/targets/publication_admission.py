@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
     ensure_real_directory,
+    fsync_directory,
     windows_extended_path,
 )
 from agent_logger.sync.targets.base import PushResult, SourceIdentityLike
@@ -92,6 +93,10 @@ def _check_existing_claim(
     if normalize(publication_key) not in allowed:
         return PushResult(ok=False, detail="publication key disagrees with recorded namespace/aliases")
     if recorded == incoming:
+        try:
+            fsync_directory(marker_path.parent)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"claim durability barrier failed: {exc}")
         return None
     return PushResult(ok=False, detail=f"publication identity mismatch at {marker_path}")
 
