@@ -205,6 +205,7 @@ class SteerBody(BaseModel):
     wake: bool = True
     message: str | None = None
     expected_status: str | None = None
+    idempotency_key: str | None = None
 
 
 class CardDraftBody(BaseModel):
@@ -912,6 +913,7 @@ def register_task_routes(
                 wake_requested=body.wake,
                 wake_message=message,
                 expected_status=body.expected_status,
+                idempotency_key=body.idempotency_key,
             ),
             "task.steer",
         )
