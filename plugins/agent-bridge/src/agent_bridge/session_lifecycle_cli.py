@@ -118,6 +118,7 @@ def _cmd_resume(args: argparse.Namespace) -> None:
         client=core._get_client(),
         target=args.session_id,
         reclaim=bool(getattr(args, "force", False)),
+        strict=bool(getattr(args, "strict", False)),
         as_json=bool(getattr(args, "json", False)),
         json_out=core._json_out,
         match_agents=core._match_agents,
@@ -387,6 +388,7 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     resume_p = sub.add_parser("resume", help="Resume a stopped session, or load/take-over a worktree by handle")
     resume_p.add_argument("session_id", metavar="target", help="Session ID (owned ACP session) or worktree handle to load")
     resume_p.add_argument("--force", "--reclaim", dest="force", action="store_true", help="Break-glass take-over: adopt the worktree even if a live interactive CLI holds it (stop that CLI first)")
+    resume_p.add_argument("--strict", action="store_true", help="Identity-preserving contract: refuse (409) rather than silently start a fresh replacement conversation when the worktree has no existing session or its resume fails")
     resume_p.set_defaults(func=_cmd_resume)
 
     from . import restart_worktree_cli

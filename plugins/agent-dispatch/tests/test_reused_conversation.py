@@ -56,7 +56,7 @@ def test_missing_handle_resumes_retained_worktree_conversation(monkeypatch):
     ok, handle = make_headless_spawn()(_task())
     assert ok is True
     assert handle["session"] == "local-body:existing-conversation"
-    assert calls[0] == ["bridge", "--json", "resume", "review-worktree"]
+    assert calls[0] == ["bridge", "--json", "resume", "review-worktree", "--strict"]
     position = calls[1].index("send")
     assert calls[1][position:position + 2] == ["send", "existing-conversation"]
     assert not any("create" in call or "--force" in call for call in calls)

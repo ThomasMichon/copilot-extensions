@@ -1738,6 +1738,48 @@ class TestWorktreeRoutes:
         )
         assert resp.status_code == 404
 
+    def test_resume_worktree_strict_refuses_instead_of_fresh_when_no_session(
+        self, client,
+    ) -> None:
+        """``strict=true`` on a worktree with no bridge session at all must
+        refuse (409, ``resume_requires_existing_session``), never silently
+        start a fresh owned session -- the identity-preserving contract."""
+        wt_id = "anomalous-potato-wsl-20250101-160100-strictempty"
+        self._seed_worktree("test-agent", wt_id)
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume?strict=true")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "resume_requires_existing_session"
+        assert detail["worktree_id"] == wt_id
+
+    def test_resume_worktree_strict_refuses_instead_of_fresh_on_resume_failure(
+        self, client, app,
+    ) -> None:
+        """``strict=true`` must refuse (409) rather than fall back to a
+        fresh replacement conversation when the existing session's resume
+        itself fails -- the exact history-loss case this contract closes."""
+        from unittest.mock import AsyncMock
+
+        wt_id = "anomalous-potato-wsl-20250101-160200-strictfail"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        stopped = Session("sess-dead-strict-1", "cold-fern", target, "test-agent")
+        stopped.status = SessionStatus.STOPPED
+        stopped.acp_session_id = "acp-dead-strict-1"
+        mgr._sessions[stopped.session_id] = stopped
+
+        mgr.resume_session = AsyncMock(side_effect=RuntimeError("acp session gone"))
+        mgr.start_session = AsyncMock()
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume?strict=true")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "resume_requires_existing_session"
+        assert detail["worktree_id"] == wt_id
+        mgr.start_session.assert_not_awaited()  # never a silent replacement
+
     def test_resume_worktree_returns_already_live_session(
         self, client, app,
     ) -> None:

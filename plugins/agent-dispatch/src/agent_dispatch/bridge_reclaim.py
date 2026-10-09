@@ -98,17 +98,26 @@ _LIVE_CLI_HOLDS_WORKTREE = "live_cli_holds_worktree"
 
 def _resume(
     worktree_id: str, *, exe: Sequence[str], force: bool, timeout: float | None,
+    strict: bool = False,
 ) -> tuple[subprocess.CompletedProcess, str | None]:
-    """Run ``agent-bridge --json resume <worktree_id> [--force]`` once.
+    """Run ``agent-bridge --json resume <worktree_id> [--force] [--strict]``
+    once.
 
     Returns ``(completed_process, session_id_or_none)``. ``session_id`` is
     ``None`` on any failure to parse it out, whether from a nonzero
     returncode or a 0-returncode, unparseable (legacy-daemon) response --
     the caller distinguishes those via ``completed_process.returncode``.
+
+    ``strict`` is the identity-preserving contract (see
+    ``agent_bridge.routes.worktrees.resume_worktree``): a missing bridge
+    record or a failed resume each refuse (409) instead of silently
+    starting a fresh replacement conversation.
     """
     resume_cmd = [*exe, "--json", "resume", worktree_id]
     if force:
         resume_cmd.append("--force")
+    if strict:
+        resume_cmd.append("--strict")
     resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         resume_cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
@@ -292,7 +301,10 @@ def resume_worktree_and_send(
 
     ``allow_takeover=False`` is the non-forcing conversation-recovery path:
     a live interactive holder raises ``BridgeCarriedSessionBusy`` without a
-    stop, restart, or forced resume.
+    stop, restart, or forced resume. It also requests the bridge's
+    identity-preserving ``strict`` resume contract, so a missing bridge
+    record or a failed resume refuse closed instead of silently returning a
+    brand-new replacement conversation.
 
     Tries a plain (non-forcing) resume first. On a genuine 409
     ``live_cli_holds_worktree`` refusal, delegates the whole
@@ -306,7 +318,10 @@ def resume_worktree_and_send(
     reason to echo an id the caller already knows.
     """
     _ = agent
-    resumed, session_id = _resume(worktree_id, exe=exe, force=False, timeout=timeout)
+    resumed, session_id = _resume(
+        worktree_id, exe=exe, force=False, timeout=timeout,
+        strict=not allow_takeover,
+    )
     if session_id is None:
         if resumed.returncode == 0:
             return _no_session_id_failure(resumed)

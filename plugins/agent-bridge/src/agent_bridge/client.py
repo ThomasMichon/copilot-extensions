@@ -1174,6 +1174,7 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         worktree_id: str,
         *,
         reclaim: bool = False,
+        strict: bool = False,
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/worktrees/{id}/resume -- ensure a worktree has a live
@@ -1184,13 +1185,21 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         holding the worktree normally yields a 409
         (``reason: live_cli_holds_worktree``); ``reclaim=true`` bypasses that
         guard so the caller can own a worktree it has just freed.
+
+        ``strict`` is the identity-preserving contract: never a silent fresh
+        replacement conversation. Either the existing session resumes, or the
+        call raises a 409 (``reason: resume_requires_existing_session``).
         """
-        params = {"reclaim": "true"} if reclaim else None
+        params = {}
+        if reclaim:
+            params["reclaim"] = "true"
+        if strict:
+            params["strict"] = "true"
         return (
             self._request(
                 "POST",
                 f"/api/v1/worktrees/{worktree_id}/resume",
-                params=params,
+                params=params or None,
                 request_timeout=request_timeout,
             )
             or {}

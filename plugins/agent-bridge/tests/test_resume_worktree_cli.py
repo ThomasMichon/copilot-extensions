@@ -39,11 +39,12 @@ class _FakeClient:
         worktree_id,
         *,
         reclaim=False,
+        strict=False,
         request_timeout=None,
     ):
-        self.worktree_calls.append((worktree_id, reclaim))
+        self.worktree_calls.append((worktree_id, reclaim, strict))
         result = (
-            self._worktree_resume(worktree_id, reclaim=reclaim)
+            self._worktree_resume(worktree_id, reclaim=reclaim, strict=strict)
             if callable(self._worktree_resume)
             else self._worktree_resume
         )
@@ -52,8 +53,8 @@ class _FakeClient:
         return result
 
 
-def _args(target, *, force=False, json=False):
-    return argparse.Namespace(session_id=target, force=force, json=json)
+def _args(target, *, force=False, json=False, strict=False):
+    return argparse.Namespace(session_id=target, force=force, json=json, strict=strict)
 
 
 def _patch_client(monkeypatch, client):
@@ -81,7 +82,7 @@ def test_dormant_worktree_loaded_with_note(monkeypatch, capsys):
 
     m._cmd_resume(_args("wt-6b68"))
 
-    assert client.worktree_calls == [("wt-6b68", False)]  # reclaim not forced
+    assert client.worktree_calls == [("wt-6b68", False, False)]  # reclaim not forced
     out = capsys.readouterr().out
     assert "Worktree wt-6b68 loaded as owned session owned-9" in out
 
@@ -115,10 +116,42 @@ def test_force_takes_over_live_holder(monkeypatch, capsys):
 
     # --force skips the session-resume attempt and reclaims the worktree.
     assert client.session_calls == []
-    assert client.worktree_calls == [("wt-6b68", True)]
+    assert client.worktree_calls == [("wt-6b68", True, False)]
     assert "Worktree wt-6b68 took over as owned session owned-9" in (
         capsys.readouterr().out
     )
+
+
+def test_strict_flag_passed_through_to_resume_worktree(monkeypatch, capsys):
+    """``--strict`` must propagate to ``client.resume_worktree(strict=True)``
+    -- the identity-preserving contract this CLI flag exists to request."""
+    client = _FakeClient(
+        session_resume=BridgeClientError(404, "not found"),
+        worktree_resume={"status": "idle", "session_id": "owned-9"},
+    )
+    _patch_client(monkeypatch, client)
+
+    m._cmd_resume(_args("wt-6b68", strict=True))
+
+    assert client.worktree_calls == [("wt-6b68", False, True)]
+
+
+def test_strict_refusal_reported_as_generic_failure(monkeypatch, capsys):
+    """A ``resume_requires_existing_session`` refusal is not a live-CLI
+    takeover case -- it must surface as a plain failure, never attempt a
+    stop/force/takeover sequence."""
+    client = _FakeClient(
+        session_resume=BridgeClientError(404, "not found"),
+        worktree_resume=BridgeClientError(
+            409, {"reason": "resume_requires_existing_session", "worktree_id": "wt-6b68"},
+        ),
+    )
+    _patch_client(monkeypatch, client)
+
+    with pytest.raises(SystemExit) as ei:
+        m._cmd_resume(_args("wt-6b68", strict=True))
+    assert ei.value.code == 1
+    assert "resume_requires_existing_session" in capsys.readouterr().err
 
 
 def test_unknown_target_reports_neither(monkeypatch, capsys):
@@ -139,7 +172,7 @@ def test_unknown_target_reports_neither(monkeypatch, capsys):
 def test_singleton_repo_target_falls_back_to_anchor_key(monkeypatch, capsys):
     client = _FakeClient(
         session_resume=BridgeClientError(404, "not found"),
-        worktree_resume=lambda worktree_id, reclaim=False: (
+        worktree_resume=lambda worktree_id, reclaim=False, strict=False: (
             BridgeClientError(404, "No session found")
             if worktree_id != "llama.cpp@anchor"
             else {"status": "idle", "session_id": "owned-anchor-1"}
@@ -159,8 +192,8 @@ def test_singleton_repo_target_falls_back_to_anchor_key(monkeypatch, capsys):
     m._cmd_resume(_args("llama.cpp@Atlas-Core"))
 
     assert client.worktree_calls == [
-        ("llama.cpp@Atlas-Core", False),
-        ("llama.cpp@anchor", False),
+        ("llama.cpp@Atlas-Core", False, False),
+        ("llama.cpp@anchor", False, False),
     ]
     assert "Repo llama.cpp loaded as owned session owned-anchor-1" in (
         capsys.readouterr().out
