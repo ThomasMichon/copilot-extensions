@@ -175,6 +175,30 @@ def test_copilot_launch_proceeds_to_the_claim_when_allowed(monkeypatch):
     assert claimed == [("cs",)]
 
 
+def test_a_direct_stdio_agent_launch_is_refused_before_any_connect(monkeypatch, capsys):
+    from agent_codespaces import __main__ as cli
+
+    monkeypatch.delenv(lp.LAUNCH_CHECKED_ENV, raising=False)
+    monkeypatch.setattr(cli, "_ssh_session", lambda args: pytest.fail("must not connect"))
+    _policy("print('{\"refuse\": \"paused\"}')")
+    args = argparse.Namespace(name="cs", stdio=True, remote_cmd="copilot --acp --stdio")
+    assert cli._cmd_ssh.__wrapped__(args) == lp.LAUNCH_REFUSED_EXIT
+    assert "paused" in capsys.readouterr().err
+
+
+def test_a_plain_ssh_and_a_bridge_checked_stdio_launch_are_not_asked(monkeypatch):
+    monkeypatch.setattr(lp, "refusal", lambda name, deadline=None: pytest.fail("must not ask"))
+    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=False)) is None
+    monkeypatch.setenv(lp.LAUNCH_CHECKED_ENV, "cs")
+    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=True)) is None
+
+
+def test_a_checked_marker_for_another_codespace_does_not_skip_the_policy(monkeypatch):
+    monkeypatch.setenv(lp.LAUNCH_CHECKED_ENV, "other")
+    monkeypatch.setattr(lp, "refusal", lambda name, deadline=None: "paused")
+    assert lp.stdio_refused_exit_code(argparse.Namespace(name="cs", stdio=True)) == lp.LAUNCH_REFUSED_EXIT
+
+
 def _cli(argv):
     parser = argparse.ArgumentParser()
     lp.add_launch_policy_parsers(parser.add_subparsers(dest="command"))

@@ -6,7 +6,8 @@ pause, a stop marker, a budget) registers one command on this machine::
     agent-codespaces launch-policy set [--timeout 20] -- <argv...>
 
 Every CodeSpace worker launch asks it first: an attached or detached
-``agent-codespaces copilot``, and agent-bridge's Session Host spawn on a
+``agent-codespaces copilot``, a direct ``agent-codespaces ssh <name> --stdio``
+(an agent's stdio transport), and agent-bridge's Session Host spawn on a
 CodeSpace (a fresh start, or a respawn on resume -- including the implicit
 resume a later ``send`` triggers), which shells ``agent-codespaces
 launch-check``. So the host's semantics live in the host, but no launch path
@@ -336,6 +337,20 @@ def refused_exit_code(codespace: str) -> int | None:
         return None
     print(f"[REFUSED] Launch on CodeSpace '{codespace}' refused: {reason}", file=sys.stderr)
     return LAUNCH_REFUSED_EXIT
+
+
+#: agent-bridge sets this to the CodeSpace's name on the ``ssh --stdio`` it
+#: spawns once it has asked this policy itself, so that launch isn't asked twice.
+LAUNCH_CHECKED_ENV = "AGENT_CODESPACES_LAUNCH_CHECKED"
+
+
+def stdio_refused_exit_code(args) -> int | None:
+    """``ssh --stdio`` carries an agent's stdio (``--remote-cmd "copilot --acp
+    --stdio"`` launches a worker), so it asks the policy like every other
+    launch; :func:`refused_exit_code`'s answer, or ``None`` for a plain ssh."""
+    if not getattr(args, "stdio", False) or os.environ.get(LAUNCH_CHECKED_ENV) == args.name:
+        return None
+    return refused_exit_code(args.name)
 
 
 # -- CLI ----------------------------------------------------------------------

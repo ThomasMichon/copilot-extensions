@@ -1150,8 +1150,8 @@ async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN0
 
 @_context_admitted
 def _cmd_ssh(args: argparse.Namespace) -> int:
-    """SSH into a CodeSpace using ssh-manager."""
-    return _ssh_session(args)
+    """SSH into a CodeSpace using ssh-manager (``--stdio`` asks the launch policy first)."""
+    return launch_policy.stdio_refused_exit_code(args) or _ssh_session(args)
 
 
 def _ssh_session(
