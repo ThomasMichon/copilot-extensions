@@ -145,9 +145,9 @@ def _live_prs(data: dict, path: Path) -> list[dict]:
             if field in pr and not isinstance(pr[field], str):
                 raise ValueError(f"Malformed tracked PR {field}: {path}")
         state = pr.get("state", "")
-        if state not in ("", "creating", "open", "merged", "closed", "abandoned"):
+        if state not in ("", "creating", "open", "active", "merged", "closed", "completed", "abandoned"):
             raise ValueError(f"Unknown tracked PR state: {path}")
-        if state not in ("merged", "closed", "abandoned"):
+        if state not in ("merged", "closed", "completed", "abandoned"):
             live.append(pr)
     return live
 

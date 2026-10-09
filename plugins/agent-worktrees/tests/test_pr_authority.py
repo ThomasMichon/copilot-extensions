@@ -201,3 +201,19 @@ def test_pr_authority_legacy_candidate_uses_its_project_remote(authority_state, 
     with pr_authority.guard(), pytest.raises(ValueError, match="Another worktree"):
         pr_authority.assert_exclusive(config, record, record.pr)
     assert observed == ["upstream"]
+
+
+@pytest.mark.parametrize("state,conflicts", [("active", True), ("completed", False)])
+def test_pr_authority_native_provider_states(authority_state, state, conflicts):
+    config, record, root, registry, ledgers = authority_state
+    other = tracking.create_new_record(
+        "other", "worktree/other", "elsewhere", "alias", "test", "linux", ledgers["alias"],
+    )
+    other.prs = [replace(record.pr, pr_id="other", state=state)]
+    tracking.save_record(other)
+    with pr_authority.guard():
+        if conflicts:
+            with pytest.raises(ValueError, match="Another worktree"):
+                pr_authority.assert_exclusive(config, record, record.pr)
+        else:
+            pr_authority.assert_exclusive(config, record, record.pr)
