@@ -82,6 +82,12 @@ refused; review their provenance before any separate migration. Cross-space
 owned creation is still unsupported before allocation. This feature does not
 add reservation/receipt authority.
 
+Claim and handoff transactions recheck each freshly loaded source, consumer,
+and child record while holding its sidecar lock. Authority comes from the
+receiving execution user's registered project configuration, never a caller's
+transport alias or supplied machine label. An unavailable project registration
+is an explicit authority failure, not permission to mutate an orphaned ledger.
+
 Registries without explicit execution-space declarations retain their legacy
 lifecycle behavior. Distinct registered keys nevertheless do not become local
 merely through shared hostname metadata. Keys cannot contain whitespace, path

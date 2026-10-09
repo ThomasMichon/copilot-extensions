@@ -1,6 +1,7 @@
 """Execution-space identity must not collapse through a shared OS hostname."""
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -47,10 +48,12 @@ def scoped_config(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    return SimpleNamespace(
+    config = SimpleNamespace(
         machine="workstation-windows", repo_name="project",
         default_repo=SimpleNamespace(anchor=str(tmp_path)),
     )
+    monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
+    return config
 
 
 def test_explicit_registration_preserves_key_and_grouping_only_metadata(tmp_path):
@@ -327,3 +330,197 @@ def test_explicit_registry_rejects_casefold_key_collisions(tmp_path):
     )
     with pytest.raises(ValueError, match="unique without regard to case"):
         parse_machines_yaml_file(path)
+
+
+def test_handoff_rejects_transport_alias_authority(scoped_config, monkeypatch):
+    from dataclasses import replace
+    from agent_worktrees import claim_handoff_accept_support
+
+    entries = cfg.load_machines_yaml(scoped_config.default_repo.anchor)
+    entries["workstation-windows"] = replace(
+        entries["workstation-windows"], alias="windows-ssh",
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="registered|explicit"):
+        claim_handoff_accept_support.same_machine("windows-ssh", "windows-ssh")
+
+
+@pytest.mark.parametrize("verb", ["add", "release", "settle"])
+def test_claim_write_rechecks_owner_after_acquiring_lock(
+    verb, tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import tracking_claim_write
+
+    record = SimpleNamespace(
+        machine=scoped_config.machine, repo="project", worktree_id="wt-owner",
+        owner_ref=None,
+    )
+    lock_held = False
+
+    @contextmanager
+    def raced_lock(*args, **kwargs):
+        nonlocal lock_held
+        record.owner_ref = "workstation-wsl/project/wt-new-parent"
+        lock_held = True
+        try:
+            yield
+        finally:
+            lock_held = False
+
+    def fresh_record(path):
+        assert lock_held
+        return record
+
+    monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
+    monkeypatch.setattr(tracking, "load_record", fresh_record)
+    monkeypatch.setattr(
+        tracking, "save_record",
+        lambda *args, **kwargs: pytest.fail("foreign claim transaction saved a record"),
+    )
+    result = getattr(tracking_claim_write, f"apply_claim_{verb}")({
+        "worktree_id": record.worktree_id, "yaml_path": str(tmp_path / "wt-owner.yaml"),
+        "kind": "pr", "ref": "owner/example#1", "disposition": "at-rest",
+    })
+    assert result["error"] == "rejected"
+    assert "cross-space" in result["message"]
+
+
+@pytest.mark.parametrize("role", ["source", "consumer", "child"])
+def test_handoff_loader_rejects_fresh_foreign_record(
+    role, tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import claim_handoffs
+
+    record = SimpleNamespace(
+        machine="workstation-wsl", repo="project", worktree_id="wt-foreign",
+        owner_ref=None, status="active",
+    )
+    monkeypatch.setattr(tracking, "load_record", lambda path: record)
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="different execution space"):
+        claim_handoffs._load_record_from_path(tmp_path / "wt-foreign.yaml", role=role)
+
+
+@pytest.mark.parametrize("seed", [None, "new resume intent"])
+def test_foreign_resume_rejects_before_seed_staging(
+    seed, tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import resolve_launch_cli
+
+    record = SimpleNamespace(
+        machine="workstation-wsl", repo="project", worktree_id="wt-foreign",
+        owner_ref=None, worktree_path=str(tmp_path), yaml_path=tmp_path / "wt-foreign.yaml",
+        pending_seed="legacy intent",
+    )
+    plans = []
+    monkeypatch.setattr(
+        resolve_launch_cli, "seed_for_attempt",
+        lambda *args, **kwargs: pytest.fail("foreign resume staged a launch seed"),
+    )
+    monkeypatch.setattr(resolve_launch_cli, "_emit_plan", plans.append)
+    result = resolve_launch_cli._resolve_resume_context(
+        resolve_launch_cli.ResolveLaunchContext(
+            config=scoped_config, args=SimpleNamespace(seed=seed), record=record,
+        )
+    )
+    assert result == 3
+    assert plans[-1]["action"] == "error"
+    assert "different execution space" in plans[-1]["error"]
+
+
+def test_source_accept_rejects_foreign_record_before_registry_transition(
+    tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import claim_handoffs
+
+    project_dir = tmp_path / "project"
+    tracking_dir = project_dir / "worktrees"
+    tracking_dir.mkdir(parents=True)
+    source_path = tracking_dir / "wt-source.yaml"
+    source = tracking.create_new_record(
+        "wt-source", "worktree/wt-source", str(tmp_path), "project",
+        "workstation-wsl", "wsl", tracking_dir,
+    )
+    claim = tracking.ResourceClaim(
+        kind="pr", ref="owner/example#1", created_at="2026-10-09T12:00:00",
+        state="active", handoff_bundle="bundle-1",
+    )
+    source.resources = [claim]
+    tracking.save_record(source, source_path)
+    bundle = claim_handoffs.ClaimBundle(
+        bundle_id="bundle-1", state="offered",
+        source="workstation-windows/project/wt-source",
+        consumer="workstation-windows/project/wt-consumer",
+        claims=(claim_handoffs._claim_snapshot(claim),),
+        offered_at="2026-10-09T12:00:00", updated_at="2026-10-09T12:00:00",
+    )
+    registry = tmp_path / "claim-handoffs.yaml"
+    claim_handoffs._save_registry(registry, [bundle])
+    before = source_path.read_bytes(), registry.read_bytes()
+    monkeypatch.setattr(cfg, "project_dir", lambda project: project_dir)
+    monkeypatch.setattr(claim_handoffs, "registry_path", lambda: registry)
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="different execution space"):
+        claim_handoffs.accept_source(bundle.bundle_id, actor=bundle.consumer)
+    assert (source_path.read_bytes(), registry.read_bytes()) == before
+
+
+def test_project_authority_failure_is_an_explicit_rejection(scoped_config, monkeypatch):
+    def unavailable(project):
+        raise ValueError("project is not registered")
+
+    monkeypatch.setattr(cfg, "load_project_config", unavailable)
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="receiving-side authority"):
+        execution_spaces.require_project_record_mutation(SimpleNamespace(repo="missing"))
+
+
+def test_sweep_rechecks_fresh_owner_under_lock(
+    tmp_path, scoped_config, monkeypatch, capfd,
+):
+    from agent_worktrees import sweep
+
+    stale = SimpleNamespace(
+        machine=scoped_config.machine, repo="project", worktree_id="wt-owner",
+        owner_ref=None, resources=[],
+    )
+    fresh = SimpleNamespace(
+        machine="workstation-wsl", repo="project", worktree_id=stale.worktree_id,
+        owner_ref=None,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(tracking, "list_records", lambda path: [stale])
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *args, **kwargs: nullcontext())
+    monkeypatch.setattr(tracking, "load_record", lambda path: fresh)
+    monkeypatch.setattr(sweep, "make_resolvers", lambda config: (lambda claim: True, lambda claim: True))
+    monkeypatch.setattr(
+        tracking, "sweep_abandoned_obligations",
+        lambda *args, **kwargs: pytest.fail("foreign sweep changed the fresh claim ledger"),
+    )
+    assert claims_cli._claims_sweep(SimpleNamespace(apply=True, json=True)) == 1
+    assert "different execution space" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_cross_space_owned_handoff_rejects_before_source_release(
+    tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import claim_handoffs
+
+    bundle = claim_handoffs.ClaimBundle(
+        bundle_id="bundle-1", state="offered",
+        source="workstation-wsl/project/wt-source",
+        consumer="workstation-windows/project/wt-consumer",
+        claims=({"kind": "worktree", "ref": "workstation-windows/project/wt-child",
+                 "created_at": "", "state": "active", "note": ""},),
+        offered_at="2026-10-09T12:00:00", updated_at="2026-10-09T12:00:00",
+    )
+    registry = tmp_path / "claim-handoffs.yaml"
+    claim_handoffs._save_registry(registry, [bundle])
+    before = registry.read_bytes()
+    monkeypatch.setattr(claim_handoffs, "registry_path", lambda: registry)
+    for name in ("acquire_bundle_fence", "accept_source", "remote_accept_source"):
+        monkeypatch.setattr(
+            claim_handoffs, name,
+            lambda *args, **kwargs: pytest.fail("unsupported handoff began releasing source authority"),
+        )
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="source claims are retained"):
+        claim_handoffs.accept(bundle.bundle_id, actor=bundle.consumer, machine=scoped_config.machine)
+    assert registry.read_bytes() == before

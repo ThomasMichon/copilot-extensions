@@ -10,11 +10,12 @@ live daemon.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from agent_worktrees import obligations, tracking, tracking_claim_write, tracking_write
+from agent_worktrees import config as cfg, obligations, tracking, tracking_claim_write, tracking_write
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +29,12 @@ def _clean_verb_registry():
 @pytest.fixture
 def record_path(tmp_tracking_dir: Path) -> Path:
     path = tmp_tracking_dir / "wt-claim.yaml"
+    project_dir = cfg.project_dir("example")
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": "example", "machine": "machine",
+        "repos": {"example": {"anchor": str(tmp_tracking_dir)}},
+    }), encoding="utf-8")
     tracking.create_new_record(
         "wt-claim", "worktree/wt-claim", "/tmp/wt-claim", "example",
         "machine", "wsl", tmp_tracking_dir,

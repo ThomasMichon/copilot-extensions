@@ -38,6 +38,10 @@ def _record(
     tdir.mkdir(parents=True, exist_ok=True)
     wdir = tmp_path / "trees" / project / worktree_id
     wdir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / project / "config.yaml").write_text(json.dumps({
+        "repo_name": project, "machine": machine,
+        "repos": {project: {"anchor": str(wdir)}},
+    }), encoding="utf-8")
     record = tracking.create_new_record(
         worktree_id,
         f"worktree/{worktree_id}",
@@ -563,7 +567,7 @@ def test_cli_accept_source_returns_json_without_logging_main_accept(
     world = _setup_bundle(handoff_world, source_machine="ember")
     bundle = _offer_cross_machine(world, [world["claims"][1].ref])
     config = types.SimpleNamespace(machine="ember", repo_name="source-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
 
     assert m.cmd_claims(
@@ -582,7 +586,7 @@ def test_cli_accept_logs_and_returns_accepted_bundle(handoff_world, monkeypatch,
     world = _setup_bundle(handoff_world)
     bundle = _offer(world, [world["claims"][1].ref])[0]
     config = types.SimpleNamespace(machine=MACHINE, repo_name="consumer-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
     logged = []
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
