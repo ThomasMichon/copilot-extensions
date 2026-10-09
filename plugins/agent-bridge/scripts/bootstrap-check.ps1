@@ -37,8 +37,9 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
     OBSERVABILITY (#167): the background reconcile is otherwise silent -- a failed
     cutover would leave no trace. So this hook records every reconcile ATTEMPT to
     ~/.<name>/reconcile-status.json and redirects the installer's output to
-    ~/.<name>/reconcile.log (stdout) / reconcile.err.log (stderr). Check those to
-    see whether the last auto-reconcile succeeded.
+    ~/.<name>/reconcile.log (stdout) / reconcile-installer.err.log (stderr).
+    Watchdog diagnostics use reconcile.err.log. Check the status record and
+    those files to see whether the last auto-reconcile succeeded.
 
     OPT-IN GATE (removed -- agent-bridge-unified-zdd-cutover Phase 0): a
     version-drift reconcile used to require a checked-in, PER-PLUGIN
@@ -66,6 +67,8 @@ function Exit-SessionStart {
     exit 0
 }
 $PluginDir = Split-Path -Parent $PSScriptRoot
+$reconcileMutex = $null
+$ownsReconcileMutex = $false
 try {
     $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
     if (-not $name) { Exit-SessionStart }
@@ -132,23 +135,36 @@ try {
     # before.)
     if ($runtimeHealthy -and $deployed -eq $current -and (-not $curVer -or $curVer -eq $deployed)) { Exit-SessionStart }
 
+    $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+    $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
+    $installerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-OutputFormat', 'Text', '-File')
     if (Test-Path $init) {
-        $reInner = "& `"$init`""
+        $installerArguments += "`"$init`""
     } else {
         $inst = Join-Path $PluginDir 'scripts\install.ps1'
         if (-not (Test-Path $inst)) { Exit-SessionStart }
-        $reInner = "& `"$inst`" install -NonInteractive"
+        $installerArguments += @("`"$inst`"", 'install', '-NonInteractive')
     }
-    $pw = Get-Command pwsh -ErrorAction SilentlyContinue
-    $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+    $argumentCode = '@(' + (($installerArguments |
+        ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ',') + ')'
 
-    # Observability (#167): capture the otherwise-silent background reconcile so a
-    # failed auto-update is diagnosable. The headless pwsh self-redirects ALL its
-    # streams (incl. Write-Host) to reconcile.log with `*>` -- see the launch
-    # below for why an outer redirect can't be used under conhost --headless.
+    # Capture inside the headless supervisor: redirecting conhost itself would
+    # capture its empty streams, not the installer child's output.
     $reconcileLog = Join-Path $InstallDir 'reconcile.log'
+    $installerErrorLog = Join-Path $InstallDir 'reconcile-installer.err.log'
     $statusFile   = Join-Path $InstallDir 'reconcile-status.json'
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        $key = -join ($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes(
+            [IO.Path]::GetFullPath($InstallDir).ToLowerInvariant())) |
+            ForEach-Object { $_.ToString('x2') })
+    } finally { $hash.Dispose() }
+    $mutexName = "Global\agent-bridge-reconcile-$key"
+    $reconcileMutex = New-Object Threading.Mutex($false, $mutexName)
+    try { $ownsReconcileMutex = $reconcileMutex.WaitOne(0) }
+    catch [Threading.AbandonedMutexException] { $ownsReconcileMutex = $true }
+    if (-not $ownsReconcileMutex) { Exit-SessionStart }
 
     # --- Good boot-citizen guard: single-flight + stale-reap ---
     # This hook fires on EVERY new session. Without a guard, a slow or wedged
@@ -164,7 +180,22 @@ try {
         if (Test-Path $statusFile) {
             $prev = Get-Content $statusFile -Raw | ConvertFrom-Json
             $prevPid = 0; [void][int]::TryParse("" + $prev.launched_pid, [ref]$prevPid)
-            if ($prevPid -gt 0 -and (Get-Process -Id $prevPid -ErrorAction SilentlyContinue)) {
+            $previousProcess = if ($prevPid -gt 0) {
+                Get-Process -Id $prevPid -ErrorAction SilentlyContinue
+            } else { $null }
+            $recordedStart = if ($prev.worker_started_at) {
+                $prev.worker_started_at
+            } else { $prev.wrapper_started_at }
+            if ($previousProcess -and $recordedStart) {
+                $startedAt = if ($recordedStart -is [DateTime]) {
+                    [DateTimeOffset]$recordedStart
+                } else { [DateTimeOffset]::Parse([string]$recordedStart) }
+                if ($previousProcess.StartTime.ToUniversalTime() -ne
+                    $startedAt.UtcDateTime) {
+                    $previousProcess = $null  # PID was reused; it is not our worker.
+                }
+            }
+            if ($previousProcess) {
                 # Age from the recorded UTC timestamp. ConvertFrom-Json may hand
                 # back $prev.at as an already-parsed (local-kind) [DateTime], so
                 # normalize via [DateTimeOffset] -- comparing instants regardless
@@ -177,10 +208,35 @@ try {
                     $ageMin = ([DateTimeOffset]::UtcNow - $dto).TotalMinutes
                 } catch { }
                 if ($ageMin -lt $staleMinutes) { Exit-SessionStart }         # in flight -- don't stack
-                Stop-Process -Id $prevPid -Force -ErrorAction SilentlyContinue  # wedged -- reap
+                if (-not $recordedStart) {
+                    [Console]::Error.WriteLine("[$name] stale legacy reconcile ownership is unverified; not reaping its PID")
+                    Exit-SessionStart
+                }
+                $reapProcess = Get-Process -Id $prevPid -ErrorAction SilentlyContinue
+                if (-not $reapProcess) { Exit-SessionStart }
+                try {
+                    # Pin the process object so its PID cannot be recycled while
+                    # taskkill acts; check this fresh handle's identity, not cache.
+                    [void]$reapProcess.Handle
+                    if ($reapProcess.HasExited -or
+                        $reapProcess.StartTime.ToUniversalTime() -ne $startedAt.UtcDateTime) {
+                        [Console]::Error.WriteLine("[$name] reconcile identity changed before reaping; leaving it recorded")
+                        Exit-SessionStart
+                    }
+                    & taskkill.exe /PID $prevPid /T /F *> $null
+                    if ($LASTEXITCODE -ne 0 -and -not $reapProcess.HasExited) {
+                        [Console]::Error.WriteLine("[$name] could not reap stale reconcile tree; leaving it recorded")
+                        Exit-SessionStart
+                    }
+                } finally {
+                    $reapProcess.Dispose()
+                }
             }
         }
-    } catch { }
+    } catch {
+        [Console]::Error.WriteLine("[$name] could not validate prior reconcile ownership; leaving it recorded")
+        Exit-SessionStart
+    }
 
     [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir\reconcile.log)...")
 
@@ -199,48 +255,83 @@ try {
     # DefTerm handoff cannot surface it as a visible window (-WindowStyle Hidden
     # ALONE is ignored by DefTerm). conhost --headless gives the child its OWN
     # headless console, so an outer Start-Process -RedirectStandard* would capture
-    # conhost's (empty) output, not the reconcile's -- the pwsh therefore
-    # self-redirects all streams to reconcile.log via `*>`. The command is
+    # conhost's (empty) output, not the reconcile's -- the supervisor therefore
+    # redirects the installer child's streams to files. The command is
     # base64-encoded to avoid arg-quoting under conhost; children (uv/python
     # building the venv) inherit the headless console and stay hidden too.
     $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    # Observability (#167 + agent-bridge-unified-zdd-cutover Phase 0 review):
-    # the initial status write below (right after Start-Process) records the
-    # ATTEMPT so the single-flight/staleness check above always sees it; this
-    # tail, appended to the SAME headless pwsh that runs the reconcile itself,
-    # overwrites that same file with completion info once it actually exits --
-    # otherwise "Last auto-reconcile" would report a launch timestamp even for
-    # a reconcile that failed or is still wedged, making staleness look
-    # falsely healthy. Re-reads launched_pid back from the status file rather
-    # than re-deriving it, since only the PARENT knows conhost's PID (this
-    # child can't reference $proc.Id -- it hasn't been created yet at the
-    # point this string is built).
-    $compTail = @'
-$__rc = if ($?) { 0 } else { 1 }
-$__completedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-$__prevPid = 0
+    $attemptId = [guid]::NewGuid().ToString('N')
+    # The parent holds the mutex until it publishes the launch. The worker then
+    # takes ownership with its own PID, even if its conhost later disappears.
+    $worker = @'
+$ErrorActionPreference = 'Continue'
+function Update-ReconcileAttempt([bool]$Completed, [int]$Code) {
+    $mutex = New-Object Threading.Mutex($false, '__MUTEX__')
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(15000) }
+        catch [Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw 'reconcile status lock timed out' }
+        $status = Get-Content -LiteralPath '__STATUSFILE__' -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        if ($status.attempt_id -ne '__ATTEMPT__') { return $false }
+        $status.launched_pid = $PID
+        $status.worker_started_at = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
+        if ($Completed) {
+            $status | Add-Member -NotePropertyName completed_at -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o'))
+            $status | Add-Member -NotePropertyName exit_code -NotePropertyValue $Code
+            $status | Add-Member -NotePropertyName success -NotePropertyValue ($Code -eq 0)
+        }
+        $utf8 = New-Object Text.UTF8Encoding($false)
+        [IO.File]::WriteAllText('__STATUSFILE__', ($status | ConvertTo-Json -Compress), $utf8)
+        return $true
+    } finally {
+        if ($held) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
 try {
-    $__prevJson = Get-Content '__STATUSFILE__' -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
-    if ($__prevJson) { [void][int]::TryParse("" + $__prevJson.launched_pid, [ref]$__prevPid) }
-} catch { }
-$__status = [ordered]@{
-    at           = '__NOW__'
-    from         = '__DEPLOYED__'
-    to           = '__CURRENT__'
-    launched_pid = $__prevPid
-    log          = '__RECONCILELOG__'
-    completed_at = $__completedAt
-    exit_code    = $__rc
-    success      = ($__rc -eq 0)
-} | ConvertTo-Json -Compress
-$__utf8 = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText('__STATUSFILE__', $__status, $__utf8)
+    if (-not (Update-ReconcileAttempt $false 0)) { exit 125 }
+    # Staging belongs to this installer invocation, not a different parent's.
+    $env:COPILOT_PLUGIN_INSTALL_STAGED = $null
+    $env:COPILOT_PLUGIN_STAGED_FROM = $null
+    # File-backed streams do not wait for EOF on pipes inherited by descendants.
+    $installer = Start-Process -FilePath '__EXE__' -NoNewWindow -PassThru `
+        -WorkingDirectory '__HOME__' -ArgumentList __ARGUMENTS__ `
+        -RedirectStandardOutput '__RECONCILELOG__' `
+        -RedirectStandardError '__ERRORLOG__' -ErrorAction Stop
+    try {
+        [void]$installer.Handle
+        $installer.WaitForExit()
+        $installer.Refresh()
+        $code = $installer.ExitCode
+        if ($null -eq $code) { throw 'installer exit status is unavailable' }
+    } finally {
+        $installer.Dispose()
+    }
+} catch {
+    $failure = "attempt=__ATTEMPT__ background reconcile failed: $($_.Exception.Message)"
+    Add-Content -LiteralPath '__RECONCILELOG__' -Value $failure
+    [Console]::Error.WriteLine($failure)
+    $code = 1
+}
+try { [void](Update-ReconcileAttempt $true $code) }
+catch {
+    $failure = "attempt=__ATTEMPT__ reconcile completion could not be recorded: $($_.Exception.Message)"
+    Add-Content -LiteralPath '__RECONCILELOG__' -Value $failure
+    [Console]::Error.WriteLine($failure)
+}
+exit $code
 '@
-    $compTail = $compTail.Replace('__STATUSFILE__', $statusFile).Replace('__NOW__', $now).`
-        Replace('__DEPLOYED__', $deployed).Replace('__CURRENT__', $current).Replace('__RECONCILELOG__', $reconcileLog)
-    $reCmd = "& { $reInner } *> `"$reconcileLog`"`n$compTail"
-    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
-    $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden `
+    $worker = $worker.Replace('__MUTEX__', $mutexName).Replace('__ATTEMPT__', $attemptId).`
+        Replace('__STATUSFILE__', $statusFile.Replace("'", "''")).`
+        Replace('__RECONCILELOG__', $reconcileLog.Replace("'", "''")).`
+        Replace('__ERRORLOG__', $installerErrorLog.Replace("'", "''")).`
+        Replace('__EXE__', $exe.Replace("'", "''")).`
+        Replace('__HOME__', $env:USERPROFILE.Replace("'", "''")).Replace('__ARGUMENTS__', $argumentCode)
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($worker))
+    $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden -ErrorAction Stop `
+        -WorkingDirectory $env:USERPROFILE `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
     $launchedPid = if ($proc) { $proc.Id } else { 0 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -249,8 +340,18 @@ $__utf8 = New-Object System.Text.UTF8Encoding($false)
         from         = $deployed
         to           = $current
         launched_pid = $launchedPid
+        wrapper_pid  = $launchedPid
+        wrapper_started_at = $proc.StartTime.ToUniversalTime().ToString('o')
+        worker_started_at = $null
+        attempt_id   = $attemptId
         log          = $reconcileLog
+        stderr_log   = $installerErrorLog
     } | ConvertTo-Json -Compress
     [System.IO.File]::WriteAllText($statusFile, $status, $utf8NoBom)
-} catch { }
+} catch {
+    [Console]::Error.WriteLine("[agent-bridge] background reconcile could not start: $($_.Exception.Message)")
+} finally {
+    if ($ownsReconcileMutex) { $reconcileMutex.ReleaseMutex() }
+    if ($reconcileMutex) { $reconcileMutex.Dispose() }
+}
 Exit-SessionStart
