@@ -143,9 +143,12 @@ def load_config() -> ServiceConfig:
                 data = _normalize_service_config(data, root=root)
             return ServiceConfig(**data)
         except Exception as exc:
-            if isinstance(data, dict) and data.get("preference_source") == "target-settings":
+            if (
+                isinstance(data, dict) and "preference_source" in data
+                and data["preference_source"] != "caller-settings"
+            ):
                 raise ValueError(
-                    "Invalid target-settings configuration; refusing caller-settings fallback"
+                    "Invalid explicit preference policy; refusing caller-settings fallback"
                 ) from exc
             log.warning("Failed to parse %s, using defaults", cfg_path)
     return ServiceConfig(

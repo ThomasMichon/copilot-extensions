@@ -31,6 +31,10 @@ from typing import Any
 
 log = logging.getLogger("venue-copilot")
 
+
+class InvalidPreferenceSource(ValueError):
+    """An explicit invalid policy must not silently choose another authority."""
+
 _OPT_OUT_ENV = "AGENT_CODESPACES_MODEL_PROPAGATE"
 _OPT_OUT_VALUES = {"0", "false", "no"}
 _ENV_KEYS = {
@@ -135,19 +139,18 @@ def resolve_model_config(
     override: dict[str, Any] | None = None, *, preference_source: str | None = None,
 ) -> dict[str, str]:
     """Resolve the caller's model configuration (see the module docstring for
-    precedence). Returns any of ``model``, ``effort``, ``context``. Never
-    raises."""
+    precedence). Returns any of ``model``, ``effort``, ``context``. Invalid
+    explicit policies raise; settings reads remain best-effort."""
+    source = preference_source if preference_source is not None else os.environ.get(
+        "AGENT_BRIDGE_PREFERENCE_SOURCE", "caller-settings",
+    )
+    if not isinstance(source, str) or source not in {"caller-settings", "target-settings"}:
+        raise InvalidPreferenceSource("Unsupported preference source; refusing default fallback")
     try:
         opt_out = os.environ.get(_OPT_OUT_ENV, "").strip().lower()
         if opt_out in _OPT_OUT_VALUES:
             return {}
 
-        source = preference_source or os.environ.get(
-            "AGENT_BRIDGE_PREFERENCE_SOURCE", "caller-settings",
-        )
-        if source not in {"caller-settings", "target-settings"}:
-            log.warning("Unsupported preference source; no defaults propagated")
-            return {}
         cfg = _host_settings_config() if source == "caller-settings" else {}
         env_cfg = {
             key: value
@@ -173,9 +176,12 @@ def model_copilot_args(
     caller's own model, reasoning effort, and context tier, as single
     ``--flag=value`` tokens for the launch's ``--copilot-arg`` list. A flag the
     caller already passed in ``existing`` wins and is not duplicated.
-    Degrade-safe: never raises."""
+    Invalid explicit policies raise rather than changing authority; settings
+    reads remain degrade-safe."""
     try:
         resolved = resolve_model_config(preference_source=preference_source)
+    except InvalidPreferenceSource:
+        raise
     except Exception:
         return []
     given = {str(arg).split("=", 1)[0] for arg in existing or []}

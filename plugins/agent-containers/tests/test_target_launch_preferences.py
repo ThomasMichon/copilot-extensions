@@ -2,6 +2,7 @@
 
 from venue_copilot import models
 from agent_containers.copilot_detach import _with_caller_model
+import pytest
 
 
 def test_target_launch_preferences(monkeypatch):
@@ -27,3 +28,15 @@ def test_caller_mode_remains_default(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(models, "_host_settings_config", lambda: {"model": "caller"})
     assert _with_caller_model([]) == ["--model=caller"]
+
+
+@pytest.mark.parametrize("policy", ["", "target-setting"])
+def test_invalid_explicit_policy_refuses_launch_default_fallback(monkeypatch, policy):
+    monkeypatch.setenv("AGENT_BRIDGE_PREFERENCE_SOURCE", policy)
+    with pytest.raises(models.InvalidPreferenceSource):
+        _with_caller_model([])
+
+
+def test_invalid_policy_type_is_not_swallowed_as_native_default():
+    with pytest.raises(models.InvalidPreferenceSource):
+        models.model_copilot_args([], preference_source={})

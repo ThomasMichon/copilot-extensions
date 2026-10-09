@@ -10,8 +10,13 @@ from .session_preferences import CONTEXT_ENV, SOURCE_ENV, SOURCES, launch_prefer
 def reused_preference_source(req: Any, existing: Any) -> str:
     env = getattr(getattr(existing, "target", None), "env", {})
     source = env.get(SOURCE_ENV, "caller-settings") if isinstance(env, dict) else "caller-settings"
-    requested = req.preference_source or (req.env or {}).get(SOURCE_ENV)
-    if requested and requested != source:
+    requested = (
+        req.preference_source if req.preference_source is not None
+        else (req.env or {}).get(SOURCE_ENV)
+    )
+    if source not in SOURCES or (requested is not None and requested not in SOURCES):
+        raise HTTPException(status_code=422, detail="unsupported preference_source")
+    if requested is not None and requested != source:
         raise HTTPException(
             status_code=409,
             detail="reused session has another preference_source; use force_new",
@@ -47,10 +52,14 @@ def apply_request_preferences(
     config = getattr(state, "config", None)
     target_env = target.env
     request_env = dict(req.env or {})
-    source = (
-        req.preference_source or request_env.get(SOURCE_ENV) or target_env.get(SOURCE_ENV)
-        or getattr(config, "preference_source", "caller-settings")
-    )
+    if req.preference_source is not None:
+        source = req.preference_source
+    elif SOURCE_ENV in request_env:
+        source = request_env[SOURCE_ENV]
+    elif SOURCE_ENV in target_env:
+        source = target_env[SOURCE_ENV]
+    else:
+        source = getattr(config, "preference_source", "caller-settings")
     if source not in SOURCES:
         raise HTTPException(status_code=422, detail="unsupported preference_source")
     if req.preference_source is not None or source != "caller-settings":

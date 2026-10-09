@@ -469,12 +469,13 @@ def test_client_capability_gate_and_legacy_default():
     assert ServiceConfig().preference_source == "caller-settings"
 
 
-def test_invalid_target_configuration_does_not_fall_back(monkeypatch, tmp_path):
+@pytest.mark.parametrize("policy", ["target-settings", "target-setting", "null", "false", "''"])
+def test_invalid_target_configuration_does_not_fall_back(monkeypatch, tmp_path, policy):
     from agent_bridge import config
 
     monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
     (tmp_path / "config.yaml").write_text(
-        "preference_source: target-settings\nport: not-a-port\n", encoding="utf-8",
+        f"preference_source: {policy}\nport: not-a-port\n", encoding="utf-8",
     )
     with pytest.raises(ValueError, match="refusing caller-settings fallback"):
         config.load_config()
@@ -505,6 +506,50 @@ def test_affinity_reuse_cannot_ignore_explicit_preferences_or_provider():
     assert reused_preference_source(
         StartSessionRequest(model="requested"), existing,
     ) == "caller-settings"
+
+
+@pytest.mark.parametrize("policy", ["", "target-setting"])
+def test_invalid_policy_environment_never_selects_another_authority(policy):
+    from agent_bridge.preference_requests import apply_request_preferences, reused_preference_source
+
+    request = StartSessionRequest(env={SOURCE_ENV: policy})
+    target = SimpleNamespace(env={})
+    state = SimpleNamespace(config=ServiceConfig())
+    with pytest.raises(HTTPException) as error:
+        apply_request_preferences(request, state, target)
+    assert error.value.status_code == 422
+    with pytest.raises(HTTPException) as error:
+        reused_preference_source(request, SimpleNamespace(target=target))
+    assert error.value.status_code == 422
+
+
+@pytest.mark.parametrize("key,value", [("model", "requested"), ("reasoning_effort", "medium")])
+def test_unoffered_already_current_value_cannot_ready_target_mode(key, value):
+    instance, events = client(model_override="native" if key != "model" else value,
+                              effort_override=value if key == "reasoning_effort" else None)
+    offered = options()
+    selected = next(item for item in offered if item["id"] == key)
+    selected["currentValue"] = value
+    selected["options"] = []
+    with pytest.raises(PreferenceApplicationError):
+        asyncio.run(instance._apply_model_config(offered))
+    assert not instance._preferences_ready
+    assert not any(kind == "preference_selected" for kind, _ in events)
+    applied = [data for kind, data in events if kind == "model_applied"]
+    assert not any(key in data for data in applied)
+
+
+def test_rpc_current_value_must_remain_offered():
+    instance, events = client(model_override="requested")
+    readback = options()
+    readback[0]["currentValue"] = "requested"
+    readback[0]["options"] = []
+    instance._connection.set_config_option.side_effect = None
+    instance._connection.set_config_option.return_value = SimpleNamespace(config_options=readback)
+    with pytest.raises(PreferenceApplicationError):
+        asyncio.run(instance._apply_model_config(options()))
+    assert not instance._preferences_ready
+    assert not any(kind == "preference_selected" for kind, _ in events)
 
 
 def test_route_persists_policy_as_request_owned_env():

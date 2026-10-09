@@ -169,9 +169,6 @@ class AcpPreferencesMixin:
                 )
                 continue
             current, allowed = entry
-            if current == value and target_mode:
-                applied[config_id] = current
-                continue
             if (allowed or target_mode) and value not in allowed:
                 log.warning(
                     "ACP config %s=%r not offered by agent (%d options); the "
@@ -227,21 +224,33 @@ class AcpPreferencesMixin:
 
         if target_mode:
             effective = self._selected_preferences(self._verified_options)
+            final_options = _config_index(self._verified_options, grouped=True)
             for key in unconfirmed:
                 effective.pop(key, None)
             for key in ("model", "reasoning_effort", "context"):
-                if desired.get(key) and effective.get(key) != desired[key]:
+                option_id = (
+                    "context" if "context" in final_options else "context_tier"
+                ) if key == "context" else key
+                final_allowed = (final_options.get(option_id) or (None, set()))[1]
+                if desired.get(key) and (
+                    desired[key] not in final_allowed or effective.get(key) != desired[key]
+                ):
                     if not any(
                         item["config"] in (
                             {"context", "context_tier"} if key == "context" else {key}
                         ) for item in fallbacks
                     ):
                         fallbacks.append({"config": key, "requested": desired[key],
-                                          "reason": "not-confirmed",
+                                          "reason": "not-offered" if desired[key] not in final_allowed
+                                          else "not-confirmed",
                                           "actual": effective.get(key)})
+            failed_keys = {
+                "context" if item["config"] == "context_tier" else item["config"]
+                for item in fallbacks
+            }
             applied = {
                 key: effective[key] for key in desired
-                if key in effective and effective[key] == desired[key]
+                if key in effective and effective[key] == desired[key] and key not in failed_keys
             }
 
         # Publish verified application outcomes and any refusal.
@@ -289,10 +298,9 @@ class AcpPreferencesMixin:
     @staticmethod
     def _selected_preferences(config_options: Any) -> dict[str, str]:
         selected: dict[str, str] = {}
-        for option in config_options or []:
-            key = _cfg_attr(option, "id", "id")
+        for key, (current, offered) in _config_index(config_options, grouped=True).items():
             if key in {"model", "reasoning_effort", "context", "context_tier"}:
-                if value := clean(_cfg_attr(option, "current_value", "currentValue")):
+                if (value := clean(current)) and value in offered:
                     selected["context" if key == "context_tier" else key] = value
         return selected
 
