@@ -16,7 +16,6 @@ that pattern to this repository.
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Draft; approved Komodo-first substrate selection | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Draft | #6007 |
 | [PR Recovery Break Glass](active/pr-recovery-break-glass/README.md) | Draft | #5817 |
-| [Transparent PSMux Launch](active/transparent-psmux-launch/README.md) | Active | #5878 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
 | [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Draft; independent planning proposal | #5799 |
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
