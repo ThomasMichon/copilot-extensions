@@ -384,12 +384,17 @@ def _discover_active_efforts(config: Mapping[str, Any]) -> tuple[list[ActiveEffo
     engine would have to know the meaning of.
 
     A slug is ambiguous, not merely a coincidence, if it is found at more
-    than one path: ``effort_slugs``/``exclusive_key``/dedup keys all key on
-    the bare slug, so two distinct effort folders sharing one name would
-    silently alias each other's task state. That is always a real
-    authoring conflict needing a rename, so it is raised here rather than
-    resolved by picking one match arbitrarily (`sorted()`'s own tie-break
-    would be stable but still semantically wrong).
+    than one path: explicit ``effort_slugs`` selection and ``origin_ref``
+    (``f"{name}/effort/{slug}/occurrence/{occurrence}"``) both key on the
+    bare slug, so two distinct effort folders sharing one name could not
+    be told apart by a selection list, and would generate colliding
+    origin_refs for genuinely different artifacts (``exclusive_key``/
+    ``dedup_key`` key on the full ``readme_relative`` path instead, so
+    they stay distinct even then -- it is selection and origin_ref
+    tracking that actually break). That is always a real authoring
+    conflict needing a rename, so it is raised here rather than resolved
+    by picking one match arbitrarily (`sorted()`'s own tie-break would be
+    stable but still semantically wrong).
     """
     active_root = _active_efforts_root(config)
     if not active_root.is_dir():
