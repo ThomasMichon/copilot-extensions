@@ -498,7 +498,7 @@ def _stage_payload_dependencies(payload: Path) -> None:
         dest_root=payload,
     )
     assert not any(line.startswith("SKIP ") for line in result), result
-    assert (payload / "libs" / "machine-identity" / "src" / "machine_identity").is_dir()
+    assert (payload / "libs" / "machine-transport" / "src" / "machine_transport").is_dir()
 
 
 def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
@@ -796,7 +796,8 @@ def _agent_worktrees_test_environment(
                     str(payload / "libs" / "config-migrate" / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
-                    str(payload / "libs" / "machine-identity" / "src"),
+                    str(payload / "libs" / "machine-transport" / "src"),
+                    str(payload / "libs" / "remote-login-shell" / "src"),
                     str(payload / "libs" / "dropin-registry" / "src"),
                     str(payload / "libs" / "plugin-activation" / "src"),
                 ]
@@ -1448,7 +1449,8 @@ def test_agent_machines_required_context_preserves_absent_policy_legacy_use(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
-                    str(payload / "libs" / "machine-identity" / "src"),
+                    str(payload / "libs" / "machine-transport" / "src"),
+                    str(payload / "libs" / "remote-login-shell" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1546,7 +1548,8 @@ def test_agent_machines_active_context_selects_only_its_cell_root(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
-                    str(payload / "libs" / "machine-identity" / "src"),
+                    str(payload / "libs" / "machine-transport" / "src"),
+                    str(payload / "libs" / "remote-login-shell" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1605,7 +1608,8 @@ def test_agent_machines_blocked_context_states_never_run_legacy(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
-                    str(payload / "libs" / "machine-identity" / "src"),
+                    str(payload / "libs" / "machine-transport" / "src"),
+                    str(payload / "libs" / "remote-login-shell" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1716,7 +1720,8 @@ def test_agent_machines_removed_policy_keeps_active_cell_authoritative(
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
                     str(_agent_procutil_src(payload)),
-                    str(payload / "libs" / "machine-identity" / "src"),
+                    str(payload / "libs" / "machine-transport" / "src"),
+                    str(payload / "libs" / "remote-login-shell" / "src"),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
