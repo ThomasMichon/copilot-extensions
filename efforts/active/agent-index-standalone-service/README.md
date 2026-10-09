@@ -266,3 +266,11 @@ boundaries from implementation decisions and deployment-specific policy.
   nested kill-on-close Job teardown. The full contained Windows standalone
   suite passed 68 tests; runner/workflow regressions passed 35 with the Linux
   process-group test explicitly deferred to its Linux CI lane.
+- Follow-up review identified the pre-seam core dependency floor and the new
+  registry's missing version-bump test path. Both base/native wheel requirements
+  now exclude the currently released `0.10.11-dev1` core and require
+  `0.10.12-dev1` or newer; the runtime seam check remains fail-closed. Test
+  preparation uses an explicit same-checkout core override (including native
+  extras) because `dev` freezes its source version. Actual preparation plus the
+  full contained suite passed 68 tests; wheel assertions reject the old core.
+  Registry-only changes now trigger the existing version-bump-engine suite.

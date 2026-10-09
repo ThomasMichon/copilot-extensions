@@ -133,6 +133,11 @@ python tools/run-standalone-tests.py agent-index-service --prepare --smoke
 python tools/run-standalone-tests.py agent-index-service --prepare
 ```
 
+Released installs require `agent-index>=0.10.12.dev1`; earlier released cores
+lack the explicit-source seam. The test runner alone overrides the core's frozen
+`dev` source version while installing that same checkout's core. This does not
+relax wheel metadata or the runtime compatibility check for ordinary installs.
+
 In an already provisioned test environment:
 
 ```console

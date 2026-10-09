@@ -18,7 +18,19 @@ SPEC.loader.exec_module(runner)
 def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
-    monkeypatch.setattr(runner.subprocess, "run", lambda command, **kwargs: calls.append(command))
+    metadata = tmp_path / "plugins" / "agent-index" / "pyproject.toml"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text('[project]\nversion = "0.1.0-dev210"\n')
+
+    def install(command, **kwargs):
+        calls.append(command)
+        if "--override" in command:
+            override = Path(command[command.index("--override") + 1])
+            assert override.read_text() == (
+                f"agent-index[store,server] @ {metadata.parent.as_uri()}\n"
+            )
+
+    monkeypatch.setattr(runner.subprocess, "run", install)
     python = tmp_path / ".test-venvs" / "service" / "bin" / "python"
 
     runner.prepare("agent-index-service", python)
@@ -27,6 +39,7 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     assert calls[1][:5] == ["uv", "pip", "install", "--python", str(python)]
     assert str(tmp_path / "plugins" / "agent-index") + "[store,server]" in calls[1]
     assert calls[1][-1] == str(tmp_path / "agent-index-service") + "[native,test]"
+    assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
 
 def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch):
@@ -138,6 +151,10 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
         (workflows / "validate-and-promote.yml").read_text(encoding="utf-8")
     )["jobs"]
     discovery = next(step["run"] for step in ci["discover"]["steps"] if step.get("id") == "set")
+    detector = next(
+        step["run"] for step in ci["checks"]["steps"] if step.get("id") == "version-bump-engine"
+    )
+    assert r"standalone_consumers\.py" in detector
     for path in ("agent-index-service/", "plugins/agent-index/", "libs/", "tools/"):
         assert path in discovery
     for name in ("agent-index-service-linux", "agent-index-service-windows"):

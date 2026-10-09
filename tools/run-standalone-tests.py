@@ -27,7 +27,10 @@ def prepare(component: str, python: Path) -> None:
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     root = python.parent.parent
     if not python.is_file():
-        subprocess.run(["uv", "venv", str(root)], cwd=REPO, check=True, **flags)
+        subprocess.run(
+            ["uv", "venv", str(root)], cwd=REPO, check=True,
+            capture_output=True, text=True, **flags,
+        )
     sources: list[str] = []
     if component == "agent-index-service":
         sources = [
@@ -38,12 +41,23 @@ def prepare(component: str, python: Path) -> None:
         ]
     extra = "native,test" if component == "agent-index-service" else "dev"
     sources.append(str(REPO / component) + f"[{extra}]")
-    subprocess.run(
-        ["uv", "pip", "install", "--python", str(python), *sources],
-        cwd=REPO,
-        check=True,
-        **flags,
-    )
+    with tempfile.TemporaryDirectory(prefix="standalone-dependencies-") as temporary:
+        overrides: list[str] = []
+        if component == "agent-index-service":
+            # dev freezes source versions; test the local compatibility seam,
+            # not an unrelated released wheel chosen to satisfy that floor.
+            override = Path(temporary) / "overrides.txt"
+            core = (REPO / "plugins" / "agent-index").resolve().as_uri()
+            override.write_text(f"agent-index[store,server] @ {core}\n", encoding="utf-8")
+            overrides = ["--override", str(override)]
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(python), *overrides, *sources],
+            cwd=REPO,
+            check=True,
+            capture_output=True,
+            text=True,
+            **flags,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,6 +105,10 @@ def main(argv: list[str] | None = None) -> int:
             )
     except (ContainmentError, OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"standalone tests: {exc}", file=sys.stderr)
+        if isinstance(exc, subprocess.CalledProcessError):
+            for output in (exc.stdout, exc.stderr):
+                if output:
+                    print(output, file=sys.stderr)
         return 1
     finally:
         lease.release()

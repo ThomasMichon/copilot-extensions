@@ -8,6 +8,7 @@ from email.parser import Parser
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
+from packaging.requirements import Requirement
 from packaging.version import Version
 
 from agent_index_service import __version__
@@ -39,6 +40,14 @@ def test_normal_wheel_metadata_and_console_program(tmp_path):
         requirements = metadata.get_all("Requires-Dist")
         assert any(req.startswith("agent-index>=") for req in requirements)
         assert any(req.startswith("agent-index[server,store]>=") for req in requirements)
+        core_requirements = [
+            Requirement(req) for req in requirements if Requirement(req).name == "agent-index"
+        ]
+        assert len(core_requirements) == 2
+        for requirement in core_requirements:
+            assert not requirement.specifier.contains("0.1.0.dev210", prereleases=True)
+            assert not requirement.specifier.contains("0.10.11.dev1", prereleases=True)
+            assert requirement.specifier.contains("0.10.12.dev1", prereleases=True)
         assert all(" @ " not in req and "file:" not in req for req in requirements)
         entries = next(name for name in members if name.endswith(".dist-info/entry_points.txt"))
         assert "agent-index-service = agent_index_service.__main__:main" in (

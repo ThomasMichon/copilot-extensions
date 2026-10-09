@@ -346,7 +346,7 @@ jobs:
           # intervening dev commit too, so an unrelated change to any listed
           # file could wrongly trigger this subprocess-heavy suite.
           if git diff --name-only "$base...$head" | grep -Eq \
-            '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
+            '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|standalone_consumers\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
