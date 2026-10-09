@@ -3906,7 +3906,7 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
 
 
 def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch, tmp_path):
-    from agent_dispatch import spawn_factories
+    from agent_dispatch import spawn_factories, spawn_script_body
     from agent_dispatch.supervisor import make_script_spawn
 
     script_path = tmp_path / "worker.py"
@@ -3918,20 +3918,20 @@ def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch
         pid = 4321
 
     monkeypatch.setattr(
-        spawn_factories,
+        spawn_script_body,
         "subprocess",
         SimpleNamespace(DEVNULL=None, Popen=lambda argv, **kwargs: started.update(
             argv=argv, kwargs=kwargs
         ) or FakeProcess()),
     )
     monkeypatch.setattr(
-        spawn_factories,
+        spawn_script_body,
         "_process_tree_kwargs",
         lambda: {"creationflags": 0},
         raising=False,
     )
     monkeypatch.setattr(
-        spawn_factories,
+        spawn_script_body,
         "Path",
         Path,
     )
@@ -3981,7 +3981,7 @@ def test_make_script_spawn_rejects_missing_inline_payload():
 
 
 def test_make_script_spawn_clears_repo_for_all_repos(monkeypatch, tmp_path):
-    from agent_dispatch import spawn_factories
+    from agent_dispatch import spawn_factories, spawn_script_body
     from agent_dispatch.supervisor import make_script_spawn
 
     script_path = tmp_path / "worker.py"
@@ -3992,7 +3992,7 @@ def test_make_script_spawn_clears_repo_for_all_repos(monkeypatch, tmp_path):
         pid = 4321
 
     monkeypatch.setattr(
-        spawn_factories,
+        spawn_script_body,
         "subprocess",
         SimpleNamespace(DEVNULL=None, Popen=lambda argv, **kwargs: started.update(
             argv=argv, kwargs=kwargs

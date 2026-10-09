@@ -271,6 +271,73 @@ def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeyp
     assert kw["json_output"] is True
 
 
+def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypatch):
+    """``resume_worktree=True`` is the non-forcing conversation-recovery path
+    (distinct from ``reclaim=True`` above, which is an explicit forceful
+    take-over): it must delegate with ``allow_takeover=False`` so
+    ``resume_worktree_and_send`` requests the bridge's identity-preserving
+    ``--strict`` contract. Without this, a worktree whose bridge session
+    record went missing (e.g. a restarted daemon that lost its session
+    table) would silently get a brand-new replacement conversation instead
+    of the documented 409 refusal -- the exact history-loss case this
+    contract exists to close."""
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    calls = []
+    monkeypatch.setattr(
+        bridge_reclaim, "resume_worktree_and_send",
+        lambda worktree_id, prompt, **kw: calls.append((worktree_id, prompt, kw))
+        or subprocess.CompletedProcess([], 0, stdout='{"session_id": "sid-9"}', stderr=""),
+    )
+
+    result = bridge.spawn_worker(
+        "task42", agent="task-worker", worker_id="w1",
+        worktree_id="wt-1", resume_worktree=True, wait=False, json_output=True,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["session_id"] == "sid-9"
+    assert len(calls) == 1
+    worktree_id, prompt, kw = calls[0]
+    assert worktree_id == "wt-1"
+    assert kw["allow_takeover"] is False
+
+
+def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeypatch):
+    """End-to-end (through ``spawn_worker``, not just ``resume_worktree_and_
+    send`` directly): a missing bridge session record must surface as the
+    caller's own refusal, never a swallowed/retried fresh session."""
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        if cmd[1:3] == ["--json", "resume"]:
+            assert "--strict" in cmd
+            return subprocess.CompletedProcess(
+                cmd, 1,
+                json.dumps({
+                    "reason": "resume_requires_existing_session",
+                    "worktree_id": "wt-1",
+                    "detail": "no existing session for worktree wt-1",
+                }),
+                "",
+            )
+        raise AssertionError(f"unexpected subprocess call: {cmd}")
+
+    monkeypatch.setattr(bridge_reclaim.subprocess, "run", fake_run)
+
+    result = bridge.spawn_worker(
+        "task42", agent="task-worker", worker_id="w1",
+        worktree_id="wt-1", resume_worktree=True, wait=False, json_output=True,
+    )
+
+    assert result.returncode == 1
+    detail = json.loads(result.stdout)
+    assert detail["reason"] == "resume_requires_existing_session"
+
+
 def test_spawn_worker_passes_caller_for_picker_origin(monkeypatch):
     """copilot-extensions#2202: without --caller, the spawned worktree has no
     caller_worktree stamped, so agent-worktrees' resolved_origin falls through

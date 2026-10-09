@@ -12,8 +12,8 @@ For every plugin ``<p>`` the version must agree across:
      ``_build_info.py`` ``__version__`` assignments and numeric development
      literals assigned to ``__version__`` or ``_FALLBACK_VERSION``
 
-The standalone ``worktree-manager`` package likewise keeps its
-``pyproject.toml`` version aligned with ``src/worktree_manager/__init__.py``.
+Registered standalone distributions likewise keep their ``pyproject.toml``
+versions aligned with their source package's ``__init__.py``.
 
 Why this guard exists: a version bump that touches only one file (e.g. #65
 bumped pyproject.toml to dev219 but left plugin.json/marketplace.json at dev218)
@@ -34,6 +34,9 @@ import json
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from standalone_consumers import STANDALONE_CONSUMERS  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -188,33 +191,39 @@ def _source_fallback_versions(
     return versions, errors
 
 
-def _worktree_manager_version_violations(manager_dir: Path) -> list[str]:
+def _standalone_version_violations(package_dir: Path, component: str) -> list[str]:
     sources: dict[str, str] = {}
     violations: list[str] = []
-    pyproject = manager_dir / "pyproject.toml"
+    pyproject = package_dir / "pyproject.toml"
     pyproject_version = _pyproject_version(pyproject)
     if pyproject_version:
         sources["pyproject.toml"] = pyproject_version
     else:
         violations.append(
-            "worktree-manager: pyproject.toml has no [project].version"
+            f"{component}: pyproject.toml has no [project].version"
         )
 
-    init_path = manager_dir / "src" / "worktree_manager" / "__init__.py"
+    module = component.replace("-", "_")
+    init_relative = f"src/{module}/__init__.py"
+    init_path = package_dir / init_relative
     fallback_versions, fallback_errors = _source_fallback_versions(init_path)
     for error in fallback_errors:
-        violations.append(f"worktree-manager: src/worktree_manager/__init__.py: {error}")
+        violations.append(f"{component}: {init_relative}: {error}")
     if not fallback_versions and not fallback_errors:
         violations.append(
-            "worktree-manager: src/worktree_manager/__init__.py has no __version__"
+            f"{component}: {init_relative} has no __version__"
         )
     for assignment, version in fallback_versions.items():
-        sources[f"src/worktree_manager/__init__.py:{assignment}"] = version
+        sources[f"{init_relative}:{assignment}"] = version
 
     if len(set(sources.values())) > 1:
         detail = ", ".join(f"{name}={version}" for name, version in sorted(sources.items()))
-        violations.append(f"worktree-manager: version mismatch ({detail})")
+        violations.append(f"{component}: version mismatch ({detail})")
     return violations
+
+
+def _worktree_manager_version_violations(manager_dir: Path) -> list[str]:
+    return _standalone_version_violations(manager_dir, "worktree-manager")
 
 
 def _registrar_declaration_violations(plugin_versions: dict[str, str]) -> list[str]:
@@ -320,6 +329,10 @@ def main() -> int:
             violations.append(f"{name}: version mismatch ({detail})")
 
     violations.extend(_worktree_manager_version_violations(WORKTREE_MANAGER))
+    for component in STANDALONE_CONSUMERS:
+        component_dir = REPO / component
+        if component != "worktree-manager" and component_dir.is_dir():
+            violations.extend(_standalone_version_violations(component_dir, component))
     violations.extend(_registrar_declaration_violations(plugin_versions))
 
     if violations:
@@ -329,8 +342,8 @@ def main() -> int:
         print(
             "\nEvery plugin's version must agree across plugin.json, "
             "pyproject.toml (runtime plugins), marketplace.json entry, and any "
-            "checked-in numeric development-version fallback; worktree-manager "
-            "must agree across pyproject.toml and its __version__. "
+            "checked-in numeric development-version fallback; standalone packages "
+            "must agree across pyproject.toml and their __version__. "
             "See docs/pipelines.md § Where the mechanically-applied bump lands.",
             file=sys.stderr,
         )

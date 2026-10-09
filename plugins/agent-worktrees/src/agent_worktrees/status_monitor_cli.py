@@ -7,6 +7,7 @@ import os
 import sys
 
 from . import config as cfg
+from .sessions_pane_args import sweep_mux_pane_args
 
 #: Bounded grace period a shutdown/handoff (runtime superseded, a newer
 #: monitor taking ownership, or the empty-strike idle-exit path) waits for
@@ -741,6 +742,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
                 _locks.write_lock(lock, extra=_lock_extra())
 
+                sweep_mux_pane_args()
                 picker_projects = monitor_roots.live_picker_projects()
                 demand_projects = core.list_cache.recent_demand_projects()
                 external_projects = picker_projects | demand_projects

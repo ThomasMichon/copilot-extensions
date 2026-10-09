@@ -7,6 +7,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import installer
 
@@ -128,8 +130,9 @@ def test_locked_retired_asset_warns_without_failing_update(
     assert "Could not retire obsolete" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("system", ["Linux", "Windows"])
 def test_packaged_preview_deploy_wrappers_uses_only_packaged_assets(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, system: str,
 ) -> None:
     preview = preview_release.build("agent-worktrees", tmp_path / "work")
     packaged_root = tmp_path / "packaged-root"
@@ -139,12 +142,32 @@ def test_packaged_preview_deploy_wrappers_uses_only_packaged_assets(
 
     install = tmp_path / "install"
     monkeypatch.setattr(installer, "install_dir", lambda: install)
-    monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(installer.platform, "system", lambda: system)
 
     assert not (packaged_root / "worktree-manager").exists()
     assert installer.deploy_wrappers(packaged_root)
     for name in ("launch-session.sh", "pane-wrapper.sh", "session-options.sh"):
         assert (install / "bin" / name).exists()
+    if system == "Windows":
+        from agent_worktrees import manager_launch_cli, sessions
+
+        launcher = install / "bin" / "pane-launch.ps1"
+        assert launcher.read_bytes() == (
+            PLUGIN.parents[1] / "worktree-manager" / "bin" / launcher.name
+        ).read_bytes()
+        monkeypatch.setattr(
+            manager_launch_cli, "_usable_worktree_manager_launcher_dir", lambda: None,
+        )
+        monkeypatch.setattr(sessions, "_LEGACY_BIN_DIR", str(install / "bin"))
+        argv = sessions._mux_pane_cmd("id", ["program", ""], is_tmux=False)
+        try:
+            assert argv[-3] == "'" + str(launcher).replace("'", "''") + "'"
+            manifest = Path(argv[-1][1:-1].replace("''", "'"))
+            assert json.loads(manifest.read_text("utf-8"))["argv"] == [
+                "-AwWt", "id", "program", "",
+            ]
+        finally:
+            sessions.cleanup_mux_pane_args(argv)
 
 
 def test_live_checkout_deploy_wrappers_falls_back_to_canonical_assets(

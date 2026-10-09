@@ -25,6 +25,7 @@ ROLE_ENV = "AGENT_INDEX_ROLE"
 CONFIG_ENV = "AGENT_INDEX_CONFIG"
 EFFECTIVE_CONFIG_ENV = "AGENT_INDEX_EFFECTIVE_CONFIG"
 CONFIG_DATA_ENV = "AGENT_INDEX_CONFIG_DATA_B64"
+SOURCE_MODE_ENV = "AGENT_INDEX_SOURCE_MODE"
 MACHINE_ENV = "AGENT_INDEX_MACHINE"
 REPO_ENV = "AGENT_INDEX_REPO"
 SERVER_VENV_PYTHON_ENV = "AGENT_INDEX_SERVER_VENV_PYTHON"
@@ -70,7 +71,10 @@ def server_venv_python() -> Path | None:
     exactly as before -- this resolver is inert scaffolding, not a behavior
     change on its own.
 
-    Resolution order:
+    Standalone explicit-source hosts use their current complete native runtime
+    and bypass this legacy sibling resolver entirely.
+
+    Resolution order for legacy hosts:
       1. ``AGENT_INDEX_SERVER_VENV_PYTHON`` -- an explicit interpreter path
          override, honored unconditionally (test/dev convenience, or an
          unconventional layout).
@@ -87,6 +91,10 @@ def server_venv_python() -> Path | None:
          too, so the same ``<venv-root>/server/...`` convention resolves
          correctly there as well, without a separate case.
     """
+    # Standalone explicit-source hosts already own a complete native runtime.
+    # A legacy sibling dispatch would change interpreters (or recurse into self).
+    if os.environ.get(SOURCE_MODE_ENV) == "explicit":
+        return None
     override = os.environ.get(SERVER_VENV_PYTHON_ENV)
     if override:
         candidate = Path(override).expanduser()
@@ -391,17 +399,21 @@ def machine_id() -> str:
 def repo_root(explicit: str | None = None) -> Path | None:
     """Resolve the harness repo being adopted: an explicit path, ``AGENT_INDEX_REPO``,
     or the CWD's git top-level. ``None`` when not in/at a repo."""
+    if os.environ.get(SOURCE_MODE_ENV) == "explicit":
+        return None
     cand = explicit or os.environ.get(REPO_ENV)
     if cand:
         return Path(cand).expanduser().resolve()
     try:
         import subprocess
+        from agent_procutil import no_window_kwargs
 
         out = subprocess.run(  # noqa: S603
             ["git", "rev-parse", "--show-toplevel"],  # noqa: S607
             capture_output=True,
             text=True,
             timeout=5,
+            **no_window_kwargs(),
         )
         if out.returncode == 0 and out.stdout.strip():
             return Path(out.stdout.strip()).resolve()
@@ -521,6 +533,13 @@ def read_corpus_sources() -> list[dict]:
     def _sources_of(path: Path) -> list[dict]:
         return _sources_of_data(_load_yaml(path))
 
+    if os.environ.get(SOURCE_MODE_ENV) == "explicit":
+        data = _load_inline_config()
+        sources = _sources_of_data(data or {})
+        if not sources:
+            raise ValueError("explicit source mode requires nonempty inline corpus.sources")
+        return [dict(spec) for spec in sources]
+
     graft: dict[str, dict] = {}
 
     effective_root = repo_root()
@@ -592,6 +611,8 @@ def _local_project_roots() -> dict[str, Path]:
 def repo_checkout_path(name: str) -> Path | None:
     """Resolve a repo name to its local checkout path from the agent-worktrees
     ``repos.yaml`` registry (platform-appropriate key), or ``None`` if unknown."""
+    if os.environ.get(SOURCE_MODE_ENV) == "explicit":
+        return None
     home = _agent_worktrees_home()
     repos = _load_yaml(home / "repos.yaml").get("repos")
     if not isinstance(repos, dict):

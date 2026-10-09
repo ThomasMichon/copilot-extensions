@@ -10,6 +10,10 @@ Agent-bridge and agent-worktrees both consume **the same `machines.yaml`
 file** -- agent-worktrees uses it for terminal profiles and SSH sessions;
 agent-bridge uses it for agent subprocess spawning and SSH transport.
 
+Named-machine parsing, identity matching and local-host checks are shared through
+`machine-transport`. Bridge retains its profile/path discovery, SSH-environment
+selection, authentication hooks and ACP launch protocol.
+
 ## Overview
 
 Agent-bridge topology is configured via **profiles** in
@@ -130,6 +134,8 @@ machines:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `display_name` | No | Human-readable name (defaults to machine key) |
+| `alias` | No | Friendly machine identity; distinct from an environment's SSH alias |
+| `hostname` | No | Real OS hostname when it differs from the registry key |
 | `environment` | No | OS/platform description (e.g., "Windows 11 Pro") |
 | `role` | No | Stable, terse classification token used by automation and compact displays |
 | `description` | No | Human-readable purpose. Whitespace-only or missing values normalize to an empty string. |
@@ -158,6 +164,29 @@ WSL on the same host):
 | `port` | No | SSH port (default: `22`) |
 | `user` | No | SSH username |
 | `shell` | No | Remote shell (`bash`, `pwsh`, `sh`, `zsh`) -- default: `bash` |
+
+Static agent `host` values match registry keys, machine aliases, hostnames and
+display names case-insensitively. SSH aliases also match case-insensitively and
+bind the specific environment they name; a conflicting explicit
+`ssh_environment` is an error. Exact registry keys retain precedence.
+Ambiguous identities or SSH aliases fail rather than selecting another machine
+silently. Use a unique registry key to disambiguate.
+
+Without an explicit or alias-bound environment, Bridge retains its preference
+for `wsl`, then `linux`, then the first available environment; non-binstub
+spawning additionally requires a supported POSIX shell. A known local machine
+spawns directly only when the selected environment is the current platform, so
+Windows and WSL on the same machine are not collapsed into one execution venue.
+Legacy missing SSH aliases still default to the machine key, missing shells to
+`bash`; explicit empty values are not rewritten.
+
+Remote Bridge operations require a unique SSH-environment alias whenever a
+machine has multiple environments. A machine key, alias or hostname does not
+choose an environment implicitly, regardless of casing; exact SSH aliases are
+matched case-insensitively. Static agents retain the defaults above, and local
+registry coverage uses the same selected environment as actual spawning.
+Remote APIs return `400 ambiguous_host` for configured ambiguous identities or
+SSH aliases, distinct from `404 host_not_found` for an unknown host.
 
 ### SSH Alias Convention
 

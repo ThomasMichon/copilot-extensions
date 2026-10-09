@@ -10,6 +10,9 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 
+# This budget includes fresh interpreter/helper imports before the PID receipt.
+DESCENDANT_WALL_SECONDS = 10
+
 from tools.plugin_test_containment import (
     CONTAINED_ENV,
     SANDBOX_ENV,
@@ -107,7 +110,7 @@ def test_timeout_reaps_recursive_descendant(tmp_path):
         env=env,
         sandbox=tmp_path,
         limits=Limits(
-            wall_seconds=2.0,
+            wall_seconds=DESCENDANT_WALL_SECONDS,
             max_processes=8,
             max_memory_mb=256,
             max_temp_mb=32,
@@ -143,7 +146,7 @@ def test_timeout_reaps_descendant_requesting_detachment(tmp_path):
         env=env,
         sandbox=tmp_path,
         limits=Limits(
-            wall_seconds=2.0,
+            wall_seconds=DESCENDANT_WALL_SECONDS,
             max_processes=8,
             max_memory_mb=256,
             max_temp_mb=32,

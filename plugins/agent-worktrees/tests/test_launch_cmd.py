@@ -787,8 +787,9 @@ def test_default_setup_sh_supports_hook_and_session_path():
     assert 'RECOVERY" != true' in text
     # PATH is prepended, and Copilot is exec'd (launcher owns the exec)
     assert 'export PATH="${SESSION_PATH}:${PATH}"' in text
-    assert "exec copilot" in text
-    assert 'exec "$COPILOT_PATH_OVERRIDE"' in text
+    assert "_exec_copilot_backend copilot" in text
+    assert 'exec "$@" "${COPILOT_ARGS[@]}"' in text
+    assert '_exec_copilot_backend "$COPILOT_PATH_OVERRIDE"' in text
     # --stdio (ACP) mode keeps human output off the JSON-RPC channel
     assert "STDIO=true" in text
     assert '"$BASH" "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
@@ -813,10 +814,11 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "-not $Recovery" in text  # hook skipped in recovery
     assert "$env:PATH" in text
     assert "& pwsh.exe -NoProfile -NoLogo -File $SetupHook" in text
-    assert "& $overrideCmd.Source @CopilotArgs" in text
+    assert "Invoke-CopilotBackend $overrideCmd.Source" in text
+    assert "& $Executable @LeadingArgs @CopilotArgs" in text
     assert "Get-Command copilot -CommandType Application -All" in text
     assert "$source -notmatch '\\\\WindowsApps\\\\'" in text
-    assert "& $copilotCmd.Source @CopilotArgs" in text
+    assert "Invoke-CopilotBackend $copilotCmd.Source" in text
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text

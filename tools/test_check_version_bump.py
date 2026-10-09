@@ -101,6 +101,8 @@ def repo(tmp_path: Path) -> Path:
     (r / "tools" / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
     (r / "tools" / UV_EDITABLE_REF.name).write_bytes(UV_EDITABLE_REF.read_bytes())
     (r / "tools" / INSTALLER_ENGINE_REF.name).write_bytes(INSTALLER_ENGINE_REF.read_bytes())
+    registry = SCRIPT.parent / "standalone_consumers.py"
+    (r / "tools" / registry.name).write_bytes(registry.read_bytes())
 
     _git(r, "init", "-q")
     _git(r, "config", "user.email", "t@example.com")

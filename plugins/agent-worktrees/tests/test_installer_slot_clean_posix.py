@@ -322,23 +322,24 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     installer invocations could both observe a clean slot (neither has
     started its external build yet) and then both build into it (#5439).
     `deploy_venv` must acquire an OS-level exclusive build lease FIRST
-    (before even attempting slot-clean), fail immediately if another live
-    process already holds it, and `_versioned_activate` must release that
-    lease afterward regardless of outcome."""
+    (before even attempting slot-clean, via the bounded-wait wrapper
+    `_wait_for_versioned_slot_lease`), fail if another live process still
+    holds it after the bounded wait, and `_versioned_activate` must release
+    that lease afterward regardless of outcome."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     deploy_body = _function_body(text, "deploy_venv")
     activate_wrapper = _function_body(text, "_versioned_activate")
 
-    lease_idx = deploy_body.index("_acquire_versioned_slot_lease")
+    lease_idx = deploy_body.index("_wait_for_versioned_slot_lease")
     clean_idx = deploy_body.index("_versioned_slot_clean")
     assert lease_idx < clean_idx, (
         "the exclusive build lease must be acquired before the slot-clean "
         "check, not after"
     )
-    assert "if ! _acquire_versioned_slot_lease; then" in deploy_body
+    assert "if ! _wait_for_versioned_slot_lease; then" in deploy_body
     lease_fail_branch = deploy_body.split(
-        "if ! _acquire_versioned_slot_lease; then", 1
-    )[1][:1400]
+        "if ! _wait_for_versioned_slot_lease; then", 1
+    )[1][:2200]
     assert "return 1" in lease_fail_branch
 
     # The wrapper must release the lease regardless of how the inner
@@ -652,7 +653,8 @@ def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure
 
     assert '"$_VERSIONED_SLOT_LEASE_FAILURE_REASON" != "contention"' in deploy_body
     assert "Could not acquire the build lease" in deploy_body
-    assert "Another process is already building this runtime slot" in deploy_body
+    assert "Another process is still building this runtime slot" in deploy_body
+    assert "AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC" in deploy_body
 
 
 def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the_helper_never_starts():
@@ -673,15 +675,21 @@ def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the
     )
 
     assert 'exec 7<>"$out_fifo"' in fallback_body
-    read_idx = fallback_body.index("IFS= read -r -t 10")
+    read_idx = fallback_body.index('IFS= read -r -t "$read_timeout"')
     open_idx = fallback_body.index('exec 7<>"$out_fifo"')
     assert open_idx < read_idx, (
         "the read-write fd on out_fifo must be opened BEFORE the helper "
         "is launched, so the subsequent bounded read never performs its "
         "own blocking read-only open"
     )
-    assert "read -r -t 10 -u 7 line" in fallback_body
-    assert '<"$out_fifo"' not in fallback_body.split("IFS= read -r -t 10", 1)[1][:30]
+    assert 'read -r -t "$read_timeout" -u 7 line' in fallback_body
+    assert '<"$out_fifo"' not in fallback_body.split(
+        'IFS= read -r -t "$read_timeout"', 1
+    )[1][:30]
+    # The 10s default is still the effective bound for every caller that
+    # doesn't override it (only _wait_for_versioned_slot_lease does, to
+    # cap this read against its own remaining wall-clock budget).
+    assert 'read_timeout="${_VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT:-10}"' in fallback_body
 
 
 def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():

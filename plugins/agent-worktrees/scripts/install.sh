@@ -954,7 +954,20 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
     local lock_file="$1"
     local lock_dir="${lock_file}.d" attempt holder_pid
     local reclaim_dir="${lock_file}.reclaiming"
-    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    # _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT (set only by
+    # _wait_for_versioned_slot_lease, via bash's dynamic scoping of `local`
+    # across callees) collapses this to exactly one attempt with no
+    # internal sleep: the normal 10-attempt/~10s-worst-case retry below is
+    # itself an UNBOUNDED nested wait from a caller that is ALREADY polling
+    # on its own bounded deadline -- without this, a short caller-configured
+    # budget (e.g. 2s) could take ~10s or more per poll, blowing well past
+    # the configured wait before the caller's own deadline check ever runs
+    # again.
+    local attempts="1 2 3 4 5 6 7 8 9 10"
+    if [[ -n "${_VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT:-}" ]]; then
+        attempts="1"
+    fi
+    for attempt in $attempts; do
         if mkdir "$lock_dir" 2>/dev/null; then
             printf '%s' "$$" > "$lock_dir/pid" 2>/dev/null || true
             _VERSIONED_SLOT_LEASE_MKDIR_DIR="$lock_dir"
@@ -1023,7 +1036,9 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
             fi
             continue
         fi
-        sleep 1
+        if [[ -z "${_VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT:-}" ]]; then
+            sleep 1
+        fi
     done
     _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
     return 1
@@ -1139,7 +1154,14 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
         return 1
     fi
 
-    if ! IFS= read -r -t 10 -u 7 line; then
+    # The status read's own timeout defaults to 10s, but
+    # _wait_for_versioned_slot_lease (via bash's dynamic scoping of `local`
+    # across callees) caps it to whatever of its own wall-clock budget
+    # actually remains -- otherwise this blocking read alone could consume
+    # up to 10s beyond a much shorter caller-configured deadline.
+    local read_timeout="${_VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT:-10}"
+    case "$read_timeout" in (*[!0-9]*|'') read_timeout=10 ;; esac
+    if ! IFS= read -r -t "$read_timeout" -u 7 line; then
         line=""
     fi
     exec 7>&- || true
@@ -1284,6 +1306,98 @@ _release_versioned_slot_lease() {
     fi
     # The universal gate is released LAST (see the ordering note above).
     _release_versioned_slot_lease_mkdir_fallback
+}
+
+_wait_for_versioned_slot_lease() {
+    # Bounded join for genuine lease contention (phase-3-runtime-admission,
+    # #5472/#5788): polls for the lease on a real wall-clock deadline
+    # (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC) instead of refusing on the
+    # first contention observation, so a concurrent first build that
+    # finishes within the budget is picked up automatically rather than
+    # requiring an operator (or an unattended resumed launch) to re-run
+    # manually. The caller's OWN post-acquisition
+    # _test_slot_already_complete re-check (already required by #5439) is
+    # what lets a finished winner be reused here rather than raced. Only
+    # genuine contention is retried -- any OTHER _acquire_versioned_slot_lease
+    # failure (lease machinery itself unusable) returns immediately, since
+    # waiting out a persistent, non-transient failure would just convert a
+    # fast, actionable error into a slow, identical one. Returns 0 iff the
+    # lease was ultimately acquired.
+    local wait_seconds="${AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC:-180}"
+    local poll_seconds="${AGENT_WORKTREES_SLOT_LEASE_POLL_SEC:-1}"
+    case "$wait_seconds" in (*[!0-9]*|'') wait_seconds=180 ;; esac
+    case "$poll_seconds" in (*[!0-9]*|'') poll_seconds=1 ;; esac
+    # Reject (fall back to the default) a value whose sheer DIGIT COUNT
+    # risks silent wraparound once it enters arithmetic expansion below --
+    # digit-only validation alone does not make that conversion safe (an
+    # astronomically oversized operator typo would otherwise still "parse"
+    # but wrap into an arbitrary, possibly-small or negative result,
+    # defeating the bounded-wait guarantee this function exists to provide).
+    case "$wait_seconds" in (??????????*) wait_seconds=180 ;; esac
+    case "$poll_seconds" in (??????????*) poll_seconds=1 ;; esac
+    # Force base-10 interpretation: digit-only validation above still
+    # accepts a zero-padded value (e.g. "08"), which bash's arithmetic
+    # context and `[[ -gt ]]` would otherwise read as octal and abort on
+    # (08/09 are not valid octal digits).
+    wait_seconds=$((10#$wait_seconds))
+    poll_seconds=$((10#$poll_seconds))
+    [[ "$poll_seconds" -gt 0 ]] || poll_seconds=1
+    # A clamp independent of digit count: even a 9-digit value that
+    # survives both checks above without wrapping is still an implausible
+    # wait and worth capping at something sane (1 year) rather than
+    # trusting it outright.
+    if [[ "$wait_seconds" -gt 31536000 ]]; then wait_seconds=31536000; fi
+    [[ "$wait_seconds" -ge 0 ]] || return 1
+
+    local start_epoch now_epoch elapsed remaining attempted=0
+    start_epoch="$(date +%s)"
+    while :; do
+        now_epoch="$(date +%s)"
+        elapsed=$((now_epoch - start_epoch))
+        remaining=$((wait_seconds - elapsed))
+        # A zero (or already-elapsed) budget still gets exactly ONE
+        # attempt -- "wait up to 0 seconds" means "don't wait on
+        # contention", never "don't even try the lease at all".
+        if [[ "$attempted" -eq 1 && "$remaining" -le 0 ]]; then
+            return 1
+        fi
+        local read_timeout="$remaining"
+        if [[ "$read_timeout" -lt 1 ]]; then read_timeout=1; fi
+        if [[ "$read_timeout" -gt 10 ]]; then read_timeout=10; fi
+        # Every _acquire_versioned_slot_lease call below forces TWO
+        # dynamically-scoped locals (visible to the mkdir fallback and the
+        # no-flock Python fallback via bash's dynamic scoping of `local`
+        # across callees): the mkdir fallback's own default retry loop is
+        # up to ~10 nested one-second sleeps, and the no-flock fallback's
+        # status read blocks up to 10 seconds on its own -- either would
+        # otherwise let a single attempt silently blow straight through a
+        # short caller-configured budget (e.g.
+        # AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC=2) before this function's own
+        # deadline check ever runs again. Collapsing each attempt (and
+        # bounding the helper's own internal wait) to the remaining budget
+        # keeps the caller's wall-clock deadline authoritative end to end.
+        local _VERSIONED_SLOT_LEASE_MKDIR_SINGLE_ATTEMPT=1
+        local _VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT="$read_timeout"
+        attempted=1
+        if _acquire_versioned_slot_lease; then return 0; fi
+        [[ "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]] || return 1
+
+        # Re-measure: the attempt above may itself have consumed real
+        # time (e.g. the no-flock fallback's bounded status read).
+        now_epoch="$(date +%s)"
+        elapsed=$((now_epoch - start_epoch))
+        remaining=$((wait_seconds - elapsed))
+        if [[ "$remaining" -le 0 ]]; then
+            return 1
+        fi
+        # Cap this poll's sleep to whatever budget remains, so the final
+        # iteration can never itself overshoot the configured deadline.
+        local sleep_for="$poll_seconds"
+        if [[ "$sleep_for" -gt "$remaining" ]]; then
+            sleep_for="$remaining"
+        fi
+        sleep "$sleep_for"
+    done
 }
 
 _versioned_slot_clean() {
@@ -1566,19 +1680,20 @@ PYEOF
 deploy_venv() {
     # Create venv via uv (--allow-existing handles re-install). Deps come from
     # pyproject at package install time -- no ad-hoc pyyaml here.
-    if ! _acquire_versioned_slot_lease; then
-        # Another live process already holds the exclusive build lease for
-        # this exact version -- it's actively building (or about to), so
-        # treat this exactly like a dirty slot and refuse to race it.
-        # _VERSIONED_SLOT_LEASE_FAILURE_REASON distinguishes that genuine
-        # contention from any OTHER lease-machinery failure (lease file/
-        # FIFOs couldn't be created, helper didn't respond, ...) -- never
-        # attribute the latter to "another process" and send an operator
-        # chasing a retry loop instead of the real, persistent failure.
+    if ! _wait_for_versioned_slot_lease; then
+        # Another live process still holds the exclusive build lease for
+        # this exact version after the caller's full bounded wait
+        # (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC, default 180s) -- we do not
+        # race it. _VERSIONED_SLOT_LEASE_FAILURE_REASON distinguishes
+        # genuine, still-unresolved contention from any OTHER failure of
+        # the authoritative universal mkdir gate (could not create the
+        # lease lock directory, ...) -- never attribute the latter to
+        # "another process". (The optional flock/fcntl strengthening
+        # layers tolerate their own failures and never surface here.)
         if [[ -n "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" && "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" != "contention" ]]; then
             err "Could not acquire the build lease for runtime slot ($SRC_VERSION): $_VERSIONED_SLOT_LEASE_FAILURE_REASON"
         else
-            err "Another process is already building this runtime slot ($SRC_VERSION) -- refusing to race it. Re-run update once the other build finishes."
+            err "Another process is still building this runtime slot ($SRC_VERSION) after waiting -- refusing to race it. Re-run update once the other build finishes, or raise AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC if builds routinely take longer."
         fi
         return 1
     fi
