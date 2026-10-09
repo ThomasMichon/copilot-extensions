@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import subprocess
 from dataclasses import asdict, dataclass
@@ -18,7 +19,7 @@ class RebaseProof:
     worktree_id: str
     pr_id: str
     branch: str
-    remote_url: str
+    remote_fingerprint: str
     expected_head: str
     published_patch_id: str
     recorded_patch_id: str
@@ -240,7 +241,8 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str) 
     if not url:
         return None
     return RebaseProof(
-        record.worktree_id, pr.pr_id, dest, url, expected, published_patch, pr.patch_id, pr.base_sha,
+        record.worktree_id, pr.pr_id, dest, hashlib.sha256(url.encode("utf-8")).hexdigest(),
+        expected, published_patch, pr.patch_id, pr.base_sha,
         original, onto, finished, head, tuple(old), conflicts,
     )
 

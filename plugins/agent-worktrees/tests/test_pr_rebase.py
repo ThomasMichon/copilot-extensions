@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import hashlib
 import os
 import stat
 import subprocess
@@ -66,7 +67,7 @@ def _publish(command, config, wid):
     pytest.param("refspec", "push-changes", "manual", marks=pytest.mark.guard),
     pytest.param("refspec", "create-pr", "sync", marks=exhaustive),
 ])
-def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, scheme, command, flow):
+def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, scheme, command, flow):
     config, wid, path, remote, branch, old = _prepare(pr_repo, scheme)
     (path / "feedback.txt").write_text("preserve unpublished source work\n")
     _git("add", "-A", cwd=path)
@@ -82,6 +83,27 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, scheme, command,
         _git("rebase", "origin/master", cwd=path)
     tip = _git("rev-parse", "HEAD", cwd=path)
     assert not git_ops.is_commit_ancestor(old, tip, cwd=path)
+    raw_url = "".join(["https://", "developer:", "synthetic-password", "@example.com/repo.git"])
+    original_git = pr_rebase._git
+
+    def url_with_credentials(*args, cwd):
+        if args == ("remote", "get-url", "--push", "origin"):
+            return raw_url
+        return original_git(*args, cwd=cwd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pr_rebase, "_git", url_with_credentials)
+        record = _record(wid)
+        proof = pr_rebase.verify(
+            record, config.default_repo, "origin", f"{record.branch}:refs/heads/{branch}",
+            old, cwd=str(path),
+        )
+        assert proof is not None
+        pr_rebase._save(proof, str(path))
+        metadata = Path(_git("rev-parse", "--absolute-git-dir", cwd=path))
+        serialized = (metadata / "agent-worktrees-pr-rebase.json").read_text()
+        assert raw_url not in serialized and "synthetic-password" not in serialized
+        assert json.loads(serialized)["remote_fingerprint"] == hashlib.sha256(raw_url.encode()).hexdigest()
     assert _publish(command, config, wid)
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
     record = _record(wid)

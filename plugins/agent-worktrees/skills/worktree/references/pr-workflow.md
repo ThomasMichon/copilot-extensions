@@ -585,6 +585,8 @@ re-verifies the current source, pins its exact object, runs real pre-push hooks,
 and retains the exact **last-observed remote head** lease. Fetching a reviewer
 update never silently advances that lease. After a successful rewrite, tracking
 refreshes the base, head and patch together.
+The destination is recorded only as a SHA-256 fingerprint; raw Git push URLs
+can carry credentials and are never copied into the checkpoint.
 Older runtimes could leave the cached patch ID behind after an incremental
 push; recovery records both that cache and the reconstructed published patch,
 but authorizes only the freshly verified full source replay, never the cache.
