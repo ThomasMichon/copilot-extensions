@@ -1,0 +1,40 @@
+name: zdd singleton-manager stress
+
+# Runs the full libs/zdd/tests suite (every case, not just the path-gated
+# smoke tier `ci.yml` runs with ZDD_SINGLETON_SMOKE_ONLY=1) on a schedule
+# and on manual dispatch, regardless of what any given PR touched. The four
+# real-process regressions in test_singleton_linux_processes.py drive
+# genuine fork/exec/signal process trees -- repeated detached cutovers, a
+# real same-process exec preserving the manager's pid/lease, exec during a
+# pending successor discovery, and a pidfd opened above FD_SETSIZE -- and
+# are gated off every PR CI run so kernel-dependent process/signal timing on
+# a shared runner can't flake a PR that never touched this code. This
+# workflow is what actually keeps them exercised, following the same
+# smoke-in-PR/full-on-schedule split as
+# .github/workflows/crash-diagnostics-stress.yml. Linux-only: the native
+# singleton backend under test is explicitly gated to Linux
+# (libs/zdd/src/zdd/singleton_linux.py), so there is no Windows/macOS
+# variant to also run here.
+
+on:
+  schedule:
+    - cron: "52 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress-linux:
+    name: full libs/zdd/tests suite (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: python -m pip install "pytest>=8.0"
+      - name: Run the full zdd singleton-manager suite
+        run: python -m pytest -q libs/zdd/tests

@@ -557,6 +557,40 @@ jobs:
           python -m pytest -q libs/plugin-activation/tests &&
           python -m pytest -q libs/session-liveness-probe/tests &&
           python -m pytest -q libs/venue-copilot/tests
+      - id: zdd-singleton
+        name: Detect zdd singleton changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base"...HEAD | grep -Eq \
+            '^(libs/zdd/|docs/patterns/versioned-singleton-manager\.md$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: zdd singleton smoke tests
+        # libs/zdd/tests is a shared library's own suite (never collected by
+        # tools/run-plugin-tests.py; see TESTING.md), so it needs its own
+        # explicit step here, path-gated the same way as the
+        # installation-context step above. ZDD_SINGLETON_SMOKE_ONLY=1 skips
+        # the four real fork/exec/signal process-tree regressions in
+        # test_singleton_linux_processes.py (repeated detached cutovers, a
+        # real same-process exec, and a pidfd above FD_SETSIZE) -- those stay
+        # off every PR and run instead via the scheduled/manual
+        # zdd-singleton-stress workflow, the same split
+        # crash-diagnostics-stress.yml already uses for real-process
+        # regressions that are not safe to gate every PR on.
+        if: steps.zdd-singleton.outputs.run == 'true'
+        env:
+          ZDD_SINGLETON_SMOKE_ONLY: "1"
+        run: python -m pytest -q libs/zdd/tests
       - name: Vendored library synchronization
         run: >-
           python tools/check-vendored-libs-sync.py &&
