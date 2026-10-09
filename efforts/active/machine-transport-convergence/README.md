@@ -472,6 +472,20 @@ provider's absence.
   there were zero later commits to replay, and normal `pr-complete` then
   reported current with `origin/dev`.
 - Dispatch and agent-machines integration still wait for the original #5689
-  identity owner. Remaining inventory and the independent #5911 release
-  remediation are open; no duplicate peer patch or release bypass is authorized
-  by this journal. The effort remains Active.
+  identity owner. Remaining inventory and normal promotion/deployment evidence
+  are open; #5911's source remediation subsequently landed through #5885.
+  No duplicate peer patch or release bypass is authorized by this journal.
+  The effort remains Active.
+
+### Current continuation gate
+
+The source slices #5737/#5740 and the publication repair are settled; the
+additional #5972/#5973/#5974 work is not implemented. The reviewed campaign
+extension precedes the independent Picker matching slice; its existing baseline
+contracts passed **9 tests** before edits. #5689 retains its original host/WSL
+implementation owner and remains the overlapping-consumer prerequisite.
+
+#5885 is merged and #5911 is closed: do not rework that completed remediation.
+Verify normal promotion and installed-consumer evidence separately. The effort
+and the #5972 issue claim remain active until their complete scopes are resolved
+or explicitly transferred; no single planning or implementation PR closes them.
