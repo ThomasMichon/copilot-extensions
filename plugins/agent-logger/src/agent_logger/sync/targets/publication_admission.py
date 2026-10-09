@@ -170,7 +170,7 @@ def _admit_under_lock(
     marker_path = dest / PUBLICATION_IDENTITY_MARKER
     try:
         existing = _read_marker(marker_path)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
     if existing is not None:
         if existing == incoming:

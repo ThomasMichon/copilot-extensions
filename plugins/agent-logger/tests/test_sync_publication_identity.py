@@ -330,6 +330,27 @@ def test_check_publication_identity_rejects_an_oversized_existing_marker(
     assert "exceeds" in result.detail
 
 
+def test_check_publication_identity_fails_closed_on_deeply_nested_marker(
+    tmp_path: Path,
+) -> None:
+    """A destination-controlled marker can be deeply nested JSON within the
+    size bound -- ``json.loads`` can raise ``RecursionError`` for that, which
+    must still fail closed with a ``PushResult``, never escape as an
+    uncaught exception."""
+    dest = tmp_path / "dest" / "m1"
+    dest.mkdir(parents=True)
+    depth = 10_000
+    nested = "[" * depth + "]" * depth
+    assert len(nested) <= MAX_MARKER_BYTES
+    (dest / PUBLICATION_IDENTITY_MARKER).write_text(nested, encoding="utf-8")
+
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = check_publication_identity(dest, identity)
+    assert result is not None and not result.ok
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
 def test_filesystem_push_claims_a_long_destination_path_with_identity(
     tmp_path: Path,
