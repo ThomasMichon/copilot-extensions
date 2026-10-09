@@ -1412,20 +1412,19 @@ function Exit-VersionedSlotLease {
 
 function Wait-ForVersionedSlotLease {
     <# Bounded join for genuine lease contention (phase-3-runtime-admission,
-       #5472/#5788): a single Enter-VersionedSlotLease refusal used to be
-       final -- the caller gave up immediately and told the operator to
-       "re-run update once the other build finishes" by hand. That is what
-       turns an ordinary concurrent first build into a visible hang/failure
-       for a resumed launch, which never retries on its own. Poll for the
-       lease instead, bounded by a real wall-clock deadline, so a build that
-       finishes within the budget is picked up automatically; the caller's
-       OWN post-acquisition Test-SlotAlreadyComplete re-check (already
-       required by #5439) is what lets a finished winner be reused here
-       rather than raced. Only genuine contention is retried -- any OTHER
-       Enter-VersionedSlotLease failure (permission/path/storage) returns
-       immediately, since waiting out a persistent, non-transient failure
-       would just convert a fast, actionable error into a slow, identical
-       one. Returns $true iff the lease was ultimately acquired. #>
+       #5472/#5788): polls for the lease on a real wall-clock deadline
+       (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC) instead of refusing on the
+       first contention observation, so a concurrent first build that
+       finishes within the budget is picked up automatically rather than
+       requiring an operator (or an unattended resumed launch) to re-run
+       manually. The caller's OWN post-acquisition Test-SlotAlreadyComplete
+       re-check (already required by #5439) is what lets a finished winner
+       be reused here rather than raced. Only genuine contention is
+       retried -- any OTHER Enter-VersionedSlotLease failure (permission/
+       path/storage) returns immediately, since waiting out a persistent,
+       non-transient failure would just convert a fast, actionable error
+       into a slow, identical one. Returns $true iff the lease was
+       ultimately acquired. #>
     if (Enter-VersionedSlotLease) { return $true }
     if ($script:VersionedSlotLeaseFailureReason -ne 'contention') { return $false }
 
@@ -2287,18 +2286,13 @@ function Deploy-Venv {
     # this function into concurrent package deployment), or remove an
     # in-progress slot out from under an active builder.
     if (-not (Wait-ForVersionedSlotLease)) {
-        # Another live process already holds (or held, for the whole bounded
-        # wait) the exclusive build lease for this exact version. We do not
-        # race it, but we no longer give up on the very first contention
-        # observation either -- Wait-ForVersionedSlotLease already polled for
-        # the caller's bounded budget (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC,
-        # default 180s), re-attempting acquisition so a build that finishes
-        # inside the budget is picked up automatically instead of leaving the
-        # operator (or a resumed, unattended launch) to "re-run update" by
-        # hand. $script:VersionedSlotLeaseFailureReason distinguishes genuine,
-        # still-unresolved contention from any OTHER lease-file failure
-        # (permission/path/storage) -- never attribute the latter to
-        # "another process".
+        # Another live process still holds the exclusive build lease for
+        # this exact version after the caller's full bounded wait
+        # (AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC, default 180s) -- we do not
+        # race it. $script:VersionedSlotLeaseFailureReason distinguishes
+        # genuine, still-unresolved contention from any OTHER lease-file
+        # failure (permission/path/storage) -- never attribute the latter
+        # to "another process".
         if ($script:VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention') {
             Write-ServiceErr "Could not acquire the build lease for runtime slot ($SrcVersion): $script:VersionedSlotLeaseFailureReason"
         } else {
