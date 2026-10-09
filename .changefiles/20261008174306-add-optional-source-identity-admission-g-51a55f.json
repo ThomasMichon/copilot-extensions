@@ -1,0 +1,9 @@
+{
+  "comment": "Add optional source_identity admission gate to Target.push: filesystem targets enforce a locked identity-marker check before any write (claim/idempotent/reject-mismatch/refuse-unowned-leaf semantics); SSH/ingest targets fail closed until receiver-side atomic admission exists. Legacy None behavior is unchanged for every existing caller.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "minor"
+    }
+  ]
+}

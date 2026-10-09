@@ -25,6 +25,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from agent_procutil import no_window_kwargs
 
@@ -227,6 +228,25 @@ def resolve_rsync_runtime(*, require_ssh: bool = True) -> RsyncRuntime:
     return RsyncRuntime(command_prefix=["wsl.exe", "-e"] if use_wsl else [], use_wsl=use_wsl)
 
 
+class SourceIdentityLike(Protocol):
+    """Structural shape required of :meth:`Target.push`'s optional
+    ``source_identity`` argument.
+
+    This is a forward-looking contract for the not-yet-landed
+    ``agent_logger.sync.source_publication.SourceIdentity`` dataclass
+    (see the ``session-intelligence-and-accounting`` effort). This
+    module deliberately never imports that module -- any object
+    exposing these four string fields satisfies this protocol
+    structurally, so a target implementation has no runtime dependency
+    on ``source_publication`` landing.
+    """
+
+    provider: str
+    host: str
+    repository: str
+    venue: str
+
+
 @dataclass
 class PushResult:
     """Outcome of a :meth:`Target.push`."""
@@ -422,6 +442,7 @@ class Target(ABC):
         include_sessions: set[str] | None = None,
         *,
         batch_mode: bool = False,
+        source_identity: SourceIdentityLike | None = None,
     ) -> PushResult:
         """Publish *source* under the target's ``{machine}/`` subpath.
 
@@ -444,6 +465,15 @@ class Target(ABC):
         would otherwise treat a filtered push as an atomic rescue operation
         (locked files aborting the whole batch) instead defers locked files
         and continues, exactly as an unfiltered push would.
+
+        ``source_identity``, when not ``None``, requests destination
+        identity-admission: the target must fail closed *before* copying
+        anything unless it actually implements an admission check (see
+        ``FilesystemTarget``'s marker-and-lock comparison) -- a target with
+        no such check (``SshTarget``/``IngestTarget`` as of this writing)
+        must return an explicit unsupported failure, never silently ignore
+        the argument and proceed as if ``None`` were passed. The default
+        ``None`` preserves every existing caller's behavior unchanged.
         """
 
     @abstractmethod

@@ -113,6 +113,19 @@ Targets implement a small `Target` interface
 | `ssh` / `ssh-tunnel` | rsync over SSH, optionally via a jump host |
 | `ingest` | an rsync-daemon sink with an optional HTTP notify |
 
+**Destination identity-admission (`push`'s optional `source_identity`).** A
+caller publishing into a namespaced destination it doesn't already own (e.g.
+rescue/CodeSpace publication, not ordinary machine-rooted session sync) may
+pass a `source_identity` (provider/host/repository/venue) to `push`. `local`/
+`onedrive` enforce it under a dedicated destination lock before any write:
+a first push to an empty leaf claims it (writes a `.archive-source.json`
+marker), a re-push matching that marker is idempotent, and a mismatched
+marker or an existing nonempty leaf with no marker at all is refused rather
+than silently overwritten or adopted. `ssh`/`ingest` fail closed (`ok=False`)
+whenever `source_identity` is passed — no receiver-side atomic admission
+exists for those transports yet. The default `None` is unchanged legacy
+behavior for every ordinary sync caller.
+
 **Post-push notify (target-independent).** A `sync.notify.url` fires a
 best-effort HTTP `POST` (JSON `{"machine": <machine>}`; `{machine}` in the URL
 is also substituted, optional bearer token) after **any** successful push,

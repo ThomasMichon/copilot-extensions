@@ -52,10 +52,12 @@ from agent_logger.sync.targets.base import (
     DoctorResult,
     FleetSyncStatus,
     PushResult,
+    SourceIdentityLike,
     SyncStatus,
     Target,
     is_session_path_included,
 )
+from agent_logger.sync.targets.publication_admission import check_publication_identity
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
 _EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
@@ -1661,7 +1663,7 @@ class FilesystemTarget(Target):
 
     def push(
         self, source: Path, machine: str, include_sessions: set[str] | None = None,
-        *, batch_mode: bool = False,
+        *, batch_mode: bool = False, source_identity: SourceIdentityLike | None = None,
     ) -> PushResult:
         try:
             safe_source = _existing_real_directory(source)
@@ -1682,6 +1684,8 @@ class FilesystemTarget(Target):
                 ok=False,
                 detail=f"cannot create safe destination for {machine}: {exc}",
             )
+        if (admitted := check_publication_identity(dest, source_identity)) is not None:
+            return admitted
 
         copied = 0
         nbytes = 0
