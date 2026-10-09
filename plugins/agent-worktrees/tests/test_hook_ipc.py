@@ -1893,3 +1893,22 @@ def test_late_completed_request_does_not_request_duplicate_fallback(tmp_path):
         assert "fallback" not in response
     finally:
         server.close()
+
+
+def test_session_start_enrichment_carries_fail_soft_terminal_probe(monkeypatch):
+    monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3")
+    monkeypatch.setattr(hook_client, "_probe_terminal", lambda: {"ancestors": [5]})
+    enriched = hook_client._enrich_session_payload({"sessionId": "s"})
+    assert enriched["_agentWorktrees"]["terminal"] == {"ancestors": [5]}
+
+
+def test_probe_terminal_never_raises_when_sibling_fails(monkeypatch):
+    class _Broken:
+        @staticmethod
+        def probe():
+            raise OSError("no win32")
+
+    monkeypatch.setattr(hook_client, "_load_sibling", lambda name: _Broken)
+    assert hook_client._probe_terminal() == {}
+    monkeypatch.setattr(hook_client, "_load_sibling", lambda name: None)
+    assert hook_client._probe_terminal() == {}
