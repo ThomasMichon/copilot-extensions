@@ -111,6 +111,21 @@ class _SessionHostConnectionMixin:
                 except Exception:
                     log.warning("Local guidance refresh failed before spawn", exc_info=True)
 
+        preference_options = client_preferences(target, self._db, session_id)
+        from .container_preference_launch import (
+            bind_launch_purpose, verify_launch_receipt, verify_selected_instance,
+        )
+
+        expected_instance = (getattr(target, "venue", None) or {}).get("instance_id")
+        args = bind_launch_purpose(
+            args, preference_options["preference_source"],
+            preserving=bool(
+                load_session_id or preference_options.get("confirmed_preferences") or model
+                or preference_options.get("launch_preferences", {}).get("model")
+                or preference_options.get("provider_intent")
+            ),
+        )
+        verify_selected_instance(args, expected_instance)
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
             # command the agent runs (e.g. an in-session `test-chamber services
@@ -162,7 +177,7 @@ class _SessionHostConnectionMixin:
                 model_override=model,
                 effort_override=effort,
                 target_preferences=getattr(hello, "preference_receipt", None),
-                **client_preferences(target, self._db, session_id),
+                **preference_options,
             )
             # Surface a mid-session transport drop (loopback socket down, host +
             # child alive) as ``disconnected`` so the reattach driver fires (P1).
@@ -175,6 +190,9 @@ class _SessionHostConnectionMixin:
                 client.auto_approve = False
             with capture_acp_parse_errors() as parse_errors:
                 try:
+                    verify_launch_receipt(
+                        args, getattr(hello, "preference_receipt", None), expected_instance,
+                    )
                     step_started = time.monotonic()
                     await asyncio.wait_for(
                         client.start_streams(

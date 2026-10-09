@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in launch-bound target-local preference authority for trusted container Session Hosts",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
