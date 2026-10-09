@@ -102,9 +102,19 @@ def cmd_session_lifecycle(args: argparse.Namespace) -> int:
 
 
 def cmd_session_binding(args: argparse.Namespace) -> int:
-    """Expose the authoritative session-to-mux binding as bounded JSON."""
+    """Expose the authoritative session-to-mux binding as bounded JSON.
+
+    ``found`` keeps its meaning (a live mux binding). ``terminal`` is the
+    terminal identity recorded at session start for any session, mux or not.
+    """
+    from . import terminal_identity
+
     session_id = getattr(args, "session_id", None)
     binding = sessions.mux_binding_for_session(session_id) if session_id else None
+    try:
+        terminal = terminal_identity.read_session_terminal(session_id)
+    except Exception:
+        terminal = None
     result = {
         "found": bool(binding),
         "session_id": session_id,
@@ -115,6 +125,7 @@ def cmd_session_binding(args: argparse.Namespace) -> int:
         "pane_start_time": binding.get("pane_start_time") if binding else None,
         "copilot_pid": binding.get("copilot_pid") if binding else None,
         "copilot_start_time": (binding.get("copilot_start_time") if binding else None),
+        "terminal": terminal,
     }
     output._json_output(result)
     return 0

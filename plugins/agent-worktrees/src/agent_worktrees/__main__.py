@@ -4057,6 +4057,12 @@ def _run_session_lifecycle(
     project_process = None
     _write_session_lifecycle_receipt(payload, "started")
     try:
+        from . import terminal_identity
+
+        terminal_identity.record_session_terminal(payload, session_environment)
+    except Exception:
+        pass
+    try:
         project_process = _start_project_session_hook(cwd, session_environment)
         nudge = _registration_nudge_context(cwd)
         _write_session_lifecycle_snapshot(

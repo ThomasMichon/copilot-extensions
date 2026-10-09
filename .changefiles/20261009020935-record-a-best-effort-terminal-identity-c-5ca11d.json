@@ -1,0 +1,9 @@
+{
+  "comment": "Record a best-effort terminal identity (console/host window on Windows, tty/mux/ssh elsewhere) at session start and expose it via session-binding --json",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

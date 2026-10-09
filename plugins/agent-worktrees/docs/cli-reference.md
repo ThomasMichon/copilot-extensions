@@ -165,6 +165,7 @@ continue to work unchanged.
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable CLI worker. Requires `--policy disposable-cli` and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
 | `session-tail` | Emit one Copilot session's last N message-bearing turns by session id (`--limit N`, JSON), including per-turn `tool_names` and an ending-state signal (`complete` / `assistant_turn_in_progress` / `assistant_offer_pending`) |
+| `session-binding` | Report one session's live mux binding (`found`, `worktree_id`, `mux_session`, `pane_id`, `pane_pid`, `copilot_pid`, ...) plus its recorded `terminal` identity (`--session-id <sid> --json`). `found` still means "a live mux binding exists"; `terminal` is present for any session whose start was recorded, muxed or not -- see [Terminal identity](#terminal-identity) |
 | `session-lock` | Write/remove a session-state lattice lock beside Copilot's session state (bridge/mux liveness marker) |
 | `execution-leg` | Provider-neutral JSON process boundary for a worktree's externally owned execution identity. `get` reads the generic record (including the legacy `session_backend` compatibility view) and fails closed for opaque schemas. `reserve` atomically fences an `ensure` or `dispose` lifecycle operation as `unknown` under the record/finalize locks and records a bounded owner/token lease plus the prior binding; a live lease rejects competitors, while an expired unchanged lease is reconciled and safely taken over. Token-bound `set` commits it and `release` rolls it back without allowing revisions to move backward; stale tokens fail closed. Unreserved `set`/`clear` retain optimistic `--if-match-revision` fencing. The bare launcher consults `execution-leg get` only to resume an already-established AHP leg; creating a new AHP session now belongs exclusively to Worktree Manager |
 | `reconcile-sessions` | Run one bounded record/session/projection reconciliation pass and emit machine-readable repair and conflict counts; suitable for an optional low-duty scheduled backstop |
@@ -174,6 +175,47 @@ continue to work unchanged.
 | `list` | List worktrees from tracking records. `--codename <name>` restricts to the worktree with that assigned codename, as an alternative to `--worktree-id` |
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch) |
+
+### Terminal identity
+
+At every `sessionStart` (including resume), the hook client probes what only a
+process inside the session's terminal can observe and the lifecycle persists a
+small, best-effort record as `agent-worktrees-terminal.json` in the session's
+state directory. It lets a later tool (e.g. a desktop companion) find and focus
+the terminal showing a session -- including sessions started before that tool
+was running. `session-binding --json` returns it as `terminal` (`null` when
+nothing was recorded):
+
+```json
+{
+  "version": 1, "platform": "windows", "recorded_at": "2026-01-01T00:00:00Z",
+  "copilot_pid": 1234, "copilot_start_time": "<opaque start-time token>",
+  "term_program": null, "wt_session": null,
+  "console_hwnd": 721460, "console_class": "PseudoConsoleWindow",
+  "host_hwnd": 66706, "host_pid": 5678, "host_exe": "WindowsTerminal.exe",
+  "host_class": "CASCADIA_HOSTING_WINDOW_CLASS",
+  "tty": null, "mux": null, "ssh": false, "live": true
+}
+```
+
+- Unknown facts are `null`. No window titles, absolute user paths, or secrets
+  are recorded; executable names are basenames. `mux` is `{kind, pane}` inside
+  tmux/psmux; `tty` is the controlling pts/tty on Linux.
+- `live` is computed at read time: `true` while `copilot_pid` still has the
+  recorded start time, `false` once that process is gone or the pid was reused,
+  `null` when unknown.
+- **Windows:** hooks run without a console window, so the hook client briefly
+  `AttachConsole`s to its Copilot ancestor to read `GetConsoleWindow()` (from a
+  short-lived console-less helper when the hook itself holds a windowless
+  console, where `AttachConsole` is refused). Under
+  ConPTY that is a `PseudoConsoleWindow` whose root owner is the hosting
+  terminal's top-level window (`host_hwnd`/`host_pid`/`host_exe`); a classic
+  console is its own host (`conhost.exe`). This works even when `WT_SESSION` is
+  unset (default-terminal handoff). Windows Terminal does not expose tab
+  identity to child processes, so `host_hwnd` names the window; a consumer
+  needing the exact tab combines it with its own UI Automation tab matching.
+- Recording is fail-soft and bounded (~1 s probe budget, typically well under
+  0.2 s); it never fails session start.
 
 ## Pull-request workflow
 
