@@ -124,10 +124,11 @@ class DiscoveredSession:
     #: machine-only origin" (authoritatively route by the machine default).
     origin_recorded: bool = False
     #: ``True`` when this session was discovered as a compressed archive
-    #: (``<machine>/archived/<id>.tar.gz``) rather than a live
+    #: (``<source-key>/archived/<id><suffix>``, tar.gz or ZIP) rather than a live
     #: ``session-state/<id>/`` directory. ``session_path`` then points at the
     #: archive; a content consumer (the writer) must materialize it. Metadata
-    #: here was read from the uncompressed selector sidecars, no decompress.
+    #: uses uncompressed selector sidecars when available; overlap admission
+    #: separately verifies archive contents.
     archived: bool = False
     #: The continuation-segment identity this unit will log. Single-segment
     #: sessions use index 0; a source that splits continuation sessions sets

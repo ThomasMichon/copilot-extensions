@@ -403,7 +403,10 @@ engine under this effort.
       update flow. See the 2026-10-08 journal entry and issue #5802.
 - [ ] `agent-index` (separate engine venv — prove the config schema handles
       this before completing the remaining adopters).
-- [ ] `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-machines`.
+- [x] `agent-dispatch` — PR #5832 merged, release #5866 promoted the
+      adopter, and the normal update verified payload/runtime `0.14.0-dev1`
+      with a healthy routed coordinator and running supervisor.
+- [ ] `agent-containers`, `agent-mcp`, `agent-machines`.
 - [ ] **`agent-worktrees` is a decided permanent exception, not a deferred
       evaluation, and not part of the non-exempt adopter set above.** It is
       the control-plane plugin and by far the largest, most bespoke installer
@@ -520,6 +523,286 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-09 — Index installation-wide uv acquisition serialized
+
+- Scoped follow-up to PR #5885's shared tool bootstrap race. CLI and durable
+  engine use different build targets but the same installation tool directory;
+  validation, partial executable removal and bootstrap must therefore share an
+  acquisition guard, not their distinct build locks.
+- Added a private Index adapter around the unchanged canonical helpers.
+  Windows `Uv` mutex scope and POSIX advisory fd7 key to the installation root
+  and use bounded 180-second admission. Acquisition releases before build or
+  publication, and never owns those locks while waiting or invoking bootstrap.
+  Cached-engine reuse stays cheap and does not acquire/bootstrap uv.
+- Real concurrent fixture runtime/engine callers start from an absent tool.
+  Exactly one bootstrap writer publishes a complete executable; both consumers
+  validate and use it. Independent build/publication probes prove lock order
+  and distinct fd7/8/9 ownership. Both POSIX flock and stdlib fcntl paths run.
+  No real download, package/model initialization or service operation is used.
+- Existing rejected-PATH/pip fallback, readiness barrier, snapshot authorization,
+  per-version build locks, publication guard and Global-to-Local diagnostics are
+  retained. Canonical bytes and existing changefiles are unchanged; no other
+  plugin or recovery history was edited.
+- Bounded validation: focused installer/acquisition selection 116 passed;
+  disconnected full Index suite 756 passed / 103 skipped; full host suite
+  848 passed / 11 skipped. The initial acquisition fixture omitted its optional
+  server definition and failed explicitly; after completing that fixture,
+  the full matrix passed. One admission deferred with 75 and was retried
+  under the authorized wait policy, without bypass.
+  Relevant engine-sync/materialization/install-contract tooling: 107 passed.
+  Guards, version/changefile checks, F/E9 lint and both installer parsers passed.
+- Measurements: shell 2132 -> 2142 (+10), PowerShell 2656 -> 2671 (+15),
+  wrappers 4788 -> 4813, canonical pair remains 881, aggregate 5669 -> 5694.
+  Native acquisition revalidation remains integration-owner work; preceding
+  native results and the independently resolved upstream guard lane are not
+  claimed as validation of this follow-up. Effort/adopter completion stays open.
+
+### 2026-10-09 — Index cross-version publication and supported snapshot recovery
+
+- Continued only PR #5885 from published head
+  `b0e9125614c62c9096c0a66710158d067b16c041`, preserving its worker-readiness
+  barrier and all prior admission, mutex fallback, interpreter, pip and engine
+  policy changes. Canonical engine and existing changefile are unchanged.
+- POSIX publication now owns installation-wide fd9 independently from
+  version/target build fd8. Freshness, invalid-marker preparation, activation,
+  stamp/payload/launcher writes and manifests share the publication guard.
+  Nested calls reuse their scope, build remains outermost, and heavy package
+  work does not hold publication. Both descriptors retain the same OS advisory
+  locking, bounded admission and explicit-unlock semantics.
+- Missing authoring origins remain source provenance. Runtime-gate and
+  installer mandatory legacy probes select the validated owning snapshot when
+  the original no longer supplies its declaration. Complete declaration and
+  namespace/legacy governance validation are retained rather than bypassed.
+- PowerShell package branches now use only the accepted UvCommand. A failed
+  Ensure-Uv cannot rediscover rejected PATH uv through a literal helper fallback
+  or Get-Command package branch; all three runtimes use Python/pip instead.
+- Real process fixtures interleave an older stamp or invalid-marker repair
+  with newer activation, prove publication blocks while another version's
+  build remains independent, and reject stale direct writers. Supported
+  runtime-gate setup/provision fixtures reach snapshot UV only after the real
+  declaration probe; a denied governance decision blocks before provisioning.
+  A still-discoverable broken executable is rejected by real Ensure-Uv, and
+  all nine CLI/server/engine package calls use pip without invoking it again.
+- Bounded validation: new contract selection 7 passed; combined installer/
+  activation matrix 113 passed; disconnected full suite 745 passed / 102
+  skipped; full host suite 836 passed / 11 skipped; relevant tooling 107
+  passed. Guards, F/E9 lint and shell/PowerShell parsing passed.
+- New measurements: shell 2132, PowerShell 2656, wrappers 4788, unchanged
+  canonical pair 881, aggregate 5669 (+73 against the correctly published
+  2064/2651/4715/5596 table). Runtime-gate grows 941 -> 942 lines separately.
+  The effort's aggregate tightening gate remains open.
+- Native 70 passed / 36 skipped applies to the prior published head after its
+  readiness barrier; neither that result nor its earlier handshake retry is
+  attributed to this follow-up. Native revalidation and publication remain
+  integration-owner work. No live mutation or next adopter was performed.
+
+### 2026-10-09 — Index POSIX advisory-lock ownership corrected
+
+- Scoped follow-up to the new POSIX helper at local head
+  `d84c33a7916ae60aaa47682ee470922c85a4e492`, before publication. A PID symlink
+  compare/readlink/delete sequence cannot atomically reclaim a stale owner:
+  another caller may replace it between the final comparison and deletion.
+  Descriptor close alone also fails when descendants retain the same open-file
+  description.
+- Replaced PID reclamation with real OS advisory locking. No-flock/macOS
+  admission uses bootstrap Python's stdlib fcntl on inherited fd8, preserving
+  its open-file description in the shell. Cleanup explicitly unlocks before
+  close in both normal flock and fcntl paths, preserves callback status, and
+  surfaces acquisition/unlock failures. Admission remains bounded to 180
+  seconds; no network or third-party prerequisites were added.
+- Real process regressions keep a harmless descendant alive with fd8 after
+  callback return, then prove another caller immediately acquires the same
+  target. Both paths also time out against a real held flock, preserve stale
+  PID evidence unchanged and retain one stable lock inode across reuse.
+  Children finish through a fixture signal, without termination.
+- Windows code, parent policy changes, canonical engine and existing
+  changefile are untouched. Measurements: shell 2030 -> 2064 (+34),
+  PowerShell remains 2651, wrappers 4715, canonical pair 881, aggregate 5596.
+  Native macOS and remaining native revalidation are not claimed; integration,
+  publication and the overall effort remain coordinator-owned/open.
+- Bounded validation: four OS-backed edge regressions passed, combined
+  installer/admission selection 106 passed, full host suite 829 passed /
+  11 skipped, disconnected full suite 741 passed / 99 skipped. Guards,
+  shell parsing and F/E9 lint passed. One admission attempt deferred with 75;
+  the authorized bounded retry completed without bypassing containment.
+
+### 2026-10-09 — Index direct-build admission and user-mode mutex fallback
+
+- Continued only PR #5885 from published head
+  `baf17d5f35eac433fde38aee0f4803a374776988`. Preserved its narrowed optional
+  repair catch, unpinned interpreter selection, Windows Python/pip fallback,
+  durable-engine uv policy and the existing patch changefile. Canonical engine
+  bytes remain unchanged.
+- Added target-venv/version-scoped build admission before cleanup and repair,
+  held across package installation, health and activation/publication. The
+  optional server sibling stays inside the CLI build guard; durable engine
+  provisioning uses its independent target guard. Returns and failures release
+  in `finally`, and different versions remain independently admissible.
+  POSIX mirrors the build scope with bounded flock/PID admission and subshell
+  cleanup. The existing Dispatch 180-second build-admission window is reused.
+- Lock order remains build then publication. Stamp's snapshot lock is released
+  before publication, and no publication holder acquires a build lock. Runtime
+  freshness is rechecked after build admission and again before publication.
+- Global Windows mutex creation catches only UnauthorizedAccessException and
+  falls back to Local with an explicit cross-session-degradation warning.
+  Other creation errors still propagate; normalized key/scope identity and
+  reentrancy are preserved.
+- Real two-process direct-install fixtures prove a second same-version caller
+  cannot clean or mutate the first build, while another version remains
+  admissible. Failure and supersession cases prove the peer proceeds before the
+  first process exits, rather than relying on process death to release the
+  guard. Timeout probes and POSIX failure/PID cleanup cover bounded admission.
+  Simulated denied Global construction proves Local reentry without elevation;
+  normal Global and unrelated-error paths are separate regressions.
+- Published-head measurements 1975/2624/4599/5480 were correct and are not
+  retroactively changed. This follow-up measures shell 2030 and PowerShell 2651,
+  wrappers 4681, plus unchanged engine pair 881 = 5562 aggregate (+82).
+  This remains disclosed temporary safety growth, not effort completion.
+- Validation remains bounded to admission 120 seconds / timeout 600 seconds.
+  Focused installer/admission matrix: 104 passed; full host suite:
+  827 passed / 11 skipped; disconnected full suite: 739 passed / 99 skipped;
+  engine-sync/materialization/install-contract tooling: 107 passed.
+  Contract, sync, versions, module size, docs, changefile, F/E9 lint and
+  shell/PowerShell parsing passed without a flake exception.
+  Required native revalidation belongs to the integration owner; native
+  64 passed / 32 skipped applies only to the preceding published head.
+  No publication, live mutation, next adopter or child agent was authorized.
+
+### 2026-10-09 — Index publication and health boundaries hardened
+
+- Continued only the Index adopter from PR #5885's published head
+  `84b5889932b3fdf8ed4f76fc8ffeec47afd9004d`. Preserved unpinned uv selection,
+  Windows Python/pip fallback when acquisition fails, and the durable engine's
+  explicit uv-first policy; CLI/server remain signed-first. The existing
+  patch changefile is unchanged; canonical engine bytes are unchanged.
+- Reused one installation-keyed publication mutex across stamp, runtime marker
+  cleanup, activation, payload/launcher writes and manifests. Runtime builds
+  release preparation locks before provisioning and recheck freshness before
+  the complete publication transaction. Direct activation/launcher callers
+  enter the same reentrant guard. Snapshot and publication locks remain
+  sequential, with no publication-to-snapshot acquisition. Windows uses the
+  global namespace; path aliases with trailing separators share one identity.
+- A deterministic two-process fixture brings newer activation to the mutex
+  while an older stamp is inside its freshness check. The activation must
+  report blocked, then publish the newest current-version, payload, launcher
+  and manifest after stamp releases. Separate cases prove current/stamped
+  freshness prevents all older runtime writes and direct launcher repair.
+- Optional server repair catches only its venv repair/probe boundary, reports
+  the literal exception and restores ErrorActionPreference in `finally`.
+  Actual repair-helper tests inject filesystem and probe exceptions and prove
+  warning fallback plus primary continuation.
+- POSIX CLI/server/engine builds now share an isolated interpreter-prefix
+  health probe and local repair adapter around the unchanged engine helper.
+  Real Python venv cases cover healthy reuse, corrupt executables, base
+  interpreter wrappers, wrong prefixes and failed probes. Fake package-build
+  interpreters emit truthful physical prefixes instead of bypassing health.
+  No real models, services or scheduler operations are used.
+- Counts relative to the published head: shell 1958 -> 1975 (+17),
+  PowerShell 2579 -> 2624 (+45), wrappers 4537 -> 4599 (+62); canonical pair
+  remains 881 lines, combined corpus 5418 -> 5480 (+62). This is disclosed
+  temporary safety growth, not satisfaction of the effort's aggregate
+  shrinkage gate; the rollout must offset it before that gate closes.
+- Bounded validation (admission 120 seconds, timeout 600 seconds): focused
+  installer/stamp/activation matrix 96 passed; disconnected full plugin suite
+  737 passed / 93 skipped; full host suite 819 passed / 11 skipped.
+  Relevant engine-sync/materialization/install-contract tooling: 107 passed.
+  Contract, engine/library sync, version, module-size, docs, changefile,
+  F/E9 lint and both platform parsers passed without a flake exception.
+- Native Windows validation previously reported 56 passed / 26 skipped at
+  the published head, not this follow-up. The new global mutex/repair paths
+  need native revalidation; PS5.1, SAC and macOS remain unclaimed gaps.
+  Publication, review, merge, release and live verification remain owned by
+  the integration coordinator. The adopter and overall effort remain open.
+
+### 2026-10-08 — Index adopter implementation prepared for integration
+
+- Public coordination: #5873. This Phase 2+ slice closes the reviewed
+  self-contained/immutable-runtime intent without changing service architecture.
+  Both Index wrappers use canonical engine references on `dev`; adopter
+  registration materializes byte-identical payload-local engines at release.
+- Shared acquisition, capture, venv/package retries and manifests cover the
+  versioned CLI, optional host-server sibling and independent durable engine.
+  No canonical engine change or new shared parameter was necessary.
+  Index retains CLI/server signed-Python preference, the durable engine's uv
+  interpreter selection, package ordering,
+  backend/CUDA/Torch feeds, engine.env and every activation/task/daemon lifecycle.
+  Signed-result usability, not exit code alone, gates recovery; an invalid
+  existing interpreter cannot bypass rebuilding.
+- PowerShell stamps materialize both engines and all three local libraries,
+  rewrite dependency references and reuse the existing ordinal payload hash.
+  Unchanged content reuses an immutable snapshot; plugin, engine, library and
+  case-distinct edits change its identity. Sequential snapshot/publication
+  locks recheck the same-version candidate before atomic marker and launcher
+  publication, addressing the stamp marker race tracked in #5271.
+- Installer counts: shell 2004 -> 1958 (-46), PowerShell 2539 -> 2579 (+40);
+  wrappers 4543 -> 4537 (-6). Canonical engine remains 403 shell + 478
+  PowerShell lines; combined corpus 5424 -> 5418 (-6). PowerShell growth
+  supplies self-contained immutable snapshots and shared signed-result health
+  policy rather than a duplicated service-specific engine.
+- Snapshot-origin provisioning preserves the durable snapshot pointer even
+  after the authoring source disappears; source metadata independently retains
+  the original payload provenance rather than advertising staging paths.
+- Contained fixtures exercise both CLI and durable-engine builds without real
+  packages/models or daemon contact. Available PowerShell coverage includes
+  signed-result simulation, snapshot reuse/content identity, unavailable
+  authoring sources and stale-candidate refusal. POSIX optional-server package
+  failure now warns without escaping the documented fallback via errexit.
+- The host full suite exposed repeated copied-interpreter fixture storage
+  growth: each POSIX venv copied three approximately 29 MB interpreter leaves.
+  Runtime-gate fixtures now use ordinary POSIX venv symlinks, retaining copies
+  on Windows. The same 2 GiB sub-suite budget then passed; no limit was raised.
+- Validation passed under admission 120 seconds / timeout 600 seconds:
+  focused installer selection 80 passed; full disconnected devcontainer suite
+  731 passed / 85 skipped; full host suite including available PowerShell
+  coverage 805 passed / 11 skipped; engine-sync/materialization/install-contract
+  tooling 107 passed. Install contract, engine sync, vendored-library sync,
+  versions, module size, docs, changefile, F/E9 lint and both installer parsers
+  passed. No accepted-flake exception was required.
+- Coordinator compatibility check retained unpinned uv interpreter selection
+  across all three venvs and the existing Windows Python/pip fallback when uv
+  acquisition fails. The durable engine does not acquire the CLI/server's
+  signed-rebuild policy. Final focused selection passed 82 cases; final full
+  host suite passed 807 cases with 11 skips.
+- The operator requested finishing this Index installer change, then pausing.
+  No further adopter slice will start at this boundary; the parent effort
+  remains Active with its remaining roster and validation gates intact.
+- Review, merge, release and live verification remain coordinator-owned and
+  outstanding. Native Windows/PowerShell 5.1, SAC and macOS behavior, and real
+  package provisioning, are not claimed. The adopter checkbox remains unchecked
+  and the overall effort remains Active.
+
+### 2026-10-08 — Dispatch adopter merged and deployment verified
+
+- PR #5832 merged as `3c153fae456d3ca70a18dc9c19f360d9b4fd3980` after
+  source CI and required gates passed and the final owner-authored `Comment`
+  review reported zero open findings. Four review rounds closed the snapshot
+  leak, existing-invalid signed rebuild, case-distinct hash and same-version
+  stale publication defects; no remaining finding was bypassed.
+- Final native Windows PowerShell 7 installer/snapshot/stamp/activation
+  selection passed (76 passed, 12 skipped). Actual SAC enforcement,
+  PowerShell 5.1, native macOS and live first-use provisioning remain
+  separate validation limitations, not claimed coverage.
+- Post-merge reconciliation initially hit a squash-replay conflict and
+  auto-aborted without changing the branch. Refreshing authoritative merged
+  PR metadata with `pr-status` allowed `pr-complete` to reconcile past the
+  verified squash merge while preserving its backup ref and active effort.
+- Release-driving `dev` CI was superseded twice by newer contributions,
+  rather than failing tests. Release promotion and normal deployed-runtime
+  verification were then completed: promotion PR #5866 included the adopter,
+  and the explicitly approved normal update installed `0.14.0-dev1`.
+- Both payload-local engine files match canonical bytes and the release
+  contains the local snapshot candidate guard. The active routed coordinator
+  reports `status: ok`, the new version and `draining: false`; its companion
+  supervisor is active/running. No forced update or unadopted runtime enablement
+  was requested.
+- The pre-update legacy unit was repeatedly rejecting a duplicate coordinator,
+  while the routed coordinator was healthy. This already-tracked condition
+  matches #5551; it was not treated as an outage or remedied with process kills
+  or a forced restart.
+- This adopter is complete. The effort remains Active: `agent-index`,
+  `agent-containers`, `agent-mcp`, `agent-machines`, permanent-exception
+  enforcement, opt-in retirement and aggregate validation remain open.
 
 ### 2026-10-08 — `agent-dispatch` adopter prepared for integration
 

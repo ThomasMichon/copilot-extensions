@@ -948,7 +948,7 @@ class TestHeadlessNewSession:
             lambda *a, **k: (_ for _ in ()).throw(OSError("no such file")),
         )
         out = sessions.headless_new_session("wtH", "/work", ["copilot"])
-        assert out == {"ok": False, "pid": None, "error": "no such file"}
+        assert out == {"ok": False, "pid": None, "error": "no such file", "spawned_nothing": True}
 
 
 class TestCmdHandoffCutover:
@@ -2817,6 +2817,40 @@ class TestCmdHandoffCutover:
             "handoff_successor_spawn_failed",
         ]
         assert recorded[1][1] == "unexpected mux blowup"
+
+    @pytest.mark.parametrize("pane_result,spawned_nothing", [
+        ({"new_pane": None, "spawned_nothing": True, "error": "launcher missing"}, True),
+        ({"new_pane": "%5", "prompt_status": "failed:pane-exited", "error": "exited"}, False),
+    ])
+    def test_spawn_failure_records_whether_anything_was_created(
+        self, monkeypatch, capfd, tmp_path, pane_result, spawned_nothing,
+    ):
+        """The monitor retries only a spawn that provably created nothing, so
+        the failure event carries ``spawned_nothing`` from ``pane_create``."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(m.pane_lifecycle, "pane_create",
+                            lambda *a, **k: {"ok": False, "prompt_received": False, **pane_result})
+        recorded: list[tuple[str, dict]] = []
+        monkeypatch.setattr(activity, "log_event", lambda event, **kw: recorded.append((event, kw)))
+
+        assert m.cmd_handoff_cutover(_ns(seed="continue")) == 4
+        capfd.readouterr()
+        failed = [kw for event, kw in recorded if event == "handoff_successor_spawn_failed"]
+        assert len(failed) == 1 and failed[0]["spawned_nothing"] is spawned_nothing
 
     # -- --headless (Phase 3 §4.3 non-mux launch primitive) --------------
 

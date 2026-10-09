@@ -2090,7 +2090,7 @@ def headless_new_session(
     try:
         proc = subprocess.Popen(argv, **kwargs)  # noqa: S603 -- fixed argv, caller-built
     except OSError as e:
-        return {"ok": False, "pid": None, "error": str(e)}
+        return {"ok": False, "pid": None, "error": str(e), "spawned_nothing": True}
 
     activity.log_event(
         "headless_session_assigned", worktree_id=worktree_id,

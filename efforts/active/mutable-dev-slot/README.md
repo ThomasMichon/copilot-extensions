@@ -159,7 +159,7 @@ operator directive to remove the explicit claimed-dev exception.
       under this generic bullet.
 - [ ] **Prioritize the plugins a separate invariant audit
       (`ThomasMichon/copilot-extensions#5472`, `#5468`,
-      `efforts/active/vision-backport-sweep/`) found still silently
+      `efforts/2026/10/09 vision-backport-sweep/`) found still silently
       mutating a completed numbered slot in place for a same-version,
       changed-content update — exactly the anti-pattern this whole effort
       exists to replace.** These need BOTH the ordinary-installer refusal

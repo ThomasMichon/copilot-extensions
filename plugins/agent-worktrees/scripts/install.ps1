@@ -1382,13 +1382,20 @@ function Enter-VersionedSlotLease {
     } catch [System.IO.IOException] {
         $ERROR_SHARING_VIOLATION = 32
         $ERROR_LOCK_VIOLATION = 33
-        $nativeCode = $_.Exception.HResult -band 0xFFFF
-        $contentionCodes = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-            @($ERROR_SHARING_VIOLATION, $ERROR_LOCK_VIOLATION)
-        } else {
-            @(11, 35) # EAGAIN/EWOULDBLOCK on Linux and BSD/macOS.
+        $ioException = $_.Exception
+        while ($ioException -isnot [System.IO.IOException] -and $ioException.InnerException) {
+            $ioException = $ioException.InnerException
         }
-        if ($nativeCode -in $contentionCodes) {
+        $nativeCode = $ioException.HResult -band 0xFFFF
+        $posixWouldBlock = $false
+        if ($env:OS -ne 'Windows_NT') {
+            $posixWouldBlock = (
+                ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux) -and $nativeCode -eq 11) -or
+                ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX) -and $nativeCode -eq 35)
+            )
+        }
+        $windowsContention = $env:OS -eq 'Windows_NT' -and ($nativeCode -eq $ERROR_SHARING_VIOLATION -or $nativeCode -eq $ERROR_LOCK_VIOLATION)
+        if ($windowsContention -or $posixWouldBlock) {
             $script:VersionedSlotLeaseFailureReason = 'contention'
         } else {
             $script:VersionedSlotLeaseFailureReason = $_.Exception.Message

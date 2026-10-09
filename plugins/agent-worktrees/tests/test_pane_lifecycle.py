@@ -72,6 +72,36 @@ def test_pane_create_logs_before_spawn_and_foregrounds(monkeypatch, tmp_path: Pa
     assert call_order[:3] == ["log:pane_create_started", "run", "log:mux_session_assigned"]
 
 
+def test_pane_create_says_when_a_failure_created_nothing(monkeypatch):
+    """A launcher that can't be built, or a mux that refuses, opened no pane:
+    the result says so, so a handoff spawn can be retried safely. A timed-out
+    mux call may have opened one, so it doesn't."""
+    import subprocess
+
+    monkeypatch.setattr(sessions, "has_mux_session", lambda worktree_id: True)
+    monkeypatch.setattr(pane_lifecycle.activity, "log_event", lambda *a, **k: None)
+
+    def _missing_launcher(*a, **k):
+        raise RuntimeError("file-based pane launcher is missing; update Worktree Manager")
+
+    monkeypatch.setattr(sessions, "build_mux_new_window_argv", _missing_launcher)
+    result = pane_lifecycle.pane_create("abc", "/w/abc", ["copilot"], mux="tmux")
+    assert result["ok"] is False and result["spawned_nothing"] is True
+
+    monkeypatch.setattr(sessions, "build_mux_new_window_argv", lambda *a, **k: ["tmux", "new-window"])
+    monkeypatch.setattr(pane_lifecycle.subprocess, "run",
+                        lambda argv, **k: _RunResult(returncode=1, stderr="no server"))
+    result = pane_lifecycle.pane_create("abc", "/w/abc", ["copilot"], mux="tmux")
+    assert result["ok"] is False and result["spawned_nothing"] is True
+
+    def _timeout(argv, **k):
+        raise subprocess.TimeoutExpired(argv, 15)
+
+    monkeypatch.setattr(pane_lifecycle.subprocess, "run", _timeout)
+    result = pane_lifecycle.pane_create("abc", "/w/abc", ["copilot"], mux="tmux")
+    assert result["ok"] is False and result["spawned_nothing"] is False
+
+
 def test_pane_create_uses_new_session_when_no_worktree_mux_exists(
     monkeypatch, tmp_path: Path
 ):

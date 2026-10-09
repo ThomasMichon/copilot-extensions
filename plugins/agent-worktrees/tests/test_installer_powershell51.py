@@ -699,17 +699,31 @@ def test_versioned_slot_lease_classifies_only_platform_contention_codes(tmp_path
         r"\$script:VersionedSlotLeaseHandle = \[System.IO.File\]::Open\([\s\S]*?\)",
         "throw [System.IO.IOException]::new('synthetic lease failure', $TestHResult)",
         functions, count=1,
-    ).replace("[Environment]::OSVersion.Platform", "$TestPlatform")
+    ).replace(
+        "[System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform",
+        "[FixtureLeasePlatformProbe]::IsOSPlatform",
+    )
     script = tmp_path / "platform-contention.ps1"
     script.write_text(
-        functions + f'\n$InstallDir="{tmp_path}"\n$SrcVersion="1.2.3"\n'
+        """
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class FixtureLeasePlatformProbe {
+    public static string CurrentOS;
+    public static bool IsOSPlatform(OSPlatform requested) {
+        return requested.ToString() == CurrentOS;
+    }
+}
+'@
+""" + functions + f'\n$InstallDir="{tmp_path}"\n$SrcVersion="1.2.3"\n'
         "$VersionedRuntime=$true\n"
         "$cases=@(\n"
-        " @{Platform='Win32NT';Code=32}, @{Platform='Win32NT';Code=33},\n"
-        " @{Platform='Unix';Code=11}, @{Platform='Unix';Code=35},\n"
-        " @{Platform='Unix';Code=13}, @{Platform='Win32NT';Code=11})\n"
+        " @{OS='WINDOWS';Code=32}, @{OS='WINDOWS';Code=33},\n"
+        " @{OS='LINUX';Code=11}, @{OS='OSX';Code=35},\n"
+        " @{OS='LINUX';Code=13}, @{OS='WINDOWS';Code=11})\n"
         "$results=@(foreach ($case in $cases) {\n"
-        " $TestPlatform=[PlatformID]$case.Platform\n"
+        " [FixtureLeasePlatformProbe]::CurrentOS=$case.OS\n"
+        " $env:OS=if ($case.OS -eq 'WINDOWS') {'Windows_NT'} else {'Fixture_Posix'}\n"
         " $TestHResult=-2147024896+$case.Code\n"
         " $acquired=Enter-VersionedSlotLease\n"
         " [pscustomobject]@{acquired=$acquired;reason=$script:VersionedSlotLeaseFailureReason}\n"
@@ -821,6 +835,58 @@ Exit-VersionedSlotLease
     assert after_release.returncode == 0, after_release.stderr
     assert after_release.stdout.strip() == "True"
     assert lease_path.exists()
+
+
+@pytest.mark.parametrize(
+    "native_code,platform,contention",
+    [(11, "Linux", True), (35, "OSX", True), (35, "Linux", False),
+     (11, "OSX", False), (11, "Windows", False), (32, "Windows", True),
+     (33, "Windows", True), (13, "Linux", False), (32, "Linux", False),
+     (33, "Linux", False), (32, "OSX", False), (33, "OSX", False)],
+)
+def test_wrapped_slot_lease_io_errors_keep_platform_specific_reasons(
+    tmp_path: Path, native_code: int, platform: str, contention: bool,
+):
+    powershell = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+    functions = _extract_lease_functions(INSTALLER.read_text(encoding="utf-8"))
+    functions = functions.replace("[System.IO.File]::Open(", "[FixtureLeaseFile]::Open(")
+    functions = functions.replace(
+        "[System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform",
+        "[FixtureLeasePlatform]::IsOSPlatform",
+    )
+    script = f"""
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+public static class FixtureLeaseFile {{
+    public static FileStream Open(string path, FileMode mode, FileAccess access, FileShare share) {{
+        throw new IOException("fixture I/O failure", {native_code});
+    }}
+}}
+public static class FixtureLeasePlatform {{
+    public static bool IsOSPlatform(OSPlatform requested) {{
+        return requested == OSPlatform.{platform};
+    }}
+}}
+'@
+{functions}
+$VersionedRuntime=$true
+$InstallDir='{tmp_path}'
+$SrcVersion='1.2.3'
+$env:OS='{"Windows_NT" if platform == "Windows" else "Fixture_Posix"}'
+if (Enter-VersionedSlotLease) {{ throw 'unexpected lease acquisition' }}
+$isContention=$script:VersionedSlotLeaseFailureReason -eq 'contention'
+if ($isContention -ne ${str(contention).lower()}) {{ throw "wrong failure classification: $script:VersionedSlotLeaseFailureReason" }}
+if (-not $isContention -and $script:VersionedSlotLeaseFailureReason -notlike '*fixture I/O failure*') {{ throw 'persistent error lost' }}
+"""
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget(tmp_path: Path):
@@ -971,8 +1037,6 @@ Exit-VersionedSlotLease
         except subprocess.TimeoutExpired:
             holder.kill()
     assert holder.returncode == 0, holder.stderr.read() if holder.stderr else ""
-
-
 def test_deploy_venv_calls_uv_retry_helper():
     """Deploy-Venv's uv fallback must go through the shared retry helper
     (behavior is covered standalone by the Invoke-UvVenvWithRetry tests

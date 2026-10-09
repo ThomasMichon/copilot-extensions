@@ -182,7 +182,7 @@ def _validate_session_entries(path: Path, *, archived: bool) -> None:
     """Check candidates the legacy reader's existence predicates would omit."""
     for candidate in path.iterdir():
         if archived:
-            if any(candidate.name.endswith(codec.suffix) for codec in sessions.CODECS.values()):
+            if sessions.archive_stem(candidate) is not None:
                 _regular_member(candidate)
             continue
         info = candidate.lstat()

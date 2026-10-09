@@ -918,7 +918,7 @@ event names, so no event was renamed:
 | 5 | `status_reported` | the first status-report write in a session |
 | 6 | `handoff_triggered` | context-handoff's `trigger_handoff` |
 | 7 | `handoff_host_acknowledged` | the status monitor's claim, gated to `outcome="acquired"` only |
-| 8 | `handoff_successor_spawn_started` | emitted before success/failure is known, so a killed spawn still leaves a trace; the terminal outcome stamps a distinct event name at the same stage -- `handoff_cutover_spawn` on success, `handoff_successor_spawn_failed` on failure |
+| 8 | `handoff_successor_spawn_started` | emitted before success/failure is known, so a killed spawn still leaves a trace; the terminal outcome stamps a distinct event name at the same stage -- `handoff_cutover_spawn` on success, `handoff_successor_spawn_failed` on failure (whose `spawned_nothing: true` marks a failure that provably opened no pane or process, the one kind the status monitor retries, up to three attempts per handoff) |
 | 9 | `handoff_successor_session_start_bound` | the successor's own sessionStart |
 | 10 | `handoff_successor_claimed` | the successor declares itself new head |
 | 11 | `handoff_pickup_confirmed_predecessor_closing` | the predecessor retire path, gated to `outcome="gone"` only, **or** the successor-link path's own direct emission of this event name (ungated) |

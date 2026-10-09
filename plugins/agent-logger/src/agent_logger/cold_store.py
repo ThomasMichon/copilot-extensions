@@ -13,13 +13,13 @@ three tiers, resolved in order:
 1. **Local live directory** -- ``~/.copilot/session-state/<id>/``, the same
    root :mod:`agent_logger.segmenter.collate` reads for ``current``/by-id
    session resolution.
-2. **On-device compact archive** -- ``<home>/archived-sessions/<id>.tar.gz``
+2. **On-device compact archive** -- ``<home>/archived-sessions/<id><suffix>``
    (:func:`agent_logger.segmenter.collate.session_archive_stores`), a session
    compacted before ever being pushed off this machine.
 3. **The locally synced corpus** -- ``session-sync``'s local target root
    (:attr:`agent_logger.config.Config.sync_path`), scanned per
-   ``<machine>/session-state/<id>/`` (synced but not yet compacted) and
-   ``<machine>/archived/<id>.tar.gz`` (packed at the sync destination) exactly
+   ``<source-key>/session-state/<id>/`` (synced but not yet compacted) and
+   ``<source-key>/archived/<id><suffix>`` (packed at the sync destination) exactly
    as :class:`agent_logger.chronicle.source.SyncedSessionSource` does for the
    chronicler's settle-gated scan.
 
@@ -27,6 +27,7 @@ Every tier goes through :mod:`agent_logger.sessions`' archive-aware reads, so
 this module never cares whether the winning ref is a live directory or a
 compressed archive -- the same distinction the chronicler's settle window
 already gates.
+Registered archive suffixes include default ``.tar.gz`` and optional ``.zip``.
 """
 
 from __future__ import annotations

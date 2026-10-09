@@ -29,6 +29,12 @@ on a remote target (an SSH read each; see `bridge` below).
   (`submitted`) is `review`, even under a stale steering flag (a concluded task
   can't be steered), while one with an `evaluator_ref` waits on its evaluator
   and is no item. Those actions show the task itself. `completed` is never an item.
+  A handoff baton (labelled `handoff`, or from `context-handoff`) is completed
+  by its pickup, so a `submitted` one is spent and never a `review`; one that no
+  session has claimed for longer than
+  `AGENT_DISPATCH_ATTENTION_HANDOFF_AFTER_SECS` (strictly greater, default 600;
+  `0` turns it off) is `stalled`: its predecessor already stopped, so the work
+  waits on a successor.
   One item per task, the worst condition winning. A lane that isn't draining
   (the coordinator's `backlog`) is one `stalled` item per repo (`entity: queue`):
   its oldest queued task waited longer than

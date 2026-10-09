@@ -89,9 +89,9 @@ def is_handoff_task(task: dict[str, Any] | None) -> bool:
     """True if ``task`` (a task dict from ``client.get``/``complete``/etc.) is
     a context-handoff-created task -- the ones that hold a claim to release.
 
-    Mirrors ``_cmd_consume``'s own inline "is this a handoff" check so both
-    stay in sync (a task carries the ``handoff`` label, or predates that
-    label and only carries the ``context-handoff`` source stamp).
+    The one shared classification: consume, attention and this release all
+    use it (a task carries the ``handoff`` label, or predates that label and
+    only carries the ``context-handoff`` source stamp).
     """
     if not isinstance(task, dict):
         return False

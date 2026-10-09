@@ -17,6 +17,7 @@ from agent_dispatch import attention_store
 from agent_dispatch.attention_store import FirstObserved
 
 T0, T1, T2 = "2026-10-07T10:00:00+00:00", "2026-10-07T11:00:00+00:00", "2026-10-07T12:00:00+00:00"
+NOW = 1791370800.0  # T1 as epoch seconds
 
 
 @pytest.fixture(autouse=True)
@@ -206,15 +207,33 @@ def test_two_items_for_one_entity_fail_their_source(tmp_path):
     ({"status": "started", "awaiting_steer": True, "hold_reason": "x"}, "awaiting_input"),  # worst wins
     # submitted is concluded: a stale steering flag can't be answered (steer submit refuses it)
     ({"status": "submitted", "awaiting_steer": True, "hold_reason": "x"}, "review"),
+    # a handoff baton's pickup is its completion: a submitted one is spent, never a review
+    ({"status": "submitted", "labels": ["handoff"]}, None),
+    ({"status": "submitted", "source": "context-handoff"}, None),
+    # one nobody picked up waits on a successor; a young or claimed one doesn't
+    ({"status": "proposed", "labels": ["handoff"], "created_at": NOW - 601}, "stalled"),
+    ({"status": "queued", "source": "context-handoff", "created_at": NOW - 3600}, "stalled"),
+    ({"status": "proposed", "labels": ["handoff"], "created_at": NOW - 60}, None),
+    ({"status": "queued", "labels": ["handoff"], "owner": "w1", "created_at": NOW - 3600}, None),
+    ({"status": "proposed", "created_at": NOW - 3600}, None),  # not a handoff
 ])
 def test_dispatch_task_mapping(task, state):
-    item = srcs._task_item({"id": "t1", "title": "Fix it", **task}, T1)
+    item = srcs._task_item({"id": "t1", "title": "Fix it", **task}, T1, now=NOW)
     assert (item and item["display_state"]) == state
     if state == "awaiting_input" and task.get("card"):
         assert item["input"] == [{"name": "answer", "type": "text"}]
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "card", "show", "t1"]}
-    elif state in ("review", "blocked"):  # no card to show: the task itself
+    elif state in ("review", "blocked", "stalled"):  # no card to show: the task itself
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "show", "t1"]}
+
+
+def test_the_unpicked_handoff_threshold_is_configurable(monkeypatch):
+    task = {"id": "t1", "title": "Relay", "status": "proposed", "labels": ["handoff"], "created_at": NOW - 120}
+    monkeypatch.setenv(srcs.HANDOFF_AFTER_ENV, "60")
+    item = srcs._task_item(task, T1, now=NOW)
+    assert item["display_state"] == "stalled" and "for 2 min: Relay" in item["reason"]
+    monkeypatch.setenv(srcs.HANDOFF_AFTER_ENV, "0")
+    assert srcs._task_item(task, T1, now=NOW) is None
 
 
 def test_the_coordinators_epoch_timestamps_become_iso(tmp_path):
