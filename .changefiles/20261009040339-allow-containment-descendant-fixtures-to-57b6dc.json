@@ -1,0 +1,9 @@
+{
+  "comment": "Allow containment descendant fixtures to finish interpreter startup before their real timeout.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

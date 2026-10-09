@@ -60,7 +60,7 @@ The operator confirmed the slug `transparent-psmux-launch`.
   related documentation and release changefiles.
 
 ### Phase 3 - Release and verify
-- [ ] Land the implementation through review and the required checks.
+- [x] Land the implementation through review and the required checks.
 - [ ] Confirm promotion to the release branch, deploy through the supported
   unified update and prove an actual Windows worktree mux launch succeeds.
 
@@ -181,3 +181,24 @@ encoded commands or initial-prompt transports.
 - The required Linux CI lane remains the live Unix proof. No local Linux
   distro or usable container engine was available; no CI bypass or blind
   failure rerun is used.
+
+### 2026-10-09 - Implementation merged
+- The repaired head passed the required Linux guard lane and all PR checks,
+  received a fresh approval with no unresolved defects, and merged as #5892.
+- The parent #5878 remains open: release promotion, supported deployment and
+  the installed Windows worktree-launch proof are still the completion gate.
+- Started the required unified consumer update. Continue with release
+  observation, projection reconciliation and the affected-host launch proof.
+
+### 2026-10-09 - Release gate fixture repair
+- `dev` CI then failed the containment detachment fixture before its descendant
+  PID receipt existed (#5916). Its two-second budget included fresh interpreter
+  and helper startup, preventing the fixture from reaching the behavior it
+  intended to prove.
+- Aligned both descendant fixtures with the adjacent scenarios' ten-second
+  startup-inclusive wall budget. The children still live for sixty seconds:
+  the real containment timeout and descendant-retirement assertions remain
+  mandatory, and no production limit changes.
+- A full Windows harness run also encountered the six existing mention-guard
+  fixture failures explicitly tracked in #5250. They are kept separate from
+  this containment repair; the release gate runs that suite on Linux.
