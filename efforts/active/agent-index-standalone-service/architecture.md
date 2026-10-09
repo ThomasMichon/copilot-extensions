@@ -61,6 +61,30 @@ as a pretend remote interface. Existing storage adapters remain valid for
 colocated native deployment; a remote persistence adapter must enforce the
 same behavioral contracts and schema/version compatibility.
 
+### Authenticated boundaries and role authority
+
+Cross-process/container/host calls must use an explicitly configured,
+already-authenticated transport per `docs/patterns/service-transport.md`.
+A reachable address, loopback bind or shared container network is not authority.
+Keep endpoints private to their own namespace and cross trust boundaries through
+the pattern's opt-in authenticated tunnel; do not add a public database or
+control listener merely to connect components.
+
+Authorize component identities for specific operations: client reads do not
+grant worker/job mutation; an execution worker may report or write only work
+assigned to its authorized source/job scope; controller admission and queue
+control do not imply unrestricted database administration. Persistence validates
+both caller identity and operation/job scope before any state transition.
+Control, drain, activation and configuration mutations retain the existing
+owner-bound authorization contract.
+
+Credentials/trust anchors are supplied through operator-owned runtime mechanisms,
+not embedded in images, descriptors or logs. Missing/invalid identity and
+cross-role or cross-scope calls fail explicitly without changing durable state.
+Remote adapters are not accepted until those negative cases are covered, as
+well as successful authorized requests. Transport choice is a deployment
+adapter, not a new unauthenticated public control plane.
+
 **Package naming/location remain implementation choices.** The first standalone
 API/controller program may compose the existing core as a normal Python library
 while ownership is extracted incrementally. It must not rename the embedding

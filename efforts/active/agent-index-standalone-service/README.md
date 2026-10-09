@@ -153,6 +153,9 @@ Architecture clarification, verbatim:
 - [ ] Optional container restart, persistent volumes and graceful termination.
 - [ ] Independently hosted API/controller, execution and persistence contracts,
   without cross-container database-handle or shared-SQLite assumptions.
+- [ ] Authenticated inter-component transport and component/job/source-scoped
+  authorization: reject unauthenticated, invalid-identity, cross-role and
+  cross-scope operations without mutating queue or corpus state.
 - [ ] Released snapshot/artifact pinning, digest/version verification, controller
   outage, repeated poll idempotence and concurrent-updater exclusion.
 - [ ] Live target deployment belongs to a separately authorized downstream slice;

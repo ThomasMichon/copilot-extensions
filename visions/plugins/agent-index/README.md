@@ -289,6 +289,11 @@ warm and separately managed within the execution tier. Existing client,
 configuration and non-container host workflows retain a supported migration
 path.
 
+Cross-component calls use authenticated, explicitly trusted transports and
+component-scoped authorization. Network reachability or container membership
+alone never grants the ability to enqueue work, claim jobs, change configuration
+or mutate corpus state. Credentials and role policy remain operator-owned.
+
 ### released-version-controller-contract
 An optional operator-owned controller can discover released versions and
 periodically reconcile the explicitly selected service to one of them. Updates
