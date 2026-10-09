@@ -67,6 +67,9 @@ plugins and register against the same contract.
 - **Mesh status** (`<catalog argv[0]> mesh-status`) -- render the calling repo's SSH
   machine mesh from its `machines.yaml` (per-host role, reachability, aliases).
   Config-driven and read-only; no probe.
+- **Static fleet driver** (`<catalog argv[0]> fleet-targets`) -- describe only
+  explicitly selected normalized registry records, with source revision and
+  qualified provider identity. No probe, tunnel, enrollment or lifecycle action.
 
 ## Emit a profile
 
@@ -78,6 +81,22 @@ Use `--print` to inspect the fragment without writing it. Use `--config-d` and
 `--ssh-config` for tests or non-default SSH config locations. Keep the registry
 and module files at durable absolute paths after emission: new fragments stamp
 those sources and operational commands use them as current authority.
+
+## Describe selected static fleet targets
+
+```bash
+<catalog argv[0]> fleet-targets registry.yaml --module transport/module.yaml \
+  --provider-instance lab-ssh --target worker-a --target worker-b
+```
+
+Use the same normalized registry and matching module as the profile emitter;
+this is not a second `machines.yaml` parser or a fleet-wide implicit selection.
+The schema-v1 snapshot preserves canonical target names and binds the exact
+registry/module bytes to a SHA-256 revision. `configured` and `ssh` describe a
+declared route only: they never establish current connectivity, service
+readiness, admission, enrollment or authorization. Static machines offer no
+create/delete/lease capability. Keep enrollment and permitted services in the
+adopting controller/connector's explicit local policy.
 
 ## Audit managed fragments
 

@@ -77,9 +77,10 @@ _resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }
 _resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }
 _resolve_zdd() { _resolve_vendored_lib zdd; }
 _resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }
+_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }
 
 _install_agent_ssh_package() {
-    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir
+    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir fleet_contracts_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
         return 1
@@ -100,6 +101,10 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate remote-login-shell library'
         return 1
     }
+    fleet_contracts_dir="$(_resolve_fleet_contracts)" || {
+        _fail 'Cannot locate fleet-contracts library'
+        return 1
+    }
     if [[ -n "${UV_CMD:-}" ]]; then
         local install_target lib_out pkg_out uv_ok=1
         for install_target in \
@@ -109,7 +114,8 @@ _install_agent_ssh_package() {
             "$ssh_manager_dir" \
             "$venue_copilot_dir" \
             "$zdd_dir" \
-            "$remote_login_shell_dir"
+            "$remote_login_shell_dir" \
+            "$fleet_contracts_dir"
         do
             if [[ "$install_target" == "$venue_copilot_dir" ]]; then
                 lib_out="$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --reinstall-package agent-venue-copilot "$install_target" --quiet)" || {
@@ -142,6 +148,7 @@ _install_agent_ssh_package() {
         "$venue_copilot_dir" \
         "$zdd_dir" \
         "$remote_login_shell_dir" \
+        "$fleet_contracts_dir" \
         "$PLUGIN_DIR" 2>/dev/null
 }
 
@@ -479,7 +486,7 @@ _materialize_snapshot_vendored_libs() {
     local snapshot_dir="$1"
     mkdir -p "$snapshot_dir/libs"
     local lib source destination
-    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell; do
+    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts; do
         source="$(_resolve_vendored_lib "$lib")" || {
             _fail "Cannot locate required snapshot library: $lib"
             return 1
@@ -641,7 +648,8 @@ _snapshot_is_reusable() {
         "libs/ssh-manager/pyproject.toml" \
         "libs/venue-copilot/pyproject.toml" \
         "libs/zdd/pyproject.toml" \
-        "libs/remote-login-shell/pyproject.toml"
+        "libs/remote-login-shell/pyproject.toml" \
+        "libs/fleet-contracts/pyproject.toml"
     do
         [[ -f "$current_snapshot/$rel" ]] || return 1
     done
