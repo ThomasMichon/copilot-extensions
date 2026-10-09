@@ -1396,13 +1396,13 @@ event note re-triggers a still-submitted task after external state changes.
 Two evaluator kinds are supported:
 
 - **Declarative `SpecEvaluator`** — a `rules` list matching on the event/task
-  fields and returning `confirm` / `abandon` / `noop`.
+  fields and returning `confirm` / `abandon` / `noop` / `reject`.
 - **Trusted script evaluator** — a separately registered opaque selector mapped
   to a fixed `argv`, run with `shell=False` and no caller-supplied arguments;
   the task's `evaluator_ref` names that selector, never a literal command.
 
 For the verification gate itself, evaluators may decide only **complete**,
-**abandon**, or **noop**. They do not rewrite the task goal, perform a generic
+**abandon**, **noop**, or **reject**. They do not rewrite the task goal, perform a generic
 progress audit, or run as an interval sweep.
 
 ```bash
@@ -1421,6 +1421,66 @@ case is the ad-hoc kick**: a one-off task with no evaluator still runs -- an
 evaluator is opt-in judgment, never required. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Concepts/*The evaluator*, §Features/*emitters-and-evaluators*).
+
+#### Rejection and same-session recovery
+
+An evaluator can reject an incorrect whole-goal completion claim:
+
+```json
+{"decision":"reject","reason":"The external goal remains open; the submitted verdict was already obsolete","feedback":{"stale_verdict":true,"next":"Suspend until a fresh author submission or terminal closure"}}
+```
+
+`reason` is required, nonblank, NUL-free UTF-8 text (at most 4096 bytes).
+`feedback` is optional (`null` or a JSON object), encoded as strict UTF-8 JSON
+without NaN/Infinity (at most 16384 bytes in compact encoding). Unknown decision
+keys are rejected. Declarative rules use
+`"reject":{"reason":"...","feedback":{...}}` instead of `confirm` or `abandon`.
+Only coordinator-owned whole-goal verification applies rejection; the general
+`evaluate` command can preview it with `--dry-run`, but cannot apply an unfenced
+rejection from a caller-provided lifecycle event.
+
+The coordinator atomically restores `submitted -> started`, the recorded
+`completed_by` owner, and the same exact `owner_session_id`. Task ID, generation,
+goal, progress, routing, and attachment history remain unchanged. It clears
+the current completion projection so a later submission can publish a fresh
+result, but saves the inspected result, reference, completing identity, and
+timestamps in the ordinary durable steer history under
+`fields.verification_rejection.submission`; `reason` and `feedback` sit alongside
+that snapshot. The audit records the rejection and SSE emits `task.rejected`
+without exposing the result body. This closes the *review-exact-submission*
+portion of the task-outputs-and-review vision without introducing a second
+conversation store.
+
+State recovery, feedback, and an exact-session wake are committed in one
+transaction. The existing coordinator wake outbox delivers the reason and asks
+the owner to `steer take <id> --all`; structured feedback and submission evidence
+are read there rather than embedded in the nudge. Delivery failures retry with
+the same operation ID and remain visible through `wakes <id>`. A matching retry
+of the same inspected submission while its recovered incarnation is unchanged
+adds neither another steer nor another wake.
+
+Generation, submitting owner/session, `submitted` status, and `updated_at`
+fence the decision. Missing exact owner/session identity, other held work under
+that owner or session, an operator hold, a latest reservation that is not
+`spawned` (including a stopped `cold` body), or already-begun session retirement
+fails explicitly and leaves the submission pending. There is no replacement
+task, owner reassignment, new conversation, or unsafe repair of a retirement
+already in flight. The supervisor preserves verification-gated submitted
+conversations until their evaluator accepts or abandons them.
+
+Upgrade the coordinator and supervisor runtime before enabling a consumer
+evaluator that emits `reject`; older runtimes reject the new decision rather
+than implementing recovery. No registration or database migration is needed.
+For a staged rollout, activate supervisor retention first, then the coordinator,
+and only then enable consumer rejection decisions. Existing installer-driven
+coordinator cutover and supervisor singleton handoff remain the activation seams;
+rejection does not introduce another resident process or change their drain
+protocols. A retirement begun by an older supervisor remains a surfaced recovery
+blocker, not permission to resurrect its session.
+Domain evidence and feedback remain the evaluator's responsibility: dispatch
+does not infer stale verdicts, PR freshness, or terminal domain state from queue
+rounds or head snapshots. For a review that lasts until merge/abandonment, a
+posted verdict is progress followed by **SUSPEND**, never a progress **SUBMIT**.
 
 ## Recipes (loop archetypes)
 

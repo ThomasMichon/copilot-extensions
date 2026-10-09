@@ -191,6 +191,13 @@ TRANSITIONS: tuple[Transition, ...] = (
         implemented_by="TaskQueue.confirm",
     ),
     Transition(
+        name="reject_submission",
+        from_states=frozenset({Status.SUBMITTED}),
+        to_state=Status.STARTED,
+        recovery_mode=RecoveryMode.SAFE_RETRY,
+        implemented_by="TaskQueue.reject_submission",
+    ),
+    Transition(
         name="reopen_completed",
         #: The Completion Review card's "Re-queue with steering" action, and
         #: the operator's plain disagreement with a completion claim more
