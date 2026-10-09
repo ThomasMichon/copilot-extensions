@@ -1,0 +1,9 @@
+{
+  "comment": "Add exact-submission evaluator rejection with same-session recovery, durable feedback and fenced wake delivery",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
