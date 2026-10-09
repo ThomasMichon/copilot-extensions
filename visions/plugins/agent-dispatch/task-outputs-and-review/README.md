@@ -82,8 +82,18 @@ browsing earlier exchanges after processes, ownership, and services change.
 
 Completed tasks do not reopen. An operator can explicitly create a new task
 using the accepted outcome, relevant history, and new instructions as context.
-The old task remains completed and unchanged; the new task has its own goal,
+The old task's completed decision and accepted outcome remain unchanged;
+the new task has its own goal,
 contract, review policy, and visible connection to its predecessor.
+
+### compatible-completion-publication-recovery
+
+An authorized publisher can recover missing completion material through a
+compatible retry without reopening a submitted or completed task. Existing
+published results and references are not silently replaced, and an identical
+retry is not another answer or completion event. Recovery preserves the
+accepted submission and review decision; it is not permission to introduce a
+new answer into an old task instead of creating a follow-up.
 
 ### durable-fast-steer-acceptance
 
@@ -150,6 +160,12 @@ UIs consume the same contracts; no UI-owned result store or second queue exists.
 - [Tasks-pane effort](../../../../efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md).
 
 ## Provenance
+
+- **2026-10-09** - Folded back compatible completion-publication recovery:
+  authorized retries can fill missing material without reopening a terminal
+  task or replacing existing results. Clarified that follow-up immutability
+  protects the completed decision and accepted outcome, not an accidental ban
+  on that recovery path.
 
 - **2026-10-09** - Folded back durable unsubmitted operator drafts, preserving
   their separation from published conversation, answer acceptance, task review,
