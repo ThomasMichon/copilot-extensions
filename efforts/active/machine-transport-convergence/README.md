@@ -29,8 +29,12 @@ Preserve provider-specific launch protocols and standalone installation.
 - **Handoff:** Resume the first unresolved item from this canonical README.
 - **Concurrent work:** #5689 introduces shared host/WSL execution identity for
   agent-machines and agent-worktrees. Do not supersede its still-open change.
-  Coordinate shared-library ownership and integrate its landed contracts before
-  editing the overlapping agent-machines identity path.
+  It must land before the Dispatch and agent-machines integration slices; it
+  must not wait for those slices or for the independent Bridge/publication
+  repair. The original PR owner retains implementation and merge stewardship.
+  The negotiated direction retires the duplicate `machine-identity` library:
+  shared matching, locality and host/WSL qualification live in `machine-transport`,
+  with consumer-specific discovery and diagnostics in thin adapters.
 
 ## Context
 
@@ -229,3 +233,40 @@ identity authority: reconcile `machine-transport` with #5689's
 - Further evidence shows the mesh parser also feeds operational refresh:
   #5375 already tracks agent-ssh's self-SSH probe loop. Include that path in the
   remaining inventory rather than treating the mesh parser as read-only only.
+
+### 2026-10-08 - Dependency order, shared identity and source repair
+- The #5689 owner had paused in draft because rebasing exposed the duplicate
+  identity library and they believed Phase 2 had to land first. Explicit
+  prerequisite comments corrected the order before implementation resumed.
+  Negotiation as **ThomasMichon (MSFT)** with **ThomasMichon (Home)** agreed
+  direction (1): retire the standalone duplicate and compose the host/WSL
+  execution contract with the existing `machine-transport` identity primitives.
+  No separate #5741 design PR blocks #5689. Actual WSL evidence, native-host
+  precedence and the distinct SSH namespace remain required.
+- Remaining inventory includes Worktrees' picker/handoff helpers in
+  `resolve_machine_cli.py`, which still repeat first-match identity logic, and
+  agent-ssh's WSL emitter, which uses key-prefix hostname heuristics. These
+  are not silently counted as completed migrations.
+- #5382 was confirmed merged into `dev` as
+  `d841b53f8fd882cacc6c91bccf7d36ad9cccc332`; #5375 was explicitly closed.
+  Its physical-host self-probe exclusion is a landed bug fix, not proof that
+  every agent-ssh identity consumer has migrated to the shared authority.
+  Promotion/deployment remain separate. Its originating worktree has
+  uncommitted changes and is retained, not discarded or finalized.
+- #5825 review corrections fingerprint credential-bearing push destinations,
+  disable replacement objects in proof and strict ancestry checks, and replace
+  patch-ID authorization with per-commit three-way tree reconstruction.
+  Repeated-region tests distinguish legal upstream line shifts from relocated
+  edits and false already-applied matches. Default proof contracts:
+  **10 passed, 16 skipped**; explicit conflict/cache contracts: **3 passed**.
+  The actual blocked Bridge lineage still verifies with one conflict replay.
+  The full updated matrix and current-head review remain pending.
+- A later runtime slot was marked installed while its shared transport package
+  had only bytecode cache. The operator authorized official recovery; the
+  installer refused another live build lease. Waiting for that builder restored
+  CLI execution without clearing ownership, editing a runtime or forcing a
+  service restart. This does not establish overall monitor/deployment health.
+- Operator priority is to settle owned #5382 and #5825 next. The former is
+  confirmed merged; the latter remains the publication prerequisite.
+  This effort stays Active and its remaining implementation/deployment gates
+  remain open.
