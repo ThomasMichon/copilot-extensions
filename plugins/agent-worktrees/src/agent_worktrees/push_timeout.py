@@ -116,7 +116,7 @@ def message(exc: subprocess.TimeoutExpired, timeout: float | None) -> str:
 
     partial = "\n".join(t for t in (_text(exc.stdout), _text(exc.stderr)) if t)
     lines = [
-        f"git push timed out after {timeout:.0f}s without completing.",
+        f"git push timed out after {timeout:g}s without completing.",
         "Possible cause: this repo's pre-push hook re-invokes the "
         "agent-worktrees binstub, which can stall the same way a direct "
         "CLI call can -- a self-update racing the runtime-slot swap, or "
@@ -134,4 +134,3 @@ def message(exc: subprocess.TimeoutExpired, timeout: float | None) -> str:
         "would silently skip PR attribution."
     )
     return "\n".join(lines)
-

@@ -520,7 +520,7 @@ def _ensure_fork_and_remote(
     # the remote, so the push later checks against this one rather than a fresh read.
     head_identity = ""
     try:
-        with pr_publish.publish_lock(worktree_path):
+        with pr_publish.publish_lock(worktree_path, push_timeout_seconds=prcfg.push_timeout_seconds):
             pointed = git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path)
             if pointed:
                 head_identity = pr_publish.push_identity(prcfg.fork.remote, cwd=worktree_path)
