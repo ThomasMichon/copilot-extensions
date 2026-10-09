@@ -1363,7 +1363,8 @@ function Enter-VersionedSlotLease {
        like a dirty slot and refuse to build, but should tell those two
        causes apart in their own message: `$script:VersionedSlotLeaseFailureReason`
        is 'contention' for a genuine sharing violation (ERROR_SHARING_VIOLATION
-       /ERROR_LOCK_VIOLATION), or the raw exception message for anything else --
+       /ERROR_LOCK_VIOLATION on Windows, EAGAIN/EWOULDBLOCK on Unix), or the
+       raw exception message for anything else --
        catching bare `[System.IO.IOException]` would otherwise misreport every
        cause (disk full, permission denied, path too long, ...) as "another
        process is building this slot", sending an operator chasing a retry
@@ -1382,7 +1383,12 @@ function Enter-VersionedSlotLease {
         $ERROR_SHARING_VIOLATION = 32
         $ERROR_LOCK_VIOLATION = 33
         $nativeCode = $_.Exception.HResult -band 0xFFFF
-        if ($nativeCode -eq $ERROR_SHARING_VIOLATION -or $nativeCode -eq $ERROR_LOCK_VIOLATION) {
+        $contentionCodes = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            @($ERROR_SHARING_VIOLATION, $ERROR_LOCK_VIOLATION)
+        } else {
+            @(11, 35) # EAGAIN/EWOULDBLOCK on Linux and BSD/macOS.
+        }
+        if ($nativeCode -in $contentionCodes) {
             $script:VersionedSlotLeaseFailureReason = 'contention'
         } else {
             $script:VersionedSlotLeaseFailureReason = $_.Exception.Message

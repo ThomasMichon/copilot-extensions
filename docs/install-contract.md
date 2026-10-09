@@ -294,7 +294,10 @@ seconds), with a poll interval via `AGENT_WORKTREES_SLOT_LEASE_POLL_MS`
 (PowerShell, default 1000) or `AGENT_WORKTREES_SLOT_LEASE_POLL_SEC` (bash,
 default 1). Only genuine contention is retried; any other failure of the
 authoritative gate (permission/path/storage) fails immediately regardless of
-the configured budget. Reaching the deadline without acquiring the lease fails the
+the configured budget. The PowerShell adapter classifies the platform's native
+lock errors: Win32 sharing/lock violations on Windows and EAGAIN/EWOULDBLOCK
+on Unix; a Unix permission error must not be mistaken for contention.
+Reaching the deadline without acquiring the lease fails the
 build with an actionable error naming the env var to raise if builds routinely
 take longer than the default.
 

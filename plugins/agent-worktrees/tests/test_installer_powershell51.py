@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -686,6 +688,46 @@ function Exit-VersionedSlotLease {{
 {exit_fn}
 }}
 """
+
+
+def test_versioned_slot_lease_classifies_only_platform_contention_codes(tmp_path: Path):
+    pwsh = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    functions = _extract_lease_functions(INSTALLER.read_text("utf-8"))
+    functions = re.sub(
+        r"\$script:VersionedSlotLeaseHandle = \[System.IO.File\]::Open\([\s\S]*?\)",
+        "throw [System.IO.IOException]::new('synthetic lease failure', $TestHResult)",
+        functions, count=1,
+    ).replace("[Environment]::OSVersion.Platform", "$TestPlatform")
+    script = tmp_path / "platform-contention.ps1"
+    script.write_text(
+        functions + f'\n$InstallDir="{tmp_path}"\n$SrcVersion="1.2.3"\n'
+        "$VersionedRuntime=$true\n"
+        "$cases=@(\n"
+        " @{Platform='Win32NT';Code=32}, @{Platform='Win32NT';Code=33},\n"
+        " @{Platform='Unix';Code=11}, @{Platform='Unix';Code=35},\n"
+        " @{Platform='Unix';Code=13}, @{Platform='Win32NT';Code=11})\n"
+        "$results=@(foreach ($case in $cases) {\n"
+        " $TestPlatform=[PlatformID]$case.Platform\n"
+        " $TestHResult=-2147024896+$case.Code\n"
+        " $acquired=Enter-VersionedSlotLease\n"
+        " [pscustomobject]@{acquired=$acquired;reason=$script:VersionedSlotLeaseFailureReason}\n"
+        "})\nConvertTo-Json -InputObject $results -Compress\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(script)],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    results = json.loads(result.stdout)
+    assert all(not item["acquired"] for item in results)
+    assert [item["reason"] for item in results] == [
+        "contention", "contention", "contention", "contention",
+        "synthetic lease failure", "synthetic lease failure",
+    ]
 
 
 def test_versioned_slot_lease_enforces_real_cross_process_exclusion(tmp_path: Path):

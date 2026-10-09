@@ -834,6 +834,30 @@ if ($plan.PSObject.Properties.Name -contains 'launch') {
     $plan = $plan.launch
 }
 
+# Date-shaped argv values must stay strings on older PowerShell versions too.
+$argvText = [IO.StringReader]::new(($jsonOutput -join "`n"))
+$argvReader = [Newtonsoft.Json.JsonTextReader]::new($argvText)
+$argvReader.DateParseHandling = [Newtonsoft.Json.DateParseHandling]::None
+try {
+    $rawPlan = [Newtonsoft.Json.Linq.JObject]::Load($argvReader)
+    if ($rawPlan.Property('launch')) { $rawPlan = $rawPlan.GetValue('launch') }
+    $rawCommand = $rawPlan.GetValue('cmd')
+    if ($null -ne $rawCommand) {
+        if ($rawCommand.Type -ne [Newtonsoft.Json.Linq.JTokenType]::Array) {
+            throw 'Launch command must be a string argv array.'
+        }
+        $plan.cmd = @($rawCommand.Children() | ForEach-Object {
+            if ($_.Type -ne [Newtonsoft.Json.Linq.JTokenType]::String) {
+                throw 'Launch command contains a non-string argument.'
+            }
+            [string]$_.Value
+        })
+    }
+} finally {
+    $argvReader.Close()
+    $argvText.Dispose()
+}
+
 # Feed the crash-detector trap a stable, cheap worktree-id reference so it
 # can record/hint accurately even if it fires deep in the create/attach flow
 # below, without depending on $plan still being reachable at trap time.
@@ -1831,13 +1855,21 @@ if (-not $noMux) {
     # observable (recorded as a pane_exited activity mark) and a crash shows a
     # diagnostic before the pane closes -- the Windows counterpart of the Linux
     # pane-wrapper.sh path. Psmux space-joins pane argv, so carry the wrapper
-    # path and complete child argv inside a space-free EncodedCommand payload.
+    # paths as quoted command tokens and complete child argv in a JSON handoff.
     # This preserves executable paths such as `C:\Program Files\...\pwsh.exe`
     # and matches sessions.py `_mux_pane_cmd`. `-AwWt <id>` is consumed by the
     # wrapper, never forwarded to Copilot. If the wrapper is missing, fall back
     # to the verbatim command unchanged.
     $paneCmd = $cmd
     $paneWrapper = Join-Path $PSScriptRoot 'pane-wrapper.ps1'
+    $paneLaunch = Join-Path $PSScriptRoot 'pane-launch.ps1'
+    if (
+        (Test-Path -LiteralPath $paneWrapper) -and
+        -not (Test-Path -LiteralPath $paneLaunch -PathType Leaf)
+    ) {
+        Write-Error 'File-based pane launcher is missing; update Worktree Manager.' -ErrorAction Continue
+        exit 3
+    }
     $ahpTokenFile = $null
     if ($ahpArgs.Count -gt 0) {
         if (-not (Test-Path -LiteralPath $paneWrapper -PathType Leaf)) {
@@ -1888,29 +1920,6 @@ if (-not $noMux) {
             $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
         }
         $wrapperArgs += $cmd
-        $wrapperB64 = [Convert]::ToBase64String(
-            [Text.Encoding]::UTF8.GetBytes($paneWrapper)
-        )
-        $argsJson = ConvertTo-Json -InputObject @($wrapperArgs) -Compress
-        $argsB64 = [Convert]::ToBase64String(
-            [Text.Encoding]::UTF8.GetBytes($argsJson)
-        )
-        $wrapperScript = (
-            "`$w=[Text.Encoding]::UTF8.GetString(" +
-            "[Convert]::FromBase64String('$wrapperB64'));" +
-            "`$j=[Text.Encoding]::UTF8.GetString(" +
-            "[Convert]::FromBase64String('$argsB64'));" +
-            "`$a=@(ConvertFrom-Json -InputObject `$j);" +
-            "& `$w @a;" +
-            "exit `$LASTEXITCODE"
-        )
-        $encodedWrapper = [Convert]::ToBase64String(
-            [Text.Encoding]::Unicode.GetBytes($wrapperScript)
-        )
-        $paneCmd = @(
-            'pwsh.exe', '-NoProfile', '-NoLogo',
-            '-EncodedCommand', $encodedWrapper
-        )
     } else {
         Write-SetupLog "pane wrapper missing at $paneWrapper; using verbatim command" 'WARN'
     }
@@ -1918,6 +1927,16 @@ if (-not $noMux) {
     $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
+    function Remove-AwPaneArgsFile([string]$Path) {
+        try {
+            [IO.File]::Delete($Path)
+        } catch [IO.IOException], [UnauthorizedAccessException] {
+            Write-SetupLog (
+                "Could not remove pane argument handoff; retained for expiry: " +
+                $_.Exception.Message
+            ) 'WARN'
+        }
+    }
     $maxCreateAttempts = 3
     $retryDelayMs = 1000
     $totalCreateAttempts = 0
@@ -1931,7 +1950,32 @@ if (-not $noMux) {
             $totalCreateAttempts++
             $newSessionExit = 1
             $newSessionError = ''
+            $paneArgsFile = $null
             try {
+                if (Test-Path -LiteralPath $paneWrapper) {
+                    # Each retry owns a fresh handoff; the pane consumes it once.
+                    $paneArgsRoot = Join-Path $RuntimeDir 'pane-args'
+                    if ((Test-Path -LiteralPath $paneArgsRoot) -and
+                        ((Get-Item -LiteralPath $paneArgsRoot).Attributes -band
+                            [IO.FileAttributes]::ReparsePoint)) {
+                        throw 'Pane argument directory must not be a symlink.'
+                    }
+                    $null = [IO.Directory]::CreateDirectory($paneArgsRoot)
+                    $paneArgsFile = Join-Path $paneArgsRoot (
+                        'aw-pane-' + [Guid]::NewGuid().ToString('N') + '.json'
+                    )
+                    $argsJson = ConvertTo-Json -InputObject @{
+                        version = 1
+                        wrapper = $paneWrapper
+                        argv = @($wrapperArgs)
+                    } -Compress
+                    [IO.File]::WriteAllText($paneArgsFile, $argsJson)
+                    $paneCmd = @(
+                        'pwsh.exe', '-NoProfile', '-NoLogo', '-File',
+                        ("'" + $paneLaunch.Replace("'", "''") + "'"),
+                        '-Manifest', ("'" + $paneArgsFile.Replace("'", "''") + "'")
+                    )
+                }
                 $savedAuth = $null
                 if ($ahpArgs.Count -gt 0) {
                     $savedAuth = @{}
@@ -1978,6 +2022,9 @@ if (-not $noMux) {
             if ($newSessionExit -eq 0) { break }
 
             Stop-AwOwnedPsmuxSession $sessName
+            if ($paneArgsFile) {
+                Remove-AwPaneArgsFile $paneArgsFile
+            }
             $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
             Write-SetupLog (
                 "psmux: create attempt $attempt/$maxCreateAttempts failed " +
@@ -2026,6 +2073,23 @@ if (-not $noMux) {
         Write-Error $message -ErrorAction Continue
         exit $newSessionExit
     } else {
+        if ($paneArgsFile) {
+            $argsDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            while (
+                (Test-Path -LiteralPath $paneArgsFile) -and
+                [DateTime]::UtcNow -lt $argsDeadline
+            ) {
+                Start-Sleep -Milliseconds 50
+            }
+            if (Test-Path -LiteralPath $paneArgsFile) {
+                Stop-AwOwnedPsmuxSession $sessName
+                Remove-AwPaneArgsFile $paneArgsFile
+                if ($ahpTokenFile) { [IO.File]::Delete($ahpTokenFile) }
+                Write-AwMuxFailure -Reason 'pane_args_handoff_failed' -ExitCode 3
+                Write-Error 'Pane did not consume its argument handoff.' -ErrorAction Continue
+                exit 3
+            }
+        }
         if ($ahpTokenFile) {
             $tokenDeadline = [DateTime]::UtcNow.AddSeconds(5)
             while (

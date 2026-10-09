@@ -203,14 +203,15 @@ def test_launchers_deliver_new_worktree_pending_seed_only_on_create():
 
 
 def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
-    """The encoded wrapper preserves complete argv through psmux's space join."""
+    """A data-only manifest preserves complete argv through psmux's space join."""
     ps = _LAUNCH_PS1.read_text()
     # The collapse helper must be gone. Wrapped pane argv travels through a
     # space-free payload so absolute executable paths remain one argument.
     assert "ConvertTo-PsmuxPaneCommand" not in ps
-    assert "$argsJson = ConvertTo-Json -InputObject @($wrapperArgs) -Compress" in ps
-    assert "[Text.Encoding]::Unicode.GetBytes($wrapperScript)" in ps
-    assert "'-EncodedCommand', $encodedWrapper" in ps
+    assert "argv = @($wrapperArgs)" in ps
+    assert "[IO.File]::WriteAllText($paneArgsFile, $argsJson)" in ps
+    assert '$paneArgsFile.Replace("\'", "\'\'")' in ps
+    assert "-EncodedCommand" not in ps
     assert "$paneCmd = $wrapPrefix + $cmd" not in ps
     assert "& $script:AwPsmuxBin new-session -d -s $sessName" in ps
     assert "-c $plan.work_dir @envFlags @paneCmd" in ps
@@ -363,14 +364,14 @@ def test_windows_failed_psmux_creation_reaps_only_the_named_session():
     assert "Sort-Object Value -Descending" in ps
     assert "[Diagnostics.Process]::GetProcessById($pidValue)" in ps
     assert "$startDeltaMs -gt 1" in ps
-    # Two create-failure call sites (initial `new-session` retry loop, and the
-    # AHP token-handoff-failure path) plus one defensive call after `attach`
+    # Three create-failure call sites (initial retry, argument handoff, and
+    # AHP token handoff) plus one defensive call after `attach`
     # returns and `has-session` reports the session gone -- `has-session`
     # going away only means psmux's own registry forgot the session, not that
     # its server/pane process tree actually exited (see #2830's 935-process
     # leak from a zombie mux session). All three share the same launch-id
     # ownership check, so this is a no-op on a genuinely clean exit.
-    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 3
+    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 4
 
 
 def test_windows_post_attach_session_gone_still_reaps_owned_tree():

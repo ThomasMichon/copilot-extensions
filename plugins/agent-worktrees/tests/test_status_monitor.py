@@ -4034,6 +4034,54 @@ def test_installers_invoke_monitor_cutover_after_activation():
         )
 
 
+def test_status_monitor_expires_orphaned_pane_args_before_eligible_sweep(
+    tmp_path, monkeypatch
+):
+    from agent_worktrees import sessions_pane_args
+    from agent_worktrees import status_monitor_cutover as smc
+
+    monkeypatch.setattr(sessions_pane_args.config, "install_dir", lambda: tmp_path)
+    root = tmp_path / "pane-args"
+    root.mkdir()
+    expired = root / "aw-pane-expired.json"
+    expired.write_text("orphan")
+    os.utime(expired, (0, 0))
+    pending = root / "aw-pane-pending.json"
+    pending.write_text("pending")
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    runtime_states = iter([False, True])
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
+    monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", lambda *a, **k: None)
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            return {"status": "ready"}
+
+    monkeypatch.setattr(m.loop_governance_mod, "LoopGovernance", lambda: _Governance())
+    events = []
+    real_expire = sessions_pane_args.sweep_mux_pane_args
+
+    def expire():
+        events.append("expire")
+        real_expire()
+
+    def sweep(*args, **kwargs):
+        events.append("sweep")
+        assert not expired.exists()
+        assert pending.exists()
+        return 1
+
+    monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", expire)
+    monkeypatch.setattr(m, "_monitor_sweep", sweep)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
+    assert events == ["expire", "sweep"]
+
+
 def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     tmp_path, monkeypatch
 ):
