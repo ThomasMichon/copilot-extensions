@@ -1,14 +1,14 @@
 # Native-Construct Convergence
 
 - **Slug:** `native-construct-convergence`
-- **Repo:** copilot-extensions (control-plane home; PR-required `main`, self-merge)
-- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
+- **Repo:** copilot-extensions (control-plane home; PR-required `dev`, role-scoped merge)
+- **Branch(es):** per-phase `pr/<slug>` worktrees targeting `dev`
 - **Created:** 2026-08-23
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Umbrella issue:** [#985](https://github.com/ThomasMichon/copilot-extensions/issues/985)
 - **Sub-issues:**
   [#986](https://github.com/ThomasMichon/copilot-extensions/issues/986) (Phase A — worktree layout),
-  [#987](https://github.com/ThomasMichon/copilot-extensions/issues/987) (Phase B — roots/identity mapping),
+  [#987](https://github.com/ThomasMichon/copilot-extensions/issues/987) (closed by an unrelated artifact; Phase B remains under #985),
   [#988](https://github.com/ThomasMichon/copilot-extensions/issues/988) (Phase C — delegate create, deferred),
   [#989](https://github.com/ThomasMichon/copilot-extensions/issues/989) (Phase D — steering onto cloud/agent-host)
 - **Vision:** **vision-closing** against the new
@@ -46,14 +46,23 @@ vision, under two firm guardrails the vision states as Behaviors:
   — reliance is feature-detected and staged behind released surfaces, with the
   harness's own implementation kept as the fallback.
 
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Claimed phase lead | Owns one declared implementation phase through review, validation, and merge | claim on `#985` and a managed per-phase worktree |
+| Sweep audit lead | Reconciles source evidence and tracker disposition without assuming phase implementation ownership | `vision-backport-sweep`, `#5456` |
+
 ## Context
 
 The harness's own worktree layout was previously aligned to the CLI's *original*
 `<anchor>.worktrees/<worktree>` shape (see the June 2026 layout-alignment work).
-The CLI has since realigned its native worktree/root model to the cleaner
-`<worktree-root>/<repo>/<worktree>` layout, so the harness should follow it back
-— a change entirely under the harness's own control (no external dependency),
-which is why it leads as Phase A.
+The original Phase A proposal assumed the CLI had since realigned its native
+worktree/root model to `<worktree-root>/<repo>/<worktree>`. Revalidate that
+assumption against a released native contract before migrating: the current
+harness default and its tests still use `<anchor>.worktrees/<worktree>`.
+The harness can change its own layout locally, but proving native alignment and
+mutual discoverability is a separate acceptance requirement.
 
 The remaining native constructs the harness converges onto — per-session
 workspace identity, the working boundary, catalogued projects, source/worktree
@@ -66,14 +75,44 @@ them now (Phases A–B, D where the surface exists) and **defers delegation**
 This effort records **delta-closure state only** — the vision states the target
 and is not edited to log progress.
 
+### 2026-10-09 source audit: mapping is not feature presence
+
+The `vision-backport-sweep` audit inspected the root/catalog/creation/permission
+paths against source snapshot `ed8c1cfee`. This is evidence about the harness,
+not proof of a released native root, project-catalog, or working-boundary API.
+
+| Construct | Source evidence | Disposition |
+|---|---|---|
+| Worktree layout and creation | `config.py:derive_worktree_root` derives `<anchor>.worktrees`; `worktree_creation.py:_create_worktree_core` combines the configured root with its generated ID; `git_ops.py:create_worktree` invokes Git directly. | Phase A alignment remains unproved; Phase C delegation remains open. Configurability is not native mapping. |
+| Source roots and projects | `repos.py:ReposRegistry` owns platform source roots and repository classes; `config.py:load_config` resolves anchors from machine configuration/registry and layers repository policy. | Phase B native root/catalog mapping remains unproved. The harness-owned registry is not evidence of native catalog adoption. |
+| Session identity and workspace evidence | Session metadata commands default to `COPILOT_AGENT_SESSION_ID`; `sessions.py:_enrich_session_dir` reads native workspace summaries/activity; agency relations are rebuildable projections, as reconciled in `#5783`. | A concrete native-identity/evidence seam exists; it does not establish every Phase B mapping or workspace-field contract. |
+| Working boundary | Creation seeds native folder trust and copies location-scoped permissions through `permissions.py`; `_build_launch_cmd` resolves the launch location and intentional permissions, with ACP handled separately. | Trust, permissions, launch location, and adoption are distinct facts. None alone proves native working-boundary mapping or enforcement. |
+
+No additional vision-level capability was missing from the existing positive
+concepts and proof-boundary behaviors. No teardown, native-layout migration,
+permission-policy change, or native-state mutation was authorized by this audit.
+The branch has no independently installable runtime; service conformance remains
+with its owning plugins, not inferred from this mapping table.
+
+## Request
+
+The original effort records the requested intent through its Guiding Intent and
+umbrella `#985`: converge on released native constructs without losing existing
+harness capabilities, with feature-detected fallback. It does not preserve the
+operator's verbatim wording; this is an agent-authored summary, not a quotation
+or a newly requested feature. The source audit above changes neither that intent
+nor ownership of the open implementation phases.
+
 ## Plan
 
 Phases are ordered by dependency, not calendar. Each phase must prove it
 preserves every existing harness capability before it lands.
 
 ### Phase A — Worktree layout alignment (#986)
+- [ ] Establish the released native layout and mutual-discovery contract before
+      selecting a migration; update the original layout assumption if required.
 - [ ] Revert the harness worktree layout to `<worktree-root>/<repo>/<worktree>`
-      (harness-controlled; no external dependency), so worktrees created by
+      if the preceding contract check confirms that target, so worktrees created by
       either the CLI or the harness are mutually discoverable. Closes
       native-convergence §Features/`vocabulary-and-layout-alignment`,
       §Features/`mutual-discoverability`.
@@ -81,7 +120,7 @@ preserves every existing harness capability before it lands.
       preserved across the layout change. Closes
       §Behaviors/`no-capability-regression` for this slice.
 
-### Phase B — Roots, project & session-identity mapping (#987)
+### Phase B — Roots, project & session-identity mapping (under #985; #987 closed)
 - [ ] Map the harness's **source root** and **worktree root** onto the CLI's
       native roots (mapping now; delegation deferred to Phase C). Closes
       native-convergence §Concepts/native-source-&-worktree-roots,
@@ -123,7 +162,7 @@ preserves every existing harness capability before it lands.
       extending this plan before implementation when necessary.
 - [ ] Keep reproductions limited to public host behavior and synthetic data.
 
-## Validation
+## Validation Plan
 
 - **No-regression gate per phase.** Before a phase lands, exercise the harness
   capabilities the vision protects — worktree create/finalize/cleanup, asserted
@@ -145,11 +184,30 @@ preserves every existing harness capability before it lands.
 control repo. **[#985](https://github.com/ThomasMichon/copilot-extensions/issues/985)
 is the shared coordination token** for this convergence work; claim a slice
 there (comment/assign) before starting, and land changes serially through the
-PR-required `main`. Downstream private plans may **link to** this effort and its
+PR-required `dev`. Downstream private plans may **link to** this effort and its
 issues; the public artifacts stay self-contained and general-purpose.
+
+## Proposal
+
+Retain the staged convergence plan and existing phase ownership under `#985`.
+Before implementing a native mapping or migration, establish the released
+contract that phase relies on and prove the no-regression and fallback gates
+above. The sweep's source-audit reconciliation is not approval to implement an
+unproved native API, nor completion of an implementation phase.
 
 ## Journal
 
+- **2026-10-09** — Recorded the sweep's remaining root/catalog/working-boundary
+  source audit. Native identity consumption is concrete; native root/catalog
+  mapping, mutual discovery, and working-boundary semantics remain unproved.
+  Retained all implementation phases and the standing vision. `#987` closed
+  through bridge/SSH commit `c994ce9be` rather than a Phase B mapping artifact;
+  its scope remains under open `#985`, with the evidence linked on both issues.
+  Corrected this active effort's stale contribution target to `dev` and made
+  native-layout proof an explicit prerequisite, not an assumption.
+  Review of `#5814` additionally caught missing canonical Participants and
+  Proposal sections; restored them without assigning unclaimed implementation
+  work or reconstructing absent operator wording.
 - **2026-08-27** — Expanded Phase D into the dedicated
   [`agent-bridge-ahp-convergence`](../agent-bridge-ahp-convergence/README.md)
   effort and public umbrella #1266. The narrower #989 remains the native
