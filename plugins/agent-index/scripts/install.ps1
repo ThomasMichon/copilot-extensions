@@ -1330,7 +1330,7 @@ function Install-ServerVenv {
             Write-Warn "Server venv creation failed -- $serverVenvPython not found (spawn_passive falls back to the shared venv)"
             return
     }
-    } catch {
+    } catch [System.IO.IOException], [System.UnauthorizedAccessException], [System.Management.Automation.RuntimeException] {
         Write-Warn "Server venv repair failed: $($_.Exception.Message) -- spawn_passive falls back to the shared venv"
         return
     }
