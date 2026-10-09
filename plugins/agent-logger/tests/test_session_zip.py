@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import os
@@ -120,6 +121,11 @@ def test_zip_accepts_benign_root_directory_entries(tmp_path: Path) -> None:
         "NUL.txt",
         "CON .txt",
         "COM9.log",
+        "CONIN$.txt",
+        "conout$",
+        "COM\u00b9.log",
+        "LPT\u00b2",
+        "com\u00b3.txt",
     ],
 )
 def test_session_ids_cannot_escape_lookup_sidecars_or_materialization(
@@ -313,6 +319,42 @@ def test_tar_comparison_bounds_extended_metadata_before_decoding(
         info.size = 9
         output.addfile(info, io.BytesIO(b"longname\0"))
     with pytest.raises(ValueError, match="metadata byte budget"):
+        sessions.CODECS["targz"].member_digests(archive)
+
+
+@pytest.mark.parametrize("encoding", ["gnu", "pax-0.0", "pax-0.1", "pax-1.0"])
+def test_tar_comparison_rejects_sparse_before_extent_decoding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encoding: str
+) -> None:
+    archive = tmp_path / "sparse.tar.gz"
+    if encoding == "gnu":
+        info = tarfile.TarInfo("events.jsonl")
+        info.type = tarfile.GNUTYPE_SPARSE
+        header = bytearray(info.tobuf(format=tarfile.GNU_FORMAT))
+        header[482] = 1  # The old GNU header requests sparse extension blocks.
+        header[148:156] = b" " * 8
+        header[148:156] = f"{sum(header):06o}\0 ".encode("ascii")
+        extension = bytearray(512)
+        extension[504] = 1  # The chain requests another block.
+        archive.write_bytes(gzip.compress(header + extension + extension))
+    else:
+        headers = {
+            "pax-0.0": {"GNU.sparse.size": "3"},
+            "pax-0.1": {"GNU.sparse.map": "0,3"},
+            "pax-1.0": {"GNU.sparse.major": "1", "GNU.sparse.minor": "0"},
+        }
+        with tarfile.open(archive, "w:gz", format=tarfile.PAX_FORMAT) as output:
+            info = tarfile.TarInfo("events.jsonl")
+            info.size = 3
+            info.pax_headers = headers[encoding]
+            output.addfile(info, io.BytesIO(b"{}\n"))
+
+    def forbidden_sparse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("comparison must reject sparse before parsing extent metadata")
+
+    for hook in ("_proc_sparse", "_proc_gnusparse_00", "_proc_gnusparse_01", "_proc_gnusparse_10"):
+        monkeypatch.setattr(tarfile.TarInfo, hook, forbidden_sparse)
+    with pytest.raises(ValueError, match="sparse session tar"):
         sessions.CODECS["targz"].member_digests(archive)
 
 
@@ -534,7 +576,20 @@ def test_unsafe_zip_members_are_rejected_before_extraction(tmp_path: Path, name:
 
 
 @pytest.mark.parametrize("codec", ["targz", "zip"])
-@pytest.mark.parametrize("name", ["a?.txt", "a\x1fname", "NUL.txt", "CON .txt"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a?.txt",
+        "a\x1fname",
+        "NUL.txt",
+        "CON .txt",
+        "CONIN$.txt",
+        "conout$",
+        "COM\u00b9.log",
+        "LPT\u00b2",
+        "com\u00b3.txt",
+    ],
+)
 def test_shared_archive_path_policy_rejects_nonportable_components(
     tmp_path: Path, codec: str, name: str
 ) -> None:
@@ -664,7 +719,7 @@ def test_archive_writers_apply_shared_path_policy_before_publication(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows cannot create these POSIX source names")
-@pytest.mark.parametrize("name", ["NUL.txt", "a?.txt", "a\x1fname"])
+@pytest.mark.parametrize("name", ["NUL.txt", "a?.txt", "a\x1fname", "CONIN$.txt", "COM\u00b9.log"])
 def test_tar_writer_rejects_nonportable_posix_source_names(tmp_path: Path, name: str) -> None:
     source = _session(tmp_path / "live")
     (source / name).write_bytes(b"retained source")

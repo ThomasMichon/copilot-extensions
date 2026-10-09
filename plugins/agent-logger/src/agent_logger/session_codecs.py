@@ -16,7 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import BinaryIO
+from typing import BinaryIO, NoReturn
 
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_MEMBER_BYTES = 512 * 1024 * 1024
@@ -24,7 +24,10 @@ MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ZIP_DIRECTORY_BYTES = 16 * 1024 * 1024
 MAX_TAR_METADATA_BYTES = 16 * 1024 * 1024
 _CASE_INSENSITIVE = os.name == "nt"
-_RESERVED = re.compile(r"(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\Z", re.IGNORECASE)
+_RESERVED = re.compile(
+    r"(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])\Z",
+    re.IGNORECASE,
+)
 _INVALID_COMPONENT = re.compile(r'[\x00-\x1f\x7f-\x9f<>:"|?*]')
 
 
@@ -186,6 +189,15 @@ class TarGzCodec(Codec):
         metadata_bytes = 0
 
         class BoundedTarInfo(tarfile.TarInfo):
+            def _reject_sparse(self, *args: object, **kwargs: object) -> NoReturn:
+                raise ValueError("sparse session tar members are unsupported")
+
+            # Sparse parsers consume extent metadata outside the header budgets.
+            _proc_sparse = _reject_sparse
+            _proc_gnusparse_00 = _reject_sparse
+            _proc_gnusparse_01 = _reject_sparse
+            _proc_gnusparse_10 = _reject_sparse
+
             @classmethod
             def frombuf(cls, buf: bytes, encoding: str, errors: str) -> tarfile.TarInfo:
                 return cls._frombuf(buf, encoding, errors)
@@ -475,7 +487,7 @@ class ZipCodec(Codec):
                         if copied.size != info.file_size:
                             raise ValueError(f"truncated session ZIP member: {info.filename!r}")
                     ensure_real_directory(out.parent)
-                    # link() publishes without replacement; cleanup never unlinks the caller's path.
+                    # Publish without replacement; cleanup never unlinks the caller's path.
                     os.link(staged, out)
 
     def list_members(self, archive: Path) -> list[str]:

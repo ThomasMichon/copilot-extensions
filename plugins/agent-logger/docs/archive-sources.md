@@ -71,7 +71,8 @@ remain the caller's separately authorized responsibilities.
 
 The shared archive-member and session-ID validator rejects Windows-invalid
 characters, control characters, device basenames, and trailing dots/spaces on
-every platform. ZIP validates the original member name before the standard
+every platform, including `CONIN$`, `CONOUT$`, and superscript-digit `COM`/`LPT`
+devices. ZIP validates the original member name before the standard
 library can truncate a NUL-containing name.
 Both archive writers validate generated member names before publication;
 unsupported source filenames leave the source and any prior archive intact.
@@ -95,7 +96,10 @@ directory has a 16 MiB budget checked before the standard ZIP parser allocates
 its index. Equality comparison uses the same decoded-content budgets.
 Tar comparison streams at most 10,000 raw headers,
 including directories and extended headers; extended metadata has a cumulative
-16 MiB budget enforced before its payload is decoded. ZIP verification derives
+16 MiB budget enforced before its payload is decoded. Old GNU and PAX GNU sparse
+encodings are rejected before their extent parsers can read or allocate
+unbudgeted metadata. This restriction applies to representation comparison,
+not ordinary single-format tar reads. ZIP verification derives
 membership and integrity from one descriptor snapshot and returns false for
 CRC, decompression, or truncation failures. Other content-read errors
 and permission failures are not empty/missing evidence. These checks do not
