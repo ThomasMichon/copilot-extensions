@@ -113,6 +113,10 @@ def _sibling_readers(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str
     from .remote_dispatch import local_machine
 
     bridge, worktrees = procutil.agent_bridge_launch_prefix(), procutil.agent_worktrees_launch_prefix()
+    if procutil.sibling_absent("agent-bridge"):
+        bridge = None
+    if procutil.sibling_absent("agent-worktrees"):
+        worktrees = None
     include_remote = bool(getattr(args, "include_remote", False))
     readers = {
         "bridge": (lambda read_at: sib.read_bridge(read_at, prefix=bridge, machine=local_machine(),

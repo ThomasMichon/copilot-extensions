@@ -157,6 +157,17 @@ def test_an_unknown_session_is_not_found(client):
     assert client.get("/api/v1/sessions/nope/attention/current").status_code == 404
 
 
+def test_a_live_registration_without_this_generations_history_is_unknown_not_clear(client, app):
+    """After a bridge restart the durable registration survives but the
+    represented history doesn't: that is no evidence of no open question."""
+    _register_live(client)
+    _ingest_live(client, {"id": "1", "type": "tool.execution_start", "data": {
+        "toolCallId": "ask-1", "toolName": "ask_user", "arguments": {"message": "Choose"}}})
+    app.state.live_event_store = type(app.state.live_event_store)()  # a new generation's empty store
+    body = _current(client, "live-1")
+    assert (body["reason"], body["availability"], body["session_id"]) == (None, "unknown_after_restart", "live-1")
+
+
 # -- the CLI -----------------------------------------------------------------------
 
 

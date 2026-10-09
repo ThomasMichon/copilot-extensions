@@ -57,7 +57,9 @@ class CurrentAttention(BaseModel):
     worktree_id: str | None = None
     reason: AttentionReason | None = None
     #: ``available`` when the reason can be acted on now; ``unknown_after_restart``
-    #: when its request predates this daemon generation; ``None`` with no reason.
+    #: when its request (or, for a represented session, its whole history)
+    #: predates this daemon generation, so the reason can't be known; ``None``
+    #: with no reason.
     availability: Literal["available", "unknown_after_restart"] | None = None
     fidelity: Literal["full", "reduced"]
     #: One line about the request (its message or intention), when there is one.

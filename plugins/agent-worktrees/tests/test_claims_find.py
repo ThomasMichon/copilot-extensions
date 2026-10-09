@@ -36,7 +36,7 @@ def _seed_pr_record(
     tracking.save_record(rec, tdir / f"{worktree_id}.yaml")
     monkeypatch.setattr(
         "agent_worktrees.installer.read_projects_registry",
-        lambda: {"projects": {"proj-a": {}, "proj-b": {}}},
+        lambda **_kw: {"projects": {"proj-a": {}, "proj-b": {}}},
     )
     monkeypatch.setattr(
         "agent_worktrees.config.project_dir",
@@ -136,6 +136,8 @@ def test_the_authority_comes_from_the_slugs_own_binding_not_the_default_repo(mon
     assert resolve("acme/home", "") == "github.com"
     assert resolve("forge/tool", "") == "forge.example.com/gitea"  # not the project's default github.com
     assert resolve("nobody/knows", "") is None  # pr bar can't read it either
+    # A stale provider on the record never overrides the binding pr bar reads through.
+    assert claims_find_cli._authority_resolver("proj-a")("forge/tool", "github") == "forge.example.com/gitea"
 
 
 def test_repo_filter_matches_a_bare_legacy_record_by_its_url(monkeypatch, tmp_path, capfd):
@@ -175,7 +177,7 @@ def test_claims_find_counts_a_tracking_record_it_cannot_load(monkeypatch, tmp_pa
 
 
 def test_claims_find_empty_registry_is_an_empty_ok_envelope(monkeypatch, capfd):
-    monkeypatch.setattr("agent_worktrees.installer.read_projects_registry", lambda: {"projects": {}})
+    monkeypatch.setattr("agent_worktrees.installer.read_projects_registry", lambda **_kw: {"projects": {}})
     rc = claims_find_cli.cmd_claims_find(
         argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
     assert rc == 0
@@ -183,7 +185,7 @@ def test_claims_find_empty_registry_is_an_empty_ok_envelope(monkeypatch, capfd):
 
 
 def test_claims_find_unreadable_registry_exits_non_zero(monkeypatch, capfd):
-    def boom():
+    def boom(**_kw):
         raise OSError("projects.yaml: permission denied")
 
     monkeypatch.setattr("agent_worktrees.installer.read_projects_registry", boom)
@@ -191,6 +193,34 @@ def test_claims_find_unreadable_registry_exits_non_zero(monkeypatch, capfd):
         argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
     assert rc == claims_find_cli.REGISTRY_UNREADABLE_EXIT
     assert "registry" in json.loads(capfd.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("content", ["{not: [yaml", "- a list\n", "projects: [a, b]\n"])
+def test_claims_find_a_malformed_real_registry_is_unreadable_not_empty(monkeypatch, tmp_path, capfd, content):
+    """The production reader, not a mock: a malformed projects.yaml is no
+    project list, never an empty (all-clear) one."""
+    from agent_worktrees import installer
+
+    registry = tmp_path / "projects.yaml"
+    registry.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: registry)
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == claims_find_cli.REGISTRY_UNREADABLE_EXIT
+    assert installer.read_projects_registry()["projects"] == {}  # lenient callers keep their contract
+
+
+@pytest.mark.parametrize("content", [None, "", "projects:\n", "projects: {}\n"])
+def test_claims_find_a_missing_or_empty_real_registry_is_an_empty_ok_envelope(monkeypatch, tmp_path, capfd, content):
+    from agent_worktrees import installer
+
+    registry = tmp_path / "projects.yaml"
+    if content is not None:
+        registry.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: registry)
+    rc = claims_find_cli.cmd_claims_find(
+        argparse.Namespace(json=True, claim_repo=None, claim_state="all", claim_live=False), ["pr"])
+    assert rc == 0 and json.loads(capfd.readouterr().out)["projects"] == []
 
 
 def test_claims_find_live_needs_a_repo(capfd):
@@ -259,7 +289,7 @@ def test_cmd_claims_find_json_roundtrip(monkeypatch, tmp_path, capfd):
 def test_cmd_claims_find_no_matches_returns_1(monkeypatch, tmp_path, capfd):
     monkeypatch.setattr(
         "agent_worktrees.installer.read_projects_registry",
-        lambda: {"projects": {}},
+        lambda **_kw: {"projects": {}},
     )
     rc = claims_find_cli.cmd_claims_find(
         argparse.Namespace(json=True, claim_repo="acme/widgets", claim_state="open",

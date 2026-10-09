@@ -9,6 +9,7 @@ import subprocess
 import pytest
 
 from agent_dispatch import __main__ as m
+from agent_dispatch import attention_cli
 from agent_dispatch import attention_contract as ac
 from agent_dispatch import attention_siblings as sib
 from agent_dispatch import attention_sources as srcs
@@ -163,11 +164,17 @@ def test_presence_alone_yields_a_scanned_item_and_unknown_presence_is_uncertain(
 
 
 def test_a_remote_transcript_is_read_only_when_opted_in():
-    fake = _bridge(sessions=[_owned("s1", "w1", target_type="command")], attention={"w1": _answer(None)},
+    fake = _bridge(sessions=[_owned("s1", "w1", target_type="ssh")], attention={"w1": _answer(None)},
                    presence={"s1": {"state": "awaiting_input", "confidence": "scanned"}})
     assert _read_bridge(fake)["items"] == []
     assert not [c for c in fake.calls if "presence" in c]
     assert len(_read_bridge(fake, include_remote=True)["items"]) == 1
+
+
+def test_a_local_command_sessions_transcript_is_read_by_default():
+    fake = _bridge(sessions=[_owned("s1", "w1", target_type="command")], attention={"w1": _answer(None)},
+                   presence={"s1": {"state": "awaiting_input", "confidence": "scanned"}})
+    assert len(_read_bridge(fake)["items"]) == 1
 
 
 def test_one_session_in_both_registries_is_one_item():
@@ -201,6 +208,27 @@ def test_a_successor_keeps_the_entity_and_its_first_observed_time(tmp_path):
 def test_one_worktree_id_in_two_projects_is_two_entities():
     candidates, _ = sib._bridge_candidates([_owned("s1", "w1", project="a")], [_live("cli", "w1", repo="b")], "m1")
     assert sorted(candidates) == ["wt:m1/a/w1", "wt:m1/b/w1"]
+
+
+def test_a_handle_shared_by_two_projects_is_never_read_as_either():
+    """The bridge resolves a bare handle, so its one answer can't be told apart:
+    both candidates are uncertain, and an unambiguous one is still read."""
+    fake = _bridge(sessions=[_owned("s1", "w1", project="a"), _owned("s3", "w3", project="a")],
+                   live=[_live("cli", "w1", repo="b")],
+                   attention={"w1": _answer("input_required"), "w3": _answer("permission_required", sid="s3")})
+    result = _read_bridge(fake)
+    assert [i["entity_ref"] for i in result["items"]] == ["wt:m1/a/w3"]
+    assert (result["status"], result["uncertain"]) == ("uncertain", 2)
+    assert [c for c in fake.calls if c[2] == "attention"][0][3:] == ["w3"]
+
+
+@pytest.mark.parametrize("row, remote", [
+    ({"target_type": "local"}, False), ({"target_type": "command"}, False), ({"target_type": None}, False),
+    ({"target_type": "ssh"}, True), ({"target_type": "command", "agent_name": "codespace:cs-1"}, True),
+    ({"target_type": "command", "agent_name": "container:c-1"}, True),
+])
+def test_transcript_locality_matches_the_bridges_own_classification(row, remote):
+    assert sib._is_remote(row) is remote
 
 
 def test_a_session_no_managed_worktree_hosts_is_uncertain_not_an_item():
@@ -355,6 +383,42 @@ def test_missing_siblings_are_listed_disabled_and_never_degrade(monkeypatch, cap
 def test_include_remote_parses_on_attention_and_after_next():
     assert m.build_parser().parse_args(["attention", "--include-remote"]).include_remote is True
     assert m.build_parser().parse_args(["attention", "next", "--include-remote", "--json"]).include_remote is True
+
+
+def _cell(tmp_path, monkeypatch, *installed):
+    """A same-cell standalone layout: ``<cell>/plugins/agent-dispatch`` under an
+    explicit installation context, with ``installed`` siblings' receipts."""
+    from agent_dispatch import procutil
+
+    plugins = tmp_path / "cell" / "plugins"
+    for name in ("agent-dispatch", *installed):
+        (plugins / name).mkdir(parents=True)
+        (plugins / name / "install.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(plugins / "agent-dispatch" / "install.json"))
+    monkeypatch.setattr(procutil, "install_dir", lambda: plugins / "agent-dispatch")
+    # The real builders: with an explicit context they always return a prefix.
+    monkeypatch.setattr(procutil, "agent_bridge_launch_prefix",
+                        lambda: procutil._sibling_runtime_launch_prefix("agent-bridge", "agent_bridge", "agent-bridge"))
+    monkeypatch.setattr(procutil, "agent_worktrees_launch_prefix", lambda: procutil._sibling_runtime_launch_prefix(
+        "agent-worktrees", "agent_worktrees", "agent-worktrees"))
+
+
+def test_a_sibling_absent_from_an_explicit_cell_is_disabled_not_run(tmp_path, monkeypatch, capsys):
+    _cell(tmp_path, monkeypatch, "agent-worktrees")
+    readers, _ = attention_cli._sibling_readers(m.build_parser().parse_args(["attention"]))
+    assert readers["bridge"] is attention_cli._disabled
+    assert readers["pr"] is not attention_cli._disabled  # installed: read (validated at execution)
+    monkeypatch.setattr(m, "_client", lambda args: pytest.fail("nothing may be read"))
+    args = m.build_parser().parse_args(["attention", "--source", "bridge"])
+    assert args.func(args) == 2 and "not installed" in capsys.readouterr().err
+
+
+def test_an_explicit_context_outside_a_cell_layout_is_never_hidden_as_absence(tmp_path, monkeypatch):
+    from agent_dispatch import procutil
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "bogus")
+    monkeypatch.setattr(procutil, "install_dir", lambda: tmp_path / "somewhere" / "agent-dispatch")
+    assert procutil.sibling_absent("agent-bridge") is False
 
 
 def test_a_command_source_cant_take_a_builtin_sibling_name():

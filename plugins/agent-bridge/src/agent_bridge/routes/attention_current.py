@@ -20,7 +20,6 @@ def get_current_attention(session_ref: str, request: Request) -> CurrentAttentio
     """Owned sessions first (a session id or a worktree handle whose owner
     runs), then the represented session a live registration or worktree head
     names. Never waits."""
-    from ..events import EventLog
     from ..result_snapshot import build_represented_result_snapshot
     from .live_sessions import _db, _resolve_registration, _result_history, _to_info
     from .sessions import _resolve_result_session
@@ -45,8 +44,13 @@ def get_current_attention(session_ref: str, request: Request) -> CurrentAttentio
         raise HTTPException(status_code=404, detail=f"Session or worktree {session_ref} not found")
     log, _history = _result_history(request, row["session_id"])
     if log is None:
-        log = EventLog(session_id=row["session_id"], worktree_id=row.get("worktree_id"),
-                       telemetry_source="represented")
+        # A durable registration outlives this generation's in-memory history
+        # (a bridge restart): no history is not evidence of no open request.
+        return CurrentAttention(
+            requested_ref=session_ref, registry="live", session_id=str(row["session_id"]),
+            worktree_id=row.get("worktree_id"), availability="unknown_after_restart",
+            fidelity="reduced",
+        )
     registration = _to_info(row).model_dump(mode="json")
     snapshot = build_represented_result_snapshot(
         registration=registration, event_log=log, requested_ref=session_ref, position=None,

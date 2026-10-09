@@ -225,6 +225,16 @@ def _listing_problem(value: Any, error: str | None, code: int | None) -> str | N
     return None if isinstance(value, list) else "its output isn't a list"
 
 
+def _is_remote(row: dict[str, Any]) -> bool:
+    """Whether a bridge session's transcript is read over SSH: the bridge's own
+    classification (``target_exec.target_kind``) -- a ``command`` transport is
+    local unless its agent is a CodeSpace or a container."""
+    agent = str(row.get("agent_name") or "")
+    if agent.startswith(("codespace:", "container:")):
+        return True
+    return str(row.get("target_type") or "local") not in ("local", "command")
+
+
 def read_bridge(read_at: str, *, prefix: list[str], machine: str | None, include_remote: bool = False,
                 run: Runner | None = None, timeout: float = BRIDGE_TIMEOUT) -> dict[str, Any]:
     run = run or _default_run()
@@ -240,6 +250,17 @@ def read_bridge(read_at: str, *, prefix: list[str], machine: str | None, include
         return {"items": [], "status": "uncertain" if uncertain else "ok", "uncertain": uncertain,
                 "read_at": read_at}
     refs = sorted(candidates)
+    # The bridge resolves a bare worktree handle, so two candidates sharing one
+    # (the same handle in two projects) can't be told apart: neither is read.
+    handles: dict[str, int] = {}
+    for ref in refs:
+        handles[candidates[ref]["handle"]] = handles.get(candidates[ref]["handle"], 0) + 1
+    ambiguous = [r for r in refs if handles[candidates[r]["handle"]] > 1]
+    uncertain += len(ambiguous)
+    refs = [r for r in refs if handles[candidates[r]["handle"]] == 1]
+    if not refs:
+        return {"items": [], "status": "uncertain" if uncertain else "ok", "uncertain": uncertain,
+                "read_at": read_at}
     body, error, _code = _call_json(run, [*prefix, "--json", "attention", *[candidates[r]["handle"] for r in refs]],
                                     deadline)
     entries = body.get("sessions") if isinstance(body, dict) else None
@@ -255,7 +276,7 @@ def read_bridge(read_at: str, *, prefix: list[str], machine: str | None, include
             found[ref].append(item)
         session_id = str((entry or {}).get("session_id") or "") if isinstance(entry, dict) else ""
         row = candidates[ref]["bridge"].get(session_id)
-        if row is None or (row.get("target_type") not in (None, "local") and not include_remote):
+        if row is None or (_is_remote(row) and not include_remote):
             continue  # an interactive session, or a remote transcript the caller didn't opt into
         presence_jobs.append((ref, session_id, lambda s=session_id: _call_json(
             run, [*prefix, "--json", "presence", s], deadline)))

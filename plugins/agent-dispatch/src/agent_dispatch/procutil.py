@@ -262,6 +262,25 @@ def agent_bridge_launch_prefix() -> list[str] | None:
     )
 
 
+def sibling_absent(plugin_id: str) -> bool:
+    """Whether an optional sibling is genuinely not installed in this explicit
+    installation cell.
+
+    With an explicit installation context the launch prefix is always built
+    (it validates at execution), so absence is the missing peer receipt in this
+    cell -- the file ``peer_launch.launch`` validates. An invalid context or
+    receipt is not absence: it is left to fail at execution, never hidden as an
+    optional miss. Without an explicit context, absence is a ``None`` prefix
+    and this returns ``False``.
+    """
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+        return False
+    own_root = install_dir()
+    if own_root.parent.name != "plugins":
+        return False
+    return not (own_root.parent / plugin_id / "install.json").exists()
+
+
 def _sibling_runtime_launch_prefix(
     plugin_id: str, module: str, path_command: str
 ) -> list[str] | None:

@@ -207,8 +207,10 @@ def _authority_resolver(project: str):
             try:
                 resolution = pr_config.resolve_repo_config_for_slug(config, slug)
                 prcfg = resolution.repo_config.pr if resolution.resolved else None
+                # Provider and API base both from the binding ``pr bar`` reads
+                # through; the record's own provider only when the binding has none.
                 cache[key] = canonical_authority(providers.get_provider(
-                    provider_name or prcfg.provider or "github",
+                    prcfg.provider or provider_name or "github",
                 ).authority_endpoint(getattr(prcfg, "api_base", "") or "")) if prcfg is not None else None
             except Exception:
                 cache[key] = None
@@ -226,7 +228,7 @@ def scan_projects(repo: str | None, state: str) -> list[dict]:
     from . import installer
 
     try:
-        registry = installer.read_projects_registry()
+        registry = installer.read_projects_registry(strict=True)
     except Exception as exc:
         raise RegistryUnreadable(str(exc)) from exc
     projects = registry.get("projects") if isinstance(registry, dict) else None
