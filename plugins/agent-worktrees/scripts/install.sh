@@ -48,6 +48,13 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
     fi
 done
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    case "${OSTYPE:-}:$PWD" in
+        msys*:*/.copilot/installed-plugins/*|cygwin*:*/.copilot/installed-plugins/*)
+            printf 'self-stage failed: Windows shell launch CWD pins the payload; launch from HOME or use install.ps1\n' >&2
+            exit 1
+            ;;
+    esac
+    cd "$HOME" || exit 1
     CONTEXTUAL_INSTALL=true
     __aw_origin_payload="$PLUGIN_DIR"
     if [[ "$PLUGIN_DIR" != */.copilot/installed-plugins/* &&

@@ -118,6 +118,8 @@ if ($InstallDir) {
 }
 $ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
 if ($ContextualInstall) {
+    Set-Location -LiteralPath $env:USERPROFILE
+    [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
     if ($Action -notin @('install', 'update', 'status')) {
         Write-Error "Structured installation context does not support action '$Action'."
         exit 1
