@@ -9,6 +9,7 @@ import os
 import stat
 import struct
 import tarfile
+import weakref
 import zipfile
 import zlib
 from collections.abc import Iterator
@@ -103,6 +104,109 @@ def test_archive_only_zip_discovery_preserves_source_and_session_id(
     assert source.key == key
     assert [(ref.id, ref.kind) for ref in refs] == [("session-1", "archive")]
     assert sessions.read_member(refs[0], "events.jsonl") == b"{}\n"
+
+
+def test_archive_discovery_keeps_only_current_refs_before_first_yield(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "store"
+    for index in range(200):
+        _zip(store / f"session-{index}.zip", [("events.jsonl", b"{}\n")])
+    live = 0
+    peak = 0
+
+    def released() -> None:
+        nonlocal live
+        live -= 1
+
+    class TrackedRef(sessions.SessionRef):
+        def __post_init__(self) -> None:
+            nonlocal live, peak
+            super().__post_init__()
+            live += 1
+            peak = max(peak, live)
+            weakref.finalize(self, released)
+
+    monkeypatch.setattr(sessions, "SessionRef", TrackedRef)
+    iterator = sessions._iter_archive_refs(store)
+    first = next(iterator)
+    assert first.kind == "archive"
+    assert peak <= 2
+    iterator.close()
+    assert live == 1
+
+
+def test_archive_discovery_streams_large_unrelated_entry_sets_without_a_store_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "store"
+    _zip(store / "session.zip", [("events.jsonl", b"{}\n")])
+    (store / "unrelated.txt").write_bytes(b"not an archive")
+    original_scandir = os.scandir
+    scans = 0
+    closed = 0
+
+    @contextmanager
+    def large_scan(path: Path) -> Iterator[Iterator[os.DirEntry[str]]]:
+        nonlocal scans, closed
+        scans += 1
+        with original_scandir(path) as entries:
+            observed = {entry.name: entry for entry in entries}
+
+            def incremental() -> Iterator[os.DirEntry[str]]:
+                for _ in range(100_001):
+                    yield observed["unrelated.txt"]
+                yield observed["session.zip"]
+
+            try:
+                yield incremental()
+            finally:
+                closed += 1
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", large_scan)
+        assert [ref.id for ref in sessions._iter_archive_refs(store)] == ["session"]
+    assert scans == closed == 2
+
+
+def test_archive_discovery_prevalidates_later_divergence_before_first_yield(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "live"
+    store = tmp_path / "store"
+    for session_id in ("first", "second"):
+        source = _session(state, session_id)
+        sessions.archive_session(source, store)
+        sessions.archive_session(source, store, codec="zip")
+    _zip(store / "second.zip", [("events.jsonl", b"divergent")])
+    with pytest.raises(ValueError, match="divergent"):
+        next(sessions.iter_session_refs(None, store))
+
+
+def test_archive_discovery_revalidates_between_streaming_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _session(tmp_path / "live")
+    store = tmp_path / "store"
+    sessions.archive_session(source, store)
+    sessions.archive_session(source, store, codec="zip")
+    original_scandir = os.scandir
+    scans = 0
+
+    @contextmanager
+    def mutate_second_pass(path: Path) -> Iterator[Iterator[os.DirEntry[str]]]:
+        nonlocal scans
+        scans += 1
+        if scans == 2:
+            _zip(store / f"{source.name}.zip", [("events.jsonl", b"changed between passes")])
+        with original_scandir(path) as entries:
+            yield entries
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", mutate_second_pass)
+        with pytest.raises(ValueError, match="divergent"):
+            next(sessions.iter_session_refs(None, store))
+    assert scans == 2
 
 
 def test_zip_accepts_benign_root_directory_entries(tmp_path: Path) -> None:

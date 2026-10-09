@@ -138,6 +138,12 @@ Identical readable contents produce one reference, preferring the legacy
 tar.gz representation; divergent, corrupt, unsafe, or unprovable contents
 raise while retaining both files. A valid live session still takes precedence,
 and explicitly ordered archive stores retain their existing precedence.
+Archive-store discovery uses two incremental directory scans, retaining only
+the current ID's format references rather than materializing the store. The
+first pass prevalidates observed overlaps before archive output; the second
+revalidates each observation before yielding. There is no new store-entry limit
+or global archive ordering guarantee. These scans do not freeze directory
+changes between observations.
 Across different source roots, provenance-based reconciliation and accounting
 remain the consumer/backend's responsibility.
 

@@ -236,19 +236,29 @@ def _iter_archive_refs(
 ) -> Iterator[SessionRef]:
     if not store.is_dir():
         return
-    candidates: dict[str, list[SessionRef]] = {}
-    for f in sorted(store.iterdir(), key=lambda path: path.name):
-        if not f.is_file():
-            continue
-        if any(f.name.endswith(s) for s in _ARCHIVE_SUFFIXES):
-            session_id = _archive_stem(f)
-            if shadowed_ids is not None and session_id in shadowed_ids:
-                continue
-            candidates.setdefault(session_id, []).append(
-                SessionRef(id=session_id, kind="archive", path=f, store=store)
-            )
-    selected = [_select_archive(refs) for refs in candidates.values()]
-    yield from selected
+
+    def candidates() -> Iterator[list[SessionRef]]:
+        with os.scandir(store) as entries:
+            for entry in entries:
+                if not entry.is_file() or not any(
+                    entry.name.endswith(suffix) for suffix in _ARCHIVE_SUFFIXES
+                ):
+                    continue
+                path = store / entry.name
+                session_id = _archive_stem(path)
+                if shadowed_ids is not None and session_id in shadowed_ids:
+                    continue
+                refs = _archive_refs_for_id(session_id, store)
+                if not refs:
+                    raise ValueError("session archive disappeared during discovery")
+                if refs[0].path == path:
+                    yield refs
+
+    # Prevalidate the store, then revalidate each streamed observation.
+    for refs in candidates():
+        _select_archive(refs)
+    for refs in candidates():
+        yield _select_archive(refs)
 
 
 def iter_session_refs(state_root: Path | None, *archive_stores: Path) -> Iterator[SessionRef]:

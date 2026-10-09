@@ -497,7 +497,7 @@ class Target(ABC):
         """Publish the compressed archive store under ``{machine}/archived/``.
 
         The second pair of the two-pair sync model: the on-device archive store
-        (compacted ``<id>.tar.gz`` bundles + uncompressed sidecars) is copied to
+        (registered tar.gz or ZIP bundles + uncompressed sidecars) is copied to
         a sibling of the uncompressed ``session-state`` tree. Targets that
         cannot do this return an ok no-op.
         """
