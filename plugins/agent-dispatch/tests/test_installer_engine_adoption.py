@@ -416,6 +416,32 @@ Write-Manifest
     assert not (runtime / "deploy-manifest.json.tmp").exists()
 
 
+def test_snapshot_hash_preserves_case_distinct_paths(tmp_path):
+    env = _env(tmp_path)
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "A.py").write_text("upper")
+    (snapshot / "a.py").write_text("lower")
+    if len(list(snapshot.iterdir())) != 2:
+        pytest.skip("case-insensitive filesystem")
+    script = (
+        _prelude("ps1")
+        + _function("ps1", "Get-DispatchSnapshotHash")
+        + f"""
+$first = Get-DispatchSnapshotHash -SnapshotDir '{snapshot}'
+[IO.File]::WriteAllText('{snapshot / "A.py"}', 'upper changed')
+$second = Get-DispatchSnapshotHash -SnapshotDir '{snapshot}'
+if ($first -eq $second) {{ throw 'case-distinct upper path disappeared from hash' }}
+[IO.File]::WriteAllText('{snapshot / "a.py"}', 'lower changed')
+$third = Get-DispatchSnapshotHash -SnapshotDir '{snapshot}'
+if ($second -eq $third) {{ throw 'case-distinct lower path disappeared from hash' }}
+if ($third -ne (Get-DispatchSnapshotHash -SnapshotDir '{snapshot}')) {{ throw 'hash is not stable' }}
+"""
+    )
+    result = _run("ps1", script, tmp_path, env)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def _fixture_checkout(tmp_path: Path) -> Path:
     root = tmp_path / "authoring"
     plugin = root / "plugins/agent-dispatch"

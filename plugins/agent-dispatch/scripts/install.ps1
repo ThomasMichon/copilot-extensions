@@ -1173,7 +1173,7 @@ function Materialize-DispatchSnapshot {
 function Get-DispatchSnapshotHash {
     param([string]$SnapshotDir)
     $root = [IO.Path]::GetFullPath($SnapshotDir).TrimEnd('/\') + [IO.Path]::DirectorySeparatorChar
-    $entries = @{}
+    $entries = New-Object 'Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
     foreach ($item in Get-ChildItem -LiteralPath $SnapshotDir -Recurse -Force) {
         $relative = $item.FullName.Substring($root.Length).Replace('\', '/')
         $entries[$relative] = if ($item.PSIsContainer) { 'D' } else { 'F' + (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash }

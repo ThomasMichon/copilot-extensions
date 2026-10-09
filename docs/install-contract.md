@@ -1577,9 +1577,8 @@ update/start lifecycle (drain → stop → stage → start, or a zero-downtime
 cutover) is **currently in flight** — seconds to a couple of minutes, during
 which the daemon can legitimately be briefly down or mid-handoff. Before
 this, nothing locally visible could distinguish "correctly mid-transition"
-from "actually dead and never came back" (the originating incident:
-agent-bridge sat dead for 3+ days after an interrupted cutover,
-aperture-labs#7890 §3), so a local liveness watchdog had to rely on a
+from "actually dead and never came back" (an interrupted agent-bridge cutover
+left its daemon unavailable for several days), so a local liveness watchdog had to rely on a
 caller-side wrapper around every manual update — exactly the kind of
 fragile convention this marker eliminates, including for *automatic*
 self-update cutovers that nothing ever wraps.

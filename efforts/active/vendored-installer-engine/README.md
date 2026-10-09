@@ -602,6 +602,11 @@ installs, no service-specific config needed for this class of plugin.
   Install-contract, engine-sync, documentation and touched Python lint
   checks passed. The wrong-prefix fixture was corrected to keep rejecting
   its stale config after a simulated failed signed rebuild.
+- The second review found PowerShell's default case-insensitive map could
+  collapse case-distinct snapshot paths on POSIX. The snapshot digest now
+  uses ordinal keys, with a real case-sensitive filesystem regression.
+  A guard-blocking private identifier in existing install-contract prose
+  was removed without changing the documented marker behavior.
 
 ### 2026-09-12 — Kickoff
 - Effort created directly off the operator's request, immediately following
