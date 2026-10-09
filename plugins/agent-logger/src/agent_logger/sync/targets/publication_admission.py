@@ -283,7 +283,7 @@ def _admit_under_lock(
     created_file_id: tuple[int, int] | None = None
     failure: PushResult | None = None
     try:
-        ensure_real_directory(dest)
+        ensure_real_directory(dest, durable=True)
         # Write through an exclusively created, brand-new temp name (so
         # there is nothing pre-existing to follow on any platform), fsync
         # its content, then publish no-replace: a race that beats us to

@@ -708,10 +708,10 @@ def _anchored_path(path: Path) -> Path:
     return path.expanduser().absolute()
 
 
-def _ensure_real_directory(path: Path) -> Path:
+def _ensure_real_directory(path: Path, *, durable: bool = False) -> Path:
     """Use the shared race-tolerant, no-link directory creation contract."""
     try:
-        return ensure_real_directory(path)
+        return ensure_real_directory(path, durable=durable)
     except OSError as exc:
         raise OSError(f"destination {exc}") from exc
 
@@ -756,10 +756,10 @@ def _validate_relative_path(relative: Path) -> None:
         raise OSError(f"unsafe destination path: {relative}")
 
 
-def _ensure_relative_directory(root: Path, relative: Path) -> Path:
+def _ensure_relative_directory(root: Path, relative: Path, *, durable: bool = False) -> Path:
     """Create a descendant directory chain without accepting symlinked leaves."""
     _validate_relative_path(relative)
-    safe_root = _ensure_real_directory(root)
+    safe_root = _ensure_real_directory(root, durable=durable)
     current = safe_root
     for part in relative.parts:
         if part in {"", "."}:
@@ -768,10 +768,15 @@ def _ensure_relative_directory(root: Path, relative: Path) -> Path:
         try:
             mode = _lstat(current).st_mode
         except FileNotFoundError:
-            _ensure_real_directory(current)
+            try:
+                _mkdir(current)
+            except FileExistsError:
+                pass
             mode = _lstat(current).st_mode
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"destination directory is unsafe: {current}")
+        if durable:
+            _fsync_directory(current.parent)
     try:
         current.relative_to(safe_root)
     except ValueError as exc:
@@ -1629,7 +1634,7 @@ class FilesystemTarget(Target):
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         try:
             root = self._root()
-            dest = _ensure_relative_directory(root, Path(machine))
+            dest = _ensure_relative_directory(root, Path(machine), durable=source_identity is not None)
         except OSError as exc:
             return PushResult(
                 ok=False,

@@ -115,7 +115,7 @@ Targets implement a small `Target` interface
 
 **Destination identity-admission (`push`'s optional `source_identity`).** A
 caller publishing into a namespaced destination it doesn't already own (e.g.
-rescue/CodeSpace publication, not ordinary machine-rooted session sync) may
+rescue/Codespace publication, not ordinary machine-rooted session sync) may
 pass the canonical `source_roots.SourceIdentity` (venue kind, provider,
 optional host/repository, and venue name) to `push`. `local`
 enforces it under a dedicated destination lock held through session, sidecar,
@@ -143,6 +143,9 @@ Marker publication is atomic and refuses to replace an existing file or link,
 including one created between the initial inspection and publication. Claim
 files are flushed before publication; POSIX uses a no-replace hard link and
 directory fsync, and Windows uses a write-through move without replacement.
+Identified publications require POSIX directory durability barriers; an
+unsupported barrier fails explicitly rather than silently claiming durability.
+Ordinary directory creation does not opt into that additional requirement.
 Only the temporary file created by the current attempt is cleaned up.
 Unowned content is never deleted or ignored merely because its filename
 resembles a stale claim artifact; such a leaf requires explicit recovery.

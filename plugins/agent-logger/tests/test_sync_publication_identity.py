@@ -449,6 +449,23 @@ def test_publication_identity_new_parents_flushed(tmp_path: Path, monkeypatch) -
     assert root / "source-host.containers" in flushed
 
 
+def test_publication_identity_unsupported_barrier_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    import errno
+
+    from agent_logger.sync import provenance
+
+    def unsupported(path):
+        raise OSError(errno.EINVAL, "directory fsync unsupported")
+
+    monkeypatch.setattr(provenance, "fsync_directory", unsupported)
+    legacy = tmp_path / "legacy"
+    assert provenance.ensure_real_directory(legacy) == legacy
+    result = _claim(tmp_path / "m1")
+    assert result is not None and not result.ok
+    assert "unsupported" in result.detail
+    assert not (tmp_path / "m1" / admission.PUBLICATION_IDENTITY_MARKER).exists()
+
+
 def test_publication_identity_creation_interleaving(tmp_path: Path, monkeypatch) -> None:
     from agent_logger.sync.targets import filesystem
 

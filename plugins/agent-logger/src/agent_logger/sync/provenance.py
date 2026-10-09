@@ -267,7 +267,7 @@ def existing_real_directory(path: Path) -> Path | None:
     return absolute
 
 
-def ensure_real_directory(path: Path) -> Path:
+def ensure_real_directory(path: Path, *, durable: bool = False) -> Path:
     """Create a directory only through real directory components.
 
     Tolerates a concurrent creator: two processes racing to create the same
@@ -276,6 +276,10 @@ def ensure_real_directory(path: Path) -> Path:
     both succeed rather than one seeing an uncaught ``FileExistsError`` --
     the component still gets the same real-directory validation below
     either way.
+
+    ``durable=True`` additionally flushes parent entries on POSIX, including
+    components created by a concurrent publisher. Unsupported barriers raise;
+    ordinary callers retain the original directory-creation behavior.
     """
     absolute = anchored_path(path)
     current = Path(absolute.anchor)
@@ -292,9 +296,10 @@ def ensure_real_directory(path: Path) -> Path:
             except FileExistsError:
                 pass
             mode = _lstat(current).st_mode
-            fsync_directory(current.parent)
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"directory is unsafe: {current}")
+        if durable:
+            fsync_directory(current.parent)
     return absolute
 
 
