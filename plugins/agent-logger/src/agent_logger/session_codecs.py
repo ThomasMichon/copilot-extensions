@@ -186,8 +186,20 @@ class TarGzCodec(Codec):
         class BoundedTarInfo(tarfile.TarInfo):
             @classmethod
             def frombuf(cls, buf: bytes, encoding: str, errors: str) -> tarfile.TarInfo:
+                return cls._frombuf(buf, encoding, errors)
+
+            @classmethod
+            def _frombuf(
+                cls, buf: bytes, encoding: str, errors: str, **kwargs: bool
+            ) -> tarfile.TarInfo:
                 nonlocal headers, metadata_bytes
-                info = super().frombuf(buf, encoding, errors)
+                # Patched Python readers bypass frombuf, including for extended headers.
+                parser = getattr(super(), "_frombuf", None)
+                info = (
+                    parser(buf, encoding, errors, **kwargs)
+                    if parser is not None
+                    else super().frombuf(buf, encoding, errors)
+                )
                 headers += 1
                 if headers > MAX_ARCHIVE_MEMBERS:
                     raise ValueError("session archive exceeds its member budget")
