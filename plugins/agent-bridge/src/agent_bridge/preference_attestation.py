@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import shlex
 import socket
@@ -48,6 +49,12 @@ def component_digest() -> str:
         source = spec.loader.get_source(name)
         if source is None:
             raise RuntimeError("target preference component has no attributable source")
+        if name == "agent_bridge":
+            # Promotion rewrites only this release label, not authority code.
+            source = re.sub(
+                r'(?m)^__version__\s*=\s*["\'][^"\']+["\']\s*$',
+                '__version__ = "<release-metadata>"', source,
+            )
         digest.update(name.encode() + b"\0")
         digest.update(source.replace("\r\n", "\n").encode("utf-8") + b"\0")
     return digest.hexdigest()

@@ -341,6 +341,27 @@ def test_digest_covers_the_staged_host_role_closure():
     assert set(a.AUTHORITY_MODULES) == names | {"agent_procutil"}
 
 
+def test_release_label_does_not_change_authority_digest(monkeypatch):
+    from importlib.util import find_spec
+    import re
+
+    original = find_spec
+    before = a.component_digest()
+
+    def changed(name):
+        spec = original(name)
+        if name == "agent_bridge":
+            source = re.sub(
+                r'(?m)^__version__\s*=\s*["\'][^"\']+["\']\s*$',
+                '__version__ = "99.99.99"', spec.loader.get_source(name),
+            )
+            return SimpleNamespace(loader=SimpleNamespace(get_source=lambda ignored: source))
+        return spec
+
+    monkeypatch.setattr("importlib.util.find_spec", changed)
+    assert a.component_digest() == before
+
+
 @pytest.mark.parametrize("consent", [b"\x01", b""])
 def test_exec_component_requires_consent_and_drops_binding_environment(monkeypatch, consent):
     from agent_bridge import preference_exec as e
