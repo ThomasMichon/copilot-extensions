@@ -20,6 +20,7 @@ from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
+    ensure_real_directory,
     is_link_or_reparse,
     open_regular_no_follow,
     short_unique_id,
@@ -40,7 +41,33 @@ _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 #: local divergence.
 PUBLICATION_IDENTITY_MARKER = ".archive-source.json"
 
-_TEMP_MARKER_GLOB = f".{PUBLICATION_IDENTITY_MARKER}.*.tmp"
+#: The marker only ever holds four short identity strings -- bounds both a
+#: pre-existing, destination-controlled marker read (the admission target is
+#: by definition one the caller does not yet own) and a new claim write.
+MAX_MARKER_BYTES = 64 * 1024
+
+_TEMP_MARKER_PREFIX = f".{PUBLICATION_IDENTITY_MARKER}."
+_TEMP_MARKER_SUFFIX = ".tmp"
+
+
+def _is_stale_temp_marker(name: str) -> bool:
+    return name.startswith(_TEMP_MARKER_PREFIX) and name.endswith(_TEMP_MARKER_SUFFIX)
+
+
+def _unlink_if_exists(path: Path) -> None:
+    try:
+        os.unlink(windows_extended_path(path))
+    except FileNotFoundError:
+        pass
+
+
+def _dest_entry_names(dest: Path) -> list[str]:
+    """List *dest*'s direct children through an extended-path-safe scan."""
+    try:
+        with os.scandir(windows_extended_path(dest)) as entries:
+            return [entry.name for entry in entries]
+    except FileNotFoundError:
+        return []
 
 
 def _read_marker(marker_path: Path) -> dict | None:
@@ -48,7 +75,10 @@ def _read_marker(marker_path: Path) -> dict | None:
     at *marker_path* on any platform (POSIX ``O_NOFOLLOW`` and Windows
     reparse-point handling are both covered by ``open_regular_no_follow``,
     not just the POSIX-only flag) -- a symlink sitting at the marker path
-    is never legitimate ownership state, so it is refused, not followed."""
+    is never legitimate ownership state, so it is refused, not followed.
+    The read is bounded: the admission target is by definition a
+    destination the caller does not yet own, so a pre-existing oversized
+    marker must not be read to EOF."""
     try:
         mode = os.stat(windows_extended_path(marker_path), follow_symlinks=False).st_mode
     except FileNotFoundError:
@@ -56,20 +86,10 @@ def _read_marker(marker_path: Path) -> dict | None:
     if is_link_or_reparse(marker_path, mode):
         raise OSError(f"publication marker at {marker_path} is a link/reparse point")
     with open_regular_no_follow(marker_path) as handle:
-        return json.loads(handle.read().decode("utf-8"))
-
-
-def _clear_stale_temp_markers(dest: Path) -> None:
-    """Remove orphaned claim temp-files from a prior interrupted write.
-
-    Held under the same destination lock as every other step here, so this
-    can only ever race a genuinely crashed/killed writer (never a live one)
-    -- a leftover ``.{marker}.<id>.tmp`` would otherwise count as unowned
-    nonempty content on every future admission attempt, permanently
-    refusing a destination that never actually got claimed.
-    """
-    for stale in dest.glob(_TEMP_MARKER_GLOB):
-        stale.unlink(missing_ok=True)
+        raw = handle.read(MAX_MARKER_BYTES + 1)
+    if len(raw) > MAX_MARKER_BYTES:
+        raise OSError(f"publication marker at {marker_path} exceeds {MAX_MARKER_BYTES} bytes")
+    return json.loads(raw.decode("utf-8"))
 
 
 def check_publication_identity(
@@ -136,6 +156,9 @@ def _admit_under_lock(
         "repository": identity.repository,
         "venue": identity.venue,
     }
+    payload = json.dumps(incoming, sort_keys=True)
+    if len(payload.encode("utf-8")) > MAX_MARKER_BYTES:
+        return PushResult(ok=False, detail="publication identity payload too large")
     marker_path = dest / PUBLICATION_IDENTITY_MARKER
     try:
         existing = _read_marker(marker_path)
@@ -152,9 +175,11 @@ def _admit_under_lock(
             ),
         )
     try:
-        if dest.exists():
-            _clear_stale_temp_markers(dest)
-        has_content = dest.exists() and any(dest.iterdir())
+        names = _dest_entry_names(dest)
+        stale = [name for name in names if _is_stale_temp_marker(name)]
+        for name in stale:
+            _unlink_if_exists(dest / name)
+        has_content = any(name not in stale for name in names)
     except OSError as exc:
         return PushResult(ok=False, detail=f"cannot inspect destination: {exc}")
     if has_content:
@@ -167,7 +192,7 @@ def _admit_under_lock(
         )
     temp_path = dest / f".{PUBLICATION_IDENTITY_MARKER}.{short_unique_id()}.tmp"
     try:
-        dest.mkdir(parents=True, exist_ok=True)
+        ensure_real_directory(dest)
         # Write through an exclusively created, brand-new temp name (so
         # there is nothing pre-existing to follow on any platform), then
         # publish via os.replace -- rename(2) (and its Windows
@@ -181,14 +206,14 @@ def _admit_under_lock(
         fd = os.open(windows_extended_path(temp_path), flags, 0o644)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(json.dumps(incoming, sort_keys=True))
+                handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(
                 windows_extended_path(temp_path), windows_extended_path(marker_path)
             )
         except OSError:
-            temp_path.unlink(missing_ok=True)
+            _unlink_if_exists(temp_path)
             raise
     except OSError as exc:
         return PushResult(ok=False, detail=f"cannot claim destination: {exc}")

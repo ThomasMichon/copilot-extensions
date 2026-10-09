@@ -10,6 +10,7 @@ of which pass this argument).
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import pytest
 from agent_logger.sync.targets.filesystem import LocalTarget
 from agent_logger.sync.targets.ingest import IngestTarget
 from agent_logger.sync.targets.publication_admission import (
+    MAX_MARKER_BYTES,
     PUBLICATION_IDENTITY_MARKER,
     check_publication_identity,
 )
@@ -286,6 +288,50 @@ def test_onedrive_target_fails_closed_for_identity_admission(tmp_path: Path) -> 
     assert not (dest / ".archive-source.json").exists()
     if dest.exists():
         assert not any(dest.iterdir())  # empty: never copied, never claimed
+
+
+def test_check_publication_identity_rejects_an_oversized_existing_marker(
+    tmp_path: Path,
+) -> None:
+    """A pre-existing, destination-controlled marker larger than the bound
+    must fail closed, never be read to EOF (the admission target is by
+    definition a destination the caller does not yet own)."""
+    dest = tmp_path / "dest" / "m1"
+    dest.mkdir(parents=True)
+    oversized = "x" * (MAX_MARKER_BYTES + 1)
+    (dest / PUBLICATION_IDENTITY_MARKER).write_text(oversized, encoding="utf-8")
+
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = check_publication_identity(dest, identity)
+    assert result is not None and not result.ok
+    assert "exceeds" in result.detail
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
+def test_filesystem_push_claims_a_long_destination_path_with_identity(
+    tmp_path: Path,
+) -> None:
+    """Admission's own filesystem operations (mkdir/scan/unlink/replace)
+    must go through the same extended-path handling as the rest of the
+    filesystem target, so a claim past Windows' MAX_PATH still lands."""
+    src = _make_source(tmp_path)
+    dest_root = tmp_path / ("d" * 48)
+    machine_dir = "m" + ("x" * 220)
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = LocalTarget({"path": str(dest_root)}).push(
+        src, machine_dir, source_identity=identity
+    )
+    assert result.ok, result.detail
+    assert len(str(dest_root / machine_dir)) >= 260
+    from agent_logger.sync import provenance
+
+    marker = dest_root / machine_dir / PUBLICATION_IDENTITY_MARKER
+    with open(provenance._windows_extended_path(marker), encoding="utf-8") as f:
+        assert json.loads(f.read())["host"] == "lambda-core"
 
 
 def test_ssh_target_rejects_identity_admission() -> None:
