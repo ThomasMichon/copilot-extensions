@@ -123,6 +123,6 @@ if [ -f "$lockFile" ]; then
 fi
 
 echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
-nohup bash "${target[@]}" >/dev/null 2>&1 &
+(cd "$HOME" && exec nohup bash "${target[@]}" >/dev/null 2>&1) &
 echo $! > "$lockFile" 2>/dev/null || true
 exit 0

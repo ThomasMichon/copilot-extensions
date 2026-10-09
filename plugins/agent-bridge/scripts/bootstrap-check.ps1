@@ -240,7 +240,7 @@ $__utf8 = New-Object System.Text.UTF8Encoding($false)
         Replace('__DEPLOYED__', $deployed).Replace('__CURRENT__', $current).Replace('__RECONCILELOG__', $reconcileLog)
     $reCmd = "& { $reInner } *> `"$reconcileLog`"`n$compTail"
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
-    $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden `
+    $proc = Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE -PassThru -WindowStyle Hidden `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
     $launchedPid = if ($proc) { $proc.Id } else { 0 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
