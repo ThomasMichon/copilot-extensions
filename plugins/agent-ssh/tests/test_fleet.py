@@ -13,6 +13,8 @@ from fleet_contracts import ContractError, DriverSnapshot, decode_json
 
 from agent_ssh import fleet
 
+pytestmark = pytest.mark.guard
+
 
 def sources(tmp_path: Path):
     registry = tmp_path / "registry.yaml"
@@ -67,6 +69,20 @@ def test_source_revision_changes_with_either_authoritative_input(tmp_path):
     registry.write_text(registry.read_text() + "# revised\n", encoding="utf-8")
     both_changed = fleet.describe(registry, module, **kwargs)
     assert len({item.source_revision for item in (before, recipe_changed, both_changed)}) == 3
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+@pytest.mark.parametrize("source", ["registry", "module"])
+def test_source_encoding_matches_the_emitters_utf8_contract(tmp_path, encoding, source):
+    registry, module = sources(tmp_path)
+    path = registry if source == "registry" else module
+    path.write_bytes(path.read_text(encoding="utf-8").encode(encoding))
+    from agent_ssh import ssh_profile
+
+    with pytest.raises(UnicodeError):
+        ssh_profile.load_file(path)
+    with pytest.raises(UnicodeError):
+        fleet.describe(registry, module, provider_instance="ssh-a", selected=["Worker-A"])
 
 
 @pytest.mark.parametrize("bad_source", ["duplicate", "module-mismatch", "oversized", "root"])

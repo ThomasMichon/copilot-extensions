@@ -229,3 +229,10 @@ They remain vision deltas, not features claimed by this routing foundation.
   command; CDE/provider admission and migration remain separately blocked.
   Native POSIX installer execution remains the Linux CI lane's obligation,
   not a claim made from the Windows run.
+- Implementation PR #5824 review identified two real integration gaps: raw-byte
+  YAML decoding could admit a different source encoding than the emitter, and
+  the projected fast suite lacked guard-lane attribution. Decode both bounded
+  sources as UTF-8 before YAML parsing; add UTF-16/32 rejection regressions for
+  both files and guard markers to the projection and static-driver contract tests.
+- Fresh guard-lane verification: 116 passed, 4 native-platform skips. This
+  collects the canonical pure suite as well as static-driver/CLI contracts.

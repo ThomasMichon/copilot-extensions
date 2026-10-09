@@ -37,7 +37,8 @@ def describe(
     if len(set(folded)) != len(folded):
         raise ContractError("selection contains duplicate SSH target identities")
     registry_bytes, module_bytes = _read(registry), _read(module)
-    cfg, recipe = yaml.safe_load(registry_bytes), yaml.safe_load(module_bytes)
+    cfg = yaml.safe_load(registry_bytes.decode("utf-8"))
+    recipe = yaml.safe_load(module_bytes.decode("utf-8"))
     try:
         ssh_profile.validate_profile_inputs(cfg, recipe, require_transport_match=True)
     except (ValueError, TypeError, KeyError) as exc:

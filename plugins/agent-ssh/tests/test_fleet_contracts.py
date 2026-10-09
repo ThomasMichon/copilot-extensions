@@ -3,6 +3,10 @@
 import runpy
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.guard
+
 _PLUGIN = Path(__file__).resolve().parents[1]
 _CANDIDATES = (
     _PLUGIN / "libs" / "fleet-contracts" / "tests" / "test_records.py",
