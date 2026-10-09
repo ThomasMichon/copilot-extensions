@@ -136,6 +136,19 @@ def test_hello_extension_and_legacy_peer(receipt):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("size", [0, 7, 8, 15])
+def test_short_hello_is_a_connection_error(size):
+    async def scenario():
+        reader = asyncio.StreamReader()
+        reader.feed_data(protocol.encode(protocol.MsgType.HELLO, b"\0" * size))
+        reader.feed_eof()
+        writer = MagicMock()
+        writer.drain = AsyncMock()
+        with pytest.raises(ConnectionError, match="truncated cursor/PID prefix"):
+            await SessionHostClient(reader, writer).attach()
+    asyncio.run(scenario())
+
+
 def test_host_sends_execution_bound_receipt():
     async def scenario():
         stdout = asyncio.StreamReader()

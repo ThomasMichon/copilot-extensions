@@ -69,6 +69,8 @@ class SessionHostClient:
         if msg is None or msg[0] != proto.MsgType.HELLO:
             raise ConnectionError("session host did not send HELLO")
         payload = msg[1]
+        if len(payload) < 16:
+            raise ConnectionError("session host HELLO has a truncated cursor/PID prefix")
         child_pid = proto.unpack_u64(payload[8:16])
         receipt = None
         if 16 < len(payload) <= 16 + MAX_RECEIPT_BYTES:
