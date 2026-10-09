@@ -2367,8 +2367,8 @@ def _merge_pr_attribution_state(
             not (a and b) or a == b for a, b in ((match.number, current_pr.number), (match.provider, current_pr.provider)))
         for f in (("remote", "head_repo", "head_identity", "head_owner") if same_pr else ()):
             setattr(match, f, getattr(match, f) or getattr(current_pr, f))
-        # A newer on-disk entry naming another PR was reassigned after this snapshot (set_pr bumps the revision): it wins whole.
-        if not same_pr and current_pr.pr_revision > match.pr_revision:
+        # A positive equal-or-newer on-disk revision wins a differing PR identity.
+        if not same_pr and current_pr.pr_revision >= max(1, match.pr_revision):
             for f in fields(match):
                 setattr(match, f.name, getattr(current_pr, f.name))
         # An EQUAL on-disk revision is authoritative too (fix-PR-#3037-review finding): two
