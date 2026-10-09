@@ -465,3 +465,39 @@ test("a control is acked under the id it was claimed for, even across a rename",
   await pending;
   assert.deepEqual(posts, [["/api/v1/live-sessions/placeholder/controls/ack", { ids: [7], applied: true }]]);
 });
+
+test("a history replay control is applied by replaying, and rejected when it can't be", async () => {
+  const { drainControls: drain } = await import("../extensions/agent-bridge/delivery.mjs");
+  for (const [replayHistory, applied] of [[async () => true, true], [async () => false, false],
+                                           [async () => { throw new Error("no transcript"); }, false],
+                                           [null, false]]) {
+    const posts = [];
+    const replayed = [];
+    await drain("s1", {
+      getJson: async () => ({ messages: [{ id: 3, kind: "control:replay-history", body: "" }] }),
+      post: async (method, path, body) => { posts.push([path, body]); return true; },
+      session: {},
+      replayHistory: replayHistory && (async (sid) => { replayed.push(sid); return replayHistory(sid); }),
+    });
+    assert.deepEqual(posts, [["/api/v1/live-sessions/s1/controls/ack", { ids: [3], applied }]]);
+    if (replayHistory) assert.deepEqual(replayed, ["s1"]);
+  }
+});
+
+test("transcriptTail keeps the newest represented events with their ids and times", async () => {
+  const { transcriptTail } = await import("../extensions/agent-bridge/delivery.mjs");
+  const lines = [
+    '{"type":"user.message","id":"a"', // a torn first line (the read started mid-line)
+    JSON.stringify({ type: "user.message", id: "u1", data: { content: "hi" }, timestamp: "2026-10-09T01:00:00.000Z" }),
+    JSON.stringify({ type: "session.info", id: "x", data: {} }),
+    JSON.stringify({ type: "assistant.message", id: "m1", data: { content: "a" }, agentId: "sub-1" }),
+    JSON.stringify({ type: "assistant.message", id: "m2", data: { content: "b" } }),
+    "",
+  ].join("\n");
+  const types = new Set(["user.message", "assistant.message"]);
+  const all = transcriptTail(lines, types);
+  assert.deepEqual(all.map((e) => e.id), ["u1", "m1", "m2"]);
+  assert.equal(all[0].timestamp, Date.parse("2026-10-09T01:00:00.000Z") / 1000);
+  assert.equal(all[1].agentId, "sub-1");
+  assert.deepEqual(transcriptTail(lines, types, 2).map((e) => e.id), ["m1", "m2"]);
+});

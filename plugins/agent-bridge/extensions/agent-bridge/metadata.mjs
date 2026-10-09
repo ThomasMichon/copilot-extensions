@@ -102,3 +102,42 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
     driven_by: env.AGENT_BRIDGE_DRIVEN_BY || null,
   };
 }
+
+// The identity fields a registration needs for the bridge (and its clients) to
+// place the session in its worktree: when the load-time lookup misses them (a
+// slow or failed `agent-worktrees get` under load, as right after a reboot),
+// the session would otherwise stay registered without them for its whole life.
+const IDENTITY_FIELDS = ["worktree_id", "repo"];
+export const METADATA_RETRY_MIN_MS = 30_000;
+export const METADATA_RETRY_MAX_MS = 10 * 60_000;
+
+// ``refresh()`` re-resolves the metadata while a field above is still missing,
+// at most once per backoff (30 s doubling to 10 min), and fills in only what was
+// missing -- a value already known is never replaced. Resolves true when it
+// filled something in (the next registration then carries it).
+export function metadataRefresher(state, resolve = resolveMetadataAsync, now = Date.now) {
+  let nextAt = 0;
+  let delay = METADATA_RETRY_MIN_MS;
+  let running = false;
+  return async () => {
+    const meta = state.meta || {};
+    const missing = IDENTITY_FIELDS.filter((k) => !meta[k]);
+    if (!missing.length || running || now() < nextAt) return false;
+    running = true;
+    try {
+      const fresh = await resolve().catch(() => null);
+      const filled = {};
+      for (const k of missing) if (fresh && fresh[k]) filled[k] = fresh[k];
+      if (Object.keys(filled).length) {
+        state.meta = { ...(state.meta || fresh), ...filled };
+        delay = METADATA_RETRY_MIN_MS;
+        return true;
+      }
+      nextAt = now() + delay;
+      delay = Math.min(delay * 2, METADATA_RETRY_MAX_MS);
+      return false;
+    } finally {
+      running = false;
+    }
+  };
+}
