@@ -46,6 +46,13 @@ vision, under two firm guardrails the vision states as Behaviors:
   — reliance is feature-detected and staged behind released surfaces, with the
   harness's own implementation kept as the fallback.
 
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Claimed phase lead | Owns one declared implementation phase through review, validation, and merge | claim on `#985` and a managed per-phase worktree |
+| Sweep audit lead | Reconciles source evidence and tracker disposition without assuming phase implementation ownership | `vision-backport-sweep`, `#5456` |
+
 ## Context
 
 The harness's own worktree layout was previously aligned to the CLI's *original*
@@ -180,6 +187,14 @@ there (comment/assign) before starting, and land changes serially through the
 PR-required `dev`. Downstream private plans may **link to** this effort and its
 issues; the public artifacts stay self-contained and general-purpose.
 
+## Proposal
+
+Retain the staged convergence plan and existing phase ownership under `#985`.
+Before implementing a native mapping or migration, establish the released
+contract that phase relies on and prove the no-regression and fallback gates
+above. The sweep's source-audit reconciliation is not approval to implement an
+unproved native API, nor completion of an implementation phase.
+
 ## Journal
 
 - **2026-10-09** — Recorded the sweep's remaining root/catalog/working-boundary
@@ -190,6 +205,9 @@ issues; the public artifacts stay self-contained and general-purpose.
   its scope remains under open `#985`, with the evidence linked on both issues.
   Corrected this active effort's stale contribution target to `dev` and made
   native-layout proof an explicit prerequisite, not an assumption.
+  Review of `#5814` additionally caught missing canonical Participants and
+  Proposal sections; restored them without assigning unclaimed implementation
+  work or reconstructing absent operator wording.
 - **2026-08-27** — Expanded Phase D into the dedicated
   [`agent-bridge-ahp-convergence`](../agent-bridge-ahp-convergence/README.md)
   effort and public umbrella #1266. The narrower #989 remains the native
