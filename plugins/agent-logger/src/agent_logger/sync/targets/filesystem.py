@@ -47,6 +47,7 @@ from agent_logger.sync.provenance import (
 from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
 )
+from agent_logger.sync.targets import publication_admission
 from agent_logger.sync.targets.base import (
     SESSION_INDEX_NAMES,
     DoctorResult,
@@ -57,17 +58,9 @@ from agent_logger.sync.targets.base import (
     Target,
     is_session_path_included,
 )
-from agent_logger.sync.targets.publication_admission import (
-    PUBLICATION_IDENTITY_MARKER,
-    check_publication_identity,
-)
 
-#: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, ``.hold``
-#: (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker), and the
-#: publication-identity ownership marker -- reserved so source content can
-#: never overwrite (or be mistaken for) the destination's own admission claim.
-_EXCLUDE_NAMES = frozenset({".lock", "lock", PUBLICATION_IDENTITY_MARKER.casefold()})
-_EXCLUDE_SUFFIXES = (".lock", ".tmp", ".hold")
+#: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
+_EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
 
 _MAX_TRANSACTION_MANIFEST_BYTES = 16 * 1024 * 1024
 _MAX_FLEET_MACHINE_DEPTH = 4
@@ -1691,7 +1684,9 @@ class FilesystemTarget(Target):
                 ok=False,
                 detail=f"cannot create safe destination for {machine}: {exc}",
             )
-        if (admitted := check_publication_identity(dest, source_identity)) is not None:
+        if (admitted := publication_admission.check_publication_identity(
+            dest, source_identity, supports_identity_admission=self.rescue_compare_and_set
+        )) is not None:
             return admitted
 
         copied = 0
@@ -1787,11 +1782,14 @@ class FilesystemTarget(Target):
                 detail=f"detritus cleanup failed for {relative}: {exc}",
             )
         try:
+            marker_rel = Path(publication_admission.PUBLICATION_IDENTITY_MARKER)
             source_files = _iter_regular_source_files(source, detritus.roots)
             for src_file in source_files:
-                if _is_excluded_name(src_file.name):
-                    continue
                 rel = src_file.relative_to(source)
+                # Marker reserved at the publication root only (see
+                # publication_admission.check_publication_identity).
+                if _is_excluded_name(src_file.name) or rel == marker_rel:
+                    continue
                 if not is_session_path_included(rel, include_sessions, batch_mode=batch_mode):
                     continue
                 dst_file = dest / rel

@@ -149,6 +149,28 @@ def test_filesystem_push_never_copies_source_marker_over_ownership_claim(
     assert recorded["provider"] == "github"
 
 
+def test_filesystem_push_preserves_a_nested_legitimately_named_file(
+    tmp_path: Path,
+) -> None:
+    """The marker name is reserved only at the publication root -- a
+    legitimately nested file sharing that basename (e.g. captured session
+    content) must still be copied normally."""
+    src = _make_source(tmp_path)
+    nested = src / "session-state" / "abc-123" / ".archive-source.json"
+    nested.write_text('{"captured": true}', encoding="utf-8")
+    dest_root = tmp_path / "dest"
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = LocalTarget({"path": str(dest_root)}).push(
+        src, "m1", source_identity=identity
+    )
+    assert result.ok
+    copied_nested = dest_root / "m1" / "session-state" / "abc-123" / ".archive-source.json"
+    assert copied_nested.is_file()
+    assert copied_nested.read_text(encoding="utf-8") == '{"captured": true}'
+
+
 def test_publication_marker_refuses_a_symlink_at_the_marker_path(
     tmp_path: Path,
 ) -> None:
@@ -171,6 +193,67 @@ def test_publication_marker_refuses_a_symlink_at_the_marker_path(
     marker = dest / PUBLICATION_IDENTITY_MARKER
     assert marker.is_symlink()  # untouched -- never followed or replaced
     assert outside_target.read_text(encoding="utf-8") == "do-not-touch"
+
+
+def test_check_publication_identity_fails_closed_when_unsupported(
+    tmp_path: Path,
+) -> None:
+    """A target with no cross-writer admission control (e.g. a cloud-synced
+    OneDrive replica) must refuse a ``source_identity`` push outright rather
+    than enforcing a lock that only ever coordinates writers on this host."""
+    dest = tmp_path / "dest" / "m1"
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = check_publication_identity(
+        dest, identity, supports_identity_admission=False
+    )
+    assert result is not None and not result.ok
+    assert not dest.exists()  # never even attempted a claim
+
+
+def test_check_publication_identity_clears_a_stale_temp_marker(
+    tmp_path: Path,
+) -> None:
+    """A temp-claim artifact left behind by a crashed/killed prior writer
+    must not permanently block a later, legitimate admission attempt."""
+    dest = tmp_path / "dest" / "m1"
+    dest.mkdir(parents=True)
+    stale = dest / f".{PUBLICATION_IDENTITY_MARKER}.deadbeefdeadbeef.tmp"
+    stale.write_text('{"provider": "orphaned"}', encoding="utf-8")
+
+    identity = _Identity(
+        provider="github", host="lambda-core", repository="example", venue="codespace"
+    )
+    result = check_publication_identity(dest, identity)
+    assert result is None
+    assert not stale.exists()
+    marker = dest / PUBLICATION_IDENTITY_MARKER
+    assert marker.is_file()
+
+
+def test_onedrive_target_fails_closed_for_identity_admission(tmp_path: Path) -> None:
+    """``OneDriveTarget`` inherits the filesystem admission gate but cannot
+    serialize cross-writer publication (cloud sync, not this process) --
+    ``Target.push`` must fail closed end-to-end, not just the helper."""
+    from agent_logger.sync.targets.filesystem import OneDriveTarget
+
+    src = _make_source(tmp_path)
+    onedrive_root = tmp_path / "OneDrive"
+    onedrive_root.mkdir()
+    target = OneDriveTarget({"root": str(onedrive_root)})
+    result = target.push(
+        src,
+        "m1",
+        source_identity=_Identity(
+            provider="github", host="a", repository="r1", venue="codespace"
+        ),
+    )
+    assert not result.ok
+    dest = onedrive_root / "Apps" / "agent-logger" / "sessions" / "m1"
+    assert not (dest / ".archive-source.json").exists()
+    if dest.exists():
+        assert not any(dest.iterdir())  # empty: never copied, never claimed
 
 
 def test_ssh_target_rejects_identity_admission() -> None:

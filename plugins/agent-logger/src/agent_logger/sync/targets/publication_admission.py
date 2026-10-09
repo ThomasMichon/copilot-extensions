@@ -19,12 +19,17 @@ import os
 from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
-from agent_logger.sync.provenance import short_unique_id, windows_extended_path
+from agent_logger.sync.provenance import (
+    is_link_or_reparse,
+    open_regular_no_follow,
+    short_unique_id,
+    windows_extended_path,
+)
 from agent_logger.sync.targets.base import PushResult, SourceIdentityLike
 
-#: ``O_NOFOLLOW`` has no Windows equivalent; ``os`` simply omits the
-#: attribute there, where reparse-point/symlink creation is already an
-#: administrative privilege and not the attacker model this guards against.
+#: ``O_NOFOLLOW`` has no Windows equivalent; the temp-write path below still
+#: gets Windows-safe no-follow semantics for free because it only ever opens
+#: a brand-new, exclusively created name (nothing pre-existing to follow).
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 #: Persisted at a claimed destination root once a ``source_identity`` push
@@ -35,9 +40,43 @@ _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 #: local divergence.
 PUBLICATION_IDENTITY_MARKER = ".archive-source.json"
 
+_TEMP_MARKER_GLOB = f".{PUBLICATION_IDENTITY_MARKER}.*.tmp"
+
+
+def _read_marker(marker_path: Path) -> dict | None:
+    """Read an existing marker without ever following a link/reparse point
+    at *marker_path* on any platform (POSIX ``O_NOFOLLOW`` and Windows
+    reparse-point handling are both covered by ``open_regular_no_follow``,
+    not just the POSIX-only flag) -- a symlink sitting at the marker path
+    is never legitimate ownership state, so it is refused, not followed."""
+    try:
+        mode = os.stat(windows_extended_path(marker_path), follow_symlinks=False).st_mode
+    except FileNotFoundError:
+        return None
+    if is_link_or_reparse(marker_path, mode):
+        raise OSError(f"publication marker at {marker_path} is a link/reparse point")
+    with open_regular_no_follow(marker_path) as handle:
+        return json.loads(handle.read().decode("utf-8"))
+
+
+def _clear_stale_temp_markers(dest: Path) -> None:
+    """Remove orphaned claim temp-files from a prior interrupted write.
+
+    Held under the same destination lock as every other step here, so this
+    can only ever race a genuinely crashed/killed writer (never a live one)
+    -- a leftover ``.{marker}.<id>.tmp`` would otherwise count as unowned
+    nonempty content on every future admission attempt, permanently
+    refusing a destination that never actually got claimed.
+    """
+    for stale in dest.glob(_TEMP_MARKER_GLOB):
+        stale.unlink(missing_ok=True)
+
 
 def check_publication_identity(
-    dest: Path, identity: SourceIdentityLike | None
+    dest: Path,
+    identity: SourceIdentityLike | None,
+    *,
+    supports_identity_admission: bool = True,
 ) -> PushResult | None:
     """Enforce destination identity-admission before any write under *dest*.
 
@@ -46,17 +85,32 @@ def check_publication_identity(
     re-push matching the already-persisted marker. Returns a failing
     :class:`PushResult` when admission must be refused outright.
 
+    *supports_identity_admission* lets a caller whose destination cannot
+    actually serialize concurrent cross-writer publication (e.g. a OneDrive
+    replica reconciled by cloud sync, not by this process) fail closed
+    instead of enforcing a lock that only ever coordinates writers on this
+    one host.
+
     Comparison, any marker write, and the emptiness check all happen under
-    one dedicated destination lock so two concurrent publishers can never
-    race past this gate -- the same check/use race already tracked as a
-    known gap for every *other* destination write in ``targets/filesystem.py``
-    (see ``push_process_logs``'s docstring) is exactly what owning the whole
-    sequence under a single lock closes here. Never overwrites or guesses:
-    a mismatched marker, or an existing nonempty leaf with no marker at
-    all, is refused rather than silently adopted.
+    one dedicated destination lock so two concurrent publishers on the same
+    host can never race past this gate -- the same check/use race already
+    tracked as a known gap for every *other* destination write in
+    ``targets/filesystem.py`` (see ``push_process_logs``'s docstring) is
+    exactly what owning the whole sequence under a single lock closes here.
+    Never overwrites or guesses: a mismatched marker, or an existing
+    nonempty leaf with no marker at all, is refused rather than silently
+    adopted.
     """
     if identity is None:
         return None
+    if not supports_identity_admission:
+        return PushResult(
+            ok=False,
+            detail=(
+                f"{dest} target cannot enforce cross-writer identity admission "
+                "(no receiver/cloud-side atomic admission for this transport yet)"
+            ),
+        )
     lock_file = dest.parent / f".{dest.name}.publication-admission.lock"
     with sync_lock(lock_file, timeout=30) as acquired:
         if not acquired:
@@ -71,28 +125,10 @@ def check_publication_identity(
             "venue": identity.venue,
         }
         marker_path = dest / PUBLICATION_IDENTITY_MARKER
-        existing: dict | None = None
         try:
-            fd = os.open(
-                windows_extended_path(marker_path), os.O_RDONLY | _O_NOFOLLOW
-            )
-        except FileNotFoundError:
-            fd = None
-        except OSError as exc:
-            # Includes ELOOP from O_NOFOLLOW: a symlink sitting at the
-            # marker path is never legitimate ownership state, so refuse
-            # outright rather than silently dereferencing it.
-            return PushResult(
-                ok=False, detail=f"unreadable publication marker: {exc}"
-            )
-        if fd is not None:
-            try:
-                with os.fdopen(fd, "r", encoding="utf-8") as handle:
-                    existing = json.loads(handle.read())
-            except (OSError, ValueError) as exc:
-                return PushResult(
-                    ok=False, detail=f"unreadable publication marker: {exc}"
-                )
+            existing = _read_marker(marker_path)
+        except (OSError, ValueError) as exc:
+            return PushResult(ok=False, detail=f"unreadable publication marker: {exc}")
         if existing is not None:
             if existing == incoming:
                 return None  # idempotent re-push of the same identity
@@ -104,6 +140,8 @@ def check_publication_identity(
                 ),
             )
         try:
+            if dest.exists():
+                _clear_stale_temp_markers(dest)
             has_content = dest.exists() and any(dest.iterdir())
         except OSError as exc:
             return PushResult(ok=False, detail=f"cannot inspect destination: {exc}")
@@ -119,12 +157,14 @@ def check_publication_identity(
         try:
             dest.mkdir(parents=True, exist_ok=True)
             # Write through an exclusively created, brand-new temp name (so
-            # there is nothing pre-existing to follow), then publish via
-            # os.replace -- rename(2) swaps the final path component itself
-            # rather than dereferencing it, so even a marker path raced into
-            # a symlink is safely overwritten in place rather than followed
-            # to redirect the write, and an interrupted write never leaves a
-            # half-written marker at the real path.
+            # there is nothing pre-existing to follow on any platform), then
+            # publish via os.replace -- rename(2) (and its Windows
+            # equivalent) swaps the final path component itself rather than
+            # dereferencing it, so even a marker path raced into a symlink
+            # is safely overwritten in place rather than followed. Both the
+            # write and the replace are cleaned up together on any failure
+            # so an interrupted claim never leaves a temp artifact that
+            # would wrongly count as unowned nonempty content later.
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
             fd = os.open(windows_extended_path(temp_path), flags, 0o644)
             try:
@@ -132,12 +172,12 @@ def check_publication_identity(
                     handle.write(json.dumps(incoming, sort_keys=True))
                     handle.flush()
                     os.fsync(handle.fileno())
+                os.replace(
+                    windows_extended_path(temp_path), windows_extended_path(marker_path)
+                )
             except OSError:
                 temp_path.unlink(missing_ok=True)
                 raise
-            os.replace(
-                windows_extended_path(temp_path), windows_extended_path(marker_path)
-            )
         except OSError as exc:
             return PushResult(ok=False, detail=f"cannot claim destination: {exc}")
         return None
