@@ -113,6 +113,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         ),
         "caller_session_id": bridge_protocol.CALLER_SESSION_ID_PROTOCOL_VERSION,
         "cooperative_stop": bridge_protocol.COOPERATIVE_STOP_PROTOCOL_VERSION,
+        "codespace_launch_policy": bridge_protocol.CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION,
     }
 
 

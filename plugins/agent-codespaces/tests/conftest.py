@@ -85,6 +85,15 @@ def _isolate_launch_memory(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_launch_policy(monkeypatch, tmp_path):
+    """Keep this machine's registered launch policy (if any) out of unit tests."""
+    from agent_codespaces import launch_policy
+
+    monkeypatch.setattr(launch_policy, "POLICY_FILE", tmp_path / "launch-policy.json")
+    monkeypatch.setattr(launch_policy, "bridge_enforcement", lambda: None)  # no daemon probe
+
+
+@pytest.fixture(autouse=True)
 def _isolate_owner_local_forward_beacon(monkeypatch, tmp_path):
     """Keep Connection Owner local-forward readiness beacons out of the host."""
     from agent_codespaces import owner_local_forwards

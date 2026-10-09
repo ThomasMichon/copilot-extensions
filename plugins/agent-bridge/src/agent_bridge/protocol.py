@@ -154,9 +154,15 @@ CALLER_SESSION_ID_PROTOCOL_VERSION = 24
 # against an older daemon it refuses rather than risk undoing a racing stop.
 COOPERATIVE_STOP_PROTOCOL_VERSION = 25
 
+# First version whose Session Host spawns on a CodeSpace (a fresh start, or a
+# respawn on resume) ask the host's registered launch policy first
+# (``agent-codespaces launch-check``). A host that registers a policy checks
+# for it, since an older resident daemon launches without asking.
+CODESPACE_LAUNCH_POLICY_PROTOCOL_VERSION = 26
+
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 25
+HTTP_PROTOCOL_VERSION = 26
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

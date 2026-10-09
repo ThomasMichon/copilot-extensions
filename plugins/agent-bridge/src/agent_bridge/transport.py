@@ -1185,13 +1185,13 @@ async def spawn(
     session_id: str = "",
 ) -> AgentProcess:
     """Spawn an ACP agent process (local, SSH, or command)."""
+    from .venue_launch_policy import gate_raw_codespace_spawn  # a resync / host-less resume asks too
+
+    await gate_raw_codespace_spawn(target)
     if target.type == "command" or target.spawn_command:
         return await spawn_raw(target, tracker=tracker, session_id=session_id)
     if target.type == "ssh":
-        return await spawn_ssh(
-            target, tracker=tracker, connect_timeout=connect_timeout,
-            session_id=session_id,
-        )
+        return await spawn_ssh(target, tracker=tracker, connect_timeout=connect_timeout, session_id=session_id)
     return await spawn_local(target, tracker=tracker, session_id=session_id)
 
 
