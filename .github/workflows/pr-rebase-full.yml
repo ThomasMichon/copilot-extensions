@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Run exhaustive owned-PR replay contracts
         env:
           AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE: "1"
@@ -35,7 +35,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Run exhaustive owned-PR replay contracts
         env:
           AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE: "1"
