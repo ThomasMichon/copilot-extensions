@@ -162,6 +162,15 @@ the new code: the successor starts on a fresh loopback port, status writers
 follow the routed active endpoint first, and the predecessor drains accepted
 status-apply work plus its current republish cycle before retiring.
 
+On Windows, ordinary and passive daemon starts use the shared direct,
+windowless interpreter resolver and preserve the calling venv's import context.
+This keeps the spawned process handle's PID equal to the runtime PID instead of
+publishing a venv redirector's PID. If the venv's real base `pythonw.exe` cannot
+be resolved, startup fails explicitly rather than retaining an ambiguous
+launcher/child identity. Repair that Python installation before retrying.
+Existing launcher/child pairs are not rewritten or stopped by this change;
+their identity must be classified before automated retirement.
+
 ## Manage the harness (state views)
 
 Once set up, the Worktree Manager is also the ongoing **Manager** — a read-only

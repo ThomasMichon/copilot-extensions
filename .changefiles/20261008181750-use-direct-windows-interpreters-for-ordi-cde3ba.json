@@ -1,0 +1,9 @@
+{
+  "comment": "Use direct Windows interpreters for ordinary and passive mux-daemon starts so process handles identify the runtime, preserving venv imports and headless flags. Reject a Windows venv that cannot bypass its redirector. Existing launcher/child pairs remain unchanged and require separate classification before retirement.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
