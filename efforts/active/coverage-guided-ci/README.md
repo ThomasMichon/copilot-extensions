@@ -733,6 +733,16 @@ _Pending review of this plan._
 ## Journal
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
+- `dev` advanced during review and contained a broader, already-merged
+  watch-daemon correction (joined shutdown, unique atomic-write files,
+  serialized replacement, and stronger restart/concurrency tests).
+  The operator approved retaining that canonical implementation and removing
+  only this PR's superseded watch-daemon slice/changefile. Owned history was
+  backed up, net-squashed, and rebased once; both the upstream documentation
+  additions and dependency version updates were preserved. No competing fix
+  was forced over the upstream contribution. All 158 directly affected
+  regression tests pass after reconciliation; fresh review and hosted
+  verification remain required for the rewritten head.
 - The review-fixed full Windows worktree run 37885149671 passed all
   intended cases in 540.84 seconds including cleanup (maximum group
   95.04 seconds). Its repeat 37886775797 passed worktrees too, but
