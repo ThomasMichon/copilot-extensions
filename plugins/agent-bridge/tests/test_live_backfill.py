@@ -81,6 +81,13 @@ def test_a_replayed_event_keeps_its_own_time() -> None:
     assert events[0].timestamp == 1_000.0 and events[1].timestamp > 1_000.0
 
 
+def test_a_non_finite_timestamp_falls_back_to_the_servers_time() -> None:
+    store = LiveEventStore()
+    store.ingest("s1", [_msg(1, "a", ts=float("nan")), _msg(2, "b", ts=float("inf"))])
+    events = store.get("s1").snapshot_history()[1]
+    assert all(e.timestamp > 1_000_000_000 for e in events)
+
+
 def test_the_routes_ask_for_the_replay_hold_live_events_and_land_it_first(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(tmp_path / "none.yaml"))
     app = create_app(config=ServiceConfig(port=0, bind="127.0.0.1", db_path=str(tmp_path / "t.db")),
