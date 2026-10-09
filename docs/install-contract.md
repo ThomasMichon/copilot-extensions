@@ -1494,6 +1494,14 @@ worktrees self-installer retains its existing 600-second minimum, extended when
 a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
 values fail explicitly before launching the installer.
 
+Plugins with a watchdog default other than 480 seconds declare that positive
+integer as `installerDeadlineSeconds` in `plugin.json`; unified update reads it
+only when neither deadline environment override is set. The declaration must
+match the plugin's own cross-platform installer defaults. Agent-dispatch declares
+1050 seconds for its longer activation/cutover lifecycle, so its default caller
+budget is 1080 seconds; an explicit disabled-watchdog override still uses the
+finite 510-second fallback. Invalid declarations fail before installer launch.
+
 The **agent-bridge Windows hook** serializes reconcile admission and status
 publication with an installation-root-scoped global mutex, including across
 Windows login sessions. Each launch has an

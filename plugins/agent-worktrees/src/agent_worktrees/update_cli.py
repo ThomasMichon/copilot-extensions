@@ -352,8 +352,8 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             return 1
 
         try:
-            installer_timeout = max(600, _installer_timeout("agent-worktrees", aw_runtime_env))
-        except ValueError as error:
+            installer_timeout = max(600, _installer_timeout("agent-worktrees", aw_runtime_env, plugin_dir))
+        except (OSError, ValueError) as error:
             output.err(str(error))
             return 1
         result = subprocess.run(

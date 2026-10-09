@@ -4,12 +4,40 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from agent_worktrees import reconcile, update_runtime as runtime
+
+pytestmark = pytest.mark.guard
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ({}, 1080),
+        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 930),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "600",
+          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 630),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "0"}, 510),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "-1"}, 510),
+    ],
+)
+def test_dispatch_effective_default_and_overrides(environment, expected):
+    payload = Path(__file__).resolve().parents[2] / "agent-dispatch"
+    default = json.loads((payload / "plugin.json").read_text())["installerDeadlineSeconds"]
+    assert default == 1050
+    for script, pattern in [
+        ("install.ps1", r"AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '(\d+)'"),
+        ("install.sh", r"AGENT_DISPATCH_INSTALL_DEADLINE_SEC=(\d+)"),
+    ]:
+        match = re.search(pattern, (payload / "scripts" / script).read_text())
+        assert match and int(match[1]) == default
+    assert runtime._installer_timeout("agent-dispatch", environment, payload) == expected
 
 
 @pytest.mark.parametrize(
@@ -80,6 +108,37 @@ def test_registered_runtime_and_module_fallback_use_selected_deadline(payloads, 
     assert runtime._update_modules(plugin, "linux", None, force=True, targets=targets)
     assert len(calls) == 3
     assert all(call["timeout"] == 930 and call["env"] is environment for call in calls)
+
+
+def test_declared_default_reaches_registered_and_module_installers(payloads, monkeypatch):
+    plugin, environment = payloads
+    environment.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
+    (plugin.parent / "agent-example" / "plugin.json").write_text(json.dumps({
+        "name": "agent-example", "installerDeadlineSeconds": 840,
+    }))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(argv, 1 if len(calls) == 2 else 0)
+
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    assert runtime._reconcile_one_runtime("agent-example", "linux", force=True) == "OK"
+    targets = {"agent-example": runtime._RegisteredPluginTarget(
+        context=None, activation=runtime._PluginActivation.ACTIVE,
+    )}
+    assert runtime._update_modules(plugin, "linux", None, force=True, targets=targets)
+    assert len(calls) == 3 and all(call["timeout"] == 870 for call in calls)
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "1050", 1.5, None])
+def test_invalid_declared_deadline_is_explicit(payloads, value):
+    plugin, environment = payloads
+    environment.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
+    payload = plugin.parent / "agent-example"
+    (payload / "plugin.json").write_text(json.dumps({"installerDeadlineSeconds": value}))
+    with pytest.raises(ValueError, match="installerDeadlineSeconds must be a positive integer"):
+        runtime._installer_timeout("agent-example", environment, payload)
 
 
 def test_invalid_deadline_does_not_launch_runtime_or_module(payloads, monkeypatch):
