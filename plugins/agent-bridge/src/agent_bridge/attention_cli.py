@@ -34,6 +34,14 @@ def _one_line(value: Any) -> str:
     return " ".join(str(value or "").split())[:_ERROR_MAX]
 
 
+def _current_attention(client: Any, session_ref: str) -> dict[str, Any]:
+    """``GET /api/v1/sessions/{ref}/attention/current``: a session's current
+    attention reason, never a wait (the caller gates on the protocol)."""
+    from urllib.parse import quote
+
+    return client._request("GET", f"/api/v1/sessions/{quote(session_ref, safe='')}/attention/current") or {}
+
+
 def read_current_attention(client: Any, refs: list[str]) -> list[dict[str, Any]]:
     """One entry per ref, in order (see the module docstring)."""
     from .client import BridgeClientError
@@ -47,7 +55,7 @@ def read_current_attention(client: Any, refs: list[str]) -> list[dict[str, Any]]
     entries = []
     for ref in refs:
         try:
-            body = client.current_attention(ref)
+            body = _current_attention(client, ref)
         except BridgeClientError as exc:
             status = "not_found" if exc.status == 404 else "error"
             entries.append({"ref": ref, "status": status, "error": _one_line(exc.detail) or str(exc)})

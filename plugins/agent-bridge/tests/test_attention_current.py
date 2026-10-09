@@ -176,13 +176,15 @@ def _fake_client(version: int, answers: dict) -> MagicMock:
     fake.daemon_supports.side_effect = lambda minimum: version >= minimum
     fake.daemon_protocol.return_value = (version, 1)
 
-    def current(ref):
+    def current(method, path):
+        ref = path.split("/")[4]
+        assert (method, path) == ("GET", f"/api/v1/sessions/{ref}/attention/current")
         answer = answers[ref]
         if isinstance(answer, Exception):
             raise answer
         return dict(answer)
 
-    fake.current_attention.side_effect = current
+    fake._request.side_effect = current
     return fake
 
 

@@ -105,9 +105,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "29a312f8ceff3df7d324c596dc8e2bae641cffc092c7d33a264316f2d731f72a",
+          "sha256": "199959547106c940aa62faca1d94d28e780c68a2ab23759c0f2ba943284426c1",
           "semantic": false,
-          "non_semantic_reason": "Adds the before=/limit= backward JSON page (continuity-qualified, atomic with event-log rebuild) to the events route (HTTP generation 23, gated by events_before_paging); forwards an optional caller_session_id from the create request into session rows and the status dict and echoes it in the create/reuse StartSessionResponse (HTTP generation 24, gated by caller_session_id); the representative session-create request shape is otherwise unchanged. The prompt-submit route forwards no_resume and fills the response's session_id with the session that took the prompt (HTTP generation 25, gated by cooperative_stop)."
+          "non_semantic_reason": "Adds the before=/limit= backward JSON page (continuity-qualified, atomic with event-log rebuild) to the events route (HTTP generation 23, gated by events_before_paging); forwards an optional caller_session_id from the create request into session rows and the status dict and echoes it in the create/reuse StartSessionResponse (HTTP generation 24, gated by caller_session_id); the representative session-create request shape is otherwise unchanged. The prompt-submit route forwards no_resume and fills the response's session_id with the session that took the prompt (HTTP generation 25, gated by cooperative_stop). It also mounts GET /api/v1/sessions/{ref}/attention/current (HTTP generation 29, gated by current_attention), whose own route module is outside this representative shape."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
