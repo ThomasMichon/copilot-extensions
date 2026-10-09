@@ -116,7 +116,8 @@ Targets implement a small `Target` interface
 **Destination identity-admission (`push`'s optional `source_identity`).** A
 caller publishing into a namespaced destination it doesn't already own (e.g.
 rescue/CodeSpace publication, not ordinary machine-rooted session sync) may
-pass a `source_identity` (provider/host/repository/venue) to `push`. `local`
+pass the canonical `source_roots.SourceIdentity` (venue kind, provider,
+optional host/repository, and venue name) to `push`. `local`
 enforces it under a dedicated destination lock before any write: a first
 push to an empty leaf claims it (writes a `.archive-source.json` marker), a
 re-push matching that marker is idempotent, and a mismatched marker or an
@@ -128,6 +129,12 @@ actually serialize two writers claiming separate replicas, and no
 receiver-side atomic admission exists yet for the `ssh`/`ingest` transports
 either. The default `None` is unchanged legacy behavior for every ordinary
 sync caller.
+
+Ownership markers use the same schema-v1 `.archive-source.json` contract
+and bounded metadata reader as source discovery, not a separate four-field
+format. Matching claims compare the complete canonical identity and preserve
+existing `legacy_aliases` metadata without rewriting the marker. The resulting
+publication can be read by `load_source_identity_file` and `iter_archive_sources`.
 
 Marker publication is atomic and refuses to replace an existing file or link,
 including one created between the initial inspection and publication. Claim

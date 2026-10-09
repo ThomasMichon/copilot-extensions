@@ -229,22 +229,13 @@ def resolve_rsync_runtime(*, require_ssh: bool = True) -> RsyncRuntime:
 
 
 class SourceIdentityLike(Protocol):
-    """Structural shape required of :meth:`Target.push`'s optional
-    ``source_identity`` argument.
+    """Serialization contract supplied by ``source_roots.SourceIdentity``.
 
-    This is a forward-looking contract for the not-yet-landed
-    ``agent_logger.sync.source_publication.SourceIdentity`` dataclass
-    (see the ``session-intelligence-and-accounting`` effort). This
-    module deliberately never imports that module -- any object
-    exposing these four string fields satisfies this protocol
-    structurally, so a target implementation has no runtime dependency
-    on ``source_publication`` landing.
+    Keep the import structural to avoid the source-discovery/sync import cycle.
+    Admission validates the serialized fields using the canonical identity.
     """
 
-    provider: str
-    host: str
-    repository: str
-    venue: str
+    def to_dict(self) -> dict[str, str | None]: ...
 
 
 @dataclass

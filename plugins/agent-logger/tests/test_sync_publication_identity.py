@@ -24,18 +24,23 @@ from agent_logger.sync.targets.publication_admission import (
     check_publication_identity,
 )
 from agent_logger.sync.targets.ssh import SshTarget
+from agent_logger.source_publication import load_source_identity_file
+from agent_logger.source_roots import SourceIdentity, iter_archive_sources
 
 
 @dataclass
 class _Identity:
-    """Minimal stand-in satisfying ``SourceIdentityLike`` structurally --
-    no import of the (not-yet-landed) real ``source_publication.SourceIdentity``
-    dataclass is needed or taken here."""
+    """Retain earlier regression inputs, serialized by the canonical model."""
 
     provider: str
     host: str
     repository: str
     venue: str
+
+    def to_dict(self) -> dict[str, str | None]:
+        return SourceIdentity(
+            "container", self.provider, host=self.host, venue_name=self.venue
+        ).to_dict()
 
 
 def _claim_worker(dest_str: str, host: str, barrier, queue) -> None:
@@ -307,12 +312,7 @@ def test_publication_marker_refuses_a_symlink_at_the_marker_path(
     outside_target = tmp_path / "outside-secret.json"
     outside_target.write_text(
         json.dumps(
-            {
-                "provider": identity.provider,
-                "host": identity.host,
-                "repository": identity.repository,
-                "venue": identity.venue,
-            },
+            {"schema_version": 1, **identity.to_dict()},
             sort_keys=True,
         ),
         encoding="utf-8",
@@ -425,10 +425,9 @@ def test_marker_created_during_publication_is_never_replaced(
     marker = dest / PUBLICATION_IDENTITY_MARKER
     outside = tmp_path / "outside.json"
     recorded = {
-        "provider": "github",
+        "schema_version": 1,
+        **identity.to_dict(),
         "host": "host-a" if winner != "different" else "host-b",
-        "repository": "example",
-        "venue": "codespace",
     }
     payload = json.dumps(recorded).encode()
     original_publish = admission._publish_marker_no_replace
@@ -521,6 +520,65 @@ def test_windows_marker_move_is_write_through_without_replacement(
     source, destination = tmp_path / "temp", tmp_path / "marker"
     admission._move_marker_no_replace_windows(source, destination)
     assert calls == [(f"extended:{source}", f"extended:{destination}", 0x00000008)]
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        SourceIdentity("machine", "copilot", host="source-host"),
+        SourceIdentity("container", "containers", host="source-host", venue_name="worker"),
+        SourceIdentity("codespace", "github", repository="owner/repo", venue_name="box"),
+    ],
+)
+def test_real_identity_push_round_trips_through_archive_discovery(
+    tmp_path: Path, identity: SourceIdentity,
+) -> None:
+    source = _make_source(tmp_path)
+    root = tmp_path / "archives"
+    result = LocalTarget({"path": str(root)}).push(
+        source, identity.namespace, source_identity=identity
+    )
+    assert result.ok, result.detail
+    marker = root / identity.namespace / PUBLICATION_IDENTITY_MARKER
+    assert load_source_identity_file(marker) == identity
+    discovered = list(iter_archive_sources(root))
+    assert len(discovered) == 1
+    assert discovered[0].key == identity.namespace
+    assert discovered[0].identity == identity
+
+
+def test_matching_canonical_marker_preserves_legacy_aliases(tmp_path: Path) -> None:
+    identity = SourceIdentity("container", "containers", host="source-host", venue_name="worker")
+    source = _make_source(tmp_path)
+    root = tmp_path / "archives"
+    target = LocalTarget({"path": str(root)})
+    first = target.push(source, identity.namespace, source_identity=identity)
+    assert first.ok, first.detail
+    marker = root / identity.namespace / PUBLICATION_IDENTITY_MARKER
+    data = {"schema_version": 1, **identity.to_dict(), "legacy_aliases": ["old-worker"]}
+    encoded = json.dumps(data).encode()
+    marker.write_bytes(encoded)
+
+    result = target.push(source, identity.namespace, source_identity=identity)
+    assert result.ok, result.detail
+    assert marker.read_bytes() == encoded
+    assert list(iter_archive_sources(root))[0].legacy_aliases == ("old-worker",)
+
+
+def test_same_short_repository_cannot_claim_another_full_repository(
+    tmp_path: Path,
+) -> None:
+    first = SourceIdentity("codespace", "github", repository="owner-a/repo", venue_name="box")
+    second = SourceIdentity("codespace", "github", repository="owner-b/repo", venue_name="box")
+    assert first.namespace == second.namespace
+    source = _make_source(tmp_path)
+    root = tmp_path / "archives"
+    target = LocalTarget({"path": str(root)})
+    assert target.push(source, first.namespace, source_identity=first).ok
+    result = target.push(source, second.namespace, source_identity=second)
+    assert not result.ok
+    assert "mismatch" in result.detail
+    assert load_source_identity_file(root / first.namespace / PUBLICATION_IDENTITY_MARKER) == first
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows lock opener")

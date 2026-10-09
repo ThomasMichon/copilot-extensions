@@ -22,8 +22,6 @@ from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.provenance import (
     ensure_real_directory,
     fsync_directory,
-    is_link_or_reparse,
-    open_regular_no_follow,
     short_unique_id,
     windows_extended_path,
 )
@@ -35,17 +33,13 @@ from agent_logger.sync.targets.base import PushResult, SourceIdentityLike
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 #: Persisted at a claimed destination root once a ``source_identity`` push
-#: admits it -- the same bounded JSON shape the (forthcoming, peer-owned)
-#: ``source_publication`` module's ``.archive-source.json`` CLI input uses.
-#: If that upstream schema lands with different field names, treat this as
-#: the contract correction to record in the effort README, not a silent
-#: local divergence.
+#: admits it, using source_roots' schema-v1 metadata contract.
 PUBLICATION_IDENTITY_MARKER = ".archive-source.json"
 
 #: The marker only ever holds four short identity strings -- bounds both a
 #: pre-existing, destination-controlled marker read (the admission target is
 #: by definition one the caller does not yet own) and a new claim write.
-MAX_MARKER_BYTES = 64 * 1024
+MAX_MARKER_BYTES = 1024 * 1024
 
 def _unlink_if_exists(path: Path) -> None:
     try:
@@ -63,26 +57,17 @@ def _dest_entry_names(dest: Path) -> list[str]:
         return []
 
 
-def _read_marker(marker_path: Path) -> dict | None:
-    """Read an existing marker without ever following a link/reparse point
-    at *marker_path* on any platform (POSIX ``O_NOFOLLOW`` and Windows
-    reparse-point handling are both covered by ``open_regular_no_follow``,
-    not just the POSIX-only flag) -- a symlink sitting at the marker path
-    is never legitimate ownership state, so it is refused, not followed.
-    The read is bounded: the admission target is by definition a
-    destination the caller does not yet own, so a pre-existing oversized
-    marker must not be read to EOF."""
+def _read_marker(marker_path: Path) -> dict[str, str | None] | None:
+    """Read through the canonical bounded, schema-validating no-link reader."""
+    from agent_logger.source_roots import read_source_metadata
+
+    io_path = Path(windows_extended_path(marker_path))
     try:
-        mode = os.stat(windows_extended_path(marker_path), follow_symlinks=False).st_mode
+        io_path.lstat()
     except FileNotFoundError:
         return None
-    if is_link_or_reparse(marker_path, mode):
-        raise OSError(f"publication marker at {marker_path} is a link/reparse point")
-    with open_regular_no_follow(marker_path) as handle:
-        raw = handle.read(MAX_MARKER_BYTES + 1)
-    if len(raw) > MAX_MARKER_BYTES:
-        raise OSError(f"publication marker at {marker_path} exceeds {MAX_MARKER_BYTES} bytes")
-    return json.loads(raw.decode("utf-8"))
+    identity, _, _ = read_source_metadata(io_path)
+    return identity.to_dict()
 
 
 def _move_marker_no_replace_windows(temp_path: Path, marker_path: Path) -> None:
@@ -186,13 +171,13 @@ def _admit_under_lock(
             ok=False,
             detail=f"publication admission lock is busy: {lock_file}",
         )
-    incoming = {
-        "provider": identity.provider,
-        "host": identity.host,
-        "repository": identity.repository,
-        "venue": identity.venue,
-    }
-    payload = json.dumps(incoming, sort_keys=True)
+    from agent_logger.source_roots import SourceIdentity
+
+    try:
+        incoming = SourceIdentity(**identity.to_dict()).to_dict()
+    except (TypeError, ValueError) as exc:
+        return PushResult(ok=False, detail=f"invalid publication identity: {exc}")
+    payload = json.dumps({"schema_version": 1, **incoming}, sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_MARKER_BYTES:
         return PushResult(ok=False, detail="publication identity payload too large")
     marker_path = dest / PUBLICATION_IDENTITY_MARKER
