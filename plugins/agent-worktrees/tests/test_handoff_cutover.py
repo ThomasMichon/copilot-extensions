@@ -26,6 +26,16 @@ from agent_worktrees import sessions_pane_retire
 from agent_worktrees import worktree_identity
 
 
+@pytest.fixture
+def registered_retire_project(monkeypatch_config, tmp_tracking_dir):
+    project_dir = m.cfg.project_dir("test-repo")
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": "test-repo", "machine": "test",
+        "repos": {"test-repo": {"anchor": str(tmp_tracking_dir)}},
+    }), encoding="utf-8")
+
+
 # â”€â”€ build_mux_new_window_argv (pure) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestPaneArgsExpiry:
     @pytest.mark.parametrize("location", ["outside", "wrong_name", "wrong_launcher"])
@@ -1432,7 +1442,7 @@ class TestCmdHandoffCutover:
         assert final.resolved_head_session == "new-sess"
 
     def test_retire_settles_predecessor_session_claim_to_at_rest(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, capfd, tmp_tracking_dir, registered_retire_project,
     ):
         """A confirmed-retired bare predecessor's Phase 8 ``session`` claim
         (opened by ``register_session``) must be settled to ``at-rest`` --
@@ -1480,7 +1490,7 @@ class TestCmdHandoffCutover:
         assert after_claim.state == "at-rest"
 
     def test_retire_settles_predecessor_session_claim_for_token_bearing_handoff(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, capfd, tmp_tracking_dir, registered_retire_project,
     ):
         """A token-bearing retire (the ordinary handoff flow, not the
         bare-retire repair) must ALSO settle the predecessor's own ``session``

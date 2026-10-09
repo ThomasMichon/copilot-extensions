@@ -378,6 +378,13 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     record = context.record
     assert record is not None
 
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+    try:
+        require_record_mutation(record, config)
+    except ExecutionSpaceError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     try:
         _dispatch_validate_profile_assignment_config(config)
     except profile_assignment.ProfileAssignmentError as exc:
@@ -425,12 +432,6 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             args.bare_resume = False
 
     bare_resume = getattr(args, "bare_resume", False)
-    from .execution_spaces import ExecutionSpaceError, require_record_mutation
-    try:
-        require_record_mutation(record, config)
-    except ExecutionSpaceError as exc:
-        output.err(str(exc))
-        return 3
     plan_work_dir = os.path.expanduser("~") if bare_resume else record.worktree_path
     launch_preflight = context.launch_preflight or _preflight_launch(config, args, plan_work_dir)
     if launch_preflight.error:

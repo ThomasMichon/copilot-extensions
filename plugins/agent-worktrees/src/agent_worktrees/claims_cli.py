@@ -403,9 +403,6 @@ def _dispatch_claim(verb: str, verb_args: dict):
     from . import status_monitor_runtime as _smr
     from . import tracking_write
 
-    from .execution_spaces import require_record_mutation
-    yaml_path = Path(verb_args["yaml_path"])
-    require_record_mutation(tracking.load_record(yaml_path), cfg.load_config())
     return tracking_write.dispatch(
         verb,
         verb_args,
@@ -675,6 +672,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
     from . import sweep as sweep_mod
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
 
     gone_of, safe_of = sweep_mod.make_resolvers(config)
 
@@ -705,6 +703,13 @@ def _claims_sweep(args: argparse.Namespace) -> int:
         if apply:
             with tracking._RecordLock(rec_path, require_sidecar=True):
                 rec = tracking.load_record(rec_path)
+                try:
+                    require_record_mutation(rec, config)
+                except ExecutionSpaceError as exc:
+                    if args.json:
+                        return output._json_error(str(exc))
+                    output.err(str(exc))
+                    return 1
                 flipped = tracking.sweep_abandoned_obligations(
                     rec,
                     gone_of=_gone,

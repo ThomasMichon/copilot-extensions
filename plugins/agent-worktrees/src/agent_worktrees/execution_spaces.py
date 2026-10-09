@@ -160,6 +160,19 @@ def require_record_mutation(record: Any, config: Any) -> None:
             )
 
 
+def require_project_record_mutation(record: Any) -> None:
+    """Resolve receiving-side project authority, never caller-supplied identity."""
+    from . import config as cfg
+
+    try:
+        config = cfg.load_project_config(record.repo)
+    except (OSError, ValueError) as exc:
+        raise ExecutionSpaceError(
+            f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
+        ) from exc
+    require_record_mutation(record, config)
+
+
 def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
     """Cleanup has only repo metadata; require config only for scoped registries."""
     from . import config as cfg

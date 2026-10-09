@@ -21,8 +21,11 @@ from . import claim_history, config as cfg, tracking
 from .claim_handoff_accept_support import (
     acquire_bundle_fence,
     load_accept_bundle,
+    load_handoff_record,
     release_bundle_fence,
     remote_accept_source,
+    require_handoff_record,
+    require_handoff_consumer,
     same_machine as _same_machine,
 )
 from .lease_config import load_lease_settings
@@ -218,6 +221,7 @@ def _load_actor_record(
         raise ClaimHandoffError(
             f"cannot read {role} worktree record {path}: {exc}"
         ) from exc
+    require_handoff_record(record, ClaimHandoffError)
     if record.worktree_id != ref.worktree_id:
         raise ClaimHandoffError(f"{role} worktree record identity mismatch: {path}")
     # ``finalized`` is deliberately not blocked: finalize is a non-terminal
@@ -252,19 +256,7 @@ def _bundle_state(bundle: ClaimBundle, state: str, *, reason: str | None = None)
 
 
 def _load_record_from_path(path: Path, *, role: str) -> tracking.WorktreeRecord:
-    try:
-        record = tracking.load_record(path)
-    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
-        raise ClaimHandoffError(
-            f"cannot read {role} worktree record {path}: {exc}"
-        ) from exc
-    if record.status in {"finalizing", "orphaned"}:
-        raise ClaimHandoffError(
-            f"{role} worktree "
-            f"{tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)} "
-            f"is {record.status}"
-        )
-    return record
+    return load_handoff_record(path, role=role, error_type=ClaimHandoffError)
 
 
 def _ordered_lock_paths(*paths: Path) -> tuple[Path, ...]:
@@ -368,12 +360,12 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
             source_path = _record_path(source_ref)
             if not source_path.exists():
                 raise ClaimHandoffError(f"source worktree not found: {bundle.source}")
-            if bundle.state == "offered":
-                bundle = _bundle_state(bundle, "accepting")
-                bundles[index] = bundle
-                _save_registry(path, bundles)
             with tracking._RecordLock(source_path, require_sidecar=True):
                 source_record = _load_record_from_path(source_path, role="source")
+                if bundle.state == "offered":
+                    bundle = _bundle_state(bundle, "accepting")
+                    bundles[index] = bundle
+                    _save_registry(path, bundles)
                 source_by_ref = {claim.ref: claim for claim in source_record.resources}
                 refs = [snapshot["ref"] for snapshot in bundle.claims]
                 missing = [ref for ref in refs if ref not in source_by_ref]
@@ -577,6 +569,7 @@ def offer(
             _load_actor_record(consumer_ref, role="consumer", machine=machine)
             with tracking._RecordLock(source_path, require_sidecar=True):
                 source_record = tracking.load_record(source_path)
+                require_handoff_record(source_record, ClaimHandoffError)
                 if source_record.status in {"finalizing", "orphaned"}:
                     raise ClaimHandoffError(
                         f"source worktree {source_canonical} is "
@@ -718,7 +711,8 @@ def accept(
                 error_type=ClaimHandoffError)
         source_ref = _qualified_ref(bundle.source, "bundle source")
         consumer_ref = _qualified_ref(bundle.consumer, "bundle consumer")
-        if _same_machine(source_ref.machine, consumer_ref.machine):
+        require_handoff_consumer(bundle, machine, ClaimHandoffError)
+        if _same_machine(source_ref.machine, consumer_ref.machine, project=consumer_ref.project):
             if bundle.state != "accepted":
                 bundle = accept_source(bundle_id, actor=actor)
             return _finish_accept_consumer_side(bundle, machine=machine)
@@ -736,7 +730,7 @@ def accept(
                     error_type=ClaimHandoffError)
             source_ref = _qualified_ref(bundle.source, "bundle source")
             if bundle.state != "accepted":
-                if _same_machine(source_ref.machine, machine):
+                if _same_machine(source_ref.machine, machine, project=consumer_ref.project):
                     bundle = accept_source(bundle_id, actor=actor)
                 else:
                     bundle = remote_accept_source(
@@ -801,6 +795,9 @@ def transition(
         raise ClaimHandoffError(f"claims handoff {verb} requires --reason")
     path = registry_path()
     try:
+        actor_ref = _qualified_ref(actor, "actor")
+        if not _same_machine(actor_ref.machine, actor_ref.machine, project=actor_ref.project):
+            raise ClaimHandoffError("claim-bundle actor is not the current registered execution space")
         with tracking._RecordLock(path, require_sidecar=True):
             bundles = _load_registry_strict(path)
             index = next(
@@ -825,6 +822,7 @@ def transition(
                 if source_path.exists():
                     with tracking._RecordLock(source_path, require_sidecar=True):
                         source_record = tracking.load_record(source_path)
+                        require_handoff_record(source_record, ClaimHandoffError)
                         dirty = False
                         for claim in source_record.resources:
                             if claim.handoff_bundle == bundle.bundle_id:
@@ -928,6 +926,7 @@ def transition(
                     return changed
                 with tracking._RecordLock(source_path, require_sidecar=True):
                     source_record = tracking.load_record(source_path)
+                    require_handoff_record(source_record, ClaimHandoffError)
                     if (source_record.status in {
                             "finalizing", "finalized", "orphaned"}
                             and not cancel_recovery):

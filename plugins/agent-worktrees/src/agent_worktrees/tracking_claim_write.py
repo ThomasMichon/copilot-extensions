@@ -33,9 +33,22 @@ also supports settling explicitly TO ``released``).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from . import activity, claim_history, obligations, tracking, tracking_write
+from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
+
+
+def _authority_rejection(record: tracking.WorktreeRecord) -> dict | None:
+    try:
+        require_project_record_mutation(record)
+    except ExecutionSpaceError as exc:
+        logging.getLogger(__name__).warning(
+            "Rejecting claim mutation for %s: %s", record.worktree_id, exc,
+        )
+        return {"error": "rejected", "message": str(exc)}
+    return None
 
 
 def apply_claim_add(args: dict) -> dict:
@@ -58,6 +71,8 @@ def apply_claim_add(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        if rejection := _authority_rejection(record):
+            return rejection
         if record.status in {"finalizing", "orphaned"}:
             return {
                 "error": "frozen",
@@ -121,6 +136,8 @@ def apply_claim_release(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        if rejection := _authority_rejection(record):
+            return rejection
         match = next((c for c in record.resources if c.ref == ref), None)
         if match is None:
             return {"error": "not_found"}
@@ -193,6 +210,8 @@ def apply_claim_settle(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        if rejection := _authority_rejection(record):
+            return rejection
         match = next((c for c in record.resources if c.ref == ref), None)
         if skip_if_released and match is not None and match.state == "released":
             return {"ok": True, "skipped": "released"}
