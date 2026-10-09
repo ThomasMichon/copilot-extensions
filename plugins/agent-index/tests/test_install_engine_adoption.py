@@ -25,8 +25,10 @@ exit 0
 def function(name: str, ext: str) -> str:
     text = (PLUGIN / "scripts" / f"install.{ext}").read_text(encoding="utf-8")
     start = f"function {name}" if ext == "ps1" else f"{name}() {{"
+    if ext == "sh" and start not in text:
+        start = f"{name}() ("
     tail = text.split(start, 1)[1]
-    next_function = r"\nfunction \w" if ext == "ps1" else r"\n[a-z_]+\(\) \{"
+    next_function = r"\nfunction \w" if ext == "ps1" else r"\n[a-z_]+\(\) [\{(]"
     return start + re.split(next_function, tail, maxsplit=1)[0]
 
 
@@ -69,7 +71,7 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
         "function Invoke-WebRequest { throw 'Forbidden bootstrap download' }\n"
         f". '{ENGINE / 'installer-engine.ps1'}'\n"
         + "\n".join(function(name, "ps1") for name in (
-            "Get-VerTuple", "Test-VersionLt", "Enter-IndexStampLock",
+            "Get-VerTuple", "Test-VersionLt", "New-IndexMutex", "Enter-IndexStampLock", "Enter-IndexBuildLock",
             "Test-IndexPublicationFresh",
         )) + "\n" + script,
         encoding="utf-8",
@@ -149,6 +151,7 @@ ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
 {function("_uv_pip_install", "sh")}
 {function("_test_index_venv", "sh")}
 {function("_new_index_venv", "sh")}
+{function("_with_index_build_lock", "sh")}
 {function("_resolve_vendored_lib", "sh")}
 _resolve_zdd() {{ _resolve_vendored_lib zdd; }}
 {function("_install_engine", "sh")}
@@ -309,7 +312,7 @@ def test_windows_cli_preserves_python_fallback_when_uv_acquisition_fails(tmp_pat
     runtime = function("Install-Runtime", "ps1")
     acquisition = "    $script:UvCommand = Ensure-Uv" + runtime.split(
         "    $script:UvCommand = Ensure-Uv", 1
-    )[1].split("    $preparationMutex", 1)[0]
+    )[1].split("    $buildMutex", 1)[0]
     result = run_ps(tmp_path, function("New-IndexVenv", "ps1") + f"""
 $env:OS = 'Installer_Test'
 $InstallDir = '{tmp_path / "runtime"}'
@@ -519,7 +522,7 @@ def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path):
     env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
     functions = "\n".join(function(name, "sh") for name in (
         "_ensure_uv", "_uv_pip_install", "_resolve_vendored_lib",
-        "_test_index_venv", "_new_index_venv", "_install_server_venv", "_ensure_runtime",
+        "_test_index_venv", "_new_index_venv", "_with_index_build_lock", "_install_server_venv", "_ensure_runtime",
     ))
     result = subprocess.run([bash, "-c", f"""
 set -uo pipefail

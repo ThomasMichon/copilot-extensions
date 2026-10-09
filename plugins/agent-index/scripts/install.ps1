@@ -1393,6 +1393,8 @@ function Install-Runtime {
     $script:UvCommand = Ensure-Uv -InstallRoot $InstallDir
     if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using Python venv/pip fallback' }
 
+    $buildMutex = Enter-IndexBuildLock -VenvPath $VenvDir
+    try {
     $preparationMutex = Enter-IndexStampLock -Scope 'Publish'
     try {
     if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
@@ -1589,6 +1591,9 @@ function Install-Runtime {
     else { Write-Fail 'Verification: module import failed'; exit 1 }
 
     if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
+    } finally {
+        [void]$buildMutex.ReleaseMutex(); $buildMutex.Dispose()
+    }
 }
 
 function Write-Manifest {
@@ -1698,6 +1703,8 @@ function Install-Engine {
         Write-Skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
         return $false
     }
+    $buildMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
+    try {
     if ((Test-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython) -and -not $Upgrade) {
         Write-Skip "Engine runtime already provisioned (durable venv preserved): $EngineVenv"
         return $true
@@ -1842,6 +1849,9 @@ function Install-Engine {
     if ($LASTEXITCODE -ne 0) { Write-Warn 'Engine venv built but torch import failed'; return $false }
     Write-Ok "Engine runtime $(if ($Upgrade) { 'updated' } else { 'provisioned' }) (durable venv): $EngineVenv"
     return $true
+    } finally {
+        [void]$buildMutex.ReleaseMutex(); $buildMutex.Dispose()
+    }
 }
 
 function Restart-EngineDaemon {
@@ -2342,9 +2352,14 @@ function Publish-FileAtomically {
     }
 }
 
+function New-IndexMutex {
+    param([string]$Name)
+    return (New-Object Threading.Mutex($false, $Name) -ErrorAction Stop)
+}
+
 function Enter-IndexStampLock {
-    param([string]$Scope, [int]$TimeoutSeconds = 20)
-    $identity = [IO.Path]::GetFullPath($InstallDir).TrimEnd('/\')
+    param([string]$Scope, [int]$TimeoutSeconds = 20, [string]$LockRoot = $InstallDir)
+    $identity = [IO.Path]::GetFullPath($LockRoot).TrimEnd('/\')
     if ($env:OS -eq 'Windows_NT') { $identity = $identity.ToLowerInvariant() }
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
@@ -2357,13 +2372,25 @@ function Enter-IndexStampLock {
     } else {
         "CopilotExtensions.AgentIndex.Stamp.$stampHash.$Scope"
     }
-    $stampMutex = New-Object Threading.Mutex($false, $stampMutexName)
+    try {
+        $stampMutex = New-IndexMutex -Name $stampMutexName
+    } catch [System.UnauthorizedAccessException] {
+        if ($env:OS -ne 'Windows_NT') { throw }
+        Write-Warn "Global $Scope mutex creation denied -- using Local; cross-session serialization is unavailable"
+        $stampMutex = New-IndexMutex -Name $stampMutexName.Replace('Global\', 'Local\')
+    }
     try {
         try { $held = $stampMutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds)) }
         catch [Threading.AbandonedMutexException] { $held = $true }
-        if (-not $held) { throw 'Timed out waiting for the agent-index stamp lock.' }
+        if (-not $held) { throw "Timed out waiting for the agent-index $Scope lock." }
         return $stampMutex
     } catch { $stampMutex.Dispose(); throw }
+}
+
+function Enter-IndexBuildLock {
+    param([string]$VenvPath, [ValidateRange(0, 180)][int]$TimeoutSeconds = 180)
+    # Use the established 180-second build admission window, not the short stamp wait.
+    return (Enter-IndexStampLock -Scope 'Build' -LockRoot $VenvPath -TimeoutSeconds $TimeoutSeconds)
 }
 
 function Test-IndexPublicationFresh {

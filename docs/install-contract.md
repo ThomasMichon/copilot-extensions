@@ -2039,13 +2039,27 @@ installation-keyed publication mutex covers runtime preparation's marker
 removals, activation, payload/launcher publication, manifests and direct
 launcher repair. Runtime freshness is rechecked under that mutex, and activation
 plus related payload/launcher writes remain one publication transaction.
-Windows uses a global named mutex so separate logon sessions share the guard;
-equivalent trailing-separator paths resolve to one lock identity.
+Windows attempts a global named mutex so separate logon sessions share the guard.
+Only an UnauthorizedAccessException during Global creation permits Local
+fallback, with an explicit warning that cross-session serialization is unavailable;
+unrelated creation errors propagate. Equivalent trailing-separator paths resolve
+to one lock identity, including reentrant Local acquisitions.
 Snapshot production releases its separate lock before publication; no
 publication holder acquires the snapshot lock. Namespaced cell adapters retain
 their independent receipt-lock contract. The POSIX
 stamp retains its owning-payload pointer, whose released payload is already
 self-contained. Neither stamp provisions the embedding stack.
+
+Direct runtime installation additionally holds a target-venv build lock before
+any slot cleanup/repair through package installation, health, activation and
+related publication. Its slot path supplies version scope, so different versions
+can build independently. The optional server sibling inherits that guard; the
+durable engine uses its own target-venv guard. Build admission uses the existing
+180-second window, and all returns/failures release in `finally`. Lock order is
+build then publication; stamp takes snapshot, releases it, then takes publication,
+never a build lock while holding publication. POSIX follows the same target-keyed
+build scope using bounded flock admission or an owned-PID fallback, released at
+the build subshell boundary. These guards do not alter daemon/engine lifecycle.
 
 Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
 `ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine

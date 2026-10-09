@@ -1177,7 +1177,53 @@ _install_server_venv() {
     _ok "Server venv provisioned: $server_venv_dir"
 }
 
+_with_index_build_lock() (
+    local target="$1" timeout="${INDEX_BUILD_LOCK_TIMEOUT_SECONDS:-180}"
+    shift
+    if [[ ! "$timeout" =~ ^[0-9]{1,3}$ ]] || ((10#$timeout > 180)); then
+        _warn 'Invalid runtime build admission timeout (expected 0-180 seconds)'
+        return 1
+    fi
+    timeout=$((10#$timeout))
+    local parent lock pid_lock="" owner deadline=$((SECONDS + timeout))
+    parent="$(dirname "$target")"
+    mkdir -p "$parent" || return 1
+    lock="$parent/.$(basename "$target").build.lock"
+    _release_index_build_lock() {
+        if [[ -n "$pid_lock" ]]; then
+            [[ "$(readlink "$pid_lock" 2>/dev/null || true)" == "${BASHPID:-$$}" ]] && rm -f "$pid_lock"
+        else
+            exec 8>&-
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$lock"
+        if ! flock -w "$timeout" 8; then
+            _warn "Timed out waiting for runtime build admission: $target"
+            exec 8>&-
+            return 1
+        fi
+    else
+        pid_lock="$lock.pid"
+        until ln -s "${BASHPID:-$$}" "$pid_lock" 2>/dev/null; do
+            owner="$(readlink "$pid_lock" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null \
+                && [[ "$(readlink "$pid_lock" 2>/dev/null || true)" == "$owner" ]]; then
+                rm -f "$pid_lock"
+            elif ((SECONDS >= deadline)); then
+                _warn "Timed out waiting for runtime build admission: $target"
+                return 1
+            else
+                sleep 1
+            fi
+        done
+    fi
+    trap '_release_index_build_lock' EXIT
+    "$@"
+)
+
 _ensure_runtime() {
+    _ensure_runtime_build() {
     if [[ ! -d "$PKG_SRC_DIR" ]]; then
         _fail "Package source not found at $PKG_SRC_DIR"
         exit 1
@@ -1361,6 +1407,8 @@ _ensure_runtime() {
         *":$LOCAL_BIN:"*) _ok "PATH: $LOCAL_BIN is on PATH" ;;
         *) _step "Add $LOCAL_BIN to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
     esac
+    }
+    _with_index_build_lock "$VENV_DIR" _ensure_runtime_build
 }
 
 _write_manifest() {
@@ -1418,6 +1466,11 @@ _activation_role() {
 }
 
 _install_engine() {
+    if [[ "${AGENT_INDEX_NO_ENGINE_DEPS:-}" == 1 ]]; then
+        _skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
+        return 1
+    fi
+    _install_engine_build() {
     # Provision the DURABLE engine venv (agent-index-engine, the torch stack) at
     # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
     # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
@@ -1535,6 +1588,8 @@ _install_engine() {
         _ok "Engine runtime provisioned (durable venv): $ENGINE_VENV"
     fi
     return 0
+    }
+    _with_index_build_lock "$ENGINE_VENV" _install_engine_build "$@"
 }
 
 _restart_engine_daemon() {

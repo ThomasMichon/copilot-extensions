@@ -54,7 +54,7 @@ def publication_fixture(tmp_path: Path) -> tuple[str, Path]:
         encoding="utf-8",
     )
     definitions = "\n".join(function(name, "ps1") for name in (
-        "Get-VerTuple", "Test-VersionLt", "Enter-IndexStampLock",
+        "Get-VerTuple", "Test-VersionLt", "New-IndexMutex", "Enter-IndexStampLock", "Enter-IndexBuildLock",
         "Test-IndexPublicationFresh", "Publish-FileAtomically",
         "Invoke-VersionedActivate", "Publish-IndexRuntime",
     ))

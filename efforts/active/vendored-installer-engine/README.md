@@ -524,6 +524,48 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-09 — Index direct-build admission and user-mode mutex fallback
+
+- Continued only PR #5885 from published head
+  `baf17d5f35eac433fde38aee0f4803a374776988`. Preserved its narrowed optional
+  repair catch, unpinned interpreter selection, Windows Python/pip fallback,
+  durable-engine uv policy and the existing patch changefile. Canonical engine
+  bytes remain unchanged.
+- Added target-venv/version-scoped build admission before cleanup and repair,
+  held across package installation, health and activation/publication. The
+  optional server sibling stays inside the CLI build guard; durable engine
+  provisioning uses its independent target guard. Returns and failures release
+  in `finally`, and different versions remain independently admissible.
+  POSIX mirrors the build scope with bounded flock/PID admission and subshell
+  cleanup. The existing Dispatch 180-second build-admission window is reused.
+- Lock order remains build then publication. Stamp's snapshot lock is released
+  before publication, and no publication holder acquires a build lock. Runtime
+  freshness is rechecked after build admission and again before publication.
+- Global Windows mutex creation catches only UnauthorizedAccessException and
+  falls back to Local with an explicit cross-session-degradation warning.
+  Other creation errors still propagate; normalized key/scope identity and
+  reentrancy are preserved.
+- Real two-process direct-install fixtures prove a second same-version caller
+  cannot clean or mutate the first build, while another version remains
+  admissible. Failure and supersession cases prove the peer proceeds before the
+  first process exits, rather than relying on process death to release the
+  guard. Timeout probes and POSIX failure/PID cleanup cover bounded admission.
+  Simulated denied Global construction proves Local reentry without elevation;
+  normal Global and unrelated-error paths are separate regressions.
+- Published-head measurements 1975/2624/4599/5480 were correct and are not
+  retroactively changed. This follow-up measures shell 2030 and PowerShell 2651,
+  wrappers 4681, plus unchanged engine pair 881 = 5562 aggregate (+82).
+  This remains disclosed temporary safety growth, not effort completion.
+- Validation remains bounded to admission 120 seconds / timeout 600 seconds.
+  Focused installer/admission matrix: 104 passed; full host suite:
+  827 passed / 11 skipped; disconnected full suite: 739 passed / 99 skipped;
+  engine-sync/materialization/install-contract tooling: 107 passed.
+  Contract, sync, versions, module size, docs, changefile, F/E9 lint and
+  shell/PowerShell parsing passed without a flake exception.
+  Required native revalidation belongs to the integration owner; native
+  64 passed / 32 skipped applies only to the preceding published head.
+  No publication, live mutation, next adopter or child agent was authorized.
+
 ### 2026-10-09 — Index publication and health boundaries hardened
 
 - Continued only the Index adopter from PR #5885's published head
