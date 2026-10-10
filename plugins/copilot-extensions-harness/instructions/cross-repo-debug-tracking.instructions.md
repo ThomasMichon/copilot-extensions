@@ -20,16 +20,18 @@ public upstream work, but public upstream artifacts must never receive private
 links, IDs or context. Keep the private symptom/rationale downstream and make
 the public report self-contained. Invoke the
 `agent-worktrees:working-cross-repo` skill for the complete resolution and
-cross-linking flow. After an upstream merge, let the consuming harness's
-adopted, consented maintenance own checked-in projection refresh (normally
-once daily), rather than forcing a synchronous resync to finish every coding
-session. Keep permissionless local rendering current with the installed
+cross-linking flow. A merge to `dev` does not make the change live: the release
+pipeline must first promote it to `main`, then an authorized local
+`<repo> update` installs that promoted release. Updating immediately after a
+`dev` merge cannot install a change that has not been promoted.
+Manual instruction sync is not required after a merge or update.
+Keep permissionless local rendering current with the installed
 payload and preserve the reviewed offline fallback. Block missing verified
 guidance delivery, but keep valid stale guidance advisory; foreign ownership,
 unsafe paths and missing/corrupt locked
-artifacts remain blocking. If maintenance or rollout has not run, report
-primed/pending, not deployed, and retain the named maintenance/deployment
-obligation. Payload/runtime updates still require explicit rollout
+artifacts remain blocking. Before promotion, report merged/pending release.
+After promotion but before local rollout, report released/pending rollout.
+Neither state means live or deployed. Payload/runtime updates still require explicit rollout
 authorization and the target's required safety/permission gates; do not
 create a parallel scheduler or silently claim that a merge updated a running
 system.

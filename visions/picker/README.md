@@ -149,6 +149,12 @@ becomes live before launch, the prompted resume refuses visibly rather than
 silently attaching, injecting a turn, or starting a competing session.
 New-worktree prompts remain a separate creation capability. Staged prompts
 are never injected into an Open/live session.
+Selecting another machine or execution environment preserves the same New and
+cold Resume prompt contract. The target's engine and daemon own staged intent,
+retry identity and handoff; SSH is an invocation boundary, not a second seed
+mechanism. Confirmed text reaches that authority intact, without shell
+interpretation. An unavailable or incompatible target reports the limitation
+without losing intent or repeating an admitted creation or handoff.
 
 ### worktree-search-and-filter
 A lightweight, keyboard-summoned search narrows the worktree list by substring

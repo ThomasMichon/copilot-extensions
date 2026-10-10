@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"9bec02705f3edc419645ad8e5cd3c6f700549046ee2df245d98dda8d76f5dea2","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.13-dev1","renderedBytes":2277,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"9bec02705f3edc419645ad8e5cd3c6f700549046ee2df245d98dda8d76f5dea2","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.14-dev1","renderedBytes":2277,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
 
 
 # `validate-and-promote` failure triage fallback
@@ -26,4 +26,4 @@ it via the normal worktree/PR flow against `dev`, never `main` directly, and
 never force-retry the pipeline as a substitute for a fix. See the
 `diagnosing-validate-and-promote-failures` skill for the exact commands.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"2a450981fbc68337e8026e60fd20fa145cdc11c637553e1654e2cbec31a209a9"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"b5d9d6a415413034feb65b6224cee0bd2b7a78d18b4f7b84652ad85068250d00"} -->
