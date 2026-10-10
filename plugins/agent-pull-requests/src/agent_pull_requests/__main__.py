@@ -507,12 +507,23 @@ def _cmd_watch_subscribe(args: argparse.Namespace) -> int:
 
 
 def _cmd_watch_unsubscribe(args: argparse.Namespace) -> int:
+    from .watch_notification import ACKNOWLEDGED_NOTIFICATIONS
+
     payload = {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id}
     if getattr(args, "registration_id", None) is not None:
+        health = _watch_request("health", {})
+        if ACKNOWLEDGED_NOTIFICATIONS not in health.get("capabilities", []):
+            print(json.dumps({"error": "watch owner lacks generation-fenced cancellation"}))
+            return 1
         payload["registration_id"] = args.registration_id
     result = _watch_request(
         "unregister", payload,
     )
+    if "registration_id" in payload and result.get("unregistered") and (
+        result.get("registration_id") != payload["registration_id"]
+        or result.get("notification_protocol") != ACKNOWLEDGED_NOTIFICATIONS
+    ):
+        result = {"error": "ambiguous cancellation after owner rollover", "ambiguous_cancellation": True}
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:

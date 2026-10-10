@@ -90,7 +90,8 @@ def validate_pending(pending: object, key, sub) -> None:
         or payload.get("event_id") != pending["event_id"]
         or payload.get("registration_id") != sub.registration_id
         or payload.get("notification_protocol") != ACKNOWLEDGED_NOTIFICATIONS
-        or payload.get("repo") != key.repo or payload.get("number") != key.number
+        or payload.get("repo") != key.repo
+        or type(payload.get("number")) is not int or payload["number"] != key.number
         or payload.get("subscriber_id") != sub.subscriber_id
         or not isinstance(payload.get("transitions"), list)
         or any(t not in ALL_TRANSITIONS for t in payload["transitions"])

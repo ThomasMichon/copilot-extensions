@@ -180,7 +180,11 @@ class WatchDaemon:
                 ok = self._registry.unregister(
                     key, identity, registration_id=sub.registration_id,
                 )
-            return {"unregistered": ok}
+            result = {"unregistered": ok}
+            if "registration_id" in payload:
+                result.update(registration_id=sub.registration_id,
+                              notification_protocol=ACKNOWLEDGED_NOTIFICATIONS)
+            return result
         if kind == "status":
             return self.status()
         if kind == "health":

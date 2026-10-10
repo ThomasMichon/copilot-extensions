@@ -230,7 +230,7 @@ def test_failed_cancellation_preserves_pending_registration(make, monkeypatch):
         assert daemon.compute("unregister", {
             "repo": key.repo, "number": key.number, "subscriber_id": "one",
             "registration_id": registered["registration_id"],
-        }) == {"unregistered": True}
+        })["unregistered"] is True
         assert read_subscriptions_state() == []
     finally:
         release.set()
@@ -280,6 +280,8 @@ def test_cli_explicit_empty_cancellation_identity_is_forwarded(monkeypatch, caps
     from agent_pull_requests import __main__ as cli
 
     def request(kind, payload):
+        if kind == "health":
+            return {"capabilities": [PROTOCOL]}
         assert kind == "unregister"
         assert payload["registration_id"] == ""
         return {"error": "invalid cancellation registration identity"}
@@ -289,6 +291,40 @@ def test_cli_explicit_empty_cancellation_identity_is_forwarded(monkeypatch, caps
         repo="example/project", number=1, subscriber_id="one", registration_id="", json=True,
     )) == 1
     assert "error" in json.loads(capsys.readouterr().out)
+
+@pytest.mark.parametrize("supported", [True, False])
+def test_fenced_cancellation_requires_capability_and_echo(monkeypatch, capsys, supported):
+    from agent_pull_requests import __main__ as cli
+
+    calls = []
+
+    def request(kind, payload):
+        calls.append(kind)
+        if kind == "health":
+            return {"capabilities": [PROTOCOL] if supported else []}
+        return {"unregistered": True}
+
+    monkeypatch.setattr(cli, "_watch_request", request)
+    assert cli._cmd_watch_unsubscribe(SimpleNamespace(
+        repo="example/project", number=1, subscriber_id="one", registration_id="old", json=True,
+    )) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert "error" in result
+    assert calls == (["health", "unregister"] if supported else ["health"])
+    if supported:
+        assert result["ambiguous_cancellation"]
+
+
+def test_boolean_pending_event_number_fails_closed():
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "one", until=(MERGED,), acknowledged=True,
+                      notify={"argv": ["consumer"]})
+    registry.apply_snapshot(key, PRSnapshot(merged=True))
+    entries = registry.snapshot_state()
+    entries[0]["pending"]["payload"]["number"] = True
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
 
 @pytest.mark.parametrize("kind", ["register", "unregister"])
 def test_mutation_requests_never_coalesce_different_subscribers(monkeypatch, kind):
@@ -587,7 +623,7 @@ def test_unregister_reregister_and_late_ack_do_not_remove_new_registration(make)
         assert daemon.compute("unregister", {
             "repo": "example/project", "number": 1, "subscriber_id": "one",
             "registration_id": old["registration_id"],
-        }) == {"unregistered": True}
+        })["unregistered"] is True
         new = daemon.compute("register", spec())
         assert new["registration_id"] != old["registration_id"]
         assert daemon.compute("unregister", {
