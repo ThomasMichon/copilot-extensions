@@ -227,3 +227,15 @@ def test_explicit_finalize_is_stable_across_cached_surfaces_and_attached_shell(
     assert derive.norm(
         {**reopened, "mux_session": True}, "host", "wsl",
     )["state"] == "ACTIVE"
+
+
+def test_truncated_finalized_display_never_overrides_live_picker():
+    from worktree_manager.production_picker import prune
+
+    rec = _rec()
+    row = m._worktree_to_dict(
+        rec, state_info=git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED),
+    )
+    del row["closure"]["display"]["settled_sessions"]
+    assert not prune.interpret_descriptor_payload(row["closure"])["supported"]
+    assert derive.norm({**row, "mux_session": True}, "host", "wsl")["state"] == "ACTIVE"

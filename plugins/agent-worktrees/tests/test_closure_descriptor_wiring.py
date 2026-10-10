@@ -142,3 +142,11 @@ def test_finalized_display_rejects_malformed_counts_without_authorizing_removal(
     descriptor = cli._worktree_to_dict(rec, state_info=info)["closure"]
     descriptor["git"]["dirty"] = False
     assert not prune.interpret_descriptor_payload(descriptor)["supported"]
+
+
+def test_finalized_display_requires_explicit_settled_session_count():
+    rec = _rec()
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    descriptor = cli._worktree_to_dict(rec, state_info=info)["closure"]
+    del descriptor["display"]["settled_sessions"]
+    assert not prune.interpret_descriptor_payload(descriptor)["supported"]
