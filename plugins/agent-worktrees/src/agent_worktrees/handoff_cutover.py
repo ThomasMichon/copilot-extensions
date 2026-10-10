@@ -32,6 +32,8 @@ import time
 from pathlib import Path
 from lazy_cli_dispatch import self_override as _self_override
 
+import yaml
+
 from . import (
     activity,
     config as cfg,
@@ -729,8 +731,8 @@ def _maybe_emit_stage_13(
 def _dispatch_handoff_repair(verb: str, verb_args: dict):
     """Dispatch confirmed-retire repair to a compatible daemon or local code.
 
-    Claim settlement requires execution-space-aware verb version 2; an older
-    handler is never dialed. A sent request's ambiguous outcome still raises
+    Claim settlement and session conclusion require execution-space-aware verb
+    version 2; an older handler is never dialed. An ambiguous sent request raises
     ``tracking_write.AmbiguousWriteOutcome`` and must not be auto-retried.
     """
     from . import status_monitor_runtime as _smr
@@ -741,66 +743,57 @@ def _dispatch_handoff_repair(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
-        min_version=2 if verb == "claim_settle" else 1,
+        min_version=2 if verb in ("claim_settle", "session_conclude") else 1,
     )
 
 
-def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> None:
+def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> dict | None:
     """Settle a confirmed-retired predecessor's ``session`` claim to at-rest.
-    Runs for *every* confirmed retire (bare or token-bearing), unlike
-    :func:`_conclude_retired_predecessor` which only concludes on a bare
-    retire. Uses the shared ``claim_settle`` verb's ``skip_if_released``
-    guard, which never resurrects an already-``released`` claim (mirrors
-    ``finalize.py``'s ``_settle_current_session_claim`` guard) -- a
-    ``deregister_session`` that raced ahead is left alone. On sidecar
-    contention the verb's own ``require_sidecar=True`` raises, caught by
-    this repair's best-effort ``contextlib.suppress(Exception)`` (matching
-    the pre-migration transaction's own net effect -- its outer lock
-    degraded, but its final ``save_record`` call already hard-required the
-    sidecar). Best-effort: unknown worktree/session or a missing claim is a
-    silent no-op."""
+
+    Applies to bare and token-bearing retires. ``skip_if_released`` preserves a
+    raced session deregistration; unknown records and missing claims are no-ops.
+    Known I/O/format failures return unconfirmed, and authority refusals reach
+    the retire report. An ambiguous sent write propagates without retry.
+    """
     if not wt_id or not session_id:
         return
-    with contextlib.suppress(Exception):
+    try:
         yaml_path = tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml"
+    except RuntimeError as exc:
+        return {"error": "unconfirmed", "message": f"Cannot resolve session-claim ledger: {exc}"}
+    try:
         if not yaml_path.exists():
             return
         record = tracking.load_record(yaml_path)
         predecessor_ref = tracking.format_claim_ref(
             record.machine, record.repo, record.worktree_id, session=session_id,
         )
-        _dispatch_handoff_repair(
+        return _dispatch_handoff_repair(
             "claim_settle",
             {
                 "worktree_id": wt_id, "yaml_path": str(yaml_path), "ref": predecessor_ref,
                 "disposition": obligations.AT_REST, "skip_if_released": True,
             },
         )
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+        return {"error": "unconfirmed", "message": f"Session-claim settlement unconfirmed: {exc}"}
 
 
-def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> None:
+def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> dict | None:
     """Mark a retire-confirmed predecessor's ``SessionEntry`` concluded.
-    A confirmed ``--retire-pane`` (pane gone AND its Copilot process
-    positively verified dead) is a deliberate, verified act, so it is safe
-    to assert conclusion here. Without this, a bare self-retire (no
-    handoff-token successor) leaves ``SessionEntry.state`` stuck
-    ``"active"`` forever, blocking ``register_session``'s creation-guard
-    from ever promoting a later successor -- a zombie head pointer. Uses
-    the shared ``session_conclude`` verb's ``only_if_active`` guard,
-    which -- like this repair always has -- never infers a successor from
-    list membership: a session registered while this predecessor was still
-    active is not necessarily its successor, so guessing would misattribute
-    succession as easily as complete it. A later registration still
-    correctly claims the cleared head via ``register_session``'s ordinary
-    path. Best-effort: unknown worktree/session or an already-concluded
-    entry is a silent no-op."""
+
+    Only a bare retire with a gone pane and a positively dead Copilot process
+    may clear the head. ``only_if_active`` leaves an already-concluded entry
+    alone; no successor is inferred from list membership. Unknown records are
+    no-ops, refusals reach the retire report, and ambiguous writes are not retried.
+    """
     if not wt_id or not session_id:
         return
     yaml_path = tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml"
     if not yaml_path.exists():
         return
-    with contextlib.suppress(Exception):
-        _dispatch_handoff_repair(
+    try:
+        return _dispatch_handoff_repair(
             "session_conclude",
             {
                 "worktree_id": wt_id,
@@ -810,6 +803,8 @@ def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> None:
                 "only_if_active": True,
             },
         )
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+        return {"error": "unconfirmed", "message": f"Session conclusion unconfirmed: {exc}"}
 
 
 def _resolve_retire_pane_mux_session(
@@ -947,21 +942,24 @@ def _handoff_cutover_retire_result(
         "identity-unavailable-skip", "identity-mismatch-skip",
         "identity-unresolved-skip", "last-window-skip",
     }
-    # Only repair a BARE retire (no handoff token at all) here. A token-bearing
-    # retire belongs to the ordinary handoff flow, where the successor's own
-    # `register_session(..., handoff_token=...)` -> `link_handoff` concludes
-    # the predecessor once it actually claims the token -- including the
-    # legitimate case where a candidate has been associated
-    # (`associate_handoff_candidate`) but not yet acknowledged: the
-    # predecessor is still `active` and its resident monitor may still retire
-    # it before that late acknowledgement lands. Concluding it here would
-    # make that acknowledgement fail (`link_handoff` refuses an explicitly
-    # concluded predecessor).
+    # Only conclude a bare retire here. With a token, the successor's own
+    # register_session -> link_handoff must conclude the predecessor when it
+    # acknowledges the token. Premature conclusion would reject a candidate's
+    # legitimate late acknowledgement.
     bare_retire = not getattr(args, "handoff_token", None)
     if overall_ok and pane_confirmed_retired and session_id:
-        core._settle_predecessor_session_claim(wt_id, session_id)
-    if overall_ok and pane_confirmed_retired and bare_retire and session_id:
-        core._conclude_retired_predecessor(wt_id, session_id)
+        settlement = core._settle_predecessor_session_claim(wt_id, session_id)
+        if settlement is not None:
+            result["claim_settlement"] = settlement
+            if settlement.get("error"):
+                overall_ok = False
+    if result["ok"] and pane_confirmed_retired and bare_retire and session_id:
+        conclusion = core._conclude_retired_predecessor(wt_id, session_id)
+        if conclusion is not None:
+            result["session_conclusion"] = conclusion
+            if conclusion.get("error"):
+                overall_ok = False
+    result["ok"] = overall_ok
     activity.log_event(
         "handoff_predecessor_retire",
         worktree_id=wt_id,

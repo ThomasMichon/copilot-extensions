@@ -807,6 +807,211 @@ def test_cleanup_registry_failure_is_a_structured_refusal(
     assert record.yaml_path.exists()
 
 
+def test_forced_cleanup_rechecks_fresh_authority_inside_sidecar_lock(
+    tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import cleanup_gc_cli
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+    real_lock = tracking._RecordLock
+    locked = False
+
+    @contextmanager
+    def raced_lock(path, *, require_sidecar):
+        nonlocal locked
+        assert require_sidecar is True
+        fresh = yaml.safe_load(path.read_text(encoding="utf-8"))
+        fresh["machine"], fresh["platform"] = "workstation-wsl", "wsl"
+        path.write_text(yaml.safe_dump(fresh), encoding="utf-8")
+        with real_lock(path, require_sidecar=require_sidecar):
+            locked = True
+            try:
+                yield
+            finally:
+                locked = False
+
+    monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
+    original_load = tracking.load_record
+
+    def fresh_load(path):
+        assert locked
+        return original_load(path)
+
+    monkeypatch.setattr(tracking, "load_record", fresh_load)
+    result = cleanup_gc_cli._revalidate_cleanup_safety(
+        record.worktree_id, repo=scoped_config.default_repo, tracking_path=tmp_path, force=True,
+        reap=lambda *args: pytest.fail("foreign forced cleanup began deleting checkout or branch"),
+    )
+    assert not result.cleanable and result.bucket == "execution-space"
+    assert "different execution space" in result.reason
+    assert record.yaml_path.exists()
+
+
+@pytest.mark.parametrize("via_daemon", [False, True])
+@pytest.mark.parametrize("verb", [
+    "session_conclude", "session_link_succession", "session_resolve_handoff_successor",
+])
+def test_session_lifecycle_fences_raced_fresh_foreign_record(
+    verb, via_daemon, tmp_path, scoped_config, monkeypatch,
+):
+    from agent_worktrees import tracking_session_lifecycle_write, tracking_write
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+    )
+    record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
+    record.head_session = "session-1"
+    if verb == "session_link_succession":
+        record.sessions.append(tracking.SessionEntry("session-2", "2026-01-01T00:00:00"))
+    elif verb == "session_resolve_handoff_successor":
+        record.status, record.kind = "finalized", "bridge"
+        tracking.open_handoff(record, "session-1", "token-1", save=False)
+    expected_state = record.session_entry("session-1").state
+    expected_head = record.head_session
+    tracking.save_record(record)
+    real_lock = tracking._RecordLock
+    foreign_bytes = []
+
+    @contextmanager
+    def raced_lock(path, *, require_sidecar):
+        assert require_sidecar is True
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw["machine"], raw["platform"] = "workstation-wsl", "wsl"
+        path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        foreign_bytes.append(path.read_bytes())
+        with real_lock(path, require_sidecar=True):
+            yield
+
+    monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
+    args = {
+        "worktree_id": record.worktree_id, "yaml_path": str(record.yaml_path),
+        "session_id": "session-1", "state": "concluded", "only_if_active": True,
+        "predecessor": "session-1", "successor": "session-2",
+        "handoff_token": "token-1", "successor_id": "session-2",
+    }
+    monkeypatch.setattr(
+        tracking, "save_record",
+        lambda *args, **kwargs: pytest.fail("foreign lifecycle repair saved a record"),
+    )
+    monkeypatch.setattr(
+        tracking, "record_pr_claims_reassigned",
+        lambda *args, **kwargs: pytest.fail("foreign lifecycle repair reassigned claim head"),
+    )
+    if via_daemon:
+        server = tracking_write.start_server(tracking_write.compute)
+        server.start()
+        try:
+            fields = tracking_write.rendezvous_fields(server)
+            assert fields["tracking_write_verb_versions"][verb] == 2
+            result = tracking_write.dispatch(
+            verb, args, read_lock_data=lambda: fields,
+            ensure_monitor=None, min_version=2,
+            )
+        finally:
+            server.close()
+    else:
+        handler = {
+            "session_conclude": tracking_session_lifecycle_write.apply_session_conclude,
+            "session_link_succession": tracking_session_lifecycle_write.apply_session_link_succession,
+            "session_resolve_handoff_successor": tracking_session_lifecycle_write.apply_resolve_handoff_successor,
+        }[verb]
+        result = handler(args)
+    assert result["error"] == "execution_space"
+    assert "different execution space" in result["message"]
+    assert record.yaml_path.read_bytes() == foreign_bytes[-1]
+    latest = tracking.load_record(record.yaml_path)
+    assert latest.session_entry("session-1").state == expected_state
+    assert latest.head_session == expected_head
+
+
+@pytest.mark.parametrize(("caller", "verb"), [
+    ("handoff", "session_conclude"), ("cli", "session_conclude"),
+    ("cli", "session_link_succession"), ("cli", "session_resolve_handoff_successor"),
+])
+def test_session_lifecycle_production_callers_never_dial_old_daemon(
+    caller, verb, tmp_path, scoped_config, monkeypatch,
+):
+    import threading
+    from agent_worktrees import (
+        handoff_cutover, locks, session_tracking_cli, status_monitor_runtime,
+        tracking_write,
+    )
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        "workstation-wsl", "wsl", tmp_path,
+    )
+    record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
+    record.head_session = "session-1"
+    tracking.save_record(record)
+    before = record.yaml_path.read_bytes()
+    threads = []
+    handler = tracking_write._VERBS[verb]
+
+    def conclude(args):
+        threads.append(threading.get_ident())
+        return handler(args)
+
+    monkeypatch.setitem(tracking_write._VERBS, verb, conclude)
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        fields = tracking_write.rendezvous_fields(server)
+        fields["tracking_write_verb_versions"] = {verb: 1}
+        monkeypatch.setattr(locks, "read_lock", lambda path: fields)
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+        adapter = (
+            handoff_cutover._dispatch_handoff_repair if caller == "handoff"
+            else session_tracking_cli._dispatch_session_lifecycle
+        )
+        result = adapter(verb, {
+            "worktree_id": record.worktree_id, "yaml_path": str(record.yaml_path),
+            "session_id": "session-1", "state": "concluded",
+            "predecessor": "session-1", "successor": "session-2",
+            "handoff_token": "token-1", "successor_id": "session-2",
+        })
+    finally:
+        server.close()
+    assert threads == [threading.get_ident()]
+    assert result["error"] == "execution_space"
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("verb", ["conclude", "link"])
+def test_session_lifecycle_cli_reports_authority_refusal_without_success(
+    verb, tmp_path, scoped_config, monkeypatch, capfd,
+):
+    from agent_worktrees import session_tracking_cli
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        "workstation-wsl", "wsl", tmp_path,
+    )
+    record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
+    record.head_session = "session-1"
+    tracking.save_record(record)
+    before = record.yaml_path.read_bytes()
+    monkeypatch.setattr(session_tracking_cli, "_find_tracking_file", lambda raw: record.yaml_path)
+    command = (
+        session_tracking_cli.cmd_conclude_session if verb == "conclude"
+        else session_tracking_cli.cmd_link_succession
+    )
+    result = command(SimpleNamespace(
+        worktree_id=record.worktree_id, session_id="session-1", state="concluded",
+        predecessor="session-1", successor="session-2",
+    ))
+    assert result == 1
+    report = json.loads(capfd.readouterr().out)
+    assert "different execution space" in report["error"]
+    assert "state" not in report
+    assert record.yaml_path.read_bytes() == before
+
+
 @pytest.mark.parametrize("platform", ["wsl", None])
 def test_matching_key_does_not_authorize_an_ambiguous_legacy_platform(platform, scoped_config):
     record = SimpleNamespace(

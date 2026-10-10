@@ -4,6 +4,8 @@ import multiprocessing as mp
 import time
 from datetime import datetime, timezone
 
+import pytest
+
 from agent_worktrees import __main__ as cli
 from agent_worktrees import git_ops, tracking
 
@@ -395,11 +397,6 @@ def test_reap_one_force_claimed_worktree_is_removed(monkeypatch, tmp_path):
     harness.seed(rec)
     harness.set_classifier(info(S.UNUSED), info(S.UNUSED))
 
-    class _ForbiddenRecordLock:
-        def __init__(self, *_args, **_kwargs):
-            raise AssertionError("force must not take record lock")
-
-    monkeypatch.setattr(cli.tracking, "_RecordLock", _ForbiddenRecordLock)
     monkeypatch.setattr(
         cli.claimant_mod,
         "resolve_claimant_alive",
@@ -470,8 +467,9 @@ def test_cmd_cleanup_revalidation_holds_finalize_lock_and_fences_mutation(
     assert harness.reaped == [("wt1", git_ops.WorktreeState.COMPLETED.value)]
 
 
+@pytest.mark.parametrize("force", [False, True])
 def test_reap_one_revalidation_holds_finalize_lock_and_fences_mutation(
-    monkeypatch, tmp_path
+    force, monkeypatch, tmp_path
 ):
     harness = CleanupHarness(monkeypatch, tmp_path)
     rec = make_record(tmp_path, status="finalized")
@@ -495,7 +493,7 @@ def test_reap_one_revalidation_holds_finalize_lock_and_fences_mutation(
         return 0, []
 
     harness.set_reap_callback(_reap)
-    result = harness.run_reap_one()
+    result = harness.run_reap_one(force=force)
     assert result["removed"] is True
     assert order[:2] == ["finalize-acquire", "record-enter"]
     assert harness.finalize_events == ["finalize-acquire", "finalize-release"]
@@ -530,8 +528,9 @@ def test_cmd_cleanup_cross_process_record_lock_contention_fails_closed(
     assert holder.exitcode == 0
 
 
+@pytest.mark.parametrize("force", [False, True])
 def test_reap_one_cross_process_record_lock_contention_fails_closed(
-    monkeypatch, tmp_path
+    force, monkeypatch, tmp_path
 ):
     harness = CleanupHarness(monkeypatch, tmp_path)
     rec = make_record(tmp_path, status="finalized")
@@ -551,7 +550,7 @@ def test_reap_one_cross_process_record_lock_contention_fails_closed(
             assert holder.is_alive()
             assert time.monotonic() < deadline
             time.sleep(0.02)
-        result = harness.run_reap_one()
+        result = harness.run_reap_one(force=force)
     finally:
         release.write_text("1", encoding="utf-8")
         holder.join(timeout=60)
