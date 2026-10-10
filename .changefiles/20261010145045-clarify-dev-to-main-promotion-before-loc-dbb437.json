@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify dev-to-main promotion before local updates; remove post-merge manual instruction-sync obligation",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
