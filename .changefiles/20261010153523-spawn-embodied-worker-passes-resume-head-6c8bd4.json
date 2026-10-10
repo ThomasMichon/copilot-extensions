@@ -1,0 +1,9 @@
+{
+  "comment": "spawn_embodied_worker passes --resume-head when re-embodying an existing worktree, so a continuing dispatch task resumes its preserved conversation instead of silently cold-starting a fresh one",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

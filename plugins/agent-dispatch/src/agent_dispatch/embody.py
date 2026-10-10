@@ -475,9 +475,10 @@ def spawn_embodied_worker(
     Runs ``agent-worktrees [--project <project>] embody --new --seed "<autopilot
     seed>" --driver <driver> --json`` -- creating a fresh parallel worktree and a
     detached mux+Copilot session seeded to claim + execute ``task_id``
-    autonomously. The ``--driver`` label stamps the "driven by <agent>" banner so
-    the session is legible in Neuron Forge. Raises :class:`EmbodyUnavailable` if
-    the ``agent-worktrees`` CLI is not on PATH; the caller degrades from there.
+    autonomously (``worktree_id`` re-embodies that worktree instead, adding
+    ``--resume-head`` to resume its preserved head session). ``--driver`` stamps
+    the "driven by <agent>" banner; raises :class:`EmbodyUnavailable` if
+    ``agent-worktrees`` isn't on PATH.
 
     ``project`` names the target project explicitly (the agent-worktrees
     ``--project`` global). It is **required in practice for a CWD-neutral caller**
@@ -521,7 +522,7 @@ def spawn_embodied_worker(
         cmd += ["--project", project]
     cmd += ["embody"]
     if worktree_id:
-        cmd += ["--worktree-id", worktree_id]
+        cmd += ["--worktree-id", worktree_id, "--resume-head"]
     else:
         cmd += ["--new"]
     cmd += ["--seed", seed, "--driver", driver, "--json"]

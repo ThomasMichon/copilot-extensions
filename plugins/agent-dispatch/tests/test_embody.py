@@ -360,6 +360,8 @@ def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
     # A fresh parallel worktree, JSON output, and the driver banner.
     assert "--new" in cmd
     assert "--json" in cmd
+    # A brand-new worktree has no head session to resume.
+    assert "--resume-head" not in cmd
     assert cmd[cmd.index("--driver") + 1] == "agent-dispatch"
     # The seed carries the autopilot worker prompt for this task/worker.
     seed = cmd[cmd.index("--seed") + 1]
@@ -387,6 +389,10 @@ def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch):
     cmd = captured["cmd"]
     assert "--new" not in cmd
     assert cmd[cmd.index("--worktree-id") + 1] == "wt-reviewer"
+    # Re-embodying an already-provisioned worktree for a continuing task must
+    # resume its preserved head session rather than silently cold-starting a
+    # fresh conversation (embody's own --seed-without-resume-head default).
+    assert "--resume-head" in cmd
 
 
 def test_create_worktree_returns_id_and_path(monkeypatch):

@@ -25,7 +25,7 @@
   "plugins/agent-dispatch/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-dispatch/scripts/versioned_runtime.py": 1415,
   "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1421,
-  "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1113,
+  "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1114,
   "plugins/agent-dispatch/src/agent_dispatch/managed_retention.py": 1018,
   "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1602,
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
