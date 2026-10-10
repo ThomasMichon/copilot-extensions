@@ -165,7 +165,15 @@ stands as originally asked.
       identity-token handling. Fail-safe default throughout: an ambiguous
       case leaves the candidate alone (bounded cost: a lingering idle
       process) rather than terminating it (unbounded cost: killing a live,
-      in-flight unrelated process).
+      in-flight unrelated process) — but "leave it alone" must not mean
+      "silently stuck forever": an ambiguous candidate still holds Phase
+      2's singleton lock, so the restarted daemon can neither adopt nor
+      replace it, preserving the lane outage indefinitely with no signal
+      anyone needs to look. Surface this as an explicit operator-visible
+      blocked/unhealthy state (e.g. in the same health-file mechanism
+      Phase 4 adds) naming the ambiguous PID and why reconciliation
+      refused it, plus a defined later retry-or-manual-repair seam —
+      without ever relaxing the refusal to terminate unsafely.
 
 ### Phase 4 — supervised-lane child logging/health file
 - [ ] Give supervised-lane children the same `ok`/`returncode`/`error`/
@@ -200,7 +208,11 @@ stands as originally asked.
       owner-validation refusal case — the identity token still matches but
       owner validation independently fails; confirm termination is refused
       here too, since identity matching and owner validation are separate
-      required guards in the plan.
+      required guards in the plan. (d) a blocked-state visibility case —
+      for whichever refusal case above the daemon hits, confirm the
+      ambiguous candidate's held Phase 2 lock is surfaced as an explicit
+      operator-visible blocked/unhealthy state (naming the PID and refusal
+      reason), not merely silently left alone.
 - [ ] **Phase 4:** automated test confirming a supervised-lane child's
       health file reflects a real crash (non-zero exit, error captured) the
       same way an emitter's already does — using the actual crash shape
@@ -266,4 +278,25 @@ _Pending — begin with Phase 1 (trace the actual spawn entry points)._
   reconciliation path, with termination-specific tests conditional on that
   choice; added the owner-validation-fails-despite-matching-identity
   refusal case alongside the existing identity-mismatch refusal case.
+
+### 2026-10-10 — Plan PR #5309 review round 3 (1 previously-missed Medium)
+- **Medium:** the fail-safe "leave an ambiguous candidate alone" default
+  had an unstated cost: it still holds Phase 2's singleton lock, so the
+  restarted daemon can neither adopt nor replace it, silently preserving
+  the lane outage with no signal to look. Added an explicit requirement
+  that this state surface as an operator-visible blocked/unhealthy state
+  (naming the PID and refusal reason, via the same Phase 4 health-file
+  mechanism) plus a later retry/manual-repair seam, without relaxing the
+  termination refusal itself. Added a matching Validation Plan case (d)
+  requiring this visibility to be proven alongside whichever refusal case
+  the daemon actually hits.
+- The two remaining Low findings from round 1
+  (discussion_r4182389155/r4182389102) were re-checked against the
+  current text and both already match what they ask for verbatim (the
+  restart test is unconditional with termination conditional, including
+  the owner-validation refusal case; the zdd reuse instruction and journal
+  correction are both in place) — their anchor lines no longer resolve in
+  the current diff (GitHub reports `line: null`), consistent with a stale
+  unresolved thread rather than a persisting content gap. Left as-is
+  rather than guessing at further rewording with no new information.
 
