@@ -101,7 +101,14 @@ each adopter is already safe.
       (`fingerprint_source()` takes every declared root -- not just one
       manifest file, closing the exact gap a prior audit found on one
       adopter, #5472 -- and is a stateless, repeatable probe a caller can
-      call cheaply and often before ever contending for a build.)
+      call cheaply and often before ever contending for a build. A
+      symlink -- whether itself a declared root, or discovered nested
+      inside one -- is hashed as its own identity only when its target's
+      actual bytes are ALREADY covered by one of the declared roots;
+      otherwise it is rejected outright, so an undeclared external target
+      can never change invisibly behind a mere pointer-identity hash. A
+      dangling target is the one exception, allowed through as identity-
+      only since there is no content it could be hiding.)
 - [x] Return exact completed reuse without taking an exclusive construction
       lease or invoking venv/package writers. Refuse numbered content drift,
       including forced updates, with actionable published-version/dev guidance.

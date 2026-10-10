@@ -1321,11 +1321,12 @@ def test_fingerprint_source_changes_when_a_symlink_is_repointed(tmp_path):
     assert before != after
 
 
-def test_fingerprint_source_never_follows_a_symlinked_directory(tmp_path):
-    """A symlinked directory is never walked into -- its nested contents
-    are not separately discovered -- but the link itself is still hashed
-    as its own entry, so re-pointing/removing it still changes the
-    digest."""
+def test_fingerprint_source_rejects_a_nested_symlinked_directory_to_an_undeclared_target(tmp_path):
+    """A nested symlinked directory pointing OUTSIDE every declared root
+    is rejected outright, never silently reduced to pointer-identity
+    text: its content is not otherwise covered by this fingerprint, so a
+    change made through it (an installer that follows the link) could
+    change the real install input with NO effect on the digest."""
     real_dir = tmp_path / "real_dir"
     real_dir.mkdir()
     (real_dir / "nested.py").write_text("x = 1", encoding="utf-8")
@@ -1338,52 +1339,91 @@ def test_fingerprint_source_never_follows_a_symlinked_directory(tmp_path):
     except OSError:
         pytest.skip("directory symlinks are unavailable")
 
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_allows_a_nested_symlinked_directory_to_a_declared_target(tmp_path):
+    """A nested symlinked directory whose target lies INSIDE one of the
+    declared roots is allowed (never walked into, but its target's
+    content is already covered by that root's own separate walk, so
+    identity-only hashing is safe here): changing the target's content
+    IS visible in the digest, through the target's own direct entry."""
+    src = tmp_path / "src"
+    src.mkdir()
+    real_dir = src / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "nested.py").write_text("x = 1", encoding="utf-8")
+    link = src / "linked_dir"
+    try:
+        link.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
     before = vr.fingerprint_source([src])
-    # Changing the nested content THROUGH the symlink must not be visible
-    # -- it was never walked.
     (real_dir / "nested.py").write_text("x = 2", encoding="utf-8")
-    after_nested_change = vr.fingerprint_source([src])
-    assert before == after_nested_change
+    after = vr.fingerprint_source([src])
+    assert before != after
 
-    # But removing the link itself must change the digest.
+    # Re-pointing the link itself (to a different, also-declared target)
+    # must also change the digest.
+    other_dir = src / "other_dir"
+    other_dir.mkdir()
+    (other_dir / "nested.py").write_text("x = 1", encoding="utf-8")
     link.unlink()
-    after_removal = vr.fingerprint_source([src])
-    assert after_removal != before
+    link.symlink_to(other_dir, target_is_directory=True)
+    after_repoint = vr.fingerprint_source([src])
+    assert after_repoint != after
 
 
-def test_fingerprint_source_symlink_to_external_target_is_relocation_stable(tmp_path_factory):
-    """An absolute symlink target that lies OUTSIDE the declared source
-    set (a fixed external location, never itself relocated) must not make
-    the digest depend on where the declared source tree is relocated to:
-    the external target's raw absolute text does not change just because
-    the tree containing the symlink moved, so it is already the stable
-    identity -- it must never be recomputed relative to the symlink's own
-    (relocating) containing directory."""
+def test_fingerprint_source_rejects_a_nested_file_symlink_to_an_undeclared_target(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    external = tmp_path / "external.py"
+    external.write_text("x = 1", encoding="utf-8")
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(external)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_allows_a_nested_symlink_to_a_dangling_target(tmp_path):
+    """A dangling symlink has no actual content to hide, so it is allowed
+    through as identity-only (unlike an undeclared-but-EXISTING external
+    target, which is rejected)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(src / "does-not-exist.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    # Must not raise.
+    vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_rejects_a_symlink_to_an_external_target_regardless_of_location(tmp_path_factory):
+    """A nested symlink to an undeclared EXTERNAL target is rejected
+    outright (see the dedicated rejection tests above); this must hold
+    consistently regardless of where the declared source tree itself
+    lives, since the rejection is based on root-containment, never on
+    absolute-location comparison."""
     external = tmp_path_factory.mktemp("external-fixed-location")
     (external / "shared.py").write_text("x = 1", encoding="utf-8")
 
-    first_base = tmp_path_factory.mktemp("first-tree")
-    second_base = tmp_path_factory.mktemp("a-very-differently-named-second-tree")
-    for base in (first_base, second_base):
+    for base_name in ("first-tree", "a-very-differently-named-second-tree"):
+        base = tmp_path_factory.mktemp(base_name)
         src = base / "src"
         src.mkdir()
         try:
             (src / "alias.py").symlink_to(external / "shared.py")
         except OSError:
             pytest.skip("symlinks are unavailable")
-
-    first = vr.fingerprint_source([first_base / "src"])
-    second = vr.fingerprint_source([second_base / "src"])
-    assert first == second
-
-    # And the external target's identity still matters: pointing at a
-    # DIFFERENT external file must still change the digest.
-    (external / "shared.py").unlink()
-    (external / "other.py").write_text("x = 2", encoding="utf-8")
-    (second_base / "src" / "alias.py").unlink()
-    (second_base / "src" / "alias.py").symlink_to(external / "other.py")
-    third = vr.fingerprint_source([second_base / "src"])
-    assert third != second
+        with pytest.raises(ValueError):
+            vr.fingerprint_source([src])
 
 
 def test_fingerprint_source_symlink_to_internal_target_is_relocation_stable(tmp_path_factory):
@@ -1407,19 +1447,15 @@ def test_fingerprint_source_symlink_to_internal_target_is_relocation_stable(tmp_
     assert first == second
 
 
-def test_fingerprint_source_target_under_common_ancestor_but_outside_declared_roots_stays_raw(tmp_path_factory):
-    """Relativizing an absolute target must check containment against the
-    ACTUAL declared roots, not merely their common ancestor: a sibling
-    path under that ancestor (e.g. `project/shared.py` alongside declared
-    roots `project/src` and `project/pyproject.toml`) was never itself
-    declared and is not guaranteed to move together with the roots. If the
-    declared roots are relocated to an entirely different location while
-    that external sibling stays fixed, the symlink's recorded target must
-    be identical in both fingerprints (the raw absolute text, since
-    `shared.py` is outside every declared root) -- not relativized against
-    one location's common ancestor and left absolute against the other's,
-    which would produce a false content-conflict for logically unchanged
-    input."""
+def test_fingerprint_source_rejects_a_target_under_common_ancestor_but_outside_declared_roots(tmp_path_factory):
+    """Containment must be checked against the ACTUAL declared roots, not
+    merely their common ancestor: a sibling path under that ancestor
+    (e.g. `project/shared.py` alongside declared roots `project/src` and
+    `project/pyproject.toml`) was never itself declared. It must be
+    rejected as an undeclared external target, consistently, regardless
+    of whether the declared roots happen to live alongside it (so a naive
+    common-ancestor containment check would wrongly treat it as
+    "inside") or at a wholly different location."""
     project = tmp_path_factory.mktemp("project")
     (project / "shared.py").write_text("shared", encoding="utf-8")
 
@@ -1434,18 +1470,17 @@ def test_fingerprint_source_target_under_common_ancestor_but_outside_declared_ro
         manifest.write_text("[project]\nname='x'\n", encoding="utf-8")
         return manifest, src
 
-    # First declaration: roots physically live alongside the external
-    # `project/shared.py` sibling (so a naive common-ancestor containment
-    # check would wrongly treat `shared.py` as "inside").
+    # Roots physically alongside the external `project/shared.py` sibling.
     first_manifest, first_src = _declare_roots(project)
-    # Second declaration: the SAME two roots relocated to a wholly
-    # different location; `project/shared.py` itself never moves.
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([first_manifest, first_src])
+
+    # The SAME two roots at a wholly different location; `shared.py`
+    # itself never moves.
     other_base = tmp_path_factory.mktemp("elsewhere")
     second_manifest, second_src = _declare_roots(other_base)
-
-    first = vr.fingerprint_source([first_manifest, first_src])
-    second = vr.fingerprint_source([second_manifest, second_src])
-    assert first == second
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([second_manifest, second_src])
 
 
 def test_fingerprint_source_rejects_a_declared_root_that_is_itself_a_symlink(tmp_path):

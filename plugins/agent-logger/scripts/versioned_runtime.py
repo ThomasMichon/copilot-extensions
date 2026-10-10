@@ -1328,17 +1328,29 @@ def fingerprint_source(paths) -> str:
     the link or its target -- would own the nested names); instead the
     link itself is hashed as a single entry recording where it points, so
     re-pointing or adding/removing it still changes the digest even though
-    its nested contents, if any, are not separately walked. A symlink
-    target is recorded as-is when relative (already stable under whole-
-    tree relocation, since it is interpreted relative to the symlink's own
-    location, which moves together with everything else). An ABSOLUTE
-    target is made relocation-invariant the same way a file label is --
-    relative to the common ancestor of every declared root -- but ONLY
-    when it actually falls inside that declared source set; an absolute
-    target OUTSIDE it (a fixed external location, or a different drive on
-    Windows) is kept as its raw absolute text instead, since that external
-    location does not move when the declared source tree is relocated and
-    is therefore already the stable identity on its own.
+    its nested contents, if any, are not separately walked.
+
+    A NESTED symlink's target must itself fall inside one of the DECLARED
+    roots (so its actual bytes are already covered by that root's own,
+    separate walk) -- this raises otherwise, exactly like a symlinked
+    DECLARED ROOT does (below): hashing only a symlink's identity/pointer
+    is only safe when the content it points at is attributable some other
+    way, never when it is an undeclared external target whose bytes could
+    change invisibly to this digest. A DANGLING target (resolves to
+    nothing at all) is the one exception -- allowed through as identity-
+    only, since there is no actual content it could be hiding.
+
+    A symlink target is recorded as-is when relative (already stable under
+    whole-tree relocation, since it is interpreted relative to the
+    symlink's own location, which moves together with everything else).
+    An ABSOLUTE target is made relocation-invariant the same way a file
+    label is -- relative to the common ancestor of every declared root --
+    but ONLY when it actually falls inside one of the declared roots
+    themselves (never merely under their common ancestor, which can
+    include undeclared sibling paths); an absolute target outside every
+    declared root is rejected per the previous paragraph, so this
+    normalization step only ever runs for a target already known to be
+    covered.
 
     A DECLARED ROOT that is itself a symlink is treated differently from a
     nested one, and deliberately raises instead of silently succeeding: a
@@ -1415,6 +1427,37 @@ def fingerprint_source(paths) -> str:
     def _raise(exc: OSError) -> None:
         raise OSError(f"fingerprint_source: could not scan a directory: {exc}") from exc
 
+    def _require_target_within_declared_roots(candidate: Path) -> None:
+        # A NESTED symlink's content is otherwise invisible to this
+        # fingerprint (only its own identity/target-pointer is hashed --
+        # see docstring); that is only safe when its target's actual
+        # bytes are ALREADY covered by one of the declared roots (walked
+        # separately, in its own right). A target outside every declared
+        # root -- an undeclared external file or directory -- could have
+        # its content changed with NO effect on the digest, recreating
+        # exactly the content-drift blind spot this function exists to
+        # close. Fail closed by rejecting it outright; the caller must
+        # either declare the target directly as its own root, or avoid
+        # this undeclared external symlink. A dangling target (resolves
+        # to nothing at all) is allowed through as identity-only: there is
+        # no actual content it could be hiding.
+        try:
+            target_resolved = candidate.resolve(strict=True)
+        except OSError:
+            return  # dangling -- nothing to hide, allow identity-only.
+        if any(
+            target_resolved == r or target_resolved.is_relative_to(r)
+            for r in roots
+        ):
+            return
+        raise ValueError(
+            f"fingerprint_source: symlink {candidate} points outside "
+            f"every declared root (to {target_resolved}) -- its content "
+            f"is not otherwise covered by this fingerprint; declare the "
+            f"target directly as an additional root, or avoid this "
+            f"undeclared external symlink"
+        )
+
     # Each discovered entry is kept under its OWN (never resolved) path, so
     # a symlink is never conflated with whatever it points to. Dict value
     # is "file" for a regular file, or "symlink" for anything that is a
@@ -1458,6 +1501,7 @@ def fingerprint_source(paths) -> str:
                     candidate = Path(dirpath) / dname
                     cmode = _lstat_mode(candidate, "nested directory entry")
                     if stat.S_ISLNK(cmode):
+                        _require_target_within_declared_roots(candidate)
                         entries[candidate] = "symlink"
                     elif not stat.S_ISDIR(cmode):
                         # os.walk placed this name in dirnames, but an
@@ -1474,6 +1518,7 @@ def fingerprint_source(paths) -> str:
                     candidate = Path(dirpath) / name
                     cmode = _lstat_mode(candidate, "nested file entry")
                     if stat.S_ISLNK(cmode):
+                        _require_target_within_declared_roots(candidate)
                         entries[candidate] = "symlink"
                     elif stat.S_ISREG(cmode):
                         entries[candidate] = "file"
@@ -1715,12 +1760,15 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
             # A platform without dir_fd-relative opens (notably Windows,
             # which also lacks O_NOFOLLOW and cannot os.open() a bare
             # directory at all): explicitly lstat the marker path first
-            # (Windows has no open-time no-follow guard) and reject a
-            # symlink there before ever opening it, then fall back to an
-            # ordinary pathname open. The lstat() of `vdir` above is the
-            # only slot-directory guard available here; together these
-            # narrow, but do not fully close, the TOCTOU window the
-            # dir_fd path closes on POSIX.
+            # (Windows has no open-time no-follow guard) and reject
+            # anything that is not a plain regular file there -- a
+            # symlink, OR a directory (opening a directory via os.open()
+            # raises on Windows rather than failing gracefully, so this
+            # must be checked before ever attempting the open) -- then
+            # fall back to an ordinary pathname open. The lstat() of
+            # `vdir` above is the only slot-directory guard available
+            # here; together these narrow, but do not fully close, the
+            # TOCTOU window the dir_fd path closes on POSIX.
             try:
                 marker_lstat = os.lstat(marker_file)
             except FileNotFoundError:
@@ -1729,7 +1777,7 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
                 raise OSError(
                     f"check_admission: could not stat {marker_file}: {exc}"
                 ) from exc
-            if stat.S_ISLNK(marker_lstat.st_mode):
+            if not stat.S_ISREG(marker_lstat.st_mode):
                 return ADMIT_HEALTH_REPAIR_REQUIRED
             try:
                 marker_fd = os.open(marker_file, os.O_RDONLY | nofollow)
