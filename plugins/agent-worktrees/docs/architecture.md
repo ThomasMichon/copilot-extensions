@@ -1086,6 +1086,42 @@ safely carry.
   systems only -- never a public repo.
 - **`false` (anonymous opt-out).** No marker at all.
 
+**A third, independent layer: the encrypted identity marker (`enc=`).**
+Alongside `codename=`/`root=` (never replacing either), the `"codename"`-mode
+marker may also carry an `enc=<token>` field -- an AES-256-GCM-encrypted
+blob (`agent_worktrees.identity_marker`) of the FULL raw identity (worktree
+id, machine, session, head SHA, project, timestamp). The first four identity
+fields correspond to the raw `true` marker; project and UTC timestamp are
+additional encrypted metadata not carried by that raw marker. Only the holder
+of a shared symmetric key can decrypt it; to everyone else it is opaque
+ciphertext -- exactly as public-safe as `codename=` itself. Because of that,
+it is emitted **automatically** under `"codename"` mode whenever a key is
+configured -- no new per-repo opt-in is needed, mirroring how `root=` was
+added. Scoped to `"codename"` mode specifically: `true` mode already
+discloses the underlying worktree identity in plaintext (encrypting it alongside
+would add ciphertext with no additional privacy value), and `false` (the
+anonymous opt-out) continues to emit no marker of any kind, encrypted or
+not -- an operator who explicitly chose full anonymity gets it, full stop.
+Key custody is
+deliberately lightweight (an operator-confirmed design choice, effort
+`pr-attribution-codenames`): a single raw base64-encoded 32-byte key file,
+**not** machine-bound (unlike `agent_vault.kek`'s DPAPI-wrapped KEKs) so the
+SAME key decrypts markers from every one of the key holder's machines. It
+resolves from `AGENT_WORKTREES_IDENTITY_KEY` (an explicit path) or, by
+default, a OneDrive-rooted location
+(`<OneDrive root>/Apps/agent-worktrees/identity.key`) -- OneDrive
+specifically because the file must travel with the operator, not stay
+pinned to one machine, which is the whole point of this layer versus the
+existing SSH-scan-based codename resolution (that must ask every known
+machine in turn; this just needs the one shared key). The key is never
+auto-generated on a publish path -- `python -m agent_worktrees.identity_marker
+generate` is the explicit, operator-invoked provisioning step; a missing key
+simply omits the `enc=` field, exactly like an unresolvable `root=` chain.
+Decrypt with `python -m agent_worktrees.identity_marker decode <token>`.
+This is intentionally a lighter-weight mechanism than `agent-vault` (no
+KeePass database, no daemon, no MFA) -- a low-stakes reverse-lookup
+convenience, not a secrets vault.
+
 **Resolution path.** `resolve --codename <name>` and `embody --codename
 <name>` both resolve **locally first** (the codename is looked up in this
 machine's own tracking store), then fall back to an **automated

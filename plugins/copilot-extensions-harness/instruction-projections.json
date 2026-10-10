@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "contribution-boundary",
+      "deliveryMode": "inline",
       "template": "instructions/contribution-boundary.instructions.md",
       "destination": ".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md",
       "customizationKind": "instructions",
@@ -12,6 +13,7 @@
     },
     {
       "id": "cross-repo-debug-tracking",
+      "deliveryMode": "selector",
       "template": "instructions/cross-repo-debug-tracking.instructions.md",
       "destination": ".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md",
       "customizationKind": "instructions",
@@ -20,6 +22,7 @@
     },
     {
       "id": "commented-review-verdict",
+      "deliveryMode": "selector",
       "template": "instructions/commented-review-verdict.instructions.md",
       "destination": ".github/instructions/copilot-extensions-harness/commented-review-verdict.instructions.md",
       "customizationKind": "instructions",
@@ -28,6 +31,7 @@
     },
     {
       "id": "validate-and-promote-triage",
+      "deliveryMode": "selector",
       "template": "instructions/validate-and-promote-triage.instructions.md",
       "destination": ".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md",
       "customizationKind": "instructions",

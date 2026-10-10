@@ -378,6 +378,7 @@ def run(
     projection_result = instruction_projections.scan_repository(
         projection_root or root,
         selected_projection_sources,
+        admission_sources=plugin_sources if projection_sources is not ... else None,
     )
     if projection_settings_error is not None:
         projection_result.add(

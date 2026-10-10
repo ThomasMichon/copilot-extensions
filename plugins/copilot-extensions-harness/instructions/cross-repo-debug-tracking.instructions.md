@@ -13,14 +13,23 @@ its actual checked-out location first (for example
 PATH lookup) -- an installed runtime under
 `~/.agent-*` is never the only copy, and assuming otherwise produces a
 false documentation-gap report. When a local symptom traces to an upstream
-`ThomasMichon/copilot-extensions` issue or PR (or the reverse), cross-link
-both directions: cite the upstream number in the local tracking issue and the
-local tracking issue in the upstream one, so the trail between the observed
-symptom and its root cause survives across sessions. Invoke the
+`ThomasMichon/copilot-extensions` issue or PR (or the reverse), preserve
+public-public traceability with cross-links in both directions only when both
+trackers and artifacts are public. A private downstream tracker may link to
+public upstream work, but public upstream artifacts must never receive private
+links, IDs or context. Keep the private symptom/rationale downstream and make
+the public report self-contained. Invoke the
 `agent-worktrees:working-cross-repo` skill for the complete resolution and
-cross-linking flow. After merging a PR to `ThomasMichon/copilot-extensions`,
-if you are also operating in a harness/consumer repo this session,
-immediately force-update installed plugins and re-run the projection sync
-(`<agent-worktrees catalog argv[0]> update --force`, then the
-`customizing-copilot:reviewing-customizations` projection sync) in that repo
-before ending your turn -- do not wait for a later drift audit to catch it.
+cross-linking flow. After an upstream merge, let the consuming harness's
+adopted, consented maintenance own checked-in projection refresh (normally
+once daily), rather than forcing a synchronous resync to finish every coding
+session. Keep permissionless local rendering current with the installed
+payload and preserve the reviewed offline fallback. Block missing verified
+guidance delivery, but keep valid stale guidance advisory; foreign ownership,
+unsafe paths and missing/corrupt locked
+artifacts remain blocking. If maintenance or rollout has not run, report
+primed/pending, not deployed, and retain the named maintenance/deployment
+obligation. Payload/runtime updates still require explicit rollout
+authorization and the target's required safety/permission gates; do not
+create a parallel scheduler or silently claim that a merge updated a running
+system.

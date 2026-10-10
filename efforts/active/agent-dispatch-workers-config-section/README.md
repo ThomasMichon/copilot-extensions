@@ -5,7 +5,7 @@
   picker-support plugins)
 - **Branch(es):** per-slice worktrees
 - **Created:** 2026-10-06
-- **Status:** Active <!-- Phase 1 landed (status + local toggle glue); Phase 2 landed (native --machine); Phase 3 (config_sections manifest entry + Picker confirmation gap) next -->
+- **Status:** Active <!-- Phase 1 landed (status + local toggle glue); Phase 2 landed (native --machine); Phase 3 landed (status-only config_sections entry); the toggle-from-Picker follow-on is tracked in ThomasMichon/copilot-extensions#6044 -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md)'s
   plugin-pivot-extensibility behavior (a plugin's own pivot manifest
   contributes Picker surface without Picker-side code) and
@@ -223,42 +223,86 @@ Intent).
       `check-module-size.py` clean.
 
 ### Phase 3 — `config_sections` manifest entry
-- [ ] Add a `config_sections` entry to `agent-dispatch`'s own pivot manifest:
+- [x] Add a `config_sections` entry to `agent-dispatch`'s own pivot manifest:
       key `workers`, label "Workers", `run` invoking Phase 1's glue script,
       `description` naming the MVP scope plainly (status + enable/disable
-      only, no template browsing yet).
-- [ ] **Known picker-side gap, not yet buildable from existing primitives:**
-      `engine_pivot_actions.py`'s `_run_config_section` invokes a selected
-      `ConfigSection` immediately on Enter — neither it nor
-      `tasks.run_config_section` reads a `confirm` field today, and a single
-      static flag on the manifest entry can't distinguish a destructive
-      "disable" invocation from a harmless "status" one in the first place
-      (both go through the same `run` command). This phase must design and
-      add real conditional-confirmation UI (likely: the `run` glue script's
-      own argv carries an explicit action, and the Picker gains a
-      confirm-before-run step keyed off that, or off a new per-invocation
-      manifest field) before shipping a disable toggle from the Picker —
-      do not treat this as a manifest-only addition.
-- [ ] Render path: confirm the Picker's existing ⚙ Configuration menu
+      only, no template browsing yet). **Landed, with a necessary design
+      change:** a `config_sections[].run` argv is static -- it cannot carry
+      a consuming repo's own chosen pool name (unknowable ahead of time by
+      a plugin-shipped manifest). Rather than invent and hardcode an
+      unverified naming convention (e.g. a presumed "general-task-worker"
+      pool), `workers config-section` gained a **no-name summary mode**:
+      invoked with no positional name, it reports every declared
+      `supervised-lane` pool's status in one joined, budget-truncated line
+      (`"pool-a: 2 -- active; pool-b: 1 -- overridden off (reason)"`,
+      collapsing into a trailing `"+N more"` marker rather than mid-name
+      truncation once the 200-char budget would overflow). The manifest
+      entry's `run` is `["agent-dispatch", "workers", "config-section"]`
+      (no name) -- this is what actually ships generically, for any
+      consuming repo's own pool(s), without presuming a naming scheme this
+      effort never actually committed to shipping.
+- [x] **Known picker-side gap, not yet buildable from existing
+      primitives -- investigated to ground truth, not just suspected, and
+      filed as its own tracked issue:**
+      [`ThomasMichon/copilot-extensions#6044`](https://github.com/ThomasMichon/copilot-extensions/issues/6044).
+      Traced both dispatch paths directly: `engine_pivot_actions.py`'s
+      `_run_config_section` invokes a selected `ConfigSection` immediately
+      on Enter, never reading `section.confirm`; and (a broader version of
+      this gap than originally suspected) `_open_task_menu`'s
+      `TaskMenuScreen` dismisses straight to `_run_task_action` with **no
+      confirm step at all** for an ordinary `WorktreeAction` either --
+      `confirm: true` is parsed and validated for both action kinds, but
+      genuinely enforced only for the unrelated "New task…"
+      `create_action.confirm` path (`CreateActionScreen`). This means
+      every `confirm: true` entry already shipped today (including this
+      very plugin's own `pause`/`force-stop`/`abandon`/... actions) runs
+      immediately with no confirmation dialog -- a pre-existing,
+      cross-cutting Picker gap, not something to redesign inside this
+      narrow effort. The filed issue also notes the scope wrinkle a single
+      static `confirm: true` can't resolve alone: one config-section
+      `run` command can't distinguish "status" from "disable" by itself,
+      so any real fix needs either a per-invocation argv-carried action or
+      a separate always-confirmed entry for the destructive operation.
+      Shipping the toggle from the Picker stays blocked on that issue; the
+      terminal `--toggle enable|disable` flag (Phase 1) remains the
+      supported path until it closes.
+- [x] Render path: confirm the Picker's existing ⚙ Configuration menu
       surfaces a `config_sections` entry with no further picker-side code
-      for the **status-only** path (per `pivot_manifest.py`'s parsing
-      already being general) — the toggle/disable path is exactly the
-      confirmation gap above, scoped narrowly to that one UI addition.
+      for the **status-only** path. **Confirmed, not just asserted:** the
+      manifest change passes `worktree-manager`'s own
+      `test_real_checkout_manifests_match_contract` (schema validation
+      against every real `plugins/*/pivots/*.json`) and its dedicated
+      `test_pivots.py`/`test_picker_tui.py` `config_sections` coverage
+      (19 + 11 tests, all green) with zero Picker-side code changes --
+      `pivot_manifest.py`'s parsing was already fully general, exactly as
+      this item predicted.
 - [ ] Wire Phase 2's `--machine` support into the config section once a
       multi-machine affordance is in scope (may ship as a Phase 3 follow-on
-      rather than blocking the single-machine MVP).
+      rather than blocking the single-machine MVP). Deferred -- the
+      no-name summary mode is inherently single-machine (it reports this
+      machine's own discovered pools); a cross-machine summary view is a
+      genuinely separate UI shape, not a small addition to this one.
 
 ## Validation Plan
 
-- [ ] An organization-neutral temporary or checked-in fixture pool (a
+- [x] An organization-neutral temporary or checked-in fixture pool (a
       throwaway `kind: supervised-lane` declaration registered against a
       scratch/test repo lane, not any particular downstream consumer's real
       harness or machine-local state) shows correct status text in the
       Picker's Configuration menu — this repeatable fixture is the
       acceptance test, not a dependency on a specific organization's
-      pre-existing deployment.
+      pre-existing deployment. **Landed, via unit coverage (not a live
+      Picker session):** `test_workers_config_cli.py`'s no-name summary
+      tests build fixture `supervised-lane` declarations and assert the
+      exact rendered status line; `worktree-manager`'s own
+      `test_real_checkout_manifests_match_contract` proves the manifest
+      entry itself is schema-valid and discoverable. A live, driven Picker
+      session was not run this session (no interactive TUI harness
+      available in this environment); deferred to whoever next drives one.
 - [ ] Toggling disable/enable from the Picker round-trips to
       `agent-dispatch supervise override list` reflecting the change.
+      Blocked on `#6044` (the toggle is not yet wired into the Picker at
+      all, by design -- see Phase 3's own items above).
 - [ ] A `--machine`-targeted toggle round-trips against a second real or
       test machine over `remote_dispatch.py`'s SSH transport. **Partially
       covered:** proven against a mocked SSH transport (the same style
@@ -272,9 +316,61 @@ Intent).
 
 ## Proposal
 
-_Pending — Phase 1's exact query/glue shape firms this up._
+_Pending — Phase 1's exact query/glue shape firms this up. (Phase 3's own
+no-name summary mode is proposal-level work in its own right; see that
+phase's first Plan item for the rationale.)_
 
 ## Journal
+
+### 2026-10-10 — Phase 3 landed: status-only `config_sections` Workers entry
+- Resolved a prior handoff's own closing claim ("needs the separate
+  Worktree Manager app repo's own Picker-side confirmation-UI gap closed")
+  -- this turned out to be **incorrect**: `worktree-manager/` is an
+  out-of-plugin directory inside *this same* `ThomasMichon/copilot-extensions`
+  checkout (confirmed via `git ls-files worktree-manager`, its own CI job
+  `worktree-manager (out-of-plugin)` in `.github/workflows/ci.yml`), not a
+  separate repository. Phase 3 was fully drivable from here all along.
+- Investigated the confirm-gap claim to ground truth rather than taking it
+  at face value: traced `engine_pivot_actions.py`'s `_run_config_section`
+  and `_open_task_menu`/`TaskMenuScreen`/`_run_task_action` directly.
+  Confirmed the gap is real and **broader** than originally scoped -- it
+  affects every `WorktreeAction`, not just `ConfigSection` -- and filed it
+  as its own tracked issue,
+  [`ThomasMichon/copilot-extensions#6044`](https://github.com/ThomasMichon/copilot-extensions/issues/6044),
+  rather than attempting a cross-cutting Picker confirm-UI redesign inside
+  this narrow effort.
+- Discovered a second, independent gap while designing the actual manifest
+  entry: a `config_sections[].run` argv is static per-plugin, so it cannot
+  target a *specific* consuming repo's own pool name (unknowable ahead of
+  time). Rather than hardcode an unverified "general-task-worker" naming
+  convention the Request only ever floated as a follow-up idea, extended
+  `workers config-section` with a **no-name summary mode**: omit the pool
+  name to get one joined, budget-truncated status line across every
+  declared pool (`all_supervised_lanes()`/`all_pools_status_line()`), with
+  a `"+N more"` collapse once the 200-char contract would overflow mid-pool
+  rather than mid-name. `--toggle` without a name is rejected with a clear
+  error (exit 2) -- toggling always requires naming the one pool to act on.
+- Added the manifest entry itself: `plugins/agent-dispatch/pivots/agent-dispatch.json`
+  gained `config_sections: [{key: "workers", label: "Workers", run:
+  ["agent-dispatch", "workers", "config-section"], description: ...}]`
+  (status-only, `confirm` omitted since this path performs no mutation).
+  Verified against `worktree-manager`'s own `test_real_checkout_manifests_match_contract`
+  (schema-validates every real `plugins/*/pivots/*.json`) and its
+  `config_sections`-specific `test_pivots.py`/`test_picker_tui.py`
+  coverage (19 + 11 tests) -- all green, zero Picker-side code changed, as
+  Phase 3's own original "render path" Plan item predicted.
+- 9 new tests in `test_workers_config_cli.py` (parser's now-optional name,
+  the summary line for multiple/zero/non-supervised-lane pools, override
+  reflection in the summary, the toggle-without-name rejection, JSON shape,
+  and the overflow-collapse budget behavior). Full `test_cli.py` (239
+  passed, 1 skipped combined with `test_workers_config_cli.py`),
+  `check-module-size.py` all green.
+- Next: the toggle-from-Picker UI wiring is blocked on `#6044` closing;
+  the terminal `--toggle enable|disable` flag (Phase 1) remains the
+  supported mutation path meanwhile. A live, driven Picker session to
+  visually confirm the Configuration menu entry was not run this session
+  (no interactive TUI harness available here) -- deferred to whoever next
+  drives one, per the Validation Plan's own note.
 
 ### 2026-10-08 — Phase 2 landed: native `--machine` on `supervise override`
 - Added `--machine <name>` to `supervise override disable|enable` (not

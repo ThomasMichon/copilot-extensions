@@ -23,6 +23,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-index-service")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
+    release = commands.add_parser("release", help="describe or verify a pinned wheel bundle")
+    release_commands = release.add_subparsers(dest="release_command", required=True)
+    describe = release_commands.add_parser("describe")
+    describe.add_argument("--bundle", required=True, type=Path)
+    describe.add_argument("--source-commit", required=True)
+    verify = release_commands.add_parser("verify")
+    verify.add_argument("--descriptor", required=True, type=Path)
+    verify.add_argument("--expected-source-commit", required=True)
     for name in ("serve", "start", "status", "deploy", "config"):
         sub = commands.add_parser(name)
         sub.add_argument("--config", required=True, type=Path, help="explicit host YAML file")
@@ -40,6 +48,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "release":
+            from .release import build_descriptor, verify_descriptor
+
+            if args.release_command == "describe":
+                payload = build_descriptor(args.bundle, source_commit=args.source_commit)
+            else:
+                payload = {
+                    "valid": True,
+                    "release": verify_descriptor(
+                        args.descriptor, expected_source_commit=args.expected_source_commit,
+                    ),
+                }
+            print(json.dumps(payload, sort_keys=True))
+            return 0
         config = load_config(args.config)
         if args.command == "config":
             print(json.dumps({
@@ -67,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             payload["invoked_version"] = __version__
             print(json.dumps(payload, sort_keys=True))
             return 0 if payload.get("running") is True else 1
-    except (ConfigurationError, RuntimeError, ImportError, OSError) as exc:
+    except (ConfigurationError, RuntimeError, ImportError, OSError, ValueError) as exc:
         print(f"agent-index-service: {exc}", file=sys.stderr)
         return 2
 

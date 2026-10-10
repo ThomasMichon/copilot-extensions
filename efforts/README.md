@@ -10,6 +10,9 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Mux Child Window Suppression](active/mux-child-window-suppression/README.md) | Draft | #6040 |
+| [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Draft; implementation planned | #6028 |
+| [Linux Role Fleet](active/linux-role-fleet/README.md) | Draft; approved Komodo-first substrate selection | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Draft | #6007 |
 | [PR Recovery Break Glass](active/pr-recovery-break-glass/README.md) | Draft | #5817 |
 | [Transparent PSMux Launch](active/transparent-psmux-launch/README.md) | Active | #5878 |
@@ -17,7 +20,7 @@ that pattern to this repository.
 | [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Draft; independent planning proposal | #5799 |
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
-| [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974 |
+| [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |
 | [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; proposal reviewed | #5768, #5769 |
 | [Dispatch Task Lifecycle and Conversations](active/agent-dispatch-monitor-and-confirmed-state/README.md) | Active; submission/output/delivery amendment proposed | #3681 |
 | [Dispatch Tasks-Pane UX](active/agent-dispatch-tasks-pane-ux-overhaul/README.md) | Active; review/history/follow-up amendment proposed | #3681 (backend dependency) |
@@ -25,7 +28,6 @@ that pattern to this repository.
 | [Session Intelligence and Accounting](active/session-intelligence-and-accounting/README.md) | Active | #5665 |
 | [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Active (Phases 1-3 built; `bridge` + `pr` sources in review) | #5668 (core + `dispatch`, merged), #5813 (`bridge` + `pr` with their sibling commands); clients separately |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
-| [Resume Prompt: Durable `--interactive` Seed Delivery, No-Mux Parity](active/resume-prompt-durable-seed-and-mux-fix/README.md) | Active (Phase 1 done) | #5415 |
 | [Compatibility-Root Decoupling](active/compatibility-root-decoupling/README.md) | Draft | #5293 |
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
 | [ai-attribution Audience-Based Disclosure Policy](active/ai-attribution-audience-policy/README.md) | Active (Phase 1 done) | #2965 |

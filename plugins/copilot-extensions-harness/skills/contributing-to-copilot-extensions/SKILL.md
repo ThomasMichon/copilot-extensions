@@ -272,9 +272,18 @@ installer. Know which kind you are changing.
    conflict-free branch is not completion. Stop only after merged + finalized,
    or after recording a concrete terminal blocker/abandonment in the owning
    task. This repository has no human-review handoff step.
-8. **Deploy with `<repo> update` — one unified command.** Merging only *primes*
-   the change; deploy it on each target machine (over SSH for remotes) with the
-   repo's update binstub: **`<repo> update`** (e.g. `agent-worktrees update`, <!-- marketplace-isolation: allow deployment-management -->
+8. **Complete an authorized rollout with `<repo> update` — one unified command.**
+   Merging only *primes* the change. Respect explicit rollout authorization,
+   safety/permission gates and each target's required deployment workflow;
+   a merge alone never proves that the running system reflects the change.
+   Adopted, consented maintenance may own scheduled consumer refresh instead
+   of a synchronous update in every coding session. Until that authorized
+   rollout runs and its running-state proof passes, report primed/pending,
+   not deployed, and retain the deployment completion obligation with its
+   named owner. Do not create a parallel scheduler or bypass another
+   repository's required workflow to finish this step.
+   When rollout is authorized, use the repo's update binstub on each target
+   (over SSH for remotes): **`<repo> update`** (e.g. `agent-worktrees update`, <!-- marketplace-isolation: allow deployment-management -->
    or
    any repo binstub such as `dotfiles update`). This single flow does
    everything: it refreshes the marketplace catalog, updates **every** registered

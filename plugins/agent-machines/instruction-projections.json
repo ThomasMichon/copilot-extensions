@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "session-guidance",
+      "deliveryMode": "selector",
       "template": "instructions/session-guidance.instructions.md",
       "destination": ".github/instructions/agent-machines/session-guidance.instructions.md",
       "customizationKind": "instructions",

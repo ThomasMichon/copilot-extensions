@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "session-guidance",
+      "deliveryMode": "selector",
       "template": "instructions/session-guidance.instructions.md",
       "destination": ".github/instructions/agent-worktrees/session-guidance.instructions.md",
       "customizationKind": "instructions",
@@ -12,6 +13,7 @@
     },
     {
       "id": "worktree-context-guide",
+      "deliveryMode": "selector",
       "template": "instructions/worktree-context-guide.instructions.md",
       "destination": ".github/instructions/agent-worktrees/worktree-context-guide.instructions.md",
       "customizationKind": "instructions",
@@ -20,6 +22,7 @@
     },
     {
       "id": "head-claim-fallback",
+      "deliveryMode": "selector",
       "template": "instructions/head-claim-fallback.instructions.md",
       "destination": ".github/instructions/agent-worktrees/head-claim-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -28,6 +31,7 @@
     },
     {
       "id": "cli-fallback",
+      "deliveryMode": "selector",
       "template": "instructions/cli-fallback.instructions.md",
       "destination": ".github/instructions/agent-worktrees/cli-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -36,6 +40,7 @@
     },
     {
       "id": "ownership-boundary-fallback",
+      "deliveryMode": "selector",
       "template": "instructions/ownership-boundary-fallback.instructions.md",
       "destination": ".github/instructions/agent-worktrees/ownership-boundary-fallback.instructions.md",
       "customizationKind": "instructions",

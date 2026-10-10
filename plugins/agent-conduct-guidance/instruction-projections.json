@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "process-hygiene-fallback",
+      "deliveryMode": "inline",
       "template": "instructions/process-hygiene-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/process-hygiene-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -12,6 +13,7 @@
     },
     {
       "id": "delegation-fallback",
+      "deliveryMode": "inline",
       "template": "instructions/delegation-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/delegation-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -20,6 +22,7 @@
     },
     {
       "id": "scratch-space-fallback",
+      "deliveryMode": "inline",
       "template": "instructions/scratch-space-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/scratch-space-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -28,6 +31,7 @@
     },
     {
       "id": "secret-masking-fallback",
+      "deliveryMode": "inline",
       "template": "instructions/secret-masking-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/secret-masking-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -36,4 +40,3 @@
     }
   ]
 }
-

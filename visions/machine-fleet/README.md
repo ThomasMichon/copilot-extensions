@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-10
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -17,6 +17,9 @@ while each existing service remains the authority for its own state.
 Fleet adoption is optional and additive. Standalone local services, direct
 connections, and existing SSH-based workflows retain their value without a
 Gateway. A roaming operator client is not required to keep remote work alive.
+The same fabric can grow into a scalable fleet of Linux hosts running explicit,
+containerized roles from the existing service ecosystem, without making one
+container manager or a private infrastructure provider its required substrate.
 
 ## Concepts & Components
 
@@ -63,6 +66,22 @@ providers own their execution/session substrate. Fleet adapters route supported
 operations to these owners rather than building competing stores or supervisors.
 Index/search and other harness-side services can be registered independently of
 interactive agent sessions.
+
+### Role deployments and container managers
+
+A role describes a supported service responsibility and its resource,
+placement, persistence and availability needs, not an arbitrary executable.
+Role instances may run directly or in containers on explicitly admitted hosts.
+The chosen deployment adapter composes an existing lightweight container manager
+or authenticated host deployment mechanism rather than building another
+scheduler. Fleet routing, container placement, service-state ownership and
+credential issuance remain separate authorities.
+
+Replicable roles may scale within declared capacity and authorization.
+Stateful or singleton roles declare storage and writer ownership before
+placement or movement; a healthy replacement process is not proof that its
+data and authority are safe to activate. Adopter-specific provisioning remains
+outside the portable fleet core.
 
 ### Scoped credential relay
 
@@ -134,6 +153,19 @@ contract: validate the replacement before activation, transfer connection and
 registration ownership explicitly, drain accepted operations, then retire the
 predecessor. Failed promotion preserves the last healthy runtime and its work.
 
+### repeatable-role-fleet-adoption
+
+An adopter can bootstrap an explicitly chosen Linux role fleet through
+repeatable, noninteractive operations after approving its capacity and trust
+inputs. Initial container-manager setup and machine enrollment expose supported
+automation rather than requiring undocumented browser ceremonies.
+Unavoidable attended identity or administrative decisions are explicit
+prerequisites, not hidden manual repairs.
+
+The deployment adapter is replaceable: adopting one manager does not bake its
+resource model into service contracts or require it for direct/standalone use.
+Inspection and planning do not install a manager, enroll hosts or start roles.
+
 ## Behaviors
 
 ### one-owner-per-kind-of-state
@@ -187,6 +219,17 @@ bounded; slow recipients and heavy services do not starve unrelated control.
 Uninstall and role retirement remove only owned registrations/processes and
 cannot silently restore a retired feeder role on a client.
 
+### role-placement-preserves-service-authority
+
+Desired role placement has explicit per-instance acceptance and observed
+readiness. Host loss, a container restart, or manager outage does not turn
+uncertain placement into successful convergence. Replica expansion remains
+within admitted capacity; automatic movement of stateful writers requires
+verified storage continuity and fencing rather than generic rescheduling.
+Updates preserve the owning service's safe activation, drain and data
+compatibility contract, including when an external manager performs container
+replacement.
+
 ## Non-Goals / Boundaries
 
 - No required provider, cloud substrate, tunnel product, identity vendor, or
@@ -212,3 +255,4 @@ cannot silently restore a retired feeder role on a client.
 - Auth-relay reality: [credential-relay](../../libs/credential-relay/README.md)
 - Reality: [architecture](../../docs/architecture.md), [configuration](../../docs/configuration.md)
 - Realization planning: [routing foundation](../../efforts/active/machine-fleet-routing-foundation/README.md)
+- Deployment planning: [Linux role fleet](../../efforts/active/linux-role-fleet/README.md)

@@ -1235,7 +1235,7 @@ def _open_via_provider(
         )
         from . import root_chain
         full_body = root_chain.compose_codename_body(
-            body, codename, marker_published, record, config,
+            body, codename, marker_published, record, config, head=head_sha,
         )
     elif attribution is True:
         marker = attr.build_marker(
@@ -1392,8 +1392,8 @@ def refresh_source_attribution(
             source_attribution_configured=target_pr.attribution_explicit,
         ):
             return ""
-        from . import root_chain
-        marker = root_chain.build_codename_marker_with_root(record.codename, record, config)
+        from .root_chain import build_codename_marker_with_root
+        marker = build_codename_marker_with_root(record.codename, record, config, head_sha)
     elif target_pr.attribution_mode == "true":
         marker = attribution.build_marker(
             worktree_id,

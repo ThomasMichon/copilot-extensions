@@ -13,6 +13,7 @@ from instruction_projections import (
     Result,
     discover_enabled_sources,
     render_local_cache,
+    resolve_instruction_source,
     scan_repository,
     sync_repository,
     validate_repository_root,
@@ -53,9 +54,23 @@ def _print_human(result) -> None:
     )
 
 
+def _discover_trusted(root: Path, args: argparse.Namespace, installed_root: Path | None):
+    return discover_enabled_sources(
+        root, require_trust=True,
+        agent_worktrees_command=args.agent_worktrees_path,
+        installed_root=installed_root,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
+    resolve = subparsers.add_parser("resolve-source")
+    resolve.add_argument("root")
+    resolve.add_argument("destination")
+    resolve.add_argument("--json", action="store_true")
+    resolve.add_argument("--from-settings", action="store_true")
+    resolve.add_argument("--agent-worktrees-path")
     for operation in ("sync", "scan", "render-local-cache"):
         subparser = subparsers.add_parser(operation)
         subparser.add_argument("root", nargs="?", default=".")
@@ -84,6 +99,20 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         print(f"error: {root} is not a directory", file=sys.stderr)
         return 2
+    if args.operation == "resolve-source":
+        try:
+            sources = (
+                discover_enabled_sources(
+                    root, require_trust=True,
+                    agent_worktrees_command=args.agent_worktrees_path,
+                ) if args.from_settings else None
+            )
+            selection = resolve_instruction_source(root, args.destination, sources)
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"blocked": True, "error": str(exc)}))
+            return 1
+        print(json.dumps(selection, indent=2, sort_keys=True))
+        return 0
     try:
         validate_repository_root(root)
     except ValueError as exc:
@@ -104,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         return discover_enabled_sources(
             root,
             installed_root=installed_root,
-            require_trust=False,
+            require_trust=args.operation == "render-local-cache",
             agent_worktrees_command=args.agent_worktrees_path,
         )
 
@@ -120,9 +149,12 @@ def main(argv: list[str] | None = None) -> int:
             _print_human(result)
         return 1 if result.blocking else 0
     sources = None
+    admission_sources = None
     if args.operation == "sync" or getattr(args, "from_settings", False):
         try:
             sources = _discover()
+            if args.operation == "scan":
+                admission_sources = _discover_trusted(root, args, installed_root)
         except ValueError as exc:
             result = Result(operation=args.operation)
             result.add(
@@ -139,7 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     result = (
         sync_repository(root, sources or [])
         if args.operation == "sync"
-        else scan_repository(root, sources)
+        else scan_repository(
+            root, sources,
+            admission_sources=admission_sources,
+        )
     )
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
