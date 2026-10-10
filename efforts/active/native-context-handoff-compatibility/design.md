@@ -45,6 +45,65 @@ bookkeeping where supported. A cwd-change event is not a model-window rollover.
 Ignore subagent clears for root pressure state; do not parse checkpoint-looking
 prompt text as proof of a native transition.
 
+### Installed SDK boundary (CLI 1.0.88)
+
+Inspection of the installed extension documentation and exported SDK declarations
+confirms the following contract, independently of runtime source:
+
+| Published surface | What it establishes | What it does not establish |
+|-------------------|---------------------|----------------------------|
+| `joinSession()` and `CopilotSession.capabilities` | Extension attachment; advertised UI capabilities | Native context admission or effective context-management policy |
+| `session.rpc.tools.getCurrentMetadata()` | Currently initialized tool metadata; nullable before initialization | Built-in versus external override provenance, or native transition viability |
+| `ToolInvocation.availableTools` | Offered metadata accompanying an actual extension invocation | Additional provenance beyond `CurrentToolMetadata` |
+| `user.settings.get()` | User values/defaults, explicitly excluding repository/enterprise overrides | Session-effective admission or an explicit policy denial |
+| Root `session.context_cleared` event | Confirmed conversation clear and optional initial message | Native terminal-tool execution, checkpoint durability, or permission for another clear |
+
+`CurrentToolMetadata` exports name, optional namespaced/MCP names, description,
+input schema, and deferral. None identifies an external override of a built-in
+tool. The presence of generated `getBuiltinDescriptors` declarations does not
+make an internal-only method callable by an extension.
+
+This is declaration/documentation evidence, not an isolated live CLI/ACP rollover
+proof. No live session was cleared, tool list initialized, settings changed, or
+private RPC invoked to obtain it. No supported admission/provenance seam has
+been established for this installed version; automatic native pressure backoff
+remains blocked rather than inferred from names or user settings.
+
+### Required host observation (conceptual, not a proposed RPC name)
+
+The smallest missing contract is a read-only observation bound to the current
+session and root/subagent owner, reporting effective admission (including explicit
+denial versus default/unknown), implementation support, and the currently offered
+native tools after filters/overrides. Native provider provenance must be
+host-authored, not metadata supplied by the tool being inspected. Include an
+initialization state and revision/invalidation mechanism so policy changes,
+tool replacement, owner changes, and reconnects cannot leave suppression active
+on stale evidence. A one-time create/resume capability bit alone is insufficient.
+
+The observation need not expose arbitrary settings or initialize services.
+Native viability/checkpoint revision errors remain execution-time results; an
+admission observation cannot promise a successful transition.
+
+### Selection precedence
+
+This is the acceptance matrix for a future supported observation, not current
+plugin behavior. Apply rows top-down; evaluate effective settings, never a
+user-only default as an explicit opt-out.
+
+| Current evidence | Selected guidance | Automatic pressure behavior |
+|------------------|-------------------|-----------------------------|
+| Explicit effective denial, including conflicting advertised tools | Respect denial; diagnose conflict | Never auto-cut over to evade policy; explicit recovery remains policy-governed |
+| Effective enablement plus current admitted native implementation/tool set | Native-first checkpoint/terminal rollover | Suppress competing custom soft/hard/force actions while evidence stays current |
+| No explicit denial; current admitted native implementation/tool set | Native-first, even without a setting signal | Same native backoff |
+| Effective enablement but implementation/availability unknown | Conditional native-first; report missing observation | No claimed native backoff; no native invocation based on the setting alone |
+| Confirmed unsupported implementation, without policy denial | Explain unsupported venue; custom recovery | Existing custom mode/consent semantics |
+| Absent, uninitialized, failed, stale, or conflicting observations | Explain uncertainty; bounded re-evaluation | Do not silently disable all recovery or treat uncertainty as confirmed native support |
+| Admitted native path with checkpoint/static-load/cap failure | Repair or diagnose the precise native failure | No blind alternate-session policy bypass or double clear |
+
+Re-evaluate on supported invalidations and before committing an automatic
+pressure action. Bound retries and report failures once per observation revision;
+do not poll arbitrary private APIs. Runtime emergency compaction remains intact.
+
 ## Native checkpoint semantics
 
 Ambient system/developer instructions teach native-first continuity. Targeted

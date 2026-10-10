@@ -163,3 +163,17 @@ alone does not complete the update.
   provider/override provenance, uninitialized-versus-unavailable metadata, and
   root context-clear versus cwd/subagent events. Public protocol/installed-host
   verification remains open; no internal API or name-only detection is adopted.
+
+### 2026-10-10 - Installed extension contract investigated
+
+- Inspected CLI 1.0.88's installed extension guide, exported `CopilotSession`,
+  `SessionCapabilities`, `ToolInvocation`, `CurrentToolMetadata`, and event/RPC
+  declarations. The published metadata and capability surfaces do not establish
+  session-effective native admission plus built-in/override provenance.
+- Recorded the exact missing host observation and selection precedence in
+  `design.md`. Settings-only/name-only automatic suppression remains blocked;
+  generated declarations are not permission to call internal methods.
+- Corrected the canonical effort index in response to #6035's review.
+- No plugin runtime, deployed policy, live context, or ownership changed.
+  Isolated CLI/ACP transition proof and the supported detection seam remain
+  open; this investigation does not complete Phase 1 or the compatibility update.
