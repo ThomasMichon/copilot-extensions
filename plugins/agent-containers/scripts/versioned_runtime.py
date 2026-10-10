@@ -1818,9 +1818,16 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
         marker_fd_stat = os.fstat(marker_fd)
         if not stat.S_ISREG(marker_fd_stat.st_mode):
             return ADMIT_HEALTH_REPAIR_REQUIRED
-        with os.fdopen(marker_fd, "r", encoding="utf-8") as fh:
+        # Read raw bytes, never a text-mode wrapper: json.loads() accepts
+        # bytes directly and folds any decoding failure into the same
+        # JSONDecodeError the parse step below already catches as
+        # malformed-marker evidence. A text-mode read (`"r",
+        # encoding="utf-8"`) would instead raise UnicodeDecodeError on
+        # invalid UTF-8 BEFORE that handler ever runs, escaping this
+        # function's health-repair-required contract entirely.
+        with os.fdopen(marker_fd, "rb") as fh:
             marker_fd = None  # fdopen now owns the fd
-            marker_text = fh.read()
+            marker_bytes = fh.read()
     finally:
         if marker_fd is not None:
             os.close(marker_fd)
@@ -1828,9 +1835,10 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
             os.close(vdir_fd)
 
     try:
-        raw = json.loads(marker_text, object_pairs_hook=_unique_object_pairs_hook)
+        raw = json.loads(marker_bytes, object_pairs_hook=_unique_object_pairs_hook)
     except Exception:
-        # Malformed JSON -- ambiguous evidence, never "never built".
+        # Malformed JSON, including invalid UTF-8/other encoding errors --
+        # ambiguous evidence, never "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED
     marker = validate_marker(raw, version)
     if marker is None:

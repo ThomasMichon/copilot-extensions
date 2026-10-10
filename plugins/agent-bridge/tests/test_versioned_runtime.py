@@ -1752,6 +1752,21 @@ def test_check_admission_health_repair_required_when_marker_is_malformed(tmp_pat
     )
 
 
+def test_check_admission_health_repair_required_when_marker_is_invalid_utf8(tmp_path):
+    """A marker read through a TEXT-mode wrapper would raise
+    ``UnicodeDecodeError`` on invalid UTF-8 bytes BEFORE the JSON-parse
+    handler ever runs, escaping this function's documented
+    health-repair-required contract entirely. Invalid UTF-8 is exactly as
+    malformed as invalid JSON and must be classified the same way."""
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(b"\x80\x81\x82\x83 not valid utf-8 or json")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
 def test_check_admission_health_repair_required_never_mutates_the_slot(tmp_path):
     marker = vr.marker_path(tmp_path, "1.0.0")
     marker.parent.mkdir(parents=True)
