@@ -530,6 +530,19 @@ def test_persisted_event_requires_exclusive_timeout_or_transition():
     with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
         WatchRegistry().restore_state(entries)
 
+@pytest.mark.parametrize("remove_all", [True, False])
+def test_transition_payload_requires_complete_snapshot(remove_all):
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "one", until=(MERGED,), acknowledged=True, notify={"argv": ["consumer"]})
+    registry.apply_snapshot(key, PRSnapshot(merged=True))
+    entries = registry.snapshot_state()
+    for field in (("pr_state", "merged", "review_decision", "mergeable", "checks_state")
+                  if remove_all else ("merged",)):
+        del entries[0]["pending"]["payload"][field]
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
+
 def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
     release = threading.Event()
     calls = []

@@ -84,6 +84,8 @@ def validate_pending(pending: object, key, sub) -> None:
     if not isinstance(pending, dict):
         raise ValueError("invalid acknowledged delivery state")
     payload = pending.get("payload")
+    snapshot_fields = {"pr_state", "merged", "review_decision", "mergeable", "checks_state"}
+    present = snapshot_fields.intersection(payload) if isinstance(payload, dict) else set()
     if (
         not isinstance(payload, dict)
         or not isinstance(pending.get("event_id"), str) or not pending["event_id"]
@@ -98,6 +100,8 @@ def validate_pending(pending: object, key, sub) -> None:
         or not isinstance(payload.get("timed_out"), bool)
         or (not payload["timed_out"] and not payload["transitions"])
         or (payload["timed_out"] and bool(payload["transitions"]))
+        or (present and present != snapshot_fields)
+        or (payload["transitions"] and present != snapshot_fields)
         or any(
             field in payload and not isinstance(payload[field], str)
             for field in ("pr_state", "review_decision", "mergeable", "checks_state")
