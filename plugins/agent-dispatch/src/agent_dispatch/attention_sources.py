@@ -23,7 +23,7 @@ import httpx
 
 from . import attention_contract as ac
 from .client import DispatchError
-from .handoff_claim_release import is_handoff_task
+from .handoff_claim_release import handoff_is_local, handoff_worktree, is_handoff_task
 
 BUILTIN_SOURCES = ("bridge", "dispatch", "pr")
 DEFAULT_TIMEOUT = 20.0
@@ -68,7 +68,7 @@ def _valid_form(form: Any) -> bool:
 
 def _task_item(task: dict[str, Any], read_at: str,
                cli: tuple[str, ...] | None = ("agent-dispatch",),
-               now: float | None = None) -> dict[str, Any] | None:
+               now: float | None = None, machine: str | None = None) -> dict[str, Any] | None:
     """One task's item, coalescing its conditions to the worst: an operator ask
     (``awaiting_steer``), an operator hold (``hold_reason``), or a self-tracked
     completion claim awaiting confirmation (``submitted``). ``submitted`` is
@@ -107,6 +107,10 @@ def _task_item(task: dict[str, Any], read_at: str,
     # The steering card for an ask; the task itself (its result, its hold) otherwise.
     view = ["card", "show", task_id] if state == "awaiting_input" else ["show", task_id]
     actions = [{"verb": "show", "argv": [*cli, *view]}] if cli else []
+    if state == "stalled":
+        # Resume only a worktree on this machine (``machine``): another's id means nothing here.
+        here = handoff_worktree(task) if handoff_is_local(task, machine) else None
+        actions = _stalled_handoff_actions(task_id, title, here, cli) + actions
     item = {
         "schema": ac.SCHEMA, "entity": "task", "entity_ref": task_id, "lifecycle_state": status,
         "display_state": state, "severity": ac.SEVERITY[state], "reason": ac.one_line(reason),
@@ -157,6 +161,109 @@ def _unpicked_handoff_age(task: dict[str, Any], now: float | None) -> float | No
     return age if age > after else None
 
 
+#: The reason an attention-queue abandon records on the task.
+ABANDON_REASON = "abandoned from the attention queue"
+
+
+def _stalled_handoff_actions(task_id: str, title: str, worktree: str | None,
+                             cli: tuple[str, ...] | None) -> list[dict[str, Any]]:
+    """What the operator can do about a baton nobody picked up: start a successor
+    in its worktree (the default; only for a worktree on this machine), or
+    abandon it. The ``show`` follows."""
+    from .handoff_fallback_seed import build_fallback_seed
+
+    actions = []
+    if worktree:
+        actions.append({"verb": "resume", "argv": ["agent-worktrees", "embody", "--worktree-id", worktree,
+                                                   "--seed", build_fallback_seed(task_id, title)]})
+    if cli:
+        actions.append({"verb": "abandon",
+                        "argv": [*cli, "abandon", task_id, "--permit", "--reason", ABANDON_REASON]})
+    return actions
+
+
+#: Seconds one worktree's pending-handoff lookup may take.
+HANDOFF_PENDING_TIMEOUT = 8.0
+#: Worktree ledgers read at once (each is one agent-worktrees process).
+HANDOFF_PENDING_CONCURRENCY = 4
+
+
+def pending_handoff_tokens(worktree: str, timeout: float = HANDOFF_PENDING_TIMEOUT) -> set[str] | None:
+    """The handoff tokens ``worktree``'s own ledger (agent-worktrees, the
+    authority for which handoff a worktree still waits on) lists as pending.
+    ``None`` when that can't be read for certain (no agent-worktrees, an
+    untracked worktree, a failed reply, or any malformed entry): the batons
+    are then taken at their word."""
+    from .procutil import run_agent_worktrees_capture
+
+    done = run_agent_worktrees_capture("head-session", "--worktree", worktree, "--json", timeout=timeout)
+    if done is None or done.returncode != 0:
+        return None
+    try:
+        data = json.loads(done.stdout)
+    except ValueError:
+        return None
+    pending = data.get("pending_handoffs") if isinstance(data, dict) and data.get("tracked") is True else None
+    if not isinstance(pending, list):
+        return None
+    tokens = [p.get("token") if isinstance(p, dict) else None for p in pending]
+    if not all(isinstance(t, str) and t for t in tokens):
+        return None
+    return set(tokens)
+
+
+class _PendingHandoffs:
+    """A stalled baton needs the operator only while its worktree still waits on
+    it. One its ledger no longer lists was picked up, replaced by a later
+    handoff, or cancelled -- or was only saved, never handed over -- so it is no
+    item. Each worktree's ledger is read once, a few at a time, alongside the
+    read's lane reads; a baton whose ledger hasn't answered by the read's
+    deadline keeps its item."""
+
+    def __init__(self, items: list[dict[str, Any]], tasks: dict[str, dict[str, Any]],
+                 lookup: Callable[[str], set[str] | None], machine: str | None = None) -> None:
+        self.lookup = lookup
+        self.ledgers: dict[str, set[str] | None] = {}
+        self.closed = False
+        stalled = {i["entity_ref"] for i in items if i["entity"] == "task" and i["display_state"] == "stalled"}
+        # Only this machine's ledgers can be read: a baton pinned elsewhere keeps its item.
+        self.batons = {t: handoff_worktree(tasks[t]) for t in stalled
+                       if t in tasks and handoff_is_local(tasks[t], machine)}
+        self.todo = sorted({wt for wt in self.batons.values() if wt})
+        self.lock = threading.Lock()
+        self.threads = [threading.Thread(target=self._work, daemon=True, name=f"attention-handoff-{n}")
+                        for n in range(min(HANDOFF_PENDING_CONCURRENCY, len(self.todo)))]
+        for thread in self.threads:
+            thread.start()
+
+    def _work(self) -> None:
+        while True:
+            with self.lock:
+                if self.closed or not self.todo:  # past the read's deadline: start no more lookups
+                    return
+                worktree = self.todo.pop()
+            try:
+                tokens = self.lookup(worktree)
+            except Exception:  # noqa: BLE001 -- an unreadable ledger keeps its batons
+                tokens = None
+            with self.lock:
+                self.ledgers[worktree] = tokens
+
+    def keep(self, items: list[dict[str, Any]], deadline: float) -> list[dict[str, Any]]:
+        for thread in self.threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        with self.lock:
+            self.closed = True
+            ledgers = dict(self.ledgers)
+
+        def gone(task_id: str) -> bool:
+            tokens = ledgers.get(self.batons.get(task_id) or "")
+            return tokens is not None and task_id not in tokens
+
+        return [i for i in items if not (i["entity"] == "task" and i["entity_ref"] in self.batons
+                                         and gone(i["entity_ref"]))]
+
+
 def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
                 cli: tuple[str, ...] | None) -> dict[str, Any] | None:
     """An undraining lane (the vision's *buildup-is-a-health-signal*): the oldest
@@ -183,10 +290,22 @@ def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
 def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
                   cli: tuple[str, ...] | None = ("agent-dispatch",),
-                  backlog_budget: float = BACKLOG_BUDGET) -> dict[str, Any]:
+                  backlog_budget: float = BACKLOG_BUDGET,
+                  pending_lookup: Callable[[str], set[str] | None] | None = None,
+                  machine: str | None = None) -> dict[str, Any]:
+    """``machine`` is this machine's name (resolved when a stalled baton names
+    a ``target_machine``): batons pinned elsewhere are neither checked against
+    this machine's ledgers nor offered a local ``resume``."""
     started = time.monotonic()
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
+        if machine is None and any(is_handoff_task(t) and t.get("target_machine") for t in tasks):
+            from .remote_dispatch import local_machine
+
+            machine = local_machine()
+        items = [i for i in (_task_item(t, read_at, cli, now=time.time(), machine=machine) for t in tasks) if i]
+        pending = _PendingHandoffs(items, {str(t.get("id")): t for t in tasks},
+                                   pending_lookup or pending_handoff_tokens, machine)
         lanes = sorted({t["repo"] for t in tasks
                         if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
         backlogs, unread = {}, 0
@@ -198,7 +317,7 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                 backlogs[repo] = (client.health(repo=repo) or {}).get("backlog") or {}
             except (DispatchError, httpx.HTTPError, OSError, ValueError):
                 unread += 1
-    items = [i for i in (_task_item(t, read_at, cli, now=time.time()) for t in tasks) if i]
+    items = pending.keep(items, started + backlog_budget)
     items += [i for i in (_queue_item(r, b, read_at, cli) for r, b in backlogs.items()) if i]
     uncertain = unread + (1 if len(tasks) >= limit else 0)
     return {"items": items, "status": "uncertain" if uncertain else "ok", "uncertain": uncertain,
@@ -341,12 +460,20 @@ def _result_problem(raw: Any) -> str | None:
 
 def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: dict[str, float],
             selected: list[str] | None, config_errors: list[dict[str, str]],
-            store: Any, read_at: str | None = None, read_token: int | None = None) -> dict[str, Any]:
+            store: Any, read_at: str | None = None, read_token: int | None = None,
+            dismissals: Any = None,
+            dismiss_cli: Callable[[], tuple[str, ...] | None] = lambda: ("agent-dispatch",),
+            include_remote: bool = False) -> dict[str, Any]:
     """Read every (selected) source concurrently and build the aggregate envelope.
     A selected name that is only a rejected registration is reported through its
     config error, not as a source. ``read_token`` (default: the number the store
     allocates as the read starts) orders this read against concurrent ones,
-    which the second-precision ``read_at`` can't."""
+    which the second-precision ``read_at`` can't. ``dismissals`` (an
+    :class:`~agent_dispatch.attention_dismiss.Dismissals`) moves the operator's
+    dismissed items out of the queue into ``dismissed``. ``dismiss_cli`` (asked
+    after the read) is the invocation that reaches the coordinator the
+    ``dispatch`` items came from, for their ``dismiss`` action (which re-reads
+    the item); ``None`` offers them none, like their other actions."""
     if read_token is None:  # the store numbers reads as they start (a clock can tie or step back)
         read_token = store.begin_read() if hasattr(store, "begin_read") else time.time_ns()
     read_at = read_at or now_iso()
@@ -398,8 +525,36 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
                 "items": len(r["items"]), "read_at": r.get("read_at", read_at),
                 **({"error": r["error"]} if r.get("error") else {})}
                for n, r in sorted(results.items())]
-    items = ac.dedupe(i for r in results.values() for i in r["items"])
+    # Dismissals apply per condition, before deduplication: hiding one source's
+    # condition never hides another source's undismissed one for the same entity.
+    raw = [i for r in results.values() for i in r["items"]]
+    dismissed: list[dict[str, Any]] = []
+    if dismissals is not None:
+        # Only a read of this machine's own queue can end a dismissal by omission:
+        # another coordinator's (--url, --shared, a failover) never had the item.
+        ok = {n for n, r in results.items() if r["status"] == "ok" and n not in scopes}
+        raw, dismissed, error = dismissals.split(raw, read_at, ok_sources=ok)
+        if error:
+            config_errors = [*config_errors, {"name": DISMISSALS_NAME, "error": error}]
+    items = ac.dedupe(raw)
+    dispatch_cli = dismiss_cli()
+    for item in items:
+        cli = dispatch_cli if item["source"] == "dispatch" else ("agent-dispatch",)
+        # A remote bridge session is read only with --include-remote: so is its dismissal's re-read.
+        extra = ("--include-remote",) if include_remote and item["source"] == "bridge" else ()
+        if cli:
+            item["actions"] = [*item["actions"], dismiss_action(item["id"], cli, extra)]
     config_errors = sorted(config_errors, key=lambda e: (e["name"], e["error"]))
     return {"schema": ac.SCHEMA, "status": ac.aggregate_status(sources, config_errors, items),
             "read_at": read_at, "selected": selected, "sources": sources,
-            "config_errors": config_errors, "items": items}
+            "config_errors": config_errors, "items": items, "dismissed": dismissed}
+
+
+#: The ``config_errors`` name a malformed dismissal store is reported under.
+DISMISSALS_NAME = "*dismissals"
+
+
+def dismiss_action(item_id: str, cli: tuple[str, ...] = ("agent-dispatch",),
+                   extra: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Every queued item's last action: hide it until it changes."""
+    return {"verb": "dismiss", "argv": [*cli, "attention", "dismiss", item_id, *extra]}

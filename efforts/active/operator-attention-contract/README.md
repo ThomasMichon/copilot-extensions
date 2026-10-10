@@ -92,6 +92,10 @@ an empty queue.
 - [x] `attention` and `attention next` with the position cursor. (ThomasMichon/copilot-extensions#5668)
 - [x] Command sources registered through `attention source add`. (ThomasMichon/copilot-extensions#5668)
 - [x] Docs: each plugin's CLI reference, the skill reference, and the item schema.
+- [x] Every item actionable: a stalled handoff is an item only while its
+  worktree's handoff ledger lists it, and offers `resume`/`abandon`; any item
+  can be dismissed until it changes, snoozed or ignored, reported under
+  `dismissed` (ThomasMichon/copilot-extensions#5978).
 
 ### Phase 4 — Clients
 

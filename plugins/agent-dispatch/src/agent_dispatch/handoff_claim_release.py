@@ -99,11 +99,43 @@ def is_handoff_task(task: dict[str, Any] | None) -> bool:
     return "handoff" in labels or task.get("source") == "context-handoff"
 
 
+def handoff_worktree(task: dict[str, Any] | None) -> str | None:
+    """The worktree a handoff baton belongs to: its ``target_worktree``, else
+    its ``worktree`` affinity (a detached baton keeps only the affinity)."""
+    if not isinstance(task, dict):
+        return None
+    affinity = task.get("affinity") if isinstance(task.get("affinity"), dict) else {}
+    worktree = task.get("target_worktree") or affinity.get("worktree")
+    return worktree if isinstance(worktree, str) and worktree else None
+
+
+def handoff_is_local(task: dict[str, Any] | None, machine: str | None) -> bool:
+    """Whether a baton's worktree is on ``machine`` (this one): it names no
+    ``target_machine``, or names this one. A worktree id and its handoff ledger
+    are machine-local, so a baton pinned elsewhere can't be checked, resumed
+    or cancelled from here."""
+    target = (task or {}).get("target_machine")
+    return not target or (machine is not None and str(target).casefold() == machine.casefold())
+
+
+def _this_machine() -> str | None:
+    from .remote_dispatch import local_machine
+
+    return local_machine()
+
+
 def release_if_handoff(
-    task: dict[str, Any] | None, task_id: str | None = None, *, timeout: float = 15.0
+    task: dict[str, Any] | None, task_id: str | None = None, *, timeout: float = 15.0,
+    cancel_pending: bool = False,
 ) -> None:
     """Best-effort, non-blocking: release the ``target_worktree``'s claim on
     ``task``'s id iff ``task`` is a context-handoff task.
+
+    ``cancel_pending`` (an abandon) also cancels the baton's entry in that
+    worktree's own handoff ledger, so an abandoned handoff no longer reads as
+    pending there (``agent-worktrees cancel-handoff``, which leaves an entry a
+    successor is already taking over untouched). A completion doesn't: its
+    pickup consumed the entry.
 
     ``task_id`` overrides ``task.get("id")`` for a caller that already has the
     id handy (e.g. from the request body) and wants to avoid relying on the
@@ -120,19 +152,32 @@ def release_if_handoff(
     resolved_id = task_id or (task or {}).get("id")
     if not resolved_id:
         return
-    worktree = (task or {}).get("target_worktree")
+    # A detached baton keeps its worktree only as an affinity: the claim and
+    # the ledger entry are still that worktree's.
+    worktree = handoff_worktree(task)
     thread = threading.Thread(
-        target=_release_task_claim,
-        args=(resolved_id,),
-        kwargs={"worktree": worktree, "timeout": timeout},
+        target=_release_in_background,
+        args=(resolved_id, (task or {}).get("target_machine")),
+        kwargs={"worktree": worktree, "timeout": timeout, "cancel_pending": cancel_pending},
         daemon=True,
         name=f"handoff-claim-release-{resolved_id}",
     )
     thread.start()
 
 
+def _release_in_background(task_id: str, target_machine: Any, *, worktree: str | None, timeout: float,
+                           cancel_pending: bool) -> None:
+    """The release thread's body. The ledger is the baton's own machine's, so
+    this host cancels only its own (like the claim release, which runs here
+    too); resolving this machine's name may shell out, so it happens here,
+    never on the caller's request."""
+    if cancel_pending and target_machine:
+        cancel_pending = handoff_is_local({"target_machine": target_machine}, _this_machine())
+    _release_task_claim(task_id, worktree=worktree, timeout=timeout, cancel_pending=cancel_pending)
+
+
 def _release_task_claim(
-    task_id: str, *, worktree: str | None, timeout: float = 15.0
+    task_id: str, *, worktree: str | None, timeout: float = 15.0, cancel_pending: bool = False,
 ) -> None:
     """``agent-worktrees claims release <task_id>``, explicitly targeting
     ``worktree`` (via ``--worktree``) rather than the calling process's own
@@ -161,3 +206,7 @@ def _release_task_claim(
     if worktree:
         argv += ["--worktree", worktree]
     run_agent_worktrees_capture(*argv, timeout=timeout)
+    if cancel_pending and worktree:
+        run_agent_worktrees_capture(
+            "cancel-handoff", "--worktree-id", worktree, "--token", task_id, timeout=timeout
+        )

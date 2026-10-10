@@ -12,6 +12,7 @@ import pytest
 
 from agent_dispatch import __main__ as m
 from agent_dispatch import attention_contract as ac
+from agent_dispatch import attention_dismiss
 from agent_dispatch import attention_sources as srcs
 from agent_dispatch import attention_store
 from agent_dispatch.attention_store import FirstObserved
@@ -26,6 +27,7 @@ def _isolate(tmp_path, monkeypatch):
 
     monkeypatch.setattr(srcs, "registry_path", lambda: tmp_path / "attention-sources.json")
     monkeypatch.setattr(attention_store, "default_path", lambda: tmp_path / "attention-observed.json")
+    monkeypatch.setattr(attention_dismiss, "default_path", lambda: tmp_path / "attention-dismissed.json")
     # The bridge and pr sources read installed siblings; these tests run without them.
     monkeypatch.setattr(procutil, "agent_bridge_launch_prefix", lambda: None)
     monkeypatch.setattr(procutil, "agent_worktrees_launch_prefix", lambda: None)
@@ -162,7 +164,8 @@ def test_the_envelope_shape_and_a_selective_read(tmp_path):
     store = FirstObserved(tmp_path / "o.json")
     readers = {"dispatch": _ok(), "zeta": lambda r: ac.command_failure("down")}
     full = _collect(readers, store)
-    assert list(full) == ["schema", "status", "read_at", "selected", "sources", "config_errors", "items"]
+    assert list(full) == ["schema", "status", "read_at", "selected", "sources", "config_errors", "items",
+                          "dismissed"]
     assert [s["name"] for s in full["sources"]] == ["dispatch", "zeta"] and full["status"] == "degraded"
     scoped = _collect(readers, store, selected=["dispatch"], config_errors=[{"name": "foo", "error": "bad"}])
     assert scoped["selected"] == ["dispatch"] and [s["name"] for s in scoped["sources"]] == ["dispatch"]
@@ -223,8 +226,12 @@ def test_dispatch_task_mapping(task, state):
     if state == "awaiting_input" and task.get("card"):
         assert item["input"] == [{"name": "answer", "type": "text"}]
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "card", "show", "t1"]}
-    elif state in ("review", "blocked", "stalled"):  # no card to show: the task itself
+    elif state in ("review", "blocked"):  # no card to show: the task itself
         assert item["actions"][0] == {"verb": "show", "argv": ["agent-dispatch", "show", "t1"]}
+    elif state == "stalled":  # a baton without a worktree can't be resumed, only abandoned (or shown)
+        assert [a["verb"] for a in item["actions"]] == ["abandon", "show"]
+        assert item["actions"][0]["argv"] == ["agent-dispatch", "abandon", "t1", "--permit", "--reason",
+                                              srcs.ABANDON_REASON]
 
 
 def test_the_unpicked_handoff_threshold_is_configurable(monkeypatch):
@@ -909,3 +916,352 @@ def test_input_belongs_to_a_dispatch_item_awaiting_input_only(item_kw):
         ac.validate_item({**_item(**item_kw), "input": [{"name": "a", "type": "text"}]})
     with pytest.raises(ac.ContractError):
         ac.validate_item({**_item(source="dispatch", state="awaiting_input"), "input": None})
+
+
+# -- stalled handoffs: real actions, and only while the worktree still waits ---------------
+
+
+def _baton(tid="h1", worktree="wt-9", age=3600, **kw):
+    return {"id": tid, "title": "Relay work", "status": "proposed", "labels": ["handoff"],
+            "created_at": NOW - age, "target_worktree": worktree, **kw}
+
+
+def test_a_stalled_handoff_can_be_resumed_in_its_worktree_or_abandoned():
+    from agent_dispatch.handoff_fallback_seed import build_fallback_seed
+
+    item = srcs._task_item(_baton(), T1, now=NOW)
+    assert [a["verb"] for a in item["actions"]] == ["resume", "abandon", "show"]
+    assert item["actions"][0]["argv"] == ["agent-worktrees", "embody", "--worktree-id", "wt-9", "--seed",
+                                          build_fallback_seed("h1", "Relay work")]
+    ac.validate_item({**item, "created_at": T1})
+
+
+def test_the_resume_seed_is_the_canonical_one_even_for_an_awkward_title():
+    from agent_dispatch.handoff_fallback_seed import build_fallback_seed
+
+    title = "Fix A | B → C " + "x" * 300
+    seed = srcs._task_item(_baton(title=title), T1, now=NOW)["actions"][0]["argv"][-1]
+    assert seed == build_fallback_seed("h1", title)
+    assert seed.count(" | ") == 2 and seed.endswith("context-handoff task:h1")
+
+
+@pytest.mark.parametrize("target,machine,local", [
+    (None, None, True),          # no pin: this machine's
+    ("Box-1", "box-1", True),    # pinned here (names compare without case)
+    ("box-2", "box-1", False),   # pinned elsewhere
+    ("box-2", None, False),      # this machine unknown: can't tell, so not here
+])
+def test_only_a_baton_on_this_machine_is_resumed_or_checked_here(target, machine, local):
+    task = _baton(**({"target_machine": target} if target else {}))
+    item = srcs._task_item(task, T1, now=NOW, machine=machine)
+    assert ("resume" in [a["verb"] for a in item["actions"]]) is local
+    asked = []
+    result = srcs.read_dispatch(lambda: _Client([task]), T1, machine=machine,
+                                pending_lookup=lambda wt: asked.append(wt) or set())
+    # A remote baton is never checked against this machine's ledger, so it stays an item.
+    assert asked == (["wt-9"] if local else [])
+    assert bool(result["items"]) is not local
+
+
+def test_the_worktree_comes_from_the_affinity_when_no_target_is_recorded():
+    task = _baton(worktree=None, affinity={"worktree": "wt-3"})
+    assert srcs.handoff_worktree(task) == "wt-3"
+    assert srcs._task_item(task, T1, now=NOW)["actions"][0]["argv"][3] == "wt-3"
+
+
+@pytest.mark.parametrize("tokens,kept", [
+    ({"h1"}, True),     # the worktree still waits on it
+    ({"other"}, False),  # picked up, replaced, cancelled, or only saved: not the operator's
+    (set(), False),
+    (None, True),       # the ledger couldn't be read: taken at its word
+])
+def test_a_stalled_handoff_is_an_item_only_while_its_worktree_lists_it(tokens, kept):
+    asked = []
+
+    def lookup(worktree):
+        asked.append(worktree)
+        return tokens
+
+    result = srcs.read_dispatch(lambda: _Client([_baton()]), T1, pending_lookup=lookup)
+    assert asked == ["wt-9"]
+    assert bool(result["items"]) is kept
+
+
+def test_only_stalled_handoffs_are_checked_and_a_failing_lookup_keeps_the_item():
+    tasks = [_baton("h1"), _baton("h2", worktree="wt-2"),
+             {"id": "r1", "title": "Review", "status": "submitted"}, _baton("young", age=60)]
+
+    def lookup(worktree):
+        if worktree == "wt-2":
+            raise RuntimeError("boom")
+        return set()
+
+    result = srcs.read_dispatch(lambda: _Client(tasks), T1, pending_lookup=lookup)
+    assert sorted(i["entity_ref"] for i in result["items"]) == ["h2", "r1"]
+
+
+def test_each_worktree_ledger_is_read_once_and_only_a_few_at_a_time(monkeypatch):
+    import threading as _t
+
+    monkeypatch.setattr(srcs, "HANDOFF_PENDING_CONCURRENCY", 2)
+    tasks = [_baton(f"a{n}", worktree="wt-a") for n in range(5)] + \
+        [_baton(f"w{n}", worktree=f"wt-{n}") for n in range(6)]
+    asked, live, peak, lock = [], [0], [0], _t.Lock()
+
+    def lookup(worktree):
+        with lock:
+            asked.append(worktree)
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        import time as _time
+        _time.sleep(0.02)
+        with lock:
+            live[0] -= 1
+        return {"a0", "w0"}
+
+    result = srcs.read_dispatch(lambda: _Client(tasks), T1, pending_lookup=lookup)
+    assert sorted(asked) == sorted(["wt-a", *(f"wt-{n}" for n in range(6))])  # one read per worktree
+    assert peak[0] <= 2
+    assert sorted(i["entity_ref"] for i in result["items"]) == ["a0", "w0"]
+
+
+def test_a_slow_ledger_lookup_keeps_the_item_within_the_reads_budget():
+    import threading as _t
+
+    release = _t.Event()
+
+    def lookup(worktree):
+        release.wait(5)
+        return set()
+
+    try:
+        result = srcs.read_dispatch(lambda: _Client([_baton()]), T1, pending_lookup=lookup, backlog_budget=0.2)
+        assert [i["entity_ref"] for i in result["items"]] == ["h1"]
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("stdout,returncode,expected", [
+    (json.dumps({"tracked": True, "pending_handoffs": [{"token": "h1"}, {"token": "h2"}]}), 0, {"h1", "h2"}),
+    (json.dumps({"tracked": True, "pending_handoffs": []}), 0, set()),
+    (json.dumps({"tracked": False, "pending_handoffs": []}), 0, None),  # an unknown worktree proves nothing
+    # one malformed entry makes the whole ledger unknown, never "not pending"
+    (json.dumps({"tracked": True, "pending_handoffs": [{}]}), 0, None),
+    (json.dumps({"tracked": True, "pending_handoffs": [{"token": "h1"}, {"token": ""}]}), 0, None),
+    (json.dumps({"tracked": True, "pending_handoffs": ["h1"]}), 0, None),
+    ("not json", 0, None),
+    ("", 1, None),
+])
+def test_the_worktree_ledger_reply_is_read_strictly(monkeypatch, stdout, returncode, expected):
+    from agent_dispatch import procutil
+
+    calls = []
+
+    def capture(*args, timeout):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, returncode, stdout, "")
+
+    monkeypatch.setattr(procutil, "run_agent_worktrees_capture", capture)
+    assert srcs.pending_handoff_tokens("wt-9") == expected
+    assert calls == [["head-session", "--worktree", "wt-9", "--json"]]
+
+
+def test_without_agent_worktrees_the_ledger_is_unknown(monkeypatch):
+    from agent_dispatch import procutil
+
+    monkeypatch.setattr(procutil, "run_agent_worktrees_capture", lambda *a, timeout: None)
+    assert srcs.pending_handoff_tokens("wt-9") is None
+
+
+# -- dismissals -----------------------------------------------------------------------------
+
+
+def _dismissals(tmp_path):
+    return attention_dismiss.Dismissals(tmp_path / "d.json")
+
+
+def _read_with(tmp_path, *items, status="ok", read_at=T1):
+    return _collect_dismissing({"s": _ok(*items, status=status, uncertain=1 if status == "uncertain" else 0)},
+                               tmp_path, read_at)
+
+
+def _collect_dismissing(readers, tmp_path, read_at=T1):
+    from datetime import datetime
+
+    return srcs.collect(readers, timeouts={}, selected=None, config_errors=[],
+                        store=FirstObserved(tmp_path / "o.json"), read_at=read_at,
+                        read_token=int(datetime.fromisoformat(read_at).timestamp() * 1e9),
+                        dismissals=_dismissals(tmp_path))
+
+
+def test_every_queued_item_offers_dismiss_last(tmp_path):
+    env = _read_with(tmp_path, _item(ref="a"))
+    assert env["items"][0]["actions"][-1] == {"verb": "dismiss",
+                                              "argv": ["agent-dispatch", "attention", "dismiss", "s:task:a"]}
+
+
+def test_a_dismissed_item_is_hidden_while_unchanged_and_reported_not_dropped(tmp_path):
+    item = _item(ref="a", reason="waiting for 12 min")
+    _dismissals(tmp_path).dismiss(item["id"], "changed", T1, item=item)
+    # Only its age moved: still the same condition.
+    env = _read_with(tmp_path, _item(ref="a", reason="waiting for 97 min"), read_at=T2)
+    assert env["items"] == [] and env["status"] == "clear"
+    assert [d["id"] for d in env["dismissed"]] == ["s:task:a"]
+    assert env["dismissed"][0]["dismissal"] == {"mode": "changed", "at": T1}
+
+
+@pytest.mark.parametrize("changed", [{"reason": "a new review"}, {"state": "failed"}, {"lifecycle": "submitted"}])
+def test_a_dismissed_item_returns_when_its_condition_changes(tmp_path, changed):
+    item = _item(ref="a")
+    store = _dismissals(tmp_path)
+    store.dismiss(item["id"], "changed", T1, item=item)
+    env = _read_with(tmp_path, _item(ref="a", **changed), read_at=T2)
+    assert [i["id"] for i in env["items"]] == ["s:task:a"] and env["dismissed"] == []
+    assert store.entries()[0] == {}  # the ended dismissal is gone: an identical recurrence is shown
+
+
+def test_a_snooze_returns_the_item_after_its_time_even_unchanged(tmp_path):
+    item = _item(ref="a")
+    _dismissals(tmp_path).dismiss(item["id"], "until", T0, until=T2)
+    assert _read_with(tmp_path, item, read_at=T1)["items"] == []
+    assert [i["id"] for i in _read_with(tmp_path, item, read_at=T2)["items"]] == ["s:task:a"]
+
+
+def test_ignore_hides_the_entity_whatever_changes_until_undismissed(tmp_path):
+    store = _dismissals(tmp_path)
+    store.dismiss("s:task:a", "forever", T0)
+    assert _read_with(tmp_path, _item(ref="a", state="failed", reason="worse"))["items"] == []
+    assert _read_with(tmp_path)["items"] == [] and "s:task:a" in store.entries()[0]  # never pruned
+    assert store.undismiss("s:task:a") is True
+    assert len(_read_with(tmp_path, _item(ref="a"))["items"]) == 1
+
+
+def test_a_condition_that_ended_ends_its_dismissal_but_an_unsure_read_proves_nothing(tmp_path):
+    item = _item(ref="a")
+    store = _dismissals(tmp_path)
+    store.dismiss(item["id"], "changed", T0, item=item)
+    _read_with(tmp_path, status="uncertain")
+    assert "s:task:a" in store.entries()[0]
+    _collect_dismissing({"s": lambda r: ac.command_failure("down")}, tmp_path)
+    assert "s:task:a" in store.entries()[0]
+    _read_with(tmp_path)  # an ok read without it: the condition ended
+    assert store.entries()[0] == {}
+
+
+def test_a_malformed_dismissal_store_hides_nothing_and_says_so(tmp_path):
+    (tmp_path / "d.json").write_text("{not json", encoding="utf-8")
+    env = _read_with(tmp_path, _item(ref="a"))
+    assert len(env["items"]) == 1 and env["dismissed"] == []
+    assert [e["name"] for e in env["config_errors"]] == [srcs.DISMISSALS_NAME]
+
+
+@pytest.mark.parametrize("entry", [
+    {"mode": "forever", "at": "not-a-time"},
+    {"mode": "forever"},
+    {"mode": "until", "at": T0, "until": "tomorrow"},
+    {"mode": "changed", "at": T0},
+])
+def test_a_damaged_dismissal_hides_nothing(tmp_path, entry):
+    (tmp_path / "d.json").write_text(json.dumps({"version": 1, "dismissed": {"s:task:a": entry}}), encoding="utf-8")
+    env = _read_with(tmp_path, _item(ref="a"))
+    assert [i["id"] for i in env["items"]] == ["s:task:a"]
+    assert [e["name"] for e in env["config_errors"]] == [srcs.DISMISSALS_NAME]
+
+
+def test_cli_dismiss_hides_the_item_and_undismiss_brings_it_back(monkeypatch, capsys):
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    rc, out = _cli(monkeypatch, capsys, ["attention", "dismiss", "dispatch:task:t1"], tasks)
+    assert rc == 0 and json.loads(out.out)["mode"] == "changed"
+    rc, out = _cli(monkeypatch, capsys, ["attention", "--json"], tasks)
+    env = json.loads(out.out)
+    assert env["items"] == [] and [d["id"] for d in env["dismissed"]] == ["dispatch:task:t1"]
+    rc, out = _cli(monkeypatch, capsys, ["attention", "dismissed", "--json"], tasks)
+    assert list(json.loads(out.out)["dismissed"]) == ["dispatch:task:t1"]
+    rc, out = _cli(monkeypatch, capsys, ["attention", "undismiss", "dispatch:task:t1"], tasks)
+    assert json.loads(out.out)["undismissed"] is True
+    rc, out = _cli(monkeypatch, capsys, ["attention", "--json"], tasks)
+    assert [i["id"] for i in json.loads(out.out)["items"]] == ["dispatch:task:t1"]
+
+
+def test_cli_dismissing_an_item_not_in_the_queue_is_a_usage_error(monkeypatch, capsys):
+    rc, out = _cli(monkeypatch, capsys, ["attention", "dismiss", "dispatch:task:gone"])
+    assert rc == 2 and "not in the attention queue" in out.err
+    rc, out = _cli(monkeypatch, capsys, ["attention", "dismiss", "dispatch:task:gone", "--forever"])
+    assert rc == 0 and json.loads(out.out)["mode"] == "forever"
+
+
+@pytest.mark.parametrize("until", ["2000-01-01T00:00:00+00:00", "tomorrow", "2099-01-01T00:00:00"])
+def test_cli_a_snooze_needs_a_future_time_with_an_offset(monkeypatch, capsys, until):
+    rc, out = _cli(monkeypatch, capsys, ["attention", "dismiss", "dispatch:task:t1", "--until", until])
+    assert rc == 2 and "--until" in out.err
+
+
+def test_cli_human_output_counts_what_is_dismissed(monkeypatch, capsys):
+    tasks = [{"id": "t1", "title": "A", "status": "submitted"}]
+    _cli(monkeypatch, capsys, ["attention", "dismiss", "dispatch:task:t1"], tasks)
+    rc, out = _cli(monkeypatch, capsys, ["attention"], tasks)
+    assert "Nothing needs you" in out.out and "1 dismissed" in out.out
+
+
+def test_ledger_lookups_stop_starting_once_the_read_is_over(monkeypatch):
+    import threading as _t
+    import time as _time
+
+    monkeypatch.setattr(srcs, "HANDOFF_PENDING_CONCURRENCY", 1)
+    release, asked = _t.Event(), []
+
+    def lookup(worktree):
+        asked.append(worktree)
+        release.wait(5)
+        return set()
+
+    tasks = [_baton(f"w{n}", worktree=f"wt-{n}") for n in range(3)]
+    try:
+        srcs.read_dispatch(lambda: _Client(tasks), T1, pending_lookup=lookup, backlog_budget=0.2)
+    finally:
+        release.set()
+    _time.sleep(0.2)
+    assert len(asked) == 1  # the worker in flight finished; none started after the deadline
+
+
+def test_a_read_of_another_coordinator_never_ends_a_local_dismissal(tmp_path):
+    item = _item(source="dispatch", ref="t1", state="review")
+    store = _dismissals(tmp_path)
+    store.dismiss(item["id"], "changed", T0, item=item)
+    shared = {"dispatch": lambda r: {"items": [], "status": "ok", "uncertain": 0, "scope": "https://shared"}}
+    _collect_dismissing(shared, tmp_path)
+    assert item["id"] in store.entries()[0]  # the shared queue never had this task
+    _collect_dismissing({"dispatch": _ok()}, tmp_path)  # this machine's own queue no longer has it
+    assert store.entries()[0] == {}
+
+
+def test_a_dismissed_condition_folded_into_another_items_also_stays_dismissed(tmp_path):
+    quiet = _item(source="a", ref="t1", state="review")
+    store = _dismissals(tmp_path)
+    store.dismiss(quiet["id"], "changed", T0, item=quiet)
+    worse = _item(source="b", ref="t1", state="failed")
+    env = _collect_dismissing({"a": _ok(quiet), "b": _ok(worse)}, tmp_path)
+    assert [i["id"] for i in env["items"]] == ["b:task:t1"] and env["items"][0]["also"] == []
+    assert quiet["id"] in store.entries()[0]
+
+
+def test_dismissing_one_sources_condition_never_hides_anothers_for_the_same_entity(tmp_path):
+    worse = _item(source="b", ref="t1", state="failed")
+    _dismissals(tmp_path).dismiss(worse["id"], "changed", T0, item=worse)
+    quiet = _item(source="a", ref="t1", state="review")
+    env = _collect_dismissing({"a": _ok(quiet), "b": _ok(worse)}, tmp_path)
+    assert [i["id"] for i in env["items"]] == ["a:task:t1"] and env["status"] == "attention"
+    assert [d["id"] for d in env["dismissed"]] == ["b:task:t1"]
+
+
+def test_a_remote_bridge_items_dismiss_rereads_with_include_remote(tmp_path):
+    from datetime import datetime
+
+    item = _item(source="bridge", entity="session", ref="wt:m/p/w1", lifecycle=None)
+    for include_remote, tail in ((True, ["--include-remote"]), (False, [])):
+        env = srcs.collect({"bridge": _ok(item)}, timeouts={}, selected=None, config_errors=[],
+                           store=FirstObserved(tmp_path / "o.json"), read_at=T1,
+                           read_token=int(datetime.fromisoformat(T1).timestamp() * 1e9),
+                           dismissals=_dismissals(tmp_path), include_remote=include_remote)
+        assert env["items"][0]["actions"][-1]["argv"] == [
+            "agent-dispatch", "attention", "dismiss", "bridge:session:wt:m/p/w1", *tail]
