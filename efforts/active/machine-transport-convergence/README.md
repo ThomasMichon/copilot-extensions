@@ -125,8 +125,11 @@ unreviewed changes to Logger's native/WSL compatibility behavior.
   SSH selection, or review a justified distinct contract for each candidate.
 - [ ] Resolve #5973 by sharing WSL/mesh host identity while retaining SSH
   aliases, live provider projection, keypair selection and native/guest venues.
-- [ ] Resolve #5974 through a reviewed Index designated-host identity boundary
-  that preserves explicit indexer configuration and standalone operation.
+- [x] Complete #5974's independent Index designation-boundary design
+  review/merge gate in #6023.
+- [ ] Implement and resolve #5974's reviewed Index designated-host identity
+  boundary after the shared contract lands; preserve explicit indexer
+  configuration and standalone operation.
 - [ ] Complete the independent design review/merge gate for #6039's Logger
   boundary proposal; this gate does not wait for #5689.
   _(agent-recommended inventory finding; operator-approved tracking/review)_
