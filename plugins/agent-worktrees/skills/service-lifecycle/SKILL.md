@@ -43,6 +43,14 @@ Some systems span both: a vault system may have CLI tools and a background
 service. The tools connect to or wrap the service; the service is the
 persistent daemon.
 
+Service readiness must outlive the installer's cleanup boundary. An invisible
+child can survive parent exit and still die when a caller-owned Windows Job
+closes, even after successful installation. Keep bounded helpers contained;
+durable daemons use the owning explicit escape/ensure primitive, preserving
+contained-test suppression. Verify the service again after caller cleanup,
+not only before return. The detailed contract is
+`docs/patterns/windows-background-process-launch.md` in copilot-extensions.
+
 ---
 
 ## Repo Is Source, Not Runtime

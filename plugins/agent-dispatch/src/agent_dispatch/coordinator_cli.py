@@ -421,7 +421,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         # console-subsystem interpreter (`python`, not `pythonw.exe`) and use
         # CREATE_NO_WINDOW so this process's own console stays hidden while
         # still being inheritable by its children.
-        kwargs.update(windowless_daemon_kwargs())
+        kwargs.update(windowless_daemon_kwargs(breakaway=True))
         return _subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
     def health_check(check_host: str, port: int) -> bool:

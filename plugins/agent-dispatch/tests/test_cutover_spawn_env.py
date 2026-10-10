@@ -92,8 +92,10 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
 
     monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
     popen_calls: list = []
+    launch_policy = []
     monkeypatch.setattr(
-        "agent_procutil.windowless_daemon_kwargs", lambda **_k: {}
+        "agent_procutil.windowless_daemon_kwargs",
+        lambda **options: launch_policy.append(options) or {},
     )
 
     import subprocess as _subprocess
@@ -118,6 +120,7 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
     # control-token command even though this test process's own env was
     # scrubbed of it above.
     captured["spawn_passive"](9999)
+    assert launch_policy == [{"breakaway": True}]
     assert len(popen_calls) == 1
     _cmd, kwargs = popen_calls[0]
     assert (

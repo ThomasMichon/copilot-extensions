@@ -342,7 +342,7 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
             stderr=subprocess.DEVNULL,
             # Launch from the runtime root, never an inherited (possibly payload) CWD.
             cwd=str(runtime_root()),
-            **windowless_daemon_kwargs(),
+            **windowless_daemon_kwargs(breakaway=True),
         )
         return True
     except OSError as exc:  # pragma: no cover -- launch failure is environmental

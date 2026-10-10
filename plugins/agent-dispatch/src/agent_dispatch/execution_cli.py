@@ -146,7 +146,7 @@ def _spawn_detached_waiter(spec: Any) -> dict:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        **windowless_daemon_kwargs(),
+        **windowless_daemon_kwargs(breakaway=True),
     )
     return {"pid": proc.pid, "argv": argv}
 
