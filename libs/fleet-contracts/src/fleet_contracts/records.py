@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import ClassVar
 
 MAX_MESSAGE_BYTES = 65536
+MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_TARGETS = 256
 MAX_SERVICES = 32
 MAX_QUERY_BYTES = 4096
@@ -42,6 +43,12 @@ def _text(value: object, field: str, maximum: int) -> None:
         raise ContractError(f"{field} must be UTF-8 text") from exc
     if size > maximum or any(ord(c) < 32 and c not in "\t\n\r" for c in value):
         raise ContractError(f"{field} exceeds its text bounds")
+
+
+def _installation_id(value: str) -> None:
+    _text(value, "installation_id", 256)
+    if any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
+        raise ContractError("installation_id cannot contain control characters")
 
 
 def _object(value: object, required: set[str], optional: set[str] | None = None) -> dict:
@@ -98,8 +105,9 @@ def _nonfinite(_: str) -> None:
     raise ContractError("JSON contains a nonfinite number")
 
 
-def decode_json(payload: bytes) -> dict:
-    if not isinstance(payload, bytes) or len(payload) > MAX_MESSAGE_BYTES:
+def decode_json(payload: bytes, *, max_bytes: int = MAX_MESSAGE_BYTES) -> dict:
+    _integer(max_bytes, "max_bytes", maximum=MAX_RESPONSE_BYTES)
+    if not isinstance(payload, bytes) or len(payload) > max_bytes:
         raise ContractError("JSON message exceeds the contract byte limit")
     try:
         value = json.loads(payload.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_nonfinite)
@@ -113,7 +121,8 @@ def decode_json(payload: bytes) -> dict:
     return value
 
 
-def encode_json(value: dict) -> bytes:
+def encode_json(value: dict, *, max_bytes: int = MAX_MESSAGE_BYTES) -> bytes:
+    _integer(max_bytes, "max_bytes", maximum=MAX_RESPONSE_BYTES)
     _check_tree(value)
     if not isinstance(value, dict):
         raise ContractError("JSON message must be an object")
@@ -122,7 +131,7 @@ def encode_json(value: dict) -> bytes:
         encoded = payload.encode("utf-8")
     except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
         raise ContractError("invalid JSON message") from exc
-    if len(encoded) > MAX_MESSAGE_BYTES:
+    if len(encoded) > max_bytes:
         raise ContractError("JSON message exceeds the contract byte limit")
     return encoded
 
@@ -221,7 +230,7 @@ class ServiceOffer:
 
     def __post_init__(self) -> None:
         _identifier(self.service_id, "service_id")
-        _identifier(self.installation_id, "installation_id")
+        _installation_id(self.installation_id)
         if not isinstance(self.adapter, str) or self.adapter not in _OPERATIONS:
             raise ContractError("unsupported service adapter")
         if type(self.operations) is not tuple:
@@ -317,8 +326,9 @@ class RouteRequest(_WireRecord):
     parameters: SearchParameters | None
 
     def __post_init__(self) -> None:
-        for name in ("fleet_id", "connector_id", "service_id", "installation_id", "request_id"):
+        for name in ("fleet_id", "connector_id", "service_id", "request_id"):
             _identifier(getattr(self, name), name)
+        _installation_id(self.installation_id)
         if not isinstance(self.target, TargetRef):
             raise ContractError("target must be a target reference")
         _integer(self.generation, "generation")

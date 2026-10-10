@@ -209,6 +209,21 @@ def test_operation_binding_and_health_parameters():
     assert request().check_offer(longer, 1499, max_ttl=3600) is longer.services[0]
 
 
+def test_native_installation_identity_is_opaque_not_a_logical_name_or_path():
+    native_id = "marketplace-identity/agent-index"
+    reg = registration()
+    offer = replace(reg.services[0], installation_id=native_id)
+    reg = replace(reg, services=(offer,))
+    routed = replace(request(), installation_id=native_id)
+    assert routed.check_offer(reg, 1499) is offer
+    assert RouteRequest.from_dict(decode_json(encode_json(routed.to_dict()))) == routed
+    for invalid in ("", " ", "a\nb", "a\0b", "a" * 257):
+        with pytest.raises(ContractError):
+            replace(offer, installation_id=invalid)
+        with pytest.raises(ContractError):
+            replace(routed, installation_id=invalid)
+
+
 def test_driver_states_do_not_imply_live_health_or_managed_capabilities():
     target = DriverTarget("worker-a", "configured", ("ssh",))
     assert target.reason is None
