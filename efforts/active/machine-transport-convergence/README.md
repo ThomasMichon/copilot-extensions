@@ -584,6 +584,25 @@ provider's absence.
   validation excludes only `test_run_bounded_kills_grandchild_on_timeout`;
   no other observed failure is waived. Current-head review and CI remain gates.
 
+### 2026-10-09 - Retained validation batches and publication-release proof
+- Complete Bridge validation passed all nine contained file groups:
+  **3782 passed, 72 skipped**. Worktrees' first seven groups passed, and two
+  additional files completed before an interruption. Two short peer review-fix
+  suites received explicit admission gaps; completed evidence was retained on
+  unchanged source instead of restarting it.
+- Negative pytest selection collapsed the runner's normal file partitioning;
+  exact node deselection restored it. Large real-Git groups still exceeded
+  group wall budgets while individual contracts kept passing. Remaining
+  validation runs in smaller bounded groups with unchanged per-test watchdogs.
+- The large PR-operation file completed **316 passed, 1 failed**. Its release
+  assertion treated a thread still resolving the real Git directory after
+  300ms as a held publication lock. It now waits for actual cross-thread lock
+  acquisition with a bounded future, propagating any acquisition exception.
+  Nested reentrancy and locked-snapshot assertions are unchanged; related
+  release/snapshot contracts passed **3 tests**. No production lock changes.
+- Remaining Worktrees files, fresh current-head review and CI still gate merge.
+  A completed Bridge run or partial Worktrees batch does not close the campaign.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
