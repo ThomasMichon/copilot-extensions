@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +82,7 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
             output.ok(
                 f"Settled parent {owner.worktree_id}'s claim on this worktree (-> at-rest)"
             )
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
         output.warn(
             f"Cannot confirm parent-obligation settlement for {worktree_id}: "
             f"{type(exc).__name__}. Inspect the owning ledger before retrying."
@@ -171,7 +172,10 @@ def require_project_record_mutation(record: Any) -> None:
 
     try:
         config = cfg.load_project_config(record.repo)
-    except (OSError, ValueError) as exc:
+        if record.repo not in config.repos:
+            raise ValueError("requested project is not registered in receiving-side configuration")
+        config = replace(config, repo_name=record.repo)
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
         raise ExecutionSpaceError(
             f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
         ) from exc
@@ -186,8 +190,12 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
         entries = cfg.load_machines_yaml(anchor)
     except FileNotFoundError:
         return
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
         raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
     if not any(entry.execution_platform for entry in entries.values()):
         return
-    require_record_mutation(record, cfg.load_config())
+    try:
+        config = cfg.load_config()
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise ExecutionSpaceError(f"cannot establish cleanup authority: {exc}") from exc
+    require_record_mutation(record, config)

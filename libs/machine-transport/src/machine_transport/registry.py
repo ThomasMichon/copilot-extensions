@@ -242,11 +242,15 @@ def parse_machines_yaml(
             execution_platform=execution_platform,
             physical_host=physical_host,
         )
+    _validate_execution_space_keys(entries)
+    return entries
+
+
+def _validate_execution_space_keys(entries: Mapping[str, MachineEntry]) -> None:
     if any(entry.execution_platform for entry in entries.values()):
         normalized = [key.casefold() for key in entries]
         if len(normalized) != len(set(normalized)):
             raise ValueError("execution-space keys must be unique without regard to case")
-    return entries
 
 
 def merge_machines_yaml(
@@ -257,12 +261,14 @@ def merge_machines_yaml(
     in-repo one. The canonical entry wins a key collision (the two files
     carry disjoint keys in practice); this is strictly additive (dotfiles
     #7914 -- returning only whichever file happened to resolve first
-    silently dropped every machine in the other file facility-wide)."""
+    silently dropped every machine in the other file facility-wide).
+    Scoped keys must remain case-insensitively unique across both files."""
     entries: dict[str, MachineEntry] = {}
     if legacy:
         entries.update(legacy)
     if canonical:
         entries.update(canonical)
+    _validate_execution_space_keys(entries)
     return entries
 
 
