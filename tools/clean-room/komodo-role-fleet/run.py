@@ -63,16 +63,18 @@ def run(root: Path) -> dict:
         if state != "true":
             raise ProofError("Role is not independently observed running")
 
-    for name in ("compose.yaml", "client.mjs"):
-        shutil.copyfile(FIXTURE / name, root / name)
-    for name in ("database", "admin", "jwt", "webhook"):
-        (root / f"{name}.secret").write_text(secrets.token_urlsafe(32), encoding="utf-8")
+    started = False
     try:
+        for name in ("compose.yaml", "client.mjs"):
+            shutil.copyfile(FIXTURE / name, root / name)
+        for name in ("database", "admin", "jwt", "webhook"):
+            (root / f"{name}.secret").write_text(secrets.token_urlsafe(32), encoding="utf-8")
         if command(["docker", "info", "--format", "{{.OSType}}"], cwd=root).strip() != b"linux":
             raise ProofError("A running Linux Docker engine is required")
         docker("pull", "mongo", "core", "periphery", "client", "nested", "enrolled")
         command(["docker", "pull", ROLE_IMAGE], cwd=root)
         receipt["role_digest"] = ROLE_IMAGE
+        started = True
         docker("up", "-d", "mongo", "core", "periphery")
         receipt["stages"].append("fresh-core-start")
         prepared = client("prepare")
@@ -115,7 +117,8 @@ def run(root: Path) -> dict:
         receipt["error"] = str(exc) if isinstance(exc, ProofError) else "Proof operation failed"
     finally:
         try:
-            docker("--profile", "*", "down", "-v", "--remove-orphans")
+            if started:
+                docker("--profile", "*", "down", "-v", "--remove-orphans")
             receipt["cleanup"] = "complete"
         except (ProofError, subprocess.TimeoutExpired, OSError):
             receipt["cleanup"] = "failed"

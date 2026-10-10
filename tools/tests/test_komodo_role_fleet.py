@@ -29,6 +29,10 @@ def test_first_command_failure_still_cleans_all_profiles_and_secret_files(tmp_pa
         calls.append(argv)
         if "down" in argv:
             return b""
+        if "info" in argv:
+            return b"linux"
+        if "pull" in argv:
+            return b""
         raise MODULE.ProofError("synthetic engine unavailable")
 
     with patch.object(MODULE, "command", failing_command):
@@ -45,7 +49,11 @@ def test_first_command_failure_still_cleans_all_profiles_and_secret_files(tmp_pa
 
 
 def test_teardown_failure_is_not_reported_as_success(tmp_path):
-    def fail(*args, **kwargs):
+    def fail(argv, **kwargs):
+        if "info" in argv:
+            return b"linux"
+        if "pull" in argv:
+            return b""
         raise MODULE.ProofError("operation failed")
 
     with patch.object(MODULE, "command", fail):
@@ -53,6 +61,24 @@ def test_teardown_failure_is_not_reported_as_success(tmp_path):
     assert receipt["cleanup"] == "failed"
     assert receipt["result"] == "fail"
     assert not list(tmp_path.glob("*.secret"))
+
+
+def test_partial_secret_setup_is_inside_cleanup_boundary(tmp_path):
+    original = Path.write_text
+
+    def write(path, data, **kwargs):
+        if path.name == "admin.secret":
+            raise OSError("synthetic secret setup failure")
+        return original(path, data, **kwargs)
+
+    with patch.object(Path, "write_text", write), patch.object(MODULE, "command") as external:
+        receipt = MODULE.run(tmp_path)
+    external.assert_not_called()
+    assert receipt["result"] == "fail"
+    assert receipt["cleanup"] == "complete"
+    assert receipt["error_type"] == "OSError"
+    assert not list(tmp_path.glob("*.secret"))
+    assert (tmp_path / "receipt.json").exists()
 
 
 def test_fixture_has_no_host_socket_mount_or_published_ports():
