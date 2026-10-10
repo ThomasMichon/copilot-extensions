@@ -578,15 +578,10 @@ def _identity_field_for_marker(
     """
     if record is None:
         return None
-    try:
-        from . import identity_marker
+    from . import identity_marker
 
-        project = getattr(config, "repo_name", None) or ""
-        return identity_marker.identity_marker_field_for_record(
-            record, project=project, head=head,
-        )
-    except Exception:
-        return None
+    project = getattr(config, "repo_name", None) or ""
+    return identity_marker.identity_marker_field_for_record(record, project=project, head=head)
 
 
 def build_codename_marker_with_root(

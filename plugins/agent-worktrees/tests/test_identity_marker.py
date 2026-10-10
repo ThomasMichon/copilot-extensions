@@ -19,6 +19,15 @@ from agent_worktrees import identity_marker
 
 
 class TestKeyResolution:
+    def test_invalid_key_reports_sanitized_warning(self, tmp_path, monkeypatch, caplog):
+        target = tmp_path / "identity.key"
+        encoded = base64.b64encode(b"\x23" * identity_marker.KEY_BYTES).decode()
+        target.write_text(encoded + "!", encoding="utf-8")
+        monkeypatch.setenv(identity_marker.KEY_ENV_VAR, str(target))
+        assert identity_marker.load_identity_key() is None
+        assert "identity key is unreadable or invalid" in caplog.text
+        assert encoded not in caplog.text
+
     def test_env_var_override_takes_precedence(self, tmp_path, monkeypatch):
         onedrive = tmp_path / "onedrive"
         onedrive.mkdir()
@@ -61,6 +70,21 @@ class TestKeyResolution:
 
 
 class TestGenerateIdentityKey:
+    def test_concurrent_creator_is_never_overwritten(self, tmp_path, monkeypatch):
+        target = tmp_path / "identity.key"
+        original = base64.b64encode(b"\x17" * identity_marker.KEY_BYTES)
+        real_link = identity_marker.os.link
+
+        def competing_link(source, destination):
+            target.write_bytes(original)
+            real_link(source, destination)
+
+        monkeypatch.setattr(identity_marker.os, "link", competing_link)
+        with pytest.raises(identity_marker.IdentityMarkerError):
+            identity_marker.generate_identity_key(target)
+        assert target.read_bytes() == original
+        assert list(tmp_path.iterdir()) == [target]
+
     def test_generates_a_valid_key(self, tmp_path, monkeypatch):
         target = tmp_path / "nested" / "identity.key"
         created = identity_marker.generate_identity_key(target)
@@ -112,6 +136,13 @@ class TestBuildIdentityPayload:
 
 
 class TestEncryptDecryptRoundTrip:
+    def test_authenticated_invalid_payload_is_rejected(self, key, monkeypatch):
+        monkeypatch.setattr(identity_marker, "load_identity_key", lambda: key)
+        token = identity_marker.encrypt_identity_payload({"v": 99, "worktree_id": "wt-1"})
+        assert token is not None
+        with pytest.raises(identity_marker.IdentityMarkerError):
+            identity_marker.decrypt_identity_payload(token, key=key)
+
     @pytest.fixture
     def key(self):
         return b"\x42" * identity_marker.KEY_BYTES

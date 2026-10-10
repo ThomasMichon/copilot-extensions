@@ -42,12 +42,17 @@ ceiling.
 from __future__ import annotations
 
 import base64
+import binascii
 import json
+import logging
 import os
 import secrets
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from cryptography.exceptions import InvalidTag
 
 if TYPE_CHECKING:
     from . import tracking
@@ -69,6 +74,7 @@ KEY_FILENAME = "identity.key"
 DEFAULT_KEY_SUBDIR = "Apps/agent-worktrees"
 #: Current payload schema version.
 PAYLOAD_VERSION = 1
+log = logging.getLogger("agent-worktrees")
 
 
 class IdentityMarkerError(RuntimeError):
@@ -138,13 +144,20 @@ def load_identity_key() -> bytes | None:
     hot-path reader used by every PR publish.
     """
     path = identity_key_path()
-    if path is None or not path.is_file():
+    if path is None:
         return None
     try:
-        raw = base64.b64decode(path.read_text(encoding="utf-8").strip())
-    except Exception:
+        with path.open("rb") as stream:
+            encoded = stream.read(1025).strip()
+        if len(encoded) > 1024:
+            raise ValueError("oversized key")
+        raw = base64.b64decode(encoded, validate=True)
+        if len(raw) != KEY_BYTES:
+            raise ValueError("wrong key length")
+    except FileNotFoundError:
         return None
-    if len(raw) != KEY_BYTES:
+    except (OSError, ValueError, binascii.Error):
+        log.warning("Encrypted PR attribution omitted: identity key is unreadable or invalid.")
         return None
     return raw
 
@@ -169,13 +182,25 @@ def generate_identity_key(path: Path | None = None, *, force: bool = False) -> P
         raise IdentityMarkerError(
             f"identity key already exists at {target} (use --force to overwrite)"
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    raw = secrets.token_bytes(KEY_BYTES)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(base64.b64encode(raw).decode("ascii"), encoding="utf-8")
-    if os.name != "nt":
-        os.chmod(tmp, 0o600)
-    os.replace(tmp, target)
+    tmp: Path | None = None
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(prefix=".identity-", dir=target.parent)
+        tmp = Path(name)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(base64.b64encode(secrets.token_bytes(KEY_BYTES)))
+        if force:
+            os.replace(tmp, target)
+        else:
+            # Publish a complete file without replacing a concurrent creator's key.
+            os.link(tmp, target)
+    except FileExistsError as exc:
+        raise IdentityMarkerError("identity key already exists; it was not overwritten") from exc
+    except OSError as exc:
+        raise IdentityMarkerError("could not create identity key file") from exc
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
     return target
 
 
@@ -246,9 +271,8 @@ def encrypt_identity_payload(payload: dict) -> str | None:
         nonce = secrets.token_bytes(NONCE_BYTES)
         ciphertext = _aesgcm(key).encrypt(nonce, plaintext, None)
         return base64.b64encode(MARKER_MAGIC + nonce + ciphertext).decode("ascii")
-    except IdentityMarkerError:
-        return None
-    except Exception:
+    except (IdentityMarkerError, TypeError, ValueError):
+        log.warning("Encrypted PR attribution omitted: identity encryption failed.")
         return None
 
 
@@ -267,9 +291,11 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
             f"{KEY_ENV_VAR} or place one at {identity_key_path()}"
         )
     try:
-        blob = base64.b64decode(token_b64)
-    except Exception as exc:
-        raise IdentityMarkerError(f"invalid base64: {exc}") from exc
+        if len(token_b64) > 16384:
+            raise ValueError("oversized token")
+        blob = base64.b64decode(token_b64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise IdentityMarkerError("invalid identity token encoding") from exc
     if not blob.startswith(MARKER_MAGIC):
         raise IdentityMarkerError("not an identity-marker token (bad magic)")
     body = blob[len(MARKER_MAGIC):]
@@ -278,13 +304,26 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
     nonce, ciphertext = body[:NONCE_BYTES], body[NONCE_BYTES:]
     try:
         plaintext = _aesgcm(resolved_key).decrypt(nonce, ciphertext, None)
-        return json.loads(plaintext.decode("utf-8"))
+        payload = json.loads(plaintext.decode("utf-8"))
+        if (
+            not isinstance(payload, dict)
+            or type(payload.get("v")) is not int
+            or payload["v"] != PAYLOAD_VERSION
+            or not isinstance(payload.get("worktree_id"), str)
+            or not payload["worktree_id"]
+            or not isinstance(payload.get("ts"), str)
+            or any(
+                not isinstance(payload[field], str)
+                for field in ("machine", "session", "head", "project")
+                if field in payload
+            )
+        ):
+            raise ValueError("invalid identity payload")
+        return payload
     except IdentityMarkerError:
         raise
-    except Exception as exc:
-        raise IdentityMarkerError(
-            f"decrypt failed (wrong key or tampered data): {exc}"
-        ) from exc
+    except (InvalidTag, ValueError, UnicodeError, TypeError) as exc:
+        raise IdentityMarkerError("invalid identity payload, wrong key, or tampered data") from exc
 
 
 def identity_marker_field(
@@ -334,7 +373,8 @@ def identity_marker_field_for_record(
             head=head,
             project=project,
         )
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
+        log.warning("Encrypted PR attribution omitted: source record is invalid.")
         return None
 
 
