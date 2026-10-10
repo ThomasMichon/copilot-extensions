@@ -469,6 +469,7 @@ def _watch_request(
     kind: str, payload: dict, *, boot_wait_s: float = 6.0, boot: bool = True
 ) -> dict:
     from work_coalescing_singleton import call_with_fallback
+    import uuid
 
     def _fallback() -> dict:
         return {"error": "no watch daemon reachable and no inline fallback for this kind"}
@@ -478,7 +479,10 @@ def _watch_request(
         boot=_watch_boot if boot else None,
         boot_wait_s=boot_wait_s,
         kind=kind,
-        key=f"{payload.get('repo', '')}#{payload.get('number', '')}",
+        key=(
+            uuid.uuid4().hex if kind in ("register", "unregister")
+            else f"{payload.get('repo', '')}#{payload.get('number', '')}"
+        ),
         payload=payload,
         request_deadline_s=5.0,
         fallback=_fallback,

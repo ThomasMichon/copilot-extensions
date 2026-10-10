@@ -139,7 +139,10 @@ class Deliveries:
                         pending["next_attempt"] = time.time() + min(
                             60.0, 2.0 ** min(pending["attempts"] - 1, 6),
                         )
-                        self.persist()
+                        try:
+                            self.persist()
+                        except StateCommitUncertain:
+                            return
                 except OSError:
                     # The persisted event remains authoritative; never acknowledge a failed write.
                     if sub.pending is not None:

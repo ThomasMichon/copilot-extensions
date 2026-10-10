@@ -290,6 +290,37 @@ def test_cli_explicit_empty_cancellation_identity_is_forwarded(monkeypatch, caps
     )) == 1
     assert "error" in json.loads(capsys.readouterr().out)
 
+@pytest.mark.parametrize("kind", ["register", "unregister"])
+def test_mutation_requests_never_coalesce_different_subscribers(monkeypatch, kind):
+    import work_coalescing_singleton
+    from agent_pull_requests import __main__ as cli
+
+    keys = []
+
+    def call(**kwargs):
+        keys.append(kwargs["key"])
+        return {}
+
+    monkeypatch.setattr(work_coalescing_singleton, "call_with_fallback", call)
+    for identity in ("one", "two", "one"):
+        cli._watch_request(kind, {"repo": "example/project", "number": 1, "subscriber_id": identity})
+    assert len(set(keys)) == 3
+
+
+def test_legacy_restored_notify_timeout_keeps_fixed_ceiling(monkeypatch):
+    from agent_pull_requests import watch_notification
+
+    def run(*args, **kwargs):
+        assert kwargs["timeout"] == 30
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(watch_notification.subprocess, "run", run)
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "legacy", until=(MERGED,), notify={"argv": ["consumer"], "timeout": 99999})
+    event = registry.apply_snapshot(key, PRSnapshot(merged=True))[0]
+    assert default_notify(event) == 0
+
 
 def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):
     from agent_pull_requests import watch_daemon

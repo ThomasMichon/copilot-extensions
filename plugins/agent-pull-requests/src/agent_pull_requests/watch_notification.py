@@ -72,7 +72,7 @@ def default_notify(event) -> int | None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         text=True,
-        timeout=spec.get("timeout", CALLBACK_TIMEOUT),
+        timeout=spec.get("timeout", CALLBACK_TIMEOUT) if event.subscriber.acknowledged else CALLBACK_TIMEOUT,
         check=False,
         **no_window_kwargs(),
     )
