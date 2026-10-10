@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"163d7e8f69227eb940bdfc06b9328402bc4cbbe71e282d8bdb5ac332ba964496","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.16.0-dev1","renderedBytes":2742,"schema":"copilot-extensions.instruction-projection","sourceId":"blocked-task-fallback","template":"instructions/blocked-task-fallback.instructions.md","templateBytes":1958,"templateSha256":"f8521aeb78c58bf04ed5e6dd755dc8a0fcd2c0899e29698091e7e2ceb849cfed","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"163d7e8f69227eb940bdfc06b9328402bc4cbbe71e282d8bdb5ac332ba964496","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.16.1-dev1","renderedBytes":2742,"schema":"copilot-extensions.instruction-projection","sourceId":"blocked-task-fallback","template":"instructions/blocked-task-fallback.instructions.md","templateBytes":1958,"templateSha256":"f8521aeb78c58bf04ed5e6dd755dc8a0fcd2c0899e29698091e7e2ceb849cfed","version":1} -->
 
 
 # Agent Dispatch -- a live task is structurally blocked
@@ -46,4 +46,4 @@ Never hand-clear another loop's/agent's reservation or exclusive key to
 "unstick" a task you don't own -- steer, release, or abandon it explicitly
 through the commands above.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"c07e4d7fa48baf76b941843b7c408f60ad785440af314d9c40a935bdcfa1b62a"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"303a466252e3307906a9571bae38f9d523278bd32e7be4a2d6c25ebcfc231a0e"} -->

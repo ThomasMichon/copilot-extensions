@@ -100,12 +100,13 @@ def _mock_spawn_ok(monkeypatch, session_id="cli-session-1", worktree_id="wt-inte
     calls = []
 
     def fake_spawn(task_id, *, worker_id, driver, project, worktree_id: str | None = None,
-                   seed=None, timeout=None, **kwargs):
+                   resume_head: bool = False, seed=None, timeout=None, **kwargs):
         calls.append(
             {
                 "task_id": task_id,
                 "project": project,
                 "worktree_id": worktree_id,
+                "resume_head": resume_head,
                 "seed": seed,
             }
         )
@@ -317,13 +318,17 @@ def test_suspended_task_with_no_prior_reservation_mints_one_from_owner(q, client
     assert q.latest_reservation(t.id) is None  # nothing to carry forward
 
     _mock_prepare(monkeypatch, worktree_id="wt-direct", ownership="reused")
-    _mock_spawn_ok(monkeypatch, session_id="fresh-session-4", worktree_id="wt-direct")
+    calls = _mock_spawn_ok(monkeypatch, session_id="fresh-session-4", worktree_id="wt-direct")
 
     result = launch_interactive_embodiment(client, t.id, machine="m")
 
     assert result["worktree"] == "wt-direct"  # the task's OWN worktree, not a fresh one
     assert result["session"] == "fresh-session-4"
     assert q.get(t.id).status == Status.STARTED
+    # The freshly-minted reservation carries no retirement marker (nothing
+    # was ever rearm-retired here) -- this is a legitimate continuation of
+    # the task's own suspended worktree, so the head session resumes.
+    assert calls[0]["resume_head"] is True
 
 
 def test_suspended_task_with_active_reservation_refuses_to_steal_it(q, client, monkeypatch):
