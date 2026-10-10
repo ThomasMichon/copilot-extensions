@@ -54,6 +54,14 @@ def _print_human(result) -> None:
     )
 
 
+def _discover_trusted(root: Path, args: argparse.Namespace):
+    return discover_enabled_sources(
+        root, require_trust=True,
+        agent_worktrees_command=args.agent_worktrees_path,
+        installed_root=args.installed_root,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
@@ -95,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             sources = (
                 discover_enabled_sources(
-                    root, require_trust=False,
+                    root, require_trust=True,
                     agent_worktrees_command=args.agent_worktrees_path,
                 ) if args.from_settings else None
             )
@@ -125,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         return discover_enabled_sources(
             root,
             installed_root=installed_root,
-            require_trust=False,
+            require_trust=args.operation == "render-local-cache",
             agent_worktrees_command=args.agent_worktrees_path,
         )
 
@@ -160,7 +168,10 @@ def main(argv: list[str] | None = None) -> int:
     result = (
         sync_repository(root, sources or [])
         if args.operation == "sync"
-        else scan_repository(root, sources)
+        else scan_repository(
+            root, sources,
+            admission_sources=_discover_trusted(root, args) if sources is not None else None,
+        )
     )
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))

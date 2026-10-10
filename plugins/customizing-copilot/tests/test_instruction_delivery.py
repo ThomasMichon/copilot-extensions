@@ -760,7 +760,10 @@ def test_valid_stale_reviewed_guidance_remains_advisory_without_local_refresh(tm
     assert selection["selectedPath"] == delivery.fallback_destination(spec.destination)
 
 
-def test_literal_selector_resolver_argv_executes_without_preconfigured_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize("trusted", [False, True])
+def test_literal_selector_resolver_argv_executes_without_preconfigured_path(
+    tmp_path: Path, trusted: bool
+) -> None:
     repo, source, spec = fixture(tmp_path)
     payload = repo / "payloads/market/policy"
     shutil.copytree(source.payload_root, payload)
@@ -792,18 +795,67 @@ def test_literal_selector_resolver_argv_executes_without_preconfigured_path(tmp_
         argv = [argument.replace(key, value) for argument in argv]
     env = dict(os.environ)
     env["PATH"] = ""
+    home = tmp_path / "isolated-home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot/config.json").write_text(json.dumps({
+        "trustedFolders": [str(repo.resolve())] if trusted else [],
+    }))
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
     completed = subprocess.run(
         argv, cwd=repo, env=env, capture_output=True, text=True, timeout=20,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     selected = json.loads(completed.stdout)
-    assert selected["selectedPath"] == local.relative_to(repo).as_posix()
+    assert selected["selectedPath"] == (
+        local.relative_to(repo).as_posix() if trusted
+        else delivery.fallback_destination(spec.destination)
+    )
     assert selected["identity"] == delivery.identity(projections.render_projection(
         spec, include_prefer_local=False
     ).marker)
     assert selected["receiptCapable"]
     assert selected["modelAdmission"] == "unknown"
+
+
+def test_untrusted_same_named_marketplace_forgery_cannot_supply_missing_floor(tmp_path: Path) -> None:
+    repo, source, spec = fixture(tmp_path)
+    local = repo / projections.local_sibling_destination(spec.destination)
+    local.parent.mkdir(parents=True)
+    local.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
+    payload = repo / "payloads/market/policy"
+    shutil.copytree(source.payload_root, payload)
+    manifest = payload.parent / ".claude-plugin"
+    manifest.mkdir()
+    (manifest / "marketplace.json").write_text(json.dumps({
+        "name": "market", "plugins": [{"name": "policy", "source": "policy"}],
+    }))
+    settings = repo / ".github/copilot/settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"policy@market": True},
+        "extraKnownMarketplaces": {"market": {"source": {
+            "source": "directory", "path": "payloads/market",
+        }}},
+    }))
+    home = tmp_path / "isolated-home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot/config.json").write_text('{"trustedFolders":[]}')
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), PATH="")
+    for operation in ("resolve-source", "scan"):
+        args = [sys.executable, str(SCRIPTS / "manage-instruction-projections.py"), operation, str(repo)]
+        if operation == "resolve-source":
+            args.append(spec.destination)
+        args.extend(["--from-settings", "--json"])
+        result = subprocess.run(
+            args, env=env, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == 1
+        parsed = json.loads(result.stdout)
+        assert parsed.get("blocked") or parsed.get("blocking")
+        assert "Traceback" not in result.stderr
 
 
 @pytest.mark.parametrize("boundary", [delivery.RECEIPT_PREFIX, delivery.MARKER_PREFIX])

@@ -129,6 +129,12 @@ content, or reports a visible blocker without assuming authorization.
 --from-settings --json` performs read-only exact selection. Both paired and
 unpaired locals must match a canonical render of the currently enabled payload;
 self-consistent cache markers/hashes/receipts cannot authenticate provenance.
+Canonical authentication and local-source admission honor the existing exact
+persisted repository-folder trust boundary. Untrusted checkout settings cannot
+introduce a same-named directory marketplace as authenticated authority.
+Reviewed offline lock/artifact validation remains available without source
+freshness or folder trust. Explicit committed-source maintenance sync is a
+separate reviewable consent-owned write path, not authentication evidence.
 Without enabled canonical proof, paired resolution uses the reviewed fallback.
 Newer `pluginVersion` wins; equal
 version/equal `templateSha256` favors local; equal version/different hash favors

@@ -1902,6 +1902,7 @@ def _desired_entry_matches(
 def scan_repository(
     repo_root: Path,
     sources: Iterable[object] | None = None,
+    *, admission_sources: Iterable[object] | None = None,
 ) -> Result:
     """Validate checked-in projections offline and optionally compare sources."""
     result = Result(operation="scan")
@@ -1936,6 +1937,12 @@ def scan_repository(
             root, sources, result, locked_plugins=locked_plugins
         )
         desired = {spec.destination: spec for spec in specs}
+        admission = desired
+        if admission_sources is not None:
+            trusted_result = Result(operation="trusted-admission")
+            trusted_specs, _ = _load_specs(root, admission_sources, trusted_result)
+            result.findings.extend(trusted_result.findings)
+            admission = {spec.destination: spec for spec in trusted_specs}
         _scan_legacy_regions(root, specs, result)
         for destination, spec in sorted(desired.items()):
             try:
@@ -1964,7 +1971,10 @@ def scan_repository(
                         message,
                     )
                 else:
-                    admitted, reason = delivery_io.new_source_admission(root, spec, _delivery_io())
+                    trusted_spec = admission.get(destination)
+                    admitted, reason = (False, "missing trusted canonical guidance delivery")
+                    if trusted_spec is not None:
+                        admitted, reason = delivery_io.new_source_admission(root, trusted_spec, _delivery_io())
                     result.add(
                         WARNING if admitted else BLOCKING,
                         "projection-source-update" if admitted else "projection-missing",
