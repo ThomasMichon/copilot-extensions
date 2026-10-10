@@ -33,11 +33,15 @@ Solo effort, single participant, no multi-agent branch topology.
 ## Guiding Intent
 
 A managed supervised-lane child process (e.g. a `supervise --supervisor-id
-<id>` instance) must be exactly one live process per id at all times, must
-leave a diagnosable trace when it stops (crash or clean exit alike), and
-must never be silently duplicated across a daemon restart. Today none of
-that holds: duplication is possible, nothing protects against it, and
-nothing logs it.
+<id>` instance) must be **at most one** live process per id at all times
+(normal startup, a crash, and the existing restart backoff all create
+legitimate periods with zero children — "exactly one" is an impossible
+availability invariant to hold continuously), must leave a diagnosable
+trace when it stops (crash or clean exit alike), and must never be
+silently duplicated across a daemon restart. A missing desired child must
+still be detected and reconciled (relaunched) separately from the
+duplicate-prevention guarantee. Today duplication is possible, nothing
+protects against it, and nothing logs it.
 
 ## Context
 
@@ -74,8 +78,12 @@ not inferred:
   left behind by the dead parent.
 - The observed stall **did** eventually clear on its own (one contender won
   out / orphans settled) — this is a transient, silent stall, not a
-  permanent deadlock, but it recurs on every daemon restart and is
-  undiagnosable without catching a live PID by luck.
+  permanent deadlock. It is not universal across every daemon restart: a
+  clean shutdown (`SupervisorDaemon.shutdown()`) stops every tracked unit
+  first, so an orderly restart leaves nothing behind. The risk is scoped
+  to restarts that don't go through that clean path — a crash, or any
+  incomplete teardown — which Phase 1 must determine the actual trigger(s)
+  for, and it is undiagnosable without catching a live PID by luck.
 
 Source pointers for implementation: `supervisor_daemon.py`
 (`_maybe_self_update`, `shutdown`, `_launch_managed`, `reconcile_once`),
@@ -124,13 +132,25 @@ stands as originally asked.
       moving to Phase 4's logging design, so that design is grounded in an
       actual observed failure mode rather than a generic shape.
 
-### Phase 2 — per-managed-child single-instance lock
+### Phase 2 — per-managed-child single-instance lock, and owner-liveness self-retirement
 - [ ] Give each managed child (keyed by its registration/supervisor id) a
       `SingleInstance`-style lock analogous to the daemon's own, at a path
       that survives the *daemon's* restart (not merely in-memory
       `self._units` tracking).
 - [ ] A restarting daemon must probe for a live holder before launching a
       fresh child for the same id, not assume a clean slate.
+- [ ] **Owner-liveness tether (the other required pillar, per
+      `docs/patterns/process-slot-ownership.md`'s two-pillar discipline —
+      the single-owner slot above is only pillar 2).** A detached
+      supervised-lane child must itself track the liveness of its logical
+      owner (the daemon that spawned it, identified by its durable
+      registration rather than the parent PID, which a daemon restart
+      changes) and drain and exit on its own once that owner is
+      *confirmed* gone — an ambiguous read (can't tell, or momentarily
+      dark) must never be treated as gone. Without this, Phase 3's
+      external reaper is the *only* backstop, and an orphan survives
+      indefinitely whenever no replacement daemon happens to start and run
+      that reconciliation.
 
 ### Phase 3 — startup-time orphan detection and reconciliation
 - [ ] On daemon start/restart, actively look for still-alive processes
@@ -149,7 +169,17 @@ stands as originally asked.
          `zdd.diagnostics.process_start_time`/`terminate_pid_if_identity`
          (already an `agent-dispatch` dependency, per
          `plugins/agent-dispatch/pyproject.toml`); refuse on any mismatch
-         or uncertainty rather than guessing.
+         or uncertainty rather than guessing. **Not yet cross-platform as
+         written:** `zdd.diagnostics`'s POSIX path reads `/proc/<pid>/stat`
+         for the identity token, which doesn't exist on macOS, so
+         `process_start_time` always returns `None` there today. Require
+         and validate explicit behavior on Windows, Linux, *and* macOS —
+         either a macOS identity implementation lands in `zdd` first, or
+         this plan documents the safe fallback for macOS explicitly: an
+         unconditional "uncertain" token on macOS already degrades to the
+         existing fail-safe default (refuse to terminate, leave the
+         candidate alone), so it's non-destructive by construction, but
+         that must be a stated, validated exemption, not an implicit gap.
       2. **Owner validation** — a separate, higher-level check that the
          candidate is genuinely the orphan being reconciled, not merely an
          unrelated live process that happens to match superficially, via
@@ -203,7 +233,12 @@ stands as originally asked.
 - [ ] **Phase 2:** automated test simulating two near-simultaneous launch
       attempts for the same managed-child id; exactly one acquires the
       lock, the other exits cleanly (or defers) rather than running
-      duplicated.
+      duplicated. Separately, an owner-liveness test: a detached child
+      whose logical owner (the daemon's durable registration) is confirmed
+      gone drains and self-retires on its own, without waiting on Phase
+      3's external reaper; an *ambiguous* owner-liveness read (can't tell,
+      or momentarily dark) must not be treated as gone and must not
+      trigger self-retirement.
 - [ ] **Phase 3:** the restart/reconciliation test is unconditional —
       simulate a daemon restart with a still-alive orphaned child from a
       previous generation; confirm the new daemon detects and reconciles
@@ -228,7 +263,13 @@ stands as originally asked.
       since the OS already released the original holder's lease when that
       process exited and the lease is acquirable again — the daemon should
       simply retry reconciliation, not surface a persistent block for a
-      race that already resolved itself.
+      race that already resolved itself; (f) a cross-platform identity
+      case — confirm `zdd.diagnostics.process_start_time` behavior on
+      Windows and Linux (real identity token, termination proceeds when it
+      matches), and confirm the documented macOS exemption: an
+      unconditional "uncertain" token there must route through the same
+      fail-safe refusal path as any other ambiguous case, never attempt
+      termination.
 - [ ] **Phase 4:** automated test confirming a supervised-lane child's
       health file reflects a real crash (non-zero exit, error captured) the
       same way an emitter's already does — using the actual crash shape
@@ -340,4 +381,36 @@ _Pending — begin with Phase 1 (trace the actual spawn entry points)._
   "downstream harness's agent-dispatch fleet" context.
 - The two remaining Low findings from round 1 were checked again; no new
   information since round 3's note, left as-is.
+
+### 2026-10-10 — Plan PR #5309 review round 6 (2 previously-missed Medium + 2 previously-missed Low)
+- **Medium:** the plan only had pillar 2 ("single-owner slot") of
+  `docs/patterns/process-slot-ownership.md`'s required two-pillar
+  discipline — Phase 3's external startup reaper. Pillar 1 ("owner-liveness
+  tether") was entirely missing: a detached supervised-lane child must
+  itself track its logical owner's liveness and self-retire once confirmed
+  gone, rather than depending solely on an external reaper that only runs
+  if/when a replacement daemon happens to start. Added this as an explicit
+  Phase 2 requirement (owner identified by durable registration, not
+  parent PID) plus a matching Validation Plan case, including the
+  ambiguous-read-must-not-self-retire fail-safe.
+- **Medium:** the mandated `zdd.diagnostics.process_start_time` identity
+  primitive is not actually cross-platform — its POSIX path reads
+  `/proc/<pid>/stat`, which doesn't exist on macOS, so it silently returns
+  no identity token there. Required explicit Windows/Linux/macOS behavior
+  in Phase 3's two-layer termination section: documented that the macOS
+  gap already degrades to the existing fail-safe refusal (non-destructive
+  by construction, since an uncertain token routes through the same
+  ambiguous-case path), but made this a stated, validated exemption rather
+  than an implicit one, with a matching Validation Plan case (f).
+- **Low:** the Guiding Intent's "exactly one live process... at all times"
+  is an impossible availability invariant — normal startup, a crash, and
+  the existing restart backoff all create legitimate zero-child windows.
+  Restated as "at most one," with missing-child detection/reconciliation
+  called out as a separately-required guarantee.
+- **Low:** the Context's "recurs on every daemon restart" claim overstated
+  the evidence — a clean `SupervisorDaemon.shutdown()` stops every tracked
+  unit first, so an orderly restart leaves nothing behind. Scoped the claim
+  to restarts that don't go through that clean path (crash, incomplete
+  teardown), consistent with Phase 1's own job of determining the actual
+  trigger(s).
 
