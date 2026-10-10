@@ -131,6 +131,14 @@ receiver-side atomic admission exists yet for the `ssh`/`ingest` transports
 either. The default `None` is unchanged legacy behavior for every ordinary
 sync caller.
 
+The explicit CLI exposes that same contract as `session-sync push --source
+<directory> --machine <canonical-key> --source-identity-file <metadata-file>`.
+The file is required schema-v1 source metadata, loaded by the shared bounded
+reader. Invalid metadata or a noncanonical key fails before target construction;
+unsupported identified transports fail without copying. Omitting the flag keeps
+legacy explicit pushes unchanged. The flag does not enable scheduled namespace
+publication or confer authorization to publish an existing archive.
+
 Ownership markers use the same schema-v1 `.archive-source.json` contract
 and bounded metadata reader as source discovery, not a separate four-field
 format. Matching claims compare the complete canonical identity and preserve
