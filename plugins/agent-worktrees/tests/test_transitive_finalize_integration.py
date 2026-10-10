@@ -30,9 +30,12 @@ Scenario walked by the single- and multi-hop tests below:
 from __future__ import annotations
 
 import subprocess
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agent_worktrees import config as cfg
 from agent_worktrees import finalize
@@ -175,6 +178,94 @@ class TestSingleHopAToB:
         assert finalize.validate_and_finalize("wt-A", config) is True
 
 
+@pytest.mark.parametrize("transaction", [1, 2])
+@pytest.mark.parametrize("field", ["machine", "platform", "owner_ref"])
+def test_finalize_rechecks_each_fresh_locked_identity_before_mutation_or_cleanup(
+    transaction, field, _env, monkeypatch, capsys,
+):
+    from machine_transport.registry import MachineEntry
+
+    tmp_path, tracking_d, config = _env
+    anchor = Path(config.default_repo.anchor)
+    child_id = "wt-raced"
+    worktree_path = tmp_path / child_id
+    _git(
+        "worktree", "add", "-b", f"worktree/{child_id}", str(worktree_path), "origin/base",
+        cwd=anchor,
+    )
+    record = tracking.create_new_record(
+        child_id, f"worktree/{child_id}", str(worktree_path), PROJECT,
+        config.machine, config.platform, tracking_d,
+    )
+    entries = {
+        key: MachineEntry(key=key, display_name=key, execution_platform="linux")
+        for key in (config.machine, "other-space")
+    }
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(tracking, "seal_worktree_identity", lambda record: None)
+    monkeypatch.setattr(
+        finalize, "_settle_current_session_claim",
+        lambda path, record, session: (record, None),
+    )
+    real_lock = tracking._RecordLock
+    lock_count, depth = 0, 0
+    raced_bytes = []
+    writes = []
+    real_save = tracking.save_record
+
+    @contextmanager
+    def raced_lock(path, *, require_sidecar=True, **kwargs):
+        nonlocal lock_count, depth
+        assert require_sidecar
+        with real_lock(path, require_sidecar=True, **kwargs):
+            if depth == 0 and path == record.yaml_path:
+                lock_count += 1
+                if lock_count == transaction:
+                    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+                    raw[field] = {
+                        "machine": "other-space", "platform": "wsl",
+                        "owner_ref": f"other-space/{PROJECT}/wt-parent",
+                    }[field]
+                    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+                    raced_bytes.append(path.read_bytes())
+            depth += 1
+            try:
+                yield
+            finally:
+                depth -= 1
+
+    def save(latest, *args, **kwargs):
+        assert not raced_bytes, "finalize wrote the newly foreign record"
+        writes.append(latest.status)
+        return real_save(latest, *args, **kwargs)
+
+    monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
+    monkeypatch.setattr(tracking, "save_record", save)
+    for module, name in (
+        (finalize.sessions, "kill_tmux_session"),
+        (finalize.procs, "terminate_processes_under"),
+        (finalize.git_ops, "remove_worktree"), (finalize.git_ops, "delete_branch"),
+        (finalize, "_reconcile_merged_pointers"),
+    ):
+        monkeypatch.setattr(
+            module, name,
+            lambda *args, **kwargs: pytest.fail("foreign finalize reached cleanup"),
+        )
+    assert finalize.validate_and_finalize(child_id, config) is False
+    assert lock_count == transaction
+    assert writes == ([] if transaction == 1 else ["finalizing"])
+    assert record.yaml_path.read_bytes() == raced_bytes[-1]
+    latest = tracking.load_record(record.yaml_path)
+    assert latest.status == ("active" if transaction == 1 else "finalizing")
+    assert worktree_path.exists()
+    assert _git("branch", "--list", record.branch, cwd=anchor)
+    assert depth == 0
+    report = capsys.readouterr().out
+    assert "Cannot finalize" in report and "record unchanged" in report
+    assert "Restored" not in report and "finalized." not in report
+
+
 @pytest.mark.parametrize("race_after_removal", [False, True])
 def test_finalize_preserves_committed_child_when_fresh_parent_authority_refuses(
     race_after_removal, _env, monkeypatch, capsys,
@@ -217,6 +308,17 @@ def test_finalize_preserves_committed_child_when_fresh_parent_authority_refuses(
     removed = []
 
     def remove_then_race(anchor, path):
+        peer_lock = []
+
+        def peer():
+            with tracking._RecordLock(child.yaml_path, blocking=False) as lock:
+                peer_lock.append(lock.acquired)
+
+        thread = threading.Thread(target=peer)
+        thread.start()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+        assert peer_lock == [False]
         result = remove_worktree(anchor, path)
         removed.append(result)
         if race_after_removal:
