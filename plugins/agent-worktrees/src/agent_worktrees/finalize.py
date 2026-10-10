@@ -835,7 +835,7 @@ def _push_changes_pr(
         return True
 
     budget = publication_deadline.lifecycle_budget(repo.pr)
-    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record)
+    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record, pushed_pr, timeout=publication_deadline.lock_wait(repo.pr.push_timeout_seconds))
     try:
         lock.acquire()
     except (TimeoutError, ValueError) as exc:
@@ -977,7 +977,7 @@ def _push_changes_pr_refspec(
         return True
 
     budget = publication_deadline.lifecycle_budget(repo.pr)
-    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record)
+    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record, pushed_pr, timeout=publication_deadline.lock_wait(repo.pr.push_timeout_seconds))
     try:
         lock.acquire()
     except (TimeoutError, ValueError) as exc:

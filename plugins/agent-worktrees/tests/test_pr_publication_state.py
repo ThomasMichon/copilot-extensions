@@ -194,6 +194,7 @@ def test_publication_contention_precedes_external_mutation(pr_repo, monkeypatch,
             time.sleep(0.05)
         assert ready.exists(), holder.poll()
         monkeypatch.setattr(pr_publish, "PUBLISH_LOCK_ACQUIRE_TIMEOUT_S", 0.1)
+        monkeypatch.setattr(pr_authority.publication_deadline, "lock_wait", lambda *a: 0.1)
         monkeypatch.setattr(git_ops, "push", lambda *a, **k: pytest.fail("push before authority admission"))
         monkeypatch.setattr(providers, "get_provider", lambda *a: pytest.fail("provider call before authority admission"))
         if operation == "ordinary":

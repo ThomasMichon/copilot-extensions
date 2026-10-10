@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import contextlib
 
 import pytest
 
@@ -78,6 +79,113 @@ def test_pr_authority_refuses_uncertain_state(authority_state, defect):
     target.write_text(malformed[defect])
     with pr_authority.guard(), pytest.raises(ValueError):
         pr_authority.assert_exclusive(config, record, record.pr)
+
+
+def test_publication_decorator_uses_selected_configuration(authority_state, monkeypatch):
+    from agent_worktrees import publication_deadline
+
+    config, _record, _root, _registry, _ledgers = authority_state
+    config = replace(config, repos={config.repo_name: cfg.RepoConfig(
+        anchor="unused", worktree_root="unused", pr=cfg.PRConfig(push_timeout_seconds=600),
+    )})
+    calls = []
+
+    @contextlib.contextmanager
+    def guard(**kwargs):
+        calls.append(kwargs)
+        yield
+
+    monkeypatch.setattr(pr_authority, "guard", guard)
+
+    @pr_authority.publication
+    def publish(value, *, config):
+        return value
+
+    assert publish("published", config=config) == "published"
+    assert calls == [{"timeout": publication_deadline.lock_wait(600)}]
+
+
+def test_publication_lock_revalidates_exact_sibling_before_mutation(authority_state, monkeypatch):
+    config, record, _root, _registry, _ledgers = authority_state
+    sibling = replace(record.pr, pr_id="sibling", branch="pr/sibling", opened_at="2000")
+    record.pr.opened_at = "2100"
+    record.prs.append(sibling)
+    tracking.save_record(record)
+    selected = replace(sibling)
+    sibling.head_sha = "b" * 40
+    tracking.save_record(record)
+    released = []
+
+    class Finalization:
+        def acquire(self):
+            pass
+        def release(self):
+            released.append(True)
+
+    lock = pr_authority.PublicationLock(Finalization(), record, selected, timeout=1)
+    with pytest.raises(ValueError, match="authority changed"):
+        lock.acquire()
+    assert released == [True]
+    assert lock.authority is None
+
+
+def test_legacy_provider_backfill_persists_verified_publication(authority_state):
+    config, record, _root, _registry, _ledgers = authority_state
+    config = replace(config, repos={config.repo_name: cfg.RepoConfig(
+        anchor="unused", worktree_root="unused", pr=cfg.PRConfig(provider="github"),
+    )})
+    expected = replace(record.pr)
+    record.pr.provider = "github"
+    record.pr.head_sha = "b" * 40
+    pr_publish.persist_publication(config, record, record.pr, expected=expected)
+    fresh = tracking.load_record(record.yaml_path)
+    assert fresh.pr.head_sha == "b" * 40
+    assert fresh.pr.provider == "github"
+
+
+def test_registration_reads_registry_under_authority_guard(authority_state, monkeypatch):
+    _config, _record, _root, _registry, _ledgers = authority_state
+    original = installer.read_projects_registry
+    reads = []
+
+    def guarded_read(*args, **kwargs):
+        assert pr_authority._held.paths
+        reads.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(installer, "read_projects_registry", guarded_read)
+    installer.register_project("new-project", "unused", "main")
+    assert reads
+    assert "new-project" in original()["projects"]
+
+
+def test_concurrent_project_registration_preserves_both_ledgers(authority_state):
+    _config, _record, root, registry, _ledgers = authority_state
+    script = """
+import sys,time
+from pathlib import Path
+from agent_worktrees import config as cfg,installer
+cfg.install_dir=lambda:Path(sys.argv[1])
+installer.projects_yaml_path=lambda:Path(sys.argv[2])
+read=installer.read_projects_registry
+def delayed_read(*a,**k):
+    result=read(*a,**k)
+    time.sleep(0.2)
+    return result
+installer.read_projects_registry=delayed_read
+installer.register_project(sys.argv[3], 'unused', 'main')
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(pr_publish.__file__).parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
+    children = [subprocess.Popen(
+        [sys.executable, "-c", script, str(root), str(registry), name],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    ) for name in ("first-project", "second-project")]
+    for child in children:
+        stdout, stderr = child.communicate(timeout=20)
+        assert child.returncode == 0, stdout + stderr
+    assert {"first-project", "second-project"} <= set(installer.read_projects_registry()["projects"])
 
 
 @pytest.mark.parametrize("operation", ["stat", "iterdir"])

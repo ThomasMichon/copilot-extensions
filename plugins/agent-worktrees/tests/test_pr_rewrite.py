@@ -51,12 +51,14 @@ def test_existing_active_pr_can_refresh_ownership_and_rewrite(pr_repo, monkeypat
     record = record_for(wid)
     old = record.pr.head_sha
     record.pr.state = "active"
+    record.pr.provider = ""
     record.pr.rewrite_owner = ""
     tracking.save_record(record)
     assert record_for(wid).has_live_pr()
     result = pr_ops.create_pr(wid, config, title="Legacy publication")
     assert result["success"] and result["rerun"]
     record = record_for(wid)
+    assert record.pr.provider == config.default_repo.pr.provider
     record.pr.number = 42
     tracking.save_record(record)
     monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: PullResult(head_sha=old))

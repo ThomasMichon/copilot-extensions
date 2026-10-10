@@ -29,7 +29,7 @@ from pathlib import Path
 from . import config as cfg
 from . import launch_wrapper_assets as lwa
 from . import project_state, registry_paths
-from . import output
+from . import output, pr_authority
 
 
 def install_dir() -> Path:
@@ -1027,6 +1027,7 @@ def _discover_project_binstubs() -> dict[str, list[Path]]:
     return found
 
 
+@pr_authority.registry_transaction
 def _prune_reserved_projects_unlocked() -> list[str]:
     """Remove any reserved-name entries from projects.yaml (self-heal).
 
@@ -1632,6 +1633,7 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
     write_registry(path, "\n".join(lines) + "\n")
 
 
+@pr_authority.registry_transaction
 def register_project(
     project: str,
     repo_dir: Path | str | None = None,

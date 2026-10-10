@@ -939,6 +939,14 @@ ownership refresh, as well as explicit rewrite admission; `completed` and
 ledger first. Explicit rewrites also retain the configured publication deadline
 and its matching lock budgets when integrating with newer deadline support.
 
+Authority admission revalidates the exact selected PR (including a checked-out
+legacy sibling), not merely the active entry. Every admitted publication lock
+uses the configured deadline-derived wait. Project registration and removal
+hold installation authority across registry read/mutate/write, so concurrent
+registration cannot hide another project's ledger. A legacy empty provider may
+be backfilled only to the configured provider during the same verified
+publication transaction; mismatches remain refused.
+
 For a legacy open PR without publication ownership, re-run `create-pr`
 **before rebasing**, while the owning branch still preserves the recorded
 published tip. This incremental publication records ownership without

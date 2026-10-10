@@ -118,13 +118,15 @@ def cmd_unregister(args: argparse.Namespace) -> int:
     except inst.BinstubOwnershipError as exc:
         output.warn(str(exc))
 
-    registry = inst.read_projects_registry()
-    if project in registry.get("projects", {}):
-        del registry["projects"][project]
-        inst.write_projects_registry(registry)
-        output.changed(f"Removed '{project}' from projects.yaml")
-    else:
-        output.skipped(f"'{project}' was not present in projects.yaml")
+    from . import pr_authority
+    with pr_authority.guard():
+        registry = inst.read_projects_registry()
+        if project in registry.get("projects", {}):
+            del registry["projects"][project]
+            inst.write_projects_registry(registry)
+            output.changed(f"Removed '{project}' from projects.yaml")
+        else:
+            output.skipped(f"'{project}' was not present in projects.yaml")
 
     from . import repos as _repos
 

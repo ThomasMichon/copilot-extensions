@@ -558,15 +558,18 @@ def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tra
 
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     fields = ("state", "base_sha", "head_sha", "patch_id", "remote", "head_repo",
-              "head_identity", "head_owner", "head_observed_at", "head_observed_api_base")
+              "head_identity", "head_owner", "head_observed_at", "head_observed_api_base", "provider")
     with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
         current = _publication_pr(fresh, pr)
         if (current is None or tracking._pr_is_terminal(current)
                 or (not pr_publication_state.matches(current, expected) if expected is not None
                     else current.pr_revision != pr.pr_revision)
-                or (current.branch, current.repo, current.provider, current.number)
-                != (pr.branch, pr.repo, pr.provider, pr.number)):
+                or (current.branch, current.repo, current.number) != (pr.branch, pr.repo, pr.number)
+                or (current.provider != pr.provider and not (
+                    not current.provider and pr.provider == config.default_repo.pr.provider
+                    and expected is not None and not expected.provider
+                ))):
             raise ValueError("PR head was pushed, but tracking authority changed; inspect and reconcile its lease.")
         if any(getattr(current, field) != getattr(pr, field) for field in fields):
             for field in fields:
