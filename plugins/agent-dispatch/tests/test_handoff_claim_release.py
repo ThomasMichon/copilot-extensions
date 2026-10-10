@@ -111,7 +111,7 @@ def test_release_if_handoff_passes_cancel_pending_through(monkeypatch):
     done = threading.Event()
 
     def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
-        calls.append((task_id, cancel_pending))
+        calls.append((task_id, worktree, cancel_pending))
         done.set()
 
     monkeypatch.setattr(handoff_claim_release, "_release_task_claim", fake_release)
@@ -119,7 +119,26 @@ def test_release_if_handoff_passes_cancel_pending_through(monkeypatch):
         {"id": "T1", "labels": ["handoff"], "target_worktree": "wt-9"}, cancel_pending=True,
     )
     assert _wait_for(done.is_set)
-    assert calls == [("T1", True)]
+    assert calls == [("T1", "wt-9", True)]
+
+
+def test_a_detached_baton_still_names_its_worktree_through_its_affinity(monkeypatch):
+    """Detaching clears the hard target but keeps the worktree affinity: the
+    claim and the ledger entry are still that worktree's."""
+    calls = []
+    done = threading.Event()
+
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
+        calls.append((task_id, worktree))
+        done.set()
+
+    monkeypatch.setattr(handoff_claim_release, "_release_task_claim", fake_release)
+    handoff_claim_release.release_if_handoff(
+        {"id": "T1", "labels": ["handoff"], "target_worktree": None, "affinity": {"worktree": "wt-3"}},
+        cancel_pending=True,
+    )
+    assert _wait_for(done.is_set)
+    assert calls == [("T1", "wt-3")]
 
 
 # -- release_if_handoff: the fire-and-forget entry point ---------------------

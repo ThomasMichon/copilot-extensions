@@ -49,14 +49,19 @@ def source_of(item_id: str) -> str:
     return item_id.split(":", 1)[0]
 
 
+def _canonical(value: Any) -> bool:
+    try:
+        return ac.canonical_time(value) == value
+    except ac.ContractError:
+        return False
+
+
 def _valid(entry: Any) -> bool:
-    if not isinstance(entry, dict) or entry.get("mode") not in MODES or not isinstance(entry.get("at"), str):
+    """Only an entry this store wrote is honored: a damaged one hides nothing."""
+    if not isinstance(entry, dict) or entry.get("mode") not in MODES or not _canonical(entry.get("at")):
         return False
     if entry["mode"] == "until":
-        try:
-            return ac.canonical_time(entry.get("until")) == entry["until"]
-        except ac.ContractError:
-            return False
+        return _canonical(entry.get("until"))
     return entry["mode"] != "changed" or isinstance(entry.get("fingerprint"), dict)
 
 

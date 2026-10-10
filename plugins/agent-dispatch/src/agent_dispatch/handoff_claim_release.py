@@ -99,6 +99,16 @@ def is_handoff_task(task: dict[str, Any] | None) -> bool:
     return "handoff" in labels or task.get("source") == "context-handoff"
 
 
+def handoff_worktree(task: dict[str, Any] | None) -> str | None:
+    """The worktree a handoff baton belongs to: its ``target_worktree``, else
+    its ``worktree`` affinity (a detached baton keeps only the affinity)."""
+    if not isinstance(task, dict):
+        return None
+    affinity = task.get("affinity") if isinstance(task.get("affinity"), dict) else {}
+    worktree = task.get("target_worktree") or affinity.get("worktree")
+    return worktree if isinstance(worktree, str) and worktree else None
+
+
 def release_if_handoff(
     task: dict[str, Any] | None, task_id: str | None = None, *, timeout: float = 15.0,
     cancel_pending: bool = False,
@@ -127,7 +137,9 @@ def release_if_handoff(
     resolved_id = task_id or (task or {}).get("id")
     if not resolved_id:
         return
-    worktree = (task or {}).get("target_worktree")
+    # A detached baton keeps its worktree only as an affinity: the claim and
+    # the ledger entry are still that worktree's.
+    worktree = handoff_worktree(task)
     thread = threading.Thread(
         target=_release_task_claim,
         args=(resolved_id,),

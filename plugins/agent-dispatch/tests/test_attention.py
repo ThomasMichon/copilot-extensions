@@ -941,34 +941,60 @@ def test_the_worktree_comes_from_the_affinity_when_no_target_is_recorded():
     assert srcs._task_item(task, T1, now=NOW)["actions"][0]["argv"][3] == "wt-3"
 
 
-@pytest.mark.parametrize("answer,kept", [
-    (True, True),    # the worktree still waits on it
-    (False, False),  # picked up, replaced, cancelled, or only saved: not the operator's
-    (None, True),    # the ledger couldn't be read: taken at its word
+@pytest.mark.parametrize("tokens,kept", [
+    ({"h1"}, True),     # the worktree still waits on it
+    ({"other"}, False),  # picked up, replaced, cancelled, or only saved: not the operator's
+    (set(), False),
+    (None, True),       # the ledger couldn't be read: taken at its word
 ])
-def test_a_stalled_handoff_is_an_item_only_while_its_worktree_lists_it(answer, kept):
+def test_a_stalled_handoff_is_an_item_only_while_its_worktree_lists_it(tokens, kept):
     asked = []
 
-    def check(task_id, worktree):
-        asked.append((task_id, worktree))
-        return answer
+    def lookup(worktree):
+        asked.append(worktree)
+        return tokens
 
-    result = srcs.read_dispatch(lambda: _Client([_baton()]), T1, pending_check=check)
-    assert asked == [("h1", "wt-9")]
+    result = srcs.read_dispatch(lambda: _Client([_baton()]), T1, pending_lookup=lookup)
+    assert asked == ["wt-9"]
     assert bool(result["items"]) is kept
 
 
-def test_only_stalled_handoffs_are_checked_and_a_failing_check_keeps_the_item():
+def test_only_stalled_handoffs_are_checked_and_a_failing_lookup_keeps_the_item():
     tasks = [_baton("h1"), _baton("h2", worktree="wt-2"),
              {"id": "r1", "title": "Review", "status": "submitted"}, _baton("young", age=60)]
 
-    def check(task_id, worktree):
-        if task_id == "h2":
+    def lookup(worktree):
+        if worktree == "wt-2":
             raise RuntimeError("boom")
-        return False
+        return set()
 
-    result = srcs.read_dispatch(lambda: _Client(tasks), T1, pending_check=check)
+    result = srcs.read_dispatch(lambda: _Client(tasks), T1, pending_lookup=lookup)
     assert sorted(i["entity_ref"] for i in result["items"]) == ["h2", "r1"]
+
+
+def test_each_worktree_ledger_is_read_once_and_only_a_few_at_a_time(monkeypatch):
+    import threading as _t
+
+    monkeypatch.setattr(srcs, "HANDOFF_PENDING_CONCURRENCY", 2)
+    tasks = [_baton(f"a{n}", worktree="wt-a") for n in range(5)] + \
+        [_baton(f"w{n}", worktree=f"wt-{n}") for n in range(6)]
+    asked, live, peak, lock = [], [0], [0], _t.Lock()
+
+    def lookup(worktree):
+        with lock:
+            asked.append(worktree)
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        import time as _time
+        _time.sleep(0.02)
+        with lock:
+            live[0] -= 1
+        return {"a0", "w0"}
+
+    result = srcs.read_dispatch(lambda: _Client(tasks), T1, pending_lookup=lookup)
+    assert sorted(asked) == sorted(["wt-a", *(f"wt-{n}" for n in range(6))])  # one read per worktree
+    assert peak[0] <= 2
+    assert sorted(i["entity_ref"] for i in result["items"]) == ["a0", "w0"]
 
 
 def test_a_slow_ledger_lookup_keeps_the_item_within_the_reads_budget():
@@ -976,22 +1002,25 @@ def test_a_slow_ledger_lookup_keeps_the_item_within_the_reads_budget():
 
     release = _t.Event()
 
-    def check(task_id, worktree):
+    def lookup(worktree):
         release.wait(5)
-        return False
+        return set()
 
     try:
-        result = srcs.read_dispatch(lambda: _Client([_baton()]), T1, pending_check=check, backlog_budget=0.2)
+        result = srcs.read_dispatch(lambda: _Client([_baton()]), T1, pending_lookup=lookup, backlog_budget=0.2)
         assert [i["entity_ref"] for i in result["items"]] == ["h1"]
     finally:
         release.set()
 
 
 @pytest.mark.parametrize("stdout,returncode,expected", [
-    (json.dumps({"tracked": True, "pending_handoffs": [{"token": "h1"}]}), 0, True),
-    (json.dumps({"tracked": True, "pending_handoffs": [{"token": "other"}]}), 0, False),
-    (json.dumps({"tracked": True, "pending_handoffs": []}), 0, False),
+    (json.dumps({"tracked": True, "pending_handoffs": [{"token": "h1"}, {"token": "h2"}]}), 0, {"h1", "h2"}),
+    (json.dumps({"tracked": True, "pending_handoffs": []}), 0, set()),
     (json.dumps({"tracked": False, "pending_handoffs": []}), 0, None),  # an unknown worktree proves nothing
+    # one malformed entry makes the whole ledger unknown, never "not pending"
+    (json.dumps({"tracked": True, "pending_handoffs": [{}]}), 0, None),
+    (json.dumps({"tracked": True, "pending_handoffs": [{"token": "h1"}, {"token": ""}]}), 0, None),
+    (json.dumps({"tracked": True, "pending_handoffs": ["h1"]}), 0, None),
     ("not json", 0, None),
     ("", 1, None),
 ])
@@ -1005,7 +1034,7 @@ def test_the_worktree_ledger_reply_is_read_strictly(monkeypatch, stdout, returnc
         return subprocess.CompletedProcess(args, returncode, stdout, "")
 
     monkeypatch.setattr(procutil, "run_agent_worktrees_capture", capture)
-    assert srcs.handoff_pending_in_worktree("h1", "wt-9") is expected
+    assert srcs.pending_handoff_tokens("wt-9") == expected
     assert calls == [["head-session", "--worktree", "wt-9", "--json"]]
 
 
@@ -1013,7 +1042,7 @@ def test_without_agent_worktrees_the_ledger_is_unknown(monkeypatch):
     from agent_dispatch import procutil
 
     monkeypatch.setattr(procutil, "run_agent_worktrees_capture", lambda *a, timeout: None)
-    assert srcs.handoff_pending_in_worktree("h1", "wt-9") is None
+    assert srcs.pending_handoff_tokens("wt-9") is None
 
 
 # -- dismissals -----------------------------------------------------------------------------
@@ -1095,6 +1124,19 @@ def test_a_malformed_dismissal_store_hides_nothing_and_says_so(tmp_path):
     (tmp_path / "d.json").write_text("{not json", encoding="utf-8")
     env = _read_with(tmp_path, _item(ref="a"))
     assert len(env["items"]) == 1 and env["dismissed"] == []
+    assert [e["name"] for e in env["config_errors"]] == [srcs.DISMISSALS_NAME]
+
+
+@pytest.mark.parametrize("entry", [
+    {"mode": "forever", "at": "not-a-time"},
+    {"mode": "forever"},
+    {"mode": "until", "at": T0, "until": "tomorrow"},
+    {"mode": "changed", "at": T0},
+])
+def test_a_damaged_dismissal_hides_nothing(tmp_path, entry):
+    (tmp_path / "d.json").write_text(json.dumps({"version": 1, "dismissed": {"s:task:a": entry}}), encoding="utf-8")
+    env = _read_with(tmp_path, _item(ref="a"))
+    assert [i["id"] for i in env["items"]] == ["s:task:a"]
     assert [e["name"] for e in env["config_errors"]] == [srcs.DISMISSALS_NAME]
 
 

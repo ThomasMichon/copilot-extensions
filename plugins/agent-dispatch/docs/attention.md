@@ -42,9 +42,11 @@ on a remote target (an SSH read each; see `bridge` below).
   handoff ledger (`agent-worktrees head-session --worktree <id> --json`), the
   authority for which handoff it waits on; a baton that ledger no longer lists
   was picked up, replaced by a later handoff or cancelled (or was only saved,
-  never handed over), so it is no item. A ledger that can't be read in the
-  read's backlog budget (no agent-worktrees, an untracked worktree, a failed
-  reply) keeps the item. A stalled baton's actions are `resume` (`agent-worktrees
+  never handed over), so it is no item. Each worktree's ledger is read once,
+  four at a time, alongside the lane reads; a ledger that can't be read for
+  certain in the read's backlog budget (no agent-worktrees, an untracked
+  worktree, a failed reply, any malformed entry) keeps its batons' items. A
+  stalled baton's actions are `resume` (`agent-worktrees
   embody --worktree-id <wt> --seed <seed>`, a successor in its worktree taking
   the handoff over through context-handoff's seed), when its worktree is known,
   then `abandon` (`agent-dispatch abandon <id> --permit --reason ...`), then

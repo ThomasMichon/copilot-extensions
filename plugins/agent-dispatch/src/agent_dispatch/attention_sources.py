@@ -23,7 +23,7 @@ import httpx
 
 from . import attention_contract as ac
 from .client import DispatchError
-from .handoff_claim_release import is_handoff_task
+from .handoff_claim_release import handoff_worktree, is_handoff_task
 
 BUILTIN_SOURCES = ("bridge", "dispatch", "pr")
 DEFAULT_TIMEOUT = 20.0
@@ -159,14 +159,6 @@ def _unpicked_handoff_age(task: dict[str, Any], now: float | None) -> float | No
     return age if age > after else None
 
 
-def handoff_worktree(task: dict[str, Any]) -> str | None:
-    """The worktree a handoff baton belongs to: its ``target_worktree``, else
-    its ``worktree`` affinity (both are set when context-handoff files it)."""
-    affinity = task.get("affinity") if isinstance(task.get("affinity"), dict) else {}
-    worktree = task.get("target_worktree") or affinity.get("worktree")
-    return worktree if isinstance(worktree, str) and worktree else None
-
-
 def handoff_seed(title: str, task_id: str) -> str:
     """The one-line handoff seed a successor's first turn takes (context-handoff's
     documented locator format): it loads the stored brief, never carries it."""
@@ -193,14 +185,16 @@ def _stalled_handoff_actions(task_id: str, title: str, worktree: str | None,
 
 #: Seconds one worktree's pending-handoff lookup may take.
 HANDOFF_PENDING_TIMEOUT = 8.0
+#: Worktree ledgers read at once (each is one agent-worktrees process).
+HANDOFF_PENDING_CONCURRENCY = 4
 
 
-def handoff_pending_in_worktree(task_id: str, worktree: str,
-                                timeout: float = HANDOFF_PENDING_TIMEOUT) -> bool | None:
-    """Whether ``worktree``'s own handoff ledger (agent-worktrees, the authority
-    for which handoff a worktree still waits on) lists this task as pending.
-    ``None`` when that can't be read (no agent-worktrees, an untracked
-    worktree, a failed or malformed reply): the task is then taken at its word."""
+def pending_handoff_tokens(worktree: str, timeout: float = HANDOFF_PENDING_TIMEOUT) -> set[str] | None:
+    """The handoff tokens ``worktree``'s own ledger (agent-worktrees, the
+    authority for which handoff a worktree still waits on) lists as pending.
+    ``None`` when that can't be read for certain (no agent-worktrees, an
+    untracked worktree, a failed reply, or any malformed entry): the batons
+    are then taken at their word."""
     from .procutil import run_agent_worktrees_capture
 
     done = run_agent_worktrees_capture("head-session", "--worktree", worktree, "--json", timeout=timeout)
@@ -213,37 +207,56 @@ def handoff_pending_in_worktree(task_id: str, worktree: str,
     pending = data.get("pending_handoffs") if isinstance(data, dict) and data.get("tracked") is True else None
     if not isinstance(pending, list):
         return None
-    return any(isinstance(p, dict) and p.get("token") == task_id for p in pending)
+    tokens = [p.get("token") if isinstance(p, dict) else None for p in pending]
+    if not all(isinstance(t, str) and t for t in tokens):
+        return None
+    return set(tokens)
 
 
 class _PendingHandoffs:
     """A stalled baton needs the operator only while its worktree still waits on
     it. One its ledger no longer lists was picked up, replaced by a later
     handoff, or cancelled -- or was only saved, never handed over -- so it is no
-    item. The lookups run together, alongside the read's lane reads; one that
-    hasn't answered by the read's deadline keeps its item."""
+    item. Each worktree's ledger is read once, a few at a time, alongside the
+    read's lane reads; a baton whose ledger hasn't answered by the read's
+    deadline keeps its item."""
 
     def __init__(self, items: list[dict[str, Any]], tasks: dict[str, dict[str, Any]],
-                 pending_check: Callable[[str, str], bool | None]) -> None:
-        self.answers: dict[str, bool | None] = {}
+                 lookup: Callable[[str], set[str] | None]) -> None:
+        self.lookup = lookup
+        self.ledgers: dict[str, set[str] | None] = {}
         stalled = {i["entity_ref"] for i in items if i["entity"] == "task" and i["display_state"] == "stalled"}
-        checks = {t: handoff_worktree(tasks[t]) for t in stalled if t in tasks}
-        self.threads = [threading.Thread(target=self._check, args=(pending_check, t, wt), daemon=True,
-                                         name=f"attention-handoff-{t}") for t, wt in checks.items() if wt]
+        self.batons = {t: handoff_worktree(tasks[t]) for t in stalled if t in tasks}
+        self.todo = sorted({wt for wt in self.batons.values() if wt})
+        self.lock = threading.Lock()
+        self.threads = [threading.Thread(target=self._work, daemon=True, name=f"attention-handoff-{n}")
+                        for n in range(min(HANDOFF_PENDING_CONCURRENCY, len(self.todo)))]
         for thread in self.threads:
             thread.start()
 
-    def _check(self, pending_check: Callable[[str, str], bool | None], task_id: str, worktree: str) -> None:
-        try:
-            self.answers[task_id] = pending_check(task_id, worktree)
-        except Exception:  # noqa: BLE001 -- an unreadable ledger keeps the item
-            self.answers[task_id] = None
+    def _work(self) -> None:
+        while True:
+            with self.lock:
+                if not self.todo:
+                    return
+                worktree = self.todo.pop()
+            try:
+                tokens = self.lookup(worktree)
+            except Exception:  # noqa: BLE001 -- an unreadable ledger keeps its batons
+                tokens = None
+            self.ledgers[worktree] = tokens
 
     def keep(self, items: list[dict[str, Any]], deadline: float) -> list[dict[str, Any]]:
         for thread in self.threads:
             thread.join(max(0.0, deadline - time.monotonic()))
-        answers = dict(self.answers)
-        return [i for i in items if not (i["entity"] == "task" and answers.get(i["entity_ref"]) is False)]
+        ledgers = dict(self.ledgers)
+
+        def gone(task_id: str) -> bool:
+            tokens = ledgers.get(self.batons.get(task_id) or "")
+            return tokens is not None and task_id not in tokens
+
+        return [i for i in items if not (i["entity"] == "task" and i["entity_ref"] in self.batons
+                                         and gone(i["entity_ref"]))]
 
 
 def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
@@ -273,13 +286,13 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
                   cli: tuple[str, ...] | None = ("agent-dispatch",),
                   backlog_budget: float = BACKLOG_BUDGET,
-                  pending_check: Callable[[str, str], bool | None] | None = None) -> dict[str, Any]:
+                  pending_lookup: Callable[[str], set[str] | None] | None = None) -> dict[str, Any]:
     started = time.monotonic()
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
         items = [i for i in (_task_item(t, read_at, cli, now=time.time()) for t in tasks) if i]
         pending = _PendingHandoffs(items, {str(t.get("id")): t for t in tasks},
-                                   pending_check or handoff_pending_in_worktree)
+                                   pending_lookup or pending_handoff_tokens)
         lanes = sorted({t["repo"] for t in tasks
                         if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
         backlogs, unread = {}, 0
