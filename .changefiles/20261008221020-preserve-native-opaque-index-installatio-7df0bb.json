@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve native opaque index installation identities and validate bounded native health/search responses without exporting process-control tokens or clipping search content",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
