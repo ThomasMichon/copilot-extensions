@@ -1675,7 +1675,7 @@ def test_ensure_status_monitor_running_scrubs_session_credentials(monkeypatch):
         captured["env"] = kwargs.get("env")
         return _FakeCompletedProcess()
 
-    monkeypatch.setattr(mux_daemon.subprocess, "run", _fake_run)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
 
     assert mux_daemon._ensure_status_monitor_running() is True
     env = captured["env"]

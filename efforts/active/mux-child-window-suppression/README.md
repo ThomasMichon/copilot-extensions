@@ -139,3 +139,15 @@ contain terminal-multiplexer descendants.
   outside the fixture's ancestry and terminal foreground changes against a
   pre-launch baseline. Ten desktop checks passed; focused orchestration
   coverage remained 133 passed with three opt-in checks skipped.
+- The next review identified the shared spawn helper's best-effort Job fallback:
+  without a Job, it resumed the child before the caller could refuse it.
+  Added an optional strict synchronous contract that kills a still-suspended
+  child on failed Job assignment before any descendant can execute; the mux
+  runner opts in. Default behavior for existing consumers is unchanged.
+- Native full-suite validation exposed four unrelated failures now tracked in
+  #6062 (three pivot-modal tests and one tarball-symlink fixture). They remain
+  unresolved validation blockers, not accepted flakes. A fifth failure caused
+  by the removed `subprocess` import was corrected at its test's actual seam.
+- Strict pre-resume failure, captured-child and corrected credential test
+  selection: 11 passed. Shared vendoring, release changefiles, complete strict
+  contract/native revalidation and reviewer approval remain outstanding.

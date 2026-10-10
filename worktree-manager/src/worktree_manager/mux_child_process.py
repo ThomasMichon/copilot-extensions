@@ -19,7 +19,7 @@ def run(
         )
     process, job = spawn_sync_in_kill_on_close_job(
         argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=text, **kwargs,
+        text=text, require_job=True, **kwargs,
     )
     try:
         if job is None:
