@@ -41,8 +41,8 @@ nothing logs it.
 
 ## Context
 
-Surfaced live while diagnosing a stalled `file-picker-repro` queue on a
-downstream harness's agent-dispatch fleet (same investigation that produced
+Surfaced live while diagnosing a stalled repro-queue on a downstream
+harness's agent-dispatch fleet (same investigation that produced
 `efforts/active/worker-status-observability-hooks/`, now merged). Direct
 findings, confirmed by reading source and inspecting live process state —
 not inferred:
@@ -329,4 +329,15 @@ _Pending — begin with Phase 1 (trace the actual spawn entry points)._
   Validation Plan case proving the identity-mismatch case does *not*
   report that same blocked state, since that race already resolved
   itself and the daemon should simply retry.
+
+### 2026-10-10 — Plan PR #5309 review round 5 (1 previously-missed Low)
+- **Low:** Context named a specific downstream repro-queue identifier
+  (`file-picker-repro`) in this public effort — the same category of issue
+  the sibling `worker-status-observability-hooks` effort already recorded
+  fixing (generalize to "a downstream harness's ... repro-queue fleet",
+  dropping the specific name while keeping the motivating context).
+  Applied the same fix here: dropped the specific queue name, kept the
+  "downstream harness's agent-dispatch fleet" context.
+- The two remaining Low findings from round 1 were checked again; no new
+  information since round 3's note, left as-is.
 
