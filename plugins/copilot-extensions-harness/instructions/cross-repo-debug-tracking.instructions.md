@@ -29,8 +29,9 @@ Keep permissionless local rendering current with the installed
 payload and preserve the reviewed offline fallback. Block missing verified
 guidance delivery, but keep valid stale guidance advisory; foreign ownership,
 unsafe paths and missing/corrupt locked
-artifacts remain blocking. Until promotion and local rollout have run, report
-merged/pending release, not live or deployed. Payload/runtime updates still require explicit rollout
+artifacts remain blocking. Before promotion, report merged/pending release.
+After promotion but before local rollout, report released/pending rollout.
+Neither state means live or deployed. Payload/runtime updates still require explicit rollout
 authorization and the target's required safety/permission gates; do not
 create a parallel scheduler or silently claim that a merge updated a running
 system.

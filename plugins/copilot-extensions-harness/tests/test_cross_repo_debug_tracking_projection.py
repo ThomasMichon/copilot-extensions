@@ -58,7 +58,9 @@ def test_postmerge_guidance_waits_for_promotion_and_local_update():
     assert "permissionless local rendering" in content
     assert "reviewed offline fallback" in content
     assert "missing/corrupt locked artifacts remain blocking" in content
-    assert "merged/pending release, not live or deployed" in content
+    assert "Before promotion, report merged/pending release" in content
+    assert "After promotion but before local rollout, report released/pending rollout" in content
+    assert "Neither state means live or deployed" in content
     assert "explicit rollout authorization" in content
     assert "immediately force-update" not in content
     assert "before ending your turn" not in content
@@ -74,7 +76,9 @@ def test_contribution_rollout_preserves_authorization_and_running_state_proof():
     assert "required deployment workflow" in normalized
     assert "running system reflects the change" in normalized
     assert "Adopted, consented maintenance" in normalized
-    assert "not deployed" in normalized
+    assert "neither means live or deployed" in normalized
+    assert "merged/pending release before promotion" in normalized
+    assert "released/pending rollout after promotion" in normalized
     assert "deployment completion obligation" in normalized
     assert "<repo> update" in normalized
     assert "pipeline promotes it to `main`" in normalized

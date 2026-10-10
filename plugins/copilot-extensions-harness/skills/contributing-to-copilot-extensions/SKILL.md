@@ -284,8 +284,9 @@ installer. Know which kind you are changing.
    a merge alone never proves that the running system reflects the change.
    Adopted, consented maintenance may own scheduled rollout after promotion instead
    of a synchronous update in every coding session. Until that authorized
-   rollout runs and its running-state proof passes, report primed/pending,
-   not deployed, and retain the deployment completion obligation with its
+   rollout runs and its running-state proof passes, report merged/pending release
+   before promotion, or released/pending rollout after promotion; neither means
+   live or deployed. Retain the deployment completion obligation with its
    named owner. Do not create a parallel scheduler or bypass another
    repository's required workflow to finish this step.
    When rollout is authorized, use the repo's update binstub on each target
