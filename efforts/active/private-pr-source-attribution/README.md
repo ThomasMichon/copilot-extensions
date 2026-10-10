@@ -137,7 +137,7 @@ remain compatible, but this workflow must not create independent machine keys.
 
 ## Proposal
 
-Pending automated review. This proposal specifies behavior and validation
+This proposal specifies behavior and validation
 obligations, not a preselected encryption implementation or a deployment action.
 No production secret is read or written by the planning slice.
 
@@ -146,6 +146,9 @@ No production secret is read or written by the planning slice.
 ### 2026-10-10 — Continuation
 
 - Identified the remaining immediate-versus-originating identity gap after
-  #5578 and captured portable vault fallback plus unlock-free local cache intent.
+  #5578 and captured the initial vault-fallback proposal plus unlock-free cache intent.
+- The operator subsequently specified one common key shared through the vault,
+  superseding the earlier fallback-only direction for this workflow. Existing
+  portable file-key compatibility is retained without divergent machine keys.
 - Kept provider fallback after the identity/key work. No immediate updater or
   manual instruction sync is part of merge completion.
