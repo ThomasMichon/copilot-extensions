@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent plan and implementation PRs against `dev`.
 - **Created:** 2026-10-08
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/installer/README.md`, optional control-plane session launch.
 - **Umbrella issue:** #5878
 
@@ -61,7 +61,7 @@ The operator confirmed the slug `transparent-psmux-launch`.
 
 ### Phase 3 - Release and verify
 - [x] Land the implementation through review and the required checks.
-- [ ] Confirm promotion to the release branch, deploy through the supported
+- [x] Confirm promotion to the release branch, deploy through the supported
   unified update and prove an actual Windows worktree mux launch succeeds.
 
 ## Validation Plan
@@ -79,7 +79,7 @@ The operator confirmed the slug `transparent-psmux-launch`.
   _(agent-recommended)_
 - [x] Run applicable lint, install-contract, asset/deployment and documentation
   impact checks before publication. _(agent-recommended)_
-- [ ] Record deployed version and affected-host launch evidence without private
+- [x] Record deployed version and affected-host launch evidence without private
   identifiers in public artifacts.
 
 ## Proposal
@@ -240,3 +240,23 @@ encoded commands or initial-prompt transports.
 - All 69 audit, paired-creation and seed-staging tests passed. Lint and the
   install-contract gate passed. This below-altitude import repair changes no
   launcher or recovery behavior; no installer/clean-room lane is affected.
+
+### 2026-10-09 - Released and verified
+- Import repair #5929 received approval with no findings, passed the required
+  checks and merged. Its full promotion run `37940242986` passed, and generated
+  release candidate #5932 merged to `main`.
+- Deployed through the supported unified update. The installed runtime is
+  agent-worktrees `1.24.33-dev1` with Worktree Manager `0.6.20-dev1`; the
+  installed file dispatcher matches the validated source hash.
+- A newly allocated managed worktree launched real Copilot through installed
+  PSMux from a windowless parent, with automatic update/reconcile disabled
+  only for this proof to pin the measured build. The mux verified, Copilot
+  reached its interactive input prompt, and its live descendants were present.
+- The running pane's actual command uses `-File` and `pane-launch.ps1`, with
+  no encoded launch text. Its exact JSON manifest was consumed and deleted.
+  Retired the disposable session through the managed restart command, verified
+  all six observed pane descendants exited, and finalized its worktree through
+  the managed lifecycle; the parent obligation was settled.
+- All Plan and Validation Plan items are resolved. The launcher README
+  remains the durable transport/cleanup documentation. No host security policy
+  was changed. Archived this effort on its completion date.
