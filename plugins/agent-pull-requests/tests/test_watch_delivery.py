@@ -425,6 +425,43 @@ def test_cli_negotiates_without_new_fields_to_old_owner(capsys):
     assert "notification_protocol" not in calls[0][1]
     assert calls[0][1]["notify"] == {"argv": ["consumer"]}
 
+@pytest.mark.parametrize("response", [
+    {"registered": True},
+    {"registered": True, "notification_protocol": PROTOCOL, "registration_id": ""},
+    {"registered": True, "notification_protocol": "legacy", "registration_id": "one"},
+])
+def test_cli_owner_rollover_requires_registration_protocol_echo(capsys, response):
+    args = SimpleNamespace(
+        repo="example/project", number=1, subscriber_id="one", until=None,
+        notify_argv=["consumer"], timeout=10, json=True,
+        acknowledged_notifications=True, notify_timeout=2,
+    )
+
+    def request(kind, payload):
+        return {"capabilities": [PROTOCOL]} if kind == "health" else response
+
+    assert subscribe(args, request) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["ambiguous_registration"] is True
+    assert "registered" not in result
+    assert result["subscriber_id"] == "one"
+
+
+@pytest.mark.parametrize("changes", [
+    {"merged": "false"}, {"closed": 0}, {"review_decision": False},
+    {"mergeable": []}, {"checks_state": 5},
+])
+def test_corrupt_acknowledged_baseline_fails_closed(changes):
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "one", until=(MERGED,), acknowledged=True,
+                      notify={"argv": ["consumer"]})
+    registry.apply_snapshot(key, PRSnapshot())
+    entries = registry.snapshot_state()
+    entries[0]["baseline"].update(changes)
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
+
 
 def test_isolated_process_crash_then_restart_replays_original_payload(tmp_path):
     output = tmp_path / "delivered.json"

@@ -108,6 +108,13 @@ greater than 30 (default: 30 seconds).
 
 ### Generic consumer wire contract
 
+An acknowledged registration must echo `notification_protocol` and a nonempty
+`registration_id`. If an owner rolls over to a legacy build between capability
+probe and registration, the CLI reports `ambiguous_registration` and fails.
+The subscription may exist: reconcile it by its target and subscriber identity
+before retry or process fallback. It is not reported as acknowledged success,
+and the CLI does not blindly cancel a potentially newer registration.
+
 Discover the owner's attributable endpoint using its existing installation
 boundary and authenticated coalescing control protocol. Send `health` first;
 only a response whose `capabilities` includes `acknowledged_notifications/v1`

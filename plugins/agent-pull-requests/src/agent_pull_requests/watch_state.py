@@ -54,6 +54,19 @@ class RegistryState:
                         raise ValueError("unsupported notification protocol")
                     key = WatchKey(repo=str(entry["repo"]), number=int(entry["number"]))
                     baseline = entry.get("baseline")
+                    if opted_in and baseline is not None:
+                        if (
+                            not isinstance(baseline, dict)
+                            or set(baseline) != {
+                                "merged", "closed", "review_decision", "mergeable", "checks_state",
+                            }
+                            or any(type(baseline[field]) is not bool for field in ("merged", "closed"))
+                            or any(
+                                baseline[field] is not None and not isinstance(baseline[field], str)
+                                for field in ("review_decision", "mergeable", "checks_state")
+                            )
+                        ):
+                            raise ValueError("invalid acknowledged baseline")
                     sub = Subscriber(
                         subscriber_id=str(entry["subscriber_id"]), until=tuple(entry["until"]),
                         notify=dict(entry.get("notify") or {}),

@@ -28,6 +28,16 @@ def subscribe(args, request) -> int:
                 raise ValueError("watch owner lacks acknowledged_notifications/v1")
             payload["notification_protocol"] = ACKNOWLEDGED_NOTIFICATIONS
         result = request("register", payload)
+        if acknowledged and result.get("registered") and (
+            result.get("notification_protocol") != ACKNOWLEDGED_NOTIFICATIONS
+            or not isinstance(result.get("registration_id"), str)
+            or not result["registration_id"].strip()
+        ):
+            result = {
+                "error": "ambiguous watch registration; reconcile subscription before retry or fallback",
+                "ambiguous_registration": True,
+                "repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id,
+            }
     except ValueError as exc:
         result = {"error": str(exc)}
     print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
