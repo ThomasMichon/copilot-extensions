@@ -365,11 +365,13 @@ def publish_lock(cwd: str, *, acquire_timeout: float | None = None,
             _unlock_publish_file(fh)
 
 
-def metadata_lock(worktree_id: str, *, project: str | None = None):
+def metadata_lock(worktree_id: str, *, project: str | None = None, timeout: float | None = None):
     """Serialize explicit publication and manual PR reassignment, not Picker stamps."""
     from . import config as cfg
     path = (cfg.tracking_dir(project) if project else cfg.tracking_dir()) / f"{worktree_id}.pr-authority.yaml"
-    return tracking._RecordLock(path, timeout=PUBLISH_LOCK_ACQUIRE_TIMEOUT_S, require_sidecar=True)
+    return tracking._RecordLock(
+        path, timeout=PUBLISH_LOCK_ACQUIRE_TIMEOUT_S if timeout is None else timeout, require_sidecar=True,
+    )
 
 
 def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,

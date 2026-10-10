@@ -1,6 +1,7 @@
 """Exact-lease intentional rewrites through the public push-changes contract."""
 
 from dataclasses import replace
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -66,6 +67,39 @@ def test_existing_active_pr_can_refresh_ownership_and_rewrite(pr_repo, monkeypat
     git("commit", "-m", "legacy feedback", cwd=wt)
     assert finalize.push_changes(wid, config, rewrite_pr=True)
     assert git("rev-parse", record.pr.branch, cwd=remote) == git("rev-parse", "HEAD", cwd=wt)
+
+
+def test_explicit_rewrite_threads_configured_lock_deadlines(pr_repo, monkeypatch):
+    from agent_worktrees import publication_deadline
+
+    config, wid, wt, _remote, _old = publish_and_rebase(pr_repo, "refspec")
+    repo = replace(config.default_repo, pr=replace(config.default_repo.pr, push_timeout_seconds=600))
+    config = replace(config, repos={config.repo_name: repo})
+    calls = []
+
+    @contextlib.contextmanager
+    def authority(**kwargs):
+        calls.append(("authority", kwargs))
+        yield
+
+    @contextlib.contextmanager
+    def publish(cwd, **kwargs):
+        calls.append(("publish", kwargs))
+        yield
+
+    @contextlib.contextmanager
+    def metadata(worktree_id, **kwargs):
+        calls.append(("metadata", kwargs))
+        yield
+
+    monkeypatch.setattr(pr_rewrite.pr_authority, "guard", authority)
+    monkeypatch.setattr(pr_publish, "publish_lock", publish)
+    monkeypatch.setattr(pr_publish, "metadata_lock", metadata)
+    assert finalize.push_changes(wid, config, rewrite_pr=True, dry_run=True)
+    wait = publication_deadline.lock_wait(600)
+    assert ("authority", {"timeout": wait}) in calls
+    assert ("publish", {"push_timeout_seconds": 600}) in calls
+    assert ("metadata", {"project": config.repo_name, "timeout": wait}) in calls
 
 
 def publish_and_rebase(pr_repo, scheme):

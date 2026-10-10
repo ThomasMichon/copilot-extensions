@@ -76,7 +76,10 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
         output.err("Timed out waiting for finalization lock.")
         return False
     try:
-        with pr_authority.guard(), pr_publish.publish_lock(cwd), pr_publish.metadata_lock(worktree_id, project=config.repo_name):
+        wait = publication_deadline.lock_wait(repo.pr.push_timeout_seconds)
+        with pr_authority.guard(timeout=wait), pr_publish.publish_lock(
+            cwd, push_timeout_seconds=repo.pr.push_timeout_seconds,
+        ), pr_publish.metadata_lock(worktree_id, project=config.repo_name, timeout=wait):
             # Re-read after admission so a concurrent set-pr or publication cannot
             # change which PR the request authorizes.
             path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
