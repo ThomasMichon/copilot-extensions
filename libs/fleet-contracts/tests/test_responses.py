@@ -140,3 +140,34 @@ def test_health_rejects_control_characters_in_opaque_installation_identity(contr
             payload(health(installationId=f"market{control}/agent-index")),
             expected_installation_id=f"market{control}/agent-index",
         )
+
+
+@pytest.mark.parametrize("raw", [
+    b"not JSON", b"[]", b'{"status":"ok"}', b"\xff",
+    b" " * (MAX_RESPONSE_BYTES + 1),
+])
+def test_invalid_backend_body_uses_backend_specific_error_class(raw):
+    with pytest.raises(BackendResponseError):
+        IndexHealth.from_backend(raw, expected_installation_id="mkt-id/agent-index")
+    with pytest.raises(BackendResponseError):
+        IndexSearchResult.from_backend(raw, expected_query="query", requested_limit=1)
+
+
+def test_invalid_backend_record_fields_are_classified_but_caller_inputs_are_not():
+    with pytest.raises(BackendResponseError):
+        IndexHealth.from_backend(
+            payload(health(version="")), expected_installation_id="mkt-id/agent-index",
+        )
+    with pytest.raises(BackendResponseError):
+        IndexSearchResult.from_backend(
+            payload({"query": "query", "available": True, "hits": [hit(line_start=True)]}),
+            expected_query="query", requested_limit=1,
+        )
+    for invoke in (
+        lambda: IndexHealth.from_backend(b"{}", expected_installation_id=""),
+        lambda: IndexSearchResult.from_backend(b"{}", expected_query="", requested_limit=1),
+        lambda: IndexSearchResult.from_backend(b"{}", expected_query="query", requested_limit=0),
+    ):
+        with pytest.raises(ContractError) as caught:
+            invoke()
+        assert not isinstance(caught.value, BackendResponseError)

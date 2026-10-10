@@ -51,6 +51,15 @@ class IndexHealth:
     @classmethod
     def from_backend(cls, payload: bytes, *, expected_installation_id: str) -> IndexHealth:
         _installation_id(expected_installation_id)
+        try:
+            return cls._parse_backend(payload, expected_installation_id)
+        except BackendResponseError:
+            raise
+        except ContractError:
+            raise BackendResponseError("invalid backend health response") from None
+
+    @classmethod
+    def _parse_backend(cls, payload: bytes, expected_installation_id: str) -> IndexHealth:
         data = decode_json(payload, max_bytes=MAX_RESPONSE_BYTES)
         required = {"status", "plugin", "version", "passive", "promoted", "installationId"}
         if not required <= data.keys() or data["plugin"] != "agent-index":
@@ -140,6 +149,17 @@ class IndexSearchResult:
     ) -> IndexSearchResult:
         _text(expected_query, "expected_query", MAX_QUERY_BYTES)
         _integer(requested_limit, "requested_limit", maximum=100)
+        try:
+            return cls._parse_backend(payload, expected_query, requested_limit)
+        except BackendResponseError:
+            raise
+        except ContractError:
+            raise BackendResponseError("invalid backend search response") from None
+
+    @classmethod
+    def _parse_backend(
+        cls, payload: bytes, expected_query: str, requested_limit: int,
+    ) -> IndexSearchResult:
         data = decode_json(payload, max_bytes=MAX_RESPONSE_BYTES)
         if data.get("available") is False:
             raise BackendResponseError("backend search explicitly reported unavailable")
