@@ -1,0 +1,9 @@
+{
+  "comment": "Align exact session-guidance projection fixture with selector delivery declarations to unblock full promotion.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
