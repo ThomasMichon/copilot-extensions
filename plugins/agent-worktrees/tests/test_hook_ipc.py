@@ -327,8 +327,9 @@ def test_session_start_rejects_old_resident_without_lifecycle_capability(
     assert hook_client._request("sessionStart", {}, tmp_path) is None
 
 
+@pytest.mark.parametrize("installed", [False, True])
 def test_session_start_old_runtime_uses_legacy_compatibility(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, installed
 ):
     runtime = tmp_path / ".agent-worktrees"
     python = runtime / "versions" / "1.5.3-dev744" / (
@@ -343,11 +344,14 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
     (runtime / "current-version").write_text(
         "1.5.3-dev744", encoding="utf-8"
     )
-    # No external update driver on this (real or test) machine's PATH -- the
-    # legacy-fallback path under test only applies absent one; see the
-    # worktree-manager-active counterpart test below for the opposite case.
-    monkeypatch.setattr(hook_client.shutil, "which", lambda name: None)
-    monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    # An installed but idle Manager must not suppress stale-runtime recovery.
+    monkeypatch.setattr(
+        hook_client.shutil, "which",
+        lambda name: str(tmp_path / "manager-stub") if installed else None,
+    )
+    manager = tmp_path / "manager"
+    manager.mkdir()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(manager))
     seen = {}
 
     def legacy(payload):
@@ -397,9 +401,18 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
     (runtime / "current-version").write_text(
         "1.5.3-dev744", encoding="utf-8"
     )
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": os.getpid(), "started": time.time()}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: None)
     monkeypatch.setattr(
-        hook_client.shutil, "which",
-        lambda name: "/usr/bin/worktree-manager" if name == "worktree-manager" else None,
+        hook_client,
+        "_load_sibling",
+        lambda name: SimpleNamespace(
+            _pid_alive=lambda pid: pid == os.getpid(),
+            _pid_image_path=lambda pid: str(python),
+        ),
     )
     monkeypatch.setattr(
         hook_client, "_fallback_legacy_session_start",
@@ -422,6 +435,92 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
         },
     }
     assert hook_client._fallback_session_start(payload, tmp_path) == {}
+
+
+@pytest.mark.parametrize(
+    "ownership",
+    [
+        None,
+        {"pid": 0, "started": 999},
+        {"pid": True, "started": 999},
+        {"pid": 1, "started": "999"},
+        {"pid": 1, "started": float("nan")},
+        {"pid": 1, "started": 1001},
+        {"pid": 1, "started": 880},
+    ],
+)
+def test_update_driver_rejects_absent_or_invalid_ownership(
+    monkeypatch, tmp_path, ownership
+):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    if ownership is not None:
+        (runtime / "updater.lock").write_text(json.dumps(ownership), encoding="utf-8")
+    (runtime / "updater-status.json").write_text(
+        json.dumps({"stage_done": True, "skipped": "locked"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(hook_client.time, "time", lambda: 1000)
+    monkeypatch.setattr(
+        hook_client, "_load_sibling",
+        lambda name: pytest.fail("invalid ownership must not probe a process"),
+    )
+    assert not hook_client._external_update_driver_active(tmp_path, Path(sys.executable))
+
+
+@pytest.mark.parametrize("alive,image", [(False, "matching"), (True, None), (True, "other")])
+def test_update_driver_rejects_dead_or_wrong_process(monkeypatch, tmp_path, alive, image):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": 123, "started": time.time()}), encoding="utf-8"
+    )
+    python = tmp_path / "python"
+    monkeypatch.setattr(
+        hook_client, "_load_sibling",
+        lambda name: SimpleNamespace(
+            _pid_alive=lambda pid: alive,
+            _pid_image_path=lambda pid: str(python) if image == "matching" else image,
+        ),
+    )
+    assert not hook_client._external_update_driver_active(tmp_path, python)
+
+
+def test_update_driver_tracks_real_stage_lock_lifetime(tmp_path):
+    from agent_worktrees import update_stage
+
+    runtime = tmp_path / ".agent-worktrees"
+    lock = runtime / "updater.lock"
+    helper = hook_client._load_sibling("versioned_runtime.py")
+    assert helper is not None
+    # Test venvs can use a trampoline; production version slots use copied
+    # interpreters. Bind this fixture to the actual running image.
+    image = helper._pid_image_path(os.getpid())
+    assert image is not None
+    python = Path(image)
+    assert update_stage.acquire_lock(lock)
+    try:
+        assert hook_client._external_update_driver_active(tmp_path, python)
+    finally:
+        update_stage.release_lock(lock)
+    assert not hook_client._external_update_driver_active(tmp_path, python)
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "probe-error"])
+def test_update_driver_unverified_ownership_preserves_recovery(
+    monkeypatch, tmp_path, failure
+):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": 123, "started": time.time()}), encoding="utf-8"
+    )
+
+    def probe(pid):
+        raise OSError("process probe unavailable")
+
+    helper = None if failure == "unavailable" else SimpleNamespace(_pid_image_path=probe)
+    monkeypatch.setattr(hook_client, "_load_sibling", lambda name: helper)
+    assert not hook_client._external_update_driver_active(tmp_path, Path(sys.executable))
 
 
 def test_session_start_enriches_payload_with_session_environment(
