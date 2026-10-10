@@ -93,6 +93,7 @@ from lazy_cli_dispatch import dispatch_lazy as _shared_dispatch_lazy
 from lazy_cli_dispatch import self_override as _shared_self_override
 from . import (
     activity,
+    anchor_ledger,
     claim_kinds_registry,
     claims_rank,
     codename_tracking,
@@ -4609,15 +4610,7 @@ def reap_one(
         return payload
 
     if wt_id == tracking.ANCHOR_ID:
-        return _result(
-            {
-                "ok": False,
-                "removed": False,
-                "skipped": True,
-                "reason": "the project's main checkout is not a removable worktree",
-            }
-        )
-
+        return _result(anchor_ledger.reap_refusal())
     if not yaml_path.exists():
         return _result(
             {

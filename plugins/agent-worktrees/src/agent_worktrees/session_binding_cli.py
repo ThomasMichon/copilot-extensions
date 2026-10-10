@@ -8,7 +8,7 @@ import sys
 
 import yaml
 
-from . import activity, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity
+from . import activity, anchor_ledger, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity
 from . import config as cfg, hook_ipc, session_context as session_context_mod
 from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
 
@@ -342,59 +342,6 @@ def _emit_handoff_claim_stages(
     _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
-def _register_anchor_session(
-    args: argparse.Namespace,
-    session_id: str,
-    anchor,
-    *,
-    pid: int | None,
-    pane_id: str | None,
-    event_at: str | None,
-    source: str,
-) -> bool:
-    """Record a session started in the project's main checkout on the ``@anchor`` ledger.
-
-    The anchor stays a ledger, not a worktree: no status updater, monitor
-    session, profile assignment, or handoff linkage is attached, and every
-    worktree-oriented reader (list, picker, cleanup, finalize) skips it.
-    Best-effort -- a failure here never fails the hook.
-    """
-    try:
-        config = cfg.load_config()
-        tracking.load_or_create_anchor_record(
-            str(anchor), config.repo_name, config.machine, config.platform, cfg.tracking_dir()
-        )
-        tracking.register_session(
-            tracking.ANCHOR_ID,
-            session_id,
-            pid=pid,
-            pane_id=pane_id,
-            started_at=event_at,
-            source=source,
-        )
-    except Exception as e:
-        output.err(f"Could not record main-checkout session: {e}")
-        return False
-    try:
-        from . import handoff_diagnostics
-
-        handoff_diagnostics.stamp_session_state_worktree_binding(
-            session_id,
-            tracking.ANCHOR_ID,
-            worktree_dir=str(anchor),
-            machine=config.machine,
-        )
-    except Exception:
-        pass
-    activity.log_event(
-        "session_started",
-        worktree_id=tracking.ANCHOR_ID,
-        session_id=session_id,
-        launch_id=getattr(args, "launch_id", None),
-    )
-    return True
-
-
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked)."""
     wt_id = getattr(args, "worktree_id", None)
@@ -454,14 +401,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     if not wt_id and cwd:
         anchor = worktree_identity._anchor_checkout_for_cwd(cwd)
         if anchor is not None:
-            _register_anchor_session(
-                args,
-                session_id,
-                anchor,
-                pid=pid,
-                pane_id=pane_id,
-                event_at=event_at,
-                source=source,
+            anchor_ledger.register_session(
+                session_id, anchor, pid=pid, pane_id=pane_id, event_at=event_at,
+                source=source, launch_id=getattr(args, "launch_id", None),
             )
     if not wt_id:
         if getattr(args, "emit_context", False):

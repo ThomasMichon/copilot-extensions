@@ -3099,19 +3099,13 @@ def list_records(
     copy_records: bool = True,
     include_anchor: bool = False,
 ) -> list[WorktreeRecord]:
-    """List records (optional status/platform/repo/kind filters). ``copy_records=False``: read-only fast path, see :func:`load_record`.
-
-    The ``@anchor`` ledger record (claims journaled from, and Copilot sessions
-    started in, the project's main checkout) is not a worktree: it is never
-    listed, finalized, reaped, or picker-visible. Only claim/session readers
-    opt in with ``include_anchor=True``.
-    """
+    """List records (optional status/platform/repo/kind filters). ``copy_records=False``: read-only fast path, see :func:`load_record`. The ``@anchor`` ledger is not a worktree; only claim/session readers pass ``include_anchor=True``."""
     records: list[WorktreeRecord] = []
     if not tracking_path.exists():
         return records
 
     for yaml_file in sorted(tracking_path.glob("*.yaml")):
-        if not include_anchor and yaml_file.stem == ANCHOR_ID:
+        if yaml_file.stem == ANCHOR_ID and not include_anchor:
             continue
         try:
             rec = load_record(yaml_file, copy_result=copy_records)
