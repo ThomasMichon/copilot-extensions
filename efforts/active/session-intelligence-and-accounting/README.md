@@ -115,8 +115,8 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
 - [ ] Extend configured sync to preserve process logs alongside session-state.
 - [x] Add canonical local target identity admission and kernel-owned publication
   claims under a lock spanning payload writes (#5808).
-- [ ] Integrate the reserved `session-sync push --source-identity-file` interface
-  with the merged canonical source-publication helper.
+- [x] Integrate the reserved `session-sync push --source-identity-file` interface
+  with the merged canonical source-publication helper (#6027).
 - [ ] Add scheduled settled-log zip compaction, archive-transparent reads, and
   safe handling of active, rotated, resumed, or truncated files.
 - [ ] Unify discovery of machine roots, CodeSpace namespaces, host-merged rescue
@@ -193,6 +193,20 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
 Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-10-10 - Explicit identity-file CLI integration merged
+- #6027 merged as `58789f46905b350d8c600b37265f34ab0d8fd366` after current-head
+  approval with zero findings and green required CI, including native Windows
+  archive-source contracts. The optional flag reuses bounded canonical metadata
+  loading and validates its canonical publication key before target creation;
+  the actual identity reaches the reviewed target admission transaction.
+- Legacy no-identity pushes remain unchanged. Identified unsupported transports
+  fail explicitly; a corrected OneDrive test pins its real temporary root and
+  checks the specific admission rejection, not an ambient-root discovery error.
+- Released caller-only recovery/live-mirror and capture-publisher integration
+  to the source-unification owner via #5665. This releases source ownership,
+  not live publication authorization. Broader preservation, compaction,
+  containment/health (#5727), catalog/accounting and adoption gates stay open.
 
 ### 2026-10-07 - Kickoff
 - Confirmed target effort adoption and public coordination issue #5665.
