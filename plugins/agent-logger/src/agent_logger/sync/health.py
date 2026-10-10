@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from agent_logger.sync.targets.base import SyncStatus
 
+MAX_DEFERRED_FILE_SAMPLES = 10
+MAX_DEFERRED_PATH_CHARS = 512
+
 
 @dataclass
 class SyncHealth:
@@ -45,6 +48,82 @@ def _health_samples(value: object, *, limit: int, chars: int) -> list[str]:
     return [item[:chars] for item in value[:limit]]
 
 
+def _health_timestamp(value: object) -> datetime:
+    if not isinstance(value, str) or len(value) != 20:
+        raise OSError("invalid sync health timestamp")
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise OSError("invalid sync health timestamp") from exc
+
+
+def _validated_legs(stored: object) -> dict[str, dict[str, Any]]:
+    if (
+        not isinstance(stored, dict)
+        or "session-state" not in stored
+        or set(stored) - {"session-state", "process-logs"}
+    ):
+        raise OSError("invalid sync health legs")
+    legs: dict[str, dict[str, Any]] = {}
+    for name in ("session-state", "process-logs"):
+        if name not in stored:
+            continue
+        entry = stored[name]
+        if not isinstance(entry, dict):
+            raise OSError("invalid sync health leg")
+        status = entry.get("status")
+        if not isinstance(status, str) or len(status) > 256:
+            raise OSError("invalid sync health leg status")
+        _health_timestamp(entry.get("last_attempt_utc"))
+        _health_timestamp(entry.get("last_checked_utc"))
+        streak = _health_count(entry.get("consecutive_partial_count"))
+        count = _health_count(entry.get("deferred_file_count"))
+        samples = _health_samples(
+            entry.get("deferred_files"),
+            limit=MAX_DEFERRED_FILE_SAMPLES,
+            chars=MAX_DEFERRED_PATH_CHARS,
+        )
+        if (
+            samples != entry["deferred_files"]
+            or count < len(samples)
+            or (status == "ok" and (streak or count))
+            or (status == "partial" and streak < 1)
+        ):
+            raise OSError("inconsistent sync health leg")
+        legs[name] = {
+            "status": status,
+            "last_attempt_utc": entry["last_attempt_utc"],
+            "last_checked_utc": entry["last_checked_utc"],
+            "consecutive_partial_count": streak,
+            "deferred_file_count": count,
+            "deferred_files": samples,
+        }
+    return legs
+
+
+def _aggregate_health(legs: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    invalid_status = next(
+        (entry["status"] for entry in legs.values() if entry["status"] not in {"ok", "partial"}),
+        None,
+    )
+    return {
+        "status": (
+            invalid_status
+            if invalid_status is not None
+            else "partial"
+            if any(entry["status"] == "partial" for entry in legs.values())
+            else "ok"
+        ),
+        "consecutive_partial_count": max(
+            entry["consecutive_partial_count"] for entry in legs.values()
+        ),
+        "deferred_file_count": sum(entry["deferred_file_count"] for entry in legs.values()),
+        "deferred_files": [path for entry in legs.values() for path in entry["deferred_files"]][
+            :MAX_DEFERRED_FILE_SAMPLES
+        ],
+    }
+
+
 def merge_health(
     metadata: dict[str, Any],
     previous: dict[str, Any] | None,
@@ -61,29 +140,7 @@ def merge_health(
     stored = prior.get("sync_legs")
     legs: dict[str, dict[str, Any]] = {}
     if stored is not None:
-        if (
-            not isinstance(stored, dict)
-            or "session-state" not in stored
-            or set(stored) - {"session-state", "process-logs"}
-        ):
-            raise OSError("invalid sync health legs")
-        for name, entry in stored.items():
-            if not isinstance(entry, dict) or not isinstance(entry.get("status"), str):
-                raise OSError("invalid sync health leg")
-            legs[name] = {
-                "status": entry["status"][:256],
-                "last_attempt_utc": entry.get("last_attempt_utc"),
-                "last_checked_utc": entry.get("last_checked_utc", entry.get("last_attempt_utc")),
-                "consecutive_partial_count": _health_count(
-                    entry.get("consecutive_partial_count"),
-                ),
-                "deferred_file_count": _health_count(entry.get("deferred_file_count")),
-                "deferred_files": _health_samples(
-                    entry.get("deferred_files"),
-                    limit=sample_limit,
-                    chars=sample_chars,
-                ),
-            }
+        legs = _validated_legs(stored)
     elif prior:
         # Legacy partial metadata cannot identify the failed leg. A log-only
         # retry must not clear it until session-state is actually transferred.
@@ -103,6 +160,11 @@ def merge_health(
                 chars=sample_chars,
             ),
         }
+        if legs["session-state"]["status"] == "partial":
+            legs["session-state"]["consecutive_partial_count"] = max(
+                1,
+                legs["session-state"]["consecutive_partial_count"],
+            )
     previous_leg = legs.get(leg, {})
     streak = 0
     if status == "partial":
@@ -116,24 +178,7 @@ def merge_health(
         "deferred_files": [path[:sample_chars] for path in deferred[:sample_limit]],
     }
     metadata["sync_legs"] = legs
-    invalid_status = next(
-        (entry["status"] for entry in legs.values() if entry["status"] not in {"ok", "partial"}),
-        None,
-    )
-    metadata["status"] = (
-        invalid_status
-        if invalid_status is not None
-        else "partial"
-        if any(entry["status"] == "partial" for entry in legs.values())
-        else "ok"
-    )
-    metadata["consecutive_partial_count"] = max(
-        entry["consecutive_partial_count"] for entry in legs.values()
-    )
-    metadata["deferred_file_count"] = sum(entry["deferred_file_count"] for entry in legs.values())
-    metadata["deferred_files"] = [
-        path for entry in legs.values() for path in entry["deferred_files"]
-    ][:sample_limit]
+    metadata.update(_aggregate_health(legs))
 
 
 def classify_sync_health(
@@ -168,26 +213,20 @@ def classify_sync_health(
 
     current = now or datetime.now(timezone.utc)
     if "sync_legs" in metadata:
-        legs = metadata["sync_legs"]
-        if (
-            not isinstance(legs, dict)
-            or "session-state" not in legs
-            or set(legs) - {"session-state", "process-logs"}
+        try:
+            legs = _validated_legs(metadata["sync_legs"])
+            aggregate = _aggregate_health(legs)
+        except OSError:
+            return SyncHealth(machine, "unhealthy", "invalid_leg_metadata")
+        if any(
+            _integer(metadata.get(key)) is None
+            for key in ("consecutive_partial_count", "deferred_file_count")
         ):
             return SyncHealth(machine, "unhealthy", "invalid_leg_metadata")
+        if any(metadata.get(key) != value for key, value in aggregate.items()):
+            return SyncHealth(machine, "unhealthy", "inconsistent_leg_metadata")
         for entry in legs.values():
-            if not isinstance(entry, dict):
-                return SyncHealth(machine, "unhealthy", "invalid_leg_metadata")
-            checked = entry.get("last_checked_utc", entry.get("last_attempt_utc"))
-            if not isinstance(checked, str):
-                return SyncHealth(machine, "unhealthy", "invalid_timestamp")
-            try:
-                leg_timestamp = datetime.strptime(checked, "%Y-%m-%dT%H:%M:%SZ").replace(
-                    tzinfo=timezone.utc,
-                )
-            except ValueError:
-                return SyncHealth(machine, "unhealthy", "invalid_timestamp")
-            timestamp = min(timestamp, leg_timestamp)
+            timestamp = min(timestamp, _health_timestamp(entry["last_checked_utc"]))
     age_hours = max(0.0, (current - timestamp).total_seconds() / 3600)
     latest_status = metadata.get("status")
     partial_streak = _integer(metadata.get("consecutive_partial_count"))

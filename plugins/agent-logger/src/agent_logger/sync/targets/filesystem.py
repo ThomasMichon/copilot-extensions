@@ -447,6 +447,12 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     copied = 0
     nbytes = 0
     locked: list[Path] = []
+    source_identity = _lstat(source)
+
+    def _revalidate_root(before: os.stat_result) -> None:
+        after = _lstat(source)
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise _SourceChangedDuringCopy("process-log source root changed during copy")
 
     def _land(
         stream: BinaryIO, dst_path: Path, *, revalidate: Callable[[], bool] | None = None,
@@ -522,15 +528,16 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
                         continue
                     copied += 1
                     nbytes += size
-        except FileNotFoundError:
-            return 0, 0, []
+                _revalidate_root(os.fstat(root_fd))
+        except FileNotFoundError as exc:
+            raise OSError("process-log source vanished during copy") from exc
         return copied, nbytes, locked
 
     try:
         with os.scandir(_windows_extended_path(source)) as scanned:
             names = sorted(entry.name for entry in scanned if is_process_log_candidate(entry.name))
-    except FileNotFoundError:
-        return 0, 0, []
+    except FileNotFoundError as exc:
+        raise OSError("process-log source vanished during copy") from exc
     for name in names:
         src_path = source / name
         try:
@@ -558,6 +565,7 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
             continue
         copied += 1
         nbytes += size
+    _revalidate_root(source_identity)
     return copied, nbytes, locked
 
 
@@ -1925,7 +1933,7 @@ class FilesystemTarget(Target):
             # health must reflect that, exactly like an outright failure.
         self._record_process_log_health(
             machine, "partial" if locked_paths else "ok",
-            tuple(str(path) for path in locked_paths),
+            tuple(path.name for path in locked_paths),
         )
         return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes)
 

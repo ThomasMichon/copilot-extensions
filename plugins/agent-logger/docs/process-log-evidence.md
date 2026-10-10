@@ -107,6 +107,10 @@ leg check so a log retry cannot disguise stale session-state (or vice versa).
 Legacy partial metadata has no failed-leg identity and conservatively requires
 a real session-state retry before becoming healthy. Unreadable or malformed
 metadata is preserved and its update failure logged.
+Classification validates complete leg schemas and their aggregate rather than
+trusting a contradictory top-level `ok`. Deferred process-log samples are bare
+filenames, not configured source paths. Roots that vanish or change identity
+during enumeration/copy remain partial, even if no file needed transfer.
 
 This composes persisted transfer results, not a new containment guarantee.
 Unsupported/scoped log passes remain outside this filesystem health contract,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -171,6 +172,125 @@ def test_deferred_log_retry_clears_only_log_samples(
     partial = meta.read_sync_meta(root)
     assert partial["status"] == "partial"
     assert partial["deferred_file_count"] == 1
+    assert partial["deferred_files"] == ["process-123-456.log"]
+    assert str(logs) not in json.dumps(partial)
     monkeypatch.setattr(filesystem, "_copy_process_logs", lambda *_args: (0, 0, []))
     assert target.push_process_logs(logs, "machine").ok
     assert meta.read_sync_meta(root)["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "missing-status",
+        "missing-count",
+        "contradictory-status",
+        "contradictory-count",
+        "boolean-count",
+    ],
+)
+def test_corrupt_legs_never_classify_healthy(tmp_path: Path, corruption: str) -> None:
+    meta.write_sync_meta(tmp_path, "machine", "local", "ok")
+    metadata = meta.read_sync_meta(tmp_path)
+    leg = metadata["sync_legs"]["session-state"]
+    if corruption == "missing-status":
+        del leg["status"]
+    elif corruption == "missing-count":
+        del leg["deferred_file_count"]
+    elif corruption == "contradictory-status":
+        leg["status"] = "partial"
+        leg["consecutive_partial_count"] = 1
+    elif corruption == "contradictory-count":
+        metadata["deferred_file_count"] = 1
+    else:
+        metadata["deferred_file_count"] = False
+    classified = classify_sync_health(
+        "machine",
+        SyncStatus(supported=True, metadata=metadata),
+        max_age_hours=12,
+        partial_threshold=3,
+    )
+    assert classified.health == "unhealthy"
+    assert classified.reason in {"invalid_leg_metadata", "inconsistent_leg_metadata"}
+
+
+@pytest.mark.parametrize(
+    "directory_fd",
+    [
+        False,
+        pytest.param(True, marks=pytest.mark.skipif(os.name == "nt", reason="POSIX directory fd")),
+    ],
+)
+def test_vanished_log_root_does_not_clear_partial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    directory_fd: bool,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    root = tmp_path / "dest" / "machine"
+    meta.write_sync_meta(root, "machine", "local", "ok")
+    meta.write_process_log_meta(root, "partial", ["prior failure"])
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    monkeypatch.setattr(filesystem._process_logs, "supports_dir_fd", lambda: directory_fd)
+    real_scandir = filesystem.os.scandir
+
+    def vanished(path: object) -> object:
+        if directory_fd or path == filesystem._windows_extended_path(logs):
+            raise FileNotFoundError("source disappeared")
+        return real_scandir(path)
+
+    monkeypatch.setattr(filesystem.os, "scandir", vanished)
+    result = target.push_process_logs(logs, "machine")
+    assert not result.ok
+    assert "source vanished" in result.detail
+    assert meta.read_sync_meta(root)["status"] == "partial"
+    assert meta.read_sync_meta(root)["consecutive_partial_count"] == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX can rename an open directory")
+@pytest.mark.parametrize("directory_fd", [False, True])
+def test_root_removed_after_scan_remains_partial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    directory_fd: bool,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    root = tmp_path / "dest" / "machine"
+    meta.write_sync_meta(root, "machine", "local", "ok")
+    meta.write_process_log_meta(root, "partial", ["prior failure"])
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    monkeypatch.setattr(filesystem._process_logs, "supports_dir_fd", lambda: directory_fd)
+    real_scandir = filesystem.os.scandir
+
+    def rotated(path: object) -> object:
+        scanned = real_scandir(path)
+        if directory_fd or path == filesystem._windows_extended_path(logs):
+            logs.rename(tmp_path / "rotated")
+        return scanned
+
+    monkeypatch.setattr(filesystem.os, "scandir", rotated)
+    assert not target.push_process_logs(logs, "machine").ok
+    assert meta.read_sync_meta(root)["status"] == "partial"
+
+
+def test_legacy_partial_without_streak_is_conservatively_migrated(tmp_path: Path) -> None:
+    meta.write_sync_meta(tmp_path, "machine", "local", "partial")
+    previous = meta.read_sync_meta(tmp_path)
+    del previous["sync_legs"]
+    del previous["consecutive_partial_count"]
+    (tmp_path / "sync-meta.json").write_text(json.dumps(previous), encoding="utf-8")
+    meta.write_process_log_meta(tmp_path, "ok")
+    classified = classify_sync_health(
+        "machine",
+        SyncStatus(supported=True, metadata=meta.read_sync_meta(tmp_path)),
+        max_age_hours=12,
+        partial_threshold=3,
+    )
+    assert classified.health == "degraded"
+    assert classified.consecutive_partial_count == 1

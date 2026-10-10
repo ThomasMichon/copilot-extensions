@@ -15,13 +15,15 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_logger.sync.health import merge_health
+from agent_logger.sync.health import (
+    MAX_DEFERRED_FILE_SAMPLES,
+    MAX_DEFERRED_PATH_CHARS,
+    merge_health,
+)
 
 log = logging.getLogger("agent-logger.sync-meta")
 SYNC_VERSION = "1.0.0"
-MAX_DEFERRED_FILE_SAMPLES = 10
 MAX_EXCLUDED_ROOT_SAMPLES = 10
-MAX_DEFERRED_PATH_CHARS = 512
 MAX_META_FIELD_CHARS = 256
 MAX_SYNC_META_BYTES = 64 * 1024
 
