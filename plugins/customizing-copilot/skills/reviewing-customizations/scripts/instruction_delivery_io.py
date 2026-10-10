@@ -77,6 +77,11 @@ def resolve_source(
     reviewed_path = str(entry["destination"])
     if fallback_raw is None:
         fallback_raw = io.read(io.safe(root, PurePosixPath(reviewed_path)), 2 * 1024 * 1024)
+        if (
+            len(fallback_raw) != entry["renderedBytes"]
+            or hashlib.sha256(fallback_raw).hexdigest() != entry["renderedSha256"]
+        ):
+            raise ValueError("reviewed inline bytes differ from the locked digest")
     else:
         reviewed_path = str(entry["fallback"]["destination"])
     reviewed = delivery.parse_marker(fallback_raw)

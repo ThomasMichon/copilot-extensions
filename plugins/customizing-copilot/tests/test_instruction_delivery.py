@@ -16,6 +16,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/reviewing-customizations/scripts"
 sys.path.insert(0, str(SCRIPTS))
 import instruction_delivery as delivery
+import instruction_delivery_io as delivery_io
 import instruction_projections as projections
 import projection_reflect as reflect
 import projection_sync_worker as worker
@@ -679,3 +680,21 @@ def test_inline_migration_never_retires_foreign_modified_fallback(tmp_path: Path
     assert projections.sync_repository(repo, [source]).blocking
     assert (selector.read_bytes(), lock.read_bytes()) == before
     assert fallback.read_bytes() == b"foreign modification"
+
+
+def test_inline_second_read_rejects_concurrent_uncommitted_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, source, spec = fixture(tmp_path, "inline")
+    assert not projections.sync_repository(repo, [source]).blocking
+    uncommitted = projections.render_projection(replace(spec, plugin_version="2.0.0")).content
+    original = delivery_io.resolve_source
+    path = repo / spec.destination
+
+    def interleave(*args: object, **kwargs: object) -> object:
+        path.write_bytes(uncommitted)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(delivery_io, "resolve_source", interleave)
+    with pytest.raises(ValueError, match="inline bytes differ from the locked digest"):
+        projections.resolve_instruction_source(repo, spec.destination, [source])
