@@ -1329,13 +1329,14 @@ def test_fingerprint_source_never_follows_a_symlinked_directory(tmp_path):
     assert after_removal != before
 
 
-def test_fingerprint_source_classifies_a_declared_root_that_is_itself_a_symlink(tmp_path):
-    """A declared ROOT -- not just a nested entry discovered during a walk
-    -- that is itself a symlink must never be silently followed: passing a
-    symlinked directory as a root must not walk/hash its target's
-    contents, and passing a symlinked file as a root must not hash it as
-    an ordinary file. Both must be classified the same way a nested
-    symlink is."""
+def test_fingerprint_source_rejects_a_declared_root_that_is_itself_a_symlink(tmp_path):
+    """A declared ROOT -- the caller's own attributable content
+    declaration -- that is itself a symlink must be REJECTED, not silently
+    reduced to the link's own target-identity text: doing so would hash
+    only "where this points", never the content actually read through
+    that path, recreating the exact content-drift blind spot this
+    function exists to close. This applies to both a symlinked directory
+    root and a symlinked file root."""
     real_dir = tmp_path / "real_dir"
     real_dir.mkdir()
     (real_dir / "nested.py").write_text("x = 1", encoding="utf-8")
@@ -1344,32 +1345,22 @@ def test_fingerprint_source_classifies_a_declared_root_that_is_itself_a_symlink(
         dir_root_link.symlink_to(real_dir, target_is_directory=True)
     except OSError:
         pytest.skip("directory symlinks are unavailable")
-
-    before = vr.fingerprint_source([dir_root_link])
-    # A change to the target's nested content must not be visible through
-    # a symlinked ROOT either -- it is still never walked.
-    (real_dir / "nested.py").write_text("x = 2", encoding="utf-8")
-    after_nested_change = vr.fingerprint_source([dir_root_link])
-    assert before == after_nested_change
-    # But re-pointing the root link itself must change the digest.
-    real_dir_2 = tmp_path / "real_dir_2"
-    real_dir_2.mkdir()
-    dir_root_link.unlink()
-    dir_root_link.symlink_to(real_dir_2, target_is_directory=True)
-    after_repoint = vr.fingerprint_source([dir_root_link])
-    assert after_repoint != before
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([dir_root_link])
 
     real_file = tmp_path / "real_file.py"
     real_file.write_text("x = 1", encoding="utf-8")
     file_root_link = tmp_path / "file_root_link.py"
     file_root_link.symlink_to(real_file)
-    # A symlinked-file root is likewise never hashed as an ordinary file:
-    # changing the TARGET's content must not change the root-link digest
-    # (the link's own identity -- what it points to -- is what is hashed).
-    link_fp_before = vr.fingerprint_source([file_root_link])
-    real_file.write_text("x = 2", encoding="utf-8")
-    link_fp_after = vr.fingerprint_source([file_root_link])
-    assert link_fp_before == link_fp_after
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([file_root_link])
+
+    # Declaring the REAL path (not the symlink) still works normally and
+    # does cover its actual content.
+    before = vr.fingerprint_source([real_dir])
+    (real_dir / "nested.py").write_text("x = 2", encoding="utf-8")
+    after = vr.fingerprint_source([real_dir])
+    assert before != after
 
 
 def test_fingerprint_source_distinguishes_a_file_from_a_symlink_with_matching_bytes(tmp_path):
@@ -1432,6 +1423,56 @@ def test_check_admission_health_repair_required_when_slot_path_is_a_dangling_sym
         vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
         == vr.ADMIT_HEALTH_REPAIR_REQUIRED
     )
+
+
+def test_check_admission_health_repair_required_when_slot_path_is_a_valid_symlink(tmp_path):
+    """A slot symlink that resolves to a PERFECTLY VALID, complete,
+    matching-hash directory must still be rejected, never silently
+    followed through to `reuse`: a published slot's own path must be an
+    immutable real directory, never an indirection, because an
+    indirection can be RETARGETED later without this contract's
+    create-once guarantee ever noticing."""
+    real_dir = tmp_path / "real_target_dir"
+    real_dir.mkdir()
+    marker = json.dumps({
+        "version": "1.0.0", "completed_at": "2020-01-01T00:00:00Z",
+        "pid": 1, "payload_hash": "abc",
+    })
+    (real_dir / vr.COMPLETE_MARKER).write_text(marker, encoding="utf-8")
+
+    vdir = vr.version_dir(tmp_path, "1.0.0")
+    vdir.parent.mkdir(parents=True)
+    try:
+        vdir.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+def test_check_admission_health_repair_required_when_marker_path_is_a_symlink(tmp_path):
+    """Same rationale as the slot-path check above, applied to the marker
+    path itself: even a marker symlink that resolves to a perfectly valid
+    marker file must be rejected, never silently read through."""
+    vr.version_dir(tmp_path, "1.0.0").mkdir(parents=True)
+    real_marker = tmp_path / "real-marker.json"
+    real_marker.write_text(
+        json.dumps({"version": "1.0.0", "completed_at": "x", "pid": 1,
+                    "payload_hash": "abc"}),
+        encoding="utf-8",
+    )
+    marker_file = vr.marker_path(tmp_path, "1.0.0")
+    try:
+        marker_file.symlink_to(real_marker)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
 
 
 def test_check_admission_reuse_when_marker_matches(tmp_path):

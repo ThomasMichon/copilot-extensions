@@ -1321,19 +1321,27 @@ def fingerprint_source(paths) -> str:
     happens to point at. Resolving a path and deduplicating by the
     resolved path would let a symlink alias (``alias.py -> real.py``, both
     under a declared root) vanish from the digest entirely once both paths
-    resolved the same way. A symlinked DIRECTORY is deliberately never followed/walked into (cycle-
-    unsafe, and ambiguous which identity -- the link or its target -- would
-    own the nested names); instead the link itself is hashed as a single
-    entry recording where it points, so re-pointing or adding/removing it
-    still changes the digest even though its nested contents, if any, are
-    not separately walked. A symlink's recorded target is stored relative
-    to the symlink's own containing directory (never as an absolute path),
-    so an absolute on-disk target does not reintroduce location-dependence.
-    This applies identically whether the symlink is discovered DURING a
-    walk or is itself one of the DECLARED roots: a declared root that is
-    itself a symlink is never silently followed/walked -- it is classified
-    as its own single symlink entry, exactly like a nested one. Each
-    entry's kind ("file" vs "symlink") is itself framed as its own
+    resolved the same way. A NESTED symlinked DIRECTORY (one discovered
+    mid-walk, not itself a declared root) is deliberately never
+    followed/walked into (cycle-unsafe, and ambiguous which identity --
+    the link or its target -- would own the nested names); instead the
+    link itself is hashed as a single entry recording where it points, so
+    re-pointing or adding/removing it still changes the digest even though
+    its nested contents, if any, are not separately walked. A symlink's
+    recorded target is stored relative to the symlink's own containing
+    directory (never as an absolute path), so an absolute on-disk target
+    does not reintroduce location-dependence.
+
+    A DECLARED ROOT that is itself a symlink is treated differently from a
+    nested one, and deliberately raises instead of silently succeeding: a
+    root is the caller's own attributable content declaration, so reducing
+    it to mere link-target identity -- never hashing what is actually read
+    through that path -- would recreate exactly the content-drift blind
+    spot this function exists to close (#5472: fingerprinting too little
+    of the real install input). The caller must declare the real resolved
+    content path (or the symlink's target) instead of a symlinked root.
+
+    Each entry's kind ("file" vs "symlink") is itself framed as its own
     length-prefixed record alongside the label and content/target, so a
     regular file can never hash identically to a symlink merely because
     its raw bytes happen to equal some symlink's encoded target text.
@@ -1412,10 +1420,22 @@ def fingerprint_source(paths) -> str:
     for root_path in roots:
         mode = root_modes[root_path]
         if stat.S_ISLNK(mode):
-            # A declared root that is itself a symlink (to a file OR a
-            # directory) is classified exactly like a nested one -- never
-            # walked/read through.
-            entries[root_path] = "symlink"
+            # Unlike a NESTED symlink discovered mid-walk (hashed as its
+            # own identity -- see docstring), a DECLARED ROOT that is
+            # itself a symlink is rejected outright, never silently
+            # reduced to link-target text: a root is the caller's own
+            # attributable content declaration, so quietly fingerprinting
+            # only "where this points" -- while never hashing what is
+            # actually read through that path -- would recreate exactly
+            # the content-drift blind spot this function exists to close
+            # (#5472). The caller must declare the real resolved path (or
+            # the symlink's target) instead.
+            raise ValueError(
+                f"fingerprint_source: declared root is a symlink, not a "
+                f"resolved content path: {root_path} -> "
+                f"{_os.readlink(root_path)!r} -- declare the real target "
+                f"path so its actual content is covered"
+            )
         elif stat.S_ISDIR(mode):
             # os.walk with onerror=_raise (NOT Path.rglob/is_file, which
             # silently swallow scandir/stat PermissionError on the
@@ -1514,22 +1534,30 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
       ``docs/patterns/mutable-dev-slot.md``'s *Ordinary installers* section).
       The caller must refuse with actionable guidance (bump the version, or
       use the claimed ``dev`` slot), never rebuild in place.
-    - ``ADMIT_HEALTH_REPAIR_REQUIRED`` -- either the completion-marker FILE
-      is present but fails validation (corrupt JSON, duplicate keys, wrong
-      schema, a mismatched version field), or ``versions/<version>`` exists
-      but is NOT a directory (a regular file or a broken/dangling symlink
-      sitting where the slot should be). Both are deliberately NOT the same
-      as "never built": a marker FILE existing but unreadable, or an
-      existing-but-wrong-shaped slot path, is ambiguous evidence -- it could
-      mean an already-published, possibly-in-use slot was later corrupted on
-      disk (truncated write, disk fault, a concurrent writer racing outside
-      this contract) -- so a caller must never silently treat either as safe
-      to construct over. Surface this for explicit operator/health-repair
-      handling (e.g. ``toss_incomplete`` only after confirming the slot is
-      not live) instead of reconstructing over possibly-published content.
+    - ``ADMIT_HEALTH_REPAIR_REQUIRED`` -- either the completion-marker path
+      is present but is not a plain regular file (a directory, or a
+      symlink -- dangling or not), or fails validation once read (corrupt
+      JSON, duplicate keys, wrong schema, a mismatched version field); or
+      ``versions/<version>`` exists but is NOT a plain directory (a regular
+      file, or a symlink -- dangling or not). A symlink at either path is
+      deliberately NEVER followed to check what it points to: a published
+      slot/marker must be an immutable REAL directory/file, never an
+      indirection, because an indirection can be silently RETARGETED later
+      (even to another otherwise-valid, complete slot) without this
+      contract's create-once guarantee ever noticing -- the whole point of
+      immutability is defeated if "is this the same identity" can be
+      answered by whatever a mutable link currently happens to point at.
+      None of this is the same as "never built": it is ambiguous/invalid
+      evidence that an already-published, possibly-in-use slot was altered
+      outside this contract (truncated write, disk fault, a concurrent
+      writer racing outside this contract, or a tampered/retargeted link)
+      -- so a caller must never silently treat it as safe to construct
+      over. Surface this for explicit operator/health-repair handling (e.g.
+      ``toss_incomplete`` only after confirming the slot is not live)
+      instead of reconstructing over possibly-published content.
     - ``ADMIT_CONSTRUCT`` -- the slot path is genuinely ABSENT, or exists as
-      a directory with no completion-marker FILE at all (never built, or a
-      prior build crashed or was killed before ever reaching the
+      a plain directory with no completion-marker path at all (never built,
+      or a prior build crashed or was killed before ever reaching the
       marker-write step): this is the known-unpublished/incomplete case,
       unambiguous and safe to (re)build -- a caller needs to serialize on
       the construction lease and build it.
@@ -1542,45 +1570,46 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
     A genuine stat failure (e.g. permission denied) while probing the slot
     or marker path raises rather than guessing at an admission decision --
     same fail-closed philosophy as :func:`fingerprint_source`. Both probes
-    use an explicit ``os.lstat()``/``os.stat()`` (never ``Path.exists()``/
-    ``Path.is_dir()``, which catch OSError internally -- including
-    PermissionError -- and return False, silently masking a stat failure
-    as "absent"), so a DANGLING slot symlink -- something exists at the
-    path, but following it resolves nowhere -- is correctly treated as
-    present-but-invalid (``ADMIT_HEALTH_REPAIR_REQUIRED``), never as
-    "genuinely absent", while an actual permission error still raises.
+    use an explicit ``os.lstat()`` (never ``Path.exists()``/``Path.is_dir()``,
+    which catch OSError internally -- including PermissionError -- and
+    return False, silently masking a stat failure as "absent"; and never a
+    symlink-following ``os.stat()`` either, per the immutability rationale
+    above), so a DANGLING OR a perfectly-valid-but-mutable slot/marker
+    symlink is correctly treated as present-but-invalid
+    (``ADMIT_HEALTH_REPAIR_REQUIRED``), never as "genuinely absent" and
+    never silently followed through to "reuse", while an actual permission
+    error still raises.
     """
     vdir = version_dir(root, version)
     try:
-        os.lstat(vdir)
+        vdir_lstat = os.lstat(vdir)
     except FileNotFoundError:
         return ADMIT_CONSTRUCT
     except OSError as exc:
         raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
-    try:
-        vdir_stat = os.stat(vdir)  # follows a symlink, unlike the lstat above
-    except FileNotFoundError:
-        # A dangling symlink sits at the slot path: something is declared
-        # there, but it resolves nowhere -- ambiguous, never "never built".
-        return ADMIT_HEALTH_REPAIR_REQUIRED
-    except OSError as exc:
-        raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
-    if not stat.S_ISDIR(vdir_stat.st_mode):
-        # Something exists at the slot path, but it is not a directory (a
-        # stray file) -- an invalid slot shape is ambiguous evidence,
-        # never "never built".
+    if not stat.S_ISDIR(vdir_lstat.st_mode):
+        # Something exists at the slot path, but it is not a plain
+        # directory -- a stray file, or a symlink (dangling OR pointing at
+        # a perfectly valid directory). Never follow it: a mutable
+        # indirection at a published slot's own path defeats this
+        # contract's immutability guarantee regardless of what it
+        # currently resolves to.
         return ADMIT_HEALTH_REPAIR_REQUIRED
     marker_file = marker_path(root, version)
     try:
-        os.lstat(marker_file)
+        marker_lstat = os.lstat(marker_file)
     except FileNotFoundError:
         return ADMIT_CONSTRUCT
     except OSError as exc:
         raise OSError(f"check_admission: could not stat {marker_file}: {exc}") from exc
+    if not stat.S_ISREG(marker_lstat.st_mode):
+        # Same rationale as the slot path above: a marker that is itself a
+        # symlink (dangling or not) is never followed and never trusted,
+        # even if its current target happens to validate.
+        return ADMIT_HEALTH_REPAIR_REQUIRED
     marker = read_marker(root, version)
     if marker is None:
-        # The marker path exists (possibly as a dangling symlink, or a
-        # file that fails schema validation) but failed validation --
+        # The marker is a plain file, but its content failed validation --
         # ambiguous evidence, never treated as "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED
     if marker.get("payload_hash") == payload_hash:
