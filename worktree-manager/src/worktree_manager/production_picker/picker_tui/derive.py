@@ -160,9 +160,10 @@ def _state(w, relation_label=""):
     (not recomputed) so ``norm()`` and :func:`_state_style` -- which must
     agree with whatever ``_state()`` actually returned -- share one
     computation."""
-    # A live process owns the worktree regardless of a cached or concurrently
-    # derived git/tracking state. Check this before the explicit ``state`` field
-    # so a first-paint WIP/FINAL cannot hide a live PID lock.
+    interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+    if interpreted.get("finalized_display") and relation_label != "HANDOFF":
+        return "FINAL"
+    # Liveness wins except for the validated explicit-finalization display.
     # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
     # before any git status/PR consideration). A live mux, a live
     # ``inuse.<pid>.lock`` binding, the cached bound-Copilot hint, OR a live
@@ -1021,4 +1022,3 @@ def bucket(wts):
         (w for w in wts if w["state"] not in ("ACTIVE", "FINAL", "MERGED")),
         key=_last_active_secs)
     return active, recent, completed
-

@@ -356,6 +356,10 @@ def _render_status_segment(
     tracking record has them. ``<sync>`` is the picker's ``↑ahead``/
     ``↓behind`` tag.
 
+    A successful explicit finalize carries a durable display assertion:
+    FINAL remains visible on fetch-free polls, independently of the fresh
+    removal authorization and any attached concluding shell.
+
     Fetch-free by default so it is cheap enough to poll on a short
     ``status-interval``; pass ``--fetch`` to refresh behind-counts from the
     remote AND to make a genuine ``FINAL`` reachable at all (a fetch-free
@@ -439,8 +443,8 @@ def _render_status_segment(
         # claim or an open follow-up renders that fact here too (`C<N>`/
         # `F<N>` markers), and a COMPLETED worktree is `FINAL` only when
         # genuinely claim-free/follow-up-free evidence says so, `MERGED`
-        # otherwise. Fetch-free polling (the default) never reports FINAL --
-        # matches design.md's "cached evidence never authorizes FINAL/safe".
+        # otherwise. A durable finalized display is separate from the fresh
+        # cleanup verdict; cached evidence still never authorizes removal.
         # "refreshed" requires the fetch to have both been REQUESTED and
         # actually attempted (`info.fetch_requested`) and succeeded (not
         # `info.fetch_failed`) -- a requested fetch that failed (network
@@ -467,8 +471,9 @@ def _render_status_segment(
             repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
         )
-        bg = _DESCRIPTOR_STYLE_BG.get(descriptor.style, "colour238")
-        block_label = descriptor.compact
+        display_style = descriptor.display["style"] if descriptor.display else descriptor.style
+        bg = _DESCRIPTOR_STYLE_BG.get(display_style, "colour238")
+        block_label = descriptor.display_compact
         tag = f" {turns}\U0001f4ac" if refined_state == git_ops.WorktreeState.CONVO else sync
     else:
         # No tracking record -- held claims/follow-ups/disposition are

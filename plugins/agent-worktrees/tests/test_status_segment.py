@@ -179,6 +179,18 @@ def test_completed_but_not_fetched_renders_merged_not_final(monkeypatch, capsys)
     assert "FINAL" not in out
 
 
+def test_explicit_finalization_survives_fetch_free_mux_polling(monkeypatch, capsys):
+    target = str(Path("wt-finalized").resolve())
+    rec = _record(worktree_path=target, status="finalized")
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    for _ in range(3):
+        assert m.cmd_status_segment(_ns(target)) == 0
+        assert capsys.readouterr().out.strip() == "[FINAL]"
+    rec.status = "active"
+    assert m.cmd_status_segment(_ns(target)) == 0
+    assert "MERGED" in capsys.readouterr().out
+
+
 def test_completed_with_held_claim_renders_merged_with_marker(monkeypatch, capsys):
     rec = _record(
         worktree_path=str(Path("wt-claimed").resolve()),
