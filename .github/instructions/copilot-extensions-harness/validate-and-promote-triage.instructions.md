@@ -1,31 +1,10 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.12-dev1","renderedBytes":2292,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.13-dev1","renderedBytes":1414,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":2} -->
 
-> If `validate-and-promote-triage.local.instructions.md` exists here, compare
-> `pluginVersion` and prefer whichever is newer. On a tie,
-> compare `templateSha256`: matching means prefer local;
-> differing means prefer this checked-in file.
-
-# `validate-and-promote` failure triage fallback
-
-**Fallback policy `[owner: copilot-extensions-harness]`:** A red
-`validate-and-promote` run is a repo-wide release-pipeline gate, not a
-routine failure -- it blocks **every** contributor's merged work from
-reaching `main`, whether or not you caused it. Diagnose via the GitHub run
-itself (never guess), routing every `gh` call through the repository-scoped
-account wrapper: open the failing run and identify every job that actually
-failed (`fail-fast: false` allows more than one) -- it may be one or more
-`full - <plugin>` fan-out jobs (one job per plugin in the full matrix), or a
-gate job (`worktree-manager`/`guards-full-sweep`), each needing its own
-diagnosis. For a fan-out job, read the pytest failure literally, then
-classify three ways: a **known, tracked flake/transient failure** (link its
-issue, per `contributing-to-copilot-extensions`'s flake exception); a
-**CI-environment-specific test bug** (e.g. a Windows-only `subprocess`
-constant referenced on the Linux runner); or a **genuine regression**. The
-latter two are owed a real, versioned **fix-forward** fix, even if the
-failure predates your own change -- never dismissed as pre-existing. Land
-it via the normal worktree/PR flow against `dev`, never `main` directly, and
-never force-retry the pipeline as a substitute for a fix. See the
-`diagnosing-validate-and-promote-failures` skill for the exact commands.
+Before dependent action, acquire guidance or BLOCK. No body delivery asserted.
+Local `.github/instructions/copilot-extensions-harness/validate-and-promote-triage.local.instructions.md`; reviewed `.github/copilot/context-fallbacks/copilot-extensions-harness/validate-and-promote-triage.md`.
+Invoke `reviewing-customizations`; use its returned base and an absolute Python interpreter. Substitute the three placeholders in this executable argv:
+["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>",".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","--from-settings","--json"]
+Apply inline cache recovery: authenticate canonical locals or use reviewed fallback; newer wins, equal version/hash favors local, unequal hash favors reviewed. Read fully unless complete body/provenance/receipt is visible now.

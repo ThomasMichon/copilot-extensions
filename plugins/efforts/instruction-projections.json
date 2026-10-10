@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "completion-gate",
+      "deliveryMode": "inline",
       "template": "instructions/completion-gate.instructions.md",
       "destination": ".github/instructions/efforts/completion-gate.instructions.md",
       "customizationKind": "instructions",

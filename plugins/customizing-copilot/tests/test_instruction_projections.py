@@ -2473,6 +2473,7 @@ def test_existing_scanner_includes_projection_findings_and_inventory(
 
     assert any(
         finding.check == "projection-missing"
+        and finding.severity == projections.BLOCKING
         for finding in report.findings
     )
     assert report.instruction_projections is not None
@@ -2627,6 +2628,7 @@ def test_integrated_scanner_reads_projection_settings_without_folder_trust(
     assert payload["instruction_projections"]["declared"] == 1
     assert any(
         finding["check"] == "projection-missing"
+        and finding["severity"] == projections.BLOCKING
         for finding in payload["findings"]
     )
 
@@ -2929,7 +2931,7 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
     text = rendered.content.decode("utf-8")
     assert ".github/instructions/**/*.local.instructions.md" in text
-    assert "Their absence is not an error." in text
+    assert "Missing local caches are normal" in text
     # Check the catch-all's own *raw template body* independently of the
     # rendered output -- `render_projection()` always layers its own
     # generic per-file preamble on top (even for a `skipLocalCache`
@@ -2940,7 +2942,7 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     # this must guard the catch-all's own precedence text specifically.
     body = spec.template_content.decode("utf-8")
     normalized = " ".join(body.split())
-    assert "pluginVersion` fields and prefer whichever is newer" in normalized
+    assert "newer version wins; equal version/hash favors local" in normalized
     # Existence alone must never be the precedence signal (a stale
     # sibling from an earlier successful render could otherwise outrank a
     # genuinely newer checked-in copy -- see
@@ -2949,9 +2951,12 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     # keywords -- a reversed policy (match -> checked-in, differ ->
     # local) would still satisfy bag-of-words checks but must fail here.
     assert (
-        "prefer the checked-in file only if that hash differs too, "
-        "otherwise the local file stays authoritative"
+        "equal version/different hash favors reviewed content"
     ) in normalized
+    assert spec.delivery_mode == "inline"
+    assert "a hook may have written bodies after automatic instruction discovery" in normalized.lower()
+    assert "omitted middle text" in normalized
+    assert "Persist no loaded-state" in normalized
 
 
 def test_render_local_cache_honors_skip_local_cache(tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ from scan_agents import repo_owned_agent_files
 from scan_plugin_sources import PluginSource, _load_json, _plugin_hook_files
 from scan_skills import split_frontmatter
 from scan_text_files import PRUNE_DIRS
+from instruction_projections import instruction_delivery_inventory
 
 TOKEN_HEURISTIC_CHARS = 4
 ADDITIONAL_CONTEXT_EVENTS = {
@@ -474,7 +475,12 @@ def build_context_budget(
     if capture_dynamic:
         dynamic_entries, dynamic_errors = capture_dynamic_session_files(root, sources, home)
     known_totals_entries = static_entries + metadata_entries + dynamic_entries
+    try:
+        delivery_budget = instruction_delivery_inventory(root, repo_always)
+    except ValueError as exc:
+        delivery_budget = {"validation_errors": [{"error": str(exc)}]}
     return {
+        "instruction_delivery": delivery_budget,
         "token_estimate": {
             "heuristic": "ceil(unicode_characters / 4)",
             "characters_per_token": TOKEN_HEURISTIC_CHARS,

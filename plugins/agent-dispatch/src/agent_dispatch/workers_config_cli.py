@@ -1,19 +1,21 @@
 """Thin CLI glue for a Worktree Manager Picker "Workers" ``config_sections``
-entry (``agent-dispatch-workers-config-section``, Phase 1).
+entry (``agent-dispatch-workers-config-section``, Phases 1 + 3).
 
 Bridges two already-shipped primitives -- ``registrar discover``'s declared
 ``supervised-lane`` pools and ``supervise override``'s local enable/disable
 kill-switch -- into the one request shape a ``config_sections[].run``
-invocation needs: given a pool name, print a short, human-legible status
-line (and, when invoked with a toggle flag, apply the local override
-first). No new mutation primitive is introduced here -- this is glue, not a
+invocation needs: print a short, human-legible status line (one named pool,
+or a summary across every declared pool when no name is given), and, when
+invoked with a toggle flag against one named pool, apply the local override
+first. No new mutation primitive is introduced here -- this is glue, not a
 new engine; see ``efforts/active/agent-dispatch-workers-config-section``.
 """
 
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING, Any
+import sys
+from typing import TYPE_CHECKING
 
 from .loop_commands import _resolve_cli_module
 from .registrations import RegistrationKind
@@ -53,6 +55,22 @@ def find_supervised_lane(
     return None
 
 
+def all_supervised_lanes() -> list["ProfileDeclaration"]:
+    """Every declared ``supervised-lane`` pool, in discovery order.
+
+    Backs the no-name ``config-section`` invocation (the ``config_sections``
+    manifest entry's own default shape, since a repo's chosen pool names are
+    not knowable ahead of time by a static manifest ``run`` argv -- see
+    Phase 3's own Plan entry): report *every* declared pool at once rather
+    than presuming a repo names its pool a particular convention.
+    """
+    from . import registrar_discovery as rd
+
+    return [
+        decl for decl in rd.discover() if decl.kind == RegistrationKind.SUPERVISED_LANE
+    ]
+
+
 def pool_status_line(
     name: str,
     *,
@@ -74,15 +92,64 @@ def pool_status_line(
         if overridden and override_reason:
             state = f"{state} ({override_reason})"
         line = f"{name}: {lanes} {unit} declared -- {state}"
+    return _truncate(line)
+
+
+def _truncate(line: str) -> str:
     if len(line) > STATUS_LINE_MAX_CHARS:
         line = line[: STATUS_LINE_MAX_CHARS - 1] + "\u2026"
     return line
 
 
-def _cmd_workers_config_section(args: argparse.Namespace) -> int:
-    """``workers config-section <name>`` -- status, optionally toggling first.
+def _pool_overridden_state(
+    declaration: "ProfileDeclaration", *, overrides: dict
+) -> tuple[bool, str | None]:
+    from .overrides import logical_override_id, overridden_off_ids
 
-    Resolves ``name`` against ``registrar discover``'s declared
+    token = logical_override_id(declaration.owner or "local", declaration.name)
+    overridden = token in overridden_off_ids(overrides)
+    reason = (overrides.get(token) or {}).get("reason") if overridden else None
+    return overridden, reason
+
+
+def all_pools_status_line(
+    declarations: list["ProfileDeclaration"], *, overrides: dict
+) -> str:
+    """Render a single ≤200-char line summarizing every declared pool.
+
+    Joined with ``"; "`` in discovery order; once appending the next pool's
+    own segment would overflow the budget, the remainder is collapsed into a
+    trailing ``"+N more"`` marker instead of silently truncating mid-segment
+    (unlike :func:`pool_status_line`'s single-pool ellipsis, a per-pool
+    summary line reads better as "N more" than a half-cut pool name).
+    """
+    if not declarations:
+        return "no worker pools declared"
+    segments = []
+    for decl in declarations:
+        overridden, reason = _pool_overridden_state(decl, overrides=overrides)
+        state = "overridden off" if overridden else "active"
+        if overridden and reason:
+            state = f"{state} ({reason})"
+        segments.append(f"{decl.name}: {decl.concurrency} -- {state}")
+    line = ""
+    for i, segment in enumerate(segments):
+        candidate = segment if not line else f"{line}; {segment}"
+        remaining = len(segments) - i
+        # Reserve room for a possible "; +N more" suffix on every segment
+        # except the last (where no suffix is ever needed).
+        suffix_room = len(f"; +{remaining - 1} more") if remaining > 1 else 0
+        if len(candidate) + suffix_room > STATUS_LINE_MAX_CHARS:
+            more = len(segments) - i
+            return _truncate(f"{line}; +{more} more" if line else f"+{more} more")
+        line = candidate
+    return line
+
+
+def _cmd_workers_config_section(args: argparse.Namespace) -> int:
+    """``workers config-section [name]`` -- status, optionally toggling first.
+
+    With ``name``: resolves it against ``registrar discover``'s declared
     ``supervised-lane`` pools, optionally applies ``--toggle
     enable|disable`` via the existing ``supervise override`` primitive
     (addressed by the pool's **logical** override id,
@@ -94,6 +161,13 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
     ``--json``. Exit code is 0 when the pool is found, 1 when no matching
     declaration exists (status/JSON is still emitted either way -- a Picker
     invocation should show the "not found" state, not merely fail silently).
+
+    Without ``name`` (the ``config_sections`` manifest entry's own default
+    invocation, since a static manifest ``run`` argv cannot know a
+    particular consuming repo's own pool name ahead of time): reports every
+    declared pool's status in one summary line; ``--toggle`` without a name
+    is rejected with a clear error (exit 2) rather than silently summarizing
+    instead of toggling.
     """
     from .config import overrides_path
     from .overrides import (
@@ -104,10 +178,39 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
         set_override,
     )
 
-    declaration = find_supervised_lane(args.name, owner=getattr(args, "owner", None))
-    owner = declaration.owner if declaration is not None else (args.owner or "local")
-    token = logical_override_id(owner or "local", args.name)
+    name = getattr(args, "name", None)
     path = overrides_path()
+
+    if name is None:
+        if getattr(args, "toggle", None) is not None:
+            print(
+                "agent-dispatch workers config-section: --toggle requires a "
+                "pool name (omitting the name only summarizes every pool)",
+                file=sys.stderr,
+            )
+            return 2
+        declarations = all_supervised_lanes()
+        overrides = load_overrides(path)
+        if getattr(args, "json", False):
+            pools = []
+            for decl in declarations:
+                overridden, reason = _pool_overridden_state(decl, overrides=overrides)
+                pools.append(
+                    {
+                        "name": decl.name,
+                        "owner": decl.owner,
+                        "concurrency": decl.concurrency,
+                        "overridden_off": overridden,
+                        "override_reason": reason,
+                    }
+                )
+            return _core()._emit({"pools": pools})
+        print(all_pools_status_line(declarations, overrides=overrides))
+        return 0
+
+    declaration = find_supervised_lane(name, owner=getattr(args, "owner", None))
+    owner = declaration.owner if declaration is not None else (args.owner or "local")
+    token = logical_override_id(owner or "local", name)
 
     toggle = getattr(args, "toggle", None)
     if toggle == "disable":
@@ -120,8 +223,8 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
     reason = (overrides.get(token) or {}).get("reason") if overridden else None
 
     if getattr(args, "json", False):
-        payload: dict[str, Any] = {
-            "name": args.name,
+        payload = {
+            "name": name,
             "owner": owner,
             "found": declaration is not None,
             "concurrency": declaration.concurrency if declaration is not None else None,
@@ -137,7 +240,7 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
         return 0 if declaration is not None else 1
     print(
         pool_status_line(
-            args.name,
+            name,
             declaration=declaration,
             overridden=overridden,
             override_reason=reason,
@@ -158,11 +261,22 @@ def register_workers_commands(sub) -> None:
     cs = workers_sub.add_parser(
         "config-section",
         help=(
-            "print a pool's <=200-char status line, optionally toggling "
-            "its local override first -- the config_sections[].run entry point"
+            "print a pool's <=200-char status line (or a summary of every "
+            "declared pool when no name is given), optionally toggling one "
+            "named pool's local override first -- the config_sections[].run "
+            "entry point"
         ),
     )
-    cs.add_argument("name", help="the declared supervised-lane pool's name")
+    cs.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help=(
+            "the declared supervised-lane pool's name; omit to summarize "
+            "every declared pool (the config_sections manifest entry's own "
+            "default invocation)"
+        ),
+    )
     cs.add_argument(
         "--owner",
         help=(
@@ -174,7 +288,7 @@ def register_workers_commands(sub) -> None:
     cs.add_argument(
         "--toggle",
         choices=["enable", "disable"],
-        help="apply a local override before reporting status",
+        help="apply a local override before reporting status (requires name)",
     )
     cs.add_argument("--reason", help="optional reason recorded with --toggle disable")
     cs.add_argument(

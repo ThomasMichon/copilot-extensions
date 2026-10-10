@@ -6,7 +6,7 @@
 - **Created:** 2026-10-08
 - **Status:** Active
 - **Vision:** `visions/agent-fabric/README.md`, derive-don't-duplicate and graceful composition
-- **Sub-issues:** #5737 · #5738 · #5740 · #5741 · #5972 · #5973 · #5974
+- **Sub-issues:** #5737 · #5738 · #5740 · #5741 · #5972 · #5973 · #5974 · #6039
 
 ## Guiding Intent
 
@@ -90,6 +90,16 @@ Publication-blocker decision:
 
 > "Fix the tooling blocker, then continue"
 
+Additional Logger boundary decision:
+
+> "May I file this additional convergence issue and add its proposal to the
+> campaign for review, leaving runtime implementation blocked on the shared
+> contract?"
+
+The operator accepted: `true`. This authorizes tracking and design review;
+it does not waive the original shared-contract prerequisite or authorize
+unreviewed changes to Logger's native/WSL compatibility behavior.
+
 ## Plan
 
 ### Phase 1 - Review the campaign boundary
@@ -115,8 +125,18 @@ Publication-blocker decision:
   SSH selection, or review a justified distinct contract for each candidate.
 - [ ] Resolve #5973 by sharing WSL/mesh host identity while retaining SSH
   aliases, live provider projection, keypair selection and native/guest venues.
-- [ ] Resolve #5974 through a reviewed Index designated-host identity boundary
-  that preserves explicit indexer configuration and standalone operation.
+- [x] Complete #5974's independent Index designation-boundary design
+  review/merge gate in #6023.
+- [ ] Implement and resolve #5974's reviewed Index designated-host identity
+  boundary after the shared contract lands; preserve explicit indexer
+  configuration and standalone operation.
+- [ ] Complete the independent design review/merge gate for #6039's Logger
+  boundary proposal; this gate does not wait for #5689.
+  _(agent-recommended inventory finding; operator-approved tracking/review)_
+- [ ] Resolve #6039's Logger ramp-up execution-locality and named-machine SSH
+  implementation after the shared contract lands; preserve
+  session-corpus filtering and standalone operation.
+  _(agent-recommended inventory finding; operator-approved tracking/review)_
 - [ ] Inventory other agent-* named-machine operation paths for remaining
   duplicated identity/transport resolution, including unresolved generated
   installer-context source ownership, shell-only paths and provider argv.
@@ -250,6 +270,40 @@ one-snapshot consistency and setup/read/HTTP agreement. Run the client-only
 packaging/installer contracts for the new vendored dependency on both platform
 lanes, a fresh standalone subprocess with no sibling present, and an available
 live venue before claiming deployment. The proposal itself changes no runtime.
+
+### Logger ramp-up boundary proposal (#6039)
+
+Logger's ramp-up command is another named-machine consumer, not merely a
+transcript label producer. Its local check strips `-wsl` and accepts either
+hostname as a prefix of the other before choosing local session discovery or
+SSH delegation. The existing test explicitly preserves native/WSL equivalence.
+Separate that compatibility surface from execution locality: same physical
+host does not prove access to the requested native or guest session store.
+
+After this proposal clears review and the original #5689 contract lands:
+
+1. Use shared execution identity for known-local versus remote decisions.
+   Preserve `detect_machine()`'s public transcript/worker labels unless a
+   separately reviewed compatibility change requires otherwise. Legacy
+   worktree designation prefixes remain session-record filters, not proof of
+   execution locality.
+2. Compose optional topology through an attributed read-only process boundary
+   and the shared matcher/transport resolver. Do not add a Logger topology
+   parser, a mandatory sibling import, or a PATH-based same-name provider.
+   A genuinely absent or explicitly unsupported provider retains standalone
+   explicit SSH-alias operation. A present provider's ambiguity, configuration,
+   schema or timeout failure is visible, never literal-alias fallback.
+3. Keep session discovery, explicit `--session` behavior, local-path conflicts,
+   suffix filtering, remote argument forwarding and child exit status owned by
+   Logger. Do not rewrite explicit SSH targets as physical-host identities.
+   Resolve one coherent identity/transport snapshot for each routing decision.
+4. Prove native/guest separation, exact/case/declared aliases, hostname-prefix
+   collisions, unknown aliases, absent versus broken providers, legacy suffix
+   filters, explicit local paths and `--session`, real resolver-to-SSH argv,
+   exit semantics and fresh standalone packaging on both platform lanes.
+
+This proposal changes no runtime. Filing #6039 does not reserve its
+implementation or claim final all-consumer inventory completeness.
 
 ## Journal
 
@@ -768,6 +822,68 @@ live venue before claiming deployment. The proposal itself changes no runtime.
   the architecture principles of independent installation, graceful optional
   composition, attributable command ownership and explicit real errors.
 
+### 2026-10-10 - Index proposal merged and remaining adapter inventory
+- Proposal #6023 merged as `2e387c8a49a4ab78baa5b3a61cd65d0cbaefbdfc`
+  after a current-head approval with zero findings and all required checks
+  successful. No review or CI bypass was used. Supported post-merge
+  reconciliation preserved the campaign workspace and advanced it onto `dev`.
+  The earlier Picker promotion/deployment journal is now upstream too.
+- #5974's design-review gate is settled; runtime implementation and deployment
+  are not. Its optional batch identity capability is still a future extension.
+  The shared host/WSL contract remains with #5689's original owner: its
+  current checks pass, but its latest review still reports unresolved findings.
+  Posted a coordination update to that PR rather than opening competing work.
+- The bounded shell-only inventory found no second shell identity authority.
+  `worktree-manager/bin/launch-session.sh:706-714` and
+  `launch-session.ps1:907-918` consume the already-resolved remote plan and
+  execute its exact `ssh_alias`/`remote_command`; neither resolves machine
+  locality. Their hostname and `SSH_CONNECTION` uses are display/session
+  context. Installer, package, control-master and preview matches were
+  classified separately from named-machine decisions. This classification
+  excludes generated vendors and the already-settled installation-context
+  host/PID ownership contract.
+- The bounded provider-argv inventory inspected the Picker descriptor parser
+  (`provider_sources.py:135-187`), container wrapper/Docker spawn builders
+  (`resolver.py:99-205,317-412`) and container SSH-profile adapter
+  (`provider_ssh.py:90-110,203-211,272-292`). These select attributable
+  provider commands and resource/instance keys, not shared machine identities.
+  A container name rendered as an SSH profile hostname remains a provider
+  namespace; it must not be canonicalized as a physical host. No source change
+  is warranted by those specific adapters.
+- These reports close the previously unexamined shell handoff and
+  provider-command construction questions within their stated bounds. They
+  do not reclassify the known #5972 Picker source-materialization/locality
+  candidates or prove every provider/backend handler in the suite was inspected.
+  The campaign's remaining-consumer inventory item stays open until that final
+  coverage boundary is reconciled with the integration slices.
+
+### 2026-10-10 - Logger inventory extension proposed
+- Rechecked #5689 at the same current head: 18 checks succeeded, six were
+  skipped, and the latest current-head review still lists 11 open findings.
+  No new owner response followed the existing campaign coordination comment.
+  Its source/root attribution could not be resolved in the current local
+  registry; that is not evidence of abandonment or authority to take it over.
+- The independent source inventory found Logger's `ramp_up.py:210-245,436-452`
+  strips `-wsl`, accepts hostname-prefix equivalence, and delegates the
+  supplied name directly to SSH. `test_ramp_up.py:167-172` explicitly expects
+  native/WSL equivalence, so a corrected execution-locality boundary requires
+  reviewed compatibility treatment rather than an unannounced test rewrite.
+- The operator approved filing this finding and adding the proposal for review,
+  with runtime implementation still blocked on the shared contract. Filed
+  #6039 after duplicate search and verified its complete title/body. It remains
+  unreserved; this planning amendment claims no runtime completion.
+- The bounded scan also located Vault's local WSL IPC selection and
+  Codespaces' lease/connection-owner host labels. These are classification
+  candidates, not newly proven named-machine resolver overlap; their mere
+  platform/hostname use does not justify a migration. Previously settled
+  generated installation-context, shell-handoff and provider-argv bodies were
+  not re-investigated. Final coverage remains open.
+- Supported pull-forward retained the unpublished Index post-merge journal
+  while advancing onto current `dev`. That journal accompanies this proposal.
+  Documentation impact: the campaign and active index own the future boundary;
+  as-is Logger, architecture and install docs stay unchanged until code lands.
+  No new vision intent or runtime dependency is introduced.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
@@ -775,10 +891,14 @@ additional #5972 Picker matching slice is merged in #6002, with complete
 affected-suite evidence, green publication gates and verified promotion and
 deployment. Remaining #5972 paths and
 #5973/#5974 are not implemented. #5974 is now reserved with its portable
-composition proposal awaiting review; implementation must follow review and
+composition proposal reviewed and merged in #6023; implementation must follow
 the original peer's shared identity contract. The campaign extension is merged.
 #5689 retains its original host/WSL
 implementation owner and remains the overlapping-consumer prerequisite.
+Logger #6039's proposal has its own independent review/merge gate in the Plan.
+Once that gate is complete, do not repeat design review: implementation waits
+only for the original shared contract. Neither its runtime nor its native/WSL
+compatibility change is implemented or reserved.
 
 #5885 is merged and #5911 is closed: do not rework that completed remediation.
 Normal promotion and installed-consumer refresh are verified; consumer projection

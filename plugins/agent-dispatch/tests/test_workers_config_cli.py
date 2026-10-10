@@ -187,3 +187,107 @@ def test_status_line_truncates_to_budget(monkeypatch, capsys):
     )
     assert len(line) == STATUS_LINE_MAX_CHARS
     assert line.endswith("\u2026")
+
+
+# -- no-name summary mode (Phase 3: the config_sections manifest entry's own
+# default invocation, since a static manifest `run` argv cannot know a
+# particular consuming repo's own pool name ahead of time) -------------------
+
+
+def test_parser_name_is_optional():
+    args = _args(["workers", "config-section"])
+    assert args.name is None
+
+
+def test_no_name_summarizes_every_declared_pool(monkeypatch, capsys):
+    _patch_discover(
+        monkeypatch,
+        [
+            _declare("pool-a", owner="repo:a", concurrency=1),
+            _declare("pool-b", owner="repo:b", concurrency=3),
+        ],
+    )
+    args = _args(["workers", "config-section"])
+    assert args.func(args) == 0
+    out = capsys.readouterr().out.strip()
+    assert out == "pool-a: 1 -- active; pool-b: 3 -- active"
+
+
+def test_no_name_summary_reflects_overrides(monkeypatch, capsys):
+    _patch_discover(monkeypatch, [_declare("pool-a", owner="repo:a", concurrency=1)])
+    args = _args(["workers", "config-section", "pool-a", "--toggle", "disable", "--reason", "noisy"])
+    args.func(args)
+    capsys.readouterr()
+
+    args = _args(["workers", "config-section"])
+    assert args.func(args) == 0
+    assert capsys.readouterr().out.strip() == "pool-a: 1 -- overridden off (noisy)"
+
+
+def test_no_name_no_pools_declared(monkeypatch, capsys):
+    _patch_discover(monkeypatch, [])
+    args = _args(["workers", "config-section"])
+    assert args.func(args) == 0
+    assert capsys.readouterr().out.strip() == "no worker pools declared"
+
+
+def test_no_name_ignores_non_supervised_lane_declarations(monkeypatch, capsys):
+    other = ProfileDeclaration(name="x", kind="emitter", owner="repo:a")
+    _patch_discover(monkeypatch, [other])
+    args = _args(["workers", "config-section"])
+    assert args.func(args) == 0
+    assert capsys.readouterr().out.strip() == "no worker pools declared"
+
+
+def test_no_name_with_toggle_rejected(monkeypatch, capsys):
+    _patch_discover(monkeypatch, [])
+    args = _args(["workers", "config-section", "--toggle", "disable"])
+    assert args.func(args) == 2
+    assert "requires a pool name" in capsys.readouterr().err
+
+
+def test_no_name_json_output_shape(monkeypatch, capsys):
+    _patch_discover(
+        monkeypatch,
+        [
+            _declare("pool-a", owner="repo:a", concurrency=1),
+            _declare("pool-b", owner="repo:b", concurrency=3),
+        ],
+    )
+    args = _args(["workers", "config-section", "--json"])
+    assert args.func(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {
+        "pools": [
+            {
+                "name": "pool-a",
+                "owner": "repo:a",
+                "concurrency": 1,
+                "overridden_off": False,
+                "override_reason": None,
+            },
+            {
+                "name": "pool-b",
+                "owner": "repo:b",
+                "concurrency": 3,
+                "overridden_off": False,
+                "override_reason": None,
+            },
+        ],
+    }
+
+
+def test_all_pools_status_line_collapses_overflow_into_more_marker():
+    from agent_dispatch.workers_config_cli import STATUS_LINE_MAX_CHARS, all_pools_status_line
+
+    # Enough pools with long-ish names to force overflow past the 200-char budget.
+    decls = [_declare(f"pool-with-a-fairly-long-name-{i:03d}", concurrency=1) for i in range(30)]
+    line = all_pools_status_line(decls, overrides={})
+    assert len(line) <= STATUS_LINE_MAX_CHARS
+    assert "more" in line
+
+
+def test_all_pools_status_line_empty():
+    from agent_dispatch.workers_config_cli import all_pools_status_line
+
+    assert all_pools_status_line([], overrides={}) == "no worker pools declared"

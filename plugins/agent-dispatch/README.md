@@ -696,6 +696,43 @@ Naming this machine itself (or omitting `--machine`) is unaffected and edits
 the local store directly, no SSH involved. `supervise override list` has no
 `--machine` -- it always reports this machine's own store.
 
+### Worktree Manager Picker glue (`agent-dispatch workers config-section`)
+
+A Worktree Manager Picker ⚙ **Configuration** menu entry named "Workers"
+(`plugins/agent-dispatch/pivots/agent-dispatch.json`'s own `config_sections`
+contribution) reports the status of every declared `supervised-lane` worker
+pool this machine discovers, without requiring the operator to know any
+`agent-dispatch` CLI invocation:
+
+```bash
+agent-dispatch workers config-section            # summary: every declared pool
+agent-dispatch workers config-section my-pool     # one named pool's status
+agent-dispatch workers config-section my-pool --toggle disable --reason "noisy"
+```
+
+With no pool name (the Picker's own invocation, since a plugin-shipped
+manifest's `run` argv is static and cannot know which pool name a particular
+consuming repo chose), it prints one joined ≤200-char line across every
+`kind: supervised-lane` declaration `registrar discover` finds -- e.g.
+`"my-pool: 2 lanes declared -- active; other-pool: 1 lane declared --
+overridden off (noisy)"` -- collapsing into a trailing `"+N more"` marker
+rather than truncating mid-pool-name once the budget would overflow. With a
+pool name, it reports (and optionally toggles, via `--toggle enable|disable`,
+the existing `supervise override` local kill-switch) that one pool only;
+`--toggle` without a name is rejected (toggling always needs one target).
+`--json` emits full structured detail instead of the compact line, for either
+shape. See `workers_config_cli.py` for the full contract.
+
+**Status-only from the Picker today.** The Configuration menu entry reports
+status only -- enabling/disabling a pool from the Picker itself is not yet
+wired up, blocked on
+[`ThomasMichon/copilot-extensions#6044`](https://github.com/ThomasMichon/copilot-extensions/issues/6044)
+(the Picker's `confirm` manifest field is parsed but not yet enforced before
+a destructive action/config-section dispatch runs -- a pre-existing,
+cross-cutting gap, not specific to this entry). The terminal `--toggle
+enable|disable` flag above remains the supported way to toggle a pool until
+that closes.
+
 `agent-dispatch emitter tick|serve SPEC --holder HOST` is the diagnostic/direct
 surface used by the supervised child. Normal deployments declare the emitter
 rather than wiring cron, a Scheduled Task, or another external timer.

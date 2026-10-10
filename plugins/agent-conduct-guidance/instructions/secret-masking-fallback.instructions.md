@@ -4,7 +4,7 @@ applyTo: "**"
 
 # Secret-pattern masking fallback
 
-**Fallback policy `[owner: agent-conduct-guidance@0.1.7-dev1]`:** Copilot's
+**Fallback policy `[owner: agent-conduct-guidance@0.1.8-dev1]`:** Copilot's
 own upstream content pipeline can silently rewrite a credential-*shaped*
 string expression -- a scheme word immediately concatenated or interpolated
 with a variable holding a token/secret, most commonly an `Authorization`

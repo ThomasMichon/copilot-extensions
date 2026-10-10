@@ -10,6 +10,30 @@ import pytest
 from agent_worktrees import tracking
 
 
+@pytest.fixture(autouse=True)
+def _isolate_identity_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_WORKTREES_IDENTITY_KEY", str(tmp_path / "absent-identity.key"))
+
+
+@pytest.fixture
+def keyed_identity_payload(monkeypatch):
+    from agent_worktrees import identity_marker
+
+    captured = {}
+    key = b"k" * identity_marker.KEY_BYTES
+    monkeypatch.setattr(identity_marker, "load_identity_key", lambda: key)
+
+    class Cipher:
+        def encrypt(self, nonce, plaintext, associated_data):
+            import json
+
+            captured.update(json.loads(plaintext))
+            return b"test-ciphertext"
+
+    monkeypatch.setattr(identity_marker, "_aesgcm", lambda resolved: Cipher())
+    return captured
+
+
 def _load_full_command_surface_once() -> None:
     """Restore the pre-lazy-dispatch full eager module surface for tests.
 

@@ -60,7 +60,9 @@ def build_marker(
     return f"<!-- agent-worktrees:source {' '.join(parts)} -->"
 
 
-def build_codename_marker(codename: str, *, root: str | None = None) -> str:
+def build_codename_marker(
+    codename: str, *, root: str | None = None, identity: str | None = None,
+) -> str:
     """Build the codename-only source-attribution comment (``codename``
     mode). Carries **no** machine, worktree id, session id, or timestamp --
     only the assigned codename, which decodes to nothing without local
@@ -78,10 +80,21 @@ def build_codename_marker(codename: str, *, root: str | None = None) -> str:
     itself (another worktree's codename, never a raw identifier); omitted
     entirely when there is no resolvable chain, so a childless worktree's
     marker is unchanged from before this field existed.
+
+    *identity* optionally carries an ``enc=<identity>`` field: an
+    AES-256-GCM-encrypted blob (see :mod:`agent_worktrees.identity_marker`)
+    of the FULL raw identity (worktree id, machine, session, head, project,
+    timestamp), decryptable only by the holder of a shared symmetric key.
+    Opaque ciphertext to everyone else -- just as public-safe as *codename*
+    and *root* themselves; omitted entirely when no identity key is
+    configured, so a marker without one configured is unchanged from before
+    this field existed.
     """
     marker = f"<!-- agent-worktrees:source codename={codename}"
     if root:
         marker += f" root={root}"
+    if identity:
+        marker += f" enc={identity}"
     return f"{marker} -->"
 
 
