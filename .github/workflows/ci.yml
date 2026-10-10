@@ -979,7 +979,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.smoke != '[]' && needs.discover.outputs.smoke != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: ${{ matrix.plugin == 'agent-dispatch' && 12 || 8 }}
     strategy:
       fail-fast: false
       matrix:

@@ -14,7 +14,7 @@ that pattern to this repository.
 | [Mux Child Window Suppression](active/mux-child-window-suppression/README.md) | Draft | #6040 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Draft; approved Komodo-first substrate selection | #6030, #5861 |
-| [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Draft | #6007 |
+| [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
 | [PR Recovery Break Glass](active/pr-recovery-break-glass/README.md) | Draft | #5817 |
 | [Transparent PSMux Launch](active/transparent-psmux-launch/README.md) | Active | #5878 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |

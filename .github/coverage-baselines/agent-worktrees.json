@@ -1,7 +1,7 @@
 {
   "asset": "agent-worktrees.json",
-  "measured_commit": "647102c5423a1258a7287b867f24699019748f07",
+  "measured_commit": "a936d3b39f4d069b4e77ed11cf8e0e59bebbcd2b",
   "plugin": "agent-worktrees",
-  "release_tag": "coverage-baselines-647102c5423a1258a7287b867f24699019748f07",
+  "release_tag": "coverage-baselines-a936d3b39f4d069b4e77ed11cf8e0e59bebbcd2b",
   "schema": "copilot-extensions.coverage-baseline-pointer"
 }
