@@ -22,6 +22,25 @@ def test_proof_requires_explicit_privileged_admission(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+def test_results_root_indirection_is_refused_before_external_operations(tmp_path):
+    with patch("sys.argv", [
+        "run.py", "--allow-privileged-dind", "--results-root", str(tmp_path),
+    ]), patch.object(Path, "is_symlink", return_value=True), patch.object(MODULE, "run") as run:
+        try:
+            MODULE.main()
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("symlink indirection must be refused")
+    run.assert_not_called()
+    assert not list(tmp_path.iterdir())
+
+
+def test_host_safe_contracts_are_collected_in_required_ci():
+    workflow = (MODULE_PATH.parents[3] / ".github" / "workflows" / "ci.yml").read_text()
+    assert "tools/tests/test_komodo_role_fleet.py" in workflow
+
+
 def test_first_command_failure_still_cleans_all_profiles_and_secret_files(tmp_path):
     calls = []
 

@@ -141,8 +141,11 @@ def main() -> int:
     args = parser.parse_args()
     if not args.allow_privileged_dind:
         parser.error("Requires explicit --allow-privileged-dind approval; this is not a production installer")
-    root = args.results_root.resolve()
-    if not root.is_dir() or root.is_symlink():
+    supplied = args.results_root.absolute()
+    if any(path.is_symlink() for path in (supplied, *supplied.parents)):
+        parser.error("--results-root must not contain symlink indirection")
+    root = supplied.resolve()
+    if not root.is_dir():
         parser.error("--results-root must be an existing private directory")
     run_dir = Path(tempfile.mkdtemp(prefix="komodo-role-proof-", dir=root))
     receipt = run(run_dir)

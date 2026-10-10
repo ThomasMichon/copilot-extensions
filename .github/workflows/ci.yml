@@ -854,6 +854,7 @@ jobs:
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
           tools/test_run_tests_in_devcontainer.py
+          tools/tests/test_komodo_role_fleet.py
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
