@@ -55,7 +55,7 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
         dirty = git_ops.get_dirty_files(cwd=worktree_path)
         listing = "\n  ".join(dirty[:20])
         output.err(
-            "Worktree has uncommitted changes; commit or stash before syncing:\n  "
+            "Worktree has uncommitted changes; make it clean before syncing:\n  "
             + listing
         )
         return False
@@ -79,13 +79,30 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
         output.err(f"Upstream {upstream} not found after fetch.")
         return False
 
+    from . import config as cfg, pr_recovery
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+        recovery = pr_recovery.prepare(
+            worktree_id, branch, upstream, record, cwd=worktree_path,
+        )
+    except (OSError, ValueError, git_ops.GitError) as exc:
+        output.err(f"Could not prepare backed sync; nothing rebased: {exc}")
+        return False
+    print(f"Pre-sync HEAD retained at {recovery.local_ref}.")
+    print(f"Revisit it with: git switch --detach {recovery.local_head}")
+
     behind = git_ops.git(
         "rev-list", "--count", f"{branch}..{upstream}",
         cwd=worktree_path, check=False,
     ).stdout.strip()
 
     print(f"Rebasing {branch} onto {upstream}...")
-    if not git_ops.rebase(upstream, cwd=worktree_path):
+    try:
+        pr_recovery.check_start(recovery, cwd=worktree_path)
+    except (OSError, ValueError, git_ops.GitError) as exc:
+        output.err(f"Nothing rebased: {exc}")
+        return False
+    if not git_ops.rebase(recovery.target_head, cwd=worktree_path):
         output.err(
             f"Rebase of {branch} onto {upstream} hit a conflict and was aborted; "
             f"the branch is unchanged. Resolve by hand in the worktree "
@@ -98,9 +115,11 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
     ).stdout.strip()
     from . import pr_rebase
     try:
+        pr_recovery.complete(recovery, cwd=worktree_path)
         pr_rebase.record_synced(worktree_id, config, worktree_path)
-    except (OSError, git_ops.GitError) as exc:
-        output.warn(f"PR rebase proof could not be recorded: {exc}")
+    except (OSError, ValueError, git_ops.GitError) as exc:
+        output.err(f"Sync completed but its recovery result could not be recorded: {exc}")
+        return False
     suffix = f" (was {behind} behind)" if behind and behind != "0" else ""
     print(f"[OK] {branch} synced onto {upstream}{suffix}; HEAD now {head}.")
     return True
