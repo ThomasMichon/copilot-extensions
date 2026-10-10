@@ -167,6 +167,14 @@ def test_posix_usage_does_not_treat_zombies_as_file_holding_members(monkeypatch)
 
     assert plugin_test_containment._ps_group_usage(7) == (1, 4096)
 
+def test_linux_empty_group_does_not_require_ps(monkeypatch):
+    monkeypatch.setattr(plugin_test_containment, "_linux_group_usage", lambda pid: (0, 0))
+    monkeypatch.setattr(
+        plugin_test_containment, "_ps_group_usage",
+        lambda pid: pytest.fail("native empty-group measurement is authoritative"),
+    )
+    assert plugin_test_containment._posix_group_usage(7) == (0, 0)
+
 
 def test_posix_group_verifies_members_after_sigkill(monkeypatch):
     signals = []

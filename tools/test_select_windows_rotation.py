@@ -100,3 +100,19 @@ def test_windows_workers_are_bounded_and_plugin_scoped() -> None:
     assert "--exec-path" in execution["run"]
     assert "$nativeVersion -ne $originalVersion" in execution["run"]
     assert "Get-Command git -CommandType Application | Select-Object -First 1" in execution["run"]
+
+
+def test_canonical_manual_ref_and_schedule_pin_the_same_matrix_sha() -> None:
+    workflow = yaml.safe_load(
+        (SCRIPT.parent.parent / ".github" / "workflows" /
+         "windows-coverage-rotation.yml").read_text(encoding="utf-8")
+    )
+    select = workflow["jobs"]["select"]
+    assert select["outputs"]["sha"] == "${{ steps.resolve-sha.outputs.sha }}"
+    assert select["outputs"]["ref"] == "${{ steps.resolve-ref.outputs.ref }}"
+    assert select["steps"][0]["env"]["INPUT_REF"] == "${{ inputs.ref }}"
+    assert 'ref="dev"' in select["steps"][0]["run"]
+    assert select["steps"][1]["with"]["ref"] == "${{ steps.resolve-ref.outputs.ref }}"
+    report = workflow["jobs"]["report"]
+    assert report["needs"] == ["select", "test"]
+    assert "needs.select.outputs.ref == 'dev'" in report["if"]

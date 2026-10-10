@@ -824,6 +824,22 @@ _Pending review of this plan._
   real commit/push/tracking isolation coverage. Local concurrent seed
   checks also hit per-item timeouts, so local success is not claimed as
   repeat performance acceptance; the same refspec check passes alone.
+- Run 38083381384 still exhausted the aggregate ceiling (902.28
+  seconds including cleanup), despite all completed groups staying below
+  240 seconds. Publication setup reuse is not yet enough; more real cost
+  reduction is owed, not another timeout increase.
+- The operator approved retaining a newly merged canonical rotation flow:
+  scheduled validation always targets `dev`; manual runs use a validated
+  explicit ref input, pin one SHA for every matrix job, and never report
+  candidate-PR failures as shared `dev` health. Removed only the overlapping
+  branch-selection implementation while keeping two workers, native Git,
+  diagnostic mode and unchanged budgets. Preserved the incoming encrypted
+  attribution refresh contract in its split module. All 44 runner/rotation
+  regressions and the real incoming attribution contract pass.
+- A subsequent review's claimed `(0, 0)` falsiness is not a Python bug:
+  nonempty tuples are truthy. A direct empty-native-group regression proves
+  the existing probe preserves `(0, 0)` without invoking `ps`; no speculative
+  production workaround was added.
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged
