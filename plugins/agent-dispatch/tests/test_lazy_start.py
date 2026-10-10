@@ -123,7 +123,7 @@ def test_coordinator_spawn_uses_console_interpreter_and_no_window_flag(monkeypat
     # The interpreter is NOT substituted to a pythonw.exe sibling.
     assert calls[0][0][1:] == ["-m", "agent_dispatch", "serve"]
     assert not calls[0][0][0].lower().endswith("pythonw.exe")
-    assert daemon_kwargs_calls == [{}]
+    assert daemon_kwargs_calls == [{"breakaway": True}]
     assert calls[0][1]["creationflags"] == "NO_WINDOW"
 
 

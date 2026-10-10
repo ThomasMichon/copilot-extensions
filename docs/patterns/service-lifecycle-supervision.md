@@ -77,6 +77,16 @@ The update path does not re-register the supervisor or ask for elevation again.
 host that should run it; a client-only host opts out (`--no-service` /
 `-NoService`).
 
+**Outlive the launching command, not its cleanup policy.** A successful
+`install`/`update`/ensure may close a caller-owned Windows kill-on-close Job.
+Durable daemons must explicitly opt out through their canonical launch
+primitive while bounded helpers remain contained. Headlessness, readiness
+before return, and survival of the immediate parent are independent properties;
+verify readiness again after closing the caller's Job. Keep test containment
+suppression intact and use an isolated production-lifetime regression.
+See [`windows-background-process-launch`](windows-background-process-launch.md)
+for the ownership/visibility distinction and supported primitives.
+
 ### Gotchas this pattern encodes
 
 - **The workgroup-principal trap.** Register the Windows task's principal from the
