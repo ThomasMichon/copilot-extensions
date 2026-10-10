@@ -86,6 +86,39 @@ not ambient `AGENT_INDEX_*` values. Treat the home/provider directory as
 operator-owned, trusted state. Credentials remain external; account selection
 uses the existing source connector behavior, not bundled secrets.
 
+## Pinned release bundles
+
+Release inspection does not require host configuration or load the core.
+A bundle contains the normal wheels for `agent-index-service`, `agent-index`,
+`agent-zdd`, `agent-procutil` and `agent-dropin-registry`. Native third-party
+dependencies remain governed package-manager dependencies, not bundled models
+or an implicit client installation.
+
+```console
+agent-index-service release describe --bundle /absolute/release --source-commit <commit>
+agent-index-service release verify --descriptor /absolute/release/release.json --expected-source-commit <commit>
+```
+
+`describe` prints a schema-1 descriptor containing the selected source commit,
+service/core versions, host configuration schema and wheel identities/digests.
+Save that output beside its wheels. `verify` requires an independently selected
+commit pin and checks the descriptor, referenced files, wheel metadata and core
+dependency constraints without importing or extracting wheel code. Invalid,
+incomplete or modified bundles fail explicitly; verification never installs,
+activates, rewrites configuration or changes a running host.
+
+This is an **integrity and pinning contract, not a signature or release approval**.
+The trusted release controller must select a real released `main` snapshot and
+obtain its bundle/descriptor through its own authenticated source. Supplying a
+commit string to `describe` does not prove that arbitrary wheel contents were
+built from that commit. Neither command polls `dev` or silently trusts a
+descriptor's own commit as the desired release.
+
+The descriptor checks the five bundled distributions' declared version/extra
+relationships, including both base and native core requirements. It is not a
+complete third-party lockfile or a platform compatibility admission check.
+Verified inputs must remain immutable until a future installer consumes them.
+
 Selecting the legacy home/data/routing paths explicitly allows legacy native
 colocation. **Do not run `serve` over an existing active instance:** use the
 authorized lifecycle owner and `deploy` instead. No migration, installation,
@@ -116,7 +149,7 @@ assignment/progress/cancellation and query embedding/storage composition.
 Future authenticated remote adapters need identity/role/job/source authorization
 tests; a shared SQLite mount is not such an adapter.
 
-Version-slot installation, release descriptors/provenance,
+Version-slot installation, authenticated release acquisition/build provenance,
 candidate validation, durable supervision and rollback/schema policy belong to
 the coordinator's next lifecycle/release slice. `deploy` is not an installer
 or continuous restart authority. Never infer rollback safety from executable

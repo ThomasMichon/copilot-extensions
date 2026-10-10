@@ -78,8 +78,10 @@ def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, 
         captured.update(kwargs)
         assert command[1:4] == ["-I", "-m", "pytest"]
         if smoke:
-            assert command[5:7] == [
+            assert command[5:9] == [
                 str(root / "tests" / "test_cli.py"), str(root / "tests" / "test_config.py"),
+                str(root / "tests" / "test_release.py"),
+                str(root / "tests" / "test_release_cli.py"),
             ]
         else:
             assert command[5] == str(root / "tests")

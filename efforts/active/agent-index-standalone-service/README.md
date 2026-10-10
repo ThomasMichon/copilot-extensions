@@ -98,6 +98,10 @@ Architecture clarification, verbatim:
 > 1-3 could run in independent containers if needed. We should break it down in a
 > reasonable manner.
 
+After the merge-only pause, the operator authorized resumption:
+
+> Okay, we may resume work now
+
 ## Plan
 
 ### Phase 1 - Existing recovery and reviewed proposal
@@ -115,9 +119,10 @@ Architecture clarification, verbatim:
 - [ ] Align component contracts with the API/controller, execution, persistence
   and client decomposition before moving or distributing code.
 - [ ] Define the service package, executable and portable release descriptor
-  outside the plugin marketplace.
-- [ ] Extract or compose the existing hosted query, indexing and worker code
-  without rebuilding a parallel implementation.
+  outside the plugin marketplace. The normal package/executable landed in
+  #5863; pinned bundle validation is the next descriptor slice.
+- [x] Extract or compose the existing hosted query, indexing and worker code
+  without rebuilding a parallel implementation (#5863, local adapters).
 - [ ] Implement the version-slot installer and durable configuration/state
   contract, including health-gated activation and rollback.
 - [ ] Preserve existing CLI, configuration and non-container host compatibility.
@@ -279,3 +284,39 @@ boundaries from implementation decisions and deployment-specific policy.
   2.32 seconds and contains no FastAPI/uvicorn/NumPy/pyarrow/LanceDB/tree-sitter
   packages. Full preparation retains native extras. Runner/workflow regressions
   passed 36 tests with one Linux-only process-group regression deferred to CI.
+
+### 2026-10-10 - Resuming the independent lifecycle
+- Operator explicitly lifted the pause. #5863 has reached released `main` as
+  `agent-index-service` `0.1.1-dev1`; native deployment is not inferred from
+  promotion. The retained implementation worktree was safely advanced after
+  preserving a backup of its already-merged private branch.
+- Native process/read-admission health, detailed status and existing warm-engine
+  inference were verified without restarting either service or cancelling work.
+  A timed-out CLI status alone did not establish failed API health. The host
+  currently has only its active executable slot; any upgrade must first establish
+  a retained eligible rollback target rather than assume an older slot exists.
+- The next bounded slice is a pinned wheel-bundle descriptor and verification
+  contract before installation/activation. It supplies integrity, exact version
+  selection and compatibility evidence; it does not claim a digest authenticates
+  a release or proves its build provenance. Trusted released-source acquisition
+  and lifecycle/schema-safe activation remain separate gates.
+- Development-only read-only monitoring is rearmed at a long interval. No
+  Scheduled Tasks, persistent supervisor, factory-specific integration or live
+  migration is introduced by this resumed slice.
+- Pinned-bundle verification is implemented without wheel extraction, native
+  stack imports or host writes. The descriptor binds five normal distributions
+  to exact source/version/digest selections; the independently supplied expected
+  revision and dependency checks reject tampered or incompatible candidates.
+  Unit/CLI smoke passed 176 tests; the full contained standalone suite passed
+  182 before the additional real-wheel build test. That integration test builds
+  actual package source copies, rejects the frozen pre-seam core version and
+  verifies a temporary release-version fixture. No test version is published.
+- Validation tiers: unit and contained native hosting/cutover regression lanes
+  exercised. Real wheel-build/descriptor integration also passed. No installer
+  or fresh service activation is implemented by this slice, so installer
+  clean-room and live external-venue deployment remain explicitly deferred to
+  the installation/activation slices. The native production instance is intact.
+- Complete contained suite, including the actual wheel-build integration and
+  hosted deployment cycles, passed 183 tests. Pinned-release pure contracts are
+  part of the base-only path-gated smoke lane; native deployment/build coverage
+  remains in the full lane.
