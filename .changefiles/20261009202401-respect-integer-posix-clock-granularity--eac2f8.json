@@ -1,0 +1,9 @@
+{
+  "comment": "Respect integer POSIX clock granularity in real build-lease timeout regression while retaining bounded-wait assertions",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
