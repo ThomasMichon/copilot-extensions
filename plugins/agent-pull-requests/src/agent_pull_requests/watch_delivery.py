@@ -23,11 +23,13 @@ class Deliveries:
         self.legacy_queue = deque()
         self.scheduler: threading.Thread | None = None
         self.max_workers = 8
+        self.changed = threading.Event()
 
     def resume(self) -> None:
         with self.lock:
             if self.shutdown.is_set():
                 return
+            self.changed.set()
             if self.scheduler is None or not self.scheduler.is_alive():
                 self.scheduler = threading.Thread(
                     target=self._schedule, name="pr-notify-scheduler", daemon=True,
@@ -36,6 +38,7 @@ class Deliveries:
 
     def _schedule(self) -> None:
         while not self.shutdown.is_set():
+            self.changed.clear()
             with self.transaction:
                 pending = sorted(
                     self.registry.pending_events(),
@@ -64,7 +67,13 @@ class Deliveries:
                     )
                     self.workers[identity] = thread
                     thread.start()
-            self.shutdown.wait(0.05)
+            future = [
+                e.subscriber.pending["next_attempt"] for e in pending
+                if e.subscriber.registration_id not in self.workers
+                and e.subscriber.pending["next_attempt"] > time.time()
+            ]
+            delay = max(0.0, min(future) - time.time()) if future else None
+            self.changed.wait(delay)
 
     def legacy(self, event) -> None:
         """Keep legacy best-effort delivery from blocking observation or other callbacks."""
@@ -80,6 +89,7 @@ class Deliveries:
         finally:
             with self.lock:
                 self.workers.pop(event.subscriber.registration_id, None)
+            self.changed.set()
 
     def _run(self, event) -> None:
         sub = event.subscriber
@@ -138,6 +148,7 @@ class Deliveries:
             with self.lock:
                 if self.workers.get(sub.registration_id) is threading.current_thread():
                     del self.workers[sub.registration_id]
+            self.changed.set()
 
     def status(self) -> list[dict]:
         with self.transaction:
@@ -155,6 +166,7 @@ class Deliveries:
             ]
 
     def close(self, deadline: float) -> list[str]:
+        self.changed.set()
         scheduler = self.scheduler
         if scheduler is not None:
             scheduler.join(max(0.0, deadline - time.monotonic()))

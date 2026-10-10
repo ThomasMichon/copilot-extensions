@@ -345,6 +345,16 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
     finally:
         release.set()
 
+def test_pending_only_key_retires_poller_and_scheduler_waits_for_retry(make):
+    daemon = make(notify=lambda event: 1)
+    daemon.compute("register", spec())
+    wait(lambda: daemon.status()["pending_deliveries"][0]["attempts"] == 1)
+    wait(lambda: not daemon._pollers)
+    assert daemon._deliveries.scheduler.is_alive()
+    attempts = daemon.status()["pending_deliveries"][0]["attempts"]
+    time.sleep(0.1)
+    assert daemon.status()["pending_deliveries"][0]["attempts"] == attempts
+
 def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
     release = threading.Event()
     calls = []

@@ -296,8 +296,7 @@ class WatchDaemon:
             idle_since = None
             if not self._registry.watching_count(key):
                 self._deliveries.resume()
-                self._shutdown_event.wait(timeout=self._poll_interval)
-                continue
+                break
             try:
                 snap = self._fetch(key.repo, key.number) if self._registry.watching_count(key) else None
             except Exception:
@@ -329,6 +328,8 @@ class WatchDaemon:
             # replaced it otherwise).
             if self._pollers.get(key) is threading.current_thread():
                 del self._pollers[key]
+        if not self._shutdown_event.is_set() and self._registry.watching_count(key):
+            self._ensure_poller(key)
 
     def status(self) -> dict:
         return {
