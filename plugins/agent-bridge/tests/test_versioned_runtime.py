@@ -1089,12 +1089,69 @@ def test_fingerprint_source_is_order_independent(tmp_path):
     assert vr.fingerprint_source([src, manifest]) == vr.fingerprint_source([manifest, src])
 
 
-def test_fingerprint_source_skips_missing_paths_without_raising(tmp_path):
+def test_fingerprint_source_raises_on_a_missing_declared_root(tmp_path):
+    """Fail closed (#6014 review): a missing declared root must never
+    silently collapse to a best-effort digest over whatever remained --
+    that could let a marker's recorded hash match a later, genuinely
+    different input set whose declared root also happened to vanish the
+    same way."""
     missing = tmp_path / "does-not-exist"
-    # Must not raise -- a caller fingerprinting a partially-staged tree gets
-    # a best-effort result, not a crash.
-    result = vr.fingerprint_source([missing])
-    assert isinstance(result, str) and len(result) == 64
+    with pytest.raises(FileNotFoundError):
+        vr.fingerprint_source([missing])
+
+
+def test_fingerprint_source_raises_on_an_unreadable_file(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("x", encoding="utf-8")
+
+    real_read_bytes = Path.read_bytes
+
+    def _boom(self):
+        if self.name == "a.py":
+            raise OSError("simulated unreadable file")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_is_independent_of_overlapping_root_order(tmp_path):
+    """A prior bug (#6014 review): with overlapping roots (a parent and its
+    own child directory), the first containing root used for a file's label
+    depended on argument order, and the same file was hashed twice (once
+    per overlapping root) -- both made the result depend on how the caller
+    happened to order/nest its roots, contradicting the stable, dedup'd
+    contract. Passing [parent, child] vs [child, parent] must agree."""
+    parent = tmp_path / "parent"
+    child = parent / "child"
+    child.mkdir(parents=True)
+    (child / "a.py").write_text("x", encoding="utf-8")
+    (parent / "b.py").write_text("y", encoding="utf-8")
+
+    forward = vr.fingerprint_source([parent, child])
+    backward = vr.fingerprint_source([child, parent])
+    assert forward == backward
+
+
+def test_fingerprint_source_frames_labels_and_content_unambiguously(tmp_path):
+    """A prior bug (#6014 review): bare NUL-separated label/content records
+    let one file's content containing an embedded label+separator serialize
+    identically to two genuinely different files. Construct the reviewer's
+    own adversarial example precisely (same root name on both sides, so the
+    labels line up byte-for-byte under the old scheme) and confirm the two
+    distinct input sets now fingerprint differently."""
+    one_file_root = tmp_path / "g1" / "r"
+    one_file_root.mkdir(parents=True)
+    (one_file_root / "a").write_bytes(b"x\0r/b\0y")
+
+    two_file_root = tmp_path / "g2" / "r"
+    two_file_root.mkdir(parents=True)
+    (two_file_root / "a").write_bytes(b"x")
+    (two_file_root / "b").write_bytes(b"y")
+
+    assert vr.fingerprint_source([one_file_root]) != vr.fingerprint_source([two_file_root])
 
 
 def test_check_admission_construct_when_slot_absent(tmp_path):

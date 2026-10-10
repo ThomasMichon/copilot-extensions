@@ -1272,45 +1272,74 @@ def fingerprint_source(paths) -> str:
     should be treated as "this version's payload changed" (e.g. a plugin's
     whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
     alone -- a prior audit on this effort found exactly that narrower scope
-    on one adopter, #5472). Hashes each regular file's path (relative to the
-    shortest common ancestor, POSIX-normalized so the fingerprint is stable
-    across OSes) and content, sorted for determinism; a directory is walked
-    recursively. Missing/unreadable paths are skipped rather than raising,
-    so a caller fingerprinting a partially-staged tree gets a best-effort
-    (not a crash) -- callers that need "all paths must exist" should check
-    that separately first.
+    on one adopter, #5472). Hashes each regular file's path (relative to
+    whichever declared root most specifically contains it, POSIX-normalized
+    so the fingerprint is stable across OSes) and content, sorted by label
+    for determinism; a directory is walked recursively.
+
+    Each ``(label, content)`` pair is framed with an explicit 8-byte
+    big-endian length prefix before hashing, so two different payloads can
+    never serialize to the same byte stream (a bare separator byte, even a
+    NUL, does not unambiguously frame arbitrary file content -- a label or
+    file ending in that same byte could make two distinct inputs collide).
+
+    Root matching is independent of the ORDER ``paths`` is passed in: roots
+    are tried longest-path-first (the most specific containing root always
+    wins over a shallower, overlapping one), and the same file reached
+    through more than one overlapping root is only ever hashed once
+    (deduplicated by its resolved absolute path). Swapping the order of
+    overlapping roots, or passing both a parent and its own child, cannot
+    change the result.
+
+    Fails closed: a missing declared root, or any file that cannot be read,
+    raises immediately rather than being silently skipped -- a caller
+    relying on this fingerprint for an admission decision must never see a
+    best-effort digest over whatever happened to remain readable stand in
+    for "the full attributable input was validated". A caller that
+    genuinely needs to fingerprint a partially-staged tree must check for
+    that itself before calling this.
     """
     import hashlib
 
-    files: list[Path] = []
-    roots = [Path(p) for p in paths]
+    roots = [Path(p).resolve() for p in paths]
+    for root_path in roots:
+        if not root_path.exists():
+            raise FileNotFoundError(
+                f"fingerprint_source: declared input path does not exist: {root_path}"
+            )
+    # Longest-path-first: the most specific containing root always wins,
+    # regardless of the order `paths` was passed in.
+    ordered_roots = sorted(roots, key=lambda r: len(r.parts), reverse=True)
+
+    files: set[Path] = set()
     for root_path in roots:
         if root_path.is_dir():
-            files.extend(sorted(f for f in root_path.rglob("*") if f.is_file()))
-        elif root_path.is_file():
-            files.append(root_path)
-    # A stable relative label per file: prefer the path relative to whichever
-    # input root actually contains it, falling back to the absolute POSIX
-    # form so a file outside every declared root still fingerprints
-    # deterministically rather than raising.
+            for f in root_path.rglob("*"):
+                if f.is_file():
+                    files.add(f.resolve())
+        else:
+            files.add(root_path)
+
     def _label(f: Path) -> str:
-        for root_path in roots:
+        for root_path in ordered_roots:
             try:
-                return (root_path.name + "/" + f.relative_to(root_path).as_posix())
+                rel = f.relative_to(root_path)
             except ValueError:
                 continue
+            return root_path.name + "/" + rel.as_posix()
         return f.as_posix()
+
+    def _frame(data: bytes) -> bytes:
+        return len(data).to_bytes(8, "big") + data
 
     digest = hashlib.sha256()
     for f in sorted(files, key=_label):
         try:
             data = f.read_bytes()
-        except OSError:
-            continue
-        digest.update(_label(f).encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(data)
-        digest.update(b"\0")
+        except OSError as exc:
+            raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
+        digest.update(_frame(_label(f).encode("utf-8")))
+        digest.update(_frame(data))
     return digest.hexdigest()
 
 
