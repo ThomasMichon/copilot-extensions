@@ -127,3 +127,7 @@ contain terminal-multiplexer descendants.
   existing shared launch-kind pattern remains accurate and unchanged.
 - Added the required patch changefile. Review, promotion and deployment remain
   outstanding.
+- Implementation review requested explicit real timeout coverage. The desktop
+  lane now passes nine checks, including a real PSMux `run-shell` timeout with
+  two Python descendants and verified caller-Job cleanup of the complete tree.
+- Synchronized the active effort index with this README.

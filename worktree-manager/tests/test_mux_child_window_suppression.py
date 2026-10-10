@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+import agent_procutil as pu
 
 from worktree_manager import mux_daemon
 from worktree_manager import mux_daemon_process
@@ -156,3 +157,55 @@ finally:
             monitor.result(timeout=3)
     assert not visible, "owned mux child surfaced a visible window"
     assert not focused, "owned mux child stole focus"
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("MUX_CHILD_WINDOWS_E2E") != "1",
+    reason="opt-in real PSMux timeout containment",
+)
+def test_real_psmux_timeout_reaps_descendants(tmp_path: Path) -> None:
+    from mux_windows_observer import descendants, processes
+
+    env = dict(os.environ)
+    for key in ("TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION"):
+        env.pop(key, None)
+    env["PSMUX_DATA_DIR"] = str(tmp_path / "timeout-mux-data")
+    env["PSMUX_NO_WARM"] = "1"
+    payload = tmp_path / "slow-child.py"
+    payload.write_text(
+        "import subprocess,sys,time\n"
+        "from agent_procutil import no_window_kwargs\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],"
+        "**no_window_kwargs())\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    process, job = pu.spawn_sync_in_kill_on_close_job(
+        [os.environ["PSMUX_TEST_BIN"], "run-shell",
+         subprocess.list2cmdline([sys.executable, str(payload)])],
+        env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, **pu.no_window_kwargs(),
+    )
+    owned: set[int] = set()
+    try:
+        assert job is not None, "timeout test requires native descendant containment"
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            table = processes()
+            owned.update(descendants(process.pid, table))
+            if sum(table.get(pid, ("", 0))[0].lower() == "python.exe" for pid in owned) >= 2:
+                break
+            time.sleep(.02)
+        else:
+            pytest.fail("PSMux timeout fixture did not launch both Python descendants")
+        with pytest.raises(subprocess.TimeoutExpired):
+            process.communicate(timeout=.1)
+    finally:
+        if job is not None:
+            job.close()
+        process.communicate(timeout=5)
+    deadline = time.monotonic() + 3
+    while owned & processes().keys() and time.monotonic() < deadline:
+        time.sleep(.02)
+    assert not (owned & processes().keys()), "timed-out PSMux descendants leaked"
