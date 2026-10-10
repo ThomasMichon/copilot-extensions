@@ -235,6 +235,27 @@ def test_failed_cancellation_preserves_pending_registration(make, monkeypatch):
     finally:
         release.set()
 
+def test_failed_legacy_fire_write_recovers_without_restart(make, monkeypatch):
+    from agent_pull_requests import watch_daemon
+
+    write = watch_daemon.write_subscriptions_state
+    failed = threading.Event()
+    calls = []
+
+    def fail_once(entries):
+        if not entries and not failed.is_set():
+            failed.set()
+            raise OSError("state unavailable")
+        write(entries)
+
+    monkeypatch.setattr(watch_daemon, "write_subscriptions_state", fail_once)
+    daemon = make(notify=lambda event: calls.append(event))
+    registration = spec()
+    del registration["notification_protocol"]
+    daemon.compute("register", registration)
+    wait(lambda: failed.is_set() and len(calls) == 1)
+    assert read_subscriptions_state() == []
+
 @pytest.mark.parametrize("operation", ["register", "unregister"])
 def test_post_replace_failure_retains_committed_memory_state(make, monkeypatch, operation):
     from agent_pull_requests import watch_daemon

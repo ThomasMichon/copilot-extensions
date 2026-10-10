@@ -156,6 +156,14 @@ class WatchDaemon:
         if kind == "register":
             return self._handle_register(payload)
         if kind == "unregister":
+            if (
+                type(payload.get("number")) is not int or payload["number"] <= 0
+                or any(
+                    not isinstance(payload.get(field), str) or not payload[field].strip()
+                    for field in ("repo", "subscriber_id")
+                )
+            ):
+                return {"error": "invalid cancellation target"}
             key = WatchKey(repo=str(payload.get("repo", "")), number=int(payload.get("number", 0)))
             with self._persist_lock:
                 identity = str(payload.get("subscriber_id", ""))
@@ -310,12 +318,27 @@ class WatchDaemon:
             try:
                 with self._persist_lock:
                     before = self._registry.revision()
+                    previous = self._registry.snapshot_state()
                     fired = (
                         self._registry.apply_snapshot(key, snap) if snap is not None
                         else self._registry.sweep_timeouts((key,))
                     )
                     if self._registry.revision() != before or self._persistence_error is not None:
-                        self._persist()
+                        try:
+                            self._persist()
+                        except StateCommitUncertain:
+                            for event in fired:
+                                if not event.subscriber.acknowledged:
+                                    self._deliveries.legacy(event)
+                            raise
+                        except OSError:
+                            self._registry.restore_state([
+                                entry for entry in previous
+                                if self._registry.subscriber(
+                                    WatchKey(entry["repo"], entry["number"]), entry["subscriber_id"],
+                                ) is None
+                            ])
+                            raise
             except OSError:
                 self._shutdown_event.wait(timeout=self._poll_interval)
                 continue
