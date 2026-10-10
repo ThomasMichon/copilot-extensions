@@ -1,0 +1,9 @@
+{
+  "comment": "Reject nonempty wheel RECORD self-size as well as self-hash.",
+  "changes": [
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}

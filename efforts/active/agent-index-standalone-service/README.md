@@ -326,3 +326,8 @@ boundaries from implementation decisions and deployment-specific policy.
   Standard repeatable metadata fields and Core Metadata 2.6 are accepted.
   The complete corrected contained suite passed 244 tests, including real
   package wheels and hosted/cutover regressions. No live indexer change occurred.
+- #6047 merged with current-head approving review and green required CI. Its
+  approval body still carried a Medium RECORD self-size strictness finding,
+  overlooked before merge; an immediate fix-forward rejects both nonempty
+  self-hash and self-size with a matching-size regression. Installation work
+  remains gated on landing that correction.

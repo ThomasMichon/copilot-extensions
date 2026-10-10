@@ -209,8 +209,8 @@ def _record(archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory:
         hasher = None
         expected = ""
         if name == record_name:
-            if digest:
-                raise ReleaseError("RECORD must not hash itself")
+            if digest or size:
+                raise ReleaseError("RECORD must leave its own hash and size empty")
         elif name not in signatures:
             if not size or "=" not in digest:
                 raise ReleaseError(f"RECORD hash and size required: {name}")
