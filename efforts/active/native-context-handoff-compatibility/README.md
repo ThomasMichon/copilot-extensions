@@ -6,6 +6,7 @@
 - **Status:** Draft
 - **Vision:** `visions/plugins/context-handoff/README.md`; native-convergence
 - **Umbrella issue:** #6028
+- **Branch(es):** independent implementation branches off `dev`; coordinator owns publication.
 - **Implementation:** not started; this change establishes reviewed intent.
 
 ## Guiding Intent
@@ -49,6 +50,10 @@ host-specific adoption policy belongs outside this generic implementation.
 Public-safe capture of the compatibility part of the operator request:
 
 > We'll update our context-handoff plugin to switch behaviors when content management is enabled in settings or otherwise detected.
+
+Here, the operator's phrase "content management" means native context
+management, including the effective `contextManagementTools` setting. The
+quotation above preserves the original request verbatim.
 
 The operator also requested that this compatibility work have its own effort.
 Unrelated repository lifecycle work is intentionally outside this scope.

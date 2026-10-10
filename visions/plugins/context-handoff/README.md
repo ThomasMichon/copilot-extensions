@@ -4,7 +4,7 @@
   Copilot agent's work across a context-window boundary
 - **Scope:** leaf (child of [`agent-fabric`](../../agent-fabric/README.md))
 - **Status:** Active
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-10
 - **Reality docs:** [plugin README](../../../plugins/context-handoff/README.md),
   [continuation skill](../../../plugins/context-handoff/skills/context-handoff/SKILL.md),
   `plugins/context-handoff/skills/diagnosing-handoff-cutover/`, and the active
