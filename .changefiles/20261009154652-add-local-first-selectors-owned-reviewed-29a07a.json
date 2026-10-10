@@ -1,5 +1,5 @@
 {
-  "comment": "Add local-first selectors, owned reviewed fallbacks, body receipts and accounting; treat unreviewed new-source freshness as advisory maintenance drift while preserving integrity blockers.",
+  "comment": "Add local-first selectors, canonical-payload-authenticated local authority, owned reviewed fallbacks with rollback-safe retirement, body receipts and accounting; keep new-source freshness advisory and integrity failures blocking.",
   "changes": [
     {
       "plugin": "customizing-copilot",

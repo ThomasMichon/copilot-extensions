@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import Callable, Mapping, Protocol
 
@@ -38,6 +39,14 @@ class Projection(Protocol):
     apply_to: str
     delivery_mode: str
     delivery_declared: bool
+
+
+def canonical_renders(spec: Projection) -> tuple[bytes, bytes]:
+    current = render_projection(spec, False)[0]
+    legacy = render_projection(
+        replace(spec, delivery_mode="inline", delivery_declared=False), False
+    )[0]
+    return current, legacy
 
 
 def render_projection(
@@ -226,8 +235,9 @@ def render_selector(provenance: Mapping[str, object]) -> tuple[bytes, dict]:
         "Acquire authoritative content before dependent/consequential action; "
         "resolution failure is a visible blocker, never authorization.\n\n"
         f"Local: `{local}`. Reviewed fallback: `{fallback}`.\n"
-        "Apply the inline cache-recovery/coverage protocol. Use `resolve-source --json`, "
-        "or exact filename-labeled owner/scope/version/hash checks: newer wins; equal "
+        "Use `resolve-source --from-settings --json` to authenticate locals against "
+        "enabled canonical payloads; without that proof use the owned reviewed fallback. "
+        "Apply the inline recovery/coverage protocol: newer wins; equal "
         "version/hash favors local; equal version/unequal hash favors fallback. Read "
         "fully unless the entire selected body with matching provenance/receipt is "
         "directly visible now. This selector asserts no body delivery.\n"

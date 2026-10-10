@@ -9,11 +9,13 @@ a hook may have written bodies after automatic instruction discovery.
 Missing local caches are normal; use each selector's reviewed fallback.
 
 Prefer the projection manager's read-only `resolve-source <repository>
-<destination> --json` operation. It validates reviewed lock/fallback ownership
-and compares marketplace-qualified source identity, scope, version and hash
-exactly. Rejected local candidates are diagnosed; invalid reviewed content
-blocks. Without that utility, use filename-labeled exact metadata checks and
-verify owned paths/lock: newer version wins; equal version/hash favors local;
+<destination> --from-settings --json` operation. It validates reviewed
+lock/fallback ownership and authenticates paired or unpaired local bytes
+against the current enabled payload's canonical render. Self-supplied hashes
+and receipts prove consistency, not provenance. Unverifiable locals fall back
+to valid reviewed content; invalid reviewed content blocks. Without canonical
+payload proof, use the owned reviewed fallback. For authenticated candidates,
+compare identity/scope/version/hash exactly: newer version wins; equal version/hash favors local;
 equal version/different hash favors reviewed content. Do not compare hashes
 from memory. Full fallbacks use literal paths outside automatic instruction
 discovery; read only the selected body.

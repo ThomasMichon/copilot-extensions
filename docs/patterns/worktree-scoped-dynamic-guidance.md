@@ -103,6 +103,9 @@ suffix, and is referenced using code spans rather than auto-expanding links.
 The version-2 lock owns both artifacts, their digests and byte counts. Sync
 validates legacy version-1 lock/preimages before migrating; fallback, selector
 and lock participate in the same compare-before-replace rollback transaction.
+Changing a selector back to inline retires only its integrity-verified owned
+fallback in that transaction; rollback restores it. Foreign edits block
+retirement, and unrelated/orphan files are never swept automatically.
 Missing/malformed reviewed content, foreign ownership and unsafe paths block
 resolution. Source-update freshness remains an advisory distinct from those
 integrity failures. A valid enabled source with neither lock entry nor existing
@@ -115,19 +118,23 @@ assert that installed payloads or running systems have been updated.
 Before dependent/consequential action the reader acquires authoritative
 content, or reports a visible blocker without assuming authorization.
 `manage-instruction-projections.py resolve-source <repository> <destination>
---json` performs read-only exact selection. Newer `pluginVersion` wins; equal
+--from-settings --json` performs read-only exact selection. Both paired and
+unpaired locals must match a canonical render of the currently enabled payload;
+self-consistent cache markers/hashes/receipts cannot authenticate provenance.
+Without enabled canonical proof, paired resolution uses the reviewed fallback.
+Newer `pluginVersion` wins; equal
 version/equal `templateSha256` favors local; equal version/different hash favors
 reviewed content. Owner identity includes marketplace, plugin, source ID,
 destination and `applyTo`. Local content must reconstruct its canonical
 template hash, including legacy bodies. A malformed local is rejected with a
 diagnostic while the valid reviewed fallback remains usable.
 
-For unpaired sources, add `--from-settings` (and the attributable
+For local authority, supply `--from-settings` (and the attributable
 `--agent-worktrees-path` where required): the utility validates the enabled
 declaration/canonical template rather than trusting arbitrary cache files.
-Without the utility, use filename-labeled exact metadata/ownership checks,
-never freehand hash transcription. Neither timestamps nor file existence
-establish authority.
+Without canonical payload verification, retain reviewed fallback authority;
+metadata comparisons alone are insufficient. Neither timestamps nor file
+existence establish authority.
 
 #### Inline decision kernels
 

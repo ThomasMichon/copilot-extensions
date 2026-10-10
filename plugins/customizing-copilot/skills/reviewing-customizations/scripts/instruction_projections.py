@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Callable, Iterable, Iterator
 
@@ -1730,24 +1730,15 @@ def resolve_instruction_source(
     entries, _, _ = _load_lock(root, result)
     if result.blocking:
         raise ValueError("missing or invalid reviewed ownership lock")
-    if destination not in entries:
-        if sources is None or root.joinpath(*relative.parts).exists():
-            raise ValueError("unpaired source requires verified enabled declarations")
-        specs, _ = _load_specs(root, sources, result)
-        matches = [spec for spec in specs if spec.destination == destination]
-        if result.blocking or len(matches) != 1:
-            raise ValueError("unpaired source is not unambiguously enabled")
-        spec = matches[0]
-        return delivery_io.resolve_unpaired(
-            root, destination, render_projection(spec, include_prefer_local=False).content,
-            render_projection(replace(spec, delivery_mode="inline", delivery_declared=False),
-                              include_prefer_local=False).content, _delivery_io(),
-        )
-    entry = entries[destination]
-    _validate_projection_file(root, entry, result)
+    if destination in entries:
+        _validate_projection_file(root, entries[destination], result)
     if result.blocking:
         raise ValueError("reviewed selector validation failed")
-    return delivery_io.resolve_source(root, entry, _delivery_io())
+    specs, _ = _load_specs(
+        root, sources or [], Result(operation="canonical-source"),
+        template_limit=MAX_LOCAL_TEMPLATE_BYTES,
+    )
+    return delivery_io.resolve_authenticated(root, destination, entries, specs, _delivery_io())
 
 
 def instruction_delivery_inventory(root: Path, automatic: set[Path]) -> dict:
@@ -2057,16 +2048,19 @@ def _current_regular_bytes(path: Path) -> bytes | None:
 
 
 def _transactional_write(
-    changes: list[tuple[Path, bytes, bytes | None]],
+    changes: list[tuple[Path, bytes | None, bytes | None]],
 ) -> None:
-    replaced: list[tuple[Path, bytes, bytes | None]] = []
+    replaced: list[tuple[Path, bytes | None, bytes | None]] = []
     try:
         for path, content, expected_content in changes:
             if _current_regular_bytes(path) != expected_content:
                 raise OSError(
                     f"{path.as_posix()} changed after validation"
                 )
-            _atomic_write(path, content)
+            if content is None:
+                path.unlink()
+            else:
+                _atomic_write(path, content)
             replaced.append((path, content, expected_content))
     except OSError as exc:
         rollback_errors: list[str] = []
@@ -2205,17 +2199,17 @@ def _sync_repository_locked(
     _scan_legacy_regions(root, specs, result)
     rendered: dict[str, RenderedProjection] = {}
     projection_preimages: dict[str, bytes | None] = {}
-    fallback_changes: list[tuple[Path, bytes, bytes | None]] = []
+    fallback_changes: list[tuple[Path, bytes | None, bytes | None]] = []
 
     for spec in specs:
         try:
             projection = render_projection(spec)
             _safe_destination(root, PurePosixPath(spec.destination))
-            if projection.fallback_content is not None:
-                fallback_path = _safe_destination(
-                    root, PurePosixPath(delivery.fallback_destination(spec.destination))
-                )
-        except ValueError as exc:
+            fallback_changes.extend(delivery_io.plan_fallback_change(
+                root, spec.destination, projection.fallback_content,
+                lock.get(spec.destination), _delivery_io(),
+            ))
+        except (OSError, ValueError) as exc:
             result.add(
                 BLOCKING,
                 "projection-destination",
@@ -2239,19 +2233,6 @@ def _sync_repository_locked(
 
         path = root.joinpath(*PurePosixPath(spec.destination).parts)
         existing_entry = lock.get(spec.destination)
-        if projection.fallback_content is not None:
-            fallback_before = None
-            if existing_entry is not None and existing_entry.get("deliveryMode") == "selector":
-                fallback_before = _validate_fallback(root, existing_entry, result)
-            elif fallback_path.exists():
-                result.add(
-                    BLOCKING, "projection-ownership", fallback_path,
-                    "refusing to overwrite a fallback without matching lock ownership",
-                )
-            if fallback_before != projection.fallback_content:
-                fallback_changes.append(
-                    (fallback_path, projection.fallback_content, fallback_before)
-                )
         if path.exists():
             if not lock_exists or existing_entry is None:
                 result.add(

@@ -242,7 +242,9 @@ Read `docs/patterns/worktree-scoped-dynamic-guidance.md` for authority,
 compatibility, inline exceptions and the model-admission evidence boundary.
 The manager's read-only `resolve-source <repo-root> <destination> --json`
 operation supplies exact ownership/version/hash/scope selection; add
-`--from-settings` for enabled unpaired sources.
+`--from-settings` to authenticate paired or unpaired locals against enabled
+canonical payloads. Without that proof, paired resolution retains reviewed
+fallback authority.
 
 `sync`/`scan`/`run_sync_pass()` above mutate the checked-in projection and
 its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).

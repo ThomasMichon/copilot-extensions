@@ -6,7 +6,7 @@ import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Sequence
 
 import instruction_delivery as delivery
 
@@ -69,7 +69,9 @@ def orphan_fallbacks(
 
 
 def resolve_source(
-    root: Path, entry: Mapping[str, object], io: DeliveryIO
+    root: Path, entry: Mapping[str, object], io: DeliveryIO,
+    canonical: tuple[bytes, bytes] | None = None,
+    canonical_error: str = "enabled canonical payload unavailable",
 ) -> dict[str, object]:
     fallback_raw = read_fallback(root, entry, io)
     reviewed_path = str(entry["destination"])
@@ -93,6 +95,10 @@ def resolve_source(
             if candidate_marker.get("deliveryKind") == "selector":
                 raise ValueError("local candidate is not a body")
             delivery.validate_local_template(candidate_raw, candidate_marker)
+            if canonical is None:
+                raise ValueError(canonical_error)
+            if candidate_raw not in canonical:
+                raise ValueError("local candidate differs from enabled canonical render")
             if delivery.local_wins(candidate_marker, reviewed):
                 selected, marker, raw = local_path, candidate_marker, candidate_raw
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -110,6 +116,45 @@ def resolve_source(
         "modelAdmission": "unknown",
         "diagnostic": diagnostic,
     }
+
+
+def resolve_authenticated(
+    root: Path, destination: str, entries: Mapping[str, Mapping[str, object]],
+    specs: Sequence[delivery.Projection], io: DeliveryIO,
+) -> dict[str, object]:
+    matches = [spec for spec in specs if spec.destination == destination]
+    if destination not in entries:
+        if io.safe(root, PurePosixPath(destination)).exists():
+            raise ValueError("unpaired source requires verified enabled declarations")
+        if len(matches) != 1:
+            raise ValueError("unpaired source requires verified enabled declarations (unambiguous)")
+        current, legacy = delivery.canonical_renders(matches[0])
+        return resolve_unpaired(root, destination, current, legacy, io)
+    canonical = None
+    error = "enabled canonical payload unavailable or ambiguous"
+    if len(matches) == 1:
+        try:
+            canonical = delivery.canonical_renders(matches[0])
+            delivery.validate_candidate(delivery.parse_marker(canonical[0]), entries[destination])
+        except ValueError as exc:
+            canonical = None
+            error = f"enabled canonical payload rejected: {exc}"
+    return resolve_source(root, entries[destination], io, canonical, error)
+
+
+def plan_fallback_change(
+    root: Path, destination: str, content: bytes | None,
+    previous: Mapping[str, object] | None, io: DeliveryIO,
+) -> list[tuple[Path, bytes | None, bytes | None]]:
+    before = None
+    if previous is not None and previous.get("deliveryMode") == "selector":
+        before = read_fallback(root, previous, io)
+    if content is None and before is None:
+        return []
+    path = io.safe(root, PurePosixPath(delivery.fallback_destination(destination)))
+    if before is None and path.exists():
+        raise ValueError("refusing to replace a fallback without matching lock ownership")
+    return [] if before == content else [(path, content, before)]
 
 
 def resolve_unpaired(
