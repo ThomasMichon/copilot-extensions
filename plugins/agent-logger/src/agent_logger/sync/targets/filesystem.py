@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import stat
@@ -33,7 +34,12 @@ from agent_logger.sync.detritus import (
     is_excluded,
 )
 from agent_logger.sync.lock import sync_lock
-from agent_logger.sync.meta import heartbeat_sync_meta, read_sync_meta, write_sync_meta
+from agent_logger.sync.meta import (
+    heartbeat_sync_meta,
+    read_sync_meta,
+    write_process_log_meta,
+    write_sync_meta,
+)
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
     RESCUE_SNAPSHOT_PROVENANCE,
@@ -1847,57 +1853,20 @@ class FilesystemTarget(Target):
                 index_deferred=_index_deferred(locked_paths),
             )
 
-    def _mark_sync_meta_partial(self, machine: str, reason: str) -> None:
-        """Best-effort: downgrade this machine's persisted ``sync-meta.json``
-        from ``ok`` to ``partial`` after the process-log leg fails outright,
-        or lands with at least one deferred (locked/rotated) file, following
-        a successfully-persisted session-state leg -- otherwise
-        ``session-sync status``/fleet health would report this machine as
-        fresh and healthy despite requested evidence not fully landing.
-        Preserves the session-state push's own recorded fields (detritus
-        exclusion counts/roots/completeness) rather than resetting them to
-        defaults -- only ``status`` and ``deferred_files`` describe this
-        downgrade; a process-log failure must not erase diagnostics the
-        same pass's session-state leg already recorded. A clean process-log
-        retry does not clear a ``partial`` status this sets -- composing a
-        combined, independently-clearable status for both transfer legs is
-        a known, out-of-scope follow-up; staying degraded until explicitly
-        investigated fails safe, not silently. Never raises: a failure here
-        must not mask the original failure this method exists to record."""
+    def _record_process_log_health(
+        self, machine: str, status: str, deferred_files: tuple[str, ...] = (),
+    ) -> None:
+        """Update only the process-log leg under existing machine metadata."""
         try:
             machine_root = _existing_relative_directory(self._root(), Path(machine))
-        except OSError:
+        except OSError as exc:
+            logging.getLogger("agent-logger.sync-meta").warning(
+                "cannot locate process-log sync metadata for %s: %s", machine, exc,
+            )
             return
         if machine_root is None:
             return
-        try:
-            existing = read_sync_meta(machine_root)
-        except OSError:
-            existing = None
-        if existing is None or existing.get("status") != "ok":
-            return
-
-        def _as_int(value: object, default: int) -> int:
-            if isinstance(value, int) and not isinstance(value, bool):
-                return value
-            return default
-
-        def _as_str_list(value: object) -> list[str]:
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, str)]
-            return []
-
-        session_count = _as_int(existing.get("session_count"), 0)
-        write_sync_meta(
-            machine_root, machine, self.name, "partial", session_count,
-            deferred_files=[reason],
-            excluded_roots=_as_str_list(existing.get("excluded_detritus_roots")),
-            excluded_file_count=_as_int(existing.get("excluded_detritus_file_count"), 0),
-            excluded_byte_count=_as_int(existing.get("excluded_detritus_byte_count"), 0),
-            excluded_measurement_complete=bool(
-                existing.get("excluded_detritus_measurement_complete", True)
-            ),
-        )
+        write_process_log_meta(machine_root, status, deferred_files)
 
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
         """Publish process-log evidence; see :class:`Target`'s base method.
@@ -1922,16 +1891,17 @@ class FilesystemTarget(Target):
         try:
             safe_source = _existing_real_directory(log_root)
         except OSError as exc:
-            self._mark_sync_meta_partial(machine, "unsafe process-log source")
+            self._record_process_log_health(machine, "partial", ("unsafe process-log source",))
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
         if safe_source is None:
+            self._record_process_log_health(machine, "partial", ("no process-log source",))
             return PushResult(ok=True, detail="no process-log source")
         log_root = safe_source
         try:
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine) / "logs")
         except OSError as exc:
-            self._mark_sync_meta_partial(machine, "unsafe process-log destination")
+            self._record_process_log_health(machine, "partial", ("unsafe process-log destination",))
             return PushResult(
                 ok=False,
                 detail=f"cannot create safe destination for {machine}/logs: {exc}",
@@ -1944,7 +1914,7 @@ class FilesystemTarget(Target):
             # between this method's own validation above and the copy) --
             # a genuinely unsafe root, not the benign per-file skip
             # `_copy_process_logs` already handles internally.
-            self._mark_sync_meta_partial(machine, "process-log copy failed")
+            self._record_process_log_health(machine, "partial", ("process-log copy failed",))
             return PushResult(ok=False, detail=f"process-log copy failed: {exc}")
         detail = f"-> {dest}"
         if locked_paths:
@@ -1953,7 +1923,10 @@ class FilesystemTarget(Target):
             # ok=True here means "the pass ran," not "every file landed" --
             # at least one log was deferred (locked/rotated), so persisted
             # health must reflect that, exactly like an outright failure.
-            self._mark_sync_meta_partial(machine, "process-log evidence deferred")
+        self._record_process_log_health(
+            machine, "partial" if locked_paths else "ok",
+            tuple(str(path) for path in locked_paths),
+        )
         return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes)
 
     def sync_status(self, machine: str) -> SyncStatus:

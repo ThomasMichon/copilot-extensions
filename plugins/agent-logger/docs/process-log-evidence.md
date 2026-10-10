@@ -85,3 +85,31 @@ Two scope limits, both deliberate rather than overlooked:
 
 Scheduled settled-log ZIP compaction, SSH/ingest target support, and
 admission fencing for repo-scoped syncs remain outstanding.
+
+### Combined transfer health
+
+Filesystem `sync-meta.json` retains independently recoverable `sync_legs`
+entries for `session-state` and (once attempted) `process-logs`. Each records
+its last actual attempt/check, status, consecutive partial attempts, exact deferred
+count, and bounded path samples. The existing aggregate `status` is partial
+while either recorded leg is partial; its streak is the maximum current
+per-leg streak, and its deferred count is the sum. A successful session transfer
+cannot reset a failing log streak, so existing sustained-partial health
+thresholds also detect repeated log deferrals.
+
+A clean process-log retry, including an incremental pass that copies no files,
+clears only that leg. Session diagnostics and detritus measurements survive.
+Missing requested log roots are recorded as partial rather than recovering
+previous failures; an existing empty log root is a successful empty observation.
+No-change session heartbeats preserve both legs and do not count as attempts.
+They refresh only the session-state check time; health uses the oldest recorded
+leg check so a log retry cannot disguise stale session-state (or vice versa).
+Legacy partial metadata has no failed-leg identity and conservatively requires
+a real session-state retry before becoming healthy. Unreadable or malformed
+metadata is preserved and its update failure logged.
+
+This composes persisted transfer results, not a new containment guarantee.
+Unsupported/scoped log passes remain outside this filesystem health contract,
+and outright session-state failures still use the existing failing command
+result rather than a new persisted leg update. Previously attempted log health
+is retained when log publication is disabled; disabling is not recovery proof.
