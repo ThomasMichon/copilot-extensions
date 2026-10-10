@@ -11,12 +11,46 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-import agent_procutil as pu
 
 from worktree_manager import mux_daemon
 from worktree_manager import mux_daemon_process
+from worktree_manager import mux_child_process
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_windows_captured_child_closes_job(
+    monkeypatch: pytest.MonkeyPatch, timeout: bool,
+) -> None:
+    closed: list[bool] = []
+    argv = ["fixture-mux", "has-session"]
+
+    class Process:
+        returncode = 0
+        calls = 0
+
+        def communicate(self, timeout: float) -> tuple[str, str]:
+            self.calls += 1
+            if self.calls == 1 and timeout == .1:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return "stdout", "stderr"
+
+    process = Process()
+    monkeypatch.setattr(mux_child_process, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        mux_child_process, "spawn_sync_in_kill_on_close_job",
+        lambda *args, **kwargs: (process, SimpleNamespace(close=lambda: closed.append(True))),
+    )
+    if timeout:
+        with pytest.raises(subprocess.TimeoutExpired):
+            mux_child_process.run(argv, timeout=.1)
+    else:
+        result = mux_child_process.run(argv, timeout=1)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "stdout", "stderr")
+    assert closed == [True]
+    assert process.calls == 2
 
 
 def test_repeated_mux_calls_preserve_suppression_and_capture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -28,7 +62,7 @@ def test_repeated_mux_calls_preserve_suppression_and_capture(monkeypatch: pytest
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, stdout="captured", stderr="")
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(mux_daemon, "run_mux_child", run)
     entry = {"mux_bin": "psmux", "mux_session": "example-session"}
     for _ in range(2):
         assert mux_daemon._mux_session_alive("psmux", "example-session")
@@ -52,7 +86,7 @@ def test_mux_failure_behavior_preserved(
             raise OSError("synthetic launch failure")
         return subprocess.CompletedProcess(argv, 1)
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(mux_daemon, "run_mux_child", run)
     if probe:
         assert not mux_daemon._mux_session_alive("psmux", "example-session")
     else:
@@ -111,6 +145,8 @@ finally:
     visible: set[int] = set()
     focused: set[int] = set()
     stop = threading.Event()
+    baseline_windows, baseline_foreground = windows()
+    baseline_pids = set(processes())
     launched: list[subprocess.Popen] = []
     real_popen = subprocess.Popen
 
@@ -129,10 +165,21 @@ finally:
                 owned.update(descendants(pid, table))
             visible_windows, foreground_pid = windows()
             for hwnd, pid in visible_windows.items():
-                if pid in owned:
+                name = table.get(pid, ("", 0))[0].lower()
+                if pid in owned or (
+                    hwnd not in baseline_windows
+                    and name in {"windowsterminal.exe", "openconsole.exe", "conhost.exe"}
+                ):
                     visible.add(hwnd)
             if foreground_pid in owned:
                 focused.add(foreground_pid)
+            if foreground_pid != baseline_foreground and table.get(
+                foreground_pid, ("", 0),
+            )[0].lower() in {"windowsterminal.exe", "openconsole.exe", "conhost.exe"}:
+                focused.add(foreground_pid)
+            for pid, (name, _) in table.items():
+                if pid not in baseline_pids and name.lower() == "openconsole.exe":
+                    visible.add(pid)
             stop.wait(.01)
 
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -163,7 +210,10 @@ finally:
     os.name != "nt" or os.environ.get("MUX_CHILD_WINDOWS_E2E") != "1",
     reason="opt-in real PSMux timeout containment",
 )
-def test_real_psmux_timeout_reaps_descendants(tmp_path: Path) -> None:
+@pytest.mark.parametrize("probe", [False, True])
+def test_real_psmux_timeout_reaps_descendants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, probe: bool,
+) -> None:
     from mux_windows_observer import descendants, processes
 
     env = dict(os.environ)
@@ -181,15 +231,18 @@ def test_real_psmux_timeout_reaps_descendants(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
-    process, job = pu.spawn_sync_in_kill_on_close_job(
-        [os.environ["PSMUX_TEST_BIN"], "run-shell",
-         subprocess.list2cmdline([sys.executable, str(payload)])],
-        env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, **pu.no_window_kwargs(),
-    )
+    from worktree_manager import mux_child_process
+    real_spawn = mux_child_process.spawn_sync_in_kill_on_close_job
+    launched: list[subprocess.Popen] = []
     owned: set[int] = set()
-    try:
-        assert job is not None, "timeout test requires native descendant containment"
+
+    def spawn(argv: list[str], **kwargs: object) -> tuple[subprocess.Popen, object]:
+        process, job = real_spawn(
+            [os.environ["PSMUX_TEST_BIN"], "run-shell",
+             subprocess.list2cmdline([sys.executable, str(payload)])],
+            env=env, **kwargs,
+        )
+        launched.append(process)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             table = processes()
@@ -199,12 +252,21 @@ def test_real_psmux_timeout_reaps_descendants(tmp_path: Path) -> None:
             time.sleep(.02)
         else:
             pytest.fail("PSMux timeout fixture did not launch both Python descendants")
-        with pytest.raises(subprocess.TimeoutExpired):
-            process.communicate(timeout=.1)
-    finally:
-        if job is not None:
-            job.close()
-        process.communicate(timeout=5)
+        return process, job
+
+    monkeypatch.setattr(mux_child_process, "spawn_sync_in_kill_on_close_job", spawn)
+    real_run = mux_daemon.run_mux_child
+    monkeypatch.setattr(
+        mux_daemon, "run_mux_child",
+        lambda argv, **kwargs: real_run(argv, **{**kwargs, "timeout": .1}),
+    )
+    if probe:
+        assert not mux_daemon._mux_session_alive("fixture-mux", "fixture")
+    else:
+        assert not mux_daemon.apply_status_options(
+            {"mux_bin": "fixture-mux", "mux_session": "fixture"}, {"@fixture": "value"},
+        )
+    assert launched and launched[0].poll() is not None
     deadline = time.monotonic() + 3
     while owned & processes().keys() and time.monotonic() < deadline:
         time.sleep(.02)

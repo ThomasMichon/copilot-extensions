@@ -193,7 +193,9 @@ On Windows, ordinary and passive daemon starts resolve the real base
 `python.exe`, preserve the calling venv's import context, and apply the shared
 windowless daemon launch flags. Recurring PSMux probes and status writes also
 apply the shared captured-child window-suppression flags; redirecting output
-alone is not sufficient. The launch-kind contract is documented in
+alone is not sufficient. Windows status writes and liveness probes own their
+descendants through a kill-on-close Job, including on timeout or cancellation.
+The launch-kind contract is documented in
 [`windows-background-process-launch`](../docs/patterns/windows-background-process-launch.md).
 This keeps the spawned process handle's PID equal to the runtime PID instead of
 publishing a venv redirector's PID. If the venv's direct base interpreter cannot

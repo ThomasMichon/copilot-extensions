@@ -22,6 +22,14 @@ from worktree_manager import mux_daemon
 from worktree_manager import mux_mapping_registry
 
 
+@pytest.fixture(autouse=True)
+def mux_process_runner(monkeypatch):
+    # This module tests daemon orchestration with its existing subprocess fakes.
+    monkeypatch.setattr(
+        mux_daemon, "run_mux_child", lambda argv, **kwargs: subprocess.run(argv, **kwargs),
+    )
+
+
 def _entry(**overrides) -> dict:
     base = {
         "project": "proj",

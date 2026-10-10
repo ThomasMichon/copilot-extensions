@@ -131,3 +131,11 @@ contain terminal-multiplexer descendants.
   lane now passes nine checks, including a real PSMux `run-shell` timeout with
   two Python descendants and verified caller-Job cleanup of the complete tree.
 - Synchronized the active effort index with this README.
+- Further review identified that a fixture-owned timeout Job did not prove
+  production timeout ownership. Status writes and liveness probes now use an
+  explicit shared Job-backed captured-child runner on Windows. Their actual
+  failure paths passed real PSMux timeout tests with two descendants.
+- Desktop observation now also detects newly surfaced Default Terminal hosts
+  outside the fixture's ancestry and terminal foreground changes against a
+  pre-launch baseline. Ten desktop checks passed; focused orchestration
+  coverage remained 133 passed with three opt-in checks skipped.
