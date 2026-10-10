@@ -66,7 +66,7 @@ Unrelated repository lifecycle work is intentionally outside this scope.
   modifying runtime behavior.
 - [ ] Trace effective settings, tool capability, permissions, and context events
   available to the plugin; document a supported detection seam.
-- [ ] Define precedence for effective true/false/absent settings, detected native
+- [x] Define precedence for effective true/false/absent settings, detected native
   capability, stale/unknown evidence, and confirmed unavailable implementation.
   Enabled settings select native guidance; they do not manufacture tool support.
 - [ ] _(agent-recommended)_ Distinguish supported-but-not-viable transitions,
@@ -173,7 +173,7 @@ alone does not complete the update.
 - Recorded the exact missing host observation and selection precedence in
   `design.md`. Settings-only/name-only automatic suppression remains blocked;
   generated declarations are not permission to call internal methods.
-- Corrected the canonical effort index in response to #6035's review.
+- Aligned the canonical effort index with the effort's Active status.
 - No plugin runtime, deployed policy, live context, or ownership changed.
   Isolated CLI/ACP transition proof and the supported detection seam remain
   open; this investigation does not complete Phase 1 or the compatibility update.

@@ -18,7 +18,8 @@ enabled in effective settings **or otherwise detected**. Preserve both signals:
 | Unknown/stale observation | Bounded re-evaluation; no silent suppression of all recovery |
 | Native transition not viable | Repair checkpoint/static load or report configured limit; fallback only when authorized |
 
-Exact precedence and supported query APIs are Phase 1 decisions, not invented
+The top-down selection precedence below defines the acceptance ordering.
+Supported query APIs remain an unresolved Phase 1 dependency, not invented
 flags in this design. Do not use "ACP" as an automatic fallback classifier.
 
 ## Detection acceptance boundary
