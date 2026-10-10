@@ -49,6 +49,11 @@ def handoff_state(tmp_path, monkeypatch):
     monkeypatch.setattr(
         claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
     )
+    load_config = claim_handoffs.cfg.load_config
+    monkeypatch.setattr(
+        claim_handoffs.cfg, "load_project_config",
+        lambda name: load_config(tmp_path / name / "config.yaml", project=name),
+    )
     ready_root = state_root.StateRoot(
         str(tmp_path), "launch_repo", "source-project", False, False, True)
     monkeypatch.setattr(

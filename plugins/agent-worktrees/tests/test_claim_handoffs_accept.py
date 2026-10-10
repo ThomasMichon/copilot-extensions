@@ -64,6 +64,11 @@ def handoff_world(tmp_path, monkeypatch):
     monkeypatch.setattr(
         claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
     )
+    load_config = claim_handoffs.cfg.load_config
+    monkeypatch.setattr(
+        claim_handoffs.cfg, "load_project_config",
+        lambda name: load_config(tmp_path / name / "config.yaml", project=name),
+    )
     return {"tmp_path": tmp_path}
 
 

@@ -215,6 +215,60 @@ class TestParseMachinesYamlFile:
 
 
 class TestMergeMachinesYaml:
+    @pytest.mark.parametrize(("legacy_platform", "canonical_platform"), [
+        ("windows", "wsl"), ("", "wsl"), ("windows", ""),
+    ])
+    def test_rejects_scoped_casefold_collision_across_files(
+        self, tmp_path, legacy_platform, canonical_platform,
+    ):
+        legacy = parse_machines_yaml_file(_write(
+            tmp_path,
+            f"machines:\n  box-a:\n    execution_platform: '{legacy_platform}'\n",
+            "legacy.yaml",
+        ))
+        canonical = parse_machines_yaml_file(_write(
+            tmp_path,
+            f"machines:\n  BOX-A:\n    execution_platform: '{canonical_platform}'\n",
+            "canonical.yaml",
+        ))
+        with pytest.raises(ValueError, match="unique without regard to case"):
+            merge_machines_yaml(legacy, canonical)
+
+    def test_legacy_only_casefold_collision_remains_compatible(self):
+        legacy = {"box-a": MachineEntry(key="box-a", display_name="Legacy")}
+        canonical = {"BOX-A": MachineEntry(key="BOX-A", display_name="Canonical")}
+        assert set(merge_machines_yaml(legacy, canonical)) == {"box-a", "BOX-A"}
+
+    def test_scoped_exact_key_overlay_remains_compatible(self):
+        legacy = {"box-a": MachineEntry(
+            key="box-a", display_name="Legacy", execution_platform="windows",
+        )}
+        canonical = {"box-a": MachineEntry(
+            key="box-a", display_name="Canonical", execution_platform="windows",
+        )}
+        assert merge_machines_yaml(legacy, canonical) == canonical
+
+    def test_scoped_merge_revalidates_legacy_only_collisions(self):
+        legacy = {
+            key: MachineEntry(key=key, display_name=key)
+            for key in ("box-a", "BOX-A")
+        }
+        canonical = {"box-b": MachineEntry(
+            key="box-b", display_name="B", execution_platform="windows",
+        )}
+        with pytest.raises(ValueError, match="unique without regard to case"):
+            merge_machines_yaml(legacy, canonical)
+
+    def test_validation_uses_final_overlay_execution_platforms(self):
+        legacy = {"box-a": MachineEntry(
+            key="box-a", display_name="Legacy", execution_platform="windows",
+        )}
+        canonical = {
+            key: MachineEntry(key=key, display_name=key)
+            for key in ("box-a", "BOX-A")
+        }
+        assert merge_machines_yaml(legacy, canonical) == canonical
+
     def test_canonical_wins_on_key_collision(self):
         legacy = {"box-a": MachineEntry(key="box-a", display_name="Legacy")}
         canonical = {"box-a": MachineEntry(key="box-a", display_name="Canonical")}

@@ -1,6 +1,7 @@
 """Execution-space identity must not collapse through a shared OS hostname."""
 
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 import json
 from types import SimpleNamespace
 
@@ -48,9 +49,11 @@ def scoped_config(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    config = SimpleNamespace(
+    config = cfg.Config(
         machine="workstation-windows", platform="windows", repo_name="project",
-        default_repo=SimpleNamespace(anchor=str(tmp_path)),
+        srcroot=str(tmp_path), repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "children"),
+        )},
     )
     monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
     return config
@@ -96,8 +99,7 @@ def test_true_same_registered_space_resolves_its_local_ledger(scoped_config, tmp
 
 @pytest.mark.parametrize("platform", ["windows", "wsl"])
 def test_each_space_selects_only_its_own_execution_platform(platform, scoped_config, monkeypatch):
-    scoped_config.machine = f"workstation-{platform}"
-    scoped_config.platform = platform
+    scoped_config = replace(scoped_config, machine=f"workstation-{platform}", platform=platform)
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
     execution_spaces.require_current_execution_space(scoped_config)
     assert execution_spaces.require_owner_identity(scoped_config.machine, scoped_config)
@@ -312,6 +314,83 @@ def test_known_parent_io_failure_reports_unconfirmed_settlement(
     assert "PermissionError" in warnings[0]
 
 
+@pytest.mark.parametrize(("body", "error"), [
+    ("repo: project\n", "KeyError"),
+    ("repo: project\nworktree_id: wt-parent\nbranch: worktree/wt-parent\n"
+     "session_turns: {count: 1}\n", "TypeError"),
+])
+def test_malformed_parent_record_reports_unconfirmed_settlement(
+    body, error, tmp_path, scoped_config, monkeypatch,
+):
+    parent_ref = "workstation-windows/project/wt-parent"
+    child = SimpleNamespace(
+        machine=scoped_config.machine, platform="windows", worktree_id="wt-child",
+        owner_ref=parent_ref, owner_claim_ref=tracking.parse_claim_ref(parent_ref),
+    )
+    parent_dir = tmp_path / "project"
+    (parent_dir / "worktrees").mkdir(parents=True)
+    path = parent_dir / "worktrees" / "wt-parent.yaml"
+    path.write_text(body, encoding="utf-8")
+    before = path.read_bytes()
+    monkeypatch.setattr(cfg, "project_dir", lambda project: parent_dir)
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *args, **kwargs: nullcontext())
+    monkeypatch.setattr(
+        tracking, "settle_resource_claim",
+        lambda *args, **kwargs: pytest.fail("malformed parent ledger was mutated"),
+    )
+    warnings = []
+    output = SimpleNamespace(
+        ok=lambda message: pytest.fail("malformed settlement reported success"),
+        warn=warnings.append,
+    )
+    execution_spaces.settle_parent_obligation(child, scoped_config, "wt-child", output=output)
+    assert len(warnings) == 1
+    assert "Cannot confirm" in warnings[0] and error in warnings[0]
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("error", [KeyError("machine"), TypeError("malformed config")])
+@pytest.mark.parametrize("loader", ["load_machines_yaml", "load_config"])
+def test_cleanup_known_format_failure_is_structured_refusal(
+    error, loader, scoped_config, monkeypatch,
+):
+    def malformed(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(cfg, loader, malformed)
+    with pytest.raises(execution_spaces.ExecutionSpaceError) as result:
+        execution_spaces.require_cleanup_identity(
+            SimpleNamespace(), scoped_config.default_repo.anchor,
+        )
+    assert result.value.__cause__ is error
+
+
+def test_cleanup_malformed_registry_parser_is_structured_refusal(tmp_path, monkeypatch):
+    path = tmp_path / "machines.yaml"
+    path.write_text(
+        "machines:\n  workstation-windows:\n    execution_platform: windows\n"
+        "    ssh:\n      environments: 42\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: parse_machines_yaml_file(path))
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="registry is invalid") as result:
+        execution_spaces.require_cleanup_identity(SimpleNamespace(), tmp_path)
+    assert isinstance(result.value.__cause__, TypeError)
+
+
+@pytest.mark.parametrize("loader", ["load_machines_yaml", "load_config"])
+def test_cleanup_does_not_suppress_execution_space_error(loader, scoped_config, monkeypatch):
+    error = execution_spaces.ExecutionSpaceError("authority refused")
+
+    def refused(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(cfg, loader, refused)
+    with pytest.raises(execution_spaces.ExecutionSpaceError) as result:
+        execution_spaces.require_cleanup_identity(SimpleNamespace(), scoped_config.default_repo.anchor)
+    assert result.value is error
+
+
 @pytest.mark.parametrize("key", ["", " space", "space key", "space/key", r"space\key", "space#session"])
 def test_explicit_registry_rejects_noncanonical_keys(key, tmp_path):
     path = tmp_path / "machines.yaml"
@@ -474,6 +553,61 @@ def test_project_authority_failure_is_an_explicit_rejection(scoped_config, monke
     monkeypatch.setattr(cfg, "load_project_config", unavailable)
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="receiving-side authority"):
         execution_spaces.require_project_record_mutation(SimpleNamespace(repo="missing"))
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_project_authority_rejects_unrelated_sole_repo(scoped, tmp_path, monkeypatch):
+    unrelated = cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "children"))
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="workstation-windows", platform="windows",
+        repo_name="missing", repos={"unrelated": unrelated},
+    )
+    assert config.default_repo is unrelated
+    monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
+    entries = {"workstation-windows": MachineEntry(
+        key="workstation-windows", display_name="Windows",
+        execution_platform="windows" if scoped else "",
+    )}
+    registry_reads = []
+    monkeypatch.setattr(
+        cfg, "load_machines_yaml",
+        lambda anchor: registry_reads.append(anchor) or entries,
+    )
+    record = SimpleNamespace(
+        repo="missing", machine=config.machine, platform="windows", worktree_id="wt-owner",
+        owner_ref=None,
+    )
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="requested project is not registered"):
+        execution_spaces.require_project_record_mutation(record)
+    assert registry_reads == []
+
+
+def test_project_authority_uses_requested_repo_anchor(scoped_config, tmp_path, monkeypatch):
+    requested_anchor = scoped_config.repos["project"].anchor
+    scoped_entries = cfg.load_machines_yaml(requested_anchor)
+    unrelated_anchor = str(tmp_path / "unrelated")
+    scoped_config.repos["unrelated"] = cfg.RepoConfig(
+        anchor=unrelated_anchor, worktree_root=str(tmp_path / "other-children"),
+    )
+    scoped_config = replace(scoped_config, repo_name="unrelated")
+    monkeypatch.setattr(cfg, "load_project_config", lambda project: scoped_config)
+    anchors = []
+
+    def registry(anchor):
+        anchors.append(anchor)
+        return scoped_entries if anchor == requested_anchor else {}
+
+    monkeypatch.setattr(cfg, "load_machines_yaml", registry)
+    record = SimpleNamespace(
+        repo="project", machine="workstation-wsl", platform="wsl", worktree_id="wt-other",
+        owner_ref=None,
+    )
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="different execution space"):
+        execution_spaces.require_project_record_mutation(record)
+    assert anchors and set(anchors) == {requested_anchor}
+    assert scoped_config.repo_name == "unrelated"
+    record.machine, record.platform = "workstation-windows", "windows"
+    execution_spaces.require_project_record_mutation(record)
 
 
 def test_sweep_rechecks_fresh_owner_under_lock(
@@ -684,7 +818,7 @@ def test_matching_key_does_not_authorize_an_ambiguous_legacy_platform(platform, 
 
 
 def test_configured_platform_must_match_actual_selected_space(scoped_config):
-    scoped_config.platform = "wsl"
+    scoped_config = replace(scoped_config, platform="wsl")
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
         execution_spaces.require_current_execution_space(scoped_config)
 

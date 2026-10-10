@@ -837,8 +837,14 @@ def test_terminal_managed_record_rejects_new_session_activation(
 def test_managed_gc_can_later_remove_primed_tree(tmp_path, monkeypatch):
     repo, record_path, worktree = _worker(tmp_path, monkeypatch)
     _conclude(record_path, repo)
-    config = types.SimpleNamespace(default_repo=repo, repo_name="demo")
-    monkeypatch.setattr(cli.cfg, "load_config", lambda: config)
+    config = cli.cfg.Config(
+        srcroot=str(tmp_path), machine="host", platform="linux", repo_name="demo",
+        repos={"demo": cli.cfg.RepoConfig(
+            anchor=repo.anchor, worktree_root=repo.worktree_root,
+            remote=repo.remote, default_branch=repo.default_branch,
+        )},
+    )
+    monkeypatch.setattr(cli.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: record_path.parent)
     monkeypatch.setattr(
         cli.sessions, "_list_mux_sessions", lambda: {}
