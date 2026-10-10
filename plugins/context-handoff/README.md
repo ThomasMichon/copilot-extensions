@@ -2,6 +2,36 @@
 
 Context window monitoring and session handoff for GitHub Copilot CLI.
 
+**Native-first continuity:** an explicit boolean `contextManagementTools: true`
+or the complete currently offered context tool set selects native checkpoint/
+terminal rollover rather than a competing custom session transfer. Explicit false
+or confirmed missing tools selects existing custom mode-governed recovery.
+The extension reads JSONC settings in `COPILOT_HOME` (default `~/.copilot`),
+then repository and local `.github/copilot/settings*.json` overrides. Legacy
+`config.json` native settings are honored after user settings for older hosts
+that still layer those keys; remove stale legacy flags on newer hosts.
+This is declared configuration, not an arbitrary effective-policy API.
+
+The read-only SDK metadata query checks `get_context_remaining`,
+`session_artifacts`, `session_history`, and `new_context` without executing or
+initializing tools. Null/unavailable query metadata is unknown, not missing
+implementation; a true flag still selects native diagnostic prompts. A valid
+initialized list missing tools is confirmed current unavailability. Observation
+is cached briefly, refreshed before idle delivery/force decisions, and invalidated
+on cwd changes and root window clears. Errors are surfaced without settings
+contents; advertised tools are not proof of provider provenance or a successful
+rollover.
+
+Native selection substitutes soft/hard **checkpoint** prompts, suppresses custom
+force capture/pickup and mutating-tool denial, and resets per-window pressure on
+confirmed root `session.context_cleared` (not subagent clears or cwd changes).
+It does not call native tools, clear a live session, opt subagents in, or change
+worktree ownership. The skill preserves parent gates, current slice, unresolved
+requests, live obligations and one next action in the owner's revision-bound
+checkpoint. Explicit custom save/trigger/consume remain available in every mode;
+policy caps and partial persistence failures never authorize blind alternate
+sessions. Host emergency compaction is unchanged.
+
 This plugin is intentionally **process-manager agnostic**. It tracks context
 pressure, teaches the rules of engagement for continuation, stores durable
 handoff batons, and can **signal that a handoff pickup is requested**. It does
@@ -10,6 +40,11 @@ any other cutover choreography itself. Those actions belong to external control
 planes such as a worktree manager, agent-bridge, or a human operator.
 
 This plugin ships four cooperating payload pieces:
+
+The custom-transfer thresholds/workflows described below apply when native
+continuity is not selected, or the operator explicitly requests owner/process
+transfer. The native-first selection above takes precedence for context-only
+pressure.
 
 | Piece | Type | Role |
 |-------|------|------|

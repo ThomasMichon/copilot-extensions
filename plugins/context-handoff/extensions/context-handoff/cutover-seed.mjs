@@ -69,6 +69,13 @@ export const CONTINUATION_DIRECTIVE =
 // design avoids (a mid-session reload replayed the nudge and raced the
 // skill registry).
 export const HANDOFF_MECHANISM_AWARENESS =
+  "First select continuity: with contextManagementTools enabled or all four " +
+  "native context tools offered without explicit opt-out, use the current " +
+  "owner's verified revision-bound session_artifacts checkpoint and terminal " +
+  "new_context for context-only rollover, not custom pickup. Preserve the parent " +
+  "gate, current slice, live obligations and one next action; refresh durable " +
+  "guidance after rollover. The custom instructions below apply to actual " +
+  "new-owner/process transfer or diagnosed unavailable-native recovery. " +
   "This worktree has a context-handoff mechanism available from turn one, " +
   "whether or not this session began from a handoff. Context-window pressure " +
   "is never a reason to truncate diligence, rush a task, or leave work " +
