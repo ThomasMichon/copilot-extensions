@@ -603,11 +603,31 @@ provider's absence.
 - Remaining Worktrees files, fresh current-head review and CI still gate merge.
   A completed Bridge run or partial Worktrees batch does not close the campaign.
 
+### 2026-10-10 - Complete affected-suite evidence
+- Retained, nonduplicated Worktrees coverage totals **7791 passed, 57 skipped,
+  1 deselected**: seven original completed groups, two completed files, the
+  complete PR-operation file with its corrected release assertion, and all
+  remaining 123 files. Complete Bridge coverage is **3782 passed, 72 skipped**.
+  Earlier and final batches differ only in the corrected release test and this
+  journal, not production source or other fixtures.
+- The only deselected contract is the exact accepted Windows gap #4644.
+  Current-head required CI run `38034875866` passed; no other failure is waived.
+- The evidence re-review found that the paired credential fixture needed an
+  explicit ten-result count to reject worker exceptions/truncated rounds.
+  That assertion is now required before accepting any successful result list.
+  The trusted identifier scan also flagged legacy example identifiers in the
+  touched Picker test file; examples now use the same generic project fixture
+  as its new regressions. Production code is unchanged.
+- Focused validation of these test-only corrections, fresh review and the
+  updated-head identifier/CI checks remain publication gates. Do not rerun
+  settled complete production-source coverage absent a relevant source change.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
-additional #5972 Picker matching slice is implemented locally, with full-suite,
-publication, review and deployment gates still open. Remaining #5972 paths and
+additional #5972 Picker matching slice is published in #6002, with complete
+affected-suite evidence. Fresh review and identifier/CI checks for the final
+test-only corrections, merge and deployment remain open. Remaining #5972 paths and
 #5973/#5974 are not implemented. The campaign extension is merged.
 #5689 retains its original host/WSL
 implementation owner and remains the overlapping-consumer prerequisite.

@@ -106,28 +106,28 @@ def test_emit_remote_plan_for_env_still_unknown_for_unmatched_name(tmp_path):
 
 
 def test_wrap_remote_command_wraps_explicit_posix_shells():
-    assert rmc._wrap_remote_command("bash", "aperture-labs") == (
-        "bash -lc aperture-labs"
+    assert rmc._wrap_remote_command("bash", "example-project") == (
+        "bash -lc example-project"
     )
     # Invokes the CONFIGURED shell itself -- never hardcodes bash for a
     # different configured one (sh/zsh are both documented supported
     # remote-shell values, machine-config.md).
-    assert rmc._wrap_remote_command("sh", "aperture-labs") == "sh -lc aperture-labs"
-    assert rmc._wrap_remote_command("zsh", "aperture-labs") == "zsh -lc aperture-labs"
+    assert rmc._wrap_remote_command("sh", "example-project") == "sh -lc example-project"
+    assert rmc._wrap_remote_command("zsh", "example-project") == "zsh -lc example-project"
 
 
 def test_wrap_remote_command_quotes_the_inner_command():
-    wrapped = rmc._wrap_remote_command("bash", "aperture-labs list --json")
-    assert wrapped == "bash -lc 'aperture-labs list --json'"
+    wrapped = rmc._wrap_remote_command("bash", "example-project list --json")
+    assert wrapped == "bash -lc 'example-project list --json'"
 
 
 def test_wrap_remote_command_never_wraps_pwsh_or_unrecognized_shell():
     # Wrapping a non-POSIX target in `bash -lc` would break it outright --
     # never guess for pwsh, and never guess for an unrecognized/empty value
     # either (only _resolve_ssh_target's own defaulting decides that).
-    assert rmc._wrap_remote_command("pwsh", "aperture-labs") == "aperture-labs"
-    assert rmc._wrap_remote_command("", "aperture-labs") == "aperture-labs"
-    assert rmc._wrap_remote_command("cmd", "aperture-labs") == "aperture-labs"
+    assert rmc._wrap_remote_command("pwsh", "example-project") == "example-project"
+    assert rmc._wrap_remote_command("", "example-project") == "example-project"
+    assert rmc._wrap_remote_command("cmd", "example-project") == "example-project"
 
 
 def test_resolve_ssh_target_defaults_shell_from_environment_name():
@@ -155,13 +155,13 @@ def test_emit_remote_plan_for_env_wraps_remote_command_for_posix_target(tmp_path
     }
     config = _fake_config(tmp_path)
     with patch.object(cfg, "load_machines_yaml", return_value=entries), \
-         patch.object(cfg, "project_name", return_value="aperture-labs"), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
          patch.object(rmc, "_emit_plan") as emit_plan:
         rc = rmc._emit_remote_plan_for_env(config, "borealis", "Linux", [])
 
     assert rc == 0
     (plan,) = emit_plan.call_args.args
-    assert plan["remote_command"] == "bash -lc aperture-labs"
+    assert plan["remote_command"] == "bash -lc example-project"
 
 
 def test_emit_remote_plan_for_env_does_not_wrap_for_windows_target(tmp_path):
@@ -174,13 +174,13 @@ def test_emit_remote_plan_for_env_does_not_wrap_for_windows_target(tmp_path):
     }
     config = _fake_config(tmp_path)
     with patch.object(cfg, "load_machines_yaml", return_value=entries), \
-         patch.object(cfg, "project_name", return_value="aperture-labs"), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
          patch.object(rmc, "_emit_plan") as emit_plan:
         rc = rmc._emit_remote_plan_for_env(config, "atlas-core", "Win", [])
 
     assert rc == 0
     (plan,) = emit_plan.call_args.args
-    assert plan["remote_command"] == "aperture-labs"
+    assert plan["remote_command"] == "example-project"
 
 
 @pytest.mark.parametrize("name", [

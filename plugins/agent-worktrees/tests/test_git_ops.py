@@ -1174,6 +1174,7 @@ class TestPinGitCredential:
             t.start()
         for t in threads:
             t.join()
+        assert len(results) == 10
         assert all(results)
 
         username = sp.run(
