@@ -19,8 +19,9 @@ enabled in effective settings **or otherwise detected**. Preserve both signals:
 | Native transition not viable | Repair checkpoint/static load or report configured limit; fallback only when authorized |
 
 The top-down selection precedence below defines the acceptance ordering.
-Supported query APIs remain an unresolved Phase 1 dependency, not invented
-flags in this design. Do not use "ACP" as an automatic fallback classifier.
+Direct settings-file opt-in and the published offered-tool metadata query are
+the selected observation seams. Neither claims arbitrary session-effective
+policy introspection. Do not use "ACP" as an automatic fallback classifier.
 
 ## Detection acceptance boundary
 
@@ -64,7 +65,7 @@ confirms the following contract, independently of runtime source:
 |-------------------|---------------------|----------------------------|
 | `joinSession()` and `CopilotSession.capabilities` | Extension attachment; advertised UI capabilities | Native context admission or effective context-management policy |
 | `session.rpc.tools.getCurrentMetadata()` | Currently initialized tool metadata; nullable before initialization | Built-in versus external override provenance, or native transition viability |
-| `ToolInvocation.availableTools` | Offered metadata accompanying an actual extension invocation | Additional provenance beyond `CurrentToolMetadata` |
+| `ToolInvocation.availableTools` | Offered metadata for a built-in tool-search override invocation only | A general snapshot for ordinary handoff invocations, or additional provider provenance |
 | `user.settings.get()` | User values/defaults, explicitly excluding repository/enterprise overrides | Session-effective admission or an explicit policy denial |
 | Root `session.context_cleared` event | Confirmed conversation clear and optional initial message | Native terminal-tool execution, checkpoint durability, or permission for another clear |
 
@@ -94,6 +95,31 @@ The observation need not expose arbitrary settings or initialize services.
 Native viability/checkpoint revision errors remain execution-time results; an
 admission observation cannot promise a successful transition.
 
+### Current offered-tool detection
+
+The operator also prefers an availability check when possible. Use the published,
+read-only `session.rpc.tools.getCurrentMetadata()` to inspect the initialized
+tool set, without calling `initializeAndValidate`, `getBuiltinDescriptors`, or
+executing tools as a probe. Detect the complete offered set
+`get_context_remaining`, `session_artifacts`, `session_history`, `new_context`;
+partial sets, missing methods, query failures, and null metadata are not positive
+capability evidence. Inspect exact offered names rather than searching an
+unrelated MCP catalog for similar names.
+
+With no explicit selected-setting denial, the complete offered set can select
+native-oriented guidance/backoff. Report this as offered-tool availability, not
+verified built-in provenance or successful rollover. The plugin does not execute
+those tools; the agent uses the host's normal permission/terminal pipeline.
+Explicit settings enablement remains an independent selection signal and must
+not be negated merely because metadata is uninitialized.
+
+Re-read the offered snapshot at bounded event/decision boundaries so a tool
+filter/replacement or reconnect does not leave a stale positive observation.
+Report a query failure explicitly, without leaking raw payloads, and retain
+diagnostic explicit recovery. `ToolInvocation.availableTools` is populated only
+for a built-in tool-search override, not ordinary handoff invocations, so it is
+not the handoff handler's general availability seam.
+
 ### Selection precedence
 
 This is the acceptance matrix, not current plugin behavior. Apply rows top-down.
@@ -105,6 +131,8 @@ never label a user-only default as an explicit effective opt-out.
 | Explicit effective denial, including conflicting advertised tools | Respect denial; diagnose conflict | Never auto-cut over to evade policy; explicit recovery remains policy-governed |
 | Selected native path with checkpoint/static-load/cap failure | Repair or diagnose the precise native failure | No blind alternate-session policy bypass or double clear |
 | Applicable explicit `contextManagementTools: true` setting | Native-first checkpoint/terminal rollover; agent checks tool availability | Suppress competing custom soft/hard/force actions; preserve explicit handoff |
+| Applicable explicit false setting | Do not infer enablement from an offered-tool conflict; diagnose it | Existing custom modes, without using alternate sessions to evade a policy denial |
+| No explicit setting denial; complete current offered native-context tool set | Native-first, based on offered availability rather than provider provenance | Suppress competing custom soft/hard/force actions; preserve explicit recovery |
 | Effective enablement plus current admitted native implementation/tool set | Native-first checkpoint/terminal rollover | Suppress competing custom soft/hard/force actions while evidence stays current |
 | No explicit denial; current admitted native implementation/tool set | Native-first, even without a setting signal | Same native backoff |
 | Effective enablement but implementation/availability unknown | Conditional native-first; report missing observation | No claimed native backoff; no native invocation based on the setting alone |

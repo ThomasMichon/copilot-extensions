@@ -192,3 +192,10 @@ alone does not complete the update.
 - Continue authorized plugin implementation: boolean/layer resolution, guidance,
   pressure backoff and window bookkeeping, explicit recovery, then acceptance.
   No product hook/API implementation or upstream lifecycle posting is authorized.
+- Operator additionally prefers checking offered native-context tools when
+  possible. The installed read-only `session.rpc.tools.getCurrentMetadata()`
+  supplies that availability seam; null/partial/error snapshots are not positive.
+  Full offered availability may select native-first without claiming provider
+  provenance or successful rollover; explicit false settings take precedence.
+- Corrected the earlier description of `ToolInvocation.availableTools`: the SDK
+  populates it only for a tool-search override, not ordinary handoff calls.
