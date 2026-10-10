@@ -1124,18 +1124,19 @@ def marker_path(root: Path, version: str) -> Path:
     return version_dir(root, version) / COMPLETE_MARKER
 
 
-def _load_unique_json(path: Path):
-    def unique_object(pairs):
-        out = {}
-        for key, value in pairs:
-            if key in out:
-                raise ValueError(f"duplicate JSON field: {key}")
-            out[key] = value
-        return out
+def _unique_object_pairs_hook(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate JSON field: {key}")
+        out[key] = value
+    return out
 
+
+def _load_unique_json(path: Path):
     return json.loads(
         path.read_text(encoding="utf-8"),
-        object_pairs_hook=unique_object,
+        object_pairs_hook=_unique_object_pairs_hook,
     )
 
 
@@ -1458,6 +1459,17 @@ def fingerprint_source(paths) -> str:
                     cmode = _lstat_mode(candidate, "nested directory entry")
                     if stat.S_ISLNK(cmode):
                         entries[candidate] = "symlink"
+                    elif not stat.S_ISDIR(cmode):
+                        # os.walk placed this name in dirnames, but an
+                        # explicit lstat here disagrees it is a plain
+                        # directory (e.g. a device/FIFO/socket, or a
+                        # TOCTOU race) -- fail closed rather than
+                        # silently traverse or skip it.
+                        raise ValueError(
+                            f"fingerprint_source: unsupported filesystem "
+                            f"object type at {candidate} (not a regular "
+                            f"file, directory, or symlink)"
+                        )
                 for name in filenames:
                     candidate = Path(dirpath) / name
                     cmode = _lstat_mode(candidate, "nested file entry")
@@ -1465,8 +1477,29 @@ def fingerprint_source(paths) -> str:
                         entries[candidate] = "symlink"
                     elif stat.S_ISREG(cmode):
                         entries[candidate] = "file"
-        else:
+                    else:
+                        # A FIFO/device/socket/etc. discovered mid-walk
+                        # must never be silently omitted from the
+                        # fingerprint (a FIFO could also block indefinitely
+                        # if ever read) -- only a regular file, directory,
+                        # or symlink is a supported attributable input.
+                        raise ValueError(
+                            f"fingerprint_source: unsupported filesystem "
+                            f"object type at {candidate} (not a regular "
+                            f"file, directory, or symlink)"
+                        )
+        elif stat.S_ISREG(mode):
             entries[root_path] = "file"
+        else:
+            # A declared root that is a FIFO/device/socket/etc. is not a
+            # supported attributable input -- fail closed instead of
+            # silently reading it as an ordinary file (a FIFO could block
+            # indefinitely).
+            raise ValueError(
+                f"fingerprint_source: unsupported filesystem object type "
+                f"at declared root {root_path} (not a regular file, "
+                f"directory, or symlink)"
+            )
 
     def _label(f: Path) -> str:
         # The root's path relative to the common ancestor of every declared
@@ -1503,23 +1536,29 @@ def fingerprint_source(paths) -> str:
                 target = target[4:]
             if _os.path.isabs(target):
                 # An absolute target is only made relocation-invariant
-                # when it actually falls INSIDE the declared source set
-                # (relative to the same common ancestor file labels use):
-                # relocating the WHOLE tree then moves the target's
-                # effective position the same way it moves everything
-                # else, so the relative form stays stable. A target
-                # OUTSIDE that set (a fixed external location, or on a
-                # different drive on Windows) is NOT part of what gets
-                # relocated -- its raw absolute text is already the
-                # stable identity in that case, and must never be
-                # recomputed relative to the symlink's OWN (relocating)
-                # containing directory, which would make the digest
-                # depend on checkout location for exactly the targets
-                # this is meant to keep stable.
+                # when it actually falls INSIDE one of the DECLARED roots
+                # themselves (never merely under their common ancestor,
+                # which can include undeclared sibling paths the caller
+                # never opted into relocating together with the rest --
+                # e.g. roots `project/src` and `project/pyproject.toml`
+                # share ancestor `project/`, but `project/shared.py` was
+                # never declared and is not guaranteed to move with the
+                # declared roots). Relocating the WHOLE declared set then
+                # moves the target's effective position the same way it
+                # moves everything else, so the relative form stays
+                # stable. A target outside every declared root (a fixed
+                # external location, or on a different drive on Windows)
+                # is NOT part of what gets relocated -- its raw absolute
+                # text is already the stable identity in that case.
                 try:
-                    target = _root_label(Path(target).resolve())
-                except (ValueError, OSError):
-                    pass
+                    target_resolved = Path(target).resolve()
+                except OSError:
+                    target_resolved = None
+                if target_resolved is not None and any(
+                    target_resolved == r or target_resolved.is_relative_to(r)
+                    for r in roots
+                ):
+                    target = _root_label(target_resolved)
             data = Path(target).as_posix().encode("utf-8")
         else:
             try:
@@ -1602,6 +1641,25 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
     (``ADMIT_HEALTH_REPAIR_REQUIRED``), never as "genuinely absent" and
     never silently followed through to "reuse", while an actual permission
     error still raises.
+
+    The marker is read through an identity-anchored, no-follow handle
+    rather than by its pathname a second time: an initial ``lstat()``
+    confirming "not a symlink" and a LATER, separate pathname-based open
+    to actually read the content would leave a TOCTOU window in which a
+    concurrent process could swap either the slot directory or the marker
+    file for a symlink (to another, otherwise-valid-and-matching slot) in
+    between the two steps, and this function would never notice. On POSIX,
+    both the slot directory and the marker are instead opened with
+    ``O_NOFOLLOW`` -- the directory first, then the marker opened
+    *relative to that already-open directory file descriptor*
+    (``dir_fd=``), never by re-resolving ``versions/<version>/<marker>``
+    as a fresh pathname -- so a same-named replacement of either path
+    after this function's own probe is caught as a symlink at open time
+    rather than silently followed. Where ``dir_fd``-relative opens are not
+    supported by the platform (notably Windows, which also lacks
+    ``O_NOFOLLOW``), this falls back to the best available guarantee: a
+    plain pathname open followed by an ``fstat()`` identity check against
+    what was probed, narrowing (never fully closing) the same window.
     """
     vdir = version_dir(root, version)
     try:
@@ -1618,22 +1676,93 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
         # contract's immutability guarantee regardless of what it
         # currently resolves to.
         return ADMIT_HEALTH_REPAIR_REQUIRED
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    dir_fd_supported = os.open in os.supports_dir_fd
     marker_file = marker_path(root, version)
+    vdir_fd = None
+    marker_fd = None
     try:
-        marker_lstat = os.lstat(marker_file)
-    except FileNotFoundError:
-        return ADMIT_CONSTRUCT
-    except OSError as exc:
-        raise OSError(f"check_admission: could not stat {marker_file}: {exc}") from exc
-    if not stat.S_ISREG(marker_lstat.st_mode):
-        # Same rationale as the slot path above: a marker that is itself a
-        # symlink (dangling or not) is never followed and never trusted,
-        # even if its current target happens to validate.
+        if dir_fd_supported:
+            # POSIX: open the slot directory itself with O_NOFOLLOW, then
+            # open the marker RELATIVE to that already-open, already-
+            # verified directory fd (dir_fd=) -- never by re-resolving
+            # `vdir`'s pathname a second time, which could have been
+            # swapped to point elsewhere in the meantime.
+            try:
+                vdir_fd = os.open(vdir, os.O_RDONLY | nofollow)
+            except OSError as exc:
+                if nofollow and exc.errno == errno.ELOOP:
+                    # Swapped to a symlink after the lstat() above.
+                    return ADMIT_HEALTH_REPAIR_REQUIRED
+                raise OSError(f"check_admission: could not open {vdir}: {exc}") from exc
+            vdir_fd_stat = os.fstat(vdir_fd)
+            if not stat.S_ISDIR(vdir_fd_stat.st_mode):
+                return ADMIT_HEALTH_REPAIR_REQUIRED
+            try:
+                marker_fd = os.open(
+                    COMPLETE_MARKER, os.O_RDONLY | nofollow, dir_fd=vdir_fd
+                )
+            except FileNotFoundError:
+                return ADMIT_CONSTRUCT
+            except OSError as exc:
+                if nofollow and exc.errno == errno.ELOOP:
+                    return ADMIT_HEALTH_REPAIR_REQUIRED
+                raise OSError(
+                    f"check_admission: could not open marker under {vdir}: {exc}"
+                ) from exc
+        else:
+            # A platform without dir_fd-relative opens (notably Windows,
+            # which also lacks O_NOFOLLOW and cannot os.open() a bare
+            # directory at all): explicitly lstat the marker path first
+            # (Windows has no open-time no-follow guard) and reject a
+            # symlink there before ever opening it, then fall back to an
+            # ordinary pathname open. The lstat() of `vdir` above is the
+            # only slot-directory guard available here; together these
+            # narrow, but do not fully close, the TOCTOU window the
+            # dir_fd path closes on POSIX.
+            try:
+                marker_lstat = os.lstat(marker_file)
+            except FileNotFoundError:
+                return ADMIT_CONSTRUCT
+            except OSError as exc:
+                raise OSError(
+                    f"check_admission: could not stat {marker_file}: {exc}"
+                ) from exc
+            if stat.S_ISLNK(marker_lstat.st_mode):
+                return ADMIT_HEALTH_REPAIR_REQUIRED
+            try:
+                marker_fd = os.open(marker_file, os.O_RDONLY | nofollow)
+            except FileNotFoundError:
+                return ADMIT_CONSTRUCT
+            except OSError as exc:
+                if nofollow and exc.errno == errno.ELOOP:
+                    return ADMIT_HEALTH_REPAIR_REQUIRED
+                raise OSError(
+                    f"check_admission: could not open {marker_file}: {exc}"
+                ) from exc
+        marker_fd_stat = os.fstat(marker_fd)
+        if not stat.S_ISREG(marker_fd_stat.st_mode):
+            return ADMIT_HEALTH_REPAIR_REQUIRED
+        with os.fdopen(marker_fd, "r", encoding="utf-8") as fh:
+            marker_fd = None  # fdopen now owns the fd
+            marker_text = fh.read()
+    finally:
+        if marker_fd is not None:
+            os.close(marker_fd)
+        if vdir_fd is not None:
+            os.close(vdir_fd)
+
+    try:
+        raw = json.loads(marker_text, object_pairs_hook=_unique_object_pairs_hook)
+    except Exception:
+        # Malformed JSON -- ambiguous evidence, never "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED
-    marker = read_marker(root, version)
+    marker = validate_marker(raw, version)
     if marker is None:
-        # The marker is a plain file, but its content failed validation --
-        # ambiguous evidence, never treated as "never built".
+        # The marker is a plain file read through a verified, no-follow
+        # handle, but its content failed schema validation -- ambiguous
+        # evidence, never treated as "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED
     if marker.get("payload_hash") == payload_hash:
         return ADMIT_REUSE

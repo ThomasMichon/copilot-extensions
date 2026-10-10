@@ -1228,6 +1228,28 @@ def test_fingerprint_source_frames_labels_and_content_unambiguously(tmp_path):
     assert vr.fingerprint_source([one_file_root]) != vr.fingerprint_source([two_file_root])
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
+def test_fingerprint_source_rejects_an_unsupported_filesystem_object_nested(tmp_path):
+    """A FIFO/device/socket/etc. discovered mid-walk must never be
+    silently omitted from the fingerprint (letting a later admission
+    decision treat a changed install input as unchanged) -- only a
+    regular file, directory, or symlink is a supported attributable
+    input."""
+    src = tmp_path / "src"
+    src.mkdir()
+    os.mkfifo(src / "a_fifo")
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([src])
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
+def test_fingerprint_source_rejects_an_unsupported_filesystem_object_as_root(tmp_path):
+    fifo = tmp_path / "a_fifo"
+    os.mkfifo(fifo)
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([fifo])
+
+
 def test_fingerprint_source_is_independent_of_absolute_location(tmp_path_factory):
     """Relocating an entire checkout to a different absolute path (a fresh
     clone, a different OS, a renamed parent directory) must not change the
@@ -1385,6 +1407,47 @@ def test_fingerprint_source_symlink_to_internal_target_is_relocation_stable(tmp_
     assert first == second
 
 
+def test_fingerprint_source_target_under_common_ancestor_but_outside_declared_roots_stays_raw(tmp_path_factory):
+    """Relativizing an absolute target must check containment against the
+    ACTUAL declared roots, not merely their common ancestor: a sibling
+    path under that ancestor (e.g. `project/shared.py` alongside declared
+    roots `project/src` and `project/pyproject.toml`) was never itself
+    declared and is not guaranteed to move together with the roots. If the
+    declared roots are relocated to an entirely different location while
+    that external sibling stays fixed, the symlink's recorded target must
+    be identical in both fingerprints (the raw absolute text, since
+    `shared.py` is outside every declared root) -- not relativized against
+    one location's common ancestor and left absolute against the other's,
+    which would produce a false content-conflict for logically unchanged
+    input."""
+    project = tmp_path_factory.mktemp("project")
+    (project / "shared.py").write_text("shared", encoding="utf-8")
+
+    def _declare_roots(base):
+        src = base / "src"
+        src.mkdir()
+        try:
+            (src / "alias.py").symlink_to(project / "shared.py")
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+        manifest = base / "pyproject.toml"
+        manifest.write_text("[project]\nname='x'\n", encoding="utf-8")
+        return manifest, src
+
+    # First declaration: roots physically live alongside the external
+    # `project/shared.py` sibling (so a naive common-ancestor containment
+    # check would wrongly treat `shared.py` as "inside").
+    first_manifest, first_src = _declare_roots(project)
+    # Second declaration: the SAME two roots relocated to a wholly
+    # different location; `project/shared.py` itself never moves.
+    other_base = tmp_path_factory.mktemp("elsewhere")
+    second_manifest, second_src = _declare_roots(other_base)
+
+    first = vr.fingerprint_source([first_manifest, first_src])
+    second = vr.fingerprint_source([second_manifest, second_src])
+    assert first == second
+
+
 def test_fingerprint_source_rejects_a_declared_root_that_is_itself_a_symlink(tmp_path):
     """A declared ROOT -- the caller's own attributable content
     declaration -- that is itself a symlink must be REJECTED, not silently
@@ -1524,6 +1587,41 @@ def test_check_admission_health_repair_required_when_marker_path_is_a_symlink(tm
         marker_file.symlink_to(real_marker)
     except OSError:
         pytest.skip("symlinks are unavailable")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="O_NOFOLLOW is POSIX-only")
+def test_check_admission_catches_a_marker_swapped_to_a_symlink_mid_probe(tmp_path, monkeypatch):
+    """Simulates the exact TOCTOU race the O_NOFOLLOW/dir_fd-anchored read
+    exists to close: something swaps the marker path for a symlink to a
+    DIFFERENT, otherwise-perfectly-valid-and-matching marker in between
+    this function's own checks and its actual open/read of the marker. A
+    pathname re-resolved a second time would silently follow the swapped-
+    in symlink and return `reuse`; the open-time O_NOFOLLOW guard must
+    instead catch it (ELOOP) and report `health-repair-required`."""
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    marker_file = vr.marker_path(tmp_path, "1.0.0")
+
+    decoy_dir = tmp_path / "decoy"
+    decoy_dir.mkdir()
+    decoy_marker = decoy_dir / vr.COMPLETE_MARKER
+    decoy_marker.write_text(marker_file.read_text(encoding="utf-8"), encoding="utf-8")
+
+    real_open = os.open
+    state = {"swapped": False}
+
+    def _swap_then_open(path, flags, *args, **kwargs):
+        p = path if isinstance(path, Path) else Path(path)
+        if not state["swapped"] and p.name == vr.COMPLETE_MARKER:
+            state["swapped"] = True
+            marker_file.unlink()
+            marker_file.symlink_to(decoy_marker)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", _swap_then_open)
     assert (
         vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
         == vr.ADMIT_HEALTH_REPAIR_REQUIRED
