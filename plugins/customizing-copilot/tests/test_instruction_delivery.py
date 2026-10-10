@@ -6,6 +6,8 @@ import json
 import importlib.util
 import subprocess
 import stat
+import shutil
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -756,3 +758,49 @@ def test_valid_stale_reviewed_guidance_remains_advisory_without_local_refresh(tm
     assert any(f.check == "projection-source-update" for f in result.findings)
     selection = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selection["selectedPath"] == delivery.fallback_destination(spec.destination)
+
+
+def test_literal_selector_resolver_argv_executes_without_preconfigured_path(tmp_path: Path) -> None:
+    repo, source, spec = fixture(tmp_path)
+    payload = repo / "payloads/market/policy"
+    shutil.copytree(source.payload_root, payload)
+    source.payload_root = payload
+    marketplace = payload.parent / ".claude-plugin"
+    marketplace.mkdir()
+    (marketplace / "marketplace.json").write_text(json.dumps({
+        "name": "market", "plugins": [{"name": "policy", "source": "policy"}],
+    }))
+    settings = repo / ".github/copilot/settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"policy@market": True},
+        "extraKnownMarketplaces": {"market": {"source": {
+            "source": "directory", "path": "payloads/market",
+        }}},
+    }))
+    assert not projections.sync_repository(repo, [source]).blocking
+    local = repo / projections.local_sibling_destination(spec.destination)
+    local.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
+    selector = (repo / spec.destination).read_text()
+    argv = next(json.loads(line) for line in selector.splitlines() if line.startswith('["<python>"'))
+    skill_base = SCRIPTS.parent
+    replacements = {
+        "<python>": sys.executable, "<skill-base>": str(skill_base),
+        "<repository>": str(repo),
+    }
+    for key, value in replacements.items():
+        argv = [argument.replace(key, value) for argument in argv]
+    env = dict(os.environ)
+    env["PATH"] = ""
+    completed = subprocess.run(
+        argv, cwd=repo, env=env, capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    selected = json.loads(completed.stdout)
+    assert selected["selectedPath"] == local.relative_to(repo).as_posix()
+    assert selected["identity"] == delivery.identity(projections.render_projection(
+        spec, include_prefer_local=False
+    ).marker)
+    assert selected["receiptCapable"]
+    assert selected["modelAdmission"] == "unknown"

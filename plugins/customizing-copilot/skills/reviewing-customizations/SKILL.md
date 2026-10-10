@@ -247,6 +247,12 @@ operation supplies exact ownership/version/hash/scope selection; add
 `--from-settings` to authenticate paired or unpaired locals against enabled
 canonical payloads. Without that proof, paired resolution retains reviewed
 fallback authority.
+`resolve-source` is not an executable: invoke the script at this loaded skill's
+returned base with an absolute Python interpreter, using argv
+`["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>","<destination>","--from-settings","--json"]`.
+This skill-loading path is the existing payload-only discovery mechanism; it
+does not add a global command, runtime or PATH entry. Preserve the owning base
+and pass the catalog `--agent-worktrees-path` when repository settings require it.
 
 `sync`/`scan`/`run_sync_pass()` above mutate the checked-in projection and
 its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).

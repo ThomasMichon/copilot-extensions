@@ -141,6 +141,15 @@ Without canonical payload verification, retain reviewed fallback authority;
 metadata comparisons alone are insufficient. Neither timestamps nor file
 existence establish authority.
 
+The resolver is a script, not a bare executable subcommand. Selectors expose
+its exact argv and instruct the agent to invoke `reviewing-customizations`;
+the tool-returned skill base locates the owning payload without a global PATH
+entry or installed-directory scan. An absolute Python interpreter and checkout
+root complete the three explicit argv placeholders. Catalog-based marketplace
+resolution may additionally require `--agent-worktrees-path`. A fresh-fixture
+test executes the actual rendered argv with an empty PATH, exercising settings
+discovery and canonical paired-cache selection rather than mocking the parser.
+
 #### Inline decision kernels
 
 The explicit inline allowlist retains existing policy prose intact:

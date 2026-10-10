@@ -231,19 +231,26 @@ def render_selector(provenance: Mapping[str, object]) -> tuple[bytes, dict]:
     destination = str(marker["destination"])
     local = destination.removesuffix(".instructions.md") + ".local.instructions.md"
     fallback = fallback_destination(destination)
+    command = resolver_argv(destination)
     body = (
-        "Acquire authoritative content before dependent/consequential action; "
-        "resolution failure is a visible blocker, never authorization.\n\n"
-        f"Local: `{local}`. Reviewed fallback: `{fallback}`.\n"
-        "Use `resolve-source --from-settings --json` to authenticate locals against "
-        "enabled canonical payloads; without that proof use the owned reviewed fallback. "
-        "Apply the inline recovery/coverage protocol: newer wins; equal "
-        "version/hash favors local; equal version/unequal hash favors fallback. Read "
-        "fully unless the entire selected body with matching provenance/receipt is "
-        "directly visible now. This selector asserts no body delivery.\n"
+        "Before dependent action, acquire guidance or BLOCK. No body delivery asserted.\n"
+        f"Local `{local}`; reviewed `{fallback}`.\n"
+        "Invoke `reviewing-customizations`; use its returned base and an absolute Python "
+        "interpreter. Substitute the three placeholders in this executable argv:\n"
+        + json.dumps(command, separators=(",", ":")) + "\n"
+        "Apply inline cache recovery: authenticate canonical locals or use reviewed "
+        "fallback; newer wins, equal version/hash favors local, unequal hash favors "
+        "reviewed. Read fully unless complete body/provenance/receipt is visible now.\n"
     )
     header = "---\napplyTo: " + json.dumps(marker["applyTo"]) + "\n---\n"
     return _render(header, body, marker), marker
+
+
+def resolver_argv(destination: str) -> list[str]:
+    return [
+        "<python>", "<skill-base>/scripts/manage-instruction-projections.py",
+        "resolve-source", "<repository>", destination, "--from-settings", "--json",
+    ]
 
 
 def complete_body(raw: bytes, marker: Mapping[str, object]) -> bool:

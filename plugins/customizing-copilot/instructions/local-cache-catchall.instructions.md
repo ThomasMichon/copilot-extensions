@@ -8,8 +8,13 @@ Inventory `.github/instructions/**/*.local.instructions.md` after startup:
 a hook may have written bodies after automatic instruction discovery.
 Missing local caches are normal; use each selector's reviewed fallback.
 
-Prefer the projection manager's read-only `resolve-source <repository>
-<destination> --from-settings --json` operation. It validates reviewed
+Invoke `reviewing-customizations` and use its returned skill base, not an
+installed-path guess or a bare `resolve-source` command. Resolve an absolute
+Python interpreter and execute this argv (substitute the three placeholders
+and the source's exact declared destination):
+`["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>","<destination>","--from-settings","--json"]`.
+Use the attributable agent-worktrees catalog path with `--agent-worktrees-path`
+when the repository's marketplace resolver requires it. This validates reviewed
 lock/fallback ownership and authenticates paired or unpaired local bytes
 against the current enabled payload's canonical render. Self-supplied hashes
 and receipts prove consistency, not provenance. Unverifiable locals fall back
