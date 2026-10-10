@@ -375,6 +375,15 @@ def test_absolute_deadline_alone_cannot_downgrade_corrupt_durable_state():
     with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
         WatchRegistry().restore_state([entry])
 
+def test_null_absolute_deadline_requires_null_remaining_timeout():
+    registry = WatchRegistry()
+    registry.register(WatchKey("example/project", 1), "one", until=(MERGED,),
+                      acknowledged=True, notify={"argv": ["consumer"]})
+    entries = registry.snapshot_state()
+    entries[0]["remaining_timeout"] = 0
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
+
 
 def test_legacy_restored_notify_timeout_keeps_fixed_ceiling(monkeypatch):
     from agent_pull_requests import watch_notification

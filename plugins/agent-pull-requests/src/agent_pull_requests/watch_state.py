@@ -98,6 +98,8 @@ class RegistryState:
                         if sub.pending is not None:
                             validate_pending(sub.pending, key, sub)
                     remaining = entry.get("remaining_timeout")
+                    if opted_in and entry["deadline_at"] is None and remaining is not None:
+                        raise ValueError("inconsistent acknowledged deadline")
                     if opted_in and entry.get("deadline_at") is not None:
                         deadline_at = positive_seconds(entry["deadline_at"])
                         remaining = max(0.0, deadline_at - time.time())
