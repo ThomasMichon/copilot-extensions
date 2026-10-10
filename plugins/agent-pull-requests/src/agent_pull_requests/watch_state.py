@@ -52,6 +52,11 @@ class RegistryState:
                 try:
                     if opted_in and entry.get("notification_protocol") != ACKNOWLEDGED_NOTIFICATIONS:
                         raise ValueError("unsupported notification protocol")
+                    if opted_in and any(
+                        not isinstance(entry.get(field), str) or not entry[field].strip()
+                        for field in ("repo", "subscriber_id", "registration_id")
+                    ):
+                        raise ValueError("invalid acknowledged identity")
                     key = WatchKey(repo=str(entry["repo"]), number=int(entry["number"]))
                     baseline = entry.get("baseline")
                     if opted_in and baseline is not None:

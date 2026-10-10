@@ -367,6 +367,31 @@ def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
     assert len(calls) == len(set(calls)) == 20
     assert not daemon._deliveries.legacy_queue
 
+def test_already_fired_legacy_event_is_queued_after_shutdown(make):
+    calls = []
+    daemon = make(notify=lambda event: calls.append(event))
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "legacy", until=(MERGED,), notify={})
+    event = registry.apply_snapshot(key, PRSnapshot(merged=True))[0]
+    daemon.compute("shutdown", {})
+    daemon._deliveries.legacy(event)
+    daemon.close()
+    assert calls == [event]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("repo", None), ("subscriber_id", 42), ("registration_id", "  "),
+])
+def test_acknowledged_raw_identity_must_be_nonblank_string(field, value):
+    registry = WatchRegistry()
+    registry.register(WatchKey("example/project", 1), "one", until=(MERGED,),
+                      acknowledged=True, notify={"argv": ["consumer"]})
+    entries = registry.snapshot_state()
+    entries[0][field] = value
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
+
 
 def test_shutdown_during_fetch_preserves_subscriber_for_successor(make):
     entered, release = threading.Event(), threading.Event()

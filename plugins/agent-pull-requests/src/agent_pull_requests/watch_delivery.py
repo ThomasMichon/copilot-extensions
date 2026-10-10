@@ -69,8 +69,6 @@ class Deliveries:
     def legacy(self, event) -> None:
         """Keep legacy best-effort delivery from blocking observation or other callbacks."""
         with self.lock:
-            if self.shutdown.is_set():
-                return
             self.legacy_queue.append(event)
         self.resume()
 
