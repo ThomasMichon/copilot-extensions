@@ -93,7 +93,10 @@ this is independent of the missing-value policies. `SSHEnvironment` also carries
 `find_machine_entry(..., reject_ambiguous=True)` rejects a non-exact identity
 shared by multiple machines with `AmbiguousMachineError`, a `ValueError`
 subclass that lets API consumers distinguish ambiguity from a missing entry
-without parsing diagnostic text. Exact registry keys retain precedence. The default
+without parsing diagnostic text. Exact registry keys retain precedence; strict
+matching also prefers a unique case-insensitive registry key over aliases,
+hostnames and display names. Colliding case-insensitive keys remain ambiguous
+unless the input exactly spells one key. The default
 remains first-match for existing consumers. Bridge opts into strict identity
 matching and separately binds SSH aliases to their precise environment: that
 consumer-specific binding and default environment preference remain outside

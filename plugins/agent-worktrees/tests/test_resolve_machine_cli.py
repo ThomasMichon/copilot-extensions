@@ -227,7 +227,8 @@ def test_ambiguous_picker_identity_never_emits_a_plan(tmp_path, capsys):
     assert "ambiguous" in capsys.readouterr().out
 
 
-def test_exact_key_precedes_another_machine_alias(tmp_path):
+@pytest.mark.parametrize("name", ["shared", "SHARED"])
+def test_exact_key_precedes_another_machine_alias(tmp_path, name):
     entries = {
         "shared": _entry("shared", envs=[("linux", "right-ssh")]),
         "other": _entry("other", alias="shared", envs=[("linux", "wrong-ssh")]),
@@ -238,9 +239,9 @@ def test_exact_key_precedes_another_machine_alias(tmp_path):
          patch.object(cfg, "project_name", return_value="example-project"), \
          patch.object(rmc, "_load_remote_machines", return_value=targets), \
          patch.object(rmc, "_emit_plan") as emit:
-        assert rmc._machine_key_for_display(config, "shared") == "shared"
-        assert rmc._try_machine_handoff(config, "shared") == 0
-        assert rmc._emit_remote_plan_for_env(config, "shared", "Linux") == 0
+        assert rmc._machine_key_for_display(config, name) == "shared"
+        assert rmc._try_machine_handoff(config, name) == 0
+        assert rmc._emit_remote_plan_for_env(config, name, "Linux") == 0
     assert all(call.args[0]["ssh_alias"] == "right-ssh" for call in emit.call_args_list)
 
 
@@ -298,3 +299,37 @@ raise SystemExit(rmc._emit_remote_plan_for_env(config, "FRIENDLY", "Linux", ["li
         "display_name": "Build Box Linux",
         "remote_command": "bash -lc 'example-project list --json'",
     }
+
+
+def test_real_subprocess_ambiguous_plan_returns_json_error(tmp_path):
+    machines = tmp_path / "machines.yaml"
+    machines.write_text(
+        "machines:\n"
+        + "".join(
+            f"  {key}:\n    alias: shared\n    ssh:\n      environments:\n"
+            f"        - name: linux\n          alias: {key}-ssh\n"
+            for key in ("first", "second")
+        ),
+        encoding="utf-8",
+    )
+    script = """
+import sys
+from types import SimpleNamespace
+from machine_transport import parse_machines_yaml_file
+from agent_worktrees import config as cfg, output, resolve_machine_cli as rmc
+cfg.load_machines_yaml = lambda _anchor: parse_machines_yaml_file(sys.argv[1])
+config = SimpleNamespace(default_repo=SimpleNamespace(anchor="fixture"))
+with output.stdout_to_stderr():
+    result = rmc._emit_remote_plan_for_env(config, "SHARED", "Linux")
+raise SystemExit(result)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(machines)],
+        capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout) == {
+        "version": 1, "error": "Machine 'SHARED' is ambiguous in topology",
+    }
+    assert result.stderr == ""

@@ -162,8 +162,7 @@ def _emit_remote_plan_for_env(
     try:
         entry = find_machine_entry(entries, machine_display, reject_ambiguous=True)
     except ValueError as exc:
-        output.err(str(exc))
-        return 1
+        return output._json_error(str(exc))
     if entry is None or not entry.ssh_environments:
         return None
 

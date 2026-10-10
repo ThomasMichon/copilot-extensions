@@ -510,7 +510,8 @@ provider's absence.
   setup-child contracts passed **28 tests**. Full-suite evidence remains open.
 - Normal promotion run `37984196435` succeeded. The unified installed-consumer
   refresh completed, with Worktrees `1.24.36-dev1` and Bridge `0.9.41.dev1`
-  verified. Consumer projection   reconciliation is complete after its required CI's separately tracked
+  verified. Consumer projection reconciliation is complete after its required
+  CI's separately tracked
   fixture lease-isolation failure was repaired and the reviewed reconciliation
   merged with green required CI.
   No broader service-health claim follows from this refresh.
@@ -526,6 +527,27 @@ provider's absence.
   independent of transport identity. No installation-context code was changed.
 - This closes that bounded source-ownership inventory gap, not the remaining
   shell-only and provider-argv inventory or the whole campaign.
+
+### 2026-10-09 - Picker current-head review corrections
+- Review of #6002 found that strict shared matching mixed case-insensitive
+  keys with alias/hostname/display matches. Strict matching now resolves a
+  unique case-insensitive key first; genuinely colliding keys remain ambiguous
+  unless the input exactly spells one key. Non-strict first-match behavior is
+  unchanged. Key-versus-identity regressions cover both insertion orders.
+- Environment-specific JSON resolve ambiguity now emits the existing versioned
+  error envelope on stdout instead of leaving stdout empty. A real headless
+  subprocess proves nonzero status, the exact envelope and clean stderr.
+  Both review regressions failed against the prior head before correction.
+- Corrected consumer contracts passed **52 tests**, shared-library regressions
+  **84 tests**, related Bridge contracts **447 tests, 1 skipped**, and the
+  standalone Picker locality contract **13 tests**. The first shared test run
+  used mutation on a frozen fixture; constructing a replaced dataclass fixed
+  that test-only error. Touched-code lint passed.
+- The previous full run was stopped before editing after these review findings;
+  completed file groups passed, but that is not full-suite success. Publication,
+  fresh current-head review, required CI and the corrected full affected suites
+  remain gates. Shared consumer release intent covers Worktrees, Bridge and
+  Worktree Manager; no peer-owned host/WSL code was changed.
 
 ### Current continuation gate
 

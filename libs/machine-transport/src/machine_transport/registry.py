@@ -263,13 +263,20 @@ def find_machine_entry(
     Matching the explicit ``hostname`` field lets a machine keyed by a
     friendly name still be found by its raw COMPUTERNAME. Returns ``None``
     if no entry matches. ``reject_ambiguous`` rejects multiple non-exact matches
-    instead of returning the first; exact keys always retain precedence.
+    instead of returning the first; exact keys always retain precedence, and
+    strict matching prefers a unique case-insensitive key over other identities.
     """
     if not name:
         return None
     if name in entries:
         return entries[name]
     name_lower = name.lower()
+    if reject_ambiguous:
+        key_matches = [entry for key, entry in entries.items() if key.lower() == name_lower]
+        if len(key_matches) > 1:
+            raise AmbiguousMachineError(f"Machine '{name}' is ambiguous in topology")
+        if key_matches:
+            return key_matches[0]
     matches: list[_Machine] = []
     for key, entry in entries.items():
         if any(value and value.lower() == name_lower for value in (

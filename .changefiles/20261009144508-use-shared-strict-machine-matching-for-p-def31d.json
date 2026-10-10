@@ -4,6 +4,14 @@
     {
       "plugin": "agent-worktrees",
       "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
     }
   ]
 }
