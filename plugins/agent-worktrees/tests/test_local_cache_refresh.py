@@ -111,7 +111,8 @@ def test_sessionstart_repairs_nested_worktree_guidance(tmp_path, monkeypatch):
     assert not (nested / ".github").exists()
 
 
-def test_real_global_discovery_and_renderer_fit_sessionstart_budget(tmp_path, monkeypatch):
+@pytest.mark.parametrize("trusted", [True, False], ids=["trusted", "untrusted"])
+def test_real_global_discovery_and_renderer_fit_sessionstart_budget(tmp_path, monkeypatch, trusted):
     """Exercise both production subprocesses and source discovery, not stubs."""
     scripts = (
         _REPO_ROOT / "plugins" / "customizing-copilot" / "skills"
@@ -132,6 +133,11 @@ def test_real_global_discovery_and_renderer_fit_sessionstart_budget(tmp_path, mo
     )
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
+    (home / ".copilot" / "config.json").write_text(
+        json.dumps({"trustedFolders": [str(repo)] if trusted else []}), encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     settings = repo / ".github" / "copilot" / "settings.json"
     settings.parent.mkdir(parents=True)
     names = [f"guidance-{index}" for index in range(8)]
@@ -164,6 +170,10 @@ def test_real_global_discovery_and_renderer_fit_sessionstart_budget(tmp_path, mo
     started = time.monotonic()
     first = lcr.refresh_local_cache(repo, home=home, timeout=lcr.SESSIONSTART_MAX_TIMEOUT_S)
     assert first.status == "ready", first.diagnostic
+    if not trusted:
+        assert first.changed == 0
+        assert all(not path.exists() for path in siblings)
+        return
     assert first.changed == len(names)
     assert first.warnings > 0
     assert time.monotonic() - started < lcr.SESSIONSTART_MAX_TIMEOUT_S
