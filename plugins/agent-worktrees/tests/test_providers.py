@@ -2597,10 +2597,10 @@ class TestCreatePRAutoOpen:
         assert res["success"] is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
 
-    def test_codename_mode_embeds_only_the_codename(self, pr_repo, monkeypatch):
-        """``source_attribution: codename`` must publish ONLY the codename --
-        no worktree id, machine, session, or head SHA (effort
-        pr-attribution-codenames Phase 4)."""
+    def test_codename_mode_embeds_codename_and_encrypted_identity(
+        self, pr_repo, monkeypatch, keyed_identity_payload,
+    ):
+        """Initial PR publication sends identity through the cipher, not raw fields."""
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -2620,7 +2620,11 @@ class TestCreatePRAutoOpen:
         assert res["success"] is True
         body = fake.captured["scope"].body
         fields = attribution.parse_marker(body)
-        assert fields == {"codename": "harbor-lattice"}
+        assert fields["codename"] == "harbor-lattice"
+        assert set(fields) == {"codename", "enc"}
+        assert keyed_identity_payload["worktree_id"] == wid
+        assert keyed_identity_payload["machine"] == rec.machine
+        assert keyed_identity_payload["head"]
         assert wid not in body
         for raw_field in ("worktree=", "machine=", "session=", "head="):
             assert raw_field not in body

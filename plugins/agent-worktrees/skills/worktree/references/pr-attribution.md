@@ -89,8 +89,9 @@ a sanitized warning and omits `enc=`; decoding reports an explicit error.
 
 If the marker carries an `enc=<token>` field, it is a self-contained
 AES-256-GCM-encrypted blob of the FULL raw identity (worktree id, machine,
-session, head SHA, project, timestamp) -- the same information the raw
-`true` marker carries in plaintext, just encrypted. Only the holder of the
+session, head SHA, project, timestamp). Worktree, machine, session and head
+correspond to the raw `true` marker; project and UTC timestamp are additional
+encrypted metadata, absent from the raw marker. Only the holder of the
 matching symmetric identity key can decrypt it; no SSH scan, no tracking
 store, and no network access needed:
 

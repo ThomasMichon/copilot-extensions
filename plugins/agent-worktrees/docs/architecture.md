@@ -1068,14 +1068,15 @@ safely carry.
 Alongside `codename=`/`root=` (never replacing either), the `"codename"`-mode
 marker may also carry an `enc=<token>` field -- an AES-256-GCM-encrypted
 blob (`agent_worktrees.identity_marker`) of the FULL raw identity (worktree
-id, machine, session, head SHA, project, timestamp), the same information
-the raw `true` marker carries in plaintext, just encrypted. Only the holder
+id, machine, session, head SHA, project, timestamp). The first four identity
+fields correspond to the raw `true` marker; project and UTC timestamp are
+additional encrypted metadata not carried by that raw marker. Only the holder
 of a shared symmetric key can decrypt it; to everyone else it is opaque
 ciphertext -- exactly as public-safe as `codename=` itself. Because of that,
 it is emitted **automatically** under `"codename"` mode whenever a key is
 configured -- no new per-repo opt-in is needed, mirroring how `root=` was
 added. Scoped to `"codename"` mode specifically: `true` mode already
-discloses the exact same identity in plaintext (encrypting it alongside
+discloses the underlying worktree identity in plaintext (encrypting it alongside
 would add ciphertext with no additional privacy value), and `false` (the
 anonymous opt-out) continues to emit no marker of any kind, encrypted or
 not -- an operator who explicitly chose full anonymity gets it, full stop.

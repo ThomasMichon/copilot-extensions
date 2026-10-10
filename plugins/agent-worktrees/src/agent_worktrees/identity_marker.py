@@ -7,14 +7,14 @@ marker fields (see :mod:`agent_worktrees.providers.attribution` and
 ``codename=`` only decodes via local tracking-store access or an automated
 cross-machine SSH scan, this field is a small AES-256-GCM-encrypted blob
 carrying the **full raw identity** (worktree id, machine, session, head SHA,
-project, timestamp -- mirroring the raw ``source_attribution: true`` marker's
-own fields) that only the holder of a shared symmetric key can decrypt --
+project, timestamp -- the raw marker's identity fields plus additional
+project and UTC timestamp metadata) that only the holder of a shared key can decrypt --
 anyone else sees only opaque ciphertext, so it is exactly as public-safe as
 ``codename=`` itself. This module is mode-agnostic (it builds/decrypts a
 payload regardless of why it was called); ``codename`` is the one caller
 that actually wires it into a published marker (see
 :func:`agent_worktrees.root_chain.build_codename_marker_with_root`) --
-``true`` mode already discloses the same identity in plaintext, and
+``true`` mode already discloses the underlying worktree identity in plaintext, and
 ``false`` (anonymous opt-out) never publishes any marker, encrypted or not.
 
 Key custody (operator-confirmed design, effort README): a single raw
@@ -222,7 +222,7 @@ def build_identity_payload(
     project: str = "",
 ) -> dict:
     """Build the full-identity payload dict (operator-confirmed Piece 2
-    scope: mirrors the raw ``source_attribution: true`` marker's own fields,
+    scope: the raw marker's identity fields plus project and UTC timestamp,
     destined for encryption instead of plaintext exposure). Only
     ``worktree_id`` and ``ts`` (a UTC ISO-8601 timestamp, second precision)
     are always present; the rest are omitted when the caller has no value,
