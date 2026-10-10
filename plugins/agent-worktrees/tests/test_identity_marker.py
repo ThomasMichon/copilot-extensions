@@ -3,22 +3,69 @@
 resolution/generation, the AES-256-GCM encrypt/decrypt round trip, and the
 standalone CLI.
 
-``cryptography`` is a hard runtime dependency of this plugin (not optional,
-unlike ``agent_vault``'s ``cache``/``kek`` extras) -- the encrypt/decrypt
-tests below are unconditional, not skipped.
+Encryption tests are mandatory except on native Windows ARM64, where the
+runtime intentionally omits cryptography. Missing-package degradation is
+tested on every platform.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import platform
+import subprocess
+import sys
+from importlib.metadata import requires
 
 import pytest
+from packaging.requirements import Requirement
 
 from agent_worktrees import identity_marker
 
+_native_windows_arm64 = sys.platform == "win32" and platform.machine().upper() == "ARM64"
+_requires_crypto = pytest.mark.skipif(
+    _native_windows_arm64, reason="cryptography wheels unavailable on native Windows ARM64",
+)
 
 class TestKeyResolution:
+    def test_runtime_dependency_marker_preserves_supported_platforms(self):
+        dependency = next(
+            Requirement(item)
+            for item in requires("agent-worktrees") or []
+            if Requirement(item).name == "cryptography"
+        )
+        assert dependency.marker is not None
+        assert not dependency.marker.evaluate(
+            {"sys_platform": "win32", "platform_machine": "ARM64"},
+        )
+        assert dependency.marker.evaluate({"sys_platform": "win32", "platform_machine": "AMD64"})
+        assert dependency.marker.evaluate({"sys_platform": "linux", "platform_machine": "aarch64"})
+
+    def test_fresh_import_and_publication_without_cryptography(self):
+        script = """
+import builtins
+original = builtins.__import__
+def blocked(name, *args, **kwargs):
+    if name == 'cryptography' or name.startswith('cryptography.'):
+        raise ImportError('test: unavailable cryptography')
+    return original(name, *args, **kwargs)
+builtins.__import__ = blocked
+from agent_worktrees import identity_marker
+identity_marker.load_identity_key = lambda: b'k' * 32
+assert identity_marker.identity_marker_field(worktree_id='sample-tree') is None
+try:
+    identity_marker.decrypt_identity_payload('invalid-token')
+except identity_marker.IdentityMarkerError:
+    pass
+else:
+    raise AssertionError('decode should report unavailable cryptography')
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "identity encryption failed" in result.stderr
+
     def test_invalid_key_reports_sanitized_warning(self, tmp_path, monkeypatch, caplog):
         target = tmp_path / "identity.key"
         encoded = base64.b64encode(b"\x23" * identity_marker.KEY_BYTES).decode()
@@ -135,6 +182,7 @@ class TestBuildIdentityPayload:
         assert payload["project"] == "repo"
 
 
+@_requires_crypto
 class TestEncryptDecryptRoundTrip:
     def test_authenticated_invalid_payload_is_rejected(self, key, monkeypatch):
         monkeypatch.setattr(identity_marker, "load_identity_key", lambda: key)
@@ -215,6 +263,7 @@ class TestIdentityMarkerFieldForRecord:
     def test_never_raises_on_bad_record(self):
         assert identity_marker.identity_marker_field_for_record(object()) is None  # type: ignore[arg-type]
 
+    @_requires_crypto
     def test_uses_live_session_over_ended_one(self, monkeypatch):
         import types
 
@@ -247,6 +296,7 @@ class TestCli:
         assert rc == 1
         assert "error" in capsys.readouterr().out
 
+    @_requires_crypto
     def test_decode_round_trips_a_real_token(self, tmp_path, monkeypatch, capsys):
         key_path = tmp_path / "identity.key"
         identity_marker._cli(["generate", "--path", str(key_path)])

@@ -52,8 +52,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cryptography.exceptions import InvalidTag
-
 if TYPE_CHECKING:
     from . import tracking
 
@@ -207,15 +205,10 @@ def generate_identity_key(path: Path | None = None, *, force: bool = False) -> P
 def _aesgcm(key: bytes):
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    except ImportError as exc:  # pragma: no cover - cryptography is a
-        # hard runtime dependency of this plugin (pyproject.toml); this
-        # branch is a defensive backstop against a corrupted/out-of-sync
-        # installed venv, not an expected runtime path.
+    except ImportError as exc:
         raise IdentityMarkerError(
             "the 'cryptography' package is required for the encrypted "
-            "identity marker but is not importable -- the installed venv "
-            "may be corrupted or out of sync with this plugin's "
-            "pyproject.toml; reinstall (e.g. `uv pip install cryptography`)"
+            "identity marker but is not importable on this runtime"
         ) from exc
     return AESGCM(key)
 
@@ -284,6 +277,10 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
     malformed token, or a failed authentication tag (wrong key / tampered
     data).
     """
+    try:
+        from cryptography.exceptions import InvalidTag
+    except ImportError as exc:
+        raise IdentityMarkerError("identity decoding requires the cryptography package") from exc
     resolved_key = key if key is not None else load_identity_key()
     if resolved_key is None:
         raise IdentityMarkerError(

@@ -6,6 +6,8 @@ PR-marker composition helpers that fold it into the ``codename`` marker.
 
 from __future__ import annotations
 
+import platform
+import sys
 import types
 
 import pytest
@@ -769,6 +771,10 @@ class TestMarkerComposition:
         assert "root=amber-thicket" in result
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32" and platform.machine().upper() == "ARM64",
+    reason="cryptography wheels unavailable on native Windows ARM64",
+)
 class TestIdentityMarkerIntegration:
     """``enc=<identity>`` is a THIRD, independent layer (effort
     ``pr-attribution-codenames``, encrypted-identity-marker slice) -- these
