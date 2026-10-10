@@ -804,3 +804,40 @@ def test_literal_selector_resolver_argv_executes_without_preconfigured_path(tmp_
     ).marker)
     assert selected["receiptCapable"]
     assert selected["modelAdmission"] == "unknown"
+
+
+@pytest.mark.parametrize("boundary", [delivery.RECEIPT_PREFIX, delivery.MARKER_PREFIX])
+def test_source_comparison_reserved_boundary_returns_structured_refusal(
+    tmp_path: Path, boundary: str
+) -> None:
+    repo, source, _ = fixture(tmp_path)
+    assert not projections.sync_repository(repo, [source]).blocking
+    path = source.payload_root / "instructions/rules.instructions.md"
+    path.write_bytes(path.read_bytes() + boundary.encode() + b"reserved example -->\n")
+    result = projections.scan_repository(repo, [source])
+    assert result.blocking
+    assert any(f.check == "projection-declaration" for f in result.findings)
+    payload = repo / "payloads/market/policy"
+    shutil.copytree(source.payload_root, payload)
+    market = payload.parent / ".claude-plugin"
+    market.mkdir()
+    (market / "marketplace.json").write_text(json.dumps({
+        "name": "market", "plugins": [{"name": "policy", "source": "policy"}],
+    }))
+    (repo / ".github/copilot/settings.json").write_text(json.dumps({
+        "enabledPlugins": {"policy@market": True},
+        "extraKnownMarketplaces": {"market": {"source": {
+            "source": "directory", "path": "payloads/market",
+        }}},
+    }))
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPTS / "manage-instruction-projections.py"),
+         "scan", str(repo), "--from-settings", "--json"],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert completed.returncode == 1
+    data = json.loads(completed.stdout)
+    assert data["blocking"] > 0
+    assert any(f["check"] == "projection-declaration" for f in data["findings"])
+    assert "Traceback" not in completed.stderr

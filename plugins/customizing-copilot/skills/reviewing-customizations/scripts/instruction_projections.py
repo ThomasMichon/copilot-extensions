@@ -1938,6 +1938,11 @@ def scan_repository(
         desired = {spec.destination: spec for spec in specs}
         _scan_legacy_regions(root, specs, result)
         for destination, spec in sorted(desired.items()):
+            try:
+                render_projection(spec)
+            except ValueError as exc:
+                result.add(BLOCKING, "projection-declaration", destination, str(exc))
+                continue
             entry = lock.get(destination)
             path = root.joinpath(*PurePosixPath(destination).parts)
             if entry is None:
