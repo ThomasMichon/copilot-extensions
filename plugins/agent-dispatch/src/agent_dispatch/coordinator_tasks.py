@@ -373,7 +373,7 @@ def register_task_routes(
             # mutation succeeds.
             from . import handoff_claim_release
 
-            handoff_claim_release.release_if_handoff(result)
+            handoff_claim_release.release_if_handoff(result, cancel_pending=event_type == "task.abandoned")
         if event_type is not None:
             _emit(event_type, result)
         return result

@@ -107,6 +107,8 @@ def _task_item(task: dict[str, Any], read_at: str,
     # The steering card for an ask; the task itself (its result, its hold) otherwise.
     view = ["card", "show", task_id] if state == "awaiting_input" else ["show", task_id]
     actions = [{"verb": "show", "argv": [*cli, *view]}] if cli else []
+    if state == "stalled":
+        actions = _stalled_handoff_actions(task_id, title, handoff_worktree(task), cli) + actions
     item = {
         "schema": ac.SCHEMA, "entity": "task", "entity_ref": task_id, "lifecycle_state": status,
         "display_state": state, "severity": ac.SEVERITY[state], "reason": ac.one_line(reason),
@@ -157,6 +159,93 @@ def _unpicked_handoff_age(task: dict[str, Any], now: float | None) -> float | No
     return age if age > after else None
 
 
+def handoff_worktree(task: dict[str, Any]) -> str | None:
+    """The worktree a handoff baton belongs to: its ``target_worktree``, else
+    its ``worktree`` affinity (both are set when context-handoff files it)."""
+    affinity = task.get("affinity") if isinstance(task.get("affinity"), dict) else {}
+    worktree = task.get("target_worktree") or affinity.get("worktree")
+    return worktree if isinstance(worktree, str) and worktree else None
+
+
+def handoff_seed(title: str, task_id: str) -> str:
+    """The one-line handoff seed a successor's first turn takes (context-handoff's
+    documented locator format): it loads the stored brief, never carries it."""
+    return f"{title} | Resume: /consume-handoff to take over | Recovery: context-handoff task:{task_id}"
+
+
+#: The reason an attention-queue abandon records on the task.
+ABANDON_REASON = "abandoned from the attention queue"
+
+
+def _stalled_handoff_actions(task_id: str, title: str, worktree: str | None,
+                             cli: tuple[str, ...] | None) -> list[dict[str, Any]]:
+    """What the operator can do about a baton nobody picked up: start a successor
+    in its worktree (the default), or abandon it. The ``show`` follows."""
+    actions = []
+    if worktree:
+        actions.append({"verb": "resume", "argv": ["agent-worktrees", "embody", "--worktree-id", worktree,
+                                                   "--seed", handoff_seed(title or "Continue", task_id)]})
+    if cli:
+        actions.append({"verb": "abandon",
+                        "argv": [*cli, "abandon", task_id, "--permit", "--reason", ABANDON_REASON]})
+    return actions
+
+
+#: Seconds one worktree's pending-handoff lookup may take.
+HANDOFF_PENDING_TIMEOUT = 8.0
+
+
+def handoff_pending_in_worktree(task_id: str, worktree: str,
+                                timeout: float = HANDOFF_PENDING_TIMEOUT) -> bool | None:
+    """Whether ``worktree``'s own handoff ledger (agent-worktrees, the authority
+    for which handoff a worktree still waits on) lists this task as pending.
+    ``None`` when that can't be read (no agent-worktrees, an untracked
+    worktree, a failed or malformed reply): the task is then taken at its word."""
+    from .procutil import run_agent_worktrees_capture
+
+    done = run_agent_worktrees_capture("head-session", "--worktree", worktree, "--json", timeout=timeout)
+    if done is None or done.returncode != 0:
+        return None
+    try:
+        data = json.loads(done.stdout)
+    except ValueError:
+        return None
+    pending = data.get("pending_handoffs") if isinstance(data, dict) and data.get("tracked") is True else None
+    if not isinstance(pending, list):
+        return None
+    return any(isinstance(p, dict) and p.get("token") == task_id for p in pending)
+
+
+class _PendingHandoffs:
+    """A stalled baton needs the operator only while its worktree still waits on
+    it. One its ledger no longer lists was picked up, replaced by a later
+    handoff, or cancelled -- or was only saved, never handed over -- so it is no
+    item. The lookups run together, alongside the read's lane reads; one that
+    hasn't answered by the read's deadline keeps its item."""
+
+    def __init__(self, items: list[dict[str, Any]], tasks: dict[str, dict[str, Any]],
+                 pending_check: Callable[[str, str], bool | None]) -> None:
+        self.answers: dict[str, bool | None] = {}
+        stalled = {i["entity_ref"] for i in items if i["entity"] == "task" and i["display_state"] == "stalled"}
+        checks = {t: handoff_worktree(tasks[t]) for t in stalled if t in tasks}
+        self.threads = [threading.Thread(target=self._check, args=(pending_check, t, wt), daemon=True,
+                                         name=f"attention-handoff-{t}") for t, wt in checks.items() if wt]
+        for thread in self.threads:
+            thread.start()
+
+    def _check(self, pending_check: Callable[[str, str], bool | None], task_id: str, worktree: str) -> None:
+        try:
+            self.answers[task_id] = pending_check(task_id, worktree)
+        except Exception:  # noqa: BLE001 -- an unreadable ledger keeps the item
+            self.answers[task_id] = None
+
+    def keep(self, items: list[dict[str, Any]], deadline: float) -> list[dict[str, Any]]:
+        for thread in self.threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        answers = dict(self.answers)
+        return [i for i in items if not (i["entity"] == "task" and answers.get(i["entity_ref"]) is False)]
+
+
 def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
                 cli: tuple[str, ...] | None) -> dict[str, Any] | None:
     """An undraining lane (the vision's *buildup-is-a-health-signal*): the oldest
@@ -183,10 +272,14 @@ def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
 def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
                   cli: tuple[str, ...] | None = ("agent-dispatch",),
-                  backlog_budget: float = BACKLOG_BUDGET) -> dict[str, Any]:
+                  backlog_budget: float = BACKLOG_BUDGET,
+                  pending_check: Callable[[str, str], bool | None] | None = None) -> dict[str, Any]:
     started = time.monotonic()
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
+        items = [i for i in (_task_item(t, read_at, cli, now=time.time()) for t in tasks) if i]
+        pending = _PendingHandoffs(items, {str(t.get("id")): t for t in tasks},
+                                   pending_check or handoff_pending_in_worktree)
         lanes = sorted({t["repo"] for t in tasks
                         if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
         backlogs, unread = {}, 0
@@ -198,7 +291,7 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                 backlogs[repo] = (client.health(repo=repo) or {}).get("backlog") or {}
             except (DispatchError, httpx.HTTPError, OSError, ValueError):
                 unread += 1
-    items = [i for i in (_task_item(t, read_at, cli, now=time.time()) for t in tasks) if i]
+    items = pending.keep(items, started + backlog_budget)
     items += [i for i in (_queue_item(r, b, read_at, cli) for r, b in backlogs.items()) if i]
     uncertain = unread + (1 if len(tasks) >= limit else 0)
     return {"items": items, "status": "uncertain" if uncertain else "ok", "uncertain": uncertain,
@@ -341,12 +434,19 @@ def _result_problem(raw: Any) -> str | None:
 
 def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: dict[str, float],
             selected: list[str] | None, config_errors: list[dict[str, str]],
-            store: Any, read_at: str | None = None, read_token: int | None = None) -> dict[str, Any]:
+            store: Any, read_at: str | None = None, read_token: int | None = None,
+            dismissals: Any = None,
+            dismiss_cli: Callable[[], tuple[str, ...] | None] = lambda: ("agent-dispatch",)) -> dict[str, Any]:
     """Read every (selected) source concurrently and build the aggregate envelope.
     A selected name that is only a rejected registration is reported through its
     config error, not as a source. ``read_token`` (default: the number the store
     allocates as the read starts) orders this read against concurrent ones,
-    which the second-precision ``read_at`` can't."""
+    which the second-precision ``read_at`` can't. ``dismissals`` (an
+    :class:`~agent_dispatch.attention_dismiss.Dismissals`) moves the operator's
+    dismissed items out of the queue into ``dismissed``. ``dismiss_cli`` (asked
+    after the read) is the invocation that reaches the coordinator the
+    ``dispatch`` items came from, for their ``dismiss`` action (which re-reads
+    the item); ``None`` offers them none, like their other actions."""
     if read_token is None:  # the store numbers reads as they start (a clock can tie or step back)
         read_token = store.begin_read() if hasattr(store, "begin_read") else time.time_ns()
     read_at = read_at or now_iso()
@@ -399,7 +499,27 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
                 **({"error": r["error"]} if r.get("error") else {})}
                for n, r in sorted(results.items())]
     items = ac.dedupe(i for r in results.values() for i in r["items"])
+    dismissed: list[dict[str, Any]] = []
+    if dismissals is not None:
+        ok = {n for n, r in results.items() if r["status"] == "ok"}
+        items, dismissed, error = dismissals.split(items, read_at, ok_sources=ok)
+        if error:
+            config_errors = [*config_errors, {"name": DISMISSALS_NAME, "error": error}]
+    dispatch_cli = dismiss_cli()
+    for item in items:
+        cli = dispatch_cli if item["source"] == "dispatch" else ("agent-dispatch",)
+        if cli:
+            item["actions"] = [*item["actions"], dismiss_action(item["id"], cli)]
     config_errors = sorted(config_errors, key=lambda e: (e["name"], e["error"]))
     return {"schema": ac.SCHEMA, "status": ac.aggregate_status(sources, config_errors, items),
             "read_at": read_at, "selected": selected, "sources": sources,
-            "config_errors": config_errors, "items": items}
+            "config_errors": config_errors, "items": items, "dismissed": dismissed}
+
+
+#: The ``config_errors`` name a malformed dismissal store is reported under.
+DISMISSALS_NAME = "*dismissals"
+
+
+def dismiss_action(item_id: str, cli: tuple[str, ...] = ("agent-dispatch",)) -> dict[str, Any]:
+    """Every queued item's last action: hide it until it changes."""
+    return {"verb": "dismiss", "argv": [*cli, "attention", "dismiss", item_id]}

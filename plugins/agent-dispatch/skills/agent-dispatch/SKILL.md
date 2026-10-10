@@ -1108,6 +1108,6 @@ library, worked example) instead.
 
 ## See Also
 
-- [docs/attention.md](../../docs/attention.md) -- `<agent-dispatch catalog argv[0]> attention`: the ordered "what needs the operator" queue across sources (tasks awaiting an answer, holds, completions to confirm, agent-bridge sessions parked on a question, permission or policy decision, tracked PRs whose merge bar failed, plus registered command sources), with a `degraded` status that never reads a failed source as all clear
+- [docs/attention.md](../../docs/attention.md) -- `<agent-dispatch catalog argv[0]> attention`: the ordered "what needs the operator" queue across sources (tasks awaiting an answer, holds, completions to confirm, agent-bridge sessions parked on a question, permission or policy decision, tracked PRs whose merge bar failed, plus registered command sources), with a `degraded` status that never reads a failed source as all clear; every item offers its actions (a stalled handoff: resume or abandon) and can be dismissed until it changes, snoozed or ignored
 - [docs/entity-relationship-model.md](../../docs/entity-relationship-model.md) -- the suite-wide diagnostic playbook: given a task id, which command resolves its worktree/session/bridge state (and the reverse: session -> tasks via `find-by-session`)
 - `troubleshooting-agent-dispatch` -- a stalled/stuck lane, dead-lettered task, stuck exclude/hold, or "no logs anywhere" -- this skill covers the happy path; that one covers silent/stuck failures.

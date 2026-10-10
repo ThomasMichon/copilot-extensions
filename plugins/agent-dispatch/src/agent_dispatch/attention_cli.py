@@ -24,6 +24,7 @@ from typing import Any
 
 from . import attention_contract as ac
 from . import attention_sources as srcs
+from .attention_dismiss import Dismissals, source_of
 from .attention_store import FirstObserved, locked
 
 
@@ -157,7 +158,8 @@ def _read(args: argparse.Namespace) -> dict[str, Any] | None:
               file=sys.stderr)
         return None
     return srcs.collect(readers, timeouts=timeouts, selected=selected,
-                        config_errors=config_errors, store=FirstObserved())
+                        config_errors=config_errors, store=FirstObserved(), dismissals=Dismissals(),
+                        dismiss_cli=lambda: getattr(args, "attention_cli", _target_cli(args)))
 
 
 def _banner(envelope: dict[str, Any]) -> list[str]:
@@ -180,8 +182,11 @@ def _item_lines(item: dict[str, Any]) -> list[str]:
 
 
 def _cmd_attention(args: argparse.Namespace) -> int:
-    if getattr(args, "attention_verb", None) == "next":
+    verb = getattr(args, "attention_verb", None)
+    if verb == "next":
         return _cmd_next(args)
+    if verb in ("dismiss", "undismiss", "dismissed"):
+        return _cmd_dismissal(args)
     envelope = _read(args)
     if envelope is None:
         return 2
@@ -194,7 +199,53 @@ def _cmd_attention(args: argparse.Namespace) -> int:
         print(f"Nothing needs you{scope}." if envelope["status"] == "clear" else "No items read.")
     for item in envelope["items"]:
         print("\n".join(_item_lines(item)))
+    if envelope["dismissed"]:
+        print(f"({len(envelope['dismissed'])} dismissed: agent-dispatch attention dismissed)")
     return 0
+
+
+def _cmd_dismissal(args: argparse.Namespace) -> int:
+    """``dismiss ID [--until TIME | --forever]``, ``undismiss ID``, ``dismissed``.
+    A dismissal until the item changes reads the item's own source first, so it
+    records the condition the operator actually saw."""
+    store = Dismissals()
+    if args.attention_verb == "dismissed":
+        entries, error = store.entries()
+        if error:
+            print(f"agent-dispatch: {error}", file=sys.stderr)
+        if args.json:
+            return _core()._emit({"dismissed": entries})
+        for item_id, entry in sorted(entries.items()):
+            until = f" until {entry['until']}" if entry["mode"] == "until" else ""
+            print(ac.for_terminal(f"{item_id}  [{entry['mode']}{until}]  since {entry['at']}"))
+        if not entries:
+            print("Nothing is dismissed.")
+        return 0
+    if args.attention_verb == "undismiss":
+        return _core()._emit({"undismissed": store.undismiss(args.id), "id": args.id})
+    now = srcs.now_iso()
+    if args.forever:
+        return _core()._emit({"dismissed": args.id, **store.dismiss(args.id, "forever", now)})
+    if args.until is not None:
+        try:
+            until = ac.canonical_time(args.until)
+        except ac.ContractError as exc:
+            print(f"agent-dispatch: --until: {exc}", file=sys.stderr)
+            return 2
+        if until <= now:
+            print(f"agent-dispatch: --until {until} is not in the future", file=sys.stderr)
+            return 2
+        return _core()._emit({"dismissed": args.id, **store.dismiss(args.id, "until", now, until=until)})
+    read_args = argparse.Namespace(**{**vars(args), "source": [source_of(args.id)]})
+    envelope = _read(read_args)
+    if envelope is None:
+        return 2
+    item = next((i for i in envelope["items"] + envelope["dismissed"] if i["id"] == args.id), None)
+    if item is None:
+        print(f"agent-dispatch: {args.id} is not in the attention queue now "
+              "(--forever or --until dismiss it anyway)", file=sys.stderr)
+        return 2
+    return _core()._emit({"dismissed": args.id, **store.dismiss(args.id, "changed", now, item=item)})
 
 
 def _cmd_next(args: argparse.Namespace) -> int:
@@ -301,6 +352,18 @@ def register_attention_commands(sub: argparse._SubParsersAction) -> None:
     nxt.add_argument("--after", default=None, metavar="CURSOR", help="The cursor a previous `next` printed")
     _add_read_flags(nxt)
     nxt.set_defaults(func=_cmd_attention)
+    dis = verbs.add_parser("dismiss", help="Hide an item until it changes (or --until a time, or --forever)")
+    dis.add_argument("id", help="The item id (`<source>:<entity>:<entity_ref>`)")
+    mode = dis.add_mutually_exclusive_group()
+    mode.add_argument("--until", default=None, metavar="TIME", help="Hide it until this ISO-8601 time, even unchanged")
+    mode.add_argument("--forever", action="store_true", help="Hide it until it is undismissed")
+    dis.add_argument("--include-remote", action="store_true", help=argparse.SUPPRESS)
+    undis = verbs.add_parser("undismiss", help="Show a dismissed item again")
+    undis.add_argument("id")
+    listed = verbs.add_parser("dismissed", help="List this machine's dismissals")
+    listed.add_argument("--json", action="store_true", help="Print them as JSON")
+    for p in (dis, undis, listed):
+        p.set_defaults(func=_cmd_attention)
     source = verbs.add_parser("source", help="Register, remove or list command sources on this machine")
     sverbs = source.add_subparsers(dest="source_verb", required=True)
     add = sverbs.add_parser("add", help="Register a command source: source add NAME [--timeout S] -- ARGV...")

@@ -7,6 +7,8 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from agent_dispatch import handoff_claim_release
 
 
@@ -85,6 +87,41 @@ def test_release_task_claim_degrades_safe_when_agent_worktrees_unavailable(monke
     handoff_claim_release._release_task_claim("T1", worktree="wt-9")
 
 
+@pytest.mark.parametrize("cancel_pending,worktree,expected", [
+    # an abandon also cancels the baton's entry in its worktree's own ledger
+    (True, "wt-9", [["claims", "release", "T1", "--json", "--worktree", "wt-9"],
+                    ["cancel-handoff", "--worktree-id", "wt-9", "--token", "T1"]]),
+    # a completion doesn't: the pickup consumed it
+    (False, "wt-9", [["claims", "release", "T1", "--json", "--worktree", "wt-9"]]),
+    # without a worktree there is no ledger to name
+    (True, None, [["claims", "release", "T1", "--json"]]),
+])
+def test_an_abandon_also_cancels_the_worktrees_pending_entry(monkeypatch, cancel_pending, worktree, expected):
+    from agent_dispatch import procutil
+
+    calls = []
+    monkeypatch.setattr(procutil, "run_agent_worktrees_capture",
+                        lambda *args, timeout: calls.append(list(args)) or _Proc())
+    handoff_claim_release._release_task_claim("T1", worktree=worktree, cancel_pending=cancel_pending)
+    assert calls == expected
+
+
+def test_release_if_handoff_passes_cancel_pending_through(monkeypatch):
+    calls = []
+    done = threading.Event()
+
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
+        calls.append((task_id, cancel_pending))
+        done.set()
+
+    monkeypatch.setattr(handoff_claim_release, "_release_task_claim", fake_release)
+    handoff_claim_release.release_if_handoff(
+        {"id": "T1", "labels": ["handoff"], "target_worktree": "wt-9"}, cancel_pending=True,
+    )
+    assert _wait_for(done.is_set)
+    assert calls == [("T1", True)]
+
+
 # -- release_if_handoff: the fire-and-forget entry point ---------------------
 
 
@@ -104,7 +141,7 @@ def test_release_if_handoff_dispatches_on_a_background_thread_not_inline(monkeyp
     started = threading.Event()
     release_thread_is_background = {}
 
-    def fake_release(task_id, *, worktree, timeout=15.0):
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
         release_thread_is_background["value"] = (
             threading.current_thread() is not threading.main_thread()
         )
@@ -126,7 +163,7 @@ def test_release_if_handoff_passes_through_worktree_and_id(monkeypatch):
     calls = []
     done = threading.Event()
 
-    def fake_release(task_id, *, worktree, timeout=15.0):
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
         calls.append((task_id, worktree))
         done.set()
 
@@ -142,7 +179,7 @@ def test_release_if_handoff_passes_through_worktree_and_id(monkeypatch):
 def test_release_if_handoff_no_ops_for_a_non_handoff_task(monkeypatch):
     calls = []
 
-    def fake_release(task_id, *, worktree, timeout=15.0):
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
         calls.append(task_id)
 
     monkeypatch.setattr(handoff_claim_release, "_release_task_claim", fake_release)
@@ -164,7 +201,7 @@ def test_release_if_handoff_prefers_explicit_task_id_override(monkeypatch):
     calls = []
     done = threading.Event()
 
-    def fake_release(task_id, *, worktree, timeout=15.0):
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
         calls.append(task_id)
         done.set()
 
@@ -180,7 +217,7 @@ def test_release_if_handoff_prefers_explicit_task_id_override(monkeypatch):
 def test_release_if_handoff_no_ops_without_any_resolvable_id(monkeypatch):
     calls = []
 
-    def fake_release(task_id, *, worktree, timeout=15.0):
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
         calls.append(task_id)
 
     monkeypatch.setattr(handoff_claim_release, "_release_task_claim", fake_release)

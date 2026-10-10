@@ -100,10 +100,17 @@ def is_handoff_task(task: dict[str, Any] | None) -> bool:
 
 
 def release_if_handoff(
-    task: dict[str, Any] | None, task_id: str | None = None, *, timeout: float = 15.0
+    task: dict[str, Any] | None, task_id: str | None = None, *, timeout: float = 15.0,
+    cancel_pending: bool = False,
 ) -> None:
     """Best-effort, non-blocking: release the ``target_worktree``'s claim on
     ``task``'s id iff ``task`` is a context-handoff task.
+
+    ``cancel_pending`` (an abandon) also cancels the baton's entry in that
+    worktree's own handoff ledger, so an abandoned handoff no longer reads as
+    pending there (``agent-worktrees cancel-handoff``, which leaves an entry a
+    successor is already taking over untouched). A completion doesn't: its
+    pickup consumed the entry.
 
     ``task_id`` overrides ``task.get("id")`` for a caller that already has the
     id handy (e.g. from the request body) and wants to avoid relying on the
@@ -124,7 +131,7 @@ def release_if_handoff(
     thread = threading.Thread(
         target=_release_task_claim,
         args=(resolved_id,),
-        kwargs={"worktree": worktree, "timeout": timeout},
+        kwargs={"worktree": worktree, "timeout": timeout, "cancel_pending": cancel_pending},
         daemon=True,
         name=f"handoff-claim-release-{resolved_id}",
     )
@@ -132,7 +139,7 @@ def release_if_handoff(
 
 
 def _release_task_claim(
-    task_id: str, *, worktree: str | None, timeout: float = 15.0
+    task_id: str, *, worktree: str | None, timeout: float = 15.0, cancel_pending: bool = False,
 ) -> None:
     """``agent-worktrees claims release <task_id>``, explicitly targeting
     ``worktree`` (via ``--worktree``) rather than the calling process's own
@@ -161,3 +168,7 @@ def _release_task_claim(
     if worktree:
         argv += ["--worktree", worktree]
     run_agent_worktrees_capture(*argv, timeout=timeout)
+    if cancel_pending and worktree:
+        run_agent_worktrees_capture(
+            "cancel-handoff", "--worktree-id", worktree, "--token", task_id, timeout=timeout
+        )

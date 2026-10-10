@@ -24,7 +24,7 @@ DISPLAY_STATES = ("failed", "stalled", "awaiting_input", "blocked", "review")
 SEVERITY = {state: rank for rank, state in enumerate(DISPLAY_STATES)}
 CONFIDENCES = ("reported", "scanned", "heuristic")
 SHARED_ENTITIES = ("task", "session", "pr", "queue")
-VERBS = ("show", "resume", "open")
+VERBS = ("show", "resume", "open", "abandon", "dismiss")
 SOURCE_STATUSES = ("ok", "failed", "uncertain", "disabled")
 COMMAND_STATUSES = ("ok", "failed", "uncertain")
 SOURCE_NAME = re.compile(r"^[a-z0-9-]+\Z")  # \Z: `$` would accept a trailing newline
@@ -106,7 +106,7 @@ def _check_action(action: Any, source: str) -> None:
     verb, argv = action.get("verb"), action.get("argv")
     if not (verb in VERBS or (isinstance(verb, str) and verb.startswith(f"x.{source}.")
                               and len(verb) > len(f"x.{source}."))):
-        raise ContractError(f"action verb {verb!r} is not show, resume, open or x.{source}.<verb>")
+        raise ContractError(f"action verb {verb!r} is not {', '.join(VERBS)} or x.{source}.<verb>")
     if not (isinstance(argv, list) and argv and all(isinstance(a, str) and a for a in argv)):
         raise ContractError("action argv must be a non-empty list of strings")
 

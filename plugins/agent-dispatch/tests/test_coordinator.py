@@ -1322,13 +1322,15 @@ def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None: released.append((task.get("id"), task.get("target_worktree"))),
+        lambda task, task_id=None, cancel_pending=False: released.append(
+            (task.get("id"), task.get("target_worktree"), cancel_pending)),
     )
     done = api.post(
         f"/tasks/{tid}/complete", json={"worker_id": "m/wt-9", "result_ref": "pr/1"}
     ).json()
     assert done["status"] == Status.COMPLETED
-    assert released == [(tid, "wt-9")]
+    # A pickup consumed the worktree's ledger entry: only an abandon cancels it.
+    assert released == [(tid, "wt-9", False)]
 
 
 def test_complete_over_http_never_releases_a_non_handoff_task(api, monkeypatch):
@@ -1367,7 +1369,7 @@ def test_idempotent_result_recording_retry_does_not_re_release(api, monkeypatch)
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None: released.append(task.get("id")),
+        lambda task, task_id=None, cancel_pending=False: released.append(task.get("id")),
     )
     # Retry attaching a result to the already-submitted task.
     api.post(
@@ -1387,13 +1389,15 @@ def test_abandon_over_http_releases_handoff_claim(api, monkeypatch):
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None: released.append((task.get("id"), task.get("target_worktree"))),
+        lambda task, task_id=None, cancel_pending=False: released.append(
+            (task.get("id"), task.get("target_worktree"), cancel_pending)),
     )
     abandoned = api.post(
         f"/tasks/{tid}/abandon", json={"permitted": True, "reason": "test"}
     ).json()
     assert abandoned["status"] == Status.ABANDONED
-    assert released == [(tid, "wt-9")]
+    # An abandoned baton is also cancelled in its worktree's handoff ledger.
+    assert released == [(tid, "wt-9", True)]
 
 
 def test_idempotent_abandon_retry_does_not_re_release(api, monkeypatch):
@@ -1414,7 +1418,7 @@ def test_idempotent_abandon_retry_does_not_re_release(api, monkeypatch):
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None: released.append(task.get("id")),
+        lambda task, task_id=None, cancel_pending=False: released.append(task.get("id")),
     )
     retry = api.post(f"/tasks/{tid}/abandon", json={"permitted": True, "reason": "retry"})
     assert retry.json()["status"] == Status.ABANDONED
