@@ -127,8 +127,11 @@ unreviewed changes to Logger's native/WSL compatibility behavior.
   aliases, live provider projection, keypair selection and native/guest venues.
 - [ ] Resolve #5974 through a reviewed Index designated-host identity boundary
   that preserves explicit indexer configuration and standalone operation.
-- [ ] Review and resolve #6039's Logger ramp-up execution-locality and
-  named-machine SSH boundary after the shared contract lands; preserve
+- [ ] Complete the independent design review/merge gate for #6039's Logger
+  boundary proposal; this gate does not wait for #5689.
+  _(agent-recommended inventory finding; operator-approved tracking/review)_
+- [ ] Resolve #6039's Logger ramp-up execution-locality and named-machine SSH
+  implementation after the shared contract lands; preserve
   session-corpus filtering and standalone operation.
   _(agent-recommended inventory finding; operator-approved tracking/review)_
 - [ ] Inventory other agent-* named-machine operation paths for remaining
@@ -889,8 +892,10 @@ composition proposal reviewed and merged in #6023; implementation must follow
 the original peer's shared identity contract. The campaign extension is merged.
 #5689 retains its original host/WSL
 implementation owner and remains the overlapping-consumer prerequisite.
-The additional Logger #6039 boundary is proposed for review; neither its
-runtime nor its native/WSL compatibility change is implemented or reserved.
+Logger #6039's proposal has its own independent review/merge gate in the Plan.
+Once that gate is complete, do not repeat design review: implementation waits
+only for the original shared contract. Neither its runtime nor its native/WSL
+compatibility change is implemented or reserved.
 
 #5885 is merged and #5911 is closed: do not rework that completed remediation.
 Normal promotion and installed-consumer refresh are verified; consumer projection
