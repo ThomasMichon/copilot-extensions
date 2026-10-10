@@ -1100,7 +1100,7 @@ def test_supervisor_daemon_root_hosts_recurring_children_windowlessly(
     monkeypatch.setattr(
         procutil,
         "windowless_daemon_kwargs",
-        lambda: {"creationflags": 0x08000000},
+        lambda **options: {"creationflags": 0x08000000},
     )
     monkeypatch.setattr(
         cli.subprocess,
@@ -1135,7 +1135,7 @@ def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
     slot_py.write_text("")
     (install_dir / "current-version").write_text("0.1.2-dev49")
     monkeypatch.setattr(cli.sys, "executable", "WRONG-INTERPRETER")
-    monkeypatch.setattr(procutil, "windowless_daemon_kwargs", lambda: {})
+    monkeypatch.setattr(procutil, "windowless_daemon_kwargs", lambda **options: {})
     observed = {}
     monkeypatch.setattr(
         cli.subprocess,

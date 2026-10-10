@@ -4,7 +4,7 @@ applyTo: "**"
 
 # Headless process-spawn fallback
 
-**Fallback policy `[owner: agent-conduct-guidance@0.1.6-dev1]`:** Every ad hoc
+**Fallback policy `[owner: agent-conduct-guidance@0.1.7-dev1]`:** Every ad hoc
 child process an agent starts to serve one turn -- a shell command, a helper
 script, a build/watch/dev-server launch, a self-authored scheduled task or
 service -- must not surface a visible console window or steal focus. On
@@ -30,6 +30,10 @@ nothing in a single blocking script (those events need PowerShell's own idle
 loop, which a blocking `WaitForExit()` never yields to); see the paired skill
 for the full, verified pattern. Prefer
 routing to an existing local API/runtime over spawning a process at all.
+Headlessness does not establish durable lifetime: keep bounded helpers inside
+caller-owned cleanup, but use the canonical explicit escape/ensure primitive
+for daemons that must outlive it. Verify survival after caller Job cleanup,
+not only parent exit or an early health probe; preserve contained-test suppression.
 Before starting a long-lived, repeating, or backgrounded process, invoke the
 `spawning-headless-processes` skill to select the correct primitive for the
 target language and OS.
