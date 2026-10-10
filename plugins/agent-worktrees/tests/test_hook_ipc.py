@@ -445,6 +445,8 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
         {"pid": True, "started": 999},
         {"pid": 1, "started": "999"},
         {"pid": 1, "started": float("nan")},
+        {"pid": 1, "started": 10 ** 1000},
+        {"pid": 1, "started": -(10 ** 1000)},
         {"pid": 1, "started": 1001},
         {"pid": 1, "started": 880},
     ],
@@ -521,6 +523,43 @@ def test_update_driver_unverified_ownership_preserves_recovery(
     helper = None if failure == "unavailable" else SimpleNamespace(_pid_image_path=probe)
     monkeypatch.setattr(hook_client, "_load_sibling", lambda name: helper)
     assert not hook_client._external_update_driver_active(tmp_path, Path(sys.executable))
+
+
+@pytest.mark.parametrize("result", ["/runtime/bin/python", None, "probe-error"])
+def test_update_driver_darwin_native_image_probe(monkeypatch, tmp_path, result):
+    import ctypes
+
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": 123, "started": time.time()}), encoding="utf-8"
+    )
+    calls = []
+
+    def probe(pid, buffer, size):
+        calls.append((pid, size))
+        if result == "probe-error":
+            raise OSError("native probe unavailable")
+        if result is None:
+            return 0
+        buffer.value = os.fsencode(result)
+        return len(buffer.value)
+
+    monkeypatch.setattr(hook_client.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        hook_client, "_load_sibling",
+        lambda name: SimpleNamespace(
+            _pid_image_path=lambda pid: None, _pid_alive=lambda pid: True,
+        ),
+    )
+    monkeypatch.setattr(
+        ctypes, "CDLL",
+        lambda name: SimpleNamespace(proc_pidpath=probe),
+    )
+    assert hook_client._external_update_driver_active(
+        tmp_path, Path("/runtime/bin/python")
+    ) is (result == "/runtime/bin/python")
+    assert calls == [(123, 4096)]
 
 
 def test_session_start_enriches_payload_with_session_environment(

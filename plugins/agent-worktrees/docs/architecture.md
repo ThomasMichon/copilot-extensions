@@ -30,6 +30,9 @@ configured root, successful version probe, completed stage, or cached
 `skipped: locked` result alone does not suppress recovery. Missing, expired,
 invalid, dead-owner, or unverified-process ownership falls through to the
 existing fallback. This read-only check neither starts nor repairs a service.
+Process identity uses the existing runtime helper on Windows and Linux and
+Darwin's native `proc_pidpath` on macOS; unavailable native probes preserve
+recovery rather than treating driver installation as proof of ownership.
 
 The **plugin** installs via `copilot plugin install` and provides skills, hooks,
 and the live-pulse extension to Copilot CLI sessions. The **runtime** installs
