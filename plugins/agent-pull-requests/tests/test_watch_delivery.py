@@ -235,6 +235,61 @@ def test_failed_cancellation_preserves_pending_registration(make, monkeypatch):
     finally:
         release.set()
 
+@pytest.mark.parametrize("operation", ["register", "unregister"])
+def test_post_replace_failure_retains_committed_memory_state(make, monkeypatch, operation):
+    from agent_pull_requests import watch_daemon
+    from agent_pull_requests.watch_storage import StateCommitUncertain
+
+    daemon = make(fetch=lambda *_: PRSnapshot())
+    old = daemon.compute("register", spec(timeout=60))
+    write = watch_daemon.write_subscriptions_state
+
+    def uncertain(entries):
+        write(entries)
+        raise StateCommitUncertain("directory sync failed")
+
+    monkeypatch.setattr(watch_daemon, "write_subscriptions_state", uncertain)
+    if operation == "register":
+        result = daemon.compute("register", spec(timeout=20))
+        assert result["ambiguous_registration"]
+        memory = daemon._registry.subscriber(WatchKey("example/project", 1), "one")
+        assert memory.registration_id != old["registration_id"]
+        assert memory.registration_id == read_subscriptions_state()[0]["registration_id"]
+    else:
+        result = daemon.compute("unregister", {
+            "repo": "example/project", "number": 1, "subscriber_id": "one",
+            "registration_id": old["registration_id"],
+        })
+        assert result["ambiguous_cancellation"]
+        assert daemon.status()["subscribers"] == {} and read_subscriptions_state() == []
+
+
+@pytest.mark.parametrize("identity", [None, "", False, 1])
+def test_explicit_malformed_cancellation_identity_never_disables_fence(make, identity):
+    daemon = make(fetch=lambda *_: PRSnapshot())
+    daemon.compute("register", spec(timeout=60))
+    result = daemon.compute("unregister", {
+        "repo": "example/project", "number": 1, "subscriber_id": "one",
+        "registration_id": identity,
+    })
+    assert "error" in result
+    assert daemon.status()["subscribers"] == {"example/project#1": ["one"]}
+
+
+def test_cli_explicit_empty_cancellation_identity_is_forwarded(monkeypatch, capsys):
+    from agent_pull_requests import __main__ as cli
+
+    def request(kind, payload):
+        assert kind == "unregister"
+        assert payload["registration_id"] == ""
+        return {"error": "invalid cancellation registration identity"}
+
+    monkeypatch.setattr(cli, "_watch_request", request)
+    assert cli._cmd_watch_unsubscribe(SimpleNamespace(
+        repo="example/project", number=1, subscriber_id="one", registration_id="", json=True,
+    )) == 1
+    assert "error" in json.loads(capsys.readouterr().out)
+
 
 def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):
     from agent_pull_requests import watch_daemon

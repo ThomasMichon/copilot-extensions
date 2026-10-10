@@ -29,6 +29,7 @@ from .watch_notification import (
 )
 from .watch_registry import FiredEvent, WatchKey, WatchRegistry
 from .watch_storage import (
+    StateCommitUncertain,
     _atomic_write_json as _atomic_write_json, lock_path, read_lock_data, read_subscriptions_state,
     state_dir, subscriptions_path, write_lock_data, write_subscriptions_state,
 )
@@ -160,14 +161,22 @@ class WatchDaemon:
                 identity = str(payload.get("subscriber_id", ""))
                 sub = self._registry.subscriber(key, identity)
                 expected = payload.get("registration_id")
-                if sub is None or (expected is not None and expected != sub.registration_id):
+                if "registration_id" in payload and (
+                    not isinstance(expected, str) or not expected.strip()
+                ):
+                    return {"error": "invalid cancellation registration identity"}
+                if sub is None or ("registration_id" in payload and expected != sub.registration_id):
                     return {"unregistered": False}
                 entries = [
                     entry for entry in self._registry.snapshot_state()
                     if (entry["repo"], entry["number"], entry["subscriber_id"])
                     != (key.repo, key.number, identity)
                 ]
-                self._persist(entries)
+                try:
+                    self._persist(entries)
+                except StateCommitUncertain:
+                    self._registry.unregister(key, identity, registration_id=sub.registration_id)
+                    return {"error": "cancellation durability is uncertain", "ambiguous_cancellation": True}
                 ok = self._registry.unregister(
                     key, identity, registration_id=sub.registration_id,
                 )
@@ -224,6 +233,12 @@ class WatchDaemon:
             )
             try:
                 self._persist()
+            except StateCommitUncertain:
+                self._ensure_poller(key)
+                return {
+                    "error": "registration durability is uncertain",
+                    "ambiguous_registration": True, "registration_id": sub.registration_id,
+                }
             except OSError:
                 self._registry.restore_registration(key, sub, previous)
                 raise

@@ -95,6 +95,13 @@ or explicit unsubscribe/replacement. Cancellation cannot undo an already-running
 callback; a late ACK cannot delete a re-registered subscriber. Optional
 `--registration-id` makes cancellation generation-fenced too.
 
+A failure after state replacement but before its directory-sync acknowledgement
+is an ambiguous committed outcome, not a rollback. Memory retains the replaced
+state; registration/cancellation reports `ambiguous_registration` or
+`ambiguous_cancellation` rather than success. Reconcile that registration before
+retry or fallback. Only omission of a cancellation identity selects legacy
+unfenced behavior; explicitly empty, null, or malformed identities are rejected.
+
 Pending events remain in the owner's existing `watch-subscriptions.json`,
 under its installation-boundary state root (`AGENT_PULL_REQUESTS_HOME` when
 provided), not a second state authority. Startup resumes pending deliveries

@@ -10,6 +10,9 @@ from pathlib import Path
 
 _ATOMIC_REPLACE_LOCK = threading.Lock()
 
+class StateCommitUncertain(OSError):
+    """Replacement committed, but its crash-durability acknowledgement failed."""
+
 
 def state_dir() -> Path:
     override = os.environ.get("AGENT_PULL_REQUESTS_HOME", "").strip()
@@ -39,11 +42,14 @@ def _atomic_write_json(path: Path, data: object) -> None:
         with _ATOMIC_REPLACE_LOCK:
             tmp.replace(path)
             if os.name != "nt":
-                directory = os.open(path.parent, os.O_RDONLY)
                 try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
+                    directory = os.open(path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                except OSError as exc:
+                    raise StateCommitUncertain("state replacement durability is uncertain") from exc
     finally:
         tmp.unlink(missing_ok=True)
 

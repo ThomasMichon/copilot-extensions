@@ -493,7 +493,7 @@ def _cmd_watch_subscribe(args: argparse.Namespace) -> int:
 
 def _cmd_watch_unsubscribe(args: argparse.Namespace) -> int:
     payload = {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id}
-    if getattr(args, "registration_id", None):
+    if getattr(args, "registration_id", None) is not None:
         payload["registration_id"] = args.registration_id
     result = _watch_request(
         "unregister", payload,

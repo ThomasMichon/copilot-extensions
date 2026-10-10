@@ -8,6 +8,7 @@ import time
 from collections import deque
 
 from .watch_notification import event_payload
+from .watch_storage import StateCommitUncertain
 
 
 class Deliveries:
@@ -117,7 +118,11 @@ class Deliveries:
                                 e for e in self.registry.snapshot_state()
                                 if e.get("registration_id") != sub.registration_id
                             ]
-                            self.persist(entries)
+                            try:
+                                self.persist(entries)
+                            except StateCommitUncertain:
+                                self.registry.unregister(event.key, sub.subscriber_id)
+                                return
                             self.registry.unregister(event.key, sub.subscriber_id)
                             return
                         pending = sub.pending
