@@ -80,21 +80,6 @@ private RPC invoked to obtain it. No supported effective-admission/provenance se
 has been established for this installed version. The later operator clarification
 selects direct settings-file opt-in instead; it does not require such a seam.
 
-### Optional future host observation (not an implementation prerequisite)
-
-A separate capability-detection contract could use a read-only observation bound to the current
-session and root/subagent owner, reporting effective admission (including explicit
-denial versus default/unknown), implementation support, and the currently offered
-native tools after filters/overrides. Native provider provenance must be
-host-authored, not metadata supplied by the tool being inspected. Include an
-initialization state and revision/invalidation mechanism so policy changes,
-tool replacement, owner changes, and reconnects cannot leave suppression active
-on stale evidence. A one-time create/resume capability bit alone is insufficient.
-
-The observation need not expose arbitrary settings or initialize services.
-Native viability/checkpoint revision errors remain execution-time results; an
-admission observation cannot promise a successful transition.
-
 ### Current offered-tool detection
 
 The operator also prefers an availability check when possible. Use the published,
@@ -130,18 +115,25 @@ never label a user-only default as an explicit effective opt-out.
 |------------------|-------------------|-----------------------------|
 | Explicit effective denial, including conflicting advertised tools | Respect denial; diagnose conflict | Never auto-cut over to evade policy; explicit recovery remains policy-governed |
 | Selected native path with checkpoint/static-load/cap failure | Repair or diagnose the precise native failure | No blind alternate-session policy bypass or double clear |
-| Applicable explicit `contextManagementTools: true` setting | Native-first checkpoint/terminal rollover; agent checks tool availability | Suppress competing custom soft/hard/force actions; preserve explicit handoff |
+| Confirmed unsupported implementation or currently unavailable required tool set, without policy denial | Explain unsupported/unavailable path; custom recovery | Existing custom mode/consent semantics, even if the flag is true |
 | Applicable explicit false setting | Do not infer enablement from an offered-tool conflict; diagnose it | Existing custom modes, without using alternate sessions to evade a policy denial |
+| Applicable explicit `contextManagementTools: true` setting; no confirmed unsupported/unavailable path | Native-first checkpoint/terminal rollover; agent checks tool availability | Replace custom session-transfer soft/hard prompts with native checkpoint prompts; suppress custom force action/tool blocking; preserve explicit handoff |
 | No explicit setting denial; complete current offered native-context tool set | Native-first, based on offered availability rather than provider provenance | Suppress competing custom soft/hard/force actions; preserve explicit recovery |
-| Effective enablement plus current admitted native implementation/tool set | Native-first checkpoint/terminal rollover | Suppress competing custom soft/hard/force actions while evidence stays current |
-| No explicit denial; current admitted native implementation/tool set | Native-first, even without a setting signal | Same native backoff |
-| Effective enablement but implementation/availability unknown | Conditional native-first; report missing observation | No claimed native backoff; no native invocation based on the setting alone |
-| Confirmed unsupported implementation, without policy denial | Explain unsupported venue; custom recovery | Existing custom mode/consent semantics |
-| Absent, uninitialized, failed, stale, or conflicting observations | Explain uncertainty; bounded re-evaluation | Do not silently disable all recovery or treat uncertainty as confirmed native support |
+| No positive setting; absent, uninitialized, failed, stale, or conflicting observations | Explain uncertainty; bounded re-evaluation | Existing custom mode/consent behavior; do not treat uncertainty as confirmed native support |
 
 Re-evaluate on supported invalidations and before committing an automatic
 pressure action. Bound retries and report failures once per observation revision;
 do not poll arbitrary private APIs. Runtime emergency compaction remains intact.
+
+Settings-only selection is intentional: on a flag-enabled host, an uninitialized
+or failed metadata query does not undo the declared opt-in. It also must not
+silence pressure handling: native checkpoint prompts report uncertainty, request
+an agent-side availability check, and describe explicit recovery. Re-evaluation
+is bounded; do not retry forever or claim a viable transition was observed.
+A valid initialized snapshot missing required tools establishes current
+unavailability, unlike null metadata or an unsupported query method. A confirmed
+native availability failure takes the earlier custom-recovery row; a policy cap
+or partial-persistence failure takes the native-failure row, not that fallback.
 
 ### 2026-10-10 - Operator clarification
 

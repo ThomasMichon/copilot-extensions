@@ -91,14 +91,20 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 
 ### Phase 3 - Pressure behavior and fallback
 
-- [ ] Back off competing custom soft/hard/force triggers when the selected
-  native path is viable; never block native checkpoint writes.
+- [ ] Select native pressure behavior from explicit settings-file enablement
+  or a complete current offered-tool set unless support/availability is confirmed
+  unavailable. Replace custom soft/hard session-transfer prompts with native
+  checkpoint prompts; suppress custom force action/tool blocking. Unknown
+  metadata does not undo explicit opt-in or silence diagnostic pressure guidance;
+  bound re-evaluation and never block native checkpoint writes.
 - [ ] Reset per-window pressure accounting after confirmed native transitions
   without changing worktree/session ownership.
 - [ ] Retain explicit save/trigger/consume and real new-owner/process recovery.
   Preserve existing consent and automatic/manual/off-mode semantics.
 - [ ] Retain diagnostic, authorized fallback for unavailable native support.
-  Unknown capability is not a silent permanent fallback disablement.
+  Confirmed unsupported/unavailable support overrides a true flag; policy caps
+  and partial persistence failure are not permission for automatic cutover.
+  Unknown capability retains diagnostics/explicit recovery, not silent suppression.
 - [ ] Preserve emergency compaction. Do not invoke low-level context clearing
   opportunistically from a timer or non-terminal hook.
 
@@ -199,3 +205,7 @@ alone does not complete the update.
   provenance or successful rollover; explicit false settings take precedence.
 - Corrected the earlier description of `ToolInvocation.availableTools`: the SDK
   populates it only for a tool-search override, not ordinary handoff calls.
+- Aligned Phase 3 with intentional settings-only native selection: pressure
+  prompts remain native/diagnostic while metadata is unknown, rather than all
+  continuity being disabled. Confirmed unsupported/unavailable support takes
+  precedence over a true flag; execution failures/policy caps remain distinct.
