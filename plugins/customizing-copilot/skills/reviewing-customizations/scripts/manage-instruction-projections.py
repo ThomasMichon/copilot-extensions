@@ -54,11 +54,11 @@ def _print_human(result) -> None:
     )
 
 
-def _discover_trusted(root: Path, args: argparse.Namespace):
+def _discover_trusted(root: Path, args: argparse.Namespace, installed_root: Path | None):
     return discover_enabled_sources(
         root, require_trust=True,
         agent_worktrees_command=args.agent_worktrees_path,
-        installed_root=args.installed_root,
+        installed_root=installed_root,
     )
 
 
@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.operation == "sync"
         else scan_repository(
             root, sources,
-            admission_sources=_discover_trusted(root, args) if sources is not None else None,
+            admission_sources=_discover_trusted(root, args, installed_root) if sources is not None else None,
         )
     )
     if args.json:

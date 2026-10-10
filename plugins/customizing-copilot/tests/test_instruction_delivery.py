@@ -893,3 +893,77 @@ def test_source_comparison_reserved_boundary_returns_structured_refusal(
     assert data["blocking"] > 0
     assert any(f["check"] == "projection-declaration" for f in data["findings"])
     assert "Traceback" not in completed.stderr
+
+
+@pytest.mark.parametrize("scope", ["**", r"src\*.py", 'src/"quoted"/*.py'])
+def test_quoted_scope_sync_offline_scan_and_resolver_roundtrip(
+    tmp_path: Path, scope: str
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    template = source.payload_root / "instructions/rules.instructions.md"
+    template.write_text("---\napplyTo: " + json.dumps(scope) + "\n---\n\nRequired rule.\n")
+    declaration = source.payload_root / "instruction-projections.json"
+    data = json.loads(declaration.read_bytes())
+    data["projections"][0]["applyTo"] = scope
+    declaration.write_text(json.dumps(data))
+    result = projections.sync_repository(repo, [source])
+    assert not result.blocking, result.findings
+    assert not projections.scan_repository(repo).blocking
+    selection = projections.resolve_instruction_source(repo, spec.destination, [source])
+    assert selection["identity"]["applyTo"] == scope
+
+
+@pytest.mark.parametrize("scalar,decoded", [
+    ('"src\\*.py"', r"src\*.py"), ("'src\\*.py'", r"src\*.py"),
+    ("'src/it''s/*.py'", "src/it's/*.py"), ('"**"', "**"),
+])
+def test_legacy_yaml_scope_compatibility(scalar: str, decoded: str) -> None:
+    assert delivery.decode_scope(scalar) == decoded
+
+
+@pytest.mark.parametrize("scalar", ['"unterminated', '"bad"quote"', "'bad'quote'"])
+def test_malformed_scope_refused_as_structured_declaration(tmp_path: Path, scalar: str) -> None:
+    repo, source, _ = fixture(tmp_path)
+    (source.payload_root / "instructions/rules.instructions.md").write_text(
+        "---\napplyTo: " + scalar + "\n---\n\nRule.\n"
+    )
+    result = projections.sync_repository(repo, [source])
+    assert result.blocking
+    assert any(f.check == "projection-declaration" for f in result.findings)
+
+
+def test_inline_envelope_adoption_reports_render_digest_delta(tmp_path: Path) -> None:
+    repo, source, _ = fixture(tmp_path, "inline")
+    declaration = source.payload_root / "instruction-projections.json"
+    data = json.loads(declaration.read_bytes())
+    data["projections"][0].pop("deliveryMode")
+    declaration.write_text(json.dumps(data))
+    assert not projections.sync_repository(repo, [source]).blocking
+    data["projections"][0]["deliveryMode"] = "inline"
+    declaration.write_text(json.dumps(data))
+    result = projections.scan_repository(repo, [source])
+    assert not result.blocking
+    assert any(
+        f.check == "projection-source-update" and "renderedSha256" in f.message
+        for f in result.findings
+    )
+
+
+def test_scan_installed_root_normalized_once_for_both_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, _, _ = fixture(tmp_path)
+    module_spec = importlib.util.spec_from_file_location(
+        "normalized_roots_manager", SCRIPTS / "manage-instruction-projections.py"
+    )
+    manager = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(manager)
+    calls = []
+    def discover(*args: object, **kwargs: object) -> list:
+        calls.append(kwargs["installed_root"])
+        return []
+    monkeypatch.setattr(manager, "discover_enabled_sources", discover)
+    assert manager.main(["scan", str(repo), "--from-settings", "--installed-root", "~/plugins", "--json"]) == 0
+    assert len(calls) == 2
+    assert calls == [Path("~/plugins").expanduser().resolve()] * 2
+    json.loads(capsys.readouterr().out)

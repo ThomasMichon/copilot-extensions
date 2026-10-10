@@ -253,6 +253,31 @@ def resolver_argv(destination: str) -> list[str]:
     ]
 
 
+def decode_scope(value: str) -> str:
+    """Decode generated JSON/YAML scalars, retaining legacy literal backslashes."""
+    if not value:
+        raise ValueError("empty applicability scope")
+    if value[0] == '"':
+        try:
+            decoded = json.loads(value)
+            if not isinstance(decoded, str):
+                raise ValueError("scope must be a string")
+            return decoded
+        except json.JSONDecodeError as exc:
+            if not value.endswith('"') or re.search(r'(?<!\\)"', value[1:-1]):
+                raise ValueError("malformed quoted applicability scope") from exc
+            if "Invalid \\escape" not in str(exc):
+                raise ValueError("malformed quoted applicability scope") from exc
+            return value[1:-1]
+    if value[0] == "'":
+        if not value.endswith("'") or re.search(r"(?<!')'(?!')", value[1:-1]):
+            raise ValueError("malformed quoted applicability scope")
+        return value[1:-1].replace("''", "'")
+    if value.endswith(("'", '"')):
+        raise ValueError("malformed quoted applicability scope")
+    return value
+
+
 def complete_body(raw: bytes, marker: Mapping[str, object]) -> bool:
     """Verify a complete byte envelope, not that a host admitted it to a model."""
     try:
@@ -291,7 +316,7 @@ def validate_local_template(raw: bytes, marker: Mapping[str, object]) -> None:
     if (
         len(lines) != 3 or lines[0] != "---" or lines[2] != "---"
         or not lines[1].startswith("applyTo:")
-        or lines[1].split(":", 1)[1].strip().strip("\"'") != marker["applyTo"]
+        or decode_scope(lines[1].split(":", 1)[1].strip()) != marker["applyTo"]
     ):
         raise ValueError("local frontmatter scope mismatch")
     if marker.get("deliveryKind") == "body":

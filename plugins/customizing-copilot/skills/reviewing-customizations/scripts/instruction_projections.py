@@ -519,9 +519,7 @@ def _frontmatter_apply_to(raw: bytes) -> str:
         fields[key] = value
     if set(fields) != {"applyTo"}:
         raise ValueError("template frontmatter must contain only applyTo")
-    value = fields["applyTo"]
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        value = value[1:-1]
+    value = delivery.decode_scope(fields["applyTo"])
     if not value:
         raise ValueError("template applyTo must not be empty")
     if not "".join(lines[closing + 1 :]).strip():
@@ -2001,6 +1999,7 @@ def scan_repository(
                         ("customizationKind", spec.customization_kind),
                         ("applyTo", spec.apply_to),
                         ("deliveryMode", spec.delivery_mode),
+                        ("renderedSha256", render_projection(spec).sha256),
                     )
                     if entry.get(field) != desired_value
                 ]
