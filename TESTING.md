@@ -54,7 +54,10 @@ sub-suite deadline. The final status reports elapsed time including cleanup.
 The short `t/g<index>` basetemp names are preserved for Windows path limits.
 Windows teardown explicitly terminates the owned Job Object and waits until
 its full active-process count is zero before closing the handle. POSIX teardown
-likewise verifies no live group members remain after termination. If reaping
+pins the controller PID with `waitid(WNOWAIT)` until teardown, revalidates its
+owned process-group/session identity before each signal, and verifies no live
+group members remain after termination. POSIX platforms without
+`waitid(WNOWAIT)` fail admission before spawning a test process. If reaping
 cannot be proved, the runner fails and retains the named sandbox rather than
 deleting files beneath a potentially live descendant.
 

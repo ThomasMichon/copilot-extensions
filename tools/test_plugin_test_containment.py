@@ -84,7 +84,9 @@ def test_exited_process_cannot_hide_an_elapsed_wall_limit(tmp_path, capfd, monke
     monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(plugin_test_containment.subprocess, "Popen", lambda *a, **k: Process())
     monkeypatch.setattr(plugin_test_containment, "_WindowsJob", Job)
-    monkeypatch.setattr(plugin_test_containment, "_terminate_posix_group", lambda pid: None)
+    monkeypatch.setattr(plugin_test_containment, "_posix_exit_code", lambda proc: 0)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(plugin_test_containment, "_terminate_posix_group", lambda *args: None)
 
     rc = plugin_test_containment._run_contained_process(
         ["fake"], cwd=tmp_path, env={}, sandbox=tmp_path,
@@ -149,8 +151,9 @@ def test_posix_group_waits_until_no_live_members_remain(monkeypatch):
     usage = iter(((2, 0), (1, 0), (0, 0)))
     monkeypatch.setattr(plugin_test_containment, "_posix_group_usage", lambda pid: next(usage))
     monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
 
-    plugin_test_containment._terminate_posix_group(12345)
+    plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
 
     assert signals == [(12345, plugin_test_containment.signal.SIGTERM)]
 
@@ -177,10 +180,41 @@ def test_posix_group_verifies_members_after_sigkill(monkeypatch):
     monkeypatch.setattr(plugin_test_containment, "_posix_group_usage", lambda pid: next(usage))
     monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
 
-    plugin_test_containment._terminate_posix_group(12345)
+    plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
 
     assert signals == [plugin_test_containment.signal.SIGTERM, 9]
+
+
+@pytest.mark.parametrize("changed_before_kill", [False, True])
+def test_posix_teardown_refuses_stale_identity_before_each_signal(monkeypatch, changed_before_kill):
+    signals = []
+    identities = iter(
+        [(12345, 12345), (12345, 54321)] if changed_before_kill else [(12345, 54321)]
+    )
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: next(identities))
+    monkeypatch.setattr(plugin_test_containment.os, "killpg", lambda pid, sig: signals.append(sig), raising=False)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_usage", lambda pid: (1, 0))
+    clock = iter((0.0, 3.0))
+    monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
+    with pytest.raises(plugin_test_containment.UnreapedProcessError, match="stale or reused"):
+        plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
+    assert signals == ([plugin_test_containment.signal.SIGTERM] if changed_before_kill else [])
+
+
+def test_posix_exit_observation_does_not_reap_controller(monkeypatch):
+    monkeypatch.setattr(plugin_test_containment.os, "P_PID", 1, raising=False)
+    for name, value in (("WEXITED", 2), ("WNOHANG", 4), ("WNOWAIT", 8), ("CLD_EXITED", 1)):
+        monkeypatch.setattr(plugin_test_containment.os, name, value, raising=False)
+    calls = []
+    monkeypatch.setattr(
+        plugin_test_containment.os, "waitid",
+        lambda *args: calls.append(args) or SimpleNamespace(si_status=7, si_code=1),
+        raising=False,
+    )
+    assert plugin_test_containment._posix_exit_code(SimpleNamespace(pid=12345)) == 7
+    assert calls == [(1, 12345, 14)]
 
 
 @pytest.mark.parametrize("hang_controller", [False, True])

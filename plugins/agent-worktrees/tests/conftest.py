@@ -570,3 +570,27 @@ def _published_pr_seed(tmp_path_factory, _pr_repo_seed):
 def published_pr_repo(tmp_path: Path, monkeypatch, _published_pr_seed):
     """Independent real-Git published state for tests of post-publication behavior."""
     return _copy_pr_repo(_published_pr_seed, tmp_path, monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def _published_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
+    import dataclasses
+    from agent_worktrees import pr_ops
+
+    seed = tmp_path_factory.mktemp("published-refspec-seed")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+        config, worktree_id, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
+        repo = dataclasses.replace(
+            config.default_repo,
+            pr=dataclasses.replace(config.default_repo.pr, head_scheme="refspec"),
+        )
+        config = dataclasses.replace(config, repos={"ext": repo})
+        result = pr_ops.create_pr(worktree_id, config, title="Own change")
+        assert result["success"], result
+    return seed
+
+
+@pytest.fixture
+def published_refspec_pr_repo(tmp_path: Path, monkeypatch, _published_refspec_pr_seed):
+    return _copy_pr_repo(_published_refspec_pr_seed, tmp_path, monkeypatch)

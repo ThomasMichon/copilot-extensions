@@ -330,7 +330,30 @@ def _posix_group_usage(pgid: int) -> tuple[int, int] | None:
     return _linux_group_usage(pgid) or _ps_group_usage(pgid)
 
 
-def _terminate_posix_group(pgid: int) -> None:
+def _posix_exit_code(proc: subprocess.Popen) -> int | None:
+    # WNOWAIT pins the child PID (and thus its group/session identity) until
+    # teardown has finished; Popen.poll() would reap it and permit PID reuse.
+    result = os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    if result is None:
+        return None
+    return result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
+
+
+def _posix_group_identity(pid: int) -> tuple[int, int]:
+    return os.getpgid(pid), os.getsid(pid)
+
+
+def _terminate_posix_group(
+    pgid: int, identity: tuple[int, int],
+) -> None:
+    def verify_identity() -> None:
+        try:
+            current = _posix_group_identity(pgid)
+        except OSError as exc:
+            raise UnreapedProcessError("Cannot verify owned POSIX process-group identity") from exc
+        if current != identity or identity != (pgid, pgid):
+            raise UnreapedProcessError("Refusing stale or reused POSIX process-group identity")
+
     def wait_until_empty(seconds: float) -> bool:
         deadline = time.monotonic() + seconds
         while True:
@@ -343,6 +366,7 @@ def _terminate_posix_group(pgid: int) -> None:
                 return False
             time.sleep(0.05)
 
+    verify_identity()
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
@@ -351,6 +375,7 @@ def _terminate_posix_group(pgid: int) -> None:
         raise UnreapedProcessError(f"Cannot terminate POSIX process group: {exc}") from exc
     if wait_until_empty(2.0):
         return
+    verify_identity()
     try:
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
@@ -579,6 +604,10 @@ def _run_contained_process(
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
+    if os.name != "nt" and not all(
+        hasattr(os, name) for name in ("waitid", "WNOWAIT", "WEXITED", "WNOHANG")
+    ):
+        raise ContainmentError("POSIX containment requires non-reaping waitid(WNOWAIT)")
     sandbox.mkdir(parents=True, exist_ok=True)
     ready = sandbox / ".containment-ready"
     ready.unlink(missing_ok=True)
@@ -589,6 +618,7 @@ def _run_contained_process(
         start_new_session=os.name != "nt",
     )
     job = None
+    posix_identity = None
     try:
         if os.name == "nt":
             try:
@@ -598,12 +628,14 @@ def _run_contained_process(
                 proc.terminate()
                 proc.wait(timeout=5)
                 raise
+        else:
+            posix_identity = _posix_group_identity(proc.pid)
         ready.write_text("assigned\n", encoding="ascii")
         started = time.monotonic()
         next_temp_check = started
         next_usage_check = started
         while True:
-            returncode = proc.poll()
+            returncode = proc.poll() if os.name == "nt" else _posix_exit_code(proc)
             now = time.monotonic()
             if now - started > limits.wall_seconds:
                 print(
@@ -654,7 +686,9 @@ def _run_contained_process(
                 if job is not None:
                     job.close()
             else:
-                _terminate_posix_group(proc.pid)
+                if posix_identity is None:
+                    raise UnreapedProcessError("POSIX ownership identity was not captured")
+                _terminate_posix_group(proc.pid, posix_identity)
         finally:
             if proc.poll() is None:
                 try:

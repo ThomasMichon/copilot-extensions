@@ -47,10 +47,20 @@ def test_pr_repo_copy_relocates_links_and_isolates_mutations(
     ).returncode != 0
 
 
+@pytest.fixture
+def published_repo(request):
+    name = request.param
+    repo = request.getfixturevalue(name)
+    seed_name = "_published_refspec_pr_seed" if name == "published_refspec_pr_repo" else "_published_pr_seed"
+    return repo, request.getfixturevalue(seed_name)
+
+
+@pytest.mark.parametrize("published_repo", ["published_pr_repo", "published_refspec_pr_repo"], indirect=True)
 @pytest.mark.parametrize("iteration", range(2))
 def test_published_pr_copy_preserves_state_and_isolates_updates(
-    published_pr_repo, _published_pr_seed, iteration
+    published_repo, iteration
 ):
+    published_pr_repo, _published_pr_seed = published_repo
     config, wid, worktree, remote = published_pr_repo
     record = tracking.load_record_by_id(wid)
     assert record is not None
@@ -59,7 +69,7 @@ def test_published_pr_copy_preserves_state_and_isolates_updates(
     assert record.pr.repo == git_ops.slug_from_url(str(remote))
     branch = record.pr.branch
     original_head = record.pr.head_sha
-    assert git_ops.git("rev-parse", branch, cwd=worktree).stdout.strip() == original_head
+    assert git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout.strip() == original_head
     assert git_ops.git(
         "--git-dir", str(remote), "rev-parse", branch
     ).stdout.strip() == original_head

@@ -811,6 +811,19 @@ _Pending review of this plan._
   real file-holding descendants, and an exited controller remains
   observable without releasing its PID. The Linux pytest module was not
   installed in that lane; these real checks use only the standard library.
+- Both normal runs on 86a74d3a0 exhausted the unchanged aggregate budget
+  (900.77 and 901.08 seconds including cleanup) after new upstream
+  recovery/rebase contracts expanded the real call work. Completed groups
+  stayed below 240 seconds, but that is not aggregate acceptance. Reuse
+  independently copied real published state for these setup-only initial
+  publications, retaining every actual recovery, rebase, guarded push,
+  concurrency, backup, and ref-retention operation under test. Legacy and
+  explicit snapshot publication still execute their real setup path.
+  Recovery passes all 17 cases; default rebase passes 13 with its existing
+  16 explicit-tier skips. Both snapshot/refspec seed copies have explicit
+  real commit/push/tracking isolation coverage. Local concurrent seed
+  checks also hit per-item timeouts, so local success is not claimed as
+  repeat performance acceptance; the same refspec check passes alone.
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged
