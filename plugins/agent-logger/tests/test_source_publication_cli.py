@@ -22,7 +22,11 @@ def _setup(tmp_path: Path, monkeypatch, target: str = "local"):
     home = tmp_path / "home"
     data = load_config(home=home, include_repo=False).as_dict()
     data["sync"]["target"] = target
-    data["sync"]["targets"][target]["path"] = str(destination)
+    if target == "onedrive":
+        data["sync"]["targets"][target]["root"] = str(destination)
+        data["sync"]["targets"][target]["subfolder"] = ""
+    else:
+        data["sync"]["targets"][target]["path"] = str(destination)
     cfg = Config(data, home)
     monkeypatch.setattr(engine, "load_config", lambda: cfg)
     monkeypatch.delenv("AGENT_LOGGER_SYNC_DISABLED", raising=False)
@@ -93,8 +97,9 @@ def test_identity_file_cli_rejects_unsupported_onedrive(tmp_path, monkeypatch, c
         "push", "--source", str(source), "--machine", identity.namespace,
         "--source-identity-file", str(marker),
     ]) == 1
-    assert "push failed" in capsys.readouterr().err
-    assert not destination.exists()
+    assert "cannot enforce cross-writer identity admission" in capsys.readouterr().err
+    assert not (destination / identity.namespace / "session-state").exists()
+    assert not (destination / identity.namespace / ".archive-source.json").exists()
 
 
 def test_identity_file_cli_absent_retains_legacy_push(tmp_path, monkeypatch):
