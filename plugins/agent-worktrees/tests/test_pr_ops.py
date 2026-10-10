@@ -3513,14 +3513,10 @@ class TestPRFinalizeAndPush:
         assert "credentials cannot be resolved safely" in mismatch
         assert publishes["count"] == 1
 
-    def test_refresh_source_attribution_codename_mode_omits_raw_fields(
-        self, pr_repo, monkeypatch,
+    def test_refresh_source_attribution_codename_mode_encrypts_raw_fields(
+        self, pr_repo, monkeypatch, keyed_identity_payload,
     ):
-        """``source_attribution: codename`` on the refresh path (a later
-        push updating an existing PR's head) must publish only the
-        codename -- the same public-safe contract as the initial create-pr
-        body (effort pr-attribution-codenames Phase 4 requires both paths
-        covered identically)."""
+        """Refresh publishes identity through the cipher, never as plaintext fields."""
         import dataclasses
 
         from agent_worktrees.providers import attribution
@@ -3571,7 +3567,11 @@ class TestPRFinalizeAndPush:
 
         assert error == ""
         fields = attribution.parse_marker(captured["marker"])
-        assert fields == {"codename": "harbor-lattice"}
+        assert fields["codename"] == "harbor-lattice"
+        assert set(fields) == {"codename", "enc"}
+        assert keyed_identity_payload["worktree_id"] == wid
+        assert keyed_identity_payload["machine"] == record.machine
+        assert keyed_identity_payload["head"] == "deadbeef" * 5
 
     def test_refresh_source_attribution_codename_mode_skips_without_codename(
         self, pr_repo, monkeypatch,
