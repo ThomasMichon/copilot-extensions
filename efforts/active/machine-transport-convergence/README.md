@@ -180,6 +180,77 @@ contract before choosing a portable shared boundary. Do not introduce another
 topology configuration or silently turn a real resolver error into an optional
 provider's absence.
 
+### Index designation boundary proposal (#5974)
+
+The Index read router has two different inputs, which must not be collapsed:
+`indexers[].machine` designates the indexer execution host, whereas
+`indexers[].ssh` is an explicit transport target. The latter may select WSL,
+a tunnel, or another SSH configuration; it is never a machine-identity alias.
+`AGENT_INDEX_MACHINE` is also an explicit designation override. The existing
+SSH command forwards that override together with a one-indexer configuration
+to terminate routing at the selected destination. Preserve this compatibility
+contract, including standalone commands and worker-record labels; do not
+reinterpret that forwarded value as evidence of physical-host identity.
+
+Implement the following boundary only after this proposal clears review and
+the original #5689 owner lands the shared execution-identity contract:
+
+1. Use the vendored `machine-transport` execution-identity resolver for native
+   versus WSL qualification, including standalone operation without topology.
+   An explicit, non-empty `AGENT_INDEX_MACHINE` remains a designation override
+   and matches the configured designation literally, case-insensitively; the
+   remote handoff must not invoke optional topology discovery to terminate.
+   Keep `machine_id()`'s existing public override/worker-label behavior. A
+   separate routing helper owns execution-locality decisions.
+2. When no override is present, optionally compose Worktrees' topology through
+   an owner-attributed, read-only process boundary. Add a narrow batch identity
+   capability to Worktrees rather than asking Index to locate or parse
+   `machines.yaml`, import a sibling runtime, or infer identities from Picker
+   launch plans. Worktrees owns configured local identity, registry layers and
+   platform detection; the shared library owns matching and guest qualification.
+   Index owns indexer selection, SSH/HTTP routing and error rendering.
+3. The proposed version-1 batch contract receives the designation strings and
+   returns the current execution key/platform plus one ordered resolution per
+   input: canonical key, accepted identity labels, known-versus-explicit status
+   and diagnostics. It performs no network request, provisioning, config write,
+   session binding or claim. Do not dump unrelated topology or use a human
+   display label to choose between native and guest execution keys.
+4. Discover the logical Worktrees command through the existing attributed
+   command resolver. A genuinely absent command or explicitly unsupported
+   capability retains standalone shared-library routing; older providers must
+   advertise unsupported capability without confusing an ordinary command
+   failure with absence. A present provider's malformed response, timeout,
+   unreadable configuration or ambiguous identity fails visibly. No broad
+   exception-to-literal fallback and no PATH/same-name-provider substitution.
+   Take one validated batch snapshot per routing decision.
+5. Known local/remote designations compare canonical execution keys, never just
+   physical hostnames. Unknown designations retain their explicit spelling and
+   diagnostics, not a fabricated topology entry. Standalone matching supports
+   the existing short-hostname/case contract and shared WSL qualification;
+   key/alias/declared-hostname enrichment is available only through topology.
+   An explicit SSH target remains byte-for-byte selected by Index, even when
+   its designated machine resolves to a different canonical key.
+6. Use the same routing helper in `plan_route`, `maybe_delegate`, `client_url`
+   and setup's single/plural designation checks. Preserve ordered indexers,
+   local service selection, client-local endpoint precedence, SSH-only corpus
+   isolation, connection-only failover and remote command exit semantics.
+
+The read-only provider is a proposed extension, not an already-shipped command.
+The existing Picker environment-plan boundary is unsuitable: it depends on SSH
+environments and produces a launch plan, not complete execution-locality
+evidence. The legacy shared locality helper also swallows selected registry
+errors; new Index routing must use the strict execution-identity contract
+instead of treating such errors as optional-provider absence.
+
+Validation must cover the existing explicit override and the actual forwarded
+SSH child, standalone native/WSL distinction, local and secondary indexers,
+topology key/alias/hostname/case equivalence, ambiguous labels, unknown targets,
+exact SSH target preservation, absent/unsupported versus broken provider,
+one-snapshot consistency and setup/read/HTTP agreement. Run the client-only
+packaging/installer contracts for the new vendored dependency on both platform
+lanes, a fresh standalone subprocess with no sibling present, and an available
+live venue before claiming deployment. The proposal itself changes no runtime.
+
 ## Journal
 
 ### 2026-10-08 - Planning
@@ -637,18 +708,80 @@ provider's absence.
   validation is refreshed for this narrow exception-boundary correction;
   current-head review and checks still precede merge and deployment.
 
+### 2026-10-10 - Independent Picker slice merged
+- #6002 merged into `dev` as
+  `651d47248cc9406982a358a3d16867a40ec93d7e` after current-head approval
+  with zero findings, all resolved threads, and green required CI and trusted
+  identifier checks. No review or CI bypass was used.
+- The slice settles strict Picker identity matching, eligible-environment
+  preservation and versioned ambiguity output, together with the narrowly
+  coupled cold-start/validation corrections. Worktrees affected coverage is
+  **7791 passed, 57 skipped, 1 deselected** for the accepted #4644 gap;
+  Bridge full coverage is **3782 passed, 72 skipped**, refreshed by **22 passed,
+  1 skipped** for the final cold-import I/O boundary. Final generic-fixture and
+  ten-result assertions passed **52 tests**.
+- Normal `pr-complete` reconciled the campaign worktree past the verified
+  squash merge, preserving a backup. Promotion and installed-consumer refresh
+  for this new slice still require separate evidence.
+- #5972 and its issue claim remain active: claimant, fleet/roster and remaining
+  locality/transport paths are not closed by this partial slice. #5689 remains
+  open under its original owner and precedes overlapping host/WSL integration.
+  #5973/#5974 and remaining shell/provider inventory are still campaign work.
+
+### 2026-10-10 - Picker promotion and installed-consumer evidence
+- Normal serialized promotion run `38040324652` succeeded after merged-dev CI
+  `38039724743`. Generated release #6022 carries merged source `651d47248cc9`
+  into `main` as `690f1ae9b9a38aaac4fdfb6055eafc6157222572` and consumes
+  this slice's changefile. No promotion bypass or manual release was used.
+- The unified installed-consumer update succeeded. Worktrees `1.24.40-dev1`
+  and Bridge `0.9.43.dev1` were verified; Worktree Manager updated to
+  `0.6.21-dev1`. A read-only call through the installed Worktrees runtime proves
+  case-insensitive key precedence, eligible-environment copies and versioned
+  ambiguity output, not just version markers.
+- Consumer guidance reconciliation was proven provenance-only, reviewed with
+  zero findings, passed its required full CI, merged and finalized in its
+  own managed workspace. No downstream-private identity or state is recorded
+  in this public campaign.
+- The independent Picker slice is source-merged, promoted and deployed.
+  Remaining #5972 paths, #5973/#5974, overlapping #5689 integration and the
+  remaining inventory still keep the overall effort and issue claim Active.
+
+### 2026-10-10 - Index boundary investigation and review proposal
+- Reserved #5974 through the canonical dispatch subject and published its sole
+  active issue-thread claim before substantive work.
+- Existing Index designation, setup, ordered-indexer and client-routing
+  contracts passed unchanged: 88 tests passed, 771 deselected in the contained
+  Windows runner. This establishes the baseline, not new-behavior validation.
+- Traced the explicit designation carried by the SSH command and the repeated
+  locality comparisons in planning, delegation, HTTP selection and setup.
+  Preserving that override is necessary to terminate a standalone remote child
+  without confusing SSH targets with physical execution identity.
+- Added the proposal above for review before runtime changes. It uses the
+  original #5689 execution-identity library and an optional, read-only attributed
+  topology boundary; neither a second topology authority nor a mandatory
+  sibling tool is introduced. The provider extension and Index integration are
+  not implemented by this planning slice.
+- Documentation-impact review: the effort owns this future boundary and its
+  evidence. As-is Index, Worktrees, architecture and install documentation
+  remain unchanged until implementation. No vision intent is extended:
+  this realizes the campaign's existing shared-machine-decision intent and
+  the architecture principles of independent installation, graceful optional
+  composition, attributable command ownership and explicit real errors.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
-additional #5972 Picker matching slice is published in #6002, with complete
-affected-suite evidence. Fresh review and identifier/CI checks for the final
-test-only corrections, merge and deployment remain open. Remaining #5972 paths and
-#5973/#5974 are not implemented. The campaign extension is merged.
+additional #5972 Picker matching slice is merged in #6002, with complete
+affected-suite evidence, green publication gates and verified promotion and
+deployment. Remaining #5972 paths and
+#5973/#5974 are not implemented. #5974 is now reserved with its portable
+composition proposal awaiting review; implementation must follow review and
+the original peer's shared identity contract. The campaign extension is merged.
 #5689 retains its original host/WSL
 implementation owner and remains the overlapping-consumer prerequisite.
 
 #5885 is merged and #5911 is closed: do not rework that completed remediation.
 Normal promotion and installed-consumer refresh are verified; consumer projection
-reconciliation is complete; the new Picker slice's deployment remains open. The effort
-and the #5972 issue claim remain active until their complete scopes are resolved
+reconciliation and the new Picker slice's deployment are complete. The effort
+and the #5972/#5974 issue claims remain active until their complete scopes are resolved
 or explicitly transferred; no single planning or implementation PR closes them.
