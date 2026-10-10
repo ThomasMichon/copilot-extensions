@@ -4,6 +4,15 @@ applyTo: "**"
 
 # Context Handoff -- this mechanism exists
 
+Select native context-only continuity first when `contextManagementTools` is
+enabled or all four native context tools are offered without explicit false.
+Use the current owner's verified revision-bound `session_artifacts` checkpoint
+and terminal `new_context`, preserving the parent gate, live obligations and one
+next action; refresh durable guidance afterward. Unknown metadata is not proof
+of unavailable support. The custom transfer instructions below apply to actual
+new-owner/process handoffs or diagnosed unavailable-native recovery, not native
+token pressure. Use the `context-handoff` skill for selection and failure handling.
+
 This worktree may have the `context-handoff` plugin active. It lets a session
 compose a continuation brief and hand it to a successor, whether or not this
 session began from one, so long-running or context-pressured work survives any
