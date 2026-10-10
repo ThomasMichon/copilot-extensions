@@ -141,5 +141,13 @@
       "confirm": true,
       "description": "Manual override for a submitted verification-gated task: accept its completion claim and close it as completed."
     }
+  ],
+  "config_sections": [
+    {
+      "key": "workers",
+      "label": "Workers",
+      "run": ["agent-dispatch", "workers", "config-section"],
+      "description": "Declared supervised-lane worker pools: a summary status line across every pool this machine discovers (lane count, active/overridden-off). Status-only in this release -- enabling/disabling one named pool is available via `agent-dispatch workers config-section <name> --toggle enable|disable` from a terminal, but not yet wired into this menu entry (it needs a confirm-before-run gate the Picker does not yet enforce for a destructive config-section invocation; see ThomasMichon/copilot-extensions#6044)."
+    }
   ]
 }

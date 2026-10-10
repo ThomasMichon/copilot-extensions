@@ -1,0 +1,9 @@
+{
+  "comment": "Add a status-only 'Workers' config_sections entry to the Worktree Manager Picker's Configuration menu, reporting every declared supervised-lane pool's status via a new no-name summary mode on 'agent-dispatch workers config-section'.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}
