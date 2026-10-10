@@ -49,6 +49,10 @@ The operator confirmed the slug and rollout to the declared deployment targets.
 Target identities and private diagnostic details remain in the downstream
 control repository, not this public effort.
 
+Additional request, with the private host identifier redacted:
+
+> I'm still seeing tons of windows on [affected Windows workstation], so we can stay focused here. But do also sweep test flows for failure to ensure processes are always headless
+
 ## Plan
 
 ### Phase 1 - Review the repair contract
@@ -64,6 +68,8 @@ control repository, not this public effort.
 - [x] Add focused regression coverage, update directly affected documentation,
       and add the required release changefile. _(agent-recommended)_
 - [ ] Merge the implementation after review and required checks.
+- [ ] Sweep test-flow launch boundaries and suppress unintended test-runner
+      windows, preserving explicitly interactive fixtures and containment.
 
 ### Phase 3 - Promote, deploy and close
 - [ ] Verify the promotion pipeline publishes the fixed snapshot to `main`.
@@ -88,6 +94,9 @@ control repository, not this public effort.
 - [ ] The promoted `main` snapshot contains the fix and release metadata.
 - [ ] Deployed runtime evidence establishes the fixed behavior, without private
       identifiers in public artifacts.
+- [ ] Shared test-runner validation covers nested Python, PowerShell and Git
+      launches, stdio, timeout cleanup, POSIX parity and native desktop window
+      observation. _(agent-recommended)_
 
 ## Proposal
 
@@ -151,3 +160,16 @@ contain terminal-multiplexer descendants.
 - Strict pre-resume failure, captured-child and corrected credential test
   selection: 11 passed. Shared vendoring, release changefiles, complete strict
   contract/native revalidation and reviewer approval remain outstanding.
+- Extended the scope to the operator-requested test-flow sweep. The shared
+  containment worker and its command launch lacked window suppression;
+  bounded execution alone does not establish a headless process contract.
+- Added canonical no-window flags at both runner boundaries with explicit
+  Windows standard streams. Intentional interactive test launches are not
+  globally rewritten. Bounded runner validation: 35 passed, one Linux-only
+  check skipped; native desktop observation remains outstanding.
+- The same two nested-launch and timeout cases passed in the interactive
+  Windows task (2 passed, 20 deselected): Python, PowerShell and Git retain
+  streams and exit codes, while fixture console-handle checks remain empty.
+  Full external-window/focus baseline observation remains a separate gate.
+- Added release changefiles for every canonical process-helper consumer as
+  required by the shared-library changefile gate; vendored copies are in sync.

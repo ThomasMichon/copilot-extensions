@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import shutil
+import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -22,6 +26,202 @@ try:
     import pytest_portfolio_guard as portfolio_guard
 finally:
     sys.path[:] = _previous_path
+
+
+def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
+    ready = tmp_path / "ready"
+    ready.touch()
+    calls = []
+    monkeypatch.setattr(containment, "no_window_kwargs", lambda: {"creationflags": 123})
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 7)
+
+    monkeypatch.setattr(containment.subprocess, "run", run)
+    assert containment._worker_main([str(ready), "command", "argument"]) == 7
+    assert calls == [
+        (
+            ["command", "argument"],
+            {"check": False, "creationflags": 123, **containment._windows_stdio_kwargs()},
+        )
+    ]
+
+
+def test_containment_owner_launch_preserves_process_contract(monkeypatch, tmp_path):
+    captured = {}
+
+    class FinishedProcess:
+        pid = 123
+
+        def poll(self):
+            return 17
+
+    def popen(command, **kwargs):
+        captured.update(kwargs)
+        assert command == containment._worker_command(
+            ["command"], tmp_path / ".containment-ready"
+        )
+        return FinishedProcess()
+
+    class Job:
+        def __init__(self, limits):
+            pass
+
+        def assign(self, pid):
+            assert pid == 123
+
+        def close(self):
+            captured["job_closed"] = True
+
+    monkeypatch.setattr(containment, "no_window_kwargs", lambda: {"creationflags": 123})
+    monkeypatch.setattr(containment.subprocess, "Popen", popen)
+    monkeypatch.setattr(containment, "_WindowsJob", Job)
+    monkeypatch.setattr(containment, "_terminate_posix_group", lambda pid: None)
+    assert containment._run_contained_process(
+        ["command"], cwd=tmp_path, env={"TEST": "value"}, sandbox=tmp_path,
+        limits=containment.Limits(),
+    ) == 17
+    assert captured["creationflags"] == 123
+    assert captured["cwd"] == str(tmp_path)
+    assert captured["env"] == {"TEST": "value"}
+    assert {
+        name: captured[name] for name in containment._windows_stdio_kwargs()
+    } == containment._windows_stdio_kwargs()
+    assert captured["start_new_session"] == (os.name != "nt")
+    if os.name == "nt":
+        assert captured["job_closed"]
+    assert not (tmp_path / ".containment-ready").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real Windows console inheritance")
+@pytest.mark.parametrize("timeout", [False, True], ids=["exit-and-streams", "timeout-tree"])
+def test_windowless_runner_contains_bare_console_descendants(tmp_path, timeout):
+    """Exercise pythonw -> runner -> worker -> bare Python/PowerShell/git.
+
+    No subprocess patch is installed: intentional CREATE_NEW_CONSOLE callers
+    remain untouched. Console handles/visibility are OS observations, not flag
+    assertions; interactive desktop focus still needs the manual launch lane.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    from agent_procutil import no_window_kwargs, windowless_python
+
+    pythonw = windowless_python(sys.executable)
+    if Path(pythonw).name.lower() != "pythonw.exe":
+        pytest.skip("windowless base interpreter unavailable")
+    powershell = shutil.which("powershell.exe")
+    git = shutil.which("git.exe")
+    if not powershell or not git:
+        pytest.skip("PowerShell and git are required console representatives")
+    receipt = tmp_path / "descendants.json"
+    result = tmp_path / "result.json"
+    sandbox = tmp_path / "sandbox"
+    console_probe = """
+import ctypes, os
+k = ctypes.windll.kernel32
+k.GetConsoleWindow.restype = ctypes.c_void_p
+window = k.GetConsoleWindow()
+assert not window or not ctypes.windll.user32.IsWindowVisible(window)
+"""
+    ps_script = (
+        'Add-Type \'using System; using System.Runtime.InteropServices; '
+        'public class ConsoleProbe { [DllImport("kernel32.dll")] '
+        'public static extern IntPtr GetConsoleWindow(); }\'; '
+        'if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 9 }; '
+        f"& '{git.replace(chr(39), chr(39) * 2)}' --version; "
+        '[Console]::Error.WriteLine("nested-stderr"); exit 7'
+    )
+    child = console_probe + f"""
+import json, subprocess, sys, time
+from pathlib import Path
+assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'
+assert Path.cwd() == Path({str(tmp_path)!r})
+Path({str(receipt)!r}).write_text(json.dumps({{
+    'pid': os.getpid(), 'window': window,
+}}))
+if {timeout!r}:
+    time.sleep(120)
+else:
+    for cycle in range(2):
+        probe = subprocess.run(
+            [{powershell!r}, '-NoProfile', '-NonInteractive', '-Command', {ps_script!r}],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert probe.returncode == 7, (probe.returncode, probe.stdout, probe.stderr)
+        assert 'git version' in probe.stdout
+        assert 'nested-stderr' in probe.stderr
+    print('nested-stdout')
+    print('nested-stderr', file=sys.stderr)
+    sys.exit(7)
+"""
+    command = console_probe + f"""
+import subprocess, sys
+assert sys.stdin.readline().strip() == 'nested-input'
+probe = subprocess.run([sys.executable, '-c', {child!r}], timeout=25)
+sys.exit(17 if probe.returncode == 7 else 18)
+"""
+    owner = textwrap.dedent(f"""
+        import json, os, sys
+        from pathlib import Path
+        sys.path.insert(0, {str(SCRIPT.parent)!r})
+        import plugin_test_containment as containment
+        sandbox = Path({str(sandbox)!r})
+        env = containment.isolated_environment(os.environ, sandbox)
+        rc = containment.run_contained(
+            [{sys.executable!r}, '-c', {command!r}],
+            cwd=Path({str(tmp_path)!r}), env=env, sandbox=sandbox,
+            limits=containment.Limits(wall_seconds={5 if timeout else 20},
+                                      poll_seconds=0.05, max_processes=32,
+                                      max_memory_mb=512, max_temp_mb=32),
+        )
+        Path({str(result)!r}).write_text(json.dumps({{'returncode': rc}}))
+    """)
+    streams = tmp_path / "streams.json"
+    launcher = f"""
+import ctypes, json, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, {str(SCRIPT.parent)!r})
+from plugin_test_containment import no_window_kwargs
+assert not ctypes.windll.kernel32.GetConsoleWindow()
+probe = subprocess.run(
+    [{sys.executable!r}, '-c', {owner!r}],
+    input='nested-input\\n', capture_output=True, text=True,
+    timeout=25, **no_window_kwargs(),
+)
+Path({str(streams)!r}).write_text(json.dumps({{
+    'returncode': probe.returncode, 'stdout': probe.stdout, 'stderr': probe.stderr,
+}}))
+"""
+    completed = subprocess.run(
+        [pythonw, "-c", launcher], cwd=tmp_path, capture_output=True,
+        text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert completed.returncode == 0, completed.stderr
+    captured = json.loads(streams.read_text())
+    assert captured["returncode"] == 0, captured["stderr"]
+    assert json.loads(result.read_text())["returncode"] == (124 if timeout else 17)
+    identity = json.loads(receipt.read_text())
+    assert not identity["window"]
+    if timeout:
+        assert "wall-clock limit exceeded" in captured["stderr"]
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.OpenProcess(0x00100000, False, identity["pid"])
+        if handle:
+            try:
+                assert kernel32.WaitForSingleObject(handle, 5000) == 0
+            finally:
+                kernel32.CloseHandle(handle)
+        else:
+            assert ctypes.get_last_error() == 87  # PID no longer exists.
+    else:
+        assert "nested-stdout" in captured["stdout"]
+        assert "nested-stderr" in captured["stderr"]
 
 
 def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None:
@@ -372,4 +572,3 @@ def test_changed_plugins_empty_diff_schedules_nothing(monkeypatch) -> None:
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: next(calls))
     monkeypatch.setattr(runner, "_has_suite", lambda name: True)
     assert runner.changed_plugins("origin/main") == []
-
