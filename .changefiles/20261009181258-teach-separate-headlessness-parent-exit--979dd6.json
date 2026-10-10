@@ -1,9 +1,0 @@
-{
-  "comment": "Teach separate headlessness, parent-exit survival and caller-containment lifetime contracts.",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

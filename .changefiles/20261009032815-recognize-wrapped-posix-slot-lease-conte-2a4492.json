@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize wrapped POSIX slot-lease contention without delaying persistent I/O failures",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

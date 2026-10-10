@@ -1,9 +1,0 @@
-{
-  "comment": "Add optional source_identity admission to Target.push: the local target enforces canonical identity/key checks and holds the publication lock through payload writes using kernel-owned claim files. OneDrive, SSH and ingest fail closed until cross-writer atomic admission is supported. Legacy None behavior is unchanged.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

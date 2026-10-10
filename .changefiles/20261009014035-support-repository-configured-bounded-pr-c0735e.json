@@ -1,9 +1,0 @@
-{
-  "comment": "Support repository-configured bounded PR push deadlines and matching publication lock budgets.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

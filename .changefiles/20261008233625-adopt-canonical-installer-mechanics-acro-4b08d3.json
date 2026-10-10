@@ -1,9 +1,0 @@
-{
-  "comment": "Adopt canonical installer mechanics across Index runtimes and publish self-contained immutable snapshots",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

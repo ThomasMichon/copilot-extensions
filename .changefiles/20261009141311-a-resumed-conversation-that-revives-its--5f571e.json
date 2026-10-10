@@ -1,9 +1,0 @@
-{
-  "comment": "A resumed conversation that revives its live-session row in a new process gets a fresh registered_at, so a provisional session the same launch registered moments earlier can't outrank it for message delivery",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

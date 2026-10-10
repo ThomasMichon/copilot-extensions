@@ -1,9 +1,0 @@
-{
-  "comment": "Adapt the publication-lock timeout fixture to configured deadlines and preserve explicit error-path coverage.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

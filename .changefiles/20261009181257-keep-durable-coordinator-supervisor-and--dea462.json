@@ -1,9 +1,0 @@
-{
-  "comment": "Keep durable coordinator, supervisor and waiter launches outside successful caller Job cleanup.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

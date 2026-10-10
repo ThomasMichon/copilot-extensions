@@ -1,9 +1,0 @@
-{
-  "comment": "Add real cross-process POSIX regression tests for the bounded build-lease wait/retry (_wait_for_versioned_slot_lease): reuse-after-release-within-budget and timeout-when-never-released, mirroring the existing PowerShell coverage. No runtime behavior change.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}
