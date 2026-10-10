@@ -51,6 +51,7 @@ from . import (
     obligations,
     output,
     permissions,
+    pr_authority,
     publication_deadline,
     push_diagnostics,
     procs,
@@ -227,13 +228,9 @@ def push_changes(
     title: str | None = None,
     dry_run: bool = False,
     allow_unsquashed: bool = False,
+    rewrite_pr: bool = False,
 ) -> bool:
     """Push worktree changes to the remote default branch.
-
-    Squashes all worktree commits, rebases onto upstream, validates,
-    merges to local default branch, and pushes.  Does NOT remove the
-    worktree or branch -- call validate_and_finalize() after this.
-
     Args:
         worktree_id: The worktree identifier.
         config: Loaded project configuration.
@@ -255,7 +252,7 @@ def push_changes(
 
     # Load tracking record
     from . import config as cfg
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = (cfg.tracking_dir(config.repo_name) if rewrite_pr else cfg.tracking_dir()) / f"{worktree_id}.yaml"
     record = None
     if yaml_path.exists():
         try:
@@ -283,6 +280,10 @@ def push_changes(
             record = tracking.load_record(yaml_path)
             record.title = new_title
             tracking.save_record(record)
+
+    if rewrite_pr:
+        from . import pr_rewrite
+        return pr_rewrite.push_changes(worktree_id, config, record, dry_run=dry_run)
 
     # PR mode: push the feature branch, not master.
     if repo.pr.enabled and record and record.pr and record.pr.branch:
@@ -834,11 +835,11 @@ def _push_changes_pr(
         return True
 
     budget = publication_deadline.lifecycle_budget(repo.pr)
-    lock = FinalizeLock(lock_path, timeout=budget, stale_after=budget)
+    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record)
     try:
         lock.acquire()
-    except TimeoutError:
-        output.err("Timed out waiting for finalization lock.")
+    except (TimeoutError, ValueError) as exc:
+        output.err(str(exc))
         return False
 
     try:
@@ -976,11 +977,11 @@ def _push_changes_pr_refspec(
         return True
 
     budget = publication_deadline.lifecycle_budget(repo.pr)
-    lock = FinalizeLock(lock_path, timeout=budget, stale_after=budget)
+    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record)
     try:
         lock.acquire()
-    except TimeoutError:
-        output.err("Timed out waiting for finalization lock.")
+    except (TimeoutError, ValueError) as exc:
+        output.err(str(exc))
         return False
 
     try:

@@ -119,10 +119,12 @@ class AzureDevOpsProvider:
             )
         data = json.loads(proc.stdout)
         number = data.get("pullRequestId")
+        state = self._canonical_state(str(data.get("status", "active")).lower())
         return PullResult(
             url=self._web_url(scope.api_base, project, name, number),
             number=int(number) if number is not None else None,
-            state=str(data.get("status", "active")).lower(),
+            state=state,
+            merged=state == "merged",
         )
 
     @staticmethod
@@ -130,6 +132,13 @@ class AzureDevOpsProvider:
         if number is None:
             return ""
         return f"{org.rstrip('/')}/{project}/_git/{repo}/pullrequest/{number}"
+
+    @staticmethod
+    def _canonical_state(status: str) -> str:
+        states = {"active": "open", "completed": "merged", "abandoned": "closed"}
+        if status not in states:
+            raise ProviderError(f"Unknown Azure DevOps PR status: {status!r}")
+        return states[status]
 
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
@@ -156,7 +165,7 @@ class AzureDevOpsProvider:
         # tracking record uses and expose the authoritative merged signal.
         status = str(data.get("status", "active")).lower()
         merged = (status == "completed")
-        state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
+        state = self._canonical_state(status)
         merge_source = data.get("lastMergeSourceCommit")
         head_sha = (
             str(merge_source.get("commitId", "") or "")

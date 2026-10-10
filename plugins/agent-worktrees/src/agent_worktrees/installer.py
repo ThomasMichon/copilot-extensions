@@ -1628,8 +1628,8 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
                 else:
                     lines.append(f"    {k}: {_format_yaml_value(v)}")
         lines.append("")
-
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    from .pr_authority import write_registry
+    write_registry(path, "\n".join(lines) + "\n")
 
 
 def register_project(
