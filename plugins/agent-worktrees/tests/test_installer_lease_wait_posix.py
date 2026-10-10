@@ -101,6 +101,7 @@ def test_wait_for_versioned_slot_lease_reuses_winner_within_bounded_budget(tmp_p
     failed_marker = tmp_path / "holder-failed.txt"
     release_marker = tmp_path / "release-now.txt"
     contended_marker = tmp_path / "contended.txt"
+    done_marker = tmp_path / "done.txt"
 
     holder_path = tmp_path / "holder.sh"
     holder_path.write_text(harness + f"""
@@ -108,14 +109,16 @@ if _acquire_versioned_slot_lease; then
     touch "{_bash_path(ready_marker)}"
     while [[ ! -f "{_bash_path(release_marker)}" ]]; do sleep 0.05; done
     _release_versioned_slot_lease
-    # Stay alive, still holding nothing, for a bit after releasing: if
-    # release were a no-op, this process's PID would still be alive and
-    # the contender's mkdir-fallback stale-PID reclaim path (which only
-    # ever triggers once `kill -0` on the recorded holder proves it
-    # dead) could NOT kick in -- so a RESULT=True from the contender
-    # while this process is still running can only mean the explicit
-    # release genuinely cleared the lock, never stale-PID recovery.
-    sleep 5
+    # Stay alive, still holding nothing, until the test explicitly says
+    # it is done (NOT a fixed sleep): if release were a no-op, this
+    # process's PID would still be alive for as long as the test needs
+    # it to be, so the contender's mkdir-fallback stale-PID reclaim path
+    # (which only ever triggers once `kill -0` on the recorded holder
+    # proves it dead) could never kick in before the test has already
+    # asserted the result -- a passing RESULT=True can only mean the
+    # explicit release genuinely cleared the lock, never a race against
+    # this process's own exit timing.
+    while [[ ! -f "{_bash_path(done_marker)}" ]]; do sleep 0.05; done
 else
     touch "{_bash_path(failed_marker)}"
 fi
@@ -182,6 +185,11 @@ if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False
         except subprocess.TimeoutExpired:
             contender.kill()
             pytest.fail("contender's bounded wait did not return within its own budget")
+        # The holder is STILL alive here (blocked on done_marker below) --
+        # proven, not merely timed -- so this assertion can only pass via
+        # the explicit release, never stale-PID reclaim of a holder that
+        # has since exited.
+        assert holder.poll() is None, "holder exited before the result was asserted"
         assert contender.returncode == 0, err
         assert "RESULT=True" in out, (
             "a bounded-wait contender must acquire the lease once the "
@@ -189,6 +197,7 @@ if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False
         )
     finally:
         release_marker.write_text("go")
+        done_marker.write_text("go")
         try:
             holder.wait(timeout=30)
         except subprocess.TimeoutExpired:
