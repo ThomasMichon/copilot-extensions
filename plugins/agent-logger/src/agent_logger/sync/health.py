@@ -124,6 +124,31 @@ def _aggregate_health(legs: dict[str, dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def migrate_legacy_health(metadata: dict[str, Any]) -> None:
+    """Attribute legacy health conservatively without inventing an attempt."""
+    _health_timestamp(metadata.get("last_sync_utc"))
+    status = metadata.get("status")
+    if not isinstance(status, str):
+        raise OSError("invalid legacy sync status")
+    streak = _health_count(metadata.get("consecutive_partial_count", 0))
+    if status == "partial":
+        streak = max(1, streak)
+    entry = {
+        "status": status[:256],
+        "last_attempt_utc": metadata["last_sync_utc"],
+        "last_checked_utc": metadata["last_sync_utc"],
+        "consecutive_partial_count": streak,
+        "deferred_file_count": _health_count(metadata.get("deferred_file_count", 0)),
+        "deferred_files": _health_samples(
+            metadata.get("deferred_files", []),
+            limit=MAX_DEFERRED_FILE_SAMPLES,
+            chars=MAX_DEFERRED_PATH_CHARS,
+        ),
+    }
+    metadata["sync_legs"] = {"session-state": entry}
+    metadata.update(_aggregate_health(metadata["sync_legs"]))
+
+
 def merge_health(
     metadata: dict[str, Any],
     previous: dict[str, Any] | None,
@@ -139,32 +164,14 @@ def merge_health(
     prior = previous or {}
     stored = prior.get("sync_legs")
     legs: dict[str, dict[str, Any]] = {}
-    if stored is not None:
+    if "sync_legs" in prior:
         legs = _validated_legs(stored)
     elif prior:
         # Legacy partial metadata cannot identify the failed leg. A log-only
         # retry must not clear it until session-state is actually transferred.
-        legs["session-state"] = {
-            "status": (
-                prior["status"][:256] if isinstance(prior.get("status"), str) else "invalid"
-            ),
-            "last_attempt_utc": prior.get("last_sync_utc"),
-            "last_checked_utc": prior.get("last_sync_utc"),
-            "consecutive_partial_count": _health_count(
-                prior.get("consecutive_partial_count", 0),
-            ),
-            "deferred_file_count": _health_count(prior.get("deferred_file_count", 0)),
-            "deferred_files": _health_samples(
-                prior.get("deferred_files", []),
-                limit=sample_limit,
-                chars=sample_chars,
-            ),
-        }
-        if legs["session-state"]["status"] == "partial":
-            legs["session-state"]["consecutive_partial_count"] = max(
-                1,
-                legs["session-state"]["consecutive_partial_count"],
-            )
+        migrated = dict(prior)
+        migrate_legacy_health(migrated)
+        legs = migrated["sync_legs"]
     previous_leg = legs.get(leg, {})
     streak = 0
     if status == "partial":

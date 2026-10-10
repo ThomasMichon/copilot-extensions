@@ -19,6 +19,7 @@ from agent_logger.sync.health import (
     MAX_DEFERRED_FILE_SAMPLES,
     MAX_DEFERRED_PATH_CHARS,
     merge_health,
+    migrate_legacy_health,
 )
 
 log = logging.getLogger("agent-logger.sync-meta")
@@ -166,6 +167,12 @@ def heartbeat_sync_meta(
     if previous is None:
         write_sync_meta(dest, machine, transport, "ok", fallback_session_count)
         return
+    if "sync_legs" not in previous:
+        try:
+            migrate_legacy_health(previous)
+        except OSError as exc:
+            log.warning("cannot migrate sync metadata for heartbeat at %s: %s", dest, exc)
+            return
     previous["last_sync_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     legs = previous.get("sync_legs")
     if isinstance(legs, dict) and isinstance(legs.get("session-state"), dict):

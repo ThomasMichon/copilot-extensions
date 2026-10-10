@@ -139,7 +139,9 @@ def test_invalid_recorded_status_cannot_be_cleared_by_other_leg(tmp_path: Path) 
     assert classified.reason == "invalid_status"
 
 
-@pytest.mark.parametrize("payload", ["invalid json", '{"sync_legs":{"unexpected":{}}}'])
+@pytest.mark.parametrize(
+    "payload", ["invalid json", '{"sync_legs":{"unexpected":{}}}', '{"sync_legs":null}']
+)
 def test_invalid_metadata_is_preserved_and_reported(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -294,3 +296,41 @@ def test_legacy_partial_without_streak_is_conservatively_migrated(tmp_path: Path
     )
     assert classified.health == "degraded"
     assert classified.consecutive_partial_count == 1
+
+
+def test_legacy_heartbeat_preserves_attempt_and_exact_samples(tmp_path: Path) -> None:
+    meta.write_sync_meta(
+        tmp_path,
+        "machine",
+        "local",
+        "partial",
+        deferred_files=[f"path-{index}" for index in range(20)],
+    )
+    previous = meta.read_sync_meta(tmp_path)
+    del previous["sync_legs"]
+    old = "2026-01-01T00:00:00Z"
+    previous["last_sync_utc"] = old
+    (tmp_path / "sync-meta.json").write_text(json.dumps(previous), encoding="utf-8")
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", 0)
+    updated = meta.read_sync_meta(tmp_path)
+    leg = updated["sync_legs"]["session-state"]
+    assert leg["last_attempt_utc"] == old
+    assert leg["last_checked_utc"] == updated["last_sync_utc"]
+    assert leg["last_checked_utc"] != old
+    assert updated["consecutive_partial_count"] == previous["consecutive_partial_count"]
+    assert updated["deferred_file_count"] == 20
+    assert updated["deferred_files"] == previous["deferred_files"]
+    meta.write_process_log_meta(tmp_path, "ok")
+    assert meta.read_sync_meta(tmp_path)["sync_legs"]["session-state"] == leg
+
+
+def test_null_legs_session_write_preserves_corruption(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    path = tmp_path / "sync-meta.json"
+    payload = '{"sync_legs":null}'
+    path.write_text(payload, encoding="utf-8")
+    meta.write_sync_meta(tmp_path, "machine", "local", "ok")
+    assert path.read_text(encoding="utf-8") == payload
+    assert "cannot update sync health" in caplog.text
