@@ -79,6 +79,10 @@ control repository, not this public effort.
 - [ ] Native Windows observation covers repeated real PSMux operations from the
       production parent shape, with no unintended terminal windows or focus
       changes; fixture descendants remain contained. _(agent-recommended)_
+- [ ] For both ordinary and passive starts, exercise the production launch seam
+      from a kill-on-close Job, close the caller Job after successful readiness,
+      and independently confirm daemon health. A bounded control child must
+      exit with the caller Job. _(agent-recommended lifecycle requirement)_
 - [ ] Applicable lint, install-contract, headless-launch and documentation-impact
       gates pass. _(agent-recommended)_
 - [ ] The promoted `main` snapshot contains the fix and release metadata.
