@@ -129,7 +129,7 @@ repos:
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `srcroot` | string | `""` | Source root — parent directory of your repos. |
-| `machine` | string | auto-detected | Machine key (matches `machines.yaml`). |
+| `machine` | string | auto-detected | Local execution identity; native configured values remain unchanged, while WSL resolves a guest identity with `-wsl`. |
 | `platform` | string | auto-detected | `windows` \| `wsl` \| `linux`. Selects which platform-keyed command map applies. |
 | `repo_name` | string | `""` | Which `repos.<name>` is the default repo. Optional when exactly one repo is defined. |
 | `headless` | bool | `false` | CLI-only project: the bare binstub lists worktrees instead of launching an interactive Copilot session. |
@@ -139,6 +139,37 @@ repos:
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
+
+### Execution machine identity
+
+`machine` resolves machine-local > global > OS hostname. Repository config
+does not override that precedence. Windows and native Linux retain the winning
+configured string, or the OS hostname when unconfigured: there is no
+alias-to-key ownership migration. Direct native topology detection retains its
+existing `alias`-or-key result. WSL maps through topology keys and always uses
+`<host>-wsl`, adding the suffix
+only once, including when a local/global setting still names the host.
+Qualification follows the actual execution environment, not an inherited
+`platform` path-selection override.
+
+Related-repo availability compares topology-equivalent keys, hostnames, and
+identity aliases without rewriting `config.machine` or the declared routing
+target. This applies to local/machine loci, container availability, and doctor
+checks even when native config retains its raw hostname.
+
+Host and guest entries may share a raw `hostname`; the guest's hostname lookup
+is qualified. Key/hostname/alias conflicts fail closed. `display_name` is human
+metadata and may be shared between entries; unique legacy display lookups remain
+compatible without shadowing identity fields. Explicitly selecting a duplicated
+display label fails with an instruction to use an identity field.
+Missing guest entries produce a warning and retain the qualified key only if it
+is not already owned by a native entry; a collision fails closed. Optional null
+hostname/alias/display-name labels are treated as absent. Machine context may borrow host metadata
+without treating the host as local. With no topology, context still emits the
+execution identity. `ssh.environments[].alias` is an independently configured
+transport name and is never rewritten or used as execution identity.
+Detection/config loading does not migrate historical worktree or claim owners.
+Machine-context warnings go to stderr; stdout remains one JSON hook response.
 
 ### Same-machine AHP sessions
 

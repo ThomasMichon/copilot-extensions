@@ -123,7 +123,7 @@ agent-machine-transport = { path = "../libs/machine-transport", editable = true 
 worktree-manager = "worktree_manager.__main__:console_entry"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "setuptools>=83.0.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

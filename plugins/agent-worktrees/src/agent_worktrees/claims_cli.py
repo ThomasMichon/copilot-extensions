@@ -397,7 +397,7 @@ def _resolve_owner_ref_record_path(
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
         )
     if parsed.machine != config.machine:
-        return (None, parsed.worktree_id, None)
+        return (tracking.resolve_legacy_wsl_owner_ref(parsed, config), parsed.worktree_id, None)
     path = cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
     return (path, parsed.worktree_id, None)
 

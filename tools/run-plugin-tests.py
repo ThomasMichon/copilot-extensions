@@ -68,6 +68,11 @@ PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
+EXTERNAL_TEST_ROOTS = {
+    "worktree-manager": Path("worktree-manager"),
+    "payload-invocation": Path("libs/payload-invocation"),
+}
+EXTERNAL_TEST_DEPENDENCIES = {"payload-invocation": ("pyyaml>=6.0.3",)}
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
 
@@ -164,6 +169,8 @@ def _acquire_admission(wait_seconds: float) -> SingleInstance:
 
 
 def _plugin_dir(name: str) -> Path:
+    if name in EXTERNAL_TEST_ROOTS:
+        return REPO / EXTERNAL_TEST_ROOTS[name]
     return PLUGINS / name
 
 
@@ -264,7 +271,7 @@ def _dep_fingerprint(name: str) -> str:
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
     h = hashlib.sha256()
-    for dependency in RUNNER_DEPENDENCIES:
+    for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
         h.update(f"runner:{dependency}\n".encode())
     for p in parts:
         try:
@@ -307,7 +314,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
-            cmd.extend(RUNNER_DEPENDENCIES)
+            cmd.extend((*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())))
             subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like
@@ -323,6 +330,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                     str(py),
                     "pytest",
                     *RUNNER_DEPENDENCIES,
+                    *EXTERNAL_TEST_DEPENDENCIES.get(name, ()),
                 ],
                 cwd=str(_plugin_dir(name)), check=True,
             )

@@ -204,7 +204,7 @@ def _record_path(ref: tracking.ClaimRef) -> Path:
 def _load_actor_record(
     ref: tracking.ClaimRef, *, role: str, machine: str
 ) -> tuple[Path, tracking.WorktreeRecord]:
-    if ref.machine != machine:
+    if ref.machine != machine and not tracking.legacy_wsl_owner_ref_is_local(ref):
         raise ClaimHandoffError(
             f"{role} {ref.canonical()} is cross-machine; Phase 1 supports "
             "same-machine handoff only"
@@ -420,7 +420,7 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
 
 def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimBundle:
     consumer_ref = _qualified_ref(bundle.consumer, "bundle consumer")
-    if consumer_ref.machine != machine:
+    if consumer_ref.machine != machine and not tracking.legacy_wsl_owner_ref_is_local(consumer_ref):
         raise ClaimHandoffError(
             f"consumer worktree {bundle.consumer} is on {consumer_ref.machine}, "
             f"not local machine {machine}"
@@ -781,9 +781,9 @@ def active_bundle_for_claim(source: str, claim_ref: str) -> str:
 
 
 def _same_worktree(left: str, right: str) -> bool:
-    return _canonical_ref(_qualified_ref(left, "actor")) == _canonical_ref(
-        _qualified_ref(right, "bundle actor")
-    )
+    left_ref = _qualified_ref(left, "actor")
+    right_ref = _qualified_ref(right, "bundle actor")
+    return tracking.claim_refs_equivalent(left_ref, right_ref)
 
 
 def transition(

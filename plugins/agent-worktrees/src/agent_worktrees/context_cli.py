@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import output
 from . import git_ops, sessions, state_root as state_root_mod, tracking
@@ -301,7 +303,8 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 
     try:
         config = cfg.load_config()
-    except Exception:
+    except Exception as exc:
+        print(f"warning: Cannot load machine context config: {exc}", file=sys.stderr)
         return _empty()
 
     project = getattr(config, "repo_name", "") or project
@@ -309,26 +312,43 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     if not project or not machine:
         return _empty()
 
+    def _identity_only() -> int:
+        raw = (
+            f"Machine: {machine}\nPlatform: {cfg.detect_platform()}\n"
+            f"Project: {project}\nBinstub: {project}"
+        )
+        print(_json.dumps({"additionalContext": raw}))
+        return 0
+
     try:
         repo_dir = config.default_repo.anchor
     except Exception:
         repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
-        return _empty()
+        return _identity_only()
 
     try:
         registry = cfg.load_machines_yaml(repo_dir)
-    except (FileNotFoundError, ValueError):
-        return _empty()
-
-    entry = cfg.find_machine_entry(registry, machine)
-    if entry is None:
-        return _empty()
+    except FileNotFoundError:
+        return _identity_only()
+    except ValueError as exc:
+        print(f"warning: Cannot load machine topology: {exc}", file=sys.stderr)
+        return _identity_only()
 
     try:
-        raw = cfg.render_copilot_instructions(entry, project=project).rstrip()
-    except Exception:
-        return _empty()
+        entry = cfg.find_machine_metadata(registry, machine)
+    except ValueError as exc:
+        print(f"warning: Cannot resolve machine metadata: {exc}", file=sys.stderr)
+        return _identity_only()
+    if entry is None:
+        print(f"warning: Machine topology has no metadata for {machine!r}", file=sys.stderr)
+        return _identity_only()
+
+    try:
+        raw = cfg.render_copilot_instructions(entry, project=project, machine=machine).rstrip()
+    except Exception as exc:
+        print(f"warning: Cannot render machine context: {exc}", file=sys.stderr)
+        return _identity_only()
     if not raw:
         return _empty()
 
@@ -397,8 +417,6 @@ def cmd_get(args: argparse.Namespace) -> int:
     session_is_anchor = False
     if session_cwd is not None and not wt_id:
         try:
-            from agent_procutil import no_window_kwargs
-
             proc = subprocess.run(
                 ["git", "-C", str(session_cwd), "rev-parse", "--show-toplevel"],
                 capture_output=True,

@@ -14,7 +14,9 @@ This is a thin, agent-worktrees-flavored wrapper over the shared
 ``machine_transport.is_local_machine`` (vendored, not duplicated -- see its
 own module docstring for the full canonicalization algorithm): it supplies
 this plugin's own ``Config``/``load_machines_yaml`` shapes so every existing
-call site keeps its original ``(name, config)`` signature.
+call site keeps its original ``(name, config)`` signature, and passes
+``guest=True`` on a WSL guest so a guest execution identity can never
+silently resolve local against its own native-host registry entry.
 """
 
 from __future__ import annotations
@@ -37,4 +39,5 @@ def is_local_machine(name: str, config: cfg.Config) -> bool:
         name,
         config_machine=config.machine,
         load_entries=lambda: cfg.load_machines_yaml(config.default_repo.anchor),
+        guest=getattr(config, "platform", "") == "wsl",
     )

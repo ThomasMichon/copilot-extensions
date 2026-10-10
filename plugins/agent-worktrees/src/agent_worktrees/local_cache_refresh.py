@@ -173,9 +173,14 @@ def _select_global_root(home: Path) -> Path | None:
     runs only inside the bounded resolution subprocess.
     """
     try:
+        import inspect
+
         from plugin_activation import resolve_active_plugins
 
-        report = resolve_active_plugins(home=home, include_projects=False)
+        kwargs = {"home": home}
+        if "include_projects" in inspect.signature(resolve_active_plugins).parameters:
+            kwargs["include_projects"] = False
+        report = resolve_active_plugins(**kwargs)
     except Exception as exc:
         _LOG.warning("Global projection renderer discovery failed: %s", exc)
         return None

@@ -130,3 +130,28 @@ class TestIsLocalMachine:
             "box-a", config_machine="", load_entries=_loader(entries),
             real_hostname="real-hostname",
         ) is True
+
+    def test_guest_does_not_treat_native_host_as_local(self):
+        entries = {
+            "box-a": MachineEntry(
+                key="box-a",
+                display_name="Box A",
+                alias="box-a",
+                hostname="real-hostname",
+            ),
+            "box-a-wsl": MachineEntry(
+                key="box-a-wsl",
+                display_name="Box A WSL",
+                hostname="real-hostname",
+            ),
+        }
+        assert is_local_machine(
+            "box-a", config_machine="box-a-wsl", load_entries=_loader(entries), guest=True,
+        ) is False
+        assert is_local_machine(
+            "box-a-wsl",
+            config_machine="box-a-wsl",
+            load_entries=_loader(entries),
+            real_hostname="real-hostname",
+            guest=True,
+        ) is True

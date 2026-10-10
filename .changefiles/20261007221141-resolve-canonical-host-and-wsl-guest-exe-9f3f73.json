@@ -1,0 +1,13 @@
+{
+  "comment": "Resolve canonical host and WSL guest execution identities consistently without changing SSH transport aliases or historical ownership.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

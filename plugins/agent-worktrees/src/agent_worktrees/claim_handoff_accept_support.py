@@ -7,6 +7,8 @@ import shlex
 import subprocess
 from collections.abc import Callable
 
+from agent_procutil import no_window_kwargs
+
 from . import claimant
 from . import config as cfg
 from . import machine_identity
@@ -33,7 +35,18 @@ def same_machine(a: str, b: str) -> bool:
         config = cfg.load_config()
     except Exception:
         return False
-    return machine_identity.is_local_machine(a, config) and machine_identity.is_local_machine(b, config)
+
+    def _is_this_machine(label: str) -> bool:
+        # Record-scoped legacy exception: a bundle actor may still carry
+        # this WSL guest's pre-split native-host spelling.
+        from .legacy_wsl_record_locality import machine_label_is_legacy_local
+
+        return (
+            machine_identity.is_local_machine(label, config)
+            or machine_label_is_legacy_local(label, config)
+        )
+
+    return _is_this_machine(a) and _is_this_machine(b)
 
 
 def acquire_bundle_fence(
@@ -136,6 +149,7 @@ def remote_accept_source(
             capture_output=True,
             text=True,
             timeout=timeout + 4,
+            **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         raise error_type(

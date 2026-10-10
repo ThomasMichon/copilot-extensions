@@ -527,10 +527,28 @@ Multi-machine packages belong in `all/` with an explicit `gate`.
 `<machine>` is the canonical topology key when an adopted repository provides a
 matching `machines.yaml` entry. The raw `platform.node()` host name (Windows
 `%COMPUTERNAME%`) is matched case-insensitively against the entry key plus its
-`hostname`, `alias`, and `display_name`; all four remain accepted for package
+`hostname` and `alias`; these remain accepted for package
 gates, `per-machine` overlays, nested module/resource gates, and machine
-directory selection. Ambiguous cross-entry matches fail before reconciliation.
-Without usable topology, the raw host name remains the standalone fallback.
+directory selection. Actual identity-field conflicts fail before reconciliation.
+`display_name` is metadata and may be duplicated, including between a host and
+its guest. Unique legacy display-name selectors/gates remain compatible unless
+they shadow an identity field; duplicated display names are not accepted as
+gates and cannot select a machine. Use a key, hostname, or alias instead.
+Native Windows and Linux retain the host identity. WSL defaults to `<host>-wsl`
+(never double-suffixed), with guest topology resolved separately even when its
+`hostname` is the Windows host name. Guest gates never accept the host's raw
+hostname or host-only labels. Without a guest topology entry the qualified
+identity remains usable, with a diagnostic instead of a host fallback.
+`--machine` is an explicit target selector and is not reinterpreted as the
+caller's local guest. SSH environment aliases remain independently configured
+transport labels. Existing durable ownership references are not rewritten.
+
+`discover.current_machine()` is the execution identity used by package discovery,
+not physical hardware inventory. Default library discovery and the standalone
+discovery module use the same resolver and accepted topology labels as the main
+CLI; their platform path-key comes from that resolver too. A diagnostic
+`raw: ...` label names the OS hostname only and does not grant it guest package
+scope. Explicit discovery target selectors remain unchanged.
 
 The canonical root is `.copilot-extensions/agent-machines/`. Legacy
 `.agent-machines/` and `.github/machine-state/` remain bounded fallbacks only

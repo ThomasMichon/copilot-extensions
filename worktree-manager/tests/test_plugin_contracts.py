@@ -16,6 +16,13 @@ from worktree_manager.plugin_contracts import (
 from worktree_manager.__main__ import main
 
 
+@pytest.fixture(autouse=True)
+def _isolate_plugin_root_overrides(monkeypatch):
+    monkeypatch.delenv("WORKTREE_MANAGER_PLUGINS_DIR", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_PLUGINS_DIR", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_PIVOTS_DIR", raising=False)
+
+
 def _settings(home: Path, enabled: dict[str, bool]) -> None:
     root = home / ".copilot"
     root.mkdir(parents=True, exist_ok=True)
