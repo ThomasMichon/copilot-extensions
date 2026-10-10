@@ -113,6 +113,53 @@ Targets implement a small `Target` interface
 | `ssh` / `ssh-tunnel` | rsync over SSH, optionally via a jump host |
 | `ingest` | an rsync-daemon sink with an optional HTTP notify |
 
+**Destination identity-admission (`push`'s optional `source_identity`).** A
+caller publishing into a namespaced destination it doesn't already own (e.g.
+rescue/Codespace publication, not ordinary machine-rooted session sync) may
+pass the canonical `source_roots.SourceIdentity` (venue kind, provider,
+optional host/repository, and venue name) to `push`. `local`
+enforces it under a dedicated destination lock held through session, sidecar,
+index and health-metadata writes: a first
+push to an empty leaf claims it (writes a `.archive-source.json` marker), a
+re-push matching that marker is idempotent, and a mismatched marker or an
+existing nonempty leaf with no marker at all is refused rather than silently
+overwritten or adopted. `onedrive`/`ssh`/`ingest` fail closed (`ok=False`)
+whenever `source_identity` is passed — a OneDrive replica is reconciled by
+cloud sync, not by this process, so the destination-lock gate above cannot
+actually serialize two writers claiming separate replicas, and no
+receiver-side atomic admission exists yet for the `ssh`/`ingest` transports
+either. The default `None` is unchanged legacy behavior for every ordinary
+sync caller.
+
+Ownership markers use the same schema-v1 `.archive-source.json` contract
+and bounded metadata reader as source discovery, not a separate four-field
+format. Matching claims compare the complete canonical identity and preserve
+existing `legacy_aliases` metadata without rewriting the marker. The resulting
+publication can be read by `load_source_identity_file` and `iter_archive_sources`.
+New claims require the canonical publication key; an existing claim accepts
+only its canonical key or a declared legacy alias, never an inferred one.
+
+Marker publication is atomic and refuses to replace an existing file or link,
+including one created between the initial inspection and publication. Claim
+files stay kernel-owned until publication and verification finish: Linux uses
+an unnamed `O_TMPFILE` inode, descriptor-based linking and directory fsync;
+Windows uses a protected original handle, no-replace handle rename and
+cancellable deletion disposition. No pathname check-then-unlink cleanup occurs.
+Linux identity admission requires `O_TMPFILE`, `/proc/self/fd` and filesystem
+support for anonymous-file publication; unsupported systems fail explicitly
+without falling back to a racy named temporary file.
+Identified publications require POSIX directory durability barriers; an
+unsupported barrier fails explicitly rather than silently claiming durability.
+Ordinary directory creation does not opt into that additional requirement.
+Closing an unpublished claim cleans up the kernel-owned file object, not
+whatever a pathname happens to reference. Unowned content is never deleted or
+ignored merely because its filename resembles a stale claim artifact; such a
+leaf requires explicit recovery. Abrupt Windows process termination in the
+disposition-cancellation/rename interval can still leave a named artifact;
+normal context cleanup does not guess its ownership after restart.
+The advisory admission lock coordinates cooperating publishers, not arbitrary
+ancestor-directory swaps or writers bypassing the admission API.
+
 **Post-push notify (target-independent).** A `sync.notify.url` fires a
 best-effort HTTP `POST` (JSON `{"machine": <machine>}`; `{machine}` in the URL
 is also substituted, optional bearer token) after **any** successful push,

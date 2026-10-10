@@ -22,6 +22,7 @@ from agent_logger.sync.targets.base import (
     NO_WINDOW_KWARGS,
     DoctorResult,
     PushResult,
+    SourceIdentityLike,
     Target,
     rsync_session_filters,
 )
@@ -101,7 +102,16 @@ class SshTarget(Target):
         include_sessions: set[str] | None = None,
         *,
         batch_mode: bool = False,
+        source_identity: SourceIdentityLike | None = None,
     ) -> PushResult:
+        if source_identity is not None:
+            return PushResult(
+                ok=False,
+                detail=(
+                    "identity-admission unsupported for the ssh target: no "
+                    "receiver-side atomic admission check exists yet"
+                ),
+            )
         host = self._host()
         if not host:
             return PushResult(ok=False, detail="ssh target requires a host")

@@ -834,3 +834,4 @@ sleep 0.5
             line for line in out_file.read_text().splitlines() if line.strip()
         ]
         assert events == ["FIRST=OK", "SECOND=REFUSED", "THIRD=OK"], events
+
