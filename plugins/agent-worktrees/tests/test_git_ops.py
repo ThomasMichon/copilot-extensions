@@ -1147,6 +1147,7 @@ class TestPinGitCredential:
         matches the login embedded in the (single) surviving helper entry,
         never a mix of one thread's username with another's helper."""
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(go, "_active_gh_account", lambda: None)
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
@@ -1155,9 +1156,12 @@ class TestPinGitCredential:
 
         results: list[bool] = []
         lock = threading.Lock()
+        # Race each pair without assuming the bounded native lock is fair.
+        round_start = threading.Barrier(2, timeout=30)
 
         def _pin(login: str) -> None:
             for _ in range(5):
+                round_start.wait()
                 ok = go.pin_git_credential(repo, login)
                 with lock:
                     results.append(ok)
@@ -1170,6 +1174,7 @@ class TestPinGitCredential:
             t.start()
         for t in threads:
             t.join()
+        assert len(results) == 10
         assert all(results)
 
         username = sp.run(

@@ -130,6 +130,14 @@ with `Tab`:
 - **Machine tabs** — one tab per registered machine plus **All machines**. The
   local host git-classifies its own worktrees; remote machines report their state
   over SSH.
+  The `agent-worktrees resolve` launch-plan adapter matches eligible handoff
+  targets and environment-specific machine labels through the shared
+  `machine-transport` matcher: keys, aliases, declared hostnames and display
+  names match case-insensitively. Unique case-insensitive registry keys retain
+  precedence over other identities; ambiguous identities fail without emitting
+  a launch plan. JSON resolve failures emit the standard versioned error
+  envelope on stdout. Reachability
+  filters, selected environments and SSH command construction are unchanged.
 - **Worktree rows** — each shows machine · environment · `repo:id4` and a **state
   block** (`WIP`, `DIRTY`, `UNUSED`, `CONVO 💬N`, `FINAL`, `MERGED`, `ORPHAN`) with an
   `↑ahead`/`↓behind` sync tag. Same vocabulary as the status bar and

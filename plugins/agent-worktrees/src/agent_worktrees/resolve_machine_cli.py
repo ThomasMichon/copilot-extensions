@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 from machine_transport import default_shell_for_env_name as _default_shell_for_env_name
+from machine_transport import find_machine_entry
 from machine_transport import resolve_ssh_target as _resolve_ssh_target
 from machine_transport import wrap_remote_command as _wrap_remote_command
 
@@ -84,23 +86,21 @@ def _try_machine_handoff(
     machine wasn't found (caller should error).
     """
     remote_targets = _load_remote_machines(config)
-    entry_map = {entry.key: (entry, envs) for entry, envs in remote_targets}
-
-    if machine_name not in entry_map:
-        found = None
-        for entry, envs in remote_targets:
-            if entry.alias and entry.alias.lower() == machine_name.lower():
-                found = (entry, envs)
-                break
-        if not found:
-            output.err(f"Unknown or unreachable remote machine: {machine_name}")
-            all_machines = _load_all_machine_keys(config)
-            if all_machines:
-                output.err("Available: " + ", ".join(all_machines))
-            return 1
-        entry, envs = found
-    else:
-        entry, envs = entry_map[machine_name]
+    entry_map = {
+        entry.key: replace(entry, ssh_environments=envs)
+        for entry, envs in remote_targets
+    }
+    try:
+        entry = find_machine_entry(entry_map, machine_name, reject_ambiguous=True)
+    except ValueError as exc:
+        output.err(str(exc))
+        return 1
+    if entry is None:
+        output.err(f"Unknown or unreachable remote machine: {machine_name}")
+        all_machines = _load_all_machine_keys(config)
+        if all_machines:
+            output.err("Available: " + ", ".join(all_machines))
+        return 1
 
     ssh_alias, shell = _resolve_ssh_target(entry)
     project = cfg.project_name()
@@ -163,19 +163,10 @@ def _emit_remote_plan_for_env(
     except (FileNotFoundError, ValueError):
         return None
 
-    key = _machine_key_for_display(config, machine_display)
-    entry = entries.get(key)
-    if entry is None:
-        nl = (machine_display or "").lower()
-        for candidate_key, candidate in entries.items():
-            if (
-                candidate_key.lower() == nl
-                or candidate.display_name.lower() == nl
-                or (candidate.alias and candidate.alias.lower() == nl)
-                or (candidate.hostname and candidate.hostname.lower() == nl)
-            ):
-                entry, key = candidate, candidate_key
-                break
+    try:
+        entry = find_machine_entry(entries, machine_display, reject_ambiguous=True)
+    except ValueError as exc:
+        return output._json_error(str(exc))
     if entry is None or not entry.ssh_environments:
         return None
 
@@ -224,13 +215,5 @@ def _machine_key_for_display(config: cfg.Config, name: str) -> str:
         entries = cfg.load_machines_yaml(repo.anchor)
     except (FileNotFoundError, ValueError):
         return name
-    nl = name.lower()
-    for key, entry in entries.items():
-        if (
-            key.lower() == nl
-            or (entry.alias and entry.alias.lower() == nl)
-            or entry.display_name.lower() == nl
-            or (entry.hostname and entry.hostname.lower() == nl)
-        ):
-            return key
-    return name
+    entry = find_machine_entry(entries, name, reject_ambiguous=True)
+    return entry.key if entry is not None else name

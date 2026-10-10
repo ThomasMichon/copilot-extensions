@@ -477,15 +477,178 @@ provider's absence.
   No duplicate peer patch or release bypass is authorized by this journal.
   The effort remains Active.
 
+### 2026-10-09 - Reviewed consumer extension and independent Picker slice
+- Plan extension #5976 merged into `dev` as
+  `314b3ac189b92fc193628806fe7b2aa4cd982f29` after current-head approval
+  with zero findings and green required CI. The independent #5972 slice now
+  uses shared strict matching for launch/Picker identities, preserving eligible
+  handoff-target filtering, environment selection and public command-plan shapes.
+  Peer-owned claimant, handoff and host/WSL paths remain untouched.
+- Existing baseline contracts passed **9 tests** before edits. The expanded
+  consumer run passed **229 tests, 12 skipped**, including a real headless
+  subprocess using YAML parsing and the public five-field JSON plan.
+  Ambiguous identities explicitly refuse to emit a plan; exact keys retain
+  precedence and unknown/offline display identities preserve compatibility.
+- Touched-code lint and the headless-spawn guard passed. The full affected
+  suite used the documented 120-second per-test allowance:
+  an unchanged real Git-heavy handoff contract exceeded the default 30-second
+  Windows watchdog, then passed in **66.16 seconds** with that allowance.
+  No production assertion, peer-owned source or module ceiling was weakened.
+- The full run then exposed a stale publication-lock test double: the earlier
+  publication repair passes `push_timeout_seconds`, but the double accepted
+  only the worktree path. It now accepts and explicitly asserts a non-default
+  configured deadline while retaining the lock-error assertion. Combined
+  publication and Picker contracts passed **55 tests**. On publication,
+  independently merged #5989 already contained the stronger parametrized
+  deadline regression; rebasing retained that upstream file verbatim instead
+  of publishing a duplicate fixture fix.
+- A later full run passed its first five file groups, then two real Bash
+  setup-child contracts failed because the selected shell could not find its
+  POSIX utilities on the host PATH. Selecting the existing Git Bash directory
+  through process-local PATH resolved both without code, host configuration
+  or assertion changes. Current rebased Picker, publication-deadline and real
+  setup-child contracts passed **28 tests**. Full-suite evidence remains open.
+- Normal promotion run `37984196435` succeeded. The unified installed-consumer
+  refresh completed, with Worktrees `1.24.36-dev1` and Bridge `0.9.41.dev1`
+  verified. Consumer projection reconciliation is complete after its required
+  CI's separately tracked
+  fixture lease-isolation failure was repaired and the reviewed reconciliation
+  merged with green required CI.
+  No broader service-health claim follows from this refresh.
+
+### 2026-10-09 - Generated installer-context boundary clarified
+- `tools/sync-installation-context.py` identifies `libs/installation-context`
+  as the canonical owner of the generated script and Python-package copies.
+  The earlier source-absence observation was a discovery error, now corrected.
+- Canonical directory-lock and maintenance-sidecar checks compare physical
+  hostnames to decide local PID liveness and ownership; source URL normalization
+  compares Git network hosts. These are distinct local process-owner and URL
+  contracts, not registry aliases or named-machine SSH routing. Keep them
+  independent of transport identity. No installation-context code was changed.
+- This closes that bounded source-ownership inventory gap, not the remaining
+  shell-only and provider-argv inventory or the whole campaign.
+
+### 2026-10-09 - Picker current-head review corrections
+- Review of #6002 found that strict shared matching mixed case-insensitive
+  keys with alias/hostname/display matches. Strict matching now resolves a
+  unique case-insensitive key first; genuinely colliding keys remain ambiguous
+  unless the input exactly spells one key. Non-strict first-match behavior is
+  unchanged. Key-versus-identity regressions cover both insertion orders.
+- Environment-specific JSON resolve ambiguity now emits the existing versioned
+  error envelope on stdout instead of leaving stdout empty. A real headless
+  subprocess proves nonzero status, the exact envelope and clean stderr.
+  Both review regressions failed against the prior head before correction.
+- Corrected consumer contracts passed **52 tests**, shared-library regressions
+  **84 tests**, related Bridge contracts **447 tests, 1 skipped**, and the
+  standalone Picker locality contract **13 tests**. The first shared test run
+  used mutation on a frozen fixture; constructing a replaced dataclass fixed
+  that test-only error. Touched-code lint passed.
+- The previous full run was stopped before editing after these review findings;
+  completed file groups passed, but that is not full-suite success. Publication,
+  fresh current-head review, required CI and the corrected full affected suites
+  remain gates. Shared consumer release intent covers Worktrees, Bridge and
+  Worktree Manager; no peer-owned host/WSL code was changed.
+
+### 2026-10-09 - Preserve handoff environment eligibility
+- The next review identified that matching retained eligible machine entries
+  but discarded their filtered environment lists. A local Windows machine
+  could therefore select its excluded native target instead of its eligible
+  WSL target. Matching now uses immutable entry copies carrying only the
+  loader-returned environments; the registry and locality filter are unchanged.
+- Four key/alias/hostname/display regressions using the actual loader failed
+  against the prior head and now select the guest SSH target and POSIX wrapper.
+  They also prove the original registry entry remains unchanged. Combined
+  matching, envelope and seed-delivery contracts passed **56 tests**.
+  Touched-code lint passed; fresh full validation and review remain required.
+
+### 2026-10-09 - Full-suite cold-start correction and tracked exception
+- Full affected validation exposed a pending-generation staging failure in
+  Bridge. Real subprocess instrumentation showed stable process identities but
+  two writers exhausted the unchanged two-second lock-admission budget while
+  cold liveness-package imports ran inside another writer's critical section.
+  Preparing that callable before acquiring the lock reduced measured locked
+  work without moving live PID checks, pruning or writes outside the lock.
+- A fresh-process import observer failed against the old code and passes with
+  the correction. The existing eight-process generation round trip, PID-reuse
+  rejection and exactly-once consumption assertions are unchanged. Runtime
+  version contracts passed **21 tests, 1 skipped**.
+- The credential-pin race fixture now synchronizes each competing pair and
+  stubs ambient account discovery. It still requires all ten real Git writes
+  and final helper/username consistency, without assuming native-lock fairness
+  over repeated acquisitions. Credential-pin contracts passed **24 tests**;
+  production locking and timeouts are unchanged. Touched-code lint passed.
+- Full and focused Windows descendant-cleanup failures match the existing
+  accepted gap #4644. The repository's documented tracked-flake exception
+  permits excluding that exact contract; do not disguise it as a passing test
+  or bundle an unvalidated process-management change here. Final affected-suite
+  validation excludes only `test_run_bounded_kills_grandchild_on_timeout`;
+  no other observed failure is waived. Current-head review and CI remain gates.
+
+### 2026-10-09 - Retained validation batches and publication-release proof
+- Complete Bridge validation passed all nine contained file groups:
+  **3782 passed, 72 skipped**. Worktrees' first seven groups passed, and two
+  additional files completed before an interruption. Two short peer review-fix
+  suites received explicit admission gaps; completed evidence was retained on
+  unchanged source instead of restarting it.
+- Negative pytest selection collapsed the runner's normal file partitioning;
+  exact node deselection restored it. Large real-Git groups still exceeded
+  group wall budgets while individual contracts kept passing. Remaining
+  validation runs in smaller bounded groups with unchanged per-test watchdogs.
+- The large PR-operation file completed **316 passed, 1 failed**. Its release
+  assertion treated a thread still resolving the real Git directory after
+  300ms as a held publication lock. It now waits for actual cross-thread lock
+  acquisition with a bounded future, propagating any acquisition exception.
+  Nested reentrancy and locked-snapshot assertions are unchanged; related
+  release/snapshot contracts passed **3 tests**. No production lock changes.
+- Remaining Worktrees files, fresh current-head review and CI still gate merge.
+  A completed Bridge run or partial Worktrees batch does not close the campaign.
+
+### 2026-10-10 - Complete affected-suite evidence
+- Retained, nonduplicated Worktrees coverage totals **7791 passed, 57 skipped,
+  1 deselected**: seven original completed groups, two completed files, the
+  complete PR-operation file with its corrected release assertion, and all
+  remaining 123 files. Complete Bridge coverage is **3782 passed, 72 skipped**.
+  Earlier and final batches differ only in the corrected release test and this
+  journal, not production source or other fixtures.
+- The only deselected contract is the exact accepted Windows gap #4644.
+  Current-head required CI run `38034875866` passed; no other failure is waived.
+- The evidence re-review found that the paired credential fixture needed an
+  explicit ten-result count to reject worker exceptions/truncated rounds.
+  That assertion is now required before accepting any successful result list.
+  The trusted identifier scan also flagged legacy example identifiers in the
+  touched Picker test file; examples now use the same generic project fixture
+  as its new regressions. Production code is unchanged.
+- Focused validation of these test-only corrections, fresh review and the
+  updated-head identifier/CI checks remain publication gates. Do not rerun
+  settled complete production-source coverage absent a relevant source change.
+
+### 2026-10-10 - Preserve the cold-import I/O boundary
+- Final review found that moving the liveness import outside the lock also
+  moved it outside staging's established best-effort `OSError` handler.
+  The import now remains before lock acquisition but inside that existing
+  narrow handler. No import exception class, admission budget, identity check
+  or lock-protected mutation contract is broadened.
+- A fresh-process import-failure regression failed against the prior source;
+  it now proves staging survives an I/O failure without creating a pending
+  record or lock file. The complete runtime-version contracts passed
+  **22 tests, 1 skipped**, including cold import ordering and real concurrent
+  round trips. Touched-code lint passed.
+- Existing complete Worktrees coverage is unchanged. Bridge affected-file
+  validation is refreshed for this narrow exception-boundary correction;
+  current-head review and checks still precede merge and deployment.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
-additional #5972/#5973/#5974 work is not implemented. The reviewed campaign
-extension precedes the independent Picker matching slice; its existing baseline
-contracts passed **9 tests** before edits. #5689 retains its original host/WSL
+additional #5972 Picker matching slice is published in #6002, with complete
+affected-suite evidence. Fresh review and identifier/CI checks for the final
+test-only corrections, merge and deployment remain open. Remaining #5972 paths and
+#5973/#5974 are not implemented. The campaign extension is merged.
+#5689 retains its original host/WSL
 implementation owner and remains the overlapping-consumer prerequisite.
 
 #5885 is merged and #5911 is closed: do not rework that completed remediation.
-Verify normal promotion and installed-consumer evidence separately. The effort
+Normal promotion and installed-consumer refresh are verified; consumer projection
+reconciliation is complete; the new Picker slice's deployment remains open. The effort
 and the #5972 issue claim remain active until their complete scopes are resolved
 or explicitly transferred; no single planning or implementation PR closes them.
