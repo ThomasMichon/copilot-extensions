@@ -45,6 +45,7 @@ class RegistryState:
         identities = set()
         with self._lock:
             for entry in entries:
+                durable_collision = False
                 opted_in = isinstance(entry, dict) and (
                     "notification_protocol" in entry or "pending" in entry
                     or "registration_id" in entry
@@ -107,11 +108,14 @@ class RegistryState:
                             raise ValueError("invalid timeout")
                         sub.deadline = time.monotonic() + float(remaining)
                     bucket = self._subscribers.setdefault(key, {})
-                    if opted_in and sub.subscriber_id in bucket:
+                    if sub.subscriber_id in bucket and (
+                        opted_in or bucket[sub.subscriber_id].acknowledged
+                    ):
+                        durable_collision = True
                         raise ValueError("duplicate registration")
                     bucket[sub.subscriber_id] = sub
                     restored += 1
                 except (KeyError, TypeError, ValueError, OverflowError):
-                    if opted_in:
+                    if opted_in or durable_collision:
                         raise ValueError("invalid persisted acknowledged subscription") from None
             return restored

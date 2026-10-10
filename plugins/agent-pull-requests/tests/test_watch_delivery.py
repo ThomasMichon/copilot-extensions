@@ -433,6 +433,19 @@ def test_acknowledged_raw_identity_must_be_nonblank_string(field, value):
     with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
         WatchRegistry().restore_state(entries)
 
+@pytest.mark.parametrize("durable_first", [True, False])
+def test_mixed_protocol_duplicate_never_overwrites_durable_event(durable_first):
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "one", until=(MERGED,), acknowledged=True,
+                      notify={"argv": ["consumer"]})
+    registry.apply_snapshot(key, PRSnapshot(merged=True))
+    durable = registry.snapshot_state()[0]
+    legacy = {"repo": key.repo, "number": 1, "subscriber_id": "one", "until": [MERGED], "notify": {}}
+    entries = [durable, legacy] if durable_first else [legacy, durable]
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
+
 
 def test_shutdown_during_fetch_preserves_subscriber_for_successor(make):
     entered, release = threading.Event(), threading.Event()
