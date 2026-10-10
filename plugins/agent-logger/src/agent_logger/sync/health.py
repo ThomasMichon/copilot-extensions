@@ -149,6 +149,20 @@ def migrate_legacy_health(metadata: dict[str, Any]) -> None:
     metadata.update(_aggregate_health(metadata["sync_legs"]))
 
 
+def validate_recorded_health(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Validate recorded legs and their aggregate without mutating either."""
+    legs = _validated_legs(metadata.get("sync_legs"))
+    aggregate = _aggregate_health(legs)
+    if any(
+        _integer(metadata.get(key)) is None
+        for key in ("consecutive_partial_count", "deferred_file_count")
+    ):
+        raise OSError("invalid aggregate sync health counts")
+    if any(metadata.get(key) != value for key, value in aggregate.items()):
+        raise OSError("inconsistent aggregate sync health")
+    return legs
+
+
 def merge_health(
     metadata: dict[str, Any],
     previous: dict[str, Any] | None,
@@ -162,10 +176,9 @@ def merge_health(
     """Update one leg; another leg's success cannot clear its failure streak."""
     status = status[:256]
     prior = previous or {}
-    stored = prior.get("sync_legs")
     legs: dict[str, dict[str, Any]] = {}
     if "sync_legs" in prior:
-        legs = _validated_legs(stored)
+        legs = validate_recorded_health(prior)
     elif prior:
         # Legacy partial metadata cannot identify the failed leg. A log-only
         # retry must not clear it until session-state is actually transferred.
@@ -221,17 +234,9 @@ def classify_sync_health(
     current = now or datetime.now(timezone.utc)
     if "sync_legs" in metadata:
         try:
-            legs = _validated_legs(metadata["sync_legs"])
-            aggregate = _aggregate_health(legs)
+            legs = validate_recorded_health(metadata)
         except OSError:
             return SyncHealth(machine, "unhealthy", "invalid_leg_metadata")
-        if any(
-            _integer(metadata.get(key)) is None
-            for key in ("consecutive_partial_count", "deferred_file_count")
-        ):
-            return SyncHealth(machine, "unhealthy", "invalid_leg_metadata")
-        if any(metadata.get(key) != value for key, value in aggregate.items()):
-            return SyncHealth(machine, "unhealthy", "inconsistent_leg_metadata")
         for entry in legs.values():
             timestamp = min(timestamp, _health_timestamp(entry["last_checked_utc"]))
     age_hours = max(0.0, (current - timestamp).total_seconds() / 3600)

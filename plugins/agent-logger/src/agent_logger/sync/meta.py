@@ -20,6 +20,7 @@ from agent_logger.sync.health import (
     MAX_DEFERRED_PATH_CHARS,
     merge_health,
     migrate_legacy_health,
+    validate_recorded_health,
 )
 
 log = logging.getLogger("agent-logger.sync-meta")
@@ -166,6 +167,12 @@ def heartbeat_sync_meta(
         return
     if previous is None:
         write_sync_meta(dest, machine, transport, "ok", fallback_session_count)
+        return
+    try:
+        if "sync_legs" in previous:
+            validate_recorded_health(previous)
+    except OSError as exc:
+        log.warning("cannot validate sync metadata for heartbeat at %s: %s", dest, exc)
         return
     if "sync_legs" not in previous:
         try:

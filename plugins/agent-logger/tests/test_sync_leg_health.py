@@ -366,3 +366,25 @@ def test_root_replaced_before_descriptor_open_is_rejected(
     assert "changed before opening" in result.detail
     assert not (root / "logs" / "process-123-456.log").exists()
     assert meta.read_sync_meta(root)["status"] == "partial"
+
+
+@pytest.mark.parametrize("corruption", ["null", "missing-field", "contradictory"])
+def test_heartbeat_preserves_invalid_legs_and_warns(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    corruption: str,
+) -> None:
+    meta.write_sync_meta(tmp_path, "machine", "local", "ok")
+    previous = meta.read_sync_meta(tmp_path)
+    if corruption == "null":
+        previous["sync_legs"] = None
+    elif corruption == "missing-field":
+        del previous["sync_legs"]["session-state"]["status"]
+    else:
+        previous["deferred_file_count"] = 1
+    path = tmp_path / "sync-meta.json"
+    raw = json.dumps(previous)
+    path.write_text(raw, encoding="utf-8")
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", 0)
+    assert path.read_text(encoding="utf-8") == raw
+    assert "cannot validate sync metadata for heartbeat" in caplog.text
