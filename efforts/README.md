@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Mux Child Window Suppression](active/mux-child-window-suppression/README.md) | Draft | #6040 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Draft; implementation planned | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Draft; approved Komodo-first substrate selection | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Draft | #6007 |
