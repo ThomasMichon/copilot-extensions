@@ -205,7 +205,10 @@ if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
-def test_wait_for_versioned_slot_lease_times_out_when_never_released(tmp_path: Path):
+@pytest.mark.parametrize("clock_boundary", [False, True], ids=["real-clock", "second-boundary"])
+def test_wait_for_versioned_slot_lease_times_out_when_never_released(
+    tmp_path: Path, clock_boundary: bool,
+):
     """The POSIX bounded wait must actually be bounded: if the holder
     never releases, a contender configured with a short budget must
     return non-zero at (approximately) that budget, not hang
@@ -245,7 +248,21 @@ fi
         contender_env["AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC"] = "2"
         contender_env["AGENT_WORKTREES_SLOT_LEASE_POLL_SEC"] = "1"
         contender_path = tmp_path / "contender.sh"
-        contender_path.write_text(harness + """
+        clock_samples = tmp_path / "clock-samples.txt"
+        clock_override = ""
+        if clock_boundary:
+            clock_samples.write_text("0", encoding="utf-8")
+            # Replay integer samples 100, 100, 101, 102: the first attempt
+            # crosses a second boundary, then one real poll reaches expiry.
+            clock_override = f"""
+date() {{
+    local sample
+    sample="$(cat "{_bash_path(clock_samples)}")"
+    printf '%s' "$((sample + 1))" > "{_bash_path(clock_samples)}"
+    if [[ "$sample" -lt 2 ]]; then echo 100; else echo "$((99 + sample))"; fi
+}}
+"""
+        contender_path.write_text(harness + clock_override + """
 if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False; fi
 """, encoding="utf-8")
         started = time.monotonic()
@@ -269,10 +286,15 @@ if _wait_for_versioned_slot_lease; then echo RESULT=True; else echo RESULT=False
             "fall back to its own ~10s internal retry before reporting "
             "contention)"
         )
-        assert elapsed >= 1.5, (
+        # date +%s truncates both clock samples: crossing a second boundary
+        # during the first acquisition can consume one budget tick immediately.
+        # A 2s integer-clock budget can therefore take only one 1s poll.
+        assert elapsed >= 0.9, (
             f"bounded wait took only {elapsed:.1f}s against a 2s budget -- "
-            "the configured wait duration is not actually being honored"
+            "no full poll occurred, even allowing the integer clock's 1s granularity"
         )
+        if clock_boundary:
+            assert clock_samples.read_text(encoding="utf-8") == "4"
     finally:
         release_marker.write_text("go")
         try:
