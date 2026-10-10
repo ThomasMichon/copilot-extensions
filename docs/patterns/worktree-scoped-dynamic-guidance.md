@@ -37,10 +37,12 @@ Projected static instruction content -- the rendered body of a plugin's own
   every session in a given worktree, changing only when the plugin's
   installed payload changes or the consumer repo's enablement changes.
 
-So this content is correctly modeled as belonging in the **checked-in**
-`.github/instructions/**/*.instructions.md` copy the sync worker maintains --
-never in a per-session file. But relying on the checked-in copy alone as the
-*only* source of truth surfaces two real gaps:
+This content belongs in a reviewed worktree-scoped artifact, never a
+per-session rewrite. Current delivery separates a concise checked-in
+`.github/instructions/**/*.instructions.md` selector from its lock-owned,
+non-auto-loaded full body in `.github/copilot/context-fallbacks/`; explicitly
+declared inline kernels retain their ambient policy. Relying only on the
+reviewed body as the source of truth would leave two gaps:
 
 1. **Sync-lag is user-facing, and the fix requires rights an ordinary
    contributor may not have.** The checked-in projection is only as fresh as
@@ -52,9 +54,10 @@ never in a per-session file. But relying on the checked-in copy alone as the
    bug.
 2. **Some launch paths have no hook and no session-state folder at all** (a
    fully headless, sandboxed, or cloud-hosted agent invocation). For those,
-   the checked-in copy is -- correctly -- the only thing that can ever be
-   present. But every *other* launch path, which could easily have something
-   fresher, currently settles for that same floor too.
+   the checked-in selector plus reviewed fallback (or explicit inline kernel)
+   remains the usable offline path without cache writes. Other launch paths
+   can acquire authenticated current local bodies instead; file existence
+   alone does not establish their authority or delivery.
 
 ## Standard approach
 
@@ -304,18 +307,21 @@ hooks own their corresponding refreshes. A provider bypassing those boundaries
 needs target-side preparation; host-local success is not evidence of remote
 installation.
 
-### 5. The checked-in copy remains the unconditional floor
+### 5. Reviewed artifacts preserve the offline acquisition floor
 
-Nothing about this pattern adds a second write path to git. The scheduled
-`projection-reflect` sync worker remains the only writer of the checked-in
-projection, unchanged, still the durable and reviewable record. A
-write-incapable launch path (one that cannot write even a gitignored local
-file) simply never populates the local tier and falls through to exactly
-what it gets today -- no regression, and no session-facing error either way.
-"Floor" here means the guaranteed-present fallback, never the *preferred*
-tier when something fresher is actually available (see the precedence note
-above) -- a floor a stale local artifact can silently stand on top of is not
-a floor at all.
+Consented reviewable sync owns the checked-in selector, non-auto-loaded full
+fallback and lock as one transaction; permissionless local rendering never
+writes those artifacts. A write-incapable or hookless launch can read the
+owned reviewed fallback through its selector without installed-source
+freshness requirements. Explicit inline kernels, including the recovery
+control, remain ambient.
+
+This floor means available verified guidance, not unconditional admission of
+every full body. A new source with no reviewed artifacts needs a complete
+authenticated local body before dependent action; cache-free controls still
+require their static floor. Missing/damaged owned artifacts remain visible
+blockers, while valid stale reviewed content remains usable and freshness is
+advisory. Native host delivery acceptance is a separate proof obligation.
 
 ### 6. Local delivery and context auditing are separate
 
@@ -370,23 +376,30 @@ attempt a privileged sync merely to see current guidance.
 pattern's render side, landed as part of
 `efforts/2026/10/02 ambient-guidance-navigability` Phase 7
 ([ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)).
-The per-file "prefer local" preamble (step 2), the repo-wide catch-all
-projection (step 3, opted out of its own local cache per step 1's
-exception), and the `agent-worktrees` create/resume + `sessionStart` wiring
-(step 4, via `agent_worktrees.local_cache_refresh`) have all landed --
-Phase 7's **Plan and Validation Plan are both complete -- Phase 7 is Done.**
-A clean-room, agent-driven proof (3 tool-forbidden `explore` sub-agents per
+**Historical delivery/proof:** Phase 7 landed full checked-in projections with
+per-file "prefer local" preambles, the repo-wide catch-all, and
+`agent-worktrees` create/resume + `sessionStart` wiring
+(`agent_worktrees.local_cache_refresh`). Its historical Plan/Validation Plan
+completion does not certify the current selector/receipt architecture.
+The historical clean-room agent-driven proof (3 tool-forbidden `explore` sub-agents per
 scenario, given only a frozen snapshot) confirmed the preamble and the
 catch-all each independently drive an agent to the fresher
 `.local.instructions.md` content over a stale or absent checked-in file
 (see the effort README's own Journal for the scenarios and results).
 `efforts/2026/10/03 local-cache-delivery-primacy` Phase 1 later replaced the
 existence-only precedence this proof covered with the marker-provenance
-comparison §2/§3 above describe, closing the stale-sibling gap that
+comparison underlying the current precedence rule, closing the stale-sibling gap that
 existence-only check left open. That same effort's Phase 2 landed the
 `agent-bridge` local-spawn-path wiring step 4 describes above
 (`agent_bridge.local_cache_refresh`), closing the one remaining local-spawn
 boundary the Phase 7 wiring didn't already cover.
+
+**Current reference:** `instruction_delivery` renders selectors/full bodies
+and receipt bindings; `instruction_delivery_io` authenticates canonical locals
+and validates reviewed bytes; `instruction_projections` owns lock migration,
+admission, sync and offline scanning. The inline catch-all and literal rendered
+argv fixture cover recovery and executable resolver discovery. Historical
+preamble proofs do not substitute for current native host acceptance.
 
 ## See Also
 
