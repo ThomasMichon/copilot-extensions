@@ -778,10 +778,39 @@ _Pending review of this plan._
   Restored only those empty directories in the immutable seed (no sample
   hooks or repeated Git initialization), with independent-copy hook-state
   assertions. The real refspec pre-push rejection and all four Git-copy
-  regressions now pass. Both hosted runs remain failures, at 378.62 and
-  384.55 seconds including cleanup, until the corrected head completes
-  its full portfolio. All 139 directly affected guard/runner/rotation
+  regressions now pass. All 139 directly affected guard/runner/rotation
   regressions pass. No ceiling or behavioral assertion was relaxed.
+- The corrected head (`3bee91142`) is now published. Standard per-PR CI
+  passes in full on this exact commit, including the Windows-latest jobs.
+  Re-dispatching this effort's own "Windows coverage rotation" workflow
+  against this exact head -- the established practice for the runs above
+  -- is no longer possible: that workflow's `select` job now hard-gates on
+  `github.ref == 'refs/heads/dev'` and every checkout step pins
+  `ref: dev`, a restriction added later in this same effort's Phase 6 to
+  mirror `validate-and-promote.yml`'s dev-only promotion gate. It was not
+  dev-restricted when the runs above were dispatched against this PR
+  branch directly. Re-litigating that restriction to unblock one PR is out
+  of scope here; tracked as a separate, narrow follow-up (add an optional
+  `ref` input honored only on `workflow_dispatch`, leaving the `schedule`
+  trigger pinned to `dev`). Evidence for this exact fix therefore shifts
+  from a pre-merge hosted dispatch to the next scheduled daily rotation
+  against `dev` post-merge -- which is in fact how the original hooks-dir
+  regression was caught in the first place, so this is a real evidentiary
+  path, not a waiver. If that rotation surfaces a new failure specific to
+  this fix, it reopens as a tracked regression like any other rotation
+  finding.
+- The next reviewer identified a POSIX ownership gap: polling could reap
+  the group leader before teardown, allowing its numeric PID to be reused.
+  POSIX exit observation now uses `waitid(WNOWAIT)` so the controller's
+  zombie pins its group/session identity until teardown completes; capture
+  and revalidate that identity immediately before both TERM and KILL.
+  Stale/reused identities fail explicitly and retain the sandbox. Windows
+  Job teardown is unchanged. All 35 runner/containment regressions pass,
+  including mismatch-before-each-signal and non-reaping observation.
+  Native Linux checks prove both normal-controller-exit and timeout reap
+  real file-holding descendants, and an exited controller remains
+  observable without releasing its PID. The Linux pytest module was not
+  installed in that lane; these real checks use only the standard library.
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged
