@@ -36,7 +36,7 @@ _PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
 _WATCH_HANDLER_DRAIN_TIMEOUT_S = 5.0
-_WATCH_RESTART_STOP_TIMEOUT_S = 20.0
+_WATCH_RESTART_STOP_TIMEOUT_S = 45.0
 
 
 def _parse_repo_slug(value: str) -> tuple[str, str]:
@@ -61,7 +61,9 @@ def _agent_worktrees_command() -> str:
     )
 
 
-def _run_agent_worktrees_gh_raw(repo: str, gh_args: list[str]) -> subprocess.CompletedProcess[str]:
+def _run_agent_worktrees_gh_raw(
+    repo: str, gh_args: list[str], *, timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     command = [
         _agent_worktrees_command(),
         "repos",
@@ -77,12 +79,17 @@ def _run_agent_worktrees_gh_raw(repo: str, gh_args: list[str]) -> subprocess.Com
         encoding="utf-8",
         errors="replace",
         check=False,
+        **({"timeout": timeout} if timeout is not None else {}),
         **no_window_kwargs(),
     )
 
 
-def _run_agent_worktrees_gh(repo: str, gh_args: list[str]) -> dict[str, Any]:
-    proc = _run_agent_worktrees_gh_raw(repo, gh_args)
+def _run_agent_worktrees_gh(
+    repo: str, gh_args: list[str], *, timeout: float | None = None,
+) -> dict[str, Any]:
+    proc = _run_agent_worktrees_gh_raw(
+        repo, gh_args, **({"timeout": timeout} if timeout is not None else {}),
+    )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip() or "unknown gh failure"
         raise RuntimeError(detail)
@@ -150,6 +157,7 @@ def _watch_github_snapshot(repo: str, number: int):
             "-f",
             f"query={_WATCH_QUERY}",
         ],
+        timeout=20.0,
     )
     repository = payload.get("data", {}).get("repository")
     pull_request = repository.get("pullRequest") if isinstance(repository, dict) else None
@@ -469,16 +477,25 @@ def _watch_request(
     kind: str, payload: dict, *, boot_wait_s: float = 6.0, boot: bool = True
 ) -> dict:
     from work_coalescing_singleton import call_with_fallback
+    import uuid
 
     def _fallback() -> dict:
-        return {"error": "no watch daemon reachable and no inline fallback for this kind"}
+        result = {"error": "no watch daemon reachable and no inline fallback for this kind"}
+        if kind == "register":
+            result["ambiguous_registration"] = True
+        elif kind == "unregister":
+            result["ambiguous_cancellation"] = True
+        return result
 
     return call_with_fallback(
         dial=_watch_dial,
         boot=_watch_boot if boot else None,
         boot_wait_s=boot_wait_s,
         kind=kind,
-        key=f"{payload.get('repo', '')}#{payload.get('number', '')}",
+        key=(
+            uuid.uuid4().hex if kind in ("register", "unregister")
+            else f"{payload.get('repo', '')}#{payload.get('number', '')}"
+        ),
         payload=payload,
         request_deadline_s=5.0,
         fallback=_fallback,
@@ -486,35 +503,29 @@ def _watch_request(
 
 
 def _cmd_watch_subscribe(args: argparse.Namespace) -> int:
-    from .watch_contract import DEFAULT_UNTIL
+    from .watch_subscription import subscribe
 
-    until = tuple(args.until) if args.until else DEFAULT_UNTIL
-    notify: dict[str, Any] = {}
-    if args.notify_argv:
-        notify["argv"] = args.notify_argv
-    result = _watch_request(
-        "register",
-        {
-            "repo": args.repo,
-            "number": args.number,
-            "subscriber_id": args.subscriber_id,
-            "until": list(until),
-            "notify": notify,
-            "timeout": args.timeout,
-        },
-    )
-    if args.json:
-        print(json.dumps(result, indent=2, sort_keys=True))
-    else:
-        print(result)
-    return 0 if result.get("registered") else 1
+    return subscribe(args, _watch_request)
 
 
 def _cmd_watch_unsubscribe(args: argparse.Namespace) -> int:
+    from .watch_notification import ACKNOWLEDGED_NOTIFICATIONS
+
+    payload = {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id}
+    if getattr(args, "registration_id", None) is not None:
+        health = _watch_request("health", {})
+        if ACKNOWLEDGED_NOTIFICATIONS not in health.get("capabilities", []):
+            print(json.dumps({"error": "watch owner lacks generation-fenced cancellation"}))
+            return 1
+        payload["registration_id"] = args.registration_id
     result = _watch_request(
-        "unregister",
-        {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id},
+        "unregister", payload,
     )
+    if "registration_id" in payload and result.get("unregistered") and (
+        result.get("registration_id") != payload["registration_id"]
+        or result.get("notification_protocol") != ACKNOWLEDGED_NOTIFICATIONS
+    ):
+        result = {"error": "ambiguous cancellation after owner rollover", "ambiguous_cancellation": True}
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
@@ -532,6 +543,8 @@ def _cmd_watch_status(args: argparse.Namespace) -> int:
             print("no watch daemon reachable, or no active subscriptions")
         for key, ids in subscribers.items():
             print(f"{key}: {', '.join(ids)}")
+        for delivery in result.get("pending_deliveries", []):
+            print(f"pending delivery: {json.dumps(delivery, sort_keys=True)}")
     return 0
 
 
@@ -580,11 +593,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         server.close_admission(reason="shutdown")
         server.close()
         deadline = time.monotonic() + _WATCH_HANDLER_DRAIN_TIMEOUT_S
-        while server.active_handler_count():
-            if time.monotonic() >= deadline:
-                raise TimeoutError("PR watch request handlers did not drain")
-            time.sleep(0.02)
-        daemon.close()
+        try:
+            while server.active_handler_count():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("PR watch request handlers did not drain")
+                time.sleep(0.02)
+        finally:
+            daemon.close()
         lease.release()
     return 0
 
@@ -768,22 +783,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, default=None, help="also fire (timed_out) after this many seconds"
     )
     watch_subscribe.add_argument(
+        "--acknowledged-notifications", action="store_true",
+        help="opt in to durable at-least-once callbacks; exit 0 acknowledges the event",
+    )
+    watch_subscribe.add_argument(
+        "--notify-timeout", type=float, default=None,
+        help="acknowledged callback deadline in seconds (positive, at most 30; default: 30)",
+    )
+    watch_subscribe.add_argument(
         "--notify-argv",
         nargs="+",
         metavar="ARGV",
         help="command to run (no agent-pull-requests-specific meaning; the "
         "fired event is passed as JSON on its stdin) when this fires -- "
-        "e.g. a caller-supplied 'agent-dispatch resume <task-id>'",
+        "use an idempotent consumer when opting into acknowledged notifications",
     )
     watch_subscribe.add_argument("--json", action="store_true")
     watch_subscribe.set_defaults(handler=_cmd_watch_subscribe)
 
     watch_unsubscribe = watch_sub.add_parser(
-        "unsubscribe", help="cancel a registration before it fires"
+        "unsubscribe", help="cancel a registration or its pending delivery"
     )
     watch_unsubscribe.add_argument("--repo", required=True, type=_validate_repo_slug)
     watch_unsubscribe.add_argument("--number", required=True, type=int)
     watch_unsubscribe.add_argument("--subscriber-id", required=True)
+    watch_unsubscribe.add_argument("--registration-id", help="cancel only this exact registration")
     watch_unsubscribe.add_argument("--json", action="store_true")
     watch_unsubscribe.set_defaults(handler=_cmd_watch_unsubscribe)
 
