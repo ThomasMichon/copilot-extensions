@@ -225,6 +225,7 @@ class _PendingHandoffs:
                  lookup: Callable[[str], set[str] | None]) -> None:
         self.lookup = lookup
         self.ledgers: dict[str, set[str] | None] = {}
+        self.closed = False
         stalled = {i["entity_ref"] for i in items if i["entity"] == "task" and i["display_state"] == "stalled"}
         self.batons = {t: handoff_worktree(tasks[t]) for t in stalled if t in tasks}
         self.todo = sorted({wt for wt in self.batons.values() if wt})
@@ -237,19 +238,22 @@ class _PendingHandoffs:
     def _work(self) -> None:
         while True:
             with self.lock:
-                if not self.todo:
+                if self.closed or not self.todo:  # past the read's deadline: start no more lookups
                     return
                 worktree = self.todo.pop()
             try:
                 tokens = self.lookup(worktree)
             except Exception:  # noqa: BLE001 -- an unreadable ledger keeps its batons
                 tokens = None
-            self.ledgers[worktree] = tokens
+            with self.lock:
+                self.ledgers[worktree] = tokens
 
     def keep(self, items: list[dict[str, Any]], deadline: float) -> list[dict[str, Any]]:
         for thread in self.threads:
             thread.join(max(0.0, deadline - time.monotonic()))
-        ledgers = dict(self.ledgers)
+        with self.lock:
+            self.closed = True
+            ledgers = dict(self.ledgers)
 
         def gone(task_id: str) -> bool:
             tokens = ledgers.get(self.batons.get(task_id) or "")
@@ -449,7 +453,8 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
             selected: list[str] | None, config_errors: list[dict[str, str]],
             store: Any, read_at: str | None = None, read_token: int | None = None,
             dismissals: Any = None,
-            dismiss_cli: Callable[[], tuple[str, ...] | None] = lambda: ("agent-dispatch",)) -> dict[str, Any]:
+            dismiss_cli: Callable[[], tuple[str, ...] | None] = lambda: ("agent-dispatch",),
+            include_remote: bool = False) -> dict[str, Any]:
     """Read every (selected) source concurrently and build the aggregate envelope.
     A selected name that is only a rejected registration is reported through its
     config error, not as a source. ``read_token`` (default: the number the store
@@ -514,15 +519,19 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
     items = ac.dedupe(i for r in results.values() for i in r["items"])
     dismissed: list[dict[str, Any]] = []
     if dismissals is not None:
-        ok = {n for n, r in results.items() if r["status"] == "ok"}
+        # Only a read of this machine's own queue can end a dismissal by omission:
+        # another coordinator's (--url, --shared, a failover) never had the item.
+        ok = {n for n, r in results.items() if r["status"] == "ok" and n not in scopes}
         items, dismissed, error = dismissals.split(items, read_at, ok_sources=ok)
         if error:
             config_errors = [*config_errors, {"name": DISMISSALS_NAME, "error": error}]
     dispatch_cli = dismiss_cli()
     for item in items:
         cli = dispatch_cli if item["source"] == "dispatch" else ("agent-dispatch",)
+        # A remote bridge session is read only with --include-remote: so is its dismissal's re-read.
+        extra = ("--include-remote",) if include_remote and item["source"] == "bridge" else ()
         if cli:
-            item["actions"] = [*item["actions"], dismiss_action(item["id"], cli)]
+            item["actions"] = [*item["actions"], dismiss_action(item["id"], cli, extra)]
     config_errors = sorted(config_errors, key=lambda e: (e["name"], e["error"]))
     return {"schema": ac.SCHEMA, "status": ac.aggregate_status(sources, config_errors, items),
             "read_at": read_at, "selected": selected, "sources": sources,
@@ -533,6 +542,7 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
 DISMISSALS_NAME = "*dismissals"
 
 
-def dismiss_action(item_id: str, cli: tuple[str, ...] = ("agent-dispatch",)) -> dict[str, Any]:
+def dismiss_action(item_id: str, cli: tuple[str, ...] = ("agent-dispatch",),
+                   extra: tuple[str, ...] = ()) -> dict[str, Any]:
     """Every queued item's last action: hide it until it changes."""
-    return {"verb": "dismiss", "argv": [*cli, "attention", "dismiss", item_id]}
+    return {"verb": "dismiss", "argv": [*cli, "attention", "dismiss", item_id, *extra]}

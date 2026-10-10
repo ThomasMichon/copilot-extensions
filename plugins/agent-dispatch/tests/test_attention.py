@@ -1173,3 +1173,58 @@ def test_cli_human_output_counts_what_is_dismissed(monkeypatch, capsys):
     _cli(monkeypatch, capsys, ["attention", "dismiss", "dispatch:task:t1"], tasks)
     rc, out = _cli(monkeypatch, capsys, ["attention"], tasks)
     assert "Nothing needs you" in out.out and "1 dismissed" in out.out
+
+
+def test_ledger_lookups_stop_starting_once_the_read_is_over(monkeypatch):
+    import threading as _t
+    import time as _time
+
+    monkeypatch.setattr(srcs, "HANDOFF_PENDING_CONCURRENCY", 1)
+    release, asked = _t.Event(), []
+
+    def lookup(worktree):
+        asked.append(worktree)
+        release.wait(5)
+        return set()
+
+    tasks = [_baton(f"w{n}", worktree=f"wt-{n}") for n in range(3)]
+    try:
+        srcs.read_dispatch(lambda: _Client(tasks), T1, pending_lookup=lookup, backlog_budget=0.2)
+    finally:
+        release.set()
+    _time.sleep(0.2)
+    assert len(asked) == 1  # the worker in flight finished; none started after the deadline
+
+
+def test_a_read_of_another_coordinator_never_ends_a_local_dismissal(tmp_path):
+    item = _item(source="dispatch", ref="t1", state="review")
+    store = _dismissals(tmp_path)
+    store.dismiss(item["id"], "changed", T0, item=item)
+    shared = {"dispatch": lambda r: {"items": [], "status": "ok", "uncertain": 0, "scope": "https://shared"}}
+    _collect_dismissing(shared, tmp_path)
+    assert item["id"] in store.entries()[0]  # the shared queue never had this task
+    _collect_dismissing({"dispatch": _ok()}, tmp_path)  # this machine's own queue no longer has it
+    assert store.entries()[0] == {}
+
+
+def test_a_dismissed_condition_folded_into_another_items_also_stays_dismissed(tmp_path):
+    quiet = _item(source="a", ref="t1", state="review")
+    store = _dismissals(tmp_path)
+    store.dismiss(quiet["id"], "changed", T0, item=quiet)
+    worse = _item(source="b", ref="t1", state="failed")
+    env = _collect_dismissing({"a": _ok(quiet), "b": _ok(worse)}, tmp_path)
+    assert [i["id"] for i in env["items"]] == ["b:task:t1"]  # the worse condition leads; a's is in also[]
+    assert quiet["id"] in store.entries()[0]
+
+
+def test_a_remote_bridge_items_dismiss_rereads_with_include_remote(tmp_path):
+    from datetime import datetime
+
+    item = _item(source="bridge", entity="session", ref="wt:m/p/w1", lifecycle=None)
+    for include_remote, tail in ((True, ["--include-remote"]), (False, [])):
+        env = srcs.collect({"bridge": _ok(item)}, timeouts={}, selected=None, config_errors=[],
+                           store=FirstObserved(tmp_path / "o.json"), read_at=T1,
+                           read_token=int(datetime.fromisoformat(T1).timestamp() * 1e9),
+                           dismissals=_dismissals(tmp_path), include_remote=include_remote)
+        assert env["items"][0]["actions"][-1]["argv"] == [
+            "agent-dispatch", "attention", "dismiss", "bridge:session:wt:m/p/w1", *tail]

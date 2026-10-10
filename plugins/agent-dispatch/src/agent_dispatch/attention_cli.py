@@ -159,7 +159,8 @@ def _read(args: argparse.Namespace) -> dict[str, Any] | None:
         return None
     return srcs.collect(readers, timeouts=timeouts, selected=selected,
                         config_errors=config_errors, store=FirstObserved(), dismissals=Dismissals(),
-                        dismiss_cli=lambda: getattr(args, "attention_cli", _target_cli(args)))
+                        dismiss_cli=lambda: getattr(args, "attention_cli", _target_cli(args)),
+                        include_remote=bool(getattr(args, "include_remote", False)))
 
 
 def _banner(envelope: dict[str, Any]) -> list[str]:

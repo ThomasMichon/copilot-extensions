@@ -194,7 +194,8 @@ silently, and a queue whose every item is dismissed reads `clear`. Three modes:
 A dismissal that no longer applies is removed by the read that finds so, and
 one whose item an `ok` read of its source no longer has ends with the
 condition (a later recurrence is new); a `failed` or `uncertain` read proves
-nothing. `attention dismissed [--json]` lists them. They are this machine's
+nothing, nor does a read of another coordinator's queue (`--url`, `--shared`, a
+failover), and an item folded into another's `also[]` is still present. `attention dismissed [--json]` lists them. They are this machine's
 own, keyed by item `id`, in `attention-dismissed.json` beside the
 coordinator's install, never in a repository; a store that can't be read
 hides nothing and is reported in `config_errors[]` (as `*dismissals`).
