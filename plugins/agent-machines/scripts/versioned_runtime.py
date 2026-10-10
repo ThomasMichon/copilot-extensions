@@ -1327,10 +1327,17 @@ def fingerprint_source(paths) -> str:
     the link or its target -- would own the nested names); instead the
     link itself is hashed as a single entry recording where it points, so
     re-pointing or adding/removing it still changes the digest even though
-    its nested contents, if any, are not separately walked. A symlink's
-    recorded target is stored relative to the symlink's own containing
-    directory (never as an absolute path), so an absolute on-disk target
-    does not reintroduce location-dependence.
+    its nested contents, if any, are not separately walked. A symlink
+    target is recorded as-is when relative (already stable under whole-
+    tree relocation, since it is interpreted relative to the symlink's own
+    location, which moves together with everything else). An ABSOLUTE
+    target is made relocation-invariant the same way a file label is --
+    relative to the common ancestor of every declared root -- but ONLY
+    when it actually falls inside that declared source set; an absolute
+    target OUTSIDE it (a fixed external location, or a different drive on
+    Windows) is kept as its raw absolute text instead, since that external
+    location does not move when the declared source tree is relocated and
+    is therefore already the stable identity on its own.
 
     A DECLARED ROOT that is itself a symlink is treated differently from a
     nested one, and deliberately raises instead of silently succeeding: a
@@ -1489,14 +1496,30 @@ def fingerprint_source(paths) -> str:
                 ) from exc
             # Windows' os.readlink() can return the extended-length form
             # (\\?\C:\...) for a target that is otherwise an ordinary
-            # absolute path; strip it before any isabs/relpath computation,
-            # which otherwise raises ValueError on a "different mount"
-            # (the un-prefixed root paths used everywhere else here never
-            # carry this prefix).
+            # absolute path; strip it before any further comparison (the
+            # un-prefixed root/common-ancestor paths used everywhere else
+            # here never carry this prefix).
             if target.startswith("\\\\?\\"):
                 target = target[4:]
             if _os.path.isabs(target):
-                target = _os.path.relpath(target, start=str(f.parent))
+                # An absolute target is only made relocation-invariant
+                # when it actually falls INSIDE the declared source set
+                # (relative to the same common ancestor file labels use):
+                # relocating the WHOLE tree then moves the target's
+                # effective position the same way it moves everything
+                # else, so the relative form stays stable. A target
+                # OUTSIDE that set (a fixed external location, or on a
+                # different drive on Windows) is NOT part of what gets
+                # relocated -- its raw absolute text is already the
+                # stable identity in that case, and must never be
+                # recomputed relative to the symlink's OWN (relocating)
+                # containing directory, which would make the digest
+                # depend on checkout location for exactly the targets
+                # this is meant to keep stable.
+                try:
+                    target = _root_label(Path(target).resolve())
+                except (ValueError, OSError):
+                    pass
             data = Path(target).as_posix().encode("utf-8")
         else:
             try:

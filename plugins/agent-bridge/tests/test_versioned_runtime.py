@@ -1329,6 +1329,62 @@ def test_fingerprint_source_never_follows_a_symlinked_directory(tmp_path):
     assert after_removal != before
 
 
+def test_fingerprint_source_symlink_to_external_target_is_relocation_stable(tmp_path_factory):
+    """An absolute symlink target that lies OUTSIDE the declared source
+    set (a fixed external location, never itself relocated) must not make
+    the digest depend on where the declared source tree is relocated to:
+    the external target's raw absolute text does not change just because
+    the tree containing the symlink moved, so it is already the stable
+    identity -- it must never be recomputed relative to the symlink's own
+    (relocating) containing directory."""
+    external = tmp_path_factory.mktemp("external-fixed-location")
+    (external / "shared.py").write_text("x = 1", encoding="utf-8")
+
+    first_base = tmp_path_factory.mktemp("first-tree")
+    second_base = tmp_path_factory.mktemp("a-very-differently-named-second-tree")
+    for base in (first_base, second_base):
+        src = base / "src"
+        src.mkdir()
+        try:
+            (src / "alias.py").symlink_to(external / "shared.py")
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+
+    first = vr.fingerprint_source([first_base / "src"])
+    second = vr.fingerprint_source([second_base / "src"])
+    assert first == second
+
+    # And the external target's identity still matters: pointing at a
+    # DIFFERENT external file must still change the digest.
+    (external / "shared.py").unlink()
+    (external / "other.py").write_text("x = 2", encoding="utf-8")
+    (second_base / "src" / "alias.py").unlink()
+    (second_base / "src" / "alias.py").symlink_to(external / "other.py")
+    third = vr.fingerprint_source([second_base / "src"])
+    assert third != second
+
+
+def test_fingerprint_source_symlink_to_internal_target_is_relocation_stable(tmp_path_factory):
+    """An absolute symlink target that lies INSIDE the declared source set
+    is made relocation-invariant the same way a file label is: relocating
+    the WHOLE tree moves the target the same way it moves everything
+    else, so the relative-to-common-ancestor form stays stable."""
+    first_base = tmp_path_factory.mktemp("first-tree")
+    second_base = tmp_path_factory.mktemp("a-very-differently-named-second-tree")
+    for base in (first_base, second_base):
+        src = base / "src"
+        src.mkdir()
+        (src / "real.py").write_text("x = 1", encoding="utf-8")
+        try:
+            (src / "alias.py").symlink_to(src / "real.py")
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+
+    first = vr.fingerprint_source([first_base / "src"])
+    second = vr.fingerprint_source([second_base / "src"])
+    assert first == second
+
+
 def test_fingerprint_source_rejects_a_declared_root_that_is_itself_a_symlink(tmp_path):
     """A declared ROOT -- the caller's own attributable content
     declaration -- that is itself a symlink must be REJECTED, not silently
