@@ -75,6 +75,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -1317,11 +1318,10 @@ def fingerprint_source(paths) -> str:
     Symlinks are never silently resolved away: a discovered symlink (to a
     file OR a directory) is hashed as ITS OWN entry -- its label, plus a
     record of what it points to -- never collapsed with whatever it
-    happens to point at. Resolving first and deduplicating by the resolved
-    path, as an earlier version of this function did, would let a symlink
-    alias (``alias.py -> real.py``, both under a declared root) vanish
-    from the digest entirely once both paths resolved the same way. A
-    symlinked DIRECTORY is deliberately never followed/walked into (cycle-
+    happens to point at. Resolving a path and deduplicating by the
+    resolved path would let a symlink alias (``alias.py -> real.py``, both
+    under a declared root) vanish from the digest entirely once both paths
+    resolved the same way. A symlinked DIRECTORY is deliberately never followed/walked into (cycle-
     unsafe, and ambiguous which identity -- the link or its target -- would
     own the nested names); instead the link itself is hashed as a single
     entry recording where it points, so re-pointing or adding/removing it
@@ -1341,6 +1341,21 @@ def fingerprint_source(paths) -> str:
     import hashlib
     import os as _os
 
+    def _lstat_mode(p: Path, context: str) -> int:
+        # An explicit lstat (never following the final symlink component),
+        # with any OSError other than "does not exist" propagating. This is
+        # deliberately NOT Path.is_symlink()/is_dir()/is_file(): those
+        # catch OSError internally (including PermissionError) and return
+        # False, which would silently misclassify -- and potentially drop
+        # -- an entry this function could not actually stat, rather than
+        # failing closed like every other check in this function.
+        try:
+            return _os.lstat(p).st_mode
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise OSError(f"fingerprint_source: could not stat {p} ({context})") from exc
+
     def _declared_root_path(p) -> Path:
         # Resolve the PARENT chain (handles relative paths, intermediate
         # symlinks, '..' components) to get a canonical absolute path, but
@@ -1354,8 +1369,11 @@ def fingerprint_source(paths) -> str:
         return raw.parent.resolve() / raw.name
 
     roots = [_declared_root_path(p) for p in paths]
+    root_modes: dict[Path, int] = {}
     for root_path in roots:
-        if not _os.path.lexists(root_path):
+        try:
+            root_modes[root_path] = _lstat_mode(root_path, "declared root")
+        except FileNotFoundError:
             raise FileNotFoundError(
                 f"fingerprint_source: declared input path does not exist: {root_path}"
             )
@@ -1392,12 +1410,13 @@ def fingerprint_source(paths) -> str:
     # the dict naturally collapses it to one entry.
     entries: dict[Path, str] = {}
     for root_path in roots:
-        if root_path.is_symlink():
+        mode = root_modes[root_path]
+        if stat.S_ISLNK(mode):
             # A declared root that is itself a symlink (to a file OR a
             # directory) is classified exactly like a nested one -- never
             # walked/read through.
             entries[root_path] = "symlink"
-        elif root_path.is_dir():
+        elif stat.S_ISDIR(mode):
             # os.walk with onerror=_raise (NOT Path.rglob/is_file, which
             # silently swallow scandir/stat PermissionError on the
             # supported Python versions) so an unreadable subdirectory
@@ -1409,24 +1428,16 @@ def fingerprint_source(paths) -> str:
             ):
                 for dname in dirnames:
                     candidate = Path(dirpath) / dname
-                    try:
-                        if candidate.is_symlink():
-                            entries[candidate] = "symlink"
-                    except OSError as exc:
-                        raise OSError(
-                            f"fingerprint_source: could not stat {candidate}: {exc}"
-                        ) from exc
+                    cmode = _lstat_mode(candidate, "nested directory entry")
+                    if stat.S_ISLNK(cmode):
+                        entries[candidate] = "symlink"
                 for name in filenames:
                     candidate = Path(dirpath) / name
-                    try:
-                        if candidate.is_symlink():
-                            entries[candidate] = "symlink"
-                        elif candidate.is_file():
-                            entries[candidate] = "file"
-                    except OSError as exc:
-                        raise OSError(
-                            f"fingerprint_source: could not stat {candidate}: {exc}"
-                        ) from exc
+                    cmode = _lstat_mode(candidate, "nested file entry")
+                    if stat.S_ISLNK(cmode):
+                        entries[candidate] = "symlink"
+                    elif stat.S_ISREG(cmode):
+                        entries[candidate] = "file"
         else:
             entries[root_path] = "file"
 
@@ -1530,42 +1541,47 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
 
     A genuine stat failure (e.g. permission denied) while probing the slot
     or marker path raises rather than guessing at an admission decision --
-    same fail-closed philosophy as :func:`fingerprint_source`. The slot
-    path is probed with ``lstat`` semantics (never following a symlink) so
-    a DANGLING slot symlink -- something exists at the path, but following
-    it resolves nowhere -- is correctly treated as present-but-invalid
-    (``ADMIT_HEALTH_REPAIR_REQUIRED``), never as "genuinely absent"
-    (``Path.exists()`` alone would report a dangling symlink as absent,
-    wrongly authorizing construction over it).
+    same fail-closed philosophy as :func:`fingerprint_source`. Both probes
+    use an explicit ``os.lstat()``/``os.stat()`` (never ``Path.exists()``/
+    ``Path.is_dir()``, which catch OSError internally -- including
+    PermissionError -- and return False, silently masking a stat failure
+    as "absent"), so a DANGLING slot symlink -- something exists at the
+    path, but following it resolves nowhere -- is correctly treated as
+    present-but-invalid (``ADMIT_HEALTH_REPAIR_REQUIRED``), never as
+    "genuinely absent", while an actual permission error still raises.
     """
     vdir = version_dir(root, version)
     try:
-        slot_lexists = os.path.lexists(vdir)
-    except OSError as exc:
-        raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
-    if not slot_lexists:
+        os.lstat(vdir)
+    except FileNotFoundError:
         return ADMIT_CONSTRUCT
-    try:
-        slot_is_dir = vdir.is_dir()
     except OSError as exc:
         raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
-    if not slot_is_dir:
+    try:
+        vdir_stat = os.stat(vdir)  # follows a symlink, unlike the lstat above
+    except FileNotFoundError:
+        # A dangling symlink sits at the slot path: something is declared
+        # there, but it resolves nowhere -- ambiguous, never "never built".
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+    except OSError as exc:
+        raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
+    if not stat.S_ISDIR(vdir_stat.st_mode):
         # Something exists at the slot path, but it is not a directory (a
-        # stray file, or a broken symlink) -- an invalid slot shape is
-        # ambiguous evidence, never "never built".
+        # stray file) -- an invalid slot shape is ambiguous evidence,
+        # never "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED
     marker_file = marker_path(root, version)
     try:
-        marker_lexists = os.path.lexists(marker_file)
+        os.lstat(marker_file)
+    except FileNotFoundError:
+        return ADMIT_CONSTRUCT
     except OSError as exc:
         raise OSError(f"check_admission: could not stat {marker_file}: {exc}") from exc
-    if not marker_lexists:
-        return ADMIT_CONSTRUCT
     marker = read_marker(root, version)
     if marker is None:
-        # The marker path exists (possibly as a dangling symlink) but
-        # failed validation -- ambiguous evidence, never treated as
-        # "never built".
+        # The marker path exists (possibly as a dangling symlink, or a
+        # file that fails schema validation) but failed validation --
+        # ambiguous evidence, never treated as "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED
     if marker.get("payload_hash") == payload_hash:
         return ADMIT_REUSE

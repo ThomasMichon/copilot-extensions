@@ -1143,6 +1143,32 @@ def test_fingerprint_source_raises_on_an_unscannable_directory(tmp_path, monkeyp
         vr.fingerprint_source([src])
 
 
+def test_fingerprint_source_raises_when_an_entry_cannot_be_lstatted(tmp_path, monkeypatch):
+    """A single file entry whose metadata lookup is denied mid-walk must
+    raise, never be silently omitted as if it simply wasn't a file/symlink
+    -- ``Path.is_symlink()``/``Path.is_file()`` catch ``OSError``
+    (including ``PermissionError``) internally and return ``False``,
+    which would otherwise let this entry vanish from the fingerprint
+    entirely and authorize a later `reuse` decision over a partial
+    digest."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("x", encoding="utf-8")
+
+    import os as _os
+
+    real_lstat = _os.lstat
+
+    def _boom(path, *args, **kwargs):
+        if Path(path).name == "a.py":
+            raise PermissionError(13, "simulated permission denied", str(path))
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(_os, "lstat", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
 def test_fingerprint_source_is_independent_of_overlapping_root_order(tmp_path):
     """With overlapping roots (a parent and its own child directory), the
     SAME two roots passed in either order must agree: each file is labeled
