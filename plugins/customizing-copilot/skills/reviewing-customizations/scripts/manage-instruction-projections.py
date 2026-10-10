@@ -149,9 +149,12 @@ def main(argv: list[str] | None = None) -> int:
             _print_human(result)
         return 1 if result.blocking else 0
     sources = None
+    admission_sources = None
     if args.operation == "sync" or getattr(args, "from_settings", False):
         try:
             sources = _discover()
+            if args.operation == "scan":
+                admission_sources = _discover_trusted(root, args, installed_root)
         except ValueError as exc:
             result = Result(operation=args.operation)
             result.add(
@@ -170,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.operation == "sync"
         else scan_repository(
             root, sources,
-            admission_sources=_discover_trusted(root, args, installed_root) if sources is not None else None,
+            admission_sources=admission_sources,
         )
     )
     if args.json:

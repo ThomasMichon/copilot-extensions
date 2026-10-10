@@ -967,3 +967,102 @@ def test_scan_installed_root_normalized_once_for_both_passes(
     assert len(calls) == 2
     assert calls == [Path("~/plugins").expanduser().resolve()] * 2
     json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("boundary", [delivery.RECEIPT_PREFIX, delivery.MARKER_PREFIX])
+def test_reserved_frontmatter_blocks_sync_before_artifacts_and_cli_scan(
+    tmp_path: Path, boundary: str
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    scope = boundary + "scope"
+    declaration = source.payload_root / "instruction-projections.json"
+    data = json.loads(declaration.read_bytes())
+    data["projections"][0]["applyTo"] = scope
+    declaration.write_text(json.dumps(data))
+    (source.payload_root / "instructions/rules.instructions.md").write_text(
+        "---\napplyTo: " + json.dumps(scope) + "\n---\n\nRequired body.\n"
+    )
+    result = projections.sync_repository(repo, [source])
+    assert result.blocking
+    assert not (repo / spec.destination).exists()
+    assert not (repo / delivery.fallback_destination(spec.destination)).exists()
+    assert not (repo / projections.LOCK_RELATIVE).exists()
+    scan = projections.scan_repository(repo, [source])
+    assert scan.blocking
+    assert any(f.check == "projection-declaration" for f in scan.findings)
+    payload = repo / "payloads/market/policy"
+    shutil.copytree(source.payload_root, payload)
+    market = payload.parent / ".claude-plugin"
+    market.mkdir()
+    (market / "marketplace.json").write_text(json.dumps({
+        "name": "market", "plugins": [{"name": "policy", "source": "policy"}],
+    }))
+    settings = repo / ".github/copilot/settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"policy@market": True},
+        "extraKnownMarketplaces": {"market": {"source": {
+            "source": "directory", "path": "payloads/market",
+        }}},
+    }))
+    cli = subprocess.run(
+        [sys.executable, str(SCRIPTS / "manage-instruction-projections.py"),
+         "scan", str(repo), "--from-settings", "--json"],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert cli.returncode == 1
+    assert json.loads(cli.stdout)["blocking"] > 0
+    assert "Traceback" not in cli.stderr
+
+
+def test_second_discovery_real_resolution_failure_returns_structured_cli_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, source, _ = fixture(tmp_path)
+    payload = repo / "payloads/market/policy"
+    shutil.copytree(source.payload_root, payload)
+    market = payload.parent / ".claude-plugin"
+    market.mkdir()
+    (market / "marketplace.json").write_text(json.dumps({
+        "name": "market", "plugins": [{"name": "policy", "source": "policy"}],
+    }))
+    settings = repo / ".github/copilot/settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"policy@market": True},
+        "extraKnownMarketplaces": {"market": {"source": {
+            "source": "directory", "path": "payloads/market",
+        }}},
+    }))
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot/config.json").write_text(json.dumps({"trustedFolders": [str(repo.resolve())]}))
+    module_spec = importlib.util.spec_from_file_location("second_discovery", SCRIPTS / "manage-instruction-projections.py")
+    manager = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(manager)
+    actual = projections.discover_enabled_sources
+    calls = 0
+
+    def discover(root: Path, **kwargs: object) -> list:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            settings.write_text(json.dumps({
+                "enabledPlugins": {"policy@market": True},
+                "extraKnownMarketplaces": {"market": {"source": {
+                    "source": "agent-worktrees-repo", "repo": "missing-repository",
+                }}},
+            }))
+        return actual(root, home=home, **kwargs)
+
+    monkeypatch.setattr(manager, "discover_enabled_sources", discover)
+    assert manager.main([
+        "scan", str(repo), "--from-settings", "--json", "--agent-worktrees-path", " ",
+    ]) == 1
+    output = capsys.readouterr()
+    data = json.loads(output.out)
+    assert data["blocking"] > 0
+    assert any(f["check"] == "projection-settings" for f in data["findings"])
+    assert "Traceback" not in output.err
+    assert calls == 2

@@ -208,6 +208,8 @@ def _render(header: str, body: str, marker: dict[str, object], suffix: str = "")
 def render_body(
     template: bytes, provenance: Mapping[str, object], preamble: str = ""
 ) -> tuple[bytes, dict]:
+    if MARKER_PREFIX.encode() in template or RECEIPT_PREFIX.encode() in template:
+        raise ValueError("template contains reserved delivery boundaries")
     lines = template.decode("utf-8").splitlines(keepends=True)
     closing = lines.index("---\n", 1)
     header = "".join(lines[: closing + 1])
