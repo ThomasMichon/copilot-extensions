@@ -463,6 +463,7 @@ def run_push(
     *,
     source: str,
     machine: str,
+    source_identity_file: str | None = None,
     verbose: bool = False,
 ) -> int:
     """Push an explicit *source* directory under an explicit *machine* label.
@@ -487,6 +488,21 @@ def run_push(
         print(f"session-sync: source not found: {src}", file=sys.stderr)
         return 1
 
+    identity = None
+    if source_identity_file is not None:
+        from agent_logger.source_publication import (
+            load_source_identity_file,
+            validate_publication_key,
+        )
+        from agent_logger.source_roots import SourceLayoutError
+
+        try:
+            identity = load_source_identity_file(Path(source_identity_file).expanduser())
+            machine = validate_publication_key(machine, identity)
+        except (OSError, SourceLayoutError) as exc:
+            print(f"session-sync: source identity rejected: {exc}", file=sys.stderr)
+            return 1
+
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
 
     if verbose:
@@ -494,7 +510,10 @@ def run_push(
         print(f"source:  {src}")
         print(f"target:  {target.describe()}")
 
-    result = target.push(src, machine, None)
+    if identity is None:
+        result = target.push(src, machine, None)
+    else:
+        result = target.push(src, machine, None, source_identity=identity)
     if not result.ok:
         print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
         return 1
@@ -776,6 +795,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="machine label / subpath under the target root (e.g. .codespaces/<name>)",
     )
     p_push.add_argument("--verbose", action="store_true", help="verbose output")
+    p_push.add_argument(
+        "--source-identity-file",
+        help="schema-v1 archive-source metadata; requires its canonical --machine key "
+        "and target identity admission",
+    )
 
     p_rescue = sub.add_parser(
         "rescue-push",
@@ -878,7 +902,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "push":
             return run_push(
-                cfg, source=args.source, machine=args.machine, verbose=args.verbose
+                cfg, source=args.source, machine=args.machine,
+                source_identity_file=args.source_identity_file, verbose=args.verbose,
             )
         if args.command == "rescue-push":
             from agent_logger.sync.rescue import run_rescue_push
