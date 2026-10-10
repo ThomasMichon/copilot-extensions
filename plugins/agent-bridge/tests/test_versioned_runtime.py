@@ -1027,3 +1027,138 @@ def test_windows_gc_reclaims_junction_slot_under_nonzero_min_age(tmp_path):
     assert vr.gc(tmp_path, min_age_days=3650) == ["1.0.0"]
     assert not os.path.lexists(junction)
     assert target.is_dir()
+
+
+# ---------------------------------------------------------------------------
+# fingerprint_source / check_admission (phase-3-runtime-admission, #5472/#5788)
+# ---------------------------------------------------------------------------
+
+def test_fingerprint_source_is_stable_for_identical_content(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("print('hi')", encoding="utf-8")
+    (src / "b.py").write_text("x = 1", encoding="utf-8")
+    first = vr.fingerprint_source([src])
+    second = vr.fingerprint_source([src])
+    assert first == second
+    assert len(first) == 64  # sha256 hex digest
+
+
+def test_fingerprint_source_changes_with_content(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("print('hi')", encoding="utf-8")
+    before = vr.fingerprint_source([src])
+    (src / "a.py").write_text("print('bye')", encoding="utf-8")
+    after = vr.fingerprint_source([src])
+    assert before != after
+
+
+def test_fingerprint_source_changes_when_a_file_is_added(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("print('hi')", encoding="utf-8")
+    before = vr.fingerprint_source([src])
+    (src / "b.py").write_text("x = 1", encoding="utf-8")
+    after = vr.fingerprint_source([src])
+    assert before != after
+
+
+def test_fingerprint_source_covers_every_declared_root_not_just_one_manifest(tmp_path):
+    """A prior real-world gap (#5472): fingerprinting only `pyproject.toml`
+    missed a changed `src/` tree entirely. Passing multiple roots must make
+    BOTH matter."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "mod.py").write_text("x = 1", encoding="utf-8")
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text("[project]\nname='x'\n", encoding="utf-8")
+
+    before = vr.fingerprint_source([manifest, src])
+    (src / "mod.py").write_text("x = 2", encoding="utf-8")
+    after = vr.fingerprint_source([manifest, src])
+    assert before != after
+
+
+def test_fingerprint_source_is_order_independent(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("a", encoding="utf-8")
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text("m", encoding="utf-8")
+    assert vr.fingerprint_source([src, manifest]) == vr.fingerprint_source([manifest, src])
+
+
+def test_fingerprint_source_skips_missing_paths_without_raising(tmp_path):
+    missing = tmp_path / "does-not-exist"
+    # Must not raise -- a caller fingerprinting a partially-staged tree gets
+    # a best-effort result, not a crash.
+    result = vr.fingerprint_source([missing])
+    assert isinstance(result, str) and len(result) == 64
+
+
+def test_check_admission_construct_when_slot_absent(tmp_path):
+    assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_CONSTRUCT
+
+
+def test_check_admission_construct_when_slot_incomplete(tmp_path):
+    vr.version_dir(tmp_path, "1.0.0").mkdir(parents=True)
+    assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_CONSTRUCT
+
+
+def test_check_admission_reuse_when_marker_matches(tmp_path):
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_REUSE
+
+
+def test_check_admission_content_conflict_when_marker_differs(tmp_path):
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="different")
+        == vr.ADMIT_CONTENT_CONFLICT
+    )
+
+
+def test_check_admission_never_mutates_the_slot(tmp_path):
+    """A stateless probe: calling it repeatedly, in either admission state,
+    must never write anything -- an ordinary caller is expected to call this
+    cheaply and often, with no construction lease held."""
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    marker_before = vr.marker_path(tmp_path, "1.0.0").read_bytes()
+    for _ in range(5):
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="other")
+    assert vr.marker_path(tmp_path, "1.0.0").read_bytes() == marker_before
+
+
+def test_cli_fingerprint_json(tmp_path, capsys):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("x", encoding="utf-8")
+    rc = vr.main(["--root", str(tmp_path), "--json", "fingerprint", str(src)])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert set(out) == {"fingerprint"}
+    assert len(out["fingerprint"]) == 64
+
+
+def test_cli_check_admission_construct(tmp_path, capsys):
+    rc = vr.main([
+        "--root", str(tmp_path), "--json", "check-admission", "1.0.0",
+        "--payload-hash", "abc",
+    ])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"version": "1.0.0", "admission": vr.ADMIT_CONSTRUCT}
+
+
+def test_cli_check_admission_reuse(tmp_path, capsys):
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    rc = vr.main([
+        "--root", str(tmp_path), "--json", "check-admission", "1.0.0",
+        "--payload-hash", "abc",
+    ])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"version": "1.0.0", "admission": vr.ADMIT_REUSE}
+

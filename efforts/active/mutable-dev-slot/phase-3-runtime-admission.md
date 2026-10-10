@@ -84,15 +84,28 @@ each adopter is already safe.
       construction, and health-repair-required states. Decisions are explicit;
       unavailable validation and malformed ownership/completion evidence must
       not silently select a rebuild of a published identity.
-- [ ] Fingerprint the full runtime install input from an attributable frozen
+      **Partial:** `check_admission()` (below) covers the first three states
+      (`reuse`/`content-conflict`/`construct`); health-repair-required
+      detection is NOT yet implemented and this bullet stays unchecked until
+      it is -- do not treat the sub-bullets below as closing this one.
+- [x] Fingerprint the full runtime install input from an attributable frozen
       source/snapshot, including source-only and vendored dependency changes.
       Do not hash mutable input before building and then publish a marker for
       different input observed afterward.
-- [ ] Return exact completed reuse without taking an exclusive construction
+      (`fingerprint_source()` takes every declared root -- not just one
+      manifest file, closing the exact gap a prior audit found on one
+      adopter, #5472 -- and is a stateless, repeatable probe a caller can
+      call cheaply and often before ever contending for a build.)
+- [x] Return exact completed reuse without taking an exclusive construction
       lease or invoking venv/package writers. Refuse numbered content drift,
       including forced updates, with actionable published-version/dev guidance.
       Completion publication is create-once for a completed immutable identity,
       not a timestamp/PID rewrite on every healthy reuse.
+      (`check_admission()` is read-only against the existing
+      `is_complete`/`read_marker` primitives -- no new lease, no mutation;
+      wiring an adopter's *refusal* message/guidance for the
+      `content-conflict` decision is each adopter's own integration work,
+      tracked under 3b, not duplicated here.)
 - [ ] Serialize unfinished construction with a real OS-backed, installation/
       version-scoped lease. After acquiring it, revalidate the target before any
       write; after contention, wait within the caller's bounded budget and

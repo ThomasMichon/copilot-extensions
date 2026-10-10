@@ -51,6 +51,16 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
                                     prints the version current-version should
                                     be restored to (its value before the claim)
     dev-status                      print the current dev-slot claim (or null)
+    fingerprint <path> ...          print a stable sha256 over the given
+                                    source file(s)/directory(ies) -- the full
+                                    attributable runtime install input, not
+                                    just one manifest file
+    check-admission <version> --payload-hash H
+                                    print 'reuse' | 'content-conflict' |
+                                    'construct' for <version> given the
+                                    caller's current source fingerprint H,
+                                    without taking a construction lease
+                                    (phase-3-runtime-admission)
 
 Exit code is 0 on success, non-zero on error; errors print to stderr.
 """
@@ -1234,6 +1244,114 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Construction admission (phase-3-runtime-admission, #5472/#5788): a
+# canonical, shared answer to "does THIS caller need to build versions/<v>,
+# or can it reuse an already-completed, matching-content slot" -- stateless,
+# no construction lease taken, so a caller can make this check cheaply and
+# often (e.g. as an ordinary installer's own fast-path probe before it ever
+# considers contending for a build). This is the 3a "exact completed reuse"
+# half of the shared admission seam; the construction-lease half (bounded
+# join for genuine concurrent first builds) is tracked as this effort's next
+# slice -- see efforts/active/mutable-dev-slot/phase-3-runtime-admission.md.
+# --------------------------------------------------------------------------
+
+#: Admission decision states. A caller branches on these, never guesses from
+#: `is_complete` alone, because "incomplete" is itself two different cases
+#: (genuinely never built vs. a REQUIRED rebuild due to content drift) that
+#: demand different caller behavior (build vs. refuse-with-guidance).
+ADMIT_REUSE = "reuse"
+ADMIT_CONTENT_CONFLICT = "content-conflict"
+ADMIT_CONSTRUCT = "construct"
+
+
+def fingerprint_source(paths) -> str:
+    """Return a stable sha256 fingerprint over a frozen set of source paths.
+
+    Covers the FULL attributable runtime install input, not just one
+    manifest file -- an adopter must pass every path whose content changing
+    should be treated as "this version's payload changed" (e.g. a plugin's
+    whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
+    alone -- a prior audit on this effort found exactly that narrower scope
+    on one adopter, #5472). Hashes each regular file's path (relative to the
+    shortest common ancestor, POSIX-normalized so the fingerprint is stable
+    across OSes) and content, sorted for determinism; a directory is walked
+    recursively. Missing/unreadable paths are skipped rather than raising,
+    so a caller fingerprinting a partially-staged tree gets a best-effort
+    (not a crash) -- callers that need "all paths must exist" should check
+    that separately first.
+    """
+    import hashlib
+
+    files: list[Path] = []
+    roots = [Path(p) for p in paths]
+    for root_path in roots:
+        if root_path.is_dir():
+            files.extend(sorted(f for f in root_path.rglob("*") if f.is_file()))
+        elif root_path.is_file():
+            files.append(root_path)
+    # A stable relative label per file: prefer the path relative to whichever
+    # input root actually contains it, falling back to the absolute POSIX
+    # form so a file outside every declared root still fingerprints
+    # deterministically rather than raising.
+    def _label(f: Path) -> str:
+        for root_path in roots:
+            try:
+                return (root_path.name + "/" + f.relative_to(root_path).as_posix())
+            except ValueError:
+                continue
+        return f.as_posix()
+
+    digest = hashlib.sha256()
+    for f in sorted(files, key=_label):
+        try:
+            data = f.read_bytes()
+        except OSError:
+            continue
+        digest.update(_label(f).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(data)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
+    """Decide what an ordinary (non-``dev``) caller should do for ``version``
+    without taking a construction lease.
+
+    Returns one of:
+
+    - ``ADMIT_REUSE`` -- the slot already exists, is healthy (valid
+      completion marker), and its recorded payload hash matches
+      ``payload_hash``: there is nothing to build. A caller must not
+      reinstall into it (dotfiles #2174) -- this is the create-once,
+      never-rewrite-a-published-slot half of the immutable-versioned-
+      runtime invariant.
+    - ``ADMIT_CONTENT_CONFLICT`` -- the slot is healthy but its recorded
+      hash does NOT match: this is the same numbered version being asked to
+      publish DIFFERENT content, which the invariant forbids outright (never
+      silently rewrite a published slot, `--force` included -- see
+      ``docs/patterns/mutable-dev-slot.md``'s *Ordinary installers* section).
+      The caller must refuse with actionable guidance (bump the version, or
+      use the claimed ``dev`` slot), never rebuild in place.
+    - ``ADMIT_CONSTRUCT`` -- the slot is absent or lacks a valid marker
+      (never built, or a prior build crashed/was killed before completing):
+      a caller needs to serialize on the construction lease and build it.
+
+    Never takes or checks the construction lease itself -- a caller that
+    gets ``ADMIT_CONSTRUCT`` must still acquire the lease (and, once held,
+    re-check admission, since a concurrent builder may have published a
+    completed slot in the meantime) before writing anything.
+    """
+    if is_complete(root, version):
+        marker = read_marker(root, version)
+        recorded_hash = (marker or {}).get("payload_hash")
+        if recorded_hash == payload_hash:
+            return ADMIT_REUSE
+        return ADMIT_CONTENT_CONFLICT
+    return ADMIT_CONSTRUCT
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1312,6 +1430,18 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("toss-incomplete",
                    help="remove non-current slots lacking a completion marker")
 
+    fp = sub.add_parser("fingerprint",
+                        help="print a stable sha256 fingerprint over the given "
+                             "source paths (files and/or directories)")
+    fp.add_argument("paths", nargs="+", help="source file(s)/directory(ies)")
+    cap = sub.add_parser("check-admission",
+                        help="decide reuse/content-conflict/construct for "
+                             "<version> without taking a construction lease")
+    cap.add_argument("version")
+    cap.add_argument("--payload-hash", required=True,
+                     help="the caller's current source fingerprint, typically "
+                          "from 'fingerprint'")
+
     dcp = sub.add_parser("dev-claim", help="claim the mutable dev slot")
     dcp.add_argument("--owner", required=True,
                      help="claimant ref (e.g. a worktree/session owner ref)")
@@ -1389,6 +1519,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "toss-incomplete":
             tossed = toss_incomplete(root, link_name)
             _emit({"tossed": tossed} if args.json else tossed, args.json)
+        elif args.cmd == "fingerprint":
+            fp_hash = fingerprint_source(args.paths)
+            _emit({"fingerprint": fp_hash} if args.json else fp_hash, args.json)
+        elif args.cmd == "check-admission":
+            decision = check_admission(root, args.version,
+                                       payload_hash=args.payload_hash)
+            _emit({"version": args.version, "admission": decision}
+                  if args.json else decision, args.json)
         elif args.cmd == "dev-claim":
             record = claim_dev(root, args.owner, host=args.host,
                                previous_version=args.previous_version,
