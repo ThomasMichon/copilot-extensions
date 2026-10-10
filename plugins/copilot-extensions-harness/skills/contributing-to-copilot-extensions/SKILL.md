@@ -273,13 +273,20 @@ installer. Know which kind you are changing.
    or after recording a concrete terminal blocker/abandonment in the owning
    task. This repository has no human-review handoff step.
 8. **Complete an authorized rollout with `<repo> update` — one unified command.**
-   Merging only *primes* the change. Respect explicit rollout authorization,
+   A merge to `dev` only *primes* the change: it is not live until the release
+   pipeline promotes it to `main` and an authorized local updater installs
+   that promoted release. Running the updater immediately after a `dev` merge
+   cannot install an unpromoted change. Manual instruction sync is not required
+   after merging or updating; permissionless local rendering delivers guidance
+   from the installed payload.
+   Respect explicit rollout authorization,
    safety/permission gates and each target's required deployment workflow;
    a merge alone never proves that the running system reflects the change.
-   Adopted, consented maintenance may own scheduled consumer refresh instead
+   Adopted, consented maintenance may own scheduled rollout after promotion instead
    of a synchronous update in every coding session. Until that authorized
-   rollout runs and its running-state proof passes, report primed/pending,
-   not deployed, and retain the deployment completion obligation with its
+   rollout runs and its running-state proof passes, report merged/pending release
+   before promotion, or released/pending rollout after promotion; neither means
+   live or deployed. Retain the deployment completion obligation with its
    named owner. Do not create a parallel scheduler or bypass another
    repository's required workflow to finish this step.
    When rollout is authorized, use the repo's update binstub on each target
