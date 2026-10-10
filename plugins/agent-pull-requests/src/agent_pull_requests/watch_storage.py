@@ -56,7 +56,8 @@ def _atomic_write_json(path: Path, data: object) -> None:
 
 def read_subscriptions_state() -> list[dict]:
     try:
-        raw = subscriptions_path().read_text(encoding="utf-8")
+        with _ATOMIC_REPLACE_LOCK:
+            raw = subscriptions_path().read_text(encoding="utf-8")
     except FileNotFoundError:
         return []
     try:

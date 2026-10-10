@@ -315,6 +315,28 @@ def test_registration_transport_fallback_reports_ambiguous_mutation(monkeypatch)
     result = cli._watch_request("register", spec())
     assert result["ambiguous_registration"] is True and "registered" not in result
 
+def test_watch_fetch_has_finite_subprocess_deadline(monkeypatch):
+    from agent_pull_requests import __main__ as cli
+
+    monkeypatch.setattr(cli, "_agent_worktrees_command", lambda: "owner-command")
+
+    def run(*args, **kwargs):
+        assert kwargs["timeout"] == 20
+        raise subprocess.TimeoutExpired("owner-command", 20)
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    with pytest.raises(subprocess.TimeoutExpired):
+        cli._watch_github_snapshot("example/project", 1)
+
+
+def test_absolute_deadline_alone_cannot_downgrade_corrupt_durable_state():
+    entry = {
+        "repo": "example/project", "number": 1, "subscriber_id": "one",
+        "until": [MERGED], "notify": {}, "deadline_at": time.time() + 10,
+    }
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state([entry])
+
 
 def test_legacy_restored_notify_timeout_keeps_fixed_ceiling(monkeypatch):
     from agent_pull_requests import watch_notification

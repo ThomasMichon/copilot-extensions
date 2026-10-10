@@ -48,7 +48,7 @@ class RegistryState:
                 durable_collision = False
                 opted_in = isinstance(entry, dict) and (
                     "notification_protocol" in entry or "pending" in entry
-                    or "registration_id" in entry
+                    or "registration_id" in entry or "deadline_at" in entry
                 )
                 try:
                     if opted_in and entry.get("notification_protocol") != ACKNOWLEDGED_NOTIFICATIONS:

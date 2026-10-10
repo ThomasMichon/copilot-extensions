@@ -61,7 +61,9 @@ def _agent_worktrees_command() -> str:
     )
 
 
-def _run_agent_worktrees_gh_raw(repo: str, gh_args: list[str]) -> subprocess.CompletedProcess[str]:
+def _run_agent_worktrees_gh_raw(
+    repo: str, gh_args: list[str], *, timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     command = [
         _agent_worktrees_command(),
         "repos",
@@ -77,12 +79,17 @@ def _run_agent_worktrees_gh_raw(repo: str, gh_args: list[str]) -> subprocess.Com
         encoding="utf-8",
         errors="replace",
         check=False,
+        **({"timeout": timeout} if timeout is not None else {}),
         **no_window_kwargs(),
     )
 
 
-def _run_agent_worktrees_gh(repo: str, gh_args: list[str]) -> dict[str, Any]:
-    proc = _run_agent_worktrees_gh_raw(repo, gh_args)
+def _run_agent_worktrees_gh(
+    repo: str, gh_args: list[str], *, timeout: float | None = None,
+) -> dict[str, Any]:
+    proc = _run_agent_worktrees_gh_raw(
+        repo, gh_args, **({"timeout": timeout} if timeout is not None else {}),
+    )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip() or "unknown gh failure"
         raise RuntimeError(detail)
@@ -150,6 +157,7 @@ def _watch_github_snapshot(repo: str, number: int):
             "-f",
             f"query={_WATCH_QUERY}",
         ],
+        timeout=20.0,
     )
     repository = payload.get("data", {}).get("repository")
     pull_request = repository.get("pullRequest") if isinstance(repository, dict) else None
