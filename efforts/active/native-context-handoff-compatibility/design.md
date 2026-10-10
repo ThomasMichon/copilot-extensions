@@ -24,11 +24,19 @@ flags in this design. Do not use "ACP" as an automatic fallback classifier.
 
 ## Detection acceptance boundary
 
-Before operational suppression, require a supported, read-only session-scoped
-signal for effective native admission and currently offered native tools. A
+An explicit `contextManagementTools: true` in the applicable `settings.json`
+configuration is the operator-selected native-first contract. Read the flag;
+do not require a new host RPC or tool-provider provenance for this positive
+opt-in. The plugin selects guidance and backs off its own automatic context-only
+handoffs; it does not execute native tools or manufacture implementation support.
+An absent flag is not enablement, and a higher-precedence explicit false must
+override a lower-precedence true.
+
+Distinguish this declared-setting contract from observed effective admission. A
 user-settings snapshot that excludes repository/managed overrides is not an
-effective-session policy snapshot. Likewise, matching tool names or schemas
-without provider/override provenance is not proof of native implementation.
+effective-session policy snapshot. Matching tool names or schemas alone is not
+proof of native implementation for a separate automatic capability-detection
+path. Those limitations must not block the explicit settings-file opt-in.
 
 Uninitialized metadata is unknown, not unavailable. A descriptor-building API
 may perform initialization; do not call it merely to observe capability. An
@@ -36,10 +44,11 @@ in-process-only API is not an extension contract even if generated declarations
 exist. Do not use private SDK members, raw internal RPC, or guessed flags to
 bridge those gaps.
 
-If the installed host does not expose sufficient admission/provenance, preserve
-conditional native-first agent guidance and explicit recovery, but do not claim
-operational backoff has been implemented or proved. Record the missing host
-contract and resolve it before enabling automatic suppression.
+If a flag-enabled host does not offer the native tools, report the actual
+availability failure and retain explicit custom recovery under its existing
+mode/consent rules. Do not automatically invoke a nonexistent tool, clear context,
+or switch sessions to evade a policy cap. Backoff from a declared setting is not
+proof that the host admitted or completed a native transition.
 
 Observe a host-confirmed root `session.context_cleared` event for window
 bookkeeping where supported. A cwd-change event is not a model-window rollover.
@@ -66,13 +75,13 @@ make an internal-only method callable by an extension.
 
 This is declaration/documentation evidence, not an isolated live CLI/ACP rollover
 proof. No live session was cleared, tool list initialized, settings changed, or
-private RPC invoked to obtain it. No supported admission/provenance seam has
-been established for this installed version; automatic native pressure backoff
-remains blocked rather than inferred from names or user settings.
+private RPC invoked to obtain it. No supported effective-admission/provenance seam
+has been established for this installed version. The later operator clarification
+selects direct settings-file opt-in instead; it does not require such a seam.
 
-### Required host observation (conceptual, not a proposed RPC name)
+### Optional future host observation (not an implementation prerequisite)
 
-The smallest missing contract is a read-only observation bound to the current
+A separate capability-detection contract could use a read-only observation bound to the current
 session and root/subagent owner, reporting effective admission (including explicit
 denial versus default/unknown), implementation support, and the currently offered
 native tools after filters/overrides. Native provider provenance must be
@@ -87,23 +96,33 @@ admission observation cannot promise a successful transition.
 
 ### Selection precedence
 
-This is the acceptance matrix for a future supported observation, not current
-plugin behavior. Apply rows top-down; evaluate effective settings, never a
-user-only default as an explicit opt-out.
+This is the acceptance matrix, not current plugin behavior. Apply rows top-down.
+Declared settings-file selection and observed effective policy are distinct;
+never label a user-only default as an explicit effective opt-out.
 
 | Current evidence | Selected guidance | Automatic pressure behavior |
 |------------------|-------------------|-----------------------------|
 | Explicit effective denial, including conflicting advertised tools | Respect denial; diagnose conflict | Never auto-cut over to evade policy; explicit recovery remains policy-governed |
+| Selected native path with checkpoint/static-load/cap failure | Repair or diagnose the precise native failure | No blind alternate-session policy bypass or double clear |
+| Applicable explicit `contextManagementTools: true` setting | Native-first checkpoint/terminal rollover; agent checks tool availability | Suppress competing custom soft/hard/force actions; preserve explicit handoff |
 | Effective enablement plus current admitted native implementation/tool set | Native-first checkpoint/terminal rollover | Suppress competing custom soft/hard/force actions while evidence stays current |
 | No explicit denial; current admitted native implementation/tool set | Native-first, even without a setting signal | Same native backoff |
 | Effective enablement but implementation/availability unknown | Conditional native-first; report missing observation | No claimed native backoff; no native invocation based on the setting alone |
 | Confirmed unsupported implementation, without policy denial | Explain unsupported venue; custom recovery | Existing custom mode/consent semantics |
 | Absent, uninitialized, failed, stale, or conflicting observations | Explain uncertainty; bounded re-evaluation | Do not silently disable all recovery or treat uncertainty as confirmed native support |
-| Admitted native path with checkpoint/static-load/cap failure | Repair or diagnose the precise native failure | No blind alternate-session policy bypass or double clear |
 
 Re-evaluate on supported invalidations and before committing an automatic
 pressure action. Bound retries and report failures once per observation revision;
 do not poll arbitrary private APIs. Runtime emergency compaction remains intact.
+
+### 2026-10-10 - Operator clarification
+
+The operator selected reading `settings.json` for the public flag as the contract,
+rather than adding a CAR host API. Implementation must resolve applicable
+configuration layers and boolean precedence, handle invalid/unreadable input
+explicitly, keep load-time I/O non-blocking, and distinguish declared enablement
+from live tool/rollover proof. Lifecycle work stays a private proposal awaiting
+review, with no product edits or upstream posting.
 
 ## Native checkpoint semantics
 

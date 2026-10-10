@@ -64,8 +64,9 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 
 - [x] Publish/review this plan and the corresponding vision extension before
   modifying runtime behavior.
-- [ ] Trace effective settings, tool capability, permissions, and context events
-  available to the plugin; document a supported detection seam.
+- [x] Trace settings, tool capability, permissions, and context events available
+  to the plugin; document the operator-selected settings-file detection seam
+  and distinguish it from unproved effective-admission/capability observation.
 - [x] Define precedence for effective true/false/absent settings, detected native
   capability, stale/unknown evidence, and confirmed unavailable implementation.
   Enabled settings select native guidance; they do not manufacture tool support.
@@ -177,3 +178,17 @@ alone does not complete the update.
 - No plugin runtime, deployed policy, live context, or ownership changed.
   Isolated CLI/ACP transition proof and the supported detection seam remain
   open; this investigation does not complete Phase 1 or the compatibility update.
+
+### 2026-10-10 - Settings-file contract selected
+
+- Operator clarified that the contract should read `settings.json` for
+  `contextManagementTools`; explicit true selects native-first compatibility.
+  A new CAR admission/provenance API is not required for this declared opt-in.
+- Preserved the installed SDK limitations as evidence, not an implementation
+  blocker for settings-file selection. Separate name-only capability detection
+  remains unproved; setting enablement is not a successful native invocation.
+- Updated precedence to place native execution failures before generic selection
+  rows, avoiding shadowed failure handling.
+- Continue authorized plugin implementation: boolean/layer resolution, guidance,
+  pressure backoff and window bookkeeping, explicit recovery, then acceptance.
+  No product hook/API implementation or upstream lifecycle posting is authorized.
