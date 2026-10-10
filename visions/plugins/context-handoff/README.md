@@ -4,7 +4,7 @@
   Copilot agent's work across a context-window boundary
 - **Scope:** leaf (child of [`agent-fabric`](../../agent-fabric/README.md))
 - **Status:** Active
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-10
 - **Reality docs:** [plugin README](../../../plugins/context-handoff/README.md),
   [continuation skill](../../../plugins/context-handoff/skills/context-handoff/SKILL.md),
   `plugins/context-handoff/skills/diagnosing-handoff-cutover/`, and the active
@@ -35,6 +35,15 @@ one piece of this story that must work identically no matter which host — or
 no host at all — is driving the process underneath it.
 
 ## Concepts & Components
+
+- **Native-compatible continuity** — when context management is enabled in
+  effective settings or otherwise detected, continuity policy enhances native
+  checkpoint/recovery and keeps a stable session rather than creating another
+  session solely for context refresh. Operational pressure handling backs off
+  competing custom cutover when native support is viable; explicit handoff and
+  unsupported-venue recovery remain available. Settings select behavior, not
+  permission to invent unavailable tools or bypass policy. Compaction remains
+  emergency recovery rather than the planned continuity path.
 
 - **Pressure monitor** — continuously tracks context utilization for the
   running session and classifies it into an escalating series of tiers as it
