@@ -154,9 +154,11 @@ def _anchor_checkout_for_cwd(cwd: str | Path | None) -> Path | None:
         if top.returncode == 0 and (top.stdout or "").strip():
             root = top.stdout.strip()
         else:
-            # A bare anchor has no work tree; match its git dir instead.
+            # A bare anchor has no work tree; match its git dir instead. Name it
+            # explicitly so hosts with ``safe.bareRepository=explicit`` resolve it.
             git_dir = git_ops.git(
-                "rev-parse", "--absolute-git-dir", cwd=str(candidate), check=False, timeout=10
+                "--git-dir", str(candidate), "rev-parse", "--absolute-git-dir",
+                cwd=str(candidate), check=False, timeout=10,
             )
             if git_dir.returncode != 0 or not (git_dir.stdout or "").strip():
                 return None

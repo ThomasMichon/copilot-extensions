@@ -1349,8 +1349,22 @@ class TestRegisterSessionInMainCheckout:
     """A session started in the project's main checkout is recorded on the
     ``@anchor`` ledger without turning the anchor into a worktree."""
 
-    def _setup(self, tmp_path: Path, monkeypatch) -> tuple[Path, Path, cfg.Config, list]:
+    def _setup(
+        self, tmp_path: Path, monkeypatch, *, bare: bool = False
+    ) -> tuple[Path, Path, cfg.Config, list]:
         anchor, linked = _repo_with_worktree(tmp_path)
+        if bare:
+            # A bare anchor (as used by worktree-class projects) has no work
+            # tree; its own linked worktree must still be excluded.
+            source = anchor
+            anchor = tmp_path / "bare-anchor"
+            git_ops.git("clone", "--bare", "-q", str(source), str(anchor))
+            linked = tmp_path / "bare-anchor.worktrees" / "app-session"
+            linked.parent.mkdir()
+            git_ops.git(
+                "--git-dir", str(anchor), "worktree", "add", str(linked),
+                "-b", "bare-session", "master", cwd=anchor,
+            )
         config = cfg.Config(
             srcroot=str(tmp_path),
             machine="test",
@@ -1404,6 +1418,24 @@ class TestRegisterSessionInMainCheckout:
         assert [r.worktree_id for r in tracking.list_records(
             tmp_tracking_dir, include_anchor=True)] == [tracking.ANCHOR_ID]
         assert tracking.find_worktree_id_by_cwd(str(anchor)) is None
+
+    def test_bare_main_checkout_session_is_recorded_on_anchor_ledger(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, linked, _config, stamps = self._setup(tmp_path, monkeypatch, bare=True)
+        # Hardened hosts refuse implicit bare-repo discovery; resolution must still work.
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.bareRepository")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "explicit")
+        assert worktree_identity._anchor_checkout_for_cwd(linked) is None
+
+        assert self._start(monkeypatch, "bare-sess", anchor) == 0
+
+        record = load_record(tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml")
+        assert Path(record.worktree_path).resolve() == anchor.resolve()
+        assert record.session_entry("bare-sess") is not None
+        assert record.resolved_head_session == "bare-sess"
+        assert [(sid, wid) for sid, wid, _ in stamps] == [("bare-sess", tracking.ANCHOR_ID)]
 
     def test_list_and_head_session_return_anchor_session(
         self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
