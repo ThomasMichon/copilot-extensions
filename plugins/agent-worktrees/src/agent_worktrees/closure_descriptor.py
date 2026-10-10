@@ -511,7 +511,7 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
         finalized_display = display["finalized"]
         if finalized_display:
             git = payload.get("git")
-            settled_sessions = _non_negative_int(display.get("settled_sessions", 0))
+            settled_sessions = _non_negative_int(display.get("settled_sessions"))
             if (
                 display["label"] != "FINAL"
                 or display["style"] != "final"

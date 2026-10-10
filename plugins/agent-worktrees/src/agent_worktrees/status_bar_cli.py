@@ -362,11 +362,10 @@ def _render_status_segment(
 
     Fetch-free by default so it is cheap enough to poll on a short
     ``status-interval``; pass ``--fetch`` to refresh behind-counts from the
-    remote AND to make a genuine ``FINAL`` reachable at all (a fetch-free
-    poll can only ever report ``MERGED`` for a completed worktree, per
-    design.md's cached-evidence-never-authorizes-FINAL rule -- and a
-    requested ``--fetch`` that itself fails degrades the same way, never
-    silently upgrading stale local refs to FINAL). Prints nothing (exit 0)
+    remote and obtain fresh ``closure.final``/cleanup evidence. Without a
+    durable finalized assertion, a fetch-free poll reports ``MERGED`` for
+    completed content; a failed fetch never authorizes removal or invents
+    that assertion. Prints nothing (exit 0)
     outside a git worktree so a misconfigured status line never spams
     errors into the bar.
     """
