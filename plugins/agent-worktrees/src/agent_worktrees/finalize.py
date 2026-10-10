@@ -1154,42 +1154,15 @@ def _settle_parent_obligation(
     treating this child as unsettled without re-deriving its state (the
     recursion collapse).
 
-    Same-machine only: when the parent lives on **this** machine its tracking
+    Same registered space only: when the parent lives on **this** space its tracking
     YAML is directly updatable (``~/.{project}/worktrees/{id}.yaml``); a
     cross-machine parent settles later via the lease disposition mirror. Fully
-    best-effort and degrade-safe -- any failure (no
-    owner_ref, unresolved/foreign parent, no matching claim, I/O error) is a
-    silent no-op and never perturbs the finalize.
+    best-effort for absent/unresolved ownership or a missing claim. Known
+    ledger I/O/format failures are reported without claiming settlement;
+    execution-space authority failures propagate and preserve the obligation.
     """
-    try:
-        owner = record.owner_claim_ref  # parsed ClaimRef of the parent, or None
-        if owner is None or not owner.is_qualified:
-            return
-        if owner.machine != config.machine:
-            return  # cross-machine parent -> lease mirror / sweep handles it
-        from . import config as cfg
-        parent_path = (
-            cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
-        )
-        if not parent_path.exists():
-            return
-        with tracking._RecordLock(parent_path, require_sidecar=True):
-            parent = tracking.load_record(parent_path)
-            child_ref = tracking.format_claim_ref(
-                config.machine, config.repo_name, worktree_id
-            )
-            settled = tracking.settle_resource_claim(
-                parent, child_ref, obligations.AT_REST, save=False,
-            )
-            if settled is not None:
-                tracking.save_record(parent, parent_path)
-        if settled is not None:
-            output.ok(
-                f"Settled parent {owner.worktree_id}'s claim on this worktree "
-                f"(-> at-rest)"
-            )
-    except Exception:  # never let settlement perturb finalize
-        return
+    from .execution_spaces import settle_parent_obligation
+    settle_parent_obligation(record, config, worktree_id, output=output)
 
 
 def _settle_current_session_claim(
@@ -1222,9 +1195,10 @@ def _settle_current_session_claim(
     from . import locks as _locks
     from . import status_monitor_runtime as _smr
     from . import tracking_write
+    from .execution_spaces import ExecutionSpaceError
 
     try:
-        tracking_write.dispatch(
+        result = tracking_write.dispatch(
             "claim_settle",
             {
                 "worktree_id": record.worktree_id,
@@ -1237,8 +1211,13 @@ def _settle_current_session_claim(
             ensure_monitor=(
                 _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
             ),
+            min_version=2,
         )
+        if result.get("error") == "rejected":
+            raise ExecutionSpaceError(result["message"])
         record = tracking.load_record(yaml_path)
+    except ExecutionSpaceError:
+        raise
     except Exception:
         pass
     return record, current_session_ref
@@ -1532,6 +1511,14 @@ def validate_and_finalize(
                 f"Cannot finalize {worktree_id}: its existing claim ledger is "
                 f"unreadable ({exc}). Creator ownership is preserved.")
             return False
+    if record is not None:
+        from .execution_spaces import ExecutionSpaceError, require_record_mutation
+
+        try:
+            require_record_mutation(record, config)
+        except ExecutionSpaceError as exc:
+            output.err(f"Cannot finalize {worktree_id}: {exc}")
+            return False
     branch = _worktree_branch(record, worktree_id)
     checkout_managed = record is None or record.checkout_managed
 
@@ -1587,9 +1574,14 @@ def validate_and_finalize(
     # job to reclaim -- not solved here, to keep this slice's scope to the
     # register/deregister/finalize wiring itself.
     current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    record, current_session_ref = _settle_current_session_claim(
-        yaml_path, record, current_session_id,
-    )
+    from .execution_spaces import ExecutionSpaceError
+    try:
+        record, current_session_ref = _settle_current_session_claim(
+            yaml_path, record, current_session_id,
+        )
+    except ExecutionSpaceError as exc:
+        output.err(str(exc))
+        return False
     _advise_other_live_sessions(record, current_session_ref)
 
     # pr-merge-obligation-gate defense 2: refresh the tracked PR(s) against

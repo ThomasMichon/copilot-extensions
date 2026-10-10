@@ -26,9 +26,12 @@ wire the concrete provider and the assessment stays unit-testable.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Callable, Optional
 
 from . import git_ops, tracking
+
+log = logging.getLogger(__name__)
 
 # A claimant-liveness probe: given a resource's qualified ``owner_ref``, report
 # whether the owning worktree is still alive. Tri-state on purpose:
@@ -598,17 +601,22 @@ def reconcile_and_persist_best_effort(
     if not changes:
         return changes
     path = rec_path if rec_path is not None else rec.yaml_path
+    from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
+
     try:
         with tracking._RecordLock(path, blocking=False) as lk:
             if not lk.acquired:
                 return changes  # contended -- skip; self-heals next sweep
             fresh = tracking.load_record(path)
+            require_project_record_mutation(fresh)
             by_number = {p.number: p for p in fresh.prs if p.number is not None}
             for number, _old_state, new_state in changes:
                 target = by_number.get(number)
                 if target is not None:
                     target.state = new_state
             tracking.save_record(fresh, path)
+    except ExecutionSpaceError as exc:
+        log.warning("PR reconciliation did not persist %s: %s", rec.worktree_id, exc)
     except OSError:
         pass
     return changes

@@ -7,9 +7,15 @@ import shlex
 import subprocess
 from collections.abc import Callable
 
-from . import claimant
+from agent_procutil import no_window_kwargs
+import yaml
+
+from . import claimant, tracking
 from . import config as cfg
-from . import machine_identity
+from .execution_spaces import (
+    ExecutionSpaceError, registry_for_config, require_owner_identity,
+    require_project_record_mutation,
+)
 from .lease_config import load_lease_settings
 from .lease_store import GitLeaseStore, LeaseConflict, LeaseLost, LeaseSnapshot
 
@@ -17,23 +23,57 @@ _BUNDLE_FENCE_KIND = "claim-handoff"
 _REMOTE_ACCEPT_TIMEOUT = 15.0
 
 
-def same_machine(a: str, b: str) -> bool:
-    """Canonicalized same-machine comparison for two machine-ref strings.
-
-    A bare ``a == b`` wrongly treats "this machine" as remote whenever the
-    bundle's recorded machine spelling differs from the caller's current one
-    (a ``machines.yaml`` key vs. its alias, or a raw COMPUTERNAME vs. the
-    canonical alias) -- the exact class of bug that caused an unnecessary SSH
-    loopback for a same-machine accept. Falls back to the direct string
-    comparison (no worse than before) if the registry can't be loaded.
-    """
-    if a == b:
-        return True
+def same_machine(a: str, b: str, *, project: str | None = None) -> bool:
+    """Authorize canonical local refs through receiving-side project settings."""
     try:
-        config = cfg.load_config()
-    except Exception:
-        return False
-    return machine_identity.is_local_machine(a, config) and machine_identity.is_local_machine(b, config)
+        config = cfg.load_project_config(project) if project else cfg.load_config()
+    except (OSError, ValueError) as exc:
+        raise ExecutionSpaceError(f"cannot establish handoff execution-space authority: {exc}") from exc
+    return require_owner_identity(a, config) and require_owner_identity(b, config)
+
+
+def require_handoff_record(record, error_type: type[Exception]) -> None:
+    """Fence the freshly loaded source, consumer, or child before mutation."""
+    try:
+        require_project_record_mutation(record)
+    except ExecutionSpaceError as exc:
+        raise error_type(str(exc)) from exc
+
+
+def load_handoff_record(path, *, role: str, error_type: type[Exception]):
+    """Read and authorize a lock-held handoff record without changing status rules."""
+    try:
+        record = tracking.load_record(path)
+    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
+        raise error_type(f"cannot read {role} worktree record {path}: {exc}") from exc
+    require_handoff_record(record, error_type)
+    if record.status in {"finalizing", "orphaned"}:
+        raise error_type(
+            f"{role} worktree "
+            f"{tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)} "
+            f"is {record.status}"
+        )
+    return record
+
+
+def require_handoff_consumer(bundle, machine: str, error_type: type[Exception]) -> None:
+    """Reject unsupported scoped ownership transfer before releasing source claims."""
+    consumer = tracking.parse_claim_ref(bundle.consumer)
+    source = tracking.parse_claim_ref(bundle.source)
+    if consumer is None or source is None:
+        raise error_type("claim bundle has invalid source or consumer identity")
+    try:
+        config = cfg.load_project_config(consumer.project)
+        if not require_owner_identity(consumer.machine, config) or not require_owner_identity(machine, config):
+            raise error_type("claim bundle consumer is not the current registered execution space")
+        if (
+            any(entry.execution_platform for entry in registry_for_config(config).values())
+            and source.machine != consumer.machine
+            and any(claim["kind"] == "worktree" for claim in bundle.claims)
+        ):
+            raise error_type("cross-space owned worktree handoff remains unsupported; source claims are retained")
+    except (OSError, ValueError, ExecutionSpaceError) as exc:
+        raise error_type(f"cannot establish claim-bundle consumer authority: {exc}") from exc
 
 
 def acquire_bundle_fence(
@@ -136,6 +176,7 @@ def remote_accept_source(
             capture_output=True,
             text=True,
             timeout=timeout + 4,
+            **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         raise error_type(

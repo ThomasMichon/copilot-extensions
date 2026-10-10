@@ -10,11 +10,12 @@ live daemon.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from agent_worktrees import obligations, tracking, tracking_claim_write, tracking_write
+from agent_worktrees import config as cfg, obligations, tracking, tracking_claim_write, tracking_write
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +29,12 @@ def _clean_verb_registry():
 @pytest.fixture
 def record_path(tmp_tracking_dir: Path) -> Path:
     path = tmp_tracking_dir / "wt-claim.yaml"
+    project_dir = cfg.project_dir("example")
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": "example", "machine": "machine",
+        "repos": {"example": {"anchor": str(tmp_tracking_dir)}},
+    }), encoding="utf-8")
     tracking.create_new_record(
         "wt-claim", "worktree/wt-claim", "/tmp/wt-claim", "example",
         "machine", "wsl", tmp_tracking_dir,
@@ -40,6 +47,35 @@ def test_importing_the_module_registers_all_three_verbs():
     assert "claim_add" in verbs
     assert "claim_release" in verbs
     assert "claim_settle" in verbs
+    assert all(tracking_write._VERB_VERSIONS[verb] == 2 for verb in (
+        "claim_add", "claim_release", "claim_settle",
+    ))
+
+
+@pytest.mark.parametrize("verb", ["claim_add", "claim_release", "claim_settle"])
+def test_claim_cli_never_dials_pre_authority_daemon(verb, record_path, monkeypatch):
+    from agent_worktrees import claims_cli, locks, status_monitor_runtime
+
+    old = {
+        "tracking_write_endpoint": "127.0.0.1:49152",
+        "tracking_write_token": "fixture-token",
+        "tracking_write_verbs": [verb],
+        "tracking_write_verb_versions": {verb: 1},
+    }
+    assert tracking_write.endpoint_from_rendezvous(old, verb=verb) is not None
+    monkeypatch.setattr(locks, "read_lock", lambda *args: old)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(
+        tracking_write, "_send_tracking_write_request",
+        lambda *args, **kwargs: pytest.fail("claim mutation dialed an old authority-unaware daemon"),
+    )
+    args = {
+        "worktree_id": "wt-claim", "yaml_path": str(record_path),
+        "kind": "pr", "ref": "owner/example#1", "disposition": "at-rest",
+    }
+    if verb != "claim_add":
+        assert tracking_claim_write.apply_claim_add(args)["ok"]
+    assert claims_cli._dispatch_claim(verb, args)["ok"]
 
 
 def test_add_journals_an_active_claim(record_path):

@@ -96,6 +96,8 @@ class MachineEntry:
     ssh_environments: list[SSHEnvironment] = field(default_factory=list)
     ssh_ready: bool = False
     copilot: bool = True
+    execution_platform: str = ""
+    physical_host: str = ""
 
 
 def parse_machines_yaml_file(
@@ -212,6 +214,19 @@ def parse_machines_yaml(
         # implementations -- worktree-manager's own parser already coerced
         # defensively; this generalizes that same safety to every consumer.
         key = str(key)
+        execution_platform = data.get("execution_platform", "")
+        physical_host = data.get("physical_host", "")
+        if execution_platform not in ("", "windows", "wsl", "linux"):
+            raise ValueError(f"execution space '{key}' has an invalid execution_platform")
+        if execution_platform and (
+            not key or any(char.isspace() for char in key)
+            or any(separator in key for separator in ("/", "\\", "#"))
+        ):
+            raise ValueError("execution-space keys must be nonempty canonical names, not paths or references")
+        if not isinstance(physical_host, str):
+            raise ValueError(f"execution space '{key}' physical_host must be a string")
+        if execution_platform and any(env.name != execution_platform for env in ssh_envs):
+            raise ValueError(f"execution space '{key}' cannot contain another space's SSH environment")
         entries[key] = MachineEntry(
             key=key,
             display_name=str(data.get("display_name") or key),
@@ -224,8 +239,18 @@ def parse_machines_yaml(
             ssh_environments=ssh_envs,
             ssh_ready=bool(ssh_block.get("ready", False)),
             copilot=bool(data.get("copilot", True)),
+            execution_platform=execution_platform,
+            physical_host=physical_host,
         )
+    _validate_execution_space_keys(entries)
     return entries
+
+
+def _validate_execution_space_keys(entries: Mapping[str, MachineEntry]) -> None:
+    if any(entry.execution_platform for entry in entries.values()):
+        normalized = [key.casefold() for key in entries]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("execution-space keys must be unique without regard to case")
 
 
 def merge_machines_yaml(
@@ -236,12 +261,14 @@ def merge_machines_yaml(
     in-repo one. The canonical entry wins a key collision (the two files
     carry disjoint keys in practice); this is strictly additive (dotfiles
     #7914 -- returning only whichever file happened to resolve first
-    silently dropped every machine in the other file facility-wide)."""
+    silently dropped every machine in the other file facility-wide).
+    Scoped keys must remain case-insensitively unique across both files."""
     entries: dict[str, MachineEntry] = {}
     if legacy:
         entries.update(legacy)
     if canonical:
         entries.update(canonical)
+    _validate_execution_space_keys(entries)
     return entries
 
 
@@ -249,7 +276,7 @@ def machine_name(entry: MachineEntry) -> str:
     """The canonical name for a machine entry: its alias if one is defined
     (the colloquial multi-machine system name), otherwise its key (the real
     hostname)."""
-    return entry.alias or entry.key
+    return entry.key if entry.execution_platform else entry.alias or entry.key
 
 
 def find_machine_entry(
@@ -270,14 +297,50 @@ def find_machine_entry(
     if name in entries:
         return entries[name]
     name_lower = name.lower()
-    matches: list[_Machine] = []
-    for key, entry in entries.items():
-        if any(value and value.lower() == name_lower for value in (
-            key, entry.alias, entry.hostname, entry.display_name,
-        )):
-            if not reject_ambiguous:
-                return entry
-            matches.append(entry)
+    if not any(getattr(entry, "execution_platform", "") for entry in entries.values()):
+        matches: list[_Machine] = []
+        for key, entry in entries.items():
+            if any(value and value.lower() == name_lower for value in (
+                key, entry.alias, entry.hostname, entry.display_name,
+            )):
+                if not reject_ambiguous:
+                    return entry
+                matches.append(entry)
+        if len(matches) > 1:
+            raise AmbiguousMachineError(f"Machine '{name}' is ambiguous in topology")
+        return matches[0] if matches else None
+    keyed = [entry for key, entry in entries.items() if key.lower() == name_lower]
+    if keyed:
+        return keyed[0]
+    aliases = [
+        entry for entry in entries.values()
+        if entry.alias and entry.alias.lower() == name_lower
+    ]
+    if len(aliases) > 1:
+        raise AmbiguousMachineError(f"ambiguous execution-space alias {name!r}; select a registered key")
+    if aliases:
+        return aliases[0]
+    matches = [
+        entry for entry in entries.values()
+        if not getattr(entry, "execution_platform", "")
+        and (
+            (entry.hostname and entry.hostname.lower() == name_lower)
+            or (entry.display_name and entry.display_name.lower() == name_lower)
+        )
+    ]
     if len(matches) > 1:
-        raise AmbiguousMachineError(f"Machine '{name}' is ambiguous in topology")
-    return matches[0] if matches else None
+        raise AmbiguousMachineError(f"ambiguous machine identity {name!r}; select a registered key")
+    if matches:
+        return matches[0]
+    if any(
+        getattr(entry, "execution_platform", "")
+        and name_lower in {
+            entry.hostname.lower(), entry.physical_host.lower(), entry.display_name.lower(),
+        }
+        for entry in entries.values()
+    ):
+        raise ValueError(
+            f"physical-host metadata {name!r} does not select an execution space; "
+            "use its registered key"
+        )
+    return None

@@ -24,6 +24,10 @@ def _record(tmp_path, project, worktree_id, *, claims=()):
     tdir.mkdir(parents=True, exist_ok=True)
     wdir = tmp_path / "trees" / worktree_id
     wdir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / project / "config.yaml").write_text(json.dumps({
+        "repo_name": project, "machine": MACHINE,
+        "repos": {project: {"anchor": str(wdir)}},
+    }), encoding="utf-8")
     record = tracking.create_new_record(
         worktree_id,
         f"worktree/{worktree_id}",
@@ -44,6 +48,11 @@ def handoff_state(tmp_path, monkeypatch):
     monkeypatch.setattr(claim_handoffs.cfg, "install_dir", lambda: runtime)
     monkeypatch.setattr(
         claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
+    )
+    load_config = claim_handoffs.cfg.load_config
+    monkeypatch.setattr(
+        claim_handoffs.cfg, "load_project_config",
+        lambda name: load_config(tmp_path / name / "config.yaml", project=name),
     )
     ready_root = state_root.StateRoot(
         str(tmp_path), "launch_repo", "source-project", False, False, True)
@@ -305,7 +314,7 @@ def test_offered_claim_cannot_settle_sweep_or_release(
     )
     assert all(claim.ref != ref for claim in reclaimed)
     config = types.SimpleNamespace(machine=MACHINE, repo_name="source-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: source_path.parent)
     monkeypatch.setattr(
         worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
@@ -519,7 +528,7 @@ def test_cli_offer_rejects_unready_coordination_without_side_effects(
     capfd,
 ):
     config = types.SimpleNamespace(machine=MACHINE, repo_name="source-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
     root = state_root.StateRoot(
         None,
@@ -567,7 +576,7 @@ def test_cli_decline_remains_available_when_coordination_is_unready(
 ):
     bundle = _offer([handoff_state[0].ref])[0]
     config = types.SimpleNamespace(machine=MACHINE, repo_name="consumer-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
     monkeypatch.setattr(
         m.state_root_mod,
@@ -585,7 +594,7 @@ def test_cli_decline_remains_available_when_coordination_is_unready(
 
 def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):
     config = types.SimpleNamespace(machine=MACHINE, repo_name="source-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
     ref = handoff_state[0].ref
     logged = []

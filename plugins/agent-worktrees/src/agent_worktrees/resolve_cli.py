@@ -637,6 +637,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+    try:
+        require_record_mutation(record, config)
+    except ExecutionSpaceError as exc:
+        return output._json_error(str(exc), exit_code=3)
     try:
         staged_seed = seed_for_attempt(yaml_path, record, state.args)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
@@ -670,10 +675,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 "Previous launch-prompt handoff is unconfirmed; the seed is retained "
                 "but will not be automatically submitted twice.", exit_code=3,
             )
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        tracking.mark_resumed(record, save=False)
-        tracking.save_record(record)
+    try:
+        with tracking._RecordLock(yaml_path):
+            record = tracking.load_record(yaml_path)
+            require_record_mutation(record, config)
+            tracking.mark_resumed(record, save=False)
+            tracking.save_record(record)
+    except ExecutionSpaceError as exc:
+        return output._json_error(str(exc), exit_code=3)
 
     activity.log_event(
         "worktree_resumed",

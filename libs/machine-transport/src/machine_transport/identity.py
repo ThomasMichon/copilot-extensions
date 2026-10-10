@@ -74,8 +74,10 @@ def is_local_machine(
         # alias-vs-key spelling mismatch for the SAME registry entry safe,
         # without also risking an empty-string false-positive the way
         # comparing two possibly-empty alias strings directly would.
-        if this is not None and target is this:
-            return True
+        if this is not None:
+            return target is this
+    if getattr(target, "execution_platform", ""):
+        return False
     hostname = (real_hostname or socket.gethostname()).lower()
     if target.hostname and target.hostname.lower() == hostname:
         return True

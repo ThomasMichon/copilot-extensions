@@ -263,6 +263,8 @@ def _revalidate_cleanup_safety(
     def _fresh_liveness(latest: tracking.WorktreeRecord) -> tuple[
         git_ops.WorktreeStateInfo, set[str], sessions.SessionContext
     ]:
+        from .execution_spaces import require_cleanup_identity
+        require_cleanup_identity(latest, repo.anchor)
         session_ctx = sessions.scan_sessions_fast([latest])
         active_paths = _build_active_paths([latest], session_ctx)
         if latest.worktree_path and Path(latest.worktree_path).exists():
@@ -290,6 +292,11 @@ def _revalidate_cleanup_safety(
 
     if force:
         latest = tracking.load_record(yaml_path)
+        from .execution_spaces import ExecutionSpaceError, require_cleanup_identity
+        try:
+            require_cleanup_identity(latest, repo.anchor)
+        except ExecutionSpaceError as exc:
+            return RevalidationResult(False, str(exc), "execution-space")
         if _hosted_session_blocks_cleanup(latest):
             return RevalidationResult(
                 False, "active hosted Copilot session in use", "active")
@@ -306,6 +313,11 @@ def _revalidate_cleanup_safety(
     try:
         with tracking._RecordLock(yaml_path, require_sidecar=True):
             latest = tracking.load_record(yaml_path)
+            from .execution_spaces import ExecutionSpaceError, require_cleanup_identity
+            try:
+                require_cleanup_identity(latest, repo.anchor)
+            except ExecutionSpaceError as exc:
+                return RevalidationResult(False, str(exc), "execution-space")
             if _hosted_session_blocks_cleanup(latest):
                 return RevalidationResult(
                     False, "active hosted Copilot session in use", "active")

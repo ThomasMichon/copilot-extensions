@@ -15,7 +15,7 @@ from agent_worktrees import config as cfg
 def _create_config(tmp_path: Path) -> cfg.Config:
     anchor = tmp_path / "anchor"
     anchor.mkdir()
-    return cfg.Config(
+    config = cfg.Config(
         srcroot=str(tmp_path),
         machine="test",
         platform="windows",
@@ -27,6 +27,13 @@ def _create_config(tmp_path: Path) -> cfg.Config:
             )
         },
     )
+    project_dir = cfg.project_dir(config.repo_name)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": config.repo_name, "machine": config.machine,
+        "repos": {config.repo_name: {"anchor": str(anchor)}},
+    }), encoding="utf-8")
+    return config
 
 
 def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cfg.Config) -> None:
