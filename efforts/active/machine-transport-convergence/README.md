@@ -549,6 +549,18 @@ provider's absence.
   remain gates. Shared consumer release intent covers Worktrees, Bridge and
   Worktree Manager; no peer-owned host/WSL code was changed.
 
+### 2026-10-09 - Preserve handoff environment eligibility
+- The next review identified that matching retained eligible machine entries
+  but discarded their filtered environment lists. A local Windows machine
+  could therefore select its excluded native target instead of its eligible
+  WSL target. Matching now uses immutable entry copies carrying only the
+  loader-returned environments; the registry and locality filter are unchanged.
+- Four key/alias/hostname/display regressions using the actual loader failed
+  against the prior head and now select the guest SSH target and POSIX wrapper.
+  They also prove the original registry entry remains unchanged. Combined
+  matching, envelope and seed-delivery contracts passed **56 tests**.
+  Touched-code lint passed; fresh full validation and review remain required.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the

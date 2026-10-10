@@ -260,6 +260,34 @@ def test_unknown_and_unreachable_machine_diagnostics_are_preserved(tmp_path, cap
         assert rmc._emit_remote_plan_for_env(config, "missing", "Linux") is None
 
 
+@pytest.mark.parametrize("name", ["atlas-core", "FRIENDLY", "CPC-FAKE-HOST1", "Build Box"])
+def test_handoff_uses_only_loader_eligible_environments(tmp_path, name):
+    from dataclasses import replace
+
+    entry = replace(
+        _entry(
+            "atlas-core", alias="friendly", hostname="CPC-FAKE-HOST1",
+            display_name="Build Box",
+            envs=[("windows", "native-ssh"), ("wsl", "guest-ssh")],
+        ),
+        ssh_ready=True,
+    )
+    config = _fake_config(tmp_path)
+    with patch.object(cfg, "load_machines_yaml", return_value={entry.key: entry}), \
+         patch.object(cfg, "detect_platform", return_value="windows"), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
+         patch.object(rmc, "_in_ssh_session", return_value=False), \
+         patch.object(rmc.machine_identity, "is_local_machine", return_value=True), \
+         patch.object(rmc, "_emit_plan") as emit:
+        assert rmc._try_machine_handoff(config, name) == 0
+    assert emit.call_args.args[0] == {
+        "action": "remote", "ssh_alias": "guest-ssh",
+        "remote_command": "bash -lc example-project",
+        "machine": "atlas-core", "display_name": "Build Box",
+    }
+    assert [env.alias for env in entry.ssh_environments] == ["native-ssh", "guest-ssh"]
+
+
 def test_shared_matching_preserves_environment_rejection(tmp_path):
     entry = _entry("atlas-core", alias="friendly", envs=[("linux", "atlas-linux")])
     config = _fake_config(tmp_path)

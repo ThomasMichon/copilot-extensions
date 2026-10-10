@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 from machine_transport import default_shell_for_env_name as _default_shell_for_env_name
 from machine_transport import find_machine_entry
@@ -85,7 +86,10 @@ def _try_machine_handoff(
     machine wasn't found (caller should error).
     """
     remote_targets = _load_remote_machines(config)
-    entry_map = {entry.key: entry for entry, _envs in remote_targets}
+    entry_map = {
+        entry.key: replace(entry, ssh_environments=envs)
+        for entry, envs in remote_targets
+    }
     try:
         entry = find_machine_entry(entry_map, machine_name, reject_ambiguous=True)
     except ValueError as exc:
