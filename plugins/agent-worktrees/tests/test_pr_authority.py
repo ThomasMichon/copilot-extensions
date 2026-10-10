@@ -188,6 +188,23 @@ installer.register_project(sys.argv[3], 'unused', 'main')
     assert {"first-project", "second-project"} <= set(installer.read_projects_registry()["projects"])
 
 
+def test_registry_install_manifest_git_probes_remain_headless(authority_state, monkeypatch):
+    _config, _record, root, _registry, _ledgers = authority_state
+    monkeypatch.setattr(installer, "install_dir", lambda: root)
+    monkeypatch.setattr(installer, "find_package_source", lambda *a: root / "plugin" / "src" / "agent_worktrees")
+    monkeypatch.setattr(installer, "_source_kind", lambda *a: "local")
+    observed = []
+
+    def run(args, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True, **installer.no_window_kwargs()}
+        observed.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(installer.subprocess, "run", run)
+    installer.write_deploy_manifest(root, "example-machine")
+    assert len(observed) == 3
+
+
 @pytest.mark.parametrize("operation", ["stat", "iterdir"])
 def test_pr_authority_refuses_unreadable_ledger(authority_state, monkeypatch, operation):
     config, record, root, registry, ledgers = authority_state

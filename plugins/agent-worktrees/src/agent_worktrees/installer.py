@@ -30,6 +30,7 @@ from . import config as cfg
 from . import launch_wrapper_assets as lwa
 from . import project_state, registry_paths
 from . import output, pr_authority
+from agent_procutil import no_window_kwargs
 
 
 def install_dir() -> Path:
@@ -71,13 +72,13 @@ def check_prereqs() -> list[str]:
 
     # git
     try:
-        subprocess.run(["git", "--version"], capture_output=True, check=True)
+        subprocess.run(["git", "--version"], capture_output=True, check=True, **no_window_kwargs())
     except (FileNotFoundError, subprocess.CalledProcessError):
         missing.append("git")
 
     # uv
     try:
-        subprocess.run(["uv", "--version"], capture_output=True, check=True)
+        subprocess.run(["uv", "--version"], capture_output=True, check=True, **no_window_kwargs())
     except (FileNotFoundError, subprocess.CalledProcessError):
         missing.append("uv")
 
@@ -283,7 +284,7 @@ def stamp_build_info(
         try:
             r = subprocess.run(
                 ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **no_window_kwargs(),
             )
             if r.returncode == 0:
                 commit = r.stdout.strip()
@@ -293,7 +294,7 @@ def stamp_build_info(
         try:
             r = subprocess.run(
                 ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **no_window_kwargs(),
             )
             if r.returncode == 0:
                 branch = r.stdout.strip()
@@ -582,6 +583,7 @@ def _project_identity(project: str, repo_dir: str | Path | None = None) -> dict[
                 capture_output=True,
                 text=True,
                 timeout=5,
+                **no_window_kwargs(),
             )
             if result.returncode == 0:
                 remote = result.stdout.strip()
@@ -1362,20 +1364,20 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
         try:
             r = subprocess.run(
                 ["git", "-C", str(repo_dir), "rev-parse", "--short", "HEAD"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **no_window_kwargs(),
             )
             if r.returncode == 0:
                 commit = r.stdout.strip()
             r = subprocess.run(
                 ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **no_window_kwargs(),
             )
             if r.returncode == 0:
                 branch = r.stdout.strip()
             r = subprocess.run(
                 ["git", "-C", str(repo_dir), "status", "--porcelain", "--",
                  "plugins/agent-worktrees/"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **no_window_kwargs(),
             )
             if r.returncode == 0 and r.stdout.strip():
                 dirty = True
