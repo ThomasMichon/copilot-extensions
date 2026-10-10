@@ -478,6 +478,13 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     if _process_logs.supports_dir_fd():
         try:
             with _process_logs.open_root_dir(source) as root_fd:
+                opened_root = os.fstat(root_fd)
+                if (source_identity.st_dev, source_identity.st_ino) != (
+                    opened_root.st_dev, opened_root.st_ino,
+                ):
+                    raise _SourceChangedDuringCopy(
+                        "process-log source root changed before opening",
+                    )
                 entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)
                 for entry in entries:
                     name = entry.name
@@ -528,7 +535,7 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
                         continue
                     copied += 1
                     nbytes += size
-                _revalidate_root(os.fstat(root_fd))
+                _revalidate_root(opened_root)
         except FileNotFoundError as exc:
             raise OSError("process-log source vanished during copy") from exc
         return copied, nbytes, locked

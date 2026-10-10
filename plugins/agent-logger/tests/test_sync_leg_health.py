@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -334,3 +336,33 @@ def test_null_legs_session_write_preserves_corruption(
     meta.write_sync_meta(tmp_path, "machine", "local", "ok")
     assert path.read_text(encoding="utf-8") == payload
     assert "cannot update sync health" in caplog.text
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory fd")
+def test_root_replaced_before_descriptor_open_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    root = tmp_path / "dest" / "machine"
+    meta.write_sync_meta(root, "machine", "local", "ok")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    real_open = filesystem._process_logs.open_root_dir
+
+    @contextmanager
+    def replaced(path: Path) -> Iterator[int]:
+        path.rename(tmp_path / "original")
+        path.mkdir()
+        (path / "process-123-456.log").write_text("replacement\n", encoding="utf-8")
+        with real_open(path) as fd:
+            yield fd
+
+    monkeypatch.setattr(filesystem._process_logs, "open_root_dir", replaced)
+    result = target.push_process_logs(logs, "machine")
+    assert not result.ok
+    assert "changed before opening" in result.detail
+    assert not (root / "logs" / "process-123-456.log").exists()
+    assert meta.read_sync_meta(root)["status"] == "partial"
