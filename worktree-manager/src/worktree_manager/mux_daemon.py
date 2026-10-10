@@ -42,6 +42,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
 from work_coalescing_singleton import CoalescingServer
 from zdd.diagnostics import process_start_time
 
@@ -319,6 +320,7 @@ def apply_status_options(entry: dict, values: dict) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=15,
+                **no_window_kwargs(),
             )
             if result.returncode != 0:
                 all_ok = False
@@ -338,6 +340,7 @@ def _mux_session_alive(mux_bin: str, session: str) -> bool:
             [mux_bin, "has-session", "-t", session],
             capture_output=True,
             timeout=5,
+            **no_window_kwargs(),
         )
         return result.returncode == 0
     except Exception:

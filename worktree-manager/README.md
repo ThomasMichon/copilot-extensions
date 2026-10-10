@@ -189,10 +189,14 @@ the new code: the successor starts on a fresh loopback port, status writers
 follow the routed active endpoint first, and the predecessor drains accepted
 status-apply work plus its current republish cycle before retiring.
 
-On Windows, ordinary and passive daemon starts use the shared direct,
-windowless interpreter resolver and preserve the calling venv's import context.
+On Windows, ordinary and passive daemon starts resolve the real base
+`python.exe`, preserve the calling venv's import context, and apply the shared
+windowless daemon launch flags. Recurring PSMux probes and status writes also
+apply the shared captured-child window-suppression flags; redirecting output
+alone is not sufficient. The launch-kind contract is documented in
+[`windows-background-process-launch`](../docs/patterns/windows-background-process-launch.md).
 This keeps the spawned process handle's PID equal to the runtime PID instead of
-publishing a venv redirector's PID. If the venv's real base `pythonw.exe` cannot
+publishing a venv redirector's PID. If the venv's direct base interpreter cannot
 be resolved, startup fails explicitly rather than retaining an ambiguous
 launcher/child identity. Repair that Python installation before retrying.
 Existing launcher/child pairs are not rewritten or stopped by this change;

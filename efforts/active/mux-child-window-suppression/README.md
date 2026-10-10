@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Sequential proposal, implementation and completion PRs against `dev`.
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** Below-altitude regression repair; restore the existing Windows background-process launch contract.
 - **Umbrella issue:** #6040
 
@@ -52,16 +52,16 @@ control repository, not this public effort.
 ## Plan
 
 ### Phase 1 - Review the repair contract
-- [ ] Merge this proposal through the normal review and check gates.
+- [x] Merge this proposal through the normal review and check gates.
 
 ### Phase 2 - Implement and verify suppression
-- [ ] Apply the existing shared suppression primitive to recurring PSMux
+- [x] Apply the existing shared suppression primitive to recurring PSMux
       children. _(agent-recommended implementation)_
-- [ ] Preserve direct interpreter PID ownership while conforming the daemon
+- [x] Preserve direct interpreter PID ownership while conforming the daemon
       launch shape to the existing recurring-child contract; verify the actual
       Windows parent/child behavior rather than flags alone.
       _(agent-recommended implementation)_
-- [ ] Add focused regression coverage, update directly affected documentation,
+- [x] Add focused regression coverage, update directly affected documentation,
       and add the required release changefile. _(agent-recommended)_
 - [ ] Merge the implementation after review and required checks.
 
@@ -73,17 +73,17 @@ control repository, not this public effort.
 
 ## Validation Plan
 
-- [ ] Focused bounded tests cover ordinary/passive direct PID and environment
+- [x] Focused bounded tests cover ordinary/passive direct PID and environment
       preservation, repeated child calls, output, failures and timeouts.
       _(agent-recommended)_
-- [ ] Native Windows observation covers repeated real PSMux operations from the
+- [x] Native Windows observation covers repeated real PSMux operations from the
       production parent shape, with no unintended terminal windows or focus
       changes; fixture descendants remain contained. _(agent-recommended)_
-- [ ] For both ordinary and passive starts, exercise the production launch seam
+- [x] For both ordinary and passive starts, exercise the production launch seam
       from a kill-on-close Job, close the caller Job after successful readiness,
       and independently confirm daemon health. A bounded control child must
       exit with the caller Job. _(agent-recommended lifecycle requirement)_
-- [ ] Applicable lint, install-contract, headless-launch and documentation-impact
+- [x] Applicable lint, install-contract, headless-launch and documentation-impact
       gates pass. _(agent-recommended)_
 - [ ] The promoted `main` snapshot contains the fix and release metadata.
 - [ ] Deployed runtime evidence establishes the fixed behavior, without private
@@ -103,3 +103,27 @@ contain terminal-multiplexer descendants.
 - Captured the operator's completion gate and confirmed effort slug.
 - Identified that flag-only tests are insufficient for the recurring-child
   launch boundary; native observation is part of completion.
+
+### 2026-10-10 - Proposal reviewed
+- Proposal PR #6042 merged after review, including explicit ordinary/passive
+  caller-Job survival validation.
+- Implementation follows the existing launch-kind matrix: direct base console
+  Python with the shared windowless daemon flags, plus explicit suppression at
+  captured PSMux child boundaries.
+
+### 2026-10-10 - Implementation evidence
+- Direct base console Python retains the original venv environment and runtime
+  PID ownership; ordinary and passive launch seams passed real Windows
+  kill-on-close Job survival tests, including a contained control child.
+- Explicit captured-child suppression covers status writes and liveness
+  probes. The adjacent attachment probe already used the shared primitive.
+- Targeted bounded mux/cutover suite: 133 passed, one opt-in desktop test skipped.
+  The separate interactive-desktop lane passed all eight tests, including two
+  successful real PSMux status cycles, no owned visible windows or focus
+  acquisition, and no fixture descendant leaks.
+- Touched Python lint, install-contract and headless-launch guards passed.
+- Documentation impact: updated the canonical manager README to explain direct
+  console Python plus windowless daemon and captured-child launch flags. The
+  existing shared launch-kind pattern remains accurate and unchanged.
+- Added the required patch changefile. Review, promotion and deployment remain
+  outstanding.
