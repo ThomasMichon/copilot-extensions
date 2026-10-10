@@ -1,0 +1,9 @@
+{
+  "comment": "Add pinned wheel-bundle release descriptor and strict artifact/compatibility verification without host or plugin discovery.",
+  "changes": [
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}

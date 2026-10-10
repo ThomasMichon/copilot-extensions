@@ -93,7 +93,10 @@ def main(argv: list[str] | None = None) -> int:
             sandbox = Path(temporary)
             env = isolated_environment(os.environ, sandbox)
             tests = (
-                [root / "tests" / "test_cli.py", root / "tests" / "test_config.py"]
+                [
+                    root / "tests" / "test_cli.py", root / "tests" / "test_config.py",
+                    root / "tests" / "test_release.py", root / "tests" / "test_release_cli.py",
+                ]
                 if args.smoke else [root / "tests"]
             )
             return run_contained(
