@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Draft | #6007 |
 | [PR Recovery Break Glass](active/pr-recovery-break-glass/README.md) | Draft | #5817 |
 | [Transparent PSMux Launch](active/transparent-psmux-launch/README.md) | Active | #5878 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
