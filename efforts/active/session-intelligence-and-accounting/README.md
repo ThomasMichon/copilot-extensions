@@ -113,6 +113,10 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
 
 ### Phase 1 - Complete evidence preservation
 - [ ] Extend configured sync to preserve process logs alongside session-state.
+- [x] Add canonical local target identity admission and kernel-owned publication
+  claims under a lock spanning payload writes (#5808).
+- [ ] Integrate the reserved `session-sync push --source-identity-file` interface
+  with the merged canonical source-publication helper.
 - [ ] Add scheduled settled-log zip compaction, archive-transparent reads, and
   safe handling of active, rotated, resumed, or truncated files.
 - [ ] Unify discovery of machine roots, CodeSpace namespaces, host-merged rescue
@@ -336,3 +340,30 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   source-root/CodeSpace/rescue discovery (explicitly owned by a
   coordinating peer per the private effort's journal) all remain
   outstanding. The umbrella #5665 stays open.
+
+### 2026-10-09 - Canonical target admission merged
+- Merged #5808 as `32582587eb76a4ab7f4be0f4670ff6d00064060f` after a current-head
+  zero-finding review and passing required checks. Local targets admit canonical
+  schema-v1 identities, preserve declared aliases, reject unowned content, and
+  hold the destination lock through payload, index, and health publication.
+  Linux uses anonymous kernel-owned claims; Windows uses original-handle
+  publication and cancellable deletion disposition. Unsupported identified
+  OneDrive/SSH/ingest publication fails closed.
+- Integrated reviewed installer repair #5885. A stale-base exact-ancestor replay
+  defect was fixed in #5983; the release-blocking deadline fixture was fixed in
+  #5989. Normal promotion #5995 released both prerequisites before publication
+  used the verifier and exact expected-head lease. No replay metadata was
+  fabricated and no rewrite protection was bypassed.
+- The integrated Linux logger suite passed 1,110 tests with 41 skips. Exact
+  published head `b909ca617` passed native Windows publication/failing-case
+  selection (73 passed, three skips) and the exact archive-source CI selector
+  (426 passed, 14 skips). CI initially reported a denied replacement-directory
+  rename in one rescue test; its cause remains unproven and tracked in #6004.
+  One authorized same-head failed-job rerun passed before merge. A recurrence
+  requires live lock-holder evidence rather than repeated retries or deleting
+  retained recovery state.
+- This closes the bounded target-admission slice only. The identity-file
+  engine/CLI integration is next; source callers remain gated until its separate
+  reviewed receipt exists. #5727 containment/health work, complete scheduled
+  preservation/compaction, catalog/accounting, daily roles, and release-backed
+  consumer adoption remain open. The effort stays Active.
