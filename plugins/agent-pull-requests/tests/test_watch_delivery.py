@@ -455,6 +455,20 @@ def test_pending_only_key_retires_poller_and_scheduler_waits_for_retry(make):
     time.sleep(0.1)
     assert daemon.status()["pending_deliveries"][0]["attempts"] == attempts
 
+def test_scheduler_wait_is_bounded_for_oversized_retry_timestamp(make):
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "one", until=(MERGED,), acknowledged=True,
+                      notify={"argv": ["consumer"]})
+    registry.apply_snapshot(key, PRSnapshot(merged=True))
+    entries = registry.snapshot_state()
+    entries[0]["pending"]["next_attempt"] = 1e100
+    write_subscriptions_state(entries)
+    daemon = make(notify=lambda event: pytest.fail("retry is not due"))
+    time.sleep(0.1)
+    assert daemon._deliveries.scheduler.is_alive()
+    daemon.close()
+
 def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
     release = threading.Event()
     calls = []

@@ -73,7 +73,7 @@ class Deliveries:
                 if e.subscriber.registration_id not in self.workers
                 and e.subscriber.pending["next_attempt"] > time.time()
             ]
-            delay = max(0.0, min(future) - time.time()) if future else None
+            delay = min(60.0, max(0.0, min(future) - time.time())) if future else None
             self.changed.wait(delay)
 
     def legacy(self, event) -> None:
