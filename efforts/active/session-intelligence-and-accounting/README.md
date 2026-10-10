@@ -196,10 +196,12 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ### 2026-10-10 - Explicit identity-file CLI integration merged
 - #6027 merged as `58789f46905b350d8c600b37265f34ab0d8fd366` after current-head
-  approval with zero findings and green required CI, including native Windows
+  approval with no unresolved Medium/High findings and green required CI, including native Windows
   archive-source contracts. The optional flag reuses bounded canonical metadata
   loading and validates its canonical publication key before target creation;
   the actual identity reaches the reviewed target admission transaction.
+- The final approval retained one Low documentation-impact finding; the PR body
+  was updated with that assessment before merge, but the review still listed it.
 - Legacy no-identity pushes remain unchanged. Identified unsupported transports
   fail explicitly; a corrected OneDrive test pins its real temporary root and
   checks the specific admission rejection, not an ambient-root discovery error.
