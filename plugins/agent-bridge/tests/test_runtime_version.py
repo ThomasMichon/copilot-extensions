@@ -323,3 +323,32 @@ assert rv.consume_pending_generation_id(os.getpid(), directory) == "cold-generat
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_cold_liveness_import_io_failure_remains_best_effort(tmp_path):
+    import subprocess
+    import sys
+
+    script = """
+import importlib.abc
+import os
+import sys
+from pathlib import Path
+from agent_bridge import runtime_version as rv
+class ImportFailure(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname.startswith("agent_bridge.session_host"):
+            raise OSError("simulated cold import I/O failure")
+        return None
+sys.meta_path.insert(0, ImportFailure())
+directory = Path(sys.argv[1])
+rv.stage_pending_generation_id(os.getpid(), "unrecorded-generation", directory)
+assert not (directory / rv.PENDING_GENERATION_IDS_FILE).exists()
+assert not (directory / "pending-generation-ids.lock").exists()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr

@@ -289,9 +289,6 @@ def stage_pending_generation_id(
     """
     from zdd.diagnostics import process_start_time
 
-    # Keep cold package imports outside the bounded cross-process lock.
-    from .session_host.osutil import pid_alive
-
     d = directory or install_dir()
     start_time = process_start_time(pid)
 
@@ -307,6 +304,9 @@ def stage_pending_generation_id(
         )
 
     try:
+        # Keep cold imports outside the lock, inside the best-effort I/O boundary.
+        from .session_host.osutil import pid_alive
+
         _with_pending_lock(d, _do)
     except OSError:
         pass

@@ -622,6 +622,21 @@ provider's absence.
   updated-head identifier/CI checks remain publication gates. Do not rerun
   settled complete production-source coverage absent a relevant source change.
 
+### 2026-10-10 - Preserve the cold-import I/O boundary
+- Final review found that moving the liveness import outside the lock also
+  moved it outside staging's established best-effort `OSError` handler.
+  The import now remains before lock acquisition but inside that existing
+  narrow handler. No import exception class, admission budget, identity check
+  or lock-protected mutation contract is broadened.
+- A fresh-process import-failure regression failed against the prior source;
+  it now proves staging survives an I/O failure without creating a pending
+  record or lock file. The complete runtime-version contracts passed
+  **22 tests, 1 skipped**, including cold import ordering and real concurrent
+  round trips. Touched-code lint passed.
+- Existing complete Worktrees coverage is unchanged. Bridge affected-file
+  validation is refreshed for this narrow exception-boundary correction;
+  current-head review and checks still precede merge and deployment.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
