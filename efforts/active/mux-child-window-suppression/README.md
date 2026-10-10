@@ -173,3 +173,12 @@ contain terminal-multiplexer descendants.
   Full external-window/focus baseline observation remains a separate gate.
 - Added release changefiles for every canonical process-helper consumer as
   required by the shared-library changefile gate; vendored copies are in sync.
+- Corrected the four native test fixtures tracked in #6062: task selection now
+  follows actual focused-row keyboard interaction; tarball extraction creates
+  and verifies a real native directory symlink. All four targeted checks passed
+  independently, without skips or production behavior changes.
+- Implementation review approved the strict containment and runner fixes.
+  Further fixture updates were published to the same PR. Current `dev` has
+  conflicting changes: supported sync attempted a rebase and aborted cleanly.
+  Resolve the conflict and obtain current-head review/checks before merge;
+  promotion and deployment are not complete.
