@@ -355,7 +355,8 @@ def test_reserved_boundary_cannot_be_embedded_in_policy(tmp_path: Path) -> None:
         projections.render_projection(replace(spec, template_content=template))
 
 
-def test_same_shipped_cohort_reduces_discovery_bytes_without_slimming_policy() -> None:
+def test_fixed_input_mechanism_comparison_reduces_discovery_bytes() -> None:
+    """Final templates under both delivery modes; not a historical before/after."""
     repo = Path(__file__).resolve().parents[3]
     sources = [
         SimpleNamespace(
