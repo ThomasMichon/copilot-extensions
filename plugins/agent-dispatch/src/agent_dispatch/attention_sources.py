@@ -23,7 +23,7 @@ import httpx
 
 from . import attention_contract as ac
 from .client import DispatchError
-from .handoff_claim_release import handoff_worktree, is_handoff_task
+from .handoff_claim_release import handoff_is_local, handoff_worktree, is_handoff_task
 
 BUILTIN_SOURCES = ("bridge", "dispatch", "pr")
 DEFAULT_TIMEOUT = 20.0
@@ -68,7 +68,7 @@ def _valid_form(form: Any) -> bool:
 
 def _task_item(task: dict[str, Any], read_at: str,
                cli: tuple[str, ...] | None = ("agent-dispatch",),
-               now: float | None = None) -> dict[str, Any] | None:
+               now: float | None = None, machine: str | None = None) -> dict[str, Any] | None:
     """One task's item, coalescing its conditions to the worst: an operator ask
     (``awaiting_steer``), an operator hold (``hold_reason``), or a self-tracked
     completion claim awaiting confirmation (``submitted``). ``submitted`` is
@@ -108,7 +108,9 @@ def _task_item(task: dict[str, Any], read_at: str,
     view = ["card", "show", task_id] if state == "awaiting_input" else ["show", task_id]
     actions = [{"verb": "show", "argv": [*cli, *view]}] if cli else []
     if state == "stalled":
-        actions = _stalled_handoff_actions(task_id, title, handoff_worktree(task), cli) + actions
+        # Resume only a worktree on this machine (``machine``): another's id means nothing here.
+        here = handoff_worktree(task) if handoff_is_local(task, machine) else None
+        actions = _stalled_handoff_actions(task_id, title, here, cli) + actions
     item = {
         "schema": ac.SCHEMA, "entity": "task", "entity_ref": task_id, "lifecycle_state": status,
         "display_state": state, "severity": ac.SEVERITY[state], "reason": ac.one_line(reason),
@@ -159,12 +161,6 @@ def _unpicked_handoff_age(task: dict[str, Any], now: float | None) -> float | No
     return age if age > after else None
 
 
-def handoff_seed(title: str, task_id: str) -> str:
-    """The one-line handoff seed a successor's first turn takes (context-handoff's
-    documented locator format): it loads the stored brief, never carries it."""
-    return f"{title} | Resume: /consume-handoff to take over | Recovery: context-handoff task:{task_id}"
-
-
 #: The reason an attention-queue abandon records on the task.
 ABANDON_REASON = "abandoned from the attention queue"
 
@@ -172,11 +168,14 @@ ABANDON_REASON = "abandoned from the attention queue"
 def _stalled_handoff_actions(task_id: str, title: str, worktree: str | None,
                              cli: tuple[str, ...] | None) -> list[dict[str, Any]]:
     """What the operator can do about a baton nobody picked up: start a successor
-    in its worktree (the default), or abandon it. The ``show`` follows."""
+    in its worktree (the default; only for a worktree on this machine), or
+    abandon it. The ``show`` follows."""
+    from .handoff_fallback_seed import build_fallback_seed
+
     actions = []
     if worktree:
         actions.append({"verb": "resume", "argv": ["agent-worktrees", "embody", "--worktree-id", worktree,
-                                                   "--seed", handoff_seed(title or "Continue", task_id)]})
+                                                   "--seed", build_fallback_seed(task_id, title)]})
     if cli:
         actions.append({"verb": "abandon",
                         "argv": [*cli, "abandon", task_id, "--permit", "--reason", ABANDON_REASON]})
@@ -222,12 +221,14 @@ class _PendingHandoffs:
     deadline keeps its item."""
 
     def __init__(self, items: list[dict[str, Any]], tasks: dict[str, dict[str, Any]],
-                 lookup: Callable[[str], set[str] | None]) -> None:
+                 lookup: Callable[[str], set[str] | None], machine: str | None = None) -> None:
         self.lookup = lookup
         self.ledgers: dict[str, set[str] | None] = {}
         self.closed = False
         stalled = {i["entity_ref"] for i in items if i["entity"] == "task" and i["display_state"] == "stalled"}
-        self.batons = {t: handoff_worktree(tasks[t]) for t in stalled if t in tasks}
+        # Only this machine's ledgers can be read: a baton pinned elsewhere keeps its item.
+        self.batons = {t: handoff_worktree(tasks[t]) for t in stalled
+                       if t in tasks and handoff_is_local(tasks[t], machine)}
         self.todo = sorted({wt for wt in self.batons.values() if wt})
         self.lock = threading.Lock()
         self.threads = [threading.Thread(target=self._work, daemon=True, name=f"attention-handoff-{n}")
@@ -290,13 +291,21 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
                   cli: tuple[str, ...] | None = ("agent-dispatch",),
                   backlog_budget: float = BACKLOG_BUDGET,
-                  pending_lookup: Callable[[str], set[str] | None] | None = None) -> dict[str, Any]:
+                  pending_lookup: Callable[[str], set[str] | None] | None = None,
+                  machine: str | None = None) -> dict[str, Any]:
+    """``machine`` is this machine's name (resolved when a stalled baton names
+    a ``target_machine``): batons pinned elsewhere are neither checked against
+    this machine's ledgers nor offered a local ``resume``."""
     started = time.monotonic()
     with client_factory() as client:
         tasks = list(client.list(repo=None, status=_OPEN_STATES, limit=limit) or [])
-        items = [i for i in (_task_item(t, read_at, cli, now=time.time()) for t in tasks) if i]
+        if machine is None and any(is_handoff_task(t) and t.get("target_machine") for t in tasks):
+            from .remote_dispatch import local_machine
+
+            machine = local_machine()
+        items = [i for i in (_task_item(t, read_at, cli, now=time.time(), machine=machine) for t in tasks) if i]
         pending = _PendingHandoffs(items, {str(t.get("id")): t for t in tasks},
-                                   pending_lookup or pending_handoff_tokens)
+                                   pending_lookup or pending_handoff_tokens, machine)
         lanes = sorted({t["repo"] for t in tasks
                         if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
         backlogs, unread = {}, 0

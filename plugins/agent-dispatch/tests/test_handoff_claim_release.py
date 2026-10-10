@@ -244,3 +244,27 @@ def test_release_if_handoff_no_ops_without_any_resolvable_id(monkeypatch):
     handoff_claim_release.release_if_handoff({"labels": ["handoff"]})
     time.sleep(0.05)
     assert calls == []
+
+
+@pytest.mark.parametrize("target,here,cancels", [
+    ("box-1", "box-1", True),   # this machine's ledger
+    ("BOX-1", "box-1", True),
+    ("box-2", "box-1", False),  # another machine's ledger isn't this host's to cancel
+    ("box-2", None, False),
+    (None, None, True),         # no pin: this machine's
+])
+def test_only_a_baton_on_this_machine_is_cancelled_in_its_ledger(monkeypatch, target, here, cancels):
+    calls = []
+    done = threading.Event()
+
+    def fake_release(task_id, *, worktree, timeout=15.0, cancel_pending=False):
+        calls.append(cancel_pending)
+        done.set()
+
+    monkeypatch.setattr(handoff_claim_release, "_release_task_claim", fake_release)
+    monkeypatch.setattr(handoff_claim_release, "_this_machine", lambda: here)
+    task = {"id": "T1", "labels": ["handoff"], "target_worktree": "wt-9",
+            **({"target_machine": target} if target else {})}
+    handoff_claim_release.release_if_handoff(task, cancel_pending=True)
+    assert _wait_for(done.is_set)
+    assert calls == [cancels]

@@ -927,12 +927,40 @@ def _baton(tid="h1", worktree="wt-9", age=3600, **kw):
 
 
 def test_a_stalled_handoff_can_be_resumed_in_its_worktree_or_abandoned():
+    from agent_dispatch.handoff_fallback_seed import build_fallback_seed
+
     item = srcs._task_item(_baton(), T1, now=NOW)
     assert [a["verb"] for a in item["actions"]] == ["resume", "abandon", "show"]
-    assert item["actions"][0]["argv"] == [
-        "agent-worktrees", "embody", "--worktree-id", "wt-9", "--seed",
-        "Relay work | Resume: /consume-handoff to take over | Recovery: context-handoff task:h1"]
+    assert item["actions"][0]["argv"] == ["agent-worktrees", "embody", "--worktree-id", "wt-9", "--seed",
+                                          build_fallback_seed("h1", "Relay work")]
     ac.validate_item({**item, "created_at": T1})
+
+
+def test_the_resume_seed_is_the_canonical_one_even_for_an_awkward_title():
+    from agent_dispatch.handoff_fallback_seed import build_fallback_seed
+
+    title = "Fix A | B → C " + "x" * 300
+    seed = srcs._task_item(_baton(title=title), T1, now=NOW)["actions"][0]["argv"][-1]
+    assert seed == build_fallback_seed("h1", title)
+    assert seed.count(" | ") == 2 and seed.endswith("context-handoff task:h1")
+
+
+@pytest.mark.parametrize("target,machine,local", [
+    (None, None, True),          # no pin: this machine's
+    ("Box-1", "box-1", True),    # pinned here (names compare without case)
+    ("box-2", "box-1", False),   # pinned elsewhere
+    ("box-2", None, False),      # this machine unknown: can't tell, so not here
+])
+def test_only_a_baton_on_this_machine_is_resumed_or_checked_here(target, machine, local):
+    task = _baton(**({"target_machine": target} if target else {}))
+    item = srcs._task_item(task, T1, now=NOW, machine=machine)
+    assert ("resume" in [a["verb"] for a in item["actions"]]) is local
+    asked = []
+    result = srcs.read_dispatch(lambda: _Client([task]), T1, machine=machine,
+                                pending_lookup=lambda wt: asked.append(wt) or set())
+    # A remote baton is never checked against this machine's ledger, so it stays an item.
+    assert asked == (["wt-9"] if local else [])
+    assert bool(result["items"]) is not local
 
 
 def test_the_worktree_comes_from_the_affinity_when_no_target_is_recorded():

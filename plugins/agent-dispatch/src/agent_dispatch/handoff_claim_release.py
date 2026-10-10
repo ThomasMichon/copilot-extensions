@@ -109,6 +109,21 @@ def handoff_worktree(task: dict[str, Any] | None) -> str | None:
     return worktree if isinstance(worktree, str) and worktree else None
 
 
+def handoff_is_local(task: dict[str, Any] | None, machine: str | None) -> bool:
+    """Whether a baton's worktree is on ``machine`` (this one): it names no
+    ``target_machine``, or names this one. A worktree id and its handoff ledger
+    are machine-local, so a baton pinned elsewhere can't be checked, resumed
+    or cancelled from here."""
+    target = (task or {}).get("target_machine")
+    return not target or (machine is not None and str(target).casefold() == machine.casefold())
+
+
+def _this_machine() -> str | None:
+    from .remote_dispatch import local_machine
+
+    return local_machine()
+
+
 def release_if_handoff(
     task: dict[str, Any] | None, task_id: str | None = None, *, timeout: float = 15.0,
     cancel_pending: bool = False,
@@ -141,13 +156,24 @@ def release_if_handoff(
     # the ledger entry are still that worktree's.
     worktree = handoff_worktree(task)
     thread = threading.Thread(
-        target=_release_task_claim,
-        args=(resolved_id,),
+        target=_release_in_background,
+        args=(resolved_id, (task or {}).get("target_machine")),
         kwargs={"worktree": worktree, "timeout": timeout, "cancel_pending": cancel_pending},
         daemon=True,
         name=f"handoff-claim-release-{resolved_id}",
     )
     thread.start()
+
+
+def _release_in_background(task_id: str, target_machine: Any, *, worktree: str | None, timeout: float,
+                           cancel_pending: bool) -> None:
+    """The release thread's body. The ledger is the baton's own machine's, so
+    this host cancels only its own (like the claim release, which runs here
+    too); resolving this machine's name may shell out, so it happens here,
+    never on the caller's request."""
+    if cancel_pending and target_machine:
+        cancel_pending = handoff_is_local({"target_machine": target_machine}, _this_machine())
+    _release_task_claim(task_id, worktree=worktree, timeout=timeout, cancel_pending=cancel_pending)
 
 
 def _release_task_claim(
