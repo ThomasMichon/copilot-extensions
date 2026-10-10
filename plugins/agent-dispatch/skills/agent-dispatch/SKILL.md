@@ -257,6 +257,19 @@ started -> suspended -> started
 - **suspended -> submitted** is owner-gated and direct: if an external condition
   satisfies the dormant goal, its resolver calls `complete` under the preserved
   owner without waking a process or manufacturing an active turn.
+- **submitted -> started** can be a trusted whole-goal evaluator's `reject`
+  decision, restoring the exact submitting owner/session with durable feedback
+  and a coordinator-owned wake. It preserves the rejected submission in steer
+  history, not in the current result projection. Read
+  `fields.verification_rejection` with `steer take <id> --all`, continue the same
+  goal, and suspend for intermediate waits. Do not submit merely to report
+  progress. The JSON decision is
+  `{"decision":"reject","reason":"Goal unfinished","feedback":{"next":"continue"}}`;
+  feedback is optional, reason is bounded to 4096 UTF-8 bytes, and compact strict
+  JSON feedback to 16384 bytes. Upgrade coordinator and supervisor before
+  adopting this decision. A missing session, changed submission, busy owner, or
+  retirement already in flight fails explicitly; do not repair it by hand or
+  substitute a new conversation. See the README's rejection/recovery contract.
 - Steering a suspended task durably records the steer and atomically either
   restores an interactive task to **started** with a wake outbox row, or
   releases a task without a captured inbox to **queued** for re-embodiment. A newly embodied

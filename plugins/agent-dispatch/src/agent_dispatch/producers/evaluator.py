@@ -103,7 +103,45 @@ class Abandon:
         return {"decision": "abandon", "reason": self.reason}
 
 
-Decision = Emit | NoOp | Confirm | Abandon
+REJECT_REASON_MAX_BYTES = 4096
+REJECT_FEEDBACK_MAX_BYTES = 16384
+
+
+@dataclass(frozen=True)
+class Reject:
+    """Reject an inspected submission and continue its exact owner session."""
+
+    reason: str
+    feedback: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.reason, str)
+            or not self.reason.strip()
+            or "\0" in self.reason
+        ):
+            raise EvaluatorError("reject decision needs a non-empty, NUL-free 'reason'")
+        try:
+            reason_size = len(self.reason.encode("utf-8"))
+            if self.feedback is not None and not isinstance(self.feedback, dict):
+                raise EvaluatorError("reject decision 'feedback' must be an object")
+            encoded = json.dumps(
+                self.feedback, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+            raise EvaluatorError("reject reason/feedback must be valid UTF-8 JSON") from exc
+        if reason_size > REJECT_REASON_MAX_BYTES:
+            raise EvaluatorError(f"reject reason exceeds {REJECT_REASON_MAX_BYTES} UTF-8 bytes")
+        if len(encoded) > REJECT_FEEDBACK_MAX_BYTES:
+            raise EvaluatorError(f"reject feedback exceeds {REJECT_FEEDBACK_MAX_BYTES} JSON bytes")
+        # Snapshot mutable feedback so later edits cannot bypass validation.
+        object.__setattr__(self, "feedback", json.loads(encoded))
+
+    def to_dict(self) -> dict:
+        return {"decision": "reject", "reason": self.reason, "feedback": self.feedback}
+
+
+Decision = Emit | NoOp | Confirm | Abandon | Reject
 
 
 def _safe_fmt(template: str, values: dict[str, Any]) -> str:
@@ -225,6 +263,11 @@ class SpecEvaluator:
                 return [Confirm(reason=rule.get("confirm_reason"))]
             if rule.get("abandon"):
                 return [Abandon(reason=rule.get("abandon_reason"))]
+            if "reject" in rule:
+                spec = rule["reject"]
+                if not isinstance(spec, dict):
+                    raise EvaluatorError("a reject rule requires an object")
+                return [decision_from_dict({**spec, "decision": "reject"})]
         return [NoOp(reason="no matching rule")]
 
 
@@ -241,6 +284,11 @@ def decision_from_dict(value: object) -> Decision:
     if not isinstance(value, dict):
         raise EvaluatorError("script evaluator output must be a JSON object")
     decision = value.get("decision")
+    if decision == "reject":
+        extra = sorted(set(value) - {"decision", "reason", "feedback"})
+        if extra:
+            raise EvaluatorError(f"reject decision has unknown key(s): {extra}")
+        return Reject(reason=value.get("reason"), feedback=value.get("feedback"))
     if decision == "emit":
         extra = sorted(set(value) - {"decision", "title", "fields"})
         if extra:
@@ -277,7 +325,7 @@ def decision_from_dict(value: object) -> Decision:
             raise EvaluatorError("abandon decision 'reason' must be a string")
         return Abandon(reason=reason)
     raise EvaluatorError(
-        "decision must be one of emit/noop/confirm/abandon"
+        "decision must be one of emit/noop/confirm/abandon/reject"
     )
 
 
@@ -492,6 +540,10 @@ def apply_decisions(
             else:
                 abandoned = abandoner(task_id, actor="evaluator", reason=d.reason)
                 results.append({"decision": "abandon", "abandoned": abandoned})
+        elif isinstance(d, Reject):
+            raise EvaluatorError(
+                "reject requires coordinator-owned whole-goal verification of an exact submission"
+            )
         else:
             results.append(d.to_dict())
     return results

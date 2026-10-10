@@ -2420,9 +2420,8 @@ class Supervisor:
 
         This is the *only* automatic release of a reservation -- and only for a
         provably-finished task -- so it can never free a still-running spawn for a
-        double-launch. A completed **goal** is verified (*verify-the-completion-
-        claim*) as it settles: an empty "done" is flagged in the reservation
-        detail rather than silently accepted. Returns the number settled.
+        double-launch. Verification-gated submissions remain recoverable until
+        accepted or abandoned. Returns the number settled.
         """
         settled = 0
         reservations = self._pool_reservations(
@@ -2440,7 +2439,8 @@ class Supervisor:
                 task = self.client.get(res["task_id"])
             except DispatchError:
                 continue  # task vanished; leave the reservation for a human
-            if task.get("status") in _TERMINAL:
+            terminal = _TERMINAL - {Status.SUBMITTED} if task.get("require_verification") else _TERMINAL
+            if task.get("status") in terminal:
                 conclusion_claim_token: str | None = None
                 if (
                     res.get("worktree_ownership") == "created"
