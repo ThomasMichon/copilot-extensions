@@ -15,24 +15,24 @@ shared "resident daemon" doc can describe both the same way.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import tempfile
 import threading
 import time
 from collections.abc import Callable
-from pathlib import Path
 
-from agent_procutil import no_window_kwargs
 from work_coalescing_singleton import CoalescingServer
 
-from .watch_contract import DEFAULT_UNTIL, PRSnapshot
+from .watch_contract import ALL_TRANSITIONS, DEFAULT_UNTIL, PRSnapshot
+from .watch_delivery import Deliveries
+from .watch_notification import (
+    ACKNOWLEDGED_NOTIFICATIONS, CALLBACK_TIMEOUT, default_notify, positive_seconds, validate_notify,
+)
 from .watch_registry import FiredEvent, WatchKey, WatchRegistry
+from .watch_storage import (
+    _atomic_write_json as _atomic_write_json, lock_path, read_lock_data, read_subscriptions_state,
+    state_dir, subscriptions_path, write_lock_data, write_subscriptions_state,
+)
 
-_HOME_ENV = "AGENT_PULL_REQUESTS_HOME"
-_LOCK_FILENAME = "watch-daemon.lock"
-_STATE_FILENAME = "watch-subscriptions.json"
 _DEFAULT_POLL_INTERVAL_S = 30.0
 #: How long a poller keeps running with zero subscribers before exiting --
 #: generous relative to a register/unregister race, short relative to an
@@ -41,73 +41,7 @@ _POLLER_IDLE_EXIT_S = 5.0
 #: How long ``serve stop`` waits for a graceful shutdown before giving up
 #: and reporting it as unresponsive (the caller decides what to do next --
 #: this module never force-kills on the caller's behalf).
-_SHUTDOWN_REQUEST_DEADLINE_S = 5.0
-# Windows can reject simultaneous replacements of the same destination,
-# even when each writer has its own closed temporary file.
-_ATOMIC_REPLACE_LOCK = threading.Lock()
-
-
-def state_dir() -> Path:
-    override = os.environ.get(_HOME_ENV, "").strip()
-    if override:
-        return Path(override)
-    return Path.home() / ".agent-pull-requests"
-
-
-def lock_path() -> Path:
-    return state_dir() / _LOCK_FILENAME
-
-
-def subscriptions_path() -> Path:
-    """The durable subscriber dump -- survives a ``serve stop``/``serve
-    restart`` (or an ungraceful crash: it's updated on every register/
-    unregister/fire, not only at clean shutdown) so a newly-started daemon
-    reattaches every still-pending subscription exactly where it left off."""
-    return state_dir() / _STATE_FILENAME
-
-
-def _atomic_write_json(path: Path, data: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.",
-        suffix=".tmp", delete=False,
-    )
-    tmp = Path(handle.name)
-    try:
-        with handle:
-            json.dump(data, handle)
-        with _ATOMIC_REPLACE_LOCK:
-            tmp.replace(path)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
-def read_subscriptions_state() -> list[dict]:
-    try:
-        raw = subscriptions_path().read_text(encoding="utf-8")
-    except OSError:
-        return []
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return []
-    return data if isinstance(data, list) else []
-
-
-def write_subscriptions_state(entries: list[dict]) -> None:
-    _atomic_write_json(subscriptions_path(), entries)
-
-
-def read_lock_data() -> dict | None:
-    try:
-        raw = lock_path().read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return None
-    return data if isinstance(data, dict) else None
+_SHUTDOWN_REQUEST_DEADLINE_S = CALLBACK_TIMEOUT + 5.0
 
 
 def rendezvous_fields(server: CoalescingServer) -> dict:
@@ -139,55 +73,9 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
     return host, port, token
 
 
-def write_lock_data(data: dict) -> None:
-    _atomic_write_json(lock_path(), data)
-
-
 #: ``fetch(repo, number) -> PRSnapshot``.
 Fetch = Callable[[str, int], PRSnapshot]
-#: ``notify(event) -> None``. Best-effort -- an exception here is logged by
-#: the caller, never allowed to kill a poller thread.
-Notify = Callable[[FiredEvent], None]
-
-
-def default_notify(event: FiredEvent) -> None:
-    """Fire-and-forget: run the subscriber's ``notify`` spec as a windowless
-    subprocess, feeding the fired event as JSON on stdin.
-
-    ``notify`` is a plain dict the registering caller supplies, with no
-    agent-dispatch-specific knowledge baked in here --
-    ``{"argv": [...]}`` is run exactly as given; this plugin never
-    special-cases a particular consumer. A missing/malformed ``argv`` is a
-    silent no-op (logged by the caller's own exception handling), since a
-    subscriber that registered a bad notify spec should not crash the
-    daemon that's serving every other subscriber too.
-    """
-    notify_spec = event.subscriber.notify
-    argv = notify_spec.get("argv") if isinstance(notify_spec, dict) else None
-    if not argv or not isinstance(argv, list):
-        return
-    payload = {
-        "repo": event.key.repo,
-        "number": event.key.number,
-        "subscriber_id": event.subscriber.subscriber_id,
-        "transitions": list(event.transitions),
-        "timed_out": event.timed_out,
-    }
-    if event.snapshot is not None:
-        payload["pr_state"] = event.snapshot.pr_state
-        payload["merged"] = event.snapshot.merged
-        payload["review_decision"] = event.snapshot.review_decision
-        payload["mergeable"] = event.snapshot.mergeable
-        payload["checks_state"] = event.snapshot.checks_state
-    subprocess.run(  # noqa: S603 -- caller-supplied notify argv, by design
-        [str(a) for a in argv],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        **no_window_kwargs(),
-    )
+Notify = Callable[[FiredEvent], int | None]
 
 
 class WatchDaemon:
@@ -197,7 +85,7 @@ class WatchDaemon:
     (``watch_registry.snapshot_state``/``write_subscriptions_state``) so a
     ``serve stop`` + ``serve restart`` -- the update/reattach path -- never
     silently drops a subscription that represents a *suspended* caller
-    (e.g. an agent-dispatch task) waiting on this daemon to wake it.
+    waiting on this daemon to wake it.
     ``persist=False`` is for tests that want a hermetic in-memory-only
     daemon with no real disk I/O.
     """
@@ -217,10 +105,14 @@ class WatchDaemon:
         self._poll_interval = poll_interval
         self._idle_exit = idle_exit
         self._persist_enabled = persist
-        self._persist_lock = threading.Lock()
+        self._persistence_error: str | None = None
+        self._persist_lock = threading.RLock()
         self._pollers: dict[WatchKey, threading.Thread] = {}
         self._pollers_lock = threading.Lock()
         self._shutdown_event = threading.Event()
+        self._deliveries = Deliveries(
+            self._registry, self._notify, self._persist, self._persist_lock, self._shutdown_event,
+        )
         if persist:
             self._reattach_from_disk()
 
@@ -232,10 +124,11 @@ class WatchDaemon:
         if not entries:
             return
         self._registry.restore_state(entries)
+        self._deliveries.resume()
         for key in self._registry.active_keys():
             self._ensure_poller(key)
 
-    def _persist(self) -> None:
+    def _persist(self, entries: list[dict] | None = None) -> None:
         """Serialize every persist call against every other -- multiple
         poller threads (any of them, firing concurrently, plus register/
         unregister from a control-plane handler thread) can all call this
@@ -247,7 +140,14 @@ class WatchDaemon:
         if not self._persist_enabled:
             return
         with self._persist_lock:
-            write_subscriptions_state(self._registry.snapshot_state())
+            try:
+                write_subscriptions_state(
+                    self._registry.snapshot_state() if entries is None else entries,
+                )
+            except OSError:
+                self._persistence_error = "state_write_failed"
+                raise
+            self._persistence_error = None
 
     # -- control-plane entrypoint -----------------------------------
 
@@ -256,16 +156,23 @@ class WatchDaemon:
             return self._handle_register(payload)
         if kind == "unregister":
             key = WatchKey(repo=str(payload.get("repo", "")), number=int(payload.get("number", 0)))
-            ok = self._registry.unregister(key, str(payload.get("subscriber_id", "")))
-            self._persist()
+            with self._persist_lock:
+                ok = self._registry.unregister(
+                    key, str(payload.get("subscriber_id", "")),
+                    registration_id=payload.get("registration_id"),
+                )
+                self._persist()
             return {"unregistered": ok}
         if kind == "status":
-            return {"subscribers": self._registry.status()}
+            return self.status()
         if kind == "health":
             return {
                 "pid": os.getpid(),
                 "subscriber_count": sum(len(v) for v in self._registry.status().values()),
                 "active_keys": len(self._registry.active_keys()),
+                "capabilities": [ACKNOWLEDGED_NOTIFICATIONS],
+                "pending_delivery_count": len(self._registry.pending_events()),
+                "persistence_error": self._persistence_error,
             }
         if kind == "shutdown":
             self._shutdown_event.set()
@@ -273,20 +180,50 @@ class WatchDaemon:
         return {"error": f"unknown kind {kind!r}"}
 
     def _handle_register(self, payload: dict) -> dict:
-        key = WatchKey(repo=str(payload.get("repo", "")), number=int(payload.get("number", 0)))
-        until = tuple(payload.get("until") or DEFAULT_UNTIL)
-        notify = payload.get("notify") if isinstance(payload.get("notify"), dict) else {}
-        timeout = payload.get("timeout")
-        self._registry.register(
-            key,
-            str(payload.get("subscriber_id", "")),
-            until=until,
-            notify=notify,
-            timeout=float(timeout) if timeout else None,
-        )
+        try:
+            protocol = payload.get("notification_protocol")
+            if "notification_protocol" in payload and protocol != ACKNOWLEDGED_NOTIFICATIONS:
+                raise ValueError("unsupported notification protocol")
+            acknowledged = protocol == ACKNOWLEDGED_NOTIFICATIONS
+            if acknowledged and not self._persist_enabled:
+                raise ValueError("acknowledged notifications require durable state")
+            number = payload.get("number")
+            repo, identity = payload.get("repo"), payload.get("subscriber_id")
+            if (
+                type(number) is not int or number <= 0
+                or not isinstance(repo, str) or not repo.strip()
+                or not isinstance(identity, str) or not identity.strip()
+            ):
+                raise ValueError("repo, positive number and subscriber_id are required")
+            key = WatchKey(repo=repo, number=number)
+            if acknowledged and payload.get("until") == []:
+                raise ValueError("until must not be empty")
+            until = payload.get("until") or DEFAULT_UNTIL
+            if not isinstance(until, (list, tuple)) or any(t not in ALL_TRANSITIONS for t in until):
+                raise ValueError("until must contain supported transitions")
+            notify = validate_notify(payload.get("notify", {}), acknowledged)
+            timeout = payload.get("timeout")
+            if timeout is not None:
+                timeout = positive_seconds(timeout)
+        except (ValueError, TypeError, OverflowError):
+            return {"error": "invalid watch registration or notification specification"}
+        with self._persist_lock:
+            previous = self._registry.subscriber(key, identity)
+            sub = self._registry.register(
+                key, identity, until=tuple(until), notify=notify,
+                timeout=timeout, acknowledged=acknowledged,
+            )
+            try:
+                self._persist()
+            except OSError:
+                self._registry.restore_registration(key, sub, previous)
+                raise
         self._ensure_poller(key)
-        self._persist()
-        return {"registered": True}
+        return (
+            {"registered": True, "registration_id": sub.registration_id,
+             "notification_protocol": ACKNOWLEDGED_NOTIFICATIONS}
+            if acknowledged else {"registered": True}
+        )
 
     def wait_for_shutdown(self, poll_interval: float = 1.0) -> None:
         """Block the caller (``serve``'s own foreground loop) until a
@@ -304,6 +241,7 @@ class WatchDaemon:
         for thread in pollers:
             thread.join(timeout=max(0.0, deadline - time.monotonic()))
         live = [thread.name for thread in pollers if thread.is_alive()]
+        live.extend(self._deliveries.close(deadline))
         if live:
             raise TimeoutError(f"PR watch pollers did not stop: {', '.join(live)}")
 
@@ -333,19 +271,25 @@ class WatchDaemon:
                 continue
             idle_since = None
             try:
-                snap = self._fetch(key.repo, key.number)
+                snap = self._fetch(key.repo, key.number) if self._registry.watching_count(key) else None
             except Exception:
+                snap = None
+            try:
+                with self._persist_lock:
+                    fired = (
+                        self._registry.apply_snapshot(key, snap) if snap is not None
+                        else self._registry.sweep_timeouts((key,))
+                    )
+                    # Also save baseline progress, not just firing transitions.
+                    self._persist()
+            except OSError:
                 self._shutdown_event.wait(timeout=self._poll_interval)
                 continue
-            fired = self._registry.apply_snapshot(key, snap)
-            if fired:
-                self._persist()
+            self._deliveries.resume()
             for event in fired:
-                try:
-                    self._notify(event)
-                except Exception:  # noqa: S110 -- one bad subscriber's notify
-                    # must never stop this poller from serving the rest.
-                    pass
+                if event.subscriber.acknowledged:
+                    continue
+                self._deliveries.legacy(event)
             self._shutdown_event.wait(timeout=self._poll_interval)
         with self._pollers_lock:
             # Another register() may have raced in right as we decided to
@@ -356,7 +300,11 @@ class WatchDaemon:
                 del self._pollers[key]
 
     def status(self) -> dict:
-        return {"subscribers": self._registry.status()}
+        return {
+            "subscribers": self._registry.status(),
+            "pending_deliveries": self._deliveries.status(),
+            "persistence_error": self._persistence_error,
+        }
 
 
 __all__ = [

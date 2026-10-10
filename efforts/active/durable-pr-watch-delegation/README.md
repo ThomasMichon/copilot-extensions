@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Separate proposal, notification-contract, and integration PRs against `dev`
 - **Created:** 2026-10-09
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-dispatch/README.md` / `hibernate-the-wait`; `visions/plugins/agent-worktrees/pull-requests/README.md` / `durable-shared-pr-transition-subscriptions`
 - **Umbrella issue:** #6007
 - **Sub-issues:** None yet
@@ -73,10 +73,12 @@ implementation requirements**, not additional operator quotations.
 
 ### Phase 1 - Review the recovery contract
 
-- [ ] Land this proposal through automated review before implementation.
-- [ ] Reconcile the preserved implementation with current source and enumerate only the delegation changes still needed.
+- [x] Land this proposal through automated review before implementation.
+- [x] Reconcile the preserved implementation with current source and enumerate only the delegation changes still needed.
 
-### Phase 2 - Reliable watch notification delivery _(agent-recommended)_
+### Phase 2 - Reliable watch notification delivery
+
+_Agent-recommended implementation requirements._
 
 - [ ] Introduce an opt-in, capability-advertised acknowledged notification contract owned by `agent-pull-requests`; legacy subscriptions retain their existing wire behavior.
 - [ ] Persist the fired event before attempting delivery. Retain a stable event identity and replay the same payload until a successful callback acknowledgement, explicit cancellation, or a visibly recorded terminal recovery outcome.
@@ -142,3 +144,17 @@ callback an implicit credential store.
 - Claimed #6007 after checking for overlapping issues and open PRs.
 - Read the current watch owner and dispatch preparation path; confirmed that fired callbacks are not durably acknowledged today.
 - Created this proposal for review. No implementation has been replayed from the preserved branch.
+
+### 2026-10-09 - Proposal approved and merged
+
+- #6011 merged after an approving automated review with zero findings and successful CI.
+- Pulled the source worktree forward onto the reviewed proposal.
+- Beginning the watch owner's acknowledged-delivery contract first; dispatch integration remains gated on that prerequisite.
+
+### 2026-10-09 - Notification contract implementation
+
+- Implemented opt-in `acknowledged_notifications/v1`, immutable durable fired events, independent retry workers, generation-safe cancellation, and legacy wire compatibility.
+- Independent review reproduced callback shutdown and failed-registration persistence gaps. Corrected the drain budgets and rollback behavior and added boundary regressions before publication.
+- The preserved dispatch patch cannot be replayed wholesale: current transactional prepare/arm/finish must be extended with a negotiated waiter kind, authenticated process fallback, and explicit delegated-owner recovery. Steer-idempotency work remains excluded.
+- Full contained verification is waiting behind another live, bounded test-runner admission owner; structural and fatal-lint gates have passed. No shared peer was interrupted.
+- Coordinated a short admission gap with the owning peer; full contained verification completed with 114 passing tests. The slot was returned to that peer after the run.

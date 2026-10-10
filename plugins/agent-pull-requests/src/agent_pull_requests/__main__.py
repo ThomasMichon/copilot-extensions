@@ -36,7 +36,7 @@ _PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
 _WATCH_HANDLER_DRAIN_TIMEOUT_S = 5.0
-_WATCH_RESTART_STOP_TIMEOUT_S = 20.0
+_WATCH_RESTART_STOP_TIMEOUT_S = 45.0
 
 
 def _parse_repo_slug(value: str) -> tuple[str, str]:
@@ -486,34 +486,17 @@ def _watch_request(
 
 
 def _cmd_watch_subscribe(args: argparse.Namespace) -> int:
-    from .watch_contract import DEFAULT_UNTIL
+    from .watch_subscription import subscribe
 
-    until = tuple(args.until) if args.until else DEFAULT_UNTIL
-    notify: dict[str, Any] = {}
-    if args.notify_argv:
-        notify["argv"] = args.notify_argv
-    result = _watch_request(
-        "register",
-        {
-            "repo": args.repo,
-            "number": args.number,
-            "subscriber_id": args.subscriber_id,
-            "until": list(until),
-            "notify": notify,
-            "timeout": args.timeout,
-        },
-    )
-    if args.json:
-        print(json.dumps(result, indent=2, sort_keys=True))
-    else:
-        print(result)
-    return 0 if result.get("registered") else 1
+    return subscribe(args, _watch_request)
 
 
 def _cmd_watch_unsubscribe(args: argparse.Namespace) -> int:
+    payload = {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id}
+    if getattr(args, "registration_id", None):
+        payload["registration_id"] = args.registration_id
     result = _watch_request(
-        "unregister",
-        {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id},
+        "unregister", payload,
     )
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
@@ -532,6 +515,8 @@ def _cmd_watch_status(args: argparse.Namespace) -> int:
             print("no watch daemon reachable, or no active subscriptions")
         for key, ids in subscribers.items():
             print(f"{key}: {', '.join(ids)}")
+        for delivery in result.get("pending_deliveries", []):
+            print(f"pending delivery: {json.dumps(delivery, sort_keys=True)}")
     return 0
 
 
@@ -580,11 +565,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         server.close_admission(reason="shutdown")
         server.close()
         deadline = time.monotonic() + _WATCH_HANDLER_DRAIN_TIMEOUT_S
-        while server.active_handler_count():
-            if time.monotonic() >= deadline:
-                raise TimeoutError("PR watch request handlers did not drain")
-            time.sleep(0.02)
-        daemon.close()
+        try:
+            while server.active_handler_count():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("PR watch request handlers did not drain")
+                time.sleep(0.02)
+        finally:
+            daemon.close()
         lease.release()
     return 0
 
@@ -768,22 +755,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, default=None, help="also fire (timed_out) after this many seconds"
     )
     watch_subscribe.add_argument(
+        "--acknowledged-notifications", action="store_true",
+        help="opt in to durable at-least-once callbacks; exit 0 acknowledges the event",
+    )
+    watch_subscribe.add_argument(
+        "--notify-timeout", type=float, default=None,
+        help="acknowledged callback deadline in seconds (positive, at most 30; default: 30)",
+    )
+    watch_subscribe.add_argument(
         "--notify-argv",
         nargs="+",
         metavar="ARGV",
         help="command to run (no agent-pull-requests-specific meaning; the "
         "fired event is passed as JSON on its stdin) when this fires -- "
-        "e.g. a caller-supplied 'agent-dispatch resume <task-id>'",
+        "use an idempotent consumer when opting into acknowledged notifications",
     )
     watch_subscribe.add_argument("--json", action="store_true")
     watch_subscribe.set_defaults(handler=_cmd_watch_subscribe)
 
     watch_unsubscribe = watch_sub.add_parser(
-        "unsubscribe", help="cancel a registration before it fires"
+        "unsubscribe", help="cancel a registration or its pending delivery"
     )
     watch_unsubscribe.add_argument("--repo", required=True, type=_validate_repo_slug)
     watch_unsubscribe.add_argument("--number", required=True, type=int)
     watch_unsubscribe.add_argument("--subscriber-id", required=True)
+    watch_unsubscribe.add_argument("--registration-id", help="cancel only this exact registration")
     watch_unsubscribe.add_argument("--json", action="store_true")
     watch_unsubscribe.set_defaults(handler=_cmd_watch_unsubscribe)
 
