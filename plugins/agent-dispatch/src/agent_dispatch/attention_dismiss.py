@@ -140,7 +140,7 @@ class Dismissals:
             else:
                 ended.add(item["id"])
                 visible.append(item)
-        seen = {i["id"] for i in items} | {a["id"] for i in items for a in i.get("also") or [] if "id" in a}
+        seen = {i["id"] for i in items}
         ended |= {k for k, v in entries.items()
                   if v["mode"] != "forever" and k not in seen and source_of(k) in ok_sources}
         if ended:

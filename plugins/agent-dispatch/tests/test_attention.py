@@ -1241,8 +1241,17 @@ def test_a_dismissed_condition_folded_into_another_items_also_stays_dismissed(tm
     store.dismiss(quiet["id"], "changed", T0, item=quiet)
     worse = _item(source="b", ref="t1", state="failed")
     env = _collect_dismissing({"a": _ok(quiet), "b": _ok(worse)}, tmp_path)
-    assert [i["id"] for i in env["items"]] == ["b:task:t1"]  # the worse condition leads; a's is in also[]
+    assert [i["id"] for i in env["items"]] == ["b:task:t1"] and env["items"][0]["also"] == []
     assert quiet["id"] in store.entries()[0]
+
+
+def test_dismissing_one_sources_condition_never_hides_anothers_for_the_same_entity(tmp_path):
+    worse = _item(source="b", ref="t1", state="failed")
+    _dismissals(tmp_path).dismiss(worse["id"], "changed", T0, item=worse)
+    quiet = _item(source="a", ref="t1", state="review")
+    env = _collect_dismissing({"a": _ok(quiet), "b": _ok(worse)}, tmp_path)
+    assert [i["id"] for i in env["items"]] == ["a:task:t1"] and env["status"] == "attention"
+    assert [d["id"] for d in env["dismissed"]] == ["b:task:t1"]
 
 
 def test_a_remote_bridge_items_dismiss_rereads_with_include_remote(tmp_path):

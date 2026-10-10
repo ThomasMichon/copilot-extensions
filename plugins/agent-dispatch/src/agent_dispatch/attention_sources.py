@@ -525,15 +525,18 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
                 "items": len(r["items"]), "read_at": r.get("read_at", read_at),
                 **({"error": r["error"]} if r.get("error") else {})}
                for n, r in sorted(results.items())]
-    items = ac.dedupe(i for r in results.values() for i in r["items"])
+    # Dismissals apply per condition, before deduplication: hiding one source's
+    # condition never hides another source's undismissed one for the same entity.
+    raw = [i for r in results.values() for i in r["items"]]
     dismissed: list[dict[str, Any]] = []
     if dismissals is not None:
         # Only a read of this machine's own queue can end a dismissal by omission:
         # another coordinator's (--url, --shared, a failover) never had the item.
         ok = {n for n, r in results.items() if r["status"] == "ok" and n not in scopes}
-        items, dismissed, error = dismissals.split(items, read_at, ok_sources=ok)
+        raw, dismissed, error = dismissals.split(raw, read_at, ok_sources=ok)
         if error:
             config_errors = [*config_errors, {"name": DISMISSALS_NAME, "error": error}]
+    items = ac.dedupe(raw)
     dispatch_cli = dismiss_cli()
     for item in items:
         cli = dispatch_cli if item["source"] == "dispatch" else ("agent-dispatch",)
