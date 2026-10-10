@@ -587,6 +587,25 @@ def test_invalid_record_rows_inventory_hash_size(bundle, change):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
+def test_record_rejects_matching_numeric_self_size(bundle):
+    def set_self_size(rows):
+        # Decimal length changes the encoded RECORD size; iterate to the
+        # fixed point so this rejects a matching size, not a size mismatch.
+        size = 0
+        while True:
+            rows[-1][2] = str(size)
+            output = io.StringIO(newline="")
+            csv.writer(output).writerows(rows)
+            actual = len(output.getvalue().encode())
+            if actual == size:
+                return rows
+            size = actual
+
+    _change_record(bundle, set_self_size)
+    with pytest.raises(ReleaseError, match="own hash and size empty"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
 @pytest.mark.parametrize("digest", [
     "md5=abc", "sha1=abc", "md5-sha1=abc", "sha224=abc", "shake_256=abc", "unknown=abc",
     "sha256=not+urlsafe", "sha256=haspadding=", "sha256=short", "sha256=", "sha256",
