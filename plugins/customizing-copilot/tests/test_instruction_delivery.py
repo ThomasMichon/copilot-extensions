@@ -505,6 +505,9 @@ def test_new_unlocked_source_is_advisory_plain_drift_with_current_local_authorit
     tmp_path: Path,
 ) -> None:
     repo, source, spec = fixture(tmp_path)
+    local = repo / projections.local_sibling_destination(spec.destination)
+    local.parent.mkdir(parents=True)
+    local.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
     result = projections.scan_repository(repo, [source])
     assert not result.blocking
     assert any(
@@ -513,9 +516,6 @@ def test_new_unlocked_source_is_advisory_plain_drift_with_current_local_authorit
     )
     classification = reflect.classify_findings(result.findings)
     assert classification.plain and not classification.conflict
-    local = repo / projections.local_sibling_destination(spec.destination)
-    local.parent.mkdir(parents=True)
-    local.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selected["selectedPath"] == local.relative_to(repo).as_posix()
     assert selected["modelAdmission"] == "unknown"
@@ -709,3 +709,50 @@ def test_budget_inventory_reports_malformed_lock_instead_of_empty_success(tmp_pa
     assert budget["instruction_delivery"]["validation_errors"]
     assert "malformed" in budget["instruction_delivery"]["validation_errors"][0]["error"]
     assert "categories" not in budget["instruction_delivery"]
+
+
+@pytest.mark.parametrize("mode", ["inline", "selector"])
+@pytest.mark.parametrize("local", ["absent", "partial", "forged"])
+def test_new_source_blocks_missing_complete_delivery_without_hook_or_maintenance(
+    tmp_path: Path, mode: str, local: str
+) -> None:
+    repo, source, spec = fixture(tmp_path, mode)
+    if local != "absent":
+        candidate = repo / projections.local_sibling_destination(spec.destination)
+        candidate.parent.mkdir(parents=True)
+        raw = projections.render_projection(spec, include_prefer_local=False).content
+        if local == "partial":
+            raw = raw.replace(b"Never assume authorization.", b"[omitted]")
+        else:
+            raw = projections.render_projection(
+                replace(spec, plugin_version="99.0.0"), include_prefer_local=False
+            ).content
+        candidate.write_bytes(raw)
+    result = projections.scan_repository(repo, [source])
+    assert result.blocking
+    assert any(f.check == "projection-missing" for f in result.findings)
+    assert not (repo / spec.destination).exists()
+    assert not (repo / projections.LOCK_RELATIVE).exists()
+
+
+def test_missing_static_control_floor_is_not_replaced_by_local_body(tmp_path: Path) -> None:
+    repo, source, spec = fixture(tmp_path, "inline")
+    declaration = source.payload_root / "instruction-projections.json"
+    data = json.loads(declaration.read_bytes())
+    data["projections"][0]["skipLocalCache"] = True
+    declaration.write_text(json.dumps(data))
+    local = repo / projections.local_sibling_destination(spec.destination)
+    local.parent.mkdir(parents=True)
+    local.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
+    assert projections.scan_repository(repo, [source]).blocking
+
+
+def test_valid_stale_reviewed_guidance_remains_advisory_without_local_refresh(tmp_path: Path) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.sync_repository(repo, [source]).blocking
+    (source.payload_root / "plugin.json").write_text('{"name":"policy","version":"2.0.0"}')
+    result = projections.scan_repository(repo, [source])
+    assert not result.blocking
+    assert any(f.check == "projection-source-update" for f in result.findings)
+    selection = projections.resolve_instruction_source(repo, spec.destination, [source])
+    assert selection["selectedPath"] == delivery.fallback_destination(spec.destination)

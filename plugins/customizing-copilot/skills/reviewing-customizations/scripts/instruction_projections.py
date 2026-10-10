@@ -1959,12 +1959,11 @@ def scan_repository(
                         message,
                     )
                 else:
+                    admitted, reason = delivery_io.new_source_admission(root, spec, _delivery_io())
                     result.add(
-                        WARNING,
-                        "projection-source-update",
-                        destination,
-                        "enabled source has no reviewed lock or destination; "
-                        "checked-in freshness awaits adopted maintenance",
+                        WARNING if admitted else BLOCKING,
+                        "projection-source-update" if admitted else "projection-missing",
+                        destination, reason,
                     )
                 continue
             locked_key = f"{entry['plugin']}:{entry['sourceId']}"

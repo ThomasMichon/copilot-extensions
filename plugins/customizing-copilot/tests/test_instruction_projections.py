@@ -2472,8 +2472,8 @@ def test_existing_scanner_includes_projection_findings_and_inventory(
     report = scanner.run(repo, [source])
 
     assert any(
-        finding.check == "projection-source-update"
-        and finding.severity == projections.WARNING
+        finding.check == "projection-missing"
+        and finding.severity == projections.BLOCKING
         for finding in report.findings
     )
     assert report.instruction_projections is not None
@@ -2624,11 +2624,11 @@ def test_integrated_scanner_reads_projection_settings_without_folder_trust(
     )
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
+    assert exit_code == 1
     assert payload["instruction_projections"]["declared"] == 1
     assert any(
-        finding["check"] == "projection-source-update"
-        and finding["severity"] == projections.WARNING
+        finding["check"] == "projection-missing"
+        and finding["severity"] == projections.BLOCKING
         for finding in payload["findings"]
     )
 

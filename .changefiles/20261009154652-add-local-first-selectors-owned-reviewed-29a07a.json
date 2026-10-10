@@ -1,5 +1,5 @@
 {
-  "comment": "Add local-first selectors, canonical-payload-authenticated local authority, owned reviewed fallbacks with rollback-safe retirement, body receipts and accounting; keep new-source freshness advisory and integrity failures blocking.",
+  "comment": "Add local-first selectors, canonical-payload-authenticated local authority, owned reviewed fallbacks with rollback-safe retirement, body receipts and accounting; block missing delivery while keeping valid stale guidance advisory.",
   "changes": [
     {
       "plugin": "customizing-copilot",

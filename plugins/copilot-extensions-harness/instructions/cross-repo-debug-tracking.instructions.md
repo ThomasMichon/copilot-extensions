@@ -24,8 +24,9 @@ cross-linking flow. After an upstream merge, let the consuming harness's
 adopted, consented maintenance own checked-in projection refresh (normally
 once daily), rather than forcing a synchronous resync to finish every coding
 session. Keep permissionless local rendering current with the installed
-payload and preserve the reviewed offline fallback. New-source freshness lag
-is advisory; foreign ownership, unsafe paths and missing/corrupt locked
+payload and preserve the reviewed offline fallback. Block missing verified
+guidance delivery, but keep valid stale guidance advisory; foreign ownership,
+unsafe paths and missing/corrupt locked
 artifacts remain blocking. If maintenance or rollout has not run, report
 primed/pending, not deployed, and retain the named maintenance/deployment
 obligation. Payload/runtime updates still require explicit rollout

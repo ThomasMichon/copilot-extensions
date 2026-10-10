@@ -183,6 +183,19 @@ def resolve_unpaired(
     }
 
 
+def new_source_admission(
+    root: Path, spec: delivery.Projection, io: DeliveryIO
+) -> tuple[bool, str]:
+    try:
+        if getattr(spec, "skip_local_cache", False):
+            raise ValueError("required inline control kernel has no static delivery floor")
+        current, legacy = delivery.canonical_renders(spec)
+        resolve_unpaired(root, spec.destination, current, legacy, io)
+        return True, "complete enabled canonical local body verified; reviewed freshness pending"
+    except (OSError, ValueError) as exc:
+        return False, f"missing verified guidance delivery: {exc}"
+
+
 def inventory(
     root: Path, automatic: set[Path], entries: Mapping[str, Mapping[str, object]],
     io: DeliveryIO,

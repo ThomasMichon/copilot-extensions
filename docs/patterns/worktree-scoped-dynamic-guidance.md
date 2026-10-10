@@ -108,9 +108,14 @@ fallback in that transaction; rollback restores it. Foreign edits block
 retirement, and unrelated/orphan files are never swept automatically.
 Missing/malformed reviewed content, foreign ownership and unsafe paths block
 resolution. Source-update freshness remains an advisory distinct from those
-integrity failures. A valid enabled source with neither lock entry nor existing
-destination reports advisory `projection-source-update`; an unowned existing
-destination or missing locked artifact still blocks. Adopted, consented
+integrity failures. A new enabled source without reviewed artifacts blocks as
+`projection-missing` until its complete enabled canonical local body is verified;
+partial, forged or absent bodies do not qualify. A required cache-free inline
+control kernel still needs its static delivery floor. Authenticated complete
+local delivery permits advisory `projection-source-update` for pending reviewed
+freshness; valid stale reviewed guidance remains advisory even without local
+refresh. An unowned existing destination or missing locked artifact still
+blocks. Adopted, consented
 deterministic maintenance normally refreshes reviewed projections once daily;
 ordinary work does not require synchronous checked-in resync. This does not
 assert that installed payloads or running systems have been updated.

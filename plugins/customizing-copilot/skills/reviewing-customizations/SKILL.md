@@ -108,10 +108,12 @@ declarations/markers/locks, duplicate ids or destinations, conflicting
 ownership, safely detectable `applyTo` overlap, orphaned lock/file entries,
 legacy marked `AGENTS.md` regions, 4 KiB per-file and 12 KiB aggregate budgets,
 and dynamic/session-specific content that cannot be checked in safely.
-New enabled sources with no lock or existing destination produce advisory
-`projection-source-update`, owned by adopted maintenance rather than a
-per-session resync. Missing locked artifacts, foreign ownership and unsafe
-paths remain blocking.
+New enabled sources with neither reviewed artifacts nor a verified complete
+enabled canonical local body block as `projection-missing`; required inline
+control floors cannot be replaced by a cache. Once valid guidance is available,
+stale reviewed freshness remains advisory `projection-source-update`, owned by
+adopted maintenance rather than per-session resync. Missing locked artifacts,
+foreign ownership and unsafe paths remain blocking.
 
 ### Static fail-safe projection sync
 
