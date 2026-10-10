@@ -43,13 +43,29 @@ A provider instance and canonical target ID qualify identity across drivers;
 the source revision identifies the exact input snapshot, not permission to
 execute it.
 
+Service installation identity is an opaque, bounded UTF-8 value (256 bytes),
+not a logical name, path or endpoint. Native index cells use values such as
+`<marketplace-id>/agent-index`; preserve and compare them exactly. Empty values
+and control characters are rejected. Accepting this identity still grants no
+authority and never causes a filesystem or network lookup.
+
 `health-v1` permits only `health`; `index-v1` additionally permits `index.search`.
 Search parameters match the existing index query API (`q`, `limit`, `source`,
 `language`, `repo`); filters do not grant source access. There is no method, URL,
 path, shell, environment, credentials or generic execute field. The response
-adapter, authentication, service/backend identity checks, state persistence,
+transport adapter, authentication, live service identity checks, state persistence,
 controller/connector runtime and standalone lifecycle are subsequent effort
 slices, not features implemented by this data-contract package.
+
+`IndexHealth` and `IndexSearchResult` validate native index response bodies with
+an explicit 1 MiB maximum, distinct from the default 64 KiB message budget.
+Health checks the expected opaque installation identity and process promotion/
+drain state, then strips backend process tokens and PIDs. `can_accept_reads`
+does not assert model/search readiness. Search preserves the original hit fields
+and full content within bounds; `available: false` is an explicit error, never
+a successful empty result. Invalid query identity, oversized bodies, excess
+hits and malformed/nonfinite scores are rejected without clipping or coercion.
+Parsing a body is not a live backend check or an access grant.
 
 See `efforts/active/machine-fleet-routing-foundation/` and
 `visions/machine-fleet/` in the repository.
