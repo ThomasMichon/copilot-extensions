@@ -561,6 +561,29 @@ provider's absence.
   matching, envelope and seed-delivery contracts passed **56 tests**.
   Touched-code lint passed; fresh full validation and review remain required.
 
+### 2026-10-09 - Full-suite cold-start correction and tracked exception
+- Full affected validation exposed a pending-generation staging failure in
+  Bridge. Real subprocess instrumentation showed stable process identities but
+  two writers exhausted the unchanged two-second lock-admission budget while
+  cold liveness-package imports ran inside another writer's critical section.
+  Preparing that callable before acquiring the lock reduced measured locked
+  work without moving live PID checks, pruning or writes outside the lock.
+- A fresh-process import observer failed against the old code and passes with
+  the correction. The existing eight-process generation round trip, PID-reuse
+  rejection and exactly-once consumption assertions are unchanged. Runtime
+  version contracts passed **21 tests, 1 skipped**.
+- The credential-pin race fixture now synchronizes each competing pair and
+  stubs ambient account discovery. It still requires all ten real Git writes
+  and final helper/username consistency, without assuming native-lock fairness
+  over repeated acquisitions. Credential-pin contracts passed **24 tests**;
+  production locking and timeouts are unchanged. Touched-code lint passed.
+- Full and focused Windows descendant-cleanup failures match the existing
+  accepted gap #4644. The repository's documented tracked-flake exception
+  permits excluding that exact contract; do not disguise it as a passing test
+  or bundle an unvalidated process-management change here. Final affected-suite
+  validation excludes only `test_run_bounded_kills_grandchild_on_timeout`;
+  no other observed failure is waived. Current-head review and CI remain gates.
+
 ### Current continuation gate
 
 The source slices #5737/#5740 and the publication repair are settled; the
