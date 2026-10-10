@@ -64,6 +64,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
         "projections": [
             {
                 "id": "session-guidance",
+                "deliveryMode": "selector",
                 "template": "instructions/session-guidance.instructions.md",
                 "destination": (
                     ".github/instructions/agent-worktrees/"
@@ -75,6 +76,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
             },
             {
                 "id": "worktree-context-guide",
+                "deliveryMode": "selector",
                 "template": "instructions/worktree-context-guide.instructions.md",
                 "destination": (
                     ".github/instructions/agent-worktrees/"
@@ -86,6 +88,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
             },
             {
                 "id": "head-claim-fallback",
+                "deliveryMode": "selector",
                 "template": "instructions/head-claim-fallback.instructions.md",
                 "destination": (
                     ".github/instructions/agent-worktrees/"
@@ -97,6 +100,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
             },
             {
                 "id": "cli-fallback",
+                "deliveryMode": "selector",
                 "template": "instructions/cli-fallback.instructions.md",
                 "destination": (
                     ".github/instructions/agent-worktrees/"
@@ -108,6 +112,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
             },
             {
                 "id": "ownership-boundary-fallback",
+                "deliveryMode": "selector",
                 "template": "instructions/ownership-boundary-fallback.instructions.md",
                 "destination": (
                     ".github/instructions/agent-worktrees/"

@@ -331,3 +331,9 @@ boundaries from implementation decisions and deployment-specific policy.
   overlooked before merge; an immediate fix-forward rejects both nonempty
   self-hash and self-size with a matching-size regression. Installation work
   remains gated on landing that correction.
+- #6051 merged after current-head approval with zero findings and green required
+  CI. Release promotion then exposed the already tracked #6050 stale exact
+  projection expectation: the production manifest declares selector delivery
+  for all five agent-worktrees projections. Its test expectation is corrected
+  without changing runtime behavior, so service promotion is not left blocked
+  behind a known regression.
