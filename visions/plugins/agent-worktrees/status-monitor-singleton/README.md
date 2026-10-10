@@ -1,11 +1,12 @@
 # Status-monitor singleton correctness — Vision
 
 - **Subject:** agent-worktrees' resident `status-monitor` process — the
-  guarantee that exactly one live, actively-serving instance exists per host
-  across every lifecycle transition it can undergo, not only at steady state.
+  guarantee that at most one actively-serving instance exists per host
+  across every lifecycle transition, with bounded zero-coverage windows,
+  and exactly one serving instance at healthy steady state.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-10
 - **Reality docs:** `plugins/agent-worktrees/docs/architecture.md`,
   `plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py`,
   `plugins/agent-worktrees/src/agent_worktrees/status_monitor_runtime.py`
@@ -159,7 +160,7 @@ it never treats stale or orphaned metadata as proof a resident is live.
 
 ## Provenance
 
-- **2026-10-07** — Conceived from PR #5412 (closing a TOCTOU race in
+- **2026-10-06** — Conceived from PR #5412 (closing a TOCTOU race in
   `status-monitor`'s ordinary cold-start exclusivity) and issue #5453
   (tracking the still-open promotion/cutover exclusivity gap). Across more
   than ten review rounds, every attempt to extend atomic exclusivity beyond
@@ -170,3 +171,5 @@ it never treats stale or orphaned metadata as proof a resident is live.
   is a design-smell signal that the four transitions need one coherent
   standard stated up front, rather than continued ad hoc, round-by-round
   patching of whichever transition was touched most recently.
+- **2026-10-10** — Aligned the subject with the at-most-one serving
+  invariant and intentional bounded zero-coverage windows.

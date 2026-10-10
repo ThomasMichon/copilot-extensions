@@ -254,7 +254,8 @@ regardless of how many worktrees, sessions, or CLI invocations reach it — the
 suite-wide
 [*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
 guarantee, generalized here from session-lifecycle hooks to every ordinary
-reader. Holding that "exactly one" guarantee across every transition the
+reader. Extending that steady-state guarantee to at most one serving resident
+with intentional bounded zero-coverage windows across every transition the
 resident process itself undergoes (cold start, replacement, restart,
 promotion/cutover) — not only its idle steady state — is its own subject:
 see [*status-monitor singleton correctness*](status-monitor-singleton/README.md).
@@ -782,7 +783,7 @@ manager, or session-host implementation.
 
 ## Provenance
 
-- **2026-10-07** — Linked the new child vision
+- **2026-10-06** — Linked the new child vision
   [*status-monitor singleton correctness*](status-monitor-singleton/README.md)
   from *The resident daemon as the authoritative live-state database*. Carved
   out after PR #5412 and issue #5453: more than ten review rounds attempting
