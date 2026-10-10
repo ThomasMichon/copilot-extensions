@@ -178,6 +178,36 @@ def test_missing_checkout_never_fetches(monkeypatch, git_facts_context, status, 
     monkeypatch.setattr(git_ops, "classify_worktree", no_git)
     info = worktree_git_facts.compute(record, repo=repo, fetch=True, active_paths=None)
     assert info.state == git_ops.WorktreeState(expected)
+
+
+def test_finalized_attached_shell_cannot_hide_dirty_checkout(
+    monkeypatch, git_facts_context,
+):
+    from agent_worktrees import prune
+
+    _project, record, repo, _path = git_facts_context
+    record.status = "finalized"
+    calls = []
+
+    def classify(*args, active_paths=None, **kwargs):
+        calls.append(active_paths)
+        return git_ops.WorktreeStateInfo(
+            state=git_ops.WorktreeState.ACTIVE if active_paths else git_ops.WorktreeState.DIRTY,
+            dirty=0 if active_paths else 1,
+        )
+
+    monkeypatch.setattr(git_ops, "classify_worktree", classify)
+    info = worktree_git_facts.compute(
+        record, repo=repo, fetch=False, active_paths={record.worktree_path},
+    )
+    assert calls == [{record.worktree_path}, None]
+    assert info.state == git_ops.WorktreeState.ACTIVE
+    assert info.dirty == 1
+    descriptor = prune.assemble_closure_descriptor(
+        record, info, prune.CleanupDisposition(False, "active", "live"),
+        held_claims=0, open_follow_ups=0, evidence_mode="cached",
+    )
+    assert descriptor.display["finalized"] is False
     assert not info.fetch_requested
     assert not info.fetch_failed
 

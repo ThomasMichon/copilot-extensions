@@ -198,6 +198,55 @@ def test_validate_and_finalize_does_not_false_block_on_renamed_checkout(
     assert any(tracked_branch in w for w in warnings)
 
 
+def test_successful_finalize_stays_final_on_fetch_free_status(
+    tmp_path: Path, monkeypatch,
+):
+    from agent_worktrees import __main__ as cli
+    from agent_worktrees import config as cfg
+    from agent_worktrees import tracking
+
+    tracking_d = tmp_path / "tracking"
+    tracking_d.mkdir()
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_d)
+    origin = tmp_path / "origin.git"
+    _git("init", "-q", "--bare", "-b", "base", str(origin), cwd=tmp_path)
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    _git("init", "-q", "-b", "base", cwd=anchor)
+    _init_identity(anchor)
+    _commit(anchor, "base.txt", "base\n")
+    _git("remote", "add", "origin", str(origin), cwd=anchor)
+    _git("push", "-q", "origin", "base", cwd=anchor)
+    wt_id = "final-status"
+    checkout = tmp_path / wt_id
+    _git("worktree", "add", "-b", f"worktree/{wt_id}", str(checkout), "base", cwd=anchor)
+    record = tracking.WorktreeRecord(
+        worktree_id=wt_id, branch=f"worktree/{wt_id}", worktree_path=str(checkout),
+        repo="repo", machine="test", platform="linux",
+        started_at="2026-10-10T00:00:00", last_resumed_at="2026-10-10T00:00:00",
+        resume_count=0, title=None, status="active", completed_at=None,
+    )
+    tracking.save_record(record, tracking_d / f"{wt_id}.yaml")
+    repo_cfg = cfg.RepoConfig(
+        anchor=str(anchor), worktree_root=str(tmp_path), default_branch="base", remote="origin",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="linux",
+        repo_name="repo", repos={"repo": repo_cfg},
+    )
+    monkeypatch.chdir(checkout)
+    assert finalize.validate_and_finalize(wt_id, config)
+    finalized = tracking.load_record(tracking_d / f"{wt_id}.yaml")
+    assert finalized.status == "finalized"
+    monkeypatch.setattr(cli, "_find_record_for_path", lambda path: finalized)
+    monkeypatch.setattr(cli, "_detect_upstream_branch", lambda *args: "base")
+    monkeypatch.setattr(cfg, "load_config", lambda **kwargs: config)
+    for _ in range(3):
+        assert cli._render_status_segment(
+            str(checkout), fetch=False, plain=True, no_title=True,
+        ).strip() == "[FINAL]"
+
+
 def test_cleanup_deletes_renamed_branch_and_preserves_orphaned_tracked_branch(
     tmp_path: Path, monkeypatch,
 ):

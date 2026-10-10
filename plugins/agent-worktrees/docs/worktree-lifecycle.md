@@ -106,11 +106,20 @@ always render as `FINAL`. The canonical closure descriptor
   claims / open follow-ups, plus an `XM<N>` marker (see below) when some of
   those held claims are purely cross-machine.
 
-A cached or fetch-free descriptor **never** reports `FINAL`, even when the
-underlying facts would otherwise qualify -- proving a worktree safe to clean
-always requires a fresh fetch immediately before acting. Pass `--fetch` to
-`agent-worktrees status-segment` (or trigger a picker refresh) to let a
-genuinely clean, claim-free, follow-up-free worktree earn `FINAL`.
+Successful explicit `finalize` is also a durable **display** assertion. The
+descriptor's additive `display` projection reports `FINAL` while the record
+remains finalized, without requiring every normal poll to fetch again. An
+attached concluding shell does not erase that assertion; liveness remains
+visible independently and continues to prevent removal. New claims/session
+activation or follow-ups reopen responsibility through their owning writers;
+observed dirtiness, checkout drift, open PRs, and pending handoffs suppress
+the finalized display.
+
+This does not change destructive authorization: the existing `closure.final`
+and `action` fields still require fresh evidence. A cached descriptor can
+therefore display `FINAL` while its cleanup action remains blocked, including
+when a paired sibling is not yet removable. Older consumers that do not
+understand `display` retain the conservative legacy label.
 
 ##### Decomposed sub-state facts (Phase 9)
 

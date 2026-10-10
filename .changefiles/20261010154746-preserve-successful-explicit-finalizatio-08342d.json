@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve successful explicit finalization as FINAL display independently of cached cleanup evidence.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
