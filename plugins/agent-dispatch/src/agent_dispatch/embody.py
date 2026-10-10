@@ -462,6 +462,7 @@ def spawn_embodied_worker(
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
     worktree_id: str | None = None,
+    resume_head: bool = False,
     route: str = "",
     repo: str | None = None,
     all_repos: bool = False,
@@ -475,10 +476,18 @@ def spawn_embodied_worker(
     Runs ``agent-worktrees [--project <project>] embody --new --seed "<autopilot
     seed>" --driver <driver> --json`` -- creating a fresh parallel worktree and a
     detached mux+Copilot session seeded to claim + execute ``task_id``
-    autonomously (``worktree_id`` re-embodies that worktree instead, adding
-    ``--resume-head`` to resume its preserved head session). ``--driver`` stamps
-    the "driven by <agent>" banner; raises :class:`EmbodyUnavailable` if
+    autonomously (``worktree_id`` re-embodies that worktree instead). ``--driver``
+    stamps the "driven by <agent>" banner; raises :class:`EmbodyUnavailable` if
     ``agent-worktrees`` isn't on PATH.
+
+    ``resume_head`` opts a ``worktree_id`` re-embody into resuming that
+    worktree's preserved head session (adds ``--resume-head``) instead of
+    cold-starting fresh (``embody``'s own ``--seed`` default). The caller alone
+    decides this -- ``worktree_id`` being set is NOT itself sufficient evidence
+    a resume is safe (a reused allocation may carry a deliberately retired
+    conversation, or a freshly targeted task may share a worktree id with
+    unrelated prior context). Callers must derive it the same fail-closed way
+    the bridge path already does: see ``spawn_factories.resume_worktree_eligible``.
 
     ``project`` names the target project explicitly (the agent-worktrees
     ``--project`` global). It is **required in practice for a CWD-neutral caller**
@@ -522,7 +531,9 @@ def spawn_embodied_worker(
         cmd += ["--project", project]
     cmd += ["embody"]
     if worktree_id:
-        cmd += ["--worktree-id", worktree_id, "--resume-head"]
+        cmd += ["--worktree-id", worktree_id]
+        if resume_head:
+            cmd += ["--resume-head"]
     else:
         cmd += ["--new"]
     cmd += ["--seed", seed, "--driver", driver, "--json"]

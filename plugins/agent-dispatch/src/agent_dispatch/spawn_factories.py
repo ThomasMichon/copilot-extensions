@@ -546,6 +546,7 @@ def make_embody_spawn(
                 driver=driver,
                 project=embody.project_for_task(task),
                 worktree_id=task.get("spawn_worktree"),
+                resume_head=resume_worktree_eligible(task),
                 route=route,
                 repo=None if all_repos else task.get("repo"),
                 all_repos=all_repos,

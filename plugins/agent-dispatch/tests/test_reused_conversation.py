@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 from agent_dispatch import bridge, bridge_reclaim, embody
-from agent_dispatch.spawn_factories import make_headless_spawn
+from agent_dispatch.spawn_factories import make_embody_spawn, make_headless_spawn
 from tests._helpers import TEST_REPO
 
 
@@ -156,4 +156,58 @@ def test_missing_conversation_retired_marker_fails_closed(monkeypatch):
     assert handle["session"] == "local-body:replacement-conversation"
     assert any("create" in call for call in calls)
     assert not any(call[1:3] == ["--json", "resume"] for call in calls)
+
+
+def _embody_cmd(monkeypatch):
+    """Capture the ``agent-worktrees embody`` argv the CLI spawn path builds,
+    without actually shelling out."""
+    calls = []
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["agent-worktrees"])
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class _Proc:
+            returncode = 0
+            stdout = '{"session_id": "cli-session", "worktree_id": "review-worktree"}'
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    return calls
+
+
+def test_cli_spawn_resumes_a_retained_not_retired_conversation(monkeypatch):
+    """The CLI (``agent-worktrees embody``) spawn path must thread the SAME
+    fail-closed ``resume_worktree_eligible`` decision the bridge/headless
+    path already makes -- a reused, not-retired allocation resumes its head
+    session (``--resume-head``) rather than cold-starting."""
+    calls = _embody_cmd(monkeypatch)
+    ok, _handle = make_embody_spawn()(_task())
+    assert ok is True
+    assert "--resume-head" in calls[0]
+
+
+def test_cli_spawn_never_resumes_a_retired_conversation(monkeypatch):
+    calls = _embody_cmd(monkeypatch)
+    ok, _handle = make_embody_spawn()(_task(conversation_retired=True))
+    assert ok is True
+    assert "--resume-head" not in calls[0]
+
+
+def test_cli_spawn_fails_closed_on_missing_retired_marker(monkeypatch):
+    calls = _embody_cmd(monkeypatch)
+    task = {**_task(), "spawn_conversation_retired": None}
+    ok, _handle = make_embody_spawn()(task)
+    assert ok is True
+    assert "--resume-head" not in calls[0]
+
+
+def test_cli_spawn_never_resumes_a_freshly_created_worktree(monkeypatch):
+    calls = _embody_cmd(monkeypatch)
+    ok, _handle = make_embody_spawn()(_task("created"))
+    assert ok is True
+    assert "--resume-head" not in calls[0]
 

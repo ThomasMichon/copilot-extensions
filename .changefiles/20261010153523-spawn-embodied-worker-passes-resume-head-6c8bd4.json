@@ -1,5 +1,5 @@
 {
-  "comment": "spawn_embodied_worker passes --resume-head when re-embodying an existing worktree, so a continuing dispatch task resumes its preserved conversation instead of silently cold-starting a fresh one",
+  "comment": "spawn_embodied_worker can resume a worktree's preserved head session via the new resume_head parameter (--resume-head), fail-closed-gated by the same resume_worktree_eligible contract the bridge/headless path already uses -- so a continuing dispatch task resumes its conversation instead of silently cold-starting a fresh one, without resurrecting a deliberately retired session or mixing in unrelated context",
   "changes": [
     {
       "plugin": "agent-dispatch",
