@@ -345,6 +345,28 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
     finally:
         release.set()
 
+def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
+    release = threading.Event()
+    calls = []
+    lock = threading.Lock()
+
+    def notify(event):
+        with lock:
+            calls.append(event.subscriber.subscriber_id)
+        assert release.wait(3)
+
+    daemon = make(notify=notify)
+    for number in range(20):
+        registration = spec(str(number))
+        del registration["notification_protocol"]
+        daemon.compute("register", registration)
+    wait(lambda: len(calls) == 8 and len(daemon._deliveries.legacy_queue) == 12)
+    daemon.compute("shutdown", {})
+    release.set()
+    daemon.close()
+    assert len(calls) == len(set(calls)) == 20
+    assert not daemon._deliveries.legacy_queue
+
 
 def test_shutdown_during_fetch_preserves_subscriber_for_successor(make):
     entered, release = threading.Event(), threading.Event()

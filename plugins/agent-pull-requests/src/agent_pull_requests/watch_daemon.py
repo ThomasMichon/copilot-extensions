@@ -267,7 +267,7 @@ class WatchDaemon:
         live = [thread.name for thread in pollers if thread.is_alive()]
         live.extend(self._deliveries.close(deadline))
         if live:
-            raise TimeoutError(f"PR watch pollers did not stop: {', '.join(live)}")
+            raise TimeoutError(f"PR watch workers did not stop: {', '.join(live)}")
 
     # -- poller lifecycle ---------------------------------------------
 

@@ -160,10 +160,29 @@ class Deliveries:
         scheduler = self.scheduler
         if scheduler is not None:
             scheduler.join(max(0.0, deadline - time.monotonic()))
-        with self.lock:
-            workers = list(self.workers.values())
-        for worker in workers:
-            worker.join(max(0.0, deadline - time.monotonic()))
+        while True:
+            with self.lock:
+                while self.legacy_queue and len(self.workers) < self.max_workers:
+                    event = self.legacy_queue.popleft()
+                    identity = event.subscriber.registration_id
+                    thread = threading.Thread(
+                        target=self._run_legacy, args=(event,),
+                        name=f"pr-notify:{identity}", daemon=True,
+                    )
+                    self.workers[identity] = thread
+                    thread.start()
+                    deadline = max(deadline, time.monotonic() + 35.0)
+                workers = list(self.workers.values())
+                queued = bool(self.legacy_queue)
+            if not workers or time.monotonic() >= deadline:
+                break
+            if queued:
+                self.shutdown.wait(0.01)
+                time.sleep(0.01)
+            else:
+                for worker in workers:
+                    worker.join(max(0.0, deadline - time.monotonic()))
+                break
         live = [worker.name for worker in workers if worker.is_alive()]
         if scheduler is not None and scheduler.is_alive():
             live.append(scheduler.name)

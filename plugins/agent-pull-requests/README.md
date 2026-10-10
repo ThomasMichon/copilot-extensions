@@ -129,6 +129,11 @@ even when handler draining fails. Exceeding either deadline raises an explicit
 error rather than reporting a completed graceful shutdown. Pending subscriptions
 are retained, not cleared by shutdown.
 
+Already-accepted legacy callbacks queued beyond the eight-worker limit are
+drained in bounded batches before shutdown finishes, with 35 seconds allowed
+per newly started batch. A large legacy backlog can exceed restart's 45-second
+wait: restart then refuses to start a successor while the owner still drains.
+
 `serve restart` probes lease ownership, not leftover rendezvous metadata or an
 ambiguous failed health RPC, to decide whether a predecessor is running.
 An unreachable lease holder must not be bypassed. Restart probes actual lease
