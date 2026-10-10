@@ -1,0 +1,9 @@
+{
+  "comment": "Stage remote Picker New and Resume prompts through the target daemon with structured SSH admission and identity-only handoff",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

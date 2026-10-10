@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** managed worktree, sequential reviewed PRs targeting `dev`
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Umbrella issue:** [#6057](https://github.com/ThomasMichon/copilot-extensions/issues/6057)
 - **Vision:** `picker` / `cold-start-resume-prompt`
 
@@ -74,10 +74,10 @@ The operator confirmed the slug `remote-picker-seed-parity`.
 
 ### Phase 1 -- Reviewed target-owned invocation contract
 
-- [ ] Review and land this plan and vision amendment before implementation.
-- [ ] Trace the complete New/Resume host-to-SSH launch path and prior safe
+- [x] Review and land this plan and vision amendment before implementation.
+- [x] Trace the complete New/Resume host-to-SSH launch path and prior safe
   structured request, remote capability and idempotency mechanisms.
-- [ ] Specify which target-owned boundary stages intent and returns its
+- [x] Specify which target-owned boundary stages intent and returns its
   worktree/seed identity, and which later command launches that exact identity.
 - [ ] Resolve lost-response semantics before enabling the offering: New retry
   must identify the already-created worktree, not create another; Resume retry
@@ -156,3 +156,37 @@ hiding the problem or silently dropping text.
   covers this Worktrees flow. Created #6057 and verified compatible target
   effort adoption with the native read-only probe. Plan is Draft pending
   repository review; no implementation changes made.
+- **2026-10-10** -- Plan approved and merged as #6059. Publication timed out
+  after the branch reached the provider; verified that exact branch and opened
+  its PR through the supported already-published-branch flow, without rewriting
+  the remote. Synced the source worktree onto the reviewed plan.
+  Implemented the initial target-local structured admission/status surface and
+  existing-daemon admission/staging transactions. A text-free request receipt
+  fences allocation and prompt identity; New creation receives its recorded
+  allocation, and accepted/replaced/completed intents cannot be silently replayed.
+  Host SSH launch carries an encoded request first and only the returned
+  worktree/seed identity for interactive launch. Added remote composer parity,
+  retained same-machine AHP restrictions and bounded shell command size.
+  Initial regression portfolios pass: 78 engine admission/creation/seed/routing
+  cases and 28 Manager UI/client cases. Ten focused admission/transport tests
+  pass, including real PowerShell argv receipt (one native-POSIX check skipped
+  on Windows and reserved for the SSH lane). A domain refusal initially closed
+  the daemon socket instead of returning its cause; corrected that to structured
+  error propagation without automatic mutation replay.
+  The declared POSIX SSH route is reachable; the first Windows target probe
+  failed. No remote state, install or live validation worktree has been created.
+  Full fault-matrix, final safety/compatibility checks, real SSH validation,
+  implementation review/CI and deployment remain; this is not a completion claim.
+- **2026-10-10** -- Independent correctness review identified two crash fences
+  and error precedence defects. Added durable creation-start fencing before New
+  side effects, reloaded admission under the execution lock, and prevented
+  recreation after incomplete/reaped attempts. Stale admission now compares the
+  durable seed revision as well as the record revision, so an interrupted
+  replacement cannot be overwritten. Remote failure reporting prioritizes the
+  structured target error instead of earlier creation progress. Added regressions
+  for each case. The expanded portfolio passes 107 engine cases (one native
+  POSIX skip) and 55 Manager cases; the latter includes launch-script contracts.
+  Remaining declared Windows routes also failed bounded reachability probes.
+  The reachable POSIX target has an old engine without the new capability:
+  its fresh/old-target refusal and eventual candidate/deployed live validation
+  remain explicit next gates. No target provisioning or remote mutation occurred.
