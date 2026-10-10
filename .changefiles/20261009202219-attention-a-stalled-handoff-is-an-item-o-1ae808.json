@@ -1,9 +1,0 @@
-{
-  "comment": "attention: a stalled handoff is an item only while its worktree's handoff ledger still lists it, and offers resume (embody with the handoff seed) and abandon; every item can be dismissed until it changes, snoozed (--until) or ignored (--forever), with dismissed items reported, not dropped; abandoning a handoff also cancels its worktree ledger entry",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

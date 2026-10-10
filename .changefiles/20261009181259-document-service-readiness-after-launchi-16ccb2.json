@@ -1,9 +1,0 @@
-{
-  "comment": "Document service readiness after launching caller cleanup in lifecycle guidance.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

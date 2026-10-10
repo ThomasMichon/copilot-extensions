@@ -1,9 +1,0 @@
-{
-  "comment": "Use revision-aware PR association in marker refresh regression coverage",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

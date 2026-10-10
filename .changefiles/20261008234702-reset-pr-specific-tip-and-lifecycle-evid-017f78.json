@@ -1,9 +1,0 @@
-{
-  "comment": "Reset PR-specific tip and lifecycle evidence when set-pr reassigns a record to another identity.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

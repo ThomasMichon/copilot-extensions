@@ -1,9 +1,0 @@
-{
-  "comment": "Retain durable pre-sync local and published recovery refs, authorize completed backed synchronization without fragile reflogs, and recover compatible legacy PR names and metadata.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
