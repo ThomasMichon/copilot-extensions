@@ -8,6 +8,9 @@ empty "all clear".
 ```bash
 agent-dispatch attention [--json] [--source NAME ...] [--include-remote]
 agent-dispatch attention next [--after CURSOR] [--json] [--source NAME ...] [--include-remote]
+agent-dispatch attention dismiss ID [--until TIME | --forever]
+agent-dispatch attention undismiss ID
+agent-dispatch attention dismissed [--json]
 agent-dispatch attention source add NAME [--timeout S] -- ARGV...
 agent-dispatch attention source remove NAME
 agent-dispatch attention source list
@@ -34,7 +37,22 @@ on a remote target (an SSH read each; see `bridge` below).
   session has claimed for longer than
   `AGENT_DISPATCH_ATTENTION_HANDOFF_AFTER_SECS` (strictly greater, default 600;
   `0` turns it off) is `stalled`: its predecessor already stopped, so the work
-  waits on a successor.
+  waits on a successor -- but only while its worktree still does. The baton's
+  worktree (`target_worktree`, else its `worktree` affinity) keeps its own
+  handoff ledger (`agent-worktrees head-session --worktree <id> --json`), the
+  authority for which handoff it waits on; a baton that ledger no longer lists
+  was picked up, replaced by a later handoff or cancelled (or was only saved,
+  never handed over), so it is no item. Each worktree's ledger is read once,
+  four at a time, alongside the lane reads; a ledger that can't be read for
+  certain in the read's backlog budget (no agent-worktrees, an untracked
+  worktree, a failed reply, any malformed entry) keeps its batons' items. A
+  stalled baton's actions are `resume` (`agent-worktrees
+  embody --worktree-id <wt> --seed <seed>`, a successor in its worktree taking
+  the handoff over through context-handoff's seed), when its worktree is known,
+  then `abandon` (`agent-dispatch abandon <id> --permit --reason ...`), then
+  `show`. Abandoning a baton also cancels its entry in that worktree's ledger
+  (`agent-worktrees cancel-handoff`, which leaves an entry a successor is
+  already taking over untouched).
   One item per task, the worst condition winning. A lane that isn't draining
   (the coordinator's `backlog`) is one `stalled` item per repo (`entity: queue`):
   its oldest queued task waited longer than
@@ -102,7 +120,8 @@ contract violation makes that source `failed` with a one-line `error`.
   "sources": [{"name": "dispatch", "status": "ok | failed | uncertain | disabled",
                "uncertain": 0, "items": 0, "read_at": "<ISO-8601 UTC>", "error": "<only when failed>"}],
   "config_errors": [{"name": "<registered name>", "error": "<one line>"}],
-  "items": ["<item>, in queue order"]
+  "items": ["<item>, in queue order"],
+  "dismissed": ["<item>, with its dismissal: {mode, at, until?}"]
 }
 ```
 
@@ -132,7 +151,7 @@ after it even when that item was resolved meanwhile; it wraps to the top.
 | `reason` | one line, at most 200 characters |
 | `created_at`, `updated_at` | when the condition began / was last observed, as canonical UTC (`YYYY-MM-DDTHH:MM:SS+00:00`); a command source may send any ISO-8601 spelling with an offset, which is normalized |
 | `confidence` | `reported`, `scanned` or `heuristic` |
-| `actions[]` | `{verb, argv}` that run as-is (a dispatch action carries the read's own `--url`/`--shared`, or `--shared` when the default path failed over to the shared coordinator; never a token, so a read authenticated only by a `--token` argument, or one that went over an SSH failover (no flag pins that peer), offers no dispatch actions); the first is the default. `verb` is `show` (read-only), `resume` (mutating) or `open` (external viewer), or a source's own `x.<source>.<verb>`. A client may run `show` without confirmation only for a built-in source's item; every action of a command source is operator-initiated |
+| `actions[]` | `{verb, argv}` that run as-is (a dispatch action carries the read's own `--url`/`--shared`, or `--shared` when the default path failed over to the shared coordinator; never a token, so a read authenticated only by a `--token` argument, or one that went over an SSH failover (no flag pins that peer), offers no dispatch actions); the first is the default. `verb` is `show` (read-only), `resume` (mutating), `open` (external viewer), `abandon` (mutating, retires the entity) or `dismiss` (hides the item on this machine; see *Dismissals*), or a source's own `x.<source>.<verb>`. Every queued item's last action is `dismiss` (`agent-dispatch attention dismiss <id>`; a `dispatch` item's carries the read's own `--url`/`--shared`, and none is offered when its other actions aren't). A client may run `show` without confirmation only for a built-in source's item; every action of a command source is operator-initiated |
 | `source` | the source that produced it |
 | `input` | optional, dispatch steering items only: the steering card's `request_input` field list, exactly as `--request-input` produces it -- `[{name, type, options?, allow_other?, show_when?}]`, `type` one of `text`, `textarea`, `choice`, `multichoice` (`options`, a non-empty string list, and `allow_other` on a `choice` or `multichoice` only; `show_when` is `{field, equals}`) -- answered with `agent-dispatch steer submit`. A card whose form isn't that shape has no `input` (its `card show` action still reaches it); a command source can't set it |
 | `also[]` | lower-ranked items for the same entity from other sources (aggregator-owned) |
@@ -154,6 +173,34 @@ Concurrent reads are ordered by a read number each takes when it starts --
 persisted in the first-observed store and strictly increasing across processes
 (no clock: same-instant reads and clock rollback can't tie or reorder them) --
 so a slower, older read that finishes last can't re-add a time a newer one cleared.
+
+## Dismissals
+
+`agent-dispatch attention dismiss <id>` hides an item the operator has decided
+to leave alone; it moves from `items` to `dismissed` (each carrying its
+`dismissal`: `mode`, `at`, and `until` for a snooze), so nothing is hidden
+silently, and a queue whose every item is dismissed reads `clear`. Three modes:
+
+- **until it changes** (the default): the item returns when its
+  `display_state`, `lifecycle_state` or `reason` changes. Numbers in a reason
+  (a waiting time, a count) are ignored, so a condition that only ages stays
+  dismissed; `updated_at` isn't compared (some sources stamp it with the read
+  time). The command reads the item's own source first, so it records the
+  condition the operator saw, and refuses (exit 2) an item that isn't queued.
+- **`--until TIME`** (ISO-8601 with an offset, in the future): a snooze; the
+  item returns after that time even if nothing changed.
+- **`--forever`**: until `attention undismiss <id>`, whatever changes.
+
+A dismissal that no longer applies is removed by the read that finds so, and
+one whose item an `ok` read of its source no longer has ends with the
+condition (a later recurrence is new); a `failed` or `uncertain` read proves
+nothing, nor does a read of another coordinator's queue (`--url`, `--shared`, a
+failover). Dismissals apply to each source's own condition before
+deduplication, so dismissing one never hides another source's undismissed
+condition for the same entity. `attention dismissed [--json]` lists them. They are this machine's
+own, keyed by item `id`, in `attention-dismissed.json` beside the
+coordinator's install, never in a repository; a store that can't be read
+hides nothing and is reported in `config_errors[]` (as `*dismissals`).
 
 ## Writing a command source
 
