@@ -145,7 +145,7 @@ def test_health_rejects_control_characters_in_opaque_installation_identity(contr
 @pytest.mark.parametrize("raw", [
     b"not JSON", b"[]", b'{"status":"ok"}', b"\xff",
     b" " * (MAX_RESPONSE_BYTES + 1),
-])
+], ids=["invalid-json", "array", "missing-fields", "invalid-utf8", "oversized"])
 def test_invalid_backend_body_uses_backend_specific_error_class(raw):
     with pytest.raises(BackendResponseError):
         IndexHealth.from_backend(raw, expected_installation_id="mkt-id/agent-index")
