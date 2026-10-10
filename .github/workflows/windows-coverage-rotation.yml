@@ -64,7 +64,6 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   select:
@@ -81,12 +80,22 @@ jobs:
     outputs:
       plugins: ${{ steps.select.outputs.plugins }}
       ref: ${{ steps.resolve-ref.outputs.ref }}
+      sha: ${{ steps.resolve-sha.outputs.sha }}
     steps:
       - id: resolve-ref
         name: Resolve the ref to validate
+        env:
+          # Passed through env, never interpolated directly into the
+          # script body -- inputs.ref is attacker-shaped (anyone who can
+          # dispatch this workflow controls it), and inline `${{ }}`
+          # interpolation into `run:` would let a crafted value (command
+          # substitution, embedded newlines) execute as shell source
+          # instead of being treated as inert data.
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REF: ${{ inputs.ref }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "ref=${{ inputs.ref || 'dev' }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "ref=${INPUT_REF:-dev}" >> "$GITHUB_OUTPUT"
           else
             echo "ref=dev" >> "$GITHUB_OUTPUT"
           fi
@@ -94,6 +103,13 @@ jobs:
         with:
           ref: ${{ steps.resolve-ref.outputs.ref }}
           fetch-depth: 1
+      - id: resolve-sha
+        name: Pin the exact commit this run validates
+        # Resolve to an immutable SHA right after checkout, once, so a
+        # push to a mutable branch ref between here and a later matrix
+        # job can never make `select` and `test` silently disagree on
+        # which commit they each actually looked at.
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -121,7 +137,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.select.outputs.ref }}
+          # The immutable SHA `select` resolved, not the (possibly
+          # mutable) ref -- every matrix job tests the exact same commit
+          # `select` computed its rotation picks from.
+          ref: ${{ needs.select.outputs.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
