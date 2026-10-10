@@ -30,6 +30,16 @@ cannot be a shared runtime import — it must physically exist in each plugin. S
 this canonical copy is **vendored (synced) byte-identically** into every Python
 runtime plugin's `scripts/` dir.
 
+The standalone `agent-index-service` distribution also consumes this exact
+primitive for its explicit installer, without introducing a plugin or a second
+maintained source mirror. Its standard setuptools build copies the canonical
+file into wheel build output; its sdist carries the same bytes so a subsequent
+wheel build needs no repository checkout. Wheel/sdist byte-equality tests and
+wheel RECORD bind that generated resource to the package artifact. Existing
+plugin bootstrap scripts remain self-contained and unchanged. The standalone
+installer uses only its own installed resource, never a repository/plugin/PATH
+fallback; editable/source-only installation is not an installer runtime.
+
 Slot resolution is completion-marker strict: `current-version`,
 `last-known-good`, and newest-slot fallback candidates must carry a valid
 `.install-complete.json` and an interpreter. The marker schema is exact: string

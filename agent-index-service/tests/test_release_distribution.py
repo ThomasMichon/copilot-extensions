@@ -32,6 +32,12 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
         build.mkdir()
         for filename in ("pyproject.toml", "README.md"):
             shutil.copy2(source / filename, build / filename)
+        if source.name == "agent-index-service":
+            for filename in ("setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
+                shutil.copy2(source / filename, build / filename)
+            primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
+            primitive.parent.mkdir(parents=True)
+            shutil.copy2(repo / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
         shutil.copytree(
             source / "src", build / "src",
             ignore=shutil.ignore_patterns("__pycache__"),
