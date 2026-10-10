@@ -3730,6 +3730,7 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
         driver,
         project=None,
         worktree_id=None,
+        resume_head=False,
         route="",
         repo=None,
         all_repos=False,

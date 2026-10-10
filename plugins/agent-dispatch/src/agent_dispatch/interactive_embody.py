@@ -79,7 +79,7 @@ import subprocess
 import uuid
 from typing import Any, Protocol
 
-from . import embody
+from . import embody, spawn_factories
 from .embody_prompts import interactive_worker_prompt
 from .queue import worker_id_for
 from .queue_records import Status
@@ -311,6 +311,12 @@ def launch_interactive_embodiment(
             driver=driver,
             project=resolved_project,
             worktree_id=worktree_id,
+            resume_head=spawn_factories.resume_worktree_eligible(
+                {
+                    "spawn_worktree_ownership": ownership,
+                    "spawn_conversation_retired": reservation.get("conversation_retired"),
+                }
+            ),
             seed=seed,
             timeout=timeout,
         )

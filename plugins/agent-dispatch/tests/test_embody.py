@@ -360,6 +360,8 @@ def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
     # A fresh parallel worktree, JSON output, and the driver banner.
     assert "--new" in cmd
     assert "--json" in cmd
+    # A brand-new worktree has no head session to resume.
+    assert "--resume-head" not in cmd
     assert cmd[cmd.index("--driver") + 1] == "agent-dispatch"
     # The seed carries the autopilot worker prompt for this task/worker.
     seed = cmd[cmd.index("--seed") + 1]
@@ -387,6 +389,55 @@ def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch):
     cmd = captured["cmd"]
     assert "--new" not in cmd
     assert cmd[cmd.index("--worktree-id") + 1] == "wt-reviewer"
+    # worktree_id alone is NOT sufficient evidence a resume is safe (a reused
+    # allocation may carry a deliberately retired conversation, or a freshly
+    # targeted task may land on a worktree id with unrelated prior context) --
+    # the caller must opt in explicitly via resume_head.
+    assert "--resume-head" not in cmd
+
+
+def test_spawn_embodied_worker_resume_head_opts_into_resuming(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.spawn_embodied_worker(
+        "task-9", worker_id="embody-1", worktree_id="wt-reviewer", resume_head=True,
+    )
+
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--worktree-id") + 1] == "wt-reviewer"
+    assert "--resume-head" in cmd
+
+
+def test_spawn_embodied_worker_resume_head_ignored_without_worktree_id(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    # resume_head only ever makes sense alongside an EXISTING worktree_id;
+    # a brand-new worktree (--new) has nothing to resume.
+    embody.spawn_embodied_worker(
+        "task-9", worker_id="embody-1", resume_head=True,
+    )
+
+    cmd = captured["cmd"]
+    assert "--new" in cmd
+    assert "--resume-head" not in cmd
 
 
 def test_create_worktree_returns_id_and_path(monkeypatch):
