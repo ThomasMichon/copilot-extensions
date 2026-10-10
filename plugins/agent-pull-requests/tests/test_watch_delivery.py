@@ -499,6 +499,37 @@ def test_scheduler_wait_is_bounded_for_oversized_retry_timestamp(make):
     assert daemon._deliveries.scheduler.is_alive()
     daemon.close()
 
+def test_delivery_thread_start_failure_recovers_without_restart(make, monkeypatch):
+    original = threading.Thread.start
+    failed = threading.Event()
+    delivered = []
+
+    def start(thread):
+        if thread.name.startswith("pr-notify:") and not failed.is_set():
+            failed.set()
+            raise RuntimeError("cannot start new thread")
+        original(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    daemon = make(notify=lambda event: delivered.append(event) or 0)
+    daemon.compute("register", spec())
+    wait(lambda: failed.is_set() and len(delivered) == 1)
+    wait(lambda: not daemon._deliveries.workers)
+    assert daemon.status()["delivery_error"] is None
+    assert not daemon.status()["subscribers"]
+
+
+def test_persisted_event_requires_exclusive_timeout_or_transition():
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "one", until=(MERGED,), acknowledged=True,
+                      notify={"argv": ["consumer"]})
+    registry.apply_snapshot(key, PRSnapshot(merged=True))
+    entries = registry.snapshot_state()
+    entries[0]["pending"]["payload"]["timed_out"] = True
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
+
 def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
     release = threading.Event()
     calls = []

@@ -25,6 +25,7 @@ class Deliveries:
         self.max_workers = 8
         self.changed = threading.Event()
         self.prefer_legacy = True
+        self.start_error: str | None = None
 
     def resume(self) -> None:
         with self.lock:
@@ -35,11 +36,17 @@ class Deliveries:
                 self.scheduler = threading.Thread(
                     target=self._schedule, name="pr-notify-scheduler", daemon=True,
                 )
-                self.scheduler.start()
+                try:
+                    self.scheduler.start()
+                except RuntimeError:
+                    self.scheduler = None
+                    self.start_error = "worker_start_failed"
+                    raise
 
     def _schedule(self) -> None:
         while not self.shutdown.is_set():
             self.changed.clear()
+            start_failed = False
             with self.transaction:
                 pending = sorted(
                     self.registry.pending_events(),
@@ -67,13 +74,24 @@ class Deliveries:
                         target=target, args=(event,), name=f"pr-notify:{identity}", daemon=True,
                     )
                     self.workers[identity] = thread
-                    thread.start()
+                    try:
+                        thread.start()
+                    except RuntimeError:
+                        del self.workers[identity]
+                        if target == self._run_legacy:
+                            self.legacy_queue.appendleft(event)
+                        self.start_error = "worker_start_failed"
+                        start_failed = True
+                    else:
+                        self.start_error = None
             future = [
                 e.subscriber.pending["next_attempt"] for e in pending
                 if e.subscriber.registration_id not in self.workers
                 and e.subscriber.pending["next_attempt"] > time.time()
             ]
             delay = min(60.0, max(0.0, min(future) - time.time())) if future else None
+            if start_failed:
+                delay = 1.0
             self.changed.wait(delay)
 
     def legacy(self, event) -> None:
@@ -184,7 +202,13 @@ class Deliveries:
                         name=f"pr-notify:{identity}", daemon=True,
                     )
                     self.workers[identity] = thread
-                    thread.start()
+                    try:
+                        thread.start()
+                    except RuntimeError:
+                        del self.workers[identity]
+                        self.legacy_queue.appendleft(event)
+                        self.start_error = "worker_start_failed"
+                        raise
                     deadline = max(deadline, time.monotonic() + 35.0)
                 workers = list(self.workers.values())
                 queued = bool(self.legacy_queue)

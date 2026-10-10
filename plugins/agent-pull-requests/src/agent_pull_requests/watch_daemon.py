@@ -203,6 +203,7 @@ class WatchDaemon:
                 "capabilities": [ACKNOWLEDGED_NOTIFICATIONS],
                 "pending_delivery_count": len(self._registry.pending_events()),
                 "persistence_error": self._persistence_error,
+                "delivery_error": self._deliveries.start_error,
             }
         if kind == "shutdown":
             self._shutdown_event.set()
@@ -363,6 +364,7 @@ class WatchDaemon:
             "subscribers": self._registry.status(),
             "pending_deliveries": self._deliveries.status(),
             "persistence_error": self._persistence_error,
+            "delivery_error": self._deliveries.start_error,
         }
 
 

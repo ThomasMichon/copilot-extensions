@@ -97,6 +97,7 @@ def validate_pending(pending: object, key, sub) -> None:
         or any(t not in ALL_TRANSITIONS for t in payload["transitions"])
         or not isinstance(payload.get("timed_out"), bool)
         or (not payload["timed_out"] and not payload["transitions"])
+        or (payload["timed_out"] and bool(payload["transitions"]))
         or any(
             field in payload and not isinstance(payload[field], str)
             for field in ("pr_state", "review_decision", "mergeable", "checks_state")
