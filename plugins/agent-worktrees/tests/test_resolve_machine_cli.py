@@ -9,6 +9,9 @@ matched `key`/`display_name`/`alias`, never `hostname`.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -20,10 +23,10 @@ from agent_worktrees import resolve_machine_cli as rmc
 pytestmark = pytest.mark.guard
 
 
-def _entry(key, *, hostname="", alias="", envs=()):
+def _entry(key, *, hostname="", alias="", display_name=None, envs=()):
     return cfg.MachineEntry(
         key=key,
-        display_name=key,
+        display_name=display_name or key,
         environment=envs[0][0] if envs else "",
         hostname=hostname,
         alias=alias,
@@ -53,14 +56,7 @@ def test_machine_key_for_display_matches_hostname(tmp_path):
 
 
 def test_emit_remote_plan_for_env_resolves_by_hostname(tmp_path):
-    """`_emit_remote_plan_for_env` loads `entries` once itself, then calls
-    `_machine_key_for_display` which loads its *own* copy via a second
-    `load_machines_yaml` call. A naive single `return_value` mock lets that
-    inner call also resolve the hostname, so `entries.get(key)` would already
-    succeed before this function's own fallback loop ever runs. Make the
-    inner (second) `load_machines_yaml` call fail -- so `_machine_key_for_display`
-    returns the name unchanged -- forcing this function's own hostname match
-    to actually execute."""
+    """Matching and environment selection use one registry snapshot."""
     entries = {
         "atlas-core": _entry(
             "atlas-core",
@@ -70,8 +66,8 @@ def test_emit_remote_plan_for_env_resolves_by_hostname(tmp_path):
     }
     config = _fake_config(tmp_path)
     with patch.object(
-        cfg, "load_machines_yaml", side_effect=[entries, FileNotFoundError()]
-    ), \
+        cfg, "load_machines_yaml", return_value=entries
+    ) as load, \
          patch.object(cfg, "project_name", return_value="example-project"), \
          patch.object(rmc, "_emit_plan") as emit_plan:
         rc = rmc._emit_remote_plan_for_env(config, "CPC-FAKE-HOST1", "Win", [])
@@ -82,6 +78,7 @@ def test_emit_remote_plan_for_env_resolves_by_hostname(tmp_path):
     assert plan["action"] == "remote"
     assert plan["ssh_alias"] == "atlas-core"
     assert plan["machine"] == "atlas-core"
+    load.assert_called_once_with(str(tmp_path))
 
 
 def test_emit_remote_plan_for_env_still_unknown_for_unmatched_name(tmp_path):
@@ -109,28 +106,28 @@ def test_emit_remote_plan_for_env_still_unknown_for_unmatched_name(tmp_path):
 
 
 def test_wrap_remote_command_wraps_explicit_posix_shells():
-    assert rmc._wrap_remote_command("bash", "aperture-labs") == (
-        "bash -lc aperture-labs"
+    assert rmc._wrap_remote_command("bash", "example-project") == (
+        "bash -lc example-project"
     )
     # Invokes the CONFIGURED shell itself -- never hardcodes bash for a
     # different configured one (sh/zsh are both documented supported
     # remote-shell values, machine-config.md).
-    assert rmc._wrap_remote_command("sh", "aperture-labs") == "sh -lc aperture-labs"
-    assert rmc._wrap_remote_command("zsh", "aperture-labs") == "zsh -lc aperture-labs"
+    assert rmc._wrap_remote_command("sh", "example-project") == "sh -lc example-project"
+    assert rmc._wrap_remote_command("zsh", "example-project") == "zsh -lc example-project"
 
 
 def test_wrap_remote_command_quotes_the_inner_command():
-    wrapped = rmc._wrap_remote_command("bash", "aperture-labs list --json")
-    assert wrapped == "bash -lc 'aperture-labs list --json'"
+    wrapped = rmc._wrap_remote_command("bash", "example-project list --json")
+    assert wrapped == "bash -lc 'example-project list --json'"
 
 
 def test_wrap_remote_command_never_wraps_pwsh_or_unrecognized_shell():
     # Wrapping a non-POSIX target in `bash -lc` would break it outright --
     # never guess for pwsh, and never guess for an unrecognized/empty value
     # either (only _resolve_ssh_target's own defaulting decides that).
-    assert rmc._wrap_remote_command("pwsh", "aperture-labs") == "aperture-labs"
-    assert rmc._wrap_remote_command("", "aperture-labs") == "aperture-labs"
-    assert rmc._wrap_remote_command("cmd", "aperture-labs") == "aperture-labs"
+    assert rmc._wrap_remote_command("pwsh", "example-project") == "example-project"
+    assert rmc._wrap_remote_command("", "example-project") == "example-project"
+    assert rmc._wrap_remote_command("cmd", "example-project") == "example-project"
 
 
 def test_resolve_ssh_target_defaults_shell_from_environment_name():
@@ -158,13 +155,13 @@ def test_emit_remote_plan_for_env_wraps_remote_command_for_posix_target(tmp_path
     }
     config = _fake_config(tmp_path)
     with patch.object(cfg, "load_machines_yaml", return_value=entries), \
-         patch.object(cfg, "project_name", return_value="aperture-labs"), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
          patch.object(rmc, "_emit_plan") as emit_plan:
         rc = rmc._emit_remote_plan_for_env(config, "borealis", "Linux", [])
 
     assert rc == 0
     (plan,) = emit_plan.call_args.args
-    assert plan["remote_command"] == "bash -lc aperture-labs"
+    assert plan["remote_command"] == "bash -lc example-project"
 
 
 def test_emit_remote_plan_for_env_does_not_wrap_for_windows_target(tmp_path):
@@ -177,10 +174,190 @@ def test_emit_remote_plan_for_env_does_not_wrap_for_windows_target(tmp_path):
     }
     config = _fake_config(tmp_path)
     with patch.object(cfg, "load_machines_yaml", return_value=entries), \
-         patch.object(cfg, "project_name", return_value="aperture-labs"), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
          patch.object(rmc, "_emit_plan") as emit_plan:
         rc = rmc._emit_remote_plan_for_env(config, "atlas-core", "Win", [])
 
     assert rc == 0
     (plan,) = emit_plan.call_args.args
-    assert plan["remote_command"] == "aperture-labs"
+    assert plan["remote_command"] == "example-project"
+
+
+@pytest.mark.parametrize("name", [
+    "atlas-core", "ATLAS-CORE", "friendly", "FRIENDLY",
+    "CPC-FAKE-HOST1", "cpc-fake-host1", "Build Box", "build box",
+])
+def test_all_picker_matching_paths_share_machine_identities(tmp_path, name):
+    entry = _entry(
+        "atlas-core", hostname="CPC-FAKE-HOST1", alias="friendly",
+        display_name="Build Box", envs=[("linux", "atlas-linux")],
+    )
+    config = _fake_config(tmp_path)
+    with patch.object(cfg, "load_machines_yaml", return_value={entry.key: entry}), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
+         patch.object(rmc, "_load_remote_machines", return_value=[(entry, entry.ssh_environments)]), \
+         patch.object(rmc, "_emit_plan") as emit:
+        assert rmc._machine_key_for_display(config, name) == entry.key
+        assert rmc._try_machine_handoff(config, name) == 0
+        assert rmc._emit_remote_plan_for_env(config, name, "Linux") == 0
+    handoff, environment = [call.args[0] for call in emit.call_args_list]
+    assert handoff == {
+        "action": "remote", "ssh_alias": "atlas-linux",
+        "remote_command": "bash -lc example-project",
+        "machine": "atlas-core", "display_name": "Build Box",
+    }
+    assert environment == {**handoff, "display_name": "Build Box Linux"}
+
+
+def test_ambiguous_picker_identity_never_emits_a_plan(tmp_path, capsys):
+    entries = {
+        key: _entry(key, alias="shared", envs=[("linux", f"{key}-ssh")])
+        for key in ("first", "second")
+    }
+    config = _fake_config(tmp_path)
+    targets = [(entry, entry.ssh_environments) for entry in entries.values()]
+    with patch.object(cfg, "load_machines_yaml", return_value=entries), \
+         patch.object(rmc, "_load_remote_machines", return_value=targets), \
+         patch.object(rmc, "_emit_plan") as emit:
+        with pytest.raises(ValueError, match="ambiguous"):
+            rmc._machine_key_for_display(config, "SHARED")
+        assert rmc._try_machine_handoff(config, "SHARED") == 1
+        assert rmc._emit_remote_plan_for_env(config, "SHARED", "Linux") == 1
+        emit.assert_not_called()
+    assert "ambiguous" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["shared", "SHARED"])
+def test_exact_key_precedes_another_machine_alias(tmp_path, name):
+    entries = {
+        "shared": _entry("shared", envs=[("linux", "right-ssh")]),
+        "other": _entry("other", alias="shared", envs=[("linux", "wrong-ssh")]),
+    }
+    config = _fake_config(tmp_path)
+    targets = [(entry, entry.ssh_environments) for entry in entries.values()]
+    with patch.object(cfg, "load_machines_yaml", return_value=entries), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
+         patch.object(rmc, "_load_remote_machines", return_value=targets), \
+         patch.object(rmc, "_emit_plan") as emit:
+        assert rmc._machine_key_for_display(config, name) == "shared"
+        assert rmc._try_machine_handoff(config, name) == 0
+        assert rmc._emit_remote_plan_for_env(config, name, "Linux") == 0
+    assert all(call.args[0]["ssh_alias"] == "right-ssh" for call in emit.call_args_list)
+
+
+def test_unknown_and_unreachable_machine_diagnostics_are_preserved(tmp_path, capsys):
+    config = _fake_config(tmp_path)
+    with patch.object(rmc, "_load_remote_machines", return_value=[]), \
+         patch.object(rmc, "_load_all_machine_keys", return_value=["known"]), \
+         patch.object(rmc, "_emit_plan") as emit:
+        assert rmc._try_machine_handoff(config, "known") == 1
+        emit.assert_not_called()
+    error = capsys.readouterr().out
+    assert "Unknown or unreachable remote machine: known" in error
+    assert "Available: known" in error
+    with patch.object(cfg, "load_machines_yaml", side_effect=FileNotFoundError()):
+        assert rmc._machine_key_for_display(config, "missing") == "missing"
+        assert rmc._emit_remote_plan_for_env(config, "missing", "Linux") is None
+
+
+@pytest.mark.parametrize("name", ["atlas-core", "FRIENDLY", "CPC-FAKE-HOST1", "Build Box"])
+def test_handoff_uses_only_loader_eligible_environments(tmp_path, name):
+    from dataclasses import replace
+
+    entry = replace(
+        _entry(
+            "atlas-core", alias="friendly", hostname="CPC-FAKE-HOST1",
+            display_name="Build Box",
+            envs=[("windows", "native-ssh"), ("wsl", "guest-ssh")],
+        ),
+        ssh_ready=True,
+    )
+    config = _fake_config(tmp_path)
+    with patch.object(cfg, "load_machines_yaml", return_value={entry.key: entry}), \
+         patch.object(cfg, "detect_platform", return_value="windows"), \
+         patch.object(cfg, "project_name", return_value="example-project"), \
+         patch.object(rmc, "_in_ssh_session", return_value=False), \
+         patch.object(rmc.machine_identity, "is_local_machine", return_value=True), \
+         patch.object(rmc, "_emit_plan") as emit:
+        assert rmc._try_machine_handoff(config, name) == 0
+    assert emit.call_args.args[0] == {
+        "action": "remote", "ssh_alias": "guest-ssh",
+        "remote_command": "bash -lc example-project",
+        "machine": "atlas-core", "display_name": "Build Box",
+    }
+    assert [env.alias for env in entry.ssh_environments] == ["native-ssh", "guest-ssh"]
+
+
+def test_shared_matching_preserves_environment_rejection(tmp_path):
+    entry = _entry("atlas-core", alias="friendly", envs=[("linux", "atlas-linux")])
+    config = _fake_config(tmp_path)
+    with patch.object(cfg, "load_machines_yaml", return_value={entry.key: entry}), \
+         patch.object(rmc, "_emit_plan") as emit:
+        assert rmc._emit_remote_plan_for_env(config, "FRIENDLY", "Win") is None
+        assert rmc._emit_remote_plan_for_env(config, "FRIENDLY", "unknown") is None
+        emit.assert_not_called()
+
+
+def test_real_subprocess_parses_and_serializes_alias_selected_plan(tmp_path):
+    machines = tmp_path / "machines.yaml"
+    machines.write_text(
+        "machines:\n  atlas-core:\n    alias: friendly\n    display_name: Build Box\n"
+        "    ssh:\n      environments:\n"
+        "        - name: linux\n          alias: atlas-linux\n",
+        encoding="utf-8",
+    )
+    script = """
+import sys
+from types import SimpleNamespace
+from machine_transport import parse_machines_yaml_file
+from agent_worktrees import config as cfg, resolve_machine_cli as rmc
+cfg.load_machines_yaml = lambda _anchor: parse_machines_yaml_file(sys.argv[1])
+cfg.project_name = lambda: "example-project"
+config = SimpleNamespace(default_repo=SimpleNamespace(anchor="fixture"))
+raise SystemExit(rmc._emit_remote_plan_for_env(config, "FRIENDLY", "Linux", ["list", "--json"]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(machines)],
+        capture_output=True, text=True, check=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    plan = json.loads(result.stdout)
+    assert plan == {
+        "action": "remote", "ssh_alias": "atlas-linux", "machine": "atlas-core",
+        "display_name": "Build Box Linux",
+        "remote_command": "bash -lc 'example-project list --json'",
+    }
+
+
+def test_real_subprocess_ambiguous_plan_returns_json_error(tmp_path):
+    machines = tmp_path / "machines.yaml"
+    machines.write_text(
+        "machines:\n"
+        + "".join(
+            f"  {key}:\n    alias: shared\n    ssh:\n      environments:\n"
+            f"        - name: linux\n          alias: {key}-ssh\n"
+            for key in ("first", "second")
+        ),
+        encoding="utf-8",
+    )
+    script = """
+import sys
+from types import SimpleNamespace
+from machine_transport import parse_machines_yaml_file
+from agent_worktrees import config as cfg, output, resolve_machine_cli as rmc
+cfg.load_machines_yaml = lambda _anchor: parse_machines_yaml_file(sys.argv[1])
+config = SimpleNamespace(default_repo=SimpleNamespace(anchor="fixture"))
+with output.stdout_to_stderr():
+    result = rmc._emit_remote_plan_for_env(config, "SHARED", "Linux")
+raise SystemExit(result)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(machines)],
+        capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout) == {
+        "version": 1, "error": "Machine 'SHARED' is ambiguous in topology",
+    }
+    assert result.stderr == ""

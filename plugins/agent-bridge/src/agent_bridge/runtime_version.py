@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -181,9 +182,9 @@ def _load_pending(path: Path) -> dict[str, dict[str, str]]:
     return data if isinstance(data, dict) else {}
 
 
-def _prune_dead_pids(pending: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
-    from .session_host.osutil import pid_alive
-
+def _prune_dead_pids(
+    pending: dict[str, dict[str, str]], pid_alive: Callable[[int], bool],
+) -> dict[str, dict[str, str]]:
     alive = {}
     for pid_str, entry in pending.items():
         try:
@@ -292,7 +293,7 @@ def stage_pending_generation_id(
     start_time = process_start_time(pid)
 
     def _do() -> None:
-        pending = _prune_dead_pids(_load_pending(d / PENDING_GENERATION_IDS_FILE))
+        pending = _prune_dead_pids(_load_pending(d / PENDING_GENERATION_IDS_FILE), pid_alive)
         pending[str(pid)] = {
             "generation_id": generation_id,
             "start_time": start_time,
@@ -303,6 +304,9 @@ def stage_pending_generation_id(
         )
 
     try:
+        # Keep cold imports outside the lock, inside the best-effort I/O boundary.
+        from .session_host.osutil import pid_alive
+
         _with_pending_lock(d, _do)
     except OSError:
         pass

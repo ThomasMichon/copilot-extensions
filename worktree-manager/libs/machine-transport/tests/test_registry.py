@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -278,3 +279,28 @@ class TestFindMachineEntry:
     def test_empty_name_returns_none(self):
         entries = self._entries()
         assert find_machine_entry(entries, "") is None
+
+    @pytest.mark.parametrize("field", ["alias", "hostname", "display_name"])
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_strict_case_insensitive_key_precedes_other_identity(self, field, reverse):
+        other = MachineEntry(key="other", display_name="Other")
+        other = replace(other, **{field: "shared"})
+        pairs = [("other", other), ("shared", MachineEntry(key="shared", display_name="Key"))]
+        entries = dict(reversed(pairs) if reverse else pairs)
+        assert find_machine_entry(entries, "SHARED", reject_ambiguous=True) is entries["shared"]
+
+    def test_strict_colliding_case_insensitive_keys_remain_ambiguous(self):
+        entries = {
+            key: MachineEntry(key=key, display_name=key)
+            for key in ("Shared", "shared")
+        }
+        with pytest.raises(ValueError, match="ambiguous"):
+            find_machine_entry(entries, "SHARED", reject_ambiguous=True)
+        assert find_machine_entry(entries, "Shared", reject_ambiguous=True) is entries["Shared"]
+
+    def test_default_first_match_compatibility_is_unchanged(self):
+        entries = {
+            "other": MachineEntry(key="other", display_name="Other", alias="shared"),
+            "shared": MachineEntry(key="shared", display_name="Key"),
+        }
+        assert find_machine_entry(entries, "SHARED") is entries["other"]

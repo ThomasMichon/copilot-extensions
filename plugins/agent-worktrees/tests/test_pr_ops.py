@@ -4453,6 +4453,8 @@ class TestPRFinalizeAndPush:
         assert pr_publish.head_branch_gone(repo, rec.pr, str(wt_path))
 
     def test_the_publication_lock_is_reentrant_within_a_thread(self, pr_repo, monkeypatch):
+        from concurrent.futures import ThreadPoolExecutor
+
         from agent_worktrees import pr_publish
         config, wid, wt_path, _remote_dir = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
@@ -4462,7 +4464,12 @@ class TestPRFinalizeAndPush:
             assert pr_publish.push_target(config.repos["ext"], rec.pr, str(wt_path)) is not None
             with pr_publish.publish_lock(str(wt_path)):
                 pass
-        assert not self._blocked_while(wt_path)  # released once the outer one ends
+        def acquire_after_release():
+            with pr_publish.publish_lock(str(wt_path)):
+                return True
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(acquire_after_release).result(timeout=30)
 
     def test_a_missing_fork_remote_decides_nothing_even_when_origin_matches(self, pr_repo, monkeypatch):
         """A legacy PR whose configured fork remote is gone: origin holding the
