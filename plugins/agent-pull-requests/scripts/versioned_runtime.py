@@ -1329,13 +1329,33 @@ def fingerprint_source(paths) -> str:
     not separately walked. A symlink's recorded target is stored relative
     to the symlink's own containing directory (never as an absolute path),
     so an absolute on-disk target does not reintroduce location-dependence.
+    This applies identically whether the symlink is discovered DURING a
+    walk or is itself one of the DECLARED roots: a declared root that is
+    itself a symlink is never silently followed/walked -- it is classified
+    as its own single symlink entry, exactly like a nested one. Each
+    entry's kind ("file" vs "symlink") is itself framed as its own
+    length-prefixed record alongside the label and content/target, so a
+    regular file can never hash identically to a symlink merely because
+    its raw bytes happen to equal some symlink's encoded target text.
     """
     import hashlib
     import os as _os
 
-    roots = [Path(p).resolve() for p in paths]
+    def _declared_root_path(p) -> Path:
+        # Resolve the PARENT chain (handles relative paths, intermediate
+        # symlinks, '..' components) to get a canonical absolute path, but
+        # preserve the final component exactly as declared -- never follow
+        # it -- so a declared root that is itself a symlink is classified
+        # with its own lstat identity below, instead of being silently
+        # resolved through to whatever it points at.
+        raw = Path(p)
+        if not raw.is_absolute():
+            raw = Path.cwd() / raw
+        return raw.parent.resolve() / raw.name
+
+    roots = [_declared_root_path(p) for p in paths]
     for root_path in roots:
-        if not root_path.exists():
+        if not _os.path.lexists(root_path):
             raise FileNotFoundError(
                 f"fingerprint_source: declared input path does not exist: {root_path}"
             )
@@ -1372,7 +1392,12 @@ def fingerprint_source(paths) -> str:
     # the dict naturally collapses it to one entry.
     entries: dict[Path, str] = {}
     for root_path in roots:
-        if root_path.is_dir():
+        if root_path.is_symlink():
+            # A declared root that is itself a symlink (to a file OR a
+            # directory) is classified exactly like a nested one -- never
+            # walked/read through.
+            entries[root_path] = "symlink"
+        elif root_path.is_dir():
             # os.walk with onerror=_raise (NOT Path.rglob/is_file, which
             # silently swallow scandir/stat PermissionError on the
             # supported Python versions) so an unreadable subdirectory
@@ -1423,7 +1448,8 @@ def fingerprint_source(paths) -> str:
 
     digest = hashlib.sha256()
     for f in sorted(entries, key=_label):
-        if entries[f] == "symlink":
+        kind = entries[f]
+        if kind == "symlink":
             try:
                 target = _os.readlink(f)
             except OSError as exc:
@@ -1440,13 +1466,20 @@ def fingerprint_source(paths) -> str:
                 target = target[4:]
             if _os.path.isabs(target):
                 target = _os.path.relpath(target, start=str(f.parent))
-            data = ("symlink:" + Path(target).as_posix()).encode("utf-8")
+            data = Path(target).as_posix().encode("utf-8")
         else:
             try:
                 data = f.read_bytes()
             except OSError as exc:
                 raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
         digest.update(_frame(_label(f).encode("utf-8")))
+        # The entry's kind is framed as ITS OWN length-prefixed record,
+        # never concatenated into `data` as a string prefix: a regular
+        # file whose raw bytes happen to equal some symlink's encoded
+        # "target text" must never hash identically to that symlink (or
+        # vice versa) just because the two kind tags were distinguished
+        # only by unframed leading bytes.
+        digest.update(_frame(kind.encode("utf-8")))
         digest.update(_frame(data))
     return digest.hexdigest()
 
@@ -1497,14 +1530,20 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
 
     A genuine stat failure (e.g. permission denied) while probing the slot
     or marker path raises rather than guessing at an admission decision --
-    same fail-closed philosophy as :func:`fingerprint_source`.
+    same fail-closed philosophy as :func:`fingerprint_source`. The slot
+    path is probed with ``lstat`` semantics (never following a symlink) so
+    a DANGLING slot symlink -- something exists at the path, but following
+    it resolves nowhere -- is correctly treated as present-but-invalid
+    (``ADMIT_HEALTH_REPAIR_REQUIRED``), never as "genuinely absent"
+    (``Path.exists()`` alone would report a dangling symlink as absent,
+    wrongly authorizing construction over it).
     """
     vdir = version_dir(root, version)
     try:
-        slot_exists = vdir.exists()
+        slot_lexists = os.path.lexists(vdir)
     except OSError as exc:
         raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
-    if not slot_exists:
+    if not slot_lexists:
         return ADMIT_CONSTRUCT
     try:
         slot_is_dir = vdir.is_dir()
@@ -1517,15 +1556,16 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
         return ADMIT_HEALTH_REPAIR_REQUIRED
     marker_file = marker_path(root, version)
     try:
-        marker_exists = marker_file.exists()
+        marker_lexists = os.path.lexists(marker_file)
     except OSError as exc:
         raise OSError(f"check_admission: could not stat {marker_file}: {exc}") from exc
-    if not marker_exists:
+    if not marker_lexists:
         return ADMIT_CONSTRUCT
     marker = read_marker(root, version)
     if marker is None:
-        # The marker FILE is present but failed validation -- ambiguous
-        # evidence, never treated as "never built".
+        # The marker path exists (possibly as a dangling symlink) but
+        # failed validation -- ambiguous evidence, never treated as
+        # "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED
     if marker.get("payload_hash") == payload_hash:
         return ADMIT_REUSE
