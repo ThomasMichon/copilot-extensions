@@ -2390,17 +2390,12 @@ function Start-CoordinatorNonElevatedFallback {
     if (Test-CoordinatorHealthy) {
         Write-Ok 'Coordinator already running (health ok) -- not starting a second instance'
     } else {
-        try {
-            Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
-            Start-Sleep -Seconds 2
-            if (Test-CoordinatorHealthy) {
-                Write-Ok 'Coordinator started as a detached background process (health ok)'
-            } else {
-                Write-Ok 'Coordinator process launched (detached) -- give it a moment; see serve-service.log for bind status'
-            }
-        } catch {
-            Write-Warn "Could not start coordinator process: $($_.Exception.Message)"
+        # Share tier-1 startup with normal clients; its daemon opts out of caller Job cleanup.
+        & $LinkPython -m agent_dispatch _ensure-coordinator
+        if ($LASTEXITCODE -ne 0 -or -not (Test-CoordinatorHealthy)) {
+            throw 'Coordinator ensure failed; see serve-service.log'
         }
+        Write-Ok 'Coordinator started through user-mode ensure (health ok)'
     }
 
     # Durable, non-elevated auto-start at each logon (HKCU Run).
@@ -3013,6 +3008,27 @@ function Install-InteractiveScheduledTask {
     return $true
 }
 
+function Start-DispatchDetachedLogonLauncher {
+    param(
+        [Parameter(Mandatory)][string]$Launcher,
+        [string[]]$LauncherArguments = @()
+    )
+    $spawn = @'
+import subprocess, sys
+from agent_procutil import windowless_daemon_kwargs
+subprocess.Popen(
+    sys.argv[2:], cwd=sys.argv[1],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    **windowless_daemon_kwargs(breakaway=True),
+)
+'@
+    & $LinkPython -c $spawn $InstallDir powershell.exe -NoProfile -ExecutionPolicy Bypass `
+        -File $Launcher @LauncherArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not launch durable service '$Launcher' outside the installer Job"
+    }
+}
+
 function Install-SupervisorLogonAutostart {
     # Interactive-mode supervisor: start it now (detached) and register an HKCU
     # Run key so it (re)starts at each interactive logon. An interactive logon
@@ -3028,11 +3044,7 @@ function Install-SupervisorLogonAutostart {
     # ONCE before reconciling all primary/profile launchers. Do not repeat a
     # process-wide stop here: doing so would kill siblings started earlier in the
     # same profile pass.
-    try {
-        Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
-    } catch {
-        Write-Warn "Could not start supervisor process '$Name': $($_.Exception.Message)"
-    }
+    Start-DispatchDetachedLogonLauncher -Launcher $Launcher -LauncherArguments @('-EnvFile', $EnvFile)
     try {
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
         New-ItemProperty -Path $runKey -Name $Name -Value "conhost.exe $taskArgs" `

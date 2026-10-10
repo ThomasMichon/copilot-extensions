@@ -406,7 +406,8 @@ def _spawn_coordinator_process() -> None:
         # daemon also relocates itself (procutil.relocate_off_payload) as a belt.
         cwd=str(install_dir),
     )
-    kwargs.update(windowless_daemon_kwargs())
+    # Successful installers also close their command Job; this daemon must outlive it.
+    kwargs.update(windowless_daemon_kwargs(breakaway=True))
     try:
         subprocess.Popen([python, "-m", "agent_dispatch", "serve"], **kwargs)  # noqa: S603
     finally:

@@ -39,6 +39,26 @@ Avoiding the window is the last line of defense -- avoid the unnecessary
 process first when a local API or already-running service can do the same
 work in-process.
 
+## Decide ownership lifetime separately
+
+Headless is not the same as durable. Windows Job membership is inherited
+independently of console/window flags: a healthy background child can survive
+parent exit and still die when the caller closes its kill-on-close Job.
+`Start-Process`, `conhost --headless`, `CREATE_NO_WINDOW`, and a detached/new
+session flag alone are not proof of escape from that cleanup boundary.
+
+Keep one-turn helpers and their descendants caller-owned. Only a daemon that
+must outlive the installer/request should opt out, through the repository's
+canonical primitive (for example
+`agent_procutil.windowless_daemon_kwargs(breakaway=True)`). Preserve bounded-task
+containment and contained-test suppression; do not remove the caller Job or
+silently fall back to inherited lifetime when escape is rejected. Prefer the
+service's shared user-mode ensure path to another ad hoc launcher.
+
+For durable work, validate both successful parent exit and closure of the
+caller's containment boundary, then independently probe the same daemon.
+Use isolated, identity-pinned fixtures for that production-lifetime check.
+
 ## Per-language, per-OS routes
 
 ### PowerShell / `pwsh`
@@ -177,6 +197,9 @@ trusting the flag alone:
 3. Force the timeout/cancellation path and confirm the whole process tree
    exits -- a headless child is easy to leak silently since there is no
    visible window to notice still running.
+4. For a durable daemon, close the launching caller's cleanup boundary after a
+   successful invocation and confirm it survives. A bounded-child control must
+   still be reaped; do not mistake test containment for production durability.
 
 ## Boundaries
 

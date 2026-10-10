@@ -25,8 +25,8 @@ change the symptom, but it is never part of the launch contract.
 | Short-lived child with captured or redirected stdio | A console-subsystem root plus `agent_procutil.no_window_kwargs()` / `no_window_flags()`, or the owning shared library's equivalent | `CREATE_NO_WINDOW`; pipes and exit status preserved; timeout owns the complete tree |
 | Non-interactive OpenSSH transport with redirected stdio | `ssh_manager.proxy.create_ssh_subprocess()` | `DETACHED_PROCESS` for the SSH root; a configured native proxy runs through an owned loopback broker; pipes, exit status, and cleanup remain owned |
 | Console descendant controlled by a third-party OpenSSH `ProxyCommand` | A windowless binary stdio client connects to an owned loopback broker; the broker launches the console child with `no_window_kwargs()` | Preserve SSH's original host/port and token expansion; authenticate the local channel; protocol bytes and child cleanup remain owned |
-| Long-lived Python daemon with no recurring console descendants | `windowless_python()` plus `detached_kwargs()` | No root console; survivability is explicit; occasional captured console children use the short-lived primitive |
-| Long-lived Python daemon with recurring console descendants | Console-subsystem Python plus `windowless_daemon_kwargs()` | One inherited hidden console contains descendants that would otherwise allocate their own Default Terminal hosts |
+| Long-lived Python daemon with no recurring console descendants | `windowless_python()` plus `detached_kwargs(breakaway=True)` when it must outlive the caller | No root console; lifetime escape is explicit; occasional captured console children use the short-lived primitive |
+| Long-lived Python daemon with recurring console descendants | Console-subsystem Python plus `windowless_daemon_kwargs(breakaway=True)` when it must outlive the caller | One inherited hidden console contains descendants; durable lifetime is separate from headlessness |
 | PowerShell startup or scheduled launcher whose output is not captured | `conhost.exe --headless <interpreter> ...` | Headless console inherited by descendants; stable installed target; explicit stop/cutover ownership |
 | Intentional interactive terminal | An explicit interactive launcher | Reviewable exception with `# headless-guard: allow <reason>` when low-level flags are necessary |
 
@@ -59,6 +59,39 @@ Its narrow `pythonw.exe` client duplicates OpenSSH's inherited OS pipe handles
 as binary streams; it must not depend on Python's GUI-mode `sys.stdin/stdout`.
 Do not rewrite SSH's HostName or Port: credential and known-hosts paths may
 expand those values.
+
+## Lifetime is independent of visibility
+
+Choose both the console shape and the ownership lifetime before spawning.
+`CREATE_NO_WINDOW`, `DETACHED_PROCESS`, `conhost --headless`, `windowsHide`,
+and a new POSIX session do not by themselves establish escape from a Windows
+Job Object. A child can be invisible, healthy, and alive after its immediate
+parent exits, yet still be killed when a command owner's kill-on-close Job is
+closed. Successful installer exit is therefore not a durable-service witness.
+
+Keep bounded helpers and their descendants inside caller-owned containment.
+For a durable daemon whose contract requires it to outlive the installer or
+request, opt out explicitly with the owning primitive:
+`agent_procutil.windowless_daemon_kwargs(breakaway=True)` for recurring console
+descendants, or the corresponding `detached_kwargs(breakaway=True)` shape.
+Do not remove the caller's Job or make every child break away to repair one
+daemon. The containing Job must permit breakaway; a rejected spawn is an error
+to surface, not a reason to silently retry with caller-owned lifetime.
+Contained tests deliberately suppress escape and retain process-tree cleanup.
+
+PowerShell `Start-Process` and .NET `CreateNoWindow` provide no Job-escape
+promise. A one-shot installer should call the service's common user-mode ensure
+path, or an installed launcher using the canonical lifetime primitive, rather
+than call a plain `conhost` spawn "detached". OS-managed scheduled activation
+remains a distinct lifetime boundary; its stable registration is not a
+substitute for verifying the installer's start-now path.
+
+Test the actual production launch seam from a kill-on-close Job: wait for
+readiness, confirm the launching command exits successfully, close the caller
+Job, then independently verify the daemon remains healthy. Include a bounded
+child control that must die, pin fixture process identities, and clean up only
+owned fixture processes. Test-only containment suppression and the production
+survival lane are separate assertions.
 
 ## Routing before launching
 
@@ -95,6 +128,8 @@ also needs a focused live regression:
    focus transitions.
 4. Force timeout/cancellation and prove the full process tree exits.
 5. Verify local routing does not cross a remote process boundary.
+6. For durable daemons, close the launching caller's containment boundary after
+   a successful invocation and verify survival; parent exit alone is insufficient.
 
 Keep the live test out of the fast required lane when it needs a Windows host;
 the static guard and unit contract remain the portable CI gate.
