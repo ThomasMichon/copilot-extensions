@@ -1313,6 +1313,22 @@ def fingerprint_source(paths) -> str:
     happened to remain accessible stand in for "the full attributable input
     was validated". A caller that genuinely needs to fingerprint a
     partially-staged tree must check for that itself before calling this.
+
+    Symlinks are never silently resolved away: a discovered symlink (to a
+    file OR a directory) is hashed as ITS OWN entry -- its label, plus a
+    record of what it points to -- never collapsed with whatever it
+    happens to point at. Resolving first and deduplicating by the resolved
+    path, as an earlier version of this function did, would let a symlink
+    alias (``alias.py -> real.py``, both under a declared root) vanish
+    from the digest entirely once both paths resolved the same way. A
+    symlinked DIRECTORY is deliberately never followed/walked into (cycle-
+    unsafe, and ambiguous which identity -- the link or its target -- would
+    own the nested names); instead the link itself is hashed as a single
+    entry recording where it points, so re-pointing or adding/removing it
+    still changes the digest even though its nested contents, if any, are
+    not separately walked. A symlink's recorded target is stored relative
+    to the symlink's own containing directory (never as an absolute path),
+    so an absolute on-disk target does not reintroduce location-dependence.
     """
     import hashlib
     import os as _os
@@ -1345,26 +1361,49 @@ def fingerprint_source(paths) -> str:
     def _raise(exc: OSError) -> None:
         raise OSError(f"fingerprint_source: could not scan a directory: {exc}") from exc
 
-    files: set[Path] = set()
+    # Each discovered entry is kept under its OWN (never resolved) path, so
+    # a symlink is never conflated with whatever it points to. Dict value
+    # is "file" for a regular file, or "symlink" for anything that is a
+    # symlink (to a file OR a directory). Keying by the un-resolved,
+    # as-walked path is also what makes the existing overlapping-root
+    # dedup work without an extra resolve() call: the same physical file
+    # reached via two overlapping roots is always discovered at the exact
+    # same path both times (`root_path` is already resolved up front), so
+    # the dict naturally collapses it to one entry.
+    entries: dict[Path, str] = {}
     for root_path in roots:
         if root_path.is_dir():
             # os.walk with onerror=_raise (NOT Path.rglob/is_file, which
             # silently swallow scandir/stat PermissionError on the
             # supported Python versions) so an unreadable subdirectory
             # fails closed instead of being quietly omitted from the
-            # fingerprint.
-            for dirpath, _dirnames, filenames in _os.walk(root_path, onerror=_raise):
+            # fingerprint. followlinks=False is explicit: a symlinked
+            # directory is never descended into (see docstring).
+            for dirpath, dirnames, filenames in _os.walk(
+                root_path, onerror=_raise, followlinks=False
+            ):
+                for dname in dirnames:
+                    candidate = Path(dirpath) / dname
+                    try:
+                        if candidate.is_symlink():
+                            entries[candidate] = "symlink"
+                    except OSError as exc:
+                        raise OSError(
+                            f"fingerprint_source: could not stat {candidate}: {exc}"
+                        ) from exc
                 for name in filenames:
                     candidate = Path(dirpath) / name
                     try:
-                        if candidate.is_file():
-                            files.add(candidate.resolve())
+                        if candidate.is_symlink():
+                            entries[candidate] = "symlink"
+                        elif candidate.is_file():
+                            entries[candidate] = "file"
                     except OSError as exc:
                         raise OSError(
                             f"fingerprint_source: could not stat {candidate}: {exc}"
                         ) from exc
         else:
-            files.add(root_path)
+            entries[root_path] = "file"
 
     def _label(f: Path) -> str:
         # The root's path relative to the common ancestor of every declared
@@ -1383,11 +1422,30 @@ def fingerprint_source(paths) -> str:
         return len(data).to_bytes(8, "big") + data
 
     digest = hashlib.sha256()
-    for f in sorted(files, key=_label):
-        try:
-            data = f.read_bytes()
-        except OSError as exc:
-            raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
+    for f in sorted(entries, key=_label):
+        if entries[f] == "symlink":
+            try:
+                target = _os.readlink(f)
+            except OSError as exc:
+                raise OSError(
+                    f"fingerprint_source: could not read symlink {f}: {exc}"
+                ) from exc
+            # Windows' os.readlink() can return the extended-length form
+            # (\\?\C:\...) for a target that is otherwise an ordinary
+            # absolute path; strip it before any isabs/relpath computation,
+            # which otherwise raises ValueError on a "different mount"
+            # (the un-prefixed root paths used everywhere else here never
+            # carry this prefix).
+            if target.startswith("\\\\?\\"):
+                target = target[4:]
+            if _os.path.isabs(target):
+                target = _os.path.relpath(target, start=str(f.parent))
+            data = ("symlink:" + Path(target).as_posix()).encode("utf-8")
+        else:
+            try:
+                data = f.read_bytes()
+            except OSError as exc:
+                raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
         digest.update(_frame(_label(f).encode("utf-8")))
         digest.update(_frame(data))
     return digest.hexdigest()
@@ -1412,31 +1470,57 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
       ``docs/patterns/mutable-dev-slot.md``'s *Ordinary installers* section).
       The caller must refuse with actionable guidance (bump the version, or
       use the claimed ``dev`` slot), never rebuild in place.
-    - ``ADMIT_HEALTH_REPAIR_REQUIRED`` -- the slot directory exists and HAS a
-      completion-marker file, but that file fails validation (corrupt JSON,
-      duplicate keys, wrong schema, a mismatched version field). This is
-      deliberately NOT the same as "never built": a marker FILE existing but
-      unreadable is ambiguous evidence -- it could mean an already-published,
-      possibly-in-use slot's marker was later corrupted on disk (truncated
-      write, disk fault, a concurrent writer racing outside this contract) --
-      so a caller must never silently treat it as safe to construct over.
-      Surface this for explicit operator/health-repair handling (e.g.
-      ``toss_incomplete`` only after confirming the slot is not live) instead
-      of reconstructing over possibly-published content.
-    - ``ADMIT_CONSTRUCT`` -- the slot is absent, or exists but has no
-      completion-marker FILE at all (never built, or a prior build crashed
-      or was killed before ever reaching the marker-write step): this is the
-      known-unpublished/incomplete case, unambiguous and safe to (re)build --
-      a caller needs to serialize on the construction lease and build it.
+    - ``ADMIT_HEALTH_REPAIR_REQUIRED`` -- either the completion-marker FILE
+      is present but fails validation (corrupt JSON, duplicate keys, wrong
+      schema, a mismatched version field), or ``versions/<version>`` exists
+      but is NOT a directory (a regular file or a broken/dangling symlink
+      sitting where the slot should be). Both are deliberately NOT the same
+      as "never built": a marker FILE existing but unreadable, or an
+      existing-but-wrong-shaped slot path, is ambiguous evidence -- it could
+      mean an already-published, possibly-in-use slot was later corrupted on
+      disk (truncated write, disk fault, a concurrent writer racing outside
+      this contract) -- so a caller must never silently treat either as safe
+      to construct over. Surface this for explicit operator/health-repair
+      handling (e.g. ``toss_incomplete`` only after confirming the slot is
+      not live) instead of reconstructing over possibly-published content.
+    - ``ADMIT_CONSTRUCT`` -- the slot path is genuinely ABSENT, or exists as
+      a directory with no completion-marker FILE at all (never built, or a
+      prior build crashed or was killed before ever reaching the
+      marker-write step): this is the known-unpublished/incomplete case,
+      unambiguous and safe to (re)build -- a caller needs to serialize on
+      the construction lease and build it.
 
     Never takes or checks the construction lease itself -- a caller that
     gets ``ADMIT_CONSTRUCT`` must still acquire the lease (and, once held,
     re-check admission, since a concurrent builder may have published a
     completed slot in the meantime) before writing anything.
+
+    A genuine stat failure (e.g. permission denied) while probing the slot
+    or marker path raises rather than guessing at an admission decision --
+    same fail-closed philosophy as :func:`fingerprint_source`.
     """
-    if not version_dir(root, version).is_dir():
+    vdir = version_dir(root, version)
+    try:
+        slot_exists = vdir.exists()
+    except OSError as exc:
+        raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
+    if not slot_exists:
         return ADMIT_CONSTRUCT
-    if not marker_path(root, version).exists():
+    try:
+        slot_is_dir = vdir.is_dir()
+    except OSError as exc:
+        raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
+    if not slot_is_dir:
+        # Something exists at the slot path, but it is not a directory (a
+        # stray file, or a broken symlink) -- an invalid slot shape is
+        # ambiguous evidence, never "never built".
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+    marker_file = marker_path(root, version)
+    try:
+        marker_exists = marker_file.exists()
+    except OSError as exc:
+        raise OSError(f"check_admission: could not stat {marker_file}: {exc}") from exc
+    if not marker_exists:
         return ADMIT_CONSTRUCT
     marker = read_marker(root, version)
     if marker is None:
@@ -1532,8 +1616,9 @@ def main(argv: list[str] | None = None) -> int:
                              "source paths (files and/or directories)")
     fp.add_argument("paths", nargs="+", help="source file(s)/directory(ies)")
     cap = sub.add_parser("check-admission",
-                        help="decide reuse/content-conflict/construct for "
-                             "<version> without taking a construction lease")
+                        help="decide reuse/content-conflict/construct/"
+                             "health-repair-required for <version> without "
+                             "taking a construction lease")
     cap.add_argument("version")
     cap.add_argument("--payload-hash", required=True,
                      help="the caller's current source fingerprint, typically "

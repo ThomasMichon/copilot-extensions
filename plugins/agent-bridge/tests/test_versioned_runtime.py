@@ -1234,6 +1234,74 @@ def test_fingerprint_source_is_independent_of_absolute_location(tmp_path_factory
     assert third != second
 
 
+def test_fingerprint_source_preserves_file_symlink_identity(tmp_path):
+    """A symlink must never be silently resolved away and conflated with
+    its target: an `alias.py -> real.py` symlink sitting alongside the
+    real file it targets must be hashed as its OWN entry, so adding,
+    removing, or re-pointing it changes the fingerprint even though its
+    resolved path is identical to `real.py`'s."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "real.py").write_text("x = 1", encoding="utf-8")
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(src / "real.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    with_alias = vr.fingerprint_source([src])
+    alias.unlink()
+    without_alias = vr.fingerprint_source([src])
+    assert with_alias != without_alias
+
+
+def test_fingerprint_source_changes_when_a_symlink_is_repointed(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "real_a.py").write_text("x = 1", encoding="utf-8")
+    (src / "real_b.py").write_text("x = 2", encoding="utf-8")
+    link = src / "alias.py"
+    try:
+        link.symlink_to(src / "real_a.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    before = vr.fingerprint_source([src])
+    link.unlink()
+    link.symlink_to(src / "real_b.py")
+    after = vr.fingerprint_source([src])
+    assert before != after
+
+
+def test_fingerprint_source_never_follows_a_symlinked_directory(tmp_path):
+    """A symlinked directory is never walked into -- its nested contents
+    are not separately discovered -- but the link itself is still hashed
+    as its own entry, so re-pointing/removing it still changes the
+    digest."""
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "nested.py").write_text("x = 1", encoding="utf-8")
+
+    src = tmp_path / "src"
+    src.mkdir()
+    link = src / "linked_dir"
+    try:
+        link.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    before = vr.fingerprint_source([src])
+    # Changing the nested content THROUGH the symlink must not be visible
+    # -- it was never walked.
+    (real_dir / "nested.py").write_text("x = 2", encoding="utf-8")
+    after_nested_change = vr.fingerprint_source([src])
+    assert before == after_nested_change
+
+    # But removing the link itself must change the digest.
+    link.unlink()
+    after_removal = vr.fingerprint_source([src])
+    assert after_removal != before
+
 
 def test_check_admission_construct_when_slot_absent(tmp_path):
     assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_CONSTRUCT
@@ -1242,6 +1310,19 @@ def test_check_admission_construct_when_slot_absent(tmp_path):
 def test_check_admission_construct_when_slot_incomplete(tmp_path):
     vr.version_dir(tmp_path, "1.0.0").mkdir(parents=True)
     assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_CONSTRUCT
+
+
+def test_check_admission_health_repair_required_when_slot_path_is_a_file(tmp_path):
+    """`versions/<version>` existing but NOT being a directory (a stray
+    file, or a broken symlink sitting where the slot should be) is an
+    invalid slot shape -- ambiguous evidence, never "never built"."""
+    vdir = vr.version_dir(tmp_path, "1.0.0")
+    vdir.parent.mkdir(parents=True)
+    vdir.write_text("not a directory", encoding="utf-8")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
 
 
 def test_check_admission_reuse_when_marker_matches(tmp_path):

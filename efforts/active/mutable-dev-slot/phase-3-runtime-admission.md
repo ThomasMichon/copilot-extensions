@@ -79,15 +79,21 @@ each adopter is already safe.
 
 ### 3a — Shared admission, construction ownership, and publication contracts
 
-- [ ] Add one canonical installer-facing admission seam that distinguishes
+- [x] Add one canonical installer-facing admission seam that distinguishes
       exact completed reuse, completed-content conflict, genuinely unfinished
       construction, and health-repair-required states. Decisions are explicit;
       unavailable validation and malformed ownership/completion evidence must
       not silently select a rebuild of a published identity.
-      **Partial:** `check_admission()` (below) covers the first three states
-      (`reuse`/`content-conflict`/`construct`); health-repair-required
-      detection is NOT yet implemented and this bullet stays unchecked until
-      it is -- do not treat the sub-bullets below as closing this one.
+      (`check_admission()` returns one of `reuse` / `content-conflict` /
+      `construct` / `health-repair-required`. A missing completion-marker
+      FILE is the unambiguous "never built" case (`construct`); a marker
+      FILE present but failing validation, or `versions/<version>` existing
+      but not being a directory, is ambiguous evidence and returns
+      `health-repair-required` instead of silently selecting a rebuild. A
+      genuine stat failure -- e.g. permission denied -- raises rather than
+      guessing. This covers the admission seam's own malformed-evidence
+      cases; it is NOT a deeper venv/package health audit beyond the
+      completion marker and slot-path shape.)
 - [x] Fingerprint the full runtime install input from an attributable frozen
       source/snapshot, including source-only and vendored dependency changes.
       Do not hash mutable input before building and then publish a marker for
