@@ -1273,9 +1273,12 @@ def fingerprint_source(paths) -> str:
     whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
     alone -- a prior audit on this effort found exactly that narrower scope
     on one adopter, #5472). Hashes each regular file's path (relative to
-    whichever declared root most specifically contains it, POSIX-normalized
-    so the fingerprint is stable across OSes) and content, sorted by label
-    for determinism; a directory is walked recursively.
+    whichever declared root most specifically contains it, labeled by that
+    root's own full resolved POSIX path -- never just its basename, which is
+    not unique across declared roots -- so the fingerprint is stable across
+    OSes and across any two roots that happen to share a directory name) and
+    content, sorted by label for determinism; a directory is walked
+    recursively.
 
     Each ``(label, content)`` pair is framed with an explicit 8-byte
     big-endian length prefix before hashing, so two different payloads can
@@ -1288,18 +1291,25 @@ def fingerprint_source(paths) -> str:
     wins over a shallower, overlapping one), and the same file reached
     through more than one overlapping root is only ever hashed once
     (deduplicated by its resolved absolute path). Swapping the order of
-    overlapping roots, or passing both a parent and its own child, cannot
-    change the result.
+    overlapping roots cannot change the result. Note this is strictly about
+    ORDER: declaring an additional, redundant child root that is already
+    covered by a passed parent root is a DIFFERENT, more specific
+    declaration (that child's own files are now labeled relative to it
+    instead of the parent) and is expected to change the result -- this
+    function does not treat "this subtree was separately named" as
+    equivalent to "this subtree was already covered".
 
-    Fails closed: a missing declared root, or any file that cannot be read,
-    raises immediately rather than being silently skipped -- a caller
-    relying on this fingerprint for an admission decision must never see a
-    best-effort digest over whatever happened to remain readable stand in
-    for "the full attributable input was validated". A caller that
-    genuinely needs to fingerprint a partially-staged tree must check for
-    that itself before calling this.
+    Fails closed: a missing declared root, any unreadable file, or any
+    directory that cannot be scanned/stat'd during the walk (e.g. a
+    permission-denied subdirectory) raises immediately rather than being
+    silently skipped -- a caller relying on this fingerprint for an
+    admission decision must never see a best-effort digest over whatever
+    happened to remain accessible stand in for "the full attributable input
+    was validated". A caller that genuinely needs to fingerprint a
+    partially-staged tree must check for that itself before calling this.
     """
     import hashlib
+    import os as _os
 
     roots = [Path(p).resolve() for p in paths]
     for root_path in roots:
@@ -1311,22 +1321,41 @@ def fingerprint_source(paths) -> str:
     # regardless of the order `paths` was passed in.
     ordered_roots = sorted(roots, key=lambda r: len(r.parts), reverse=True)
 
+    def _raise(exc: OSError) -> None:
+        raise OSError(f"fingerprint_source: could not scan a directory: {exc}") from exc
+
     files: set[Path] = set()
     for root_path in roots:
         if root_path.is_dir():
-            for f in root_path.rglob("*"):
-                if f.is_file():
-                    files.add(f.resolve())
+            # os.walk with onerror=_raise (NOT Path.rglob/is_file, which
+            # silently swallow scandir/stat PermissionError on the
+            # supported Python versions) so an unreadable subdirectory
+            # fails closed instead of being quietly omitted from the
+            # fingerprint.
+            for dirpath, _dirnames, filenames in _os.walk(root_path, onerror=_raise):
+                for name in filenames:
+                    candidate = Path(dirpath) / name
+                    try:
+                        if candidate.is_file():
+                            files.add(candidate.resolve())
+                    except OSError as exc:
+                        raise OSError(
+                            f"fingerprint_source: could not stat {candidate}: {exc}"
+                        ) from exc
         else:
             files.add(root_path)
 
     def _label(f: Path) -> str:
+        # The root's own full resolved POSIX path, never just its
+        # basename (`.name`), which is not unique across declared roots --
+        # two different roots that happen to share a directory name (e.g.
+        # "src" under two different parents) must never collide.
         for root_path in ordered_roots:
             try:
                 rel = f.relative_to(root_path)
             except ValueError:
                 continue
-            return root_path.name + "/" + rel.as_posix()
+            return root_path.as_posix() + "/" + rel.as_posix()
         return f.as_posix()
 
     def _frame(data: bytes) -> bytes:

@@ -1090,11 +1090,10 @@ def test_fingerprint_source_is_order_independent(tmp_path):
 
 
 def test_fingerprint_source_raises_on_a_missing_declared_root(tmp_path):
-    """Fail closed (#6014 review): a missing declared root must never
-    silently collapse to a best-effort digest over whatever remained --
-    that could let a marker's recorded hash match a later, genuinely
-    different input set whose declared root also happened to vanish the
-    same way."""
+    """A missing declared root must never silently collapse to a
+    best-effort digest over whatever remained -- that could let a marker's
+    recorded hash match a later, genuinely different input set whose
+    declared root also happened to vanish the same way."""
     missing = tmp_path / "does-not-exist"
     with pytest.raises(FileNotFoundError):
         vr.fingerprint_source([missing])
@@ -1117,13 +1116,39 @@ def test_fingerprint_source_raises_on_an_unreadable_file(tmp_path, monkeypatch):
         vr.fingerprint_source([src])
 
 
+def test_fingerprint_source_raises_on_an_unscannable_directory(tmp_path, monkeypatch):
+    """A directory that cannot be scanned/stat'd during the walk (e.g.
+    permission-denied) must raise, never be silently omitted from the
+    fingerprint -- ``Path.rglob``/``is_file`` swallow scandir/stat
+    ``PermissionError`` on supported Python versions, so the walk must use
+    a mechanism (``os.walk`` with ``onerror``) that does not."""
+    src = tmp_path / "src"
+    (src / "locked").mkdir(parents=True)
+    (src / "locked" / "a.py").write_text("x", encoding="utf-8")
+
+    import os as _os
+
+    real_walk = _os.walk
+
+    def _boom(top, *args, **kwargs):
+        onerror = kwargs.get("onerror")
+        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+            if dirpath.endswith("locked") and onerror is not None:
+                onerror(PermissionError(13, "simulated permission denied", dirpath))
+                continue
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(_os, "walk", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
 def test_fingerprint_source_is_independent_of_overlapping_root_order(tmp_path):
-    """A prior bug (#6014 review): with overlapping roots (a parent and its
-    own child directory), the first containing root used for a file's label
-    depended on argument order, and the same file was hashed twice (once
-    per overlapping root) -- both made the result depend on how the caller
-    happened to order/nest its roots, contradicting the stable, dedup'd
-    contract. Passing [parent, child] vs [child, parent] must agree."""
+    """With overlapping roots (a parent and its own child directory), the
+    SAME two roots passed in either order must agree: each file is labeled
+    relative to whichever declared root most specifically contains it
+    (independent of argument order), and is hashed exactly once even though
+    it is reachable through both roots."""
     parent = tmp_path / "parent"
     child = parent / "child"
     child.mkdir(parents=True)
@@ -1135,13 +1160,36 @@ def test_fingerprint_source_is_independent_of_overlapping_root_order(tmp_path):
     assert forward == backward
 
 
+def test_fingerprint_source_labels_are_unique_across_same_named_roots(tmp_path):
+    """Two different declared roots that happen to share a directory name
+    (e.g. "src" under two different parents) must never collide: a file's
+    label is derived from its root's own full resolved path, never just
+    the root's basename."""
+    a_src = tmp_path / "a" / "src"
+    a_src.mkdir(parents=True)
+    (a_src / "x.py").write_text("one", encoding="utf-8")
+
+    b_src = tmp_path / "b" / "src"
+    b_src.mkdir(parents=True)
+    (b_src / "x.py").write_text("two", encoding="utf-8")
+
+    assert vr.fingerprint_source([a_src]) != vr.fingerprint_source([b_src])
+    # And the combined fingerprint must be stable/repeatable despite the
+    # label collision risk (same basename "src" for both roots).
+    combined_first = vr.fingerprint_source([a_src, b_src])
+    combined_second = vr.fingerprint_source([a_src, b_src])
+    assert combined_first == combined_second
+
+
 def test_fingerprint_source_frames_labels_and_content_unambiguously(tmp_path):
-    """A prior bug (#6014 review): bare NUL-separated label/content records
-    let one file's content containing an embedded label+separator serialize
-    identically to two genuinely different files. Construct the reviewer's
-    own adversarial example precisely (same root name on both sides, so the
-    labels line up byte-for-byte under the old scheme) and confirm the two
-    distinct input sets now fingerprint differently."""
+    """Labels and content must be framed unambiguously: a bare separator
+    (even a NUL) does not unambiguously delimit arbitrary file bytes -- one
+    file whose content embeds another file's label+separator could
+    otherwise serialize identically to two genuinely different files.
+    Construct that exact adversarial example (same root name on both
+    sides, so the labels line up byte-for-byte under a naive separator
+    scheme) and confirm the two distinct input sets fingerprint
+    differently."""
     one_file_root = tmp_path / "g1" / "r"
     one_file_root.mkdir(parents=True)
     (one_file_root / "a").write_bytes(b"x\0r/b\0y")
@@ -1152,6 +1200,7 @@ def test_fingerprint_source_frames_labels_and_content_unambiguously(tmp_path):
     (two_file_root / "b").write_bytes(b"y")
 
     assert vr.fingerprint_source([one_file_root]) != vr.fingerprint_source([two_file_root])
+
 
 
 def test_check_admission_construct_when_slot_absent(tmp_path):
