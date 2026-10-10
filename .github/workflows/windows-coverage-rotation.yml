@@ -24,6 +24,14 @@
 # issue (same shape as module-health-watchdog.yml) rather than blocking
 # anything, since this is new, exploratory coverage -- the existing
 # Linux-side full matrix remains the actual promotion gate.
+#
+# The scheduled daily run always validates `dev`. A manual
+# `workflow_dispatch` may additionally target any other ref via its `ref`
+# input -- e.g. to get real hosted Windows full-suite evidence for a
+# specific PR branch's exact head before merge, without waiting for the
+# next `dev` rotation. A manual run against a non-`dev` ref never files
+# the shared tracking issue (see the `report` job) -- that stays reserved
+# for genuine `dev`-rotation findings, not one-off PR validation noise.
 name: Windows coverage rotation
 
 on:
@@ -38,6 +46,15 @@ on:
         description: "Override the rotation date (YYYY-MM-DD); defaults to today (UTC)."
         required: false
         type: string
+      ref:
+        description: >-
+          Branch/ref to validate (defaults to dev). Manual dispatch only --
+          the scheduled daily rotation always runs against dev regardless
+          of this input. Use this to get real hosted Windows full-suite
+          evidence for a specific PR branch's exact head before merge.
+        required: false
+        type: string
+        default: dev
 
 concurrency:
   # A scheduled run and a manually dispatched run could otherwise overlap;
@@ -47,24 +64,64 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   select:
     name: select today's rotation
     runs-on: ubuntu-latest
-    # schedule always runs against the default branch; workflow_dispatch
-    # can target any ref -- restrict both to dev (the active integration
-    # branch regressions should be caught on, mirroring
-    # validate-and-promote.yml's own choice of branch for its full matrix).
-    if: github.ref == 'refs/heads/dev'
+    # The scheduled daily rotation always targets dev (the active
+    # integration branch regressions should be caught on, mirroring
+    # validate-and-promote.yml's own choice of branch for its full
+    # matrix). A manual workflow_dispatch may instead target any ref via
+    # the `ref` input (default dev) -- e.g. to get real hosted Windows
+    # full-suite evidence for a specific PR branch's exact head, which
+    # this workflow's own validation history has relied on before.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     outputs:
       plugins: ${{ steps.select.outputs.plugins }}
+      ref: ${{ steps.resolve-ref.outputs.ref }}
+      sha: ${{ steps.resolve-sha.outputs.sha }}
     steps:
+      - id: resolve-ref
+        name: Resolve the ref to validate
+        env:
+          # Passed through env, never interpolated directly into the
+          # script body -- inputs.ref is attacker-shaped (anyone who can
+          # dispatch this workflow controls it), and inline `${{ }}`
+          # interpolation into `run:` would let a crafted value (command
+          # substitution, embedded newlines) execute as shell source
+          # instead of being treated as inert data.
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          ref="${INPUT_REF:-dev}"
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            ref="dev"
+          fi
+          # A legitimate Git ref name never contains CR/LF (Git itself
+          # rejects control characters in ref names). Reject any value
+          # that does before it ever reaches $GITHUB_OUTPUT -- writing an
+          # unsanitized value containing an embedded newline there would
+          # let a crafted ref inject extra, attacker-controlled
+          # key=value lines into this step's own output set.
+          case "$ref" in
+            *$'\n'*|*$'\r'*)
+              echo "::error::ref input contains a CR or LF; refusing" >&2
+              exit 1
+              ;;
+          esac
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          ref: dev
+          ref: ${{ steps.resolve-ref.outputs.ref }}
           fetch-depth: 1
+      - id: resolve-sha
+        name: Pin the exact commit this run validates
+        # Resolve to an immutable SHA right after checkout, once, so a
+        # push to a mutable branch ref between here and a later matrix
+        # job can never make `select` and `test` silently disagree on
+        # which commit they each actually looked at.
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -92,7 +149,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: dev
+          # The immutable SHA `select` resolved, not the (possibly
+          # mutable) ref -- every matrix job tests the exact same commit
+          # `select` computed its rotation picks from.
+          ref: ${{ needs.select.outputs.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -103,8 +163,13 @@ jobs:
 
   report:
     name: file a tracking issue on failure
-    needs: test
-    if: always() && needs.test.result == 'failure'
+    needs: [select, test]
+    # Only a genuine `dev`-rotation failure (scheduled, or a manual
+    # dispatch explicitly validating `dev`) files/updates the shared
+    # tracking issue -- a manual dispatch validating some other PR
+    # branch's candidate head is one-off evidence-gathering, not a signal
+    # about `dev`'s own health, and must not pollute that issue.
+    if: always() && needs.test.result == 'failure' && needs.select.outputs.ref == 'dev'
     runs-on: ubuntu-latest
     permissions:
       contents: read
