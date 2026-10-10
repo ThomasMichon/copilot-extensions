@@ -1268,6 +1268,28 @@ ADMIT_CONSTRUCT = "construct"
 ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
 
 
+def _normalize_windows_extended_path(target: str) -> str:
+    """Strip Windows' extended-length path prefix from a raw symlink
+    target string, so later ``isabs()``/``resolve()`` comparisons see an
+    ordinary absolute path exactly like every other path in this module.
+
+    ``os.readlink()`` on Windows can return the extended-length form
+    (``\\\\?\\C:\\...``) for a target that is otherwise an ordinary
+    absolute path -- strip it. The UNC variant
+    (``\\\\?\\UNC\\server\\share\\...``) needs its OWN conversion back to
+    an ordinary UNC path (``\\\\server\\share\\...``): naively stripping
+    just the generic ``\\\\?\\`` prefix would leave
+    ``UNC\\server\\share\\...``, which Windows path handling treats as a
+    RELATIVE path, silently breaking ``isabs()``/``resolve()`` instead of
+    recognizing the server/share location.
+    """
+    if target.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + target[len("\\\\?\\UNC\\"):]
+    if target.startswith("\\\\?\\"):
+        return target[4:]
+    return target
+
+
 def fingerprint_source(paths) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
@@ -1443,8 +1465,18 @@ def fingerprint_source(paths) -> str:
         # no actual content it could be hiding.
         try:
             target_resolved = candidate.resolve(strict=True)
-        except OSError:
+        except FileNotFoundError:
             return  # dangling -- nothing to hide, allow identity-only.
+        except OSError as exc:
+            # A genuine lookup failure (e.g. permission denied) is NOT
+            # the same as "dangling" -- target content may exist and is
+            # simply unverifiable here, which must never silently permit
+            # an identity-only hash. Fail closed like every other stat
+            # failure in this function.
+            raise OSError(
+                f"fingerprint_source: could not resolve symlink target "
+                f"for {candidate}: {exc}"
+            ) from exc
         if any(
             target_resolved == r or target_resolved.is_relative_to(r)
             for r in roots
@@ -1572,13 +1604,7 @@ def fingerprint_source(paths) -> str:
                 raise OSError(
                     f"fingerprint_source: could not read symlink {f}: {exc}"
                 ) from exc
-            # Windows' os.readlink() can return the extended-length form
-            # (\\?\C:\...) for a target that is otherwise an ordinary
-            # absolute path; strip it before any further comparison (the
-            # un-prefixed root/common-ancestor paths used everywhere else
-            # here never carry this prefix).
-            if target.startswith("\\\\?\\"):
-                target = target[4:]
+            target = _normalize_windows_extended_path(target)
             if _os.path.isabs(target):
                 # An absolute target is only made relocation-invariant
                 # when it actually falls INSIDE one of the DECLARED roots

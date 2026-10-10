@@ -1405,6 +1405,54 @@ def test_fingerprint_source_allows_a_nested_symlink_to_a_dangling_target(tmp_pat
     vr.fingerprint_source([src])
 
 
+def test_fingerprint_source_raises_when_symlink_target_lookup_is_denied(tmp_path, monkeypatch):
+    """A PermissionError (or any OSError other than FileNotFoundError)
+    while resolving a symlink's target must never be treated the same as
+    "dangling": the target may genuinely exist with unverified content,
+    so silently allowing identity-only hashing would violate this
+    function's fail-closed contract. Only an actual FileNotFoundError
+    (a truly dangling target) is allowed through."""
+    src = tmp_path / "src"
+    src.mkdir()
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(src / "does-not-exist.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    real_resolve = Path.resolve
+
+    def _boom(self, *args, **kwargs):
+        if self.name == "alias.py":
+            raise PermissionError(13, "simulated permission denied", str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
+def test_normalize_windows_extended_path_converts_unc_form():
+    """The \\\\?\\UNC\\server\\share\\... extended-length form must become
+    an ordinary \\\\server\\share\\... UNC path, never a naive 4-character
+    strip (which would leave `UNC\\server\\share\\...`, a path Windows
+    treats as RELATIVE, silently breaking downstream isabs()/resolve()
+    comparisons)."""
+    assert (
+        vr._normalize_windows_extended_path(r"\\?\UNC\myserver\myshare\file.txt")
+        == r"\\myserver\myshare\file.txt"
+    )
+
+
+def test_normalize_windows_extended_path_strips_generic_prefix():
+    assert vr._normalize_windows_extended_path(r"\\?\C:\a\b.txt") == r"C:\a\b.txt"
+
+
+def test_normalize_windows_extended_path_leaves_ordinary_paths_unchanged():
+    assert vr._normalize_windows_extended_path(r"C:\a\b.txt") == r"C:\a\b.txt"
+    assert vr._normalize_windows_extended_path("relative/path.py") == "relative/path.py"
+
+
 def test_fingerprint_source_rejects_a_symlink_to_an_external_target_regardless_of_location(tmp_path_factory):
     """A nested symlink to an undeclared EXTERNAL target is rejected
     outright (see the dedicated rejection tests above); this must hold
