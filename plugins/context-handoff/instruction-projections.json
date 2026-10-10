@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "session-guidance",
+      "deliveryMode": "selector",
       "template": "instructions/session-guidance.instructions.md",
       "destination": ".github/instructions/context-handoff/session-guidance.instructions.md",
       "customizationKind": "instructions",
@@ -12,6 +13,7 @@
     },
     {
       "id": "handoff-fallback",
+      "deliveryMode": "selector",
       "template": "instructions/handoff-fallback.instructions.md",
       "destination": ".github/instructions/context-handoff/handoff-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -20,6 +22,7 @@
     },
     {
       "id": "awareness",
+      "deliveryMode": "selector",
       "template": "instructions/awareness.instructions.md",
       "destination": ".github/instructions/context-handoff/awareness.instructions.md",
       "customizationKind": "instructions",

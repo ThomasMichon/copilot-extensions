@@ -108,6 +108,10 @@ declarations/markers/locks, duplicate ids or destinations, conflicting
 ownership, safely detectable `applyTo` overlap, orphaned lock/file entries,
 legacy marked `AGENTS.md` regions, 4 KiB per-file and 12 KiB aggregate budgets,
 and dynamic/session-specific content that cannot be checked in safely.
+New enabled sources with no lock or existing destination produce advisory
+`projection-source-update`, owned by adopted maintenance rather than a
+per-session resync. Missing locked artifacts, foreign ownership and unsafe
+paths remain blocking.
 
 ### Static fail-safe projection sync
 
@@ -229,6 +233,16 @@ plugin payloads is similarly the caller's job, via an optional `refresh`
 callback run once before the pass (never retried mid-pass).
 
 ### Worktree-scoped local cache -- the consent-free, permissionless read path
+
+Source declarations now choose inline decision kernels or local-first selectors.
+Selectors own reviewed full bodies outside automatic instruction discovery;
+full caches/bodies carry per-source completeness receipts, never loaded-state.
+The catch-all remains inline to recover bodies written after discovery.
+Read `docs/patterns/worktree-scoped-dynamic-guidance.md` for authority,
+compatibility, inline exceptions and the model-admission evidence boundary.
+The manager's read-only `resolve-source <repo-root> <destination> --json`
+operation supplies exact ownership/version/hash/scope selection; add
+`--from-settings` for enabled unpaired sources.
 
 `sync`/`scan`/`run_sync_pass()` above mutate the checked-in projection and
 its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).
@@ -378,6 +392,10 @@ registrations, prompt-hook registrations, and other hook registrations. Dynamic
 payload size remains unknown by default; prompt-hook payloads are reported
 separately and are not counted as `additionalContext`.
 JSON output includes a stable `context_budget` object.
+Its additive `instruction_delivery` inventory separates automatically
+discovered selectors, inline kernels and local bodies from reviewed on-demand
+fallbacks. These counts never assert that a body was admitted to the model;
+selective reads and native/runtime admission remain unknown.
 
 Add `--capture-dynamic` to also measure the real session-scoped
 `instructions/**/*.instructions.md` files each plugin's `sessionStart` command

@@ -3460,6 +3460,7 @@ def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
     output = capsys.readouterr().out
     payload = json.loads(output)
     assert set(payload["context_budget"]) == {
+        "instruction_delivery",
         "token_estimate",
         "static_instruction_payloads",
         "metadata_upper_bounds",

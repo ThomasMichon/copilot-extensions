@@ -13,6 +13,7 @@ from instruction_projections import (
     Result,
     discover_enabled_sources,
     render_local_cache,
+    resolve_instruction_source,
     scan_repository,
     sync_repository,
     validate_repository_root,
@@ -56,6 +57,12 @@ def _print_human(result) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
+    resolve = subparsers.add_parser("resolve-source")
+    resolve.add_argument("root")
+    resolve.add_argument("destination")
+    resolve.add_argument("--json", action="store_true")
+    resolve.add_argument("--from-settings", action="store_true")
+    resolve.add_argument("--agent-worktrees-path")
     for operation in ("sync", "scan", "render-local-cache"):
         subparser = subparsers.add_parser(operation)
         subparser.add_argument("root", nargs="?", default=".")
@@ -84,6 +91,20 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         print(f"error: {root} is not a directory", file=sys.stderr)
         return 2
+    if args.operation == "resolve-source":
+        try:
+            sources = (
+                discover_enabled_sources(
+                    root, require_trust=False,
+                    agent_worktrees_command=args.agent_worktrees_path,
+                ) if args.from_settings else None
+            )
+            selection = resolve_instruction_source(root, args.destination, sources)
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"blocked": True, "error": str(exc)}))
+            return 1
+        print(json.dumps(selection, indent=2, sort_keys=True))
+        return 0
     try:
         validate_repository_root(root)
     except ValueError as exc:

@@ -1,0 +1,9 @@
+{
+  "comment": "Declare local-first instruction delivery and retained decision kernels; assign reviewed projection freshness to consented maintenance and preserve authorized rollout and running-state proof obligations.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

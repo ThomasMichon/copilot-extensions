@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "session-guidance",
+      "deliveryMode": "selector",
       "template": "instructions/session-guidance.instructions.md",
       "destination": ".github/instructions/agent-dispatch/session-guidance.instructions.md",
       "customizationKind": "instructions",
@@ -12,6 +13,7 @@
     },
     {
       "id": "blocked-task-fallback",
+      "deliveryMode": "selector",
       "template": "instructions/blocked-task-fallback.instructions.md",
       "destination": ".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md",
       "customizationKind": "instructions",

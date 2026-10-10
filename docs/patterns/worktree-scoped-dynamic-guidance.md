@@ -8,7 +8,7 @@ behaviors `resilient-safety-boundary`, `ambient-delivery-fails-open`,
 > local cache this pattern describes is the **primary** delivery path for
 > worktree-scoped projected instruction content -- it reflects the
 > currently installed payload, not a sync-lagged approximation of it. The
-> checked-in copy below is strictly the **fallback**: the floor a session
+> reviewed checked-in body below is strictly the **fallback**: the floor a session
 > falls back to only when no pre-session hook could render anything
 > fresher, or hasn't yet had the chance to. Precedence between the two is
 > decided by comparing their own embedded marker `pluginVersion` (§2),
@@ -65,7 +65,7 @@ worktree lifecycle boundaries rather than every session start.
 
 ### 1. The gitignored sibling file
 
-Every checked-in projection destination
+Every projection destination
 `.github/instructions/<plugin>/<sourceId>.instructions.md` gains a gitignored
 sibling at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
 **except** a source that opts out via its own declaration's
@@ -89,59 +89,100 @@ what's already installed right now, what would the correct projection look
 like," which is cheap, safe to run unprompted, and requires no repository
 write permission of any kind.
 
-### 2. The checked-in file defers to its local sibling by provenance, not existence
+### 2. Selectors, reviewed bodies, and exact authority
 
-The checked-in projection template gains a short, literal preamble ahead of
-its rendered body:
+Declarations explicitly choose `deliveryMode: "selector"` or `"inline"`.
+Undeclared mode remains legacy inline for compatibility; the shipped suite
+declares every source. A selector replaces the checked-in full body at the
+existing `.github/instructions/<plugin>/...instructions.md` destination.
+Its complete reviewed body is owned separately at the derived literal path
+`.github/copilot/context-fallbacks/<plugin>/...md`, preserving the destination's
+subdirectories. This path is outside instruction discovery, has no instruction
+suffix, and is referenced using code spans rather than auto-expanding links.
 
-```markdown
-> If `<sourceId>.local.instructions.md` exists here, compare
-> `pluginVersion` and prefer whichever is newer. On a tie, compare
-> `templateSha256`: matching means prefer local; differing means
-> prefer this checked-in file.
-```
+The version-2 lock owns both artifacts, their digests and byte counts. Sync
+validates legacy version-1 lock/preimages before migrating; fallback, selector
+and lock participate in the same compare-before-replace rollback transaction.
+Missing/malformed reviewed content, foreign ownership and unsafe paths block
+resolution. Source-update freshness remains an advisory distinct from those
+integrity failures. A valid enabled source with neither lock entry nor existing
+destination reports advisory `projection-source-update`; an unowned existing
+destination or missing locked artifact still blocks. Adopted, consented
+deterministic maintenance normally refreshes reviewed projections once daily;
+ordinary work does not require synchronous checked-in resync. This does not
+assert that installed payloads or running systems have been updated.
 
-This is the common-case path: once a source has been synced in at least once,
-its checked-in file self-directs to its own fresher sibling with no
-additional lookup -- but the comparison is by **declared version**, not mere
-presence, so a stale sibling left over from an earlier render (a boot where
-nothing re-rendered it since) can never outrank a checked-in copy that has
-since moved ahead. A render *timestamp* cannot serve this role: an
-older/regressed installed payload rendered *after* the checked-in copy
-advances would still carry the later timestamp and win, recreating the exact
-staleness bug this comparison exists to prevent -- and a changing timestamp
-field would break this render's own byte-determinism. The markers' existing
-`pluginVersion` (and `templateSha256` as the tie-break for an ambiguous equal
-version with differing content, since a version string is not an immutable
-source identity) are what `render_projection()` already stamps into every
-rendered file, so no new field is needed.
+Before dependent/consequential action the reader acquires authoritative
+content, or reports a visible blocker without assuming authorization.
+`manage-instruction-projections.py resolve-source <repository> <destination>
+--json` performs read-only exact selection. Newer `pluginVersion` wins; equal
+version/equal `templateSha256` favors local; equal version/different hash favors
+reviewed content. Owner identity includes marketplace, plugin, source ID,
+destination and `applyTo`. Local content must reconstruct its canonical
+template hash, including legacy bodies. A malformed local is rejected with a
+diagnostic while the valid reviewed fallback remains usable.
 
-### 3. A repo-wide catch-all for sources with no checked-in file yet
+For unpaired sources, add `--from-settings` (and the attributable
+`--agent-worktrees-path` where required): the utility validates the enabled
+declaration/canonical template rather than trusting arbitrary cache files.
+Without the utility, use filename-labeled exact metadata/ownership checks,
+never freehand hash transcription. Neither timestamps nor file existence
+establish authority.
 
-The per-file preamble above cannot help a source that has **never** been
-synced in -- there is no checked-in file yet to carry it. A single,
-repo-wide, unconditionally-loaded static projection closes that gap:
+#### Inline decision kernels
 
-```markdown
----
-applyTo: "**"
----
+The explicit inline allowlist retains existing policy prose intact:
 
-Check `.github/instructions/**/*.local.instructions.md` for any files
-present now and read each one. When a checked-in `.instructions.md` file
-exists for the same plugin and source, compare both files' embedded
-marker `pluginVersion` fields and prefer whichever is newer; on a tie,
-compare `templateSha256` instead of whole-file bytes (which always
-differ -- only the checked-in file carries the preamble) -- prefer the
-checked-in file only if that hash differs too, otherwise the local file
-stays authoritative. With no checked-in file yet for that path, the
-local file is authoritative on its own. Their absence is not an error.
-```
+- `agent-conduct-guidance`: `process-hygiene-fallback` governs every spawn;
+  `delegation-fallback` governs the initial research/delegation decision;
+  `scratch-space-fallback` governs every ad hoc write;
+  `secret-masking-fallback` governs credential-shaped construction.
+- `ai-attribution:publication-safety` governs publication before it happens.
+- `copilot-extensions-harness:contribution-boundary` governs contribution intake.
+- `efforts:completion-gate` governs termination and completion claims.
+- `customizing-copilot:local-cache-catchall` is the recovery control kernel.
 
-This file is the one thing every launch path -- hooked or hookless, worktree
-or anchor, App-forked or CLI-forked -- loads unconditionally, because it is
-ordinary checked-in content like any other `.instructions.md` file. It never
-depends on a hook having run.
+This is a source-owned declaration list, not a substring classifier. Other
+sources are acquisition-gated procedures/pointers. No policy prose is slimmed
+to fabricate savings; inline kernels can remain duplicated when both copies
+are discovered, because their identified decision-point contract requires
+ambient retention.
+
+### 3. Per-source body evidence and late-source recovery
+
+Full modern bodies carry opening provenance (`deliveryKind: "body"`,
+`bodySha256`) and a closing `copilot-guidance-body-end:v1` receipt whose
+`bindingSha256` hashes the canonical marketplace/plugin, source ID, version,
+template hash, scope and body hash. This compact binding covers every identity
+field without repeating the metadata corpus at each boundary. The selection
+utility exposes the exact binding; never compare it by freehand transcription.
+Compact version-2 selectors retain source identity, scope, version/hash,
+destination and rendered size; full template provenance remains in the lock.
+Selectors contain no body receipt. The pure envelope validator detects omitted
+middle bytes, truncated bodies, receipt-only summaries and quoted envelopes.
+It verifies byte completeness, **not model admission or compliance**.
+
+The catch-all remains unconditionally inline and opts out of its own local
+cache. It inventories after startup because a bare launch can discover
+instructions before a hook writes local bodies. It covers late, partial and
+unpaired sources without treating a global marker as whole-corpus coverage.
+
+A read may be skipped only if the complete selected body and matching opening/
+closing provenance are directly visible in the current applicable context.
+Filesystem existence, quoted examples, omitted ranges, truncated tool output,
+compacted summaries and earlier-context claims are insufficient. Legacy
+receipt-free bodies remain readable but cannot license skipping. On uncertainty
+read the full selected content. Recompute selection/coverage after source
+changes, resume or reconstruction; persist no loaded-state. No global coverage
+file is required.
+
+The scanner separates automatically discovered selectors, inline kernels and
+local bodies from reviewed on-demand fallbacks. Actual admission and selective
+reads remain unknown without runtime evidence; character/4 estimates are only
+heuristics. Sandbox fake prompt/CLI tests establish ordering and envelope
+contracts, not native CLI/App/no-hook/resume/new-context behavior or provider
+credit savings. Those native acceptance cases remain **not verified** by
+structural tests.
 
 ### 4. Refresh at worktree lifecycle boundaries, not every session
 

@@ -23,9 +23,12 @@ import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Callable, Iterable, Iterator
+
+import instruction_delivery as delivery
+import instruction_delivery_io as delivery_io
 
 BLOCKING = "blocking"
 WARNING = "warning"
@@ -35,7 +38,7 @@ DECLARATION_VERSION = 1
 PROJECTION_SCHEMA = "copilot-extensions.instruction-projection"
 PROJECTION_VERSION = 1
 LOCK_SCHEMA = "copilot-extensions.context-projections"
-LOCK_VERSION = 1
+LOCK_VERSION = 2
 RESULT_SCHEMA = "copilot-extensions.instruction-projection-result"
 RESULT_VERSION = 1
 
@@ -145,6 +148,8 @@ class ProjectionSpec:
     apply_to: str
     legacy_markers: tuple[str, ...]
     skip_local_cache: bool = False
+    delivery_mode: str = "inline"
+    delivery_declared: bool = False
 
     @property
     def source_key(self) -> str:
@@ -158,9 +163,10 @@ class RenderedProjection:
     sha256: str
     byte_count: int
     marker: dict[str, object]
+    fallback_content: bytes | None = None
 
     def lock_entry(self) -> dict[str, object]:
-        return {
+        entry = {
             "sourceId": self.spec.source_id,
             "plugin": self.spec.plugin,
             "pluginVersion": self.spec.plugin_version,
@@ -173,6 +179,16 @@ class RenderedProjection:
             "renderedSha256": self.sha256,
             "renderedBytes": self.byte_count,
         }
+        if self.fallback_content is not None:
+            entry.update(
+                deliveryMode="selector",
+                fallback={
+                    "destination": delivery.fallback_destination(self.spec.destination),
+                    "renderedSha256": _sha256(self.fallback_content),
+                    "renderedBytes": len(self.fallback_content),
+                },
+            )
+        return entry
 
 
 @dataclass
@@ -341,6 +357,8 @@ def _safe_destination(root: Path, relative: PurePosixPath) -> Path:
             raise ValueError("destination path is unreadable") from exc
         if stat.S_ISLNK(info.st_mode) or _is_reparse(info):
             raise ValueError("destination contains a symlink or reparse point")
+        if current != root.joinpath(*relative.parts) and not stat.S_ISDIR(info.st_mode):
+            raise ValueError("destination parent is not a directory")
     try:
         current.resolve(strict=False).relative_to(root_resolved)
     except ValueError as exc:
@@ -655,6 +673,7 @@ def _load_specs(
             not isinstance(declaration, dict)
             or set(declaration) != {"schema", "version", "projections"}
             or declaration.get("schema") != DECLARATION_SCHEMA
+            or type(declaration.get("version")) is not int
             or declaration.get("version") != DECLARATION_VERSION
             or not isinstance(declaration.get("projections"), list)
             or not 1 <= len(declaration["projections"]) <= MAX_PROJECTIONS_PER_PLUGIN
@@ -678,7 +697,7 @@ def _load_specs(
                     "applyTo",
                     "legacyMarkers",
                 }
-                _optional_keys = {"skipLocalCache"}
+                _optional_keys = {"skipLocalCache", "deliveryMode"}
                 if (
                     not isinstance(entry, dict)
                     or not _required_keys <= set(entry)
@@ -746,6 +765,11 @@ def _load_specs(
                 skip_local_cache = entry.get("skipLocalCache", False)
                 if not isinstance(skip_local_cache, bool):
                     raise ValueError("skipLocalCache must be a boolean")
+                delivery_mode = entry.get("deliveryMode", "inline")
+                if not isinstance(delivery_mode, str) or delivery_mode not in {"inline", "selector"}:
+                    raise ValueError("deliveryMode must be inline or selector")
+                if skip_local_cache and delivery_mode == "selector":
+                    raise ValueError("a cache-free control kernel must remain inline")
                 template_path = _safe_existing_file(payload_root, template_rel)
                 template_raw = _canonical_template_bytes(
                     _read_bounded_regular(template_path, template_limit)
@@ -784,6 +808,8 @@ def _load_specs(
                     apply_to=apply_to,
                     legacy_markers=tuple(markers),
                     skip_local_cache=skip_local_cache,
+                    delivery_mode=delivery_mode,
+                    delivery_declared="deliveryMode" in entry,
                 )
             )
     _find_spec_conflicts(specs, result)
@@ -841,70 +867,17 @@ def _find_spec_conflicts(specs: list[ProjectionSpec], result: Result) -> None:
 def render_projection(
     spec: ProjectionSpec, *, include_prefer_local: bool = True
 ) -> RenderedProjection:
-    """Render one deterministic UTF-8/LF projection.
-
-    ``include_prefer_local`` (default) adds a marker-provenance precedence
-    preamble (``worktree-scoped-dynamic-guidance.md`` §2); ``render_local_
-    cache`` passes ``False`` for the sibling's own content.
-    """
-    text = spec.template_content.decode("utf-8")
-    lines = text.splitlines(keepends=True)
-    closing = lines.index("---\n", 1)
-    header = "".join(lines[: closing + 1])
-    body = "".join(lines[closing + 1 :])
-    if include_prefer_local:
-        local_cache_name = PurePosixPath(
-            local_sibling_destination(spec.destination)
-        ).name
-        # pluginVersion tie -> compare templateSha256 (not whole-file
-        # bytes -- only this file has the preamble): match=local wins.
-        preamble = (
-            f"\n> If `{local_cache_name}` exists here, compare\n"
-            "> `pluginVersion` and prefer whichever is newer. On a tie,\n"
-            "> compare `templateSha256`: matching means prefer local;\n"
-            "> differing means prefer this checked-in file.\n"
-        )
-    else:
-        preamble = ""
-    marker: dict[str, object] = {
-        "schema": PROJECTION_SCHEMA,
-        "version": PROJECTION_VERSION,
-        "sourceId": spec.source_id,
-        "plugin": spec.plugin,
-        "pluginVersion": spec.plugin_version,
-        "template": spec.template,
-        "templateSha256": spec.template_sha256,
-        "templateBytes": spec.template_bytes,
-        "destination": spec.destination,
-        "customizationKind": spec.customization_kind,
-        "applyTo": spec.apply_to,
-        "renderedBytes": 0,
-    }
-    content = b""
-    for _attempt in range(4):
-        marker_line = (
-            MARKER_PREFIX
-            + json.dumps(
-                marker,
-                separators=(",", ":"),
-                sort_keys=True,
-                ensure_ascii=True,
-            )
-            + MARKER_SUFFIX
-            + "\n"
-        )
-        content = (header + marker_line + preamble + body).encode("utf-8")
-        if marker["renderedBytes"] == len(content):
-            break
-        marker["renderedBytes"] = len(content)
-    if marker["renderedBytes"] != len(content):
-        raise ValueError("rendered byte count did not stabilize")
+    """Render a declared inline kernel or local-first selector/body pair."""
+    content, marker, fallback_content = delivery.render_projection(
+        spec, include_prefer_local
+    )
     return RenderedProjection(
         spec=spec,
         content=content,
         sha256=_sha256(content),
         byte_count=len(content),
         marker=marker,
+        fallback_content=fallback_content,
     )
 
 
@@ -1457,6 +1430,8 @@ def _parse_owned_local_cache_marker(
         return None
     try:
         marker = _parse_marker(raw)
+        if marker.get("deliveryKind") == "body" and not delivery.complete_body(raw, marker):
+            raise ValueError("incomplete inline body envelope")
     except ValueError:
         return None
     marker_destination = marker.get("destination")
@@ -1507,59 +1482,7 @@ _MARKER_KEYS = _LOCK_ENTRY_KEYS - {"renderedSha256"} | {"schema", "version"}
 
 
 def _validate_lock_entry(entry: object) -> dict[str, object]:
-    if not isinstance(entry, dict) or set(entry) != _LOCK_ENTRY_KEYS:
-        raise ValueError("lock entry has unknown or missing keys")
-    for key in (
-        "sourceId",
-        "plugin",
-        "pluginVersion",
-        "template",
-        "templateSha256",
-        "destination",
-        "customizationKind",
-        "applyTo",
-        "renderedSha256",
-    ):
-        if not isinstance(entry[key], str) or not entry[key]:
-            raise ValueError(f"lock entry {key} is invalid")
-    if not IDENTIFIER.fullmatch(entry["sourceId"]):
-        raise ValueError("lock sourceId is invalid")
-    plugin_name, separator, marketplace = entry["plugin"].partition("@")
-    if (
-        not separator
-        or not IDENTIFIER.fullmatch(plugin_name)
-        or not IDENTIFIER.fullmatch(marketplace)
-    ):
-        raise ValueError("lock plugin identity is invalid")
-    template = _validate_relative(entry["template"], field_name="lock template")
-    destination = _validate_relative(
-        entry["destination"], field_name="lock destination"
-    )
-    if destination.parts[:3] != (".github", "instructions", plugin_name):
-        raise ValueError("lock destination is outside its plugin namespace")
-    if template.suffixes[-2:] != [".instructions", ".md"]:
-        raise ValueError("lock template is not an .instructions.md path")
-    if destination.suffixes[-2:] != [".instructions", ".md"]:
-        raise ValueError("lock destination is not an .instructions.md path")
-    if entry["customizationKind"] not in CUSTOMIZATION_KINDS:
-        raise ValueError("lock customizationKind is unsupported")
-    if not PLUGIN_VERSION.fullmatch(entry["pluginVersion"]):
-        raise ValueError("lock pluginVersion is invalid")
-    if (
-        not 1 <= len(entry["applyTo"]) <= 256
-        or any(ord(ch) < 32 for ch in entry["applyTo"])
-    ):
-        raise ValueError("lock applyTo is invalid")
-    if not DIGEST.fullmatch(entry["templateSha256"]) or not DIGEST.fullmatch(
-        entry["renderedSha256"]
-    ):
-        raise ValueError("lock digest is invalid")
-    for key in ("templateBytes", "renderedBytes"):
-        if not isinstance(entry[key], int) or isinstance(entry[key], bool) or entry[key] < 1:
-            raise ValueError(f"lock {key} is invalid")
-    if entry["templateBytes"] > MAX_TEMPLATE_BYTES:
-        raise ValueError("lock templateBytes exceeds the template budget")
-    return dict(entry)
+    return delivery.validate_lock_entry(entry, _validate_relative, MAX_TEMPLATE_BYTES)
 
 
 def _load_aggregate_budget(
@@ -1642,7 +1565,8 @@ def _load_lock(
             not isinstance(value, dict)
             or set(value) != {"schema", "version", "projections"}
             or value.get("schema") != LOCK_SCHEMA
-            or value.get("version") != LOCK_VERSION
+            or type(value.get("version")) is not int
+            or value.get("version") not in (1, LOCK_VERSION)
             or not isinstance(value.get("projections"), list)
         ):
             raise ValueError("lock schema/version/shape is unsupported")
@@ -1650,6 +1574,8 @@ def _load_lock(
         portable_destinations: set[str] = set()
         sources: set[str] = set()
         for raw_entry in value["projections"]:
+            if value["version"] == 1 and isinstance(raw_entry, dict) and "deliveryMode" in raw_entry:
+                raise ValueError("legacy lock cannot own selector/fallback triples")
             entry = _validate_lock_entry(raw_entry)
             destination = str(entry["destination"])
             portable_destination = _portable_path_key(destination)
@@ -1666,7 +1592,7 @@ def _load_lock(
         canonical = _canonical_json(
             {
                 "schema": LOCK_SCHEMA,
-                "version": LOCK_VERSION,
+                "version": value["version"],
                 "projections": [
                     entries[destination] for destination in sorted(entries)
                 ],
@@ -1701,31 +1627,7 @@ def load_lock_entries(repo_root: Path) -> dict[str, dict[str, object]]:
     return entries
 
 
-def _parse_marker(raw: bytes) -> dict[str, object]:
-    try:
-        text = raw.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        raise ValueError("projection is not valid UTF-8") from exc
-    matches = [
-        line
-        for line in text.splitlines()
-        if line.startswith(MARKER_PREFIX)
-    ]
-    if len(matches) != 1 or not matches[0].endswith(MARKER_SUFFIX):
-        raise ValueError("projection must contain exactly one provenance marker")
-    payload = matches[0][len(MARKER_PREFIX) : -len(MARKER_SUFFIX)]
-    try:
-        marker = _load_json_bytes(payload.encode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ValueError("projection provenance marker is malformed") from exc
-    if (
-        not isinstance(marker, dict)
-        or set(marker) != _MARKER_KEYS
-        or marker.get("schema") != PROJECTION_SCHEMA
-        or marker.get("version") != PROJECTION_VERSION
-    ):
-        raise ValueError("projection provenance marker schema is unsupported")
-    return marker
+_parse_marker = delivery.parse_marker
 
 
 def _marker_matches_lock(
@@ -1734,6 +1636,8 @@ def _marker_matches_lock(
     actual_bytes: int,
 ) -> bool:
     for key in _LOCK_ENTRY_KEYS - {"renderedSha256"}:
+        if marker.get("version") == 2 and key not in delivery.SELECTOR_KEYS:
+            continue
         if marker.get(key) != entry.get(key):
             return False
     return marker.get("renderedBytes") == actual_bytes
@@ -1760,6 +1664,12 @@ def _validate_projection_file(
         if b"\r" in raw or raw.startswith(b"\xef\xbb\xbf"):
             raise ValueError("projection must use deterministic UTF-8/LF bytes")
         marker = _parse_marker(raw)
+        if entry.get("deliveryMode") == "selector" and marker.get("deliveryKind") != "selector":
+            raise ValueError("locked selector is not a selector")
+        if _frontmatter_apply_to(raw) != entry["applyTo"]:
+            raise ValueError("projection frontmatter scope does not match lock")
+        if marker.get("deliveryKind") == "body" and not delivery.complete_body(raw, marker):
+            raise ValueError("incomplete inline body envelope")
         if not _marker_matches_lock(marker, entry, len(raw)):
             raise ValueError("projection marker does not match lock ownership")
         if _sha256(raw) != entry["renderedSha256"]:
@@ -1798,6 +1708,52 @@ def _validate_projection_file(
         return None
 
 
+def _delivery_io() -> delivery_io.DeliveryIO:
+    return delivery_io.DeliveryIO(_safe_destination, _read_bounded_regular, _is_indirection)
+
+
+def _validate_fallback(root: Path, entry: dict, result: Result) -> bytes | None:
+    try:
+        return delivery_io.read_fallback(root, entry, _delivery_io())
+    except (OSError, ValueError) as exc:
+        result.add(BLOCKING, "projection-fallback", entry["destination"], str(exc))
+        return None
+
+
+def resolve_instruction_source(
+    root: Path, destination: str, sources: Iterable[object] | None = None
+) -> dict:
+    root = validate_repository_root(root)
+    relative = _validate_relative(destination, field_name="selector destination")
+    _safe_destination(root, relative)
+    result = Result(operation="resolve-source")
+    entries, _, _ = _load_lock(root, result)
+    if result.blocking:
+        raise ValueError("missing or invalid reviewed ownership lock")
+    if destination not in entries:
+        if sources is None or root.joinpath(*relative.parts).exists():
+            raise ValueError("unpaired source requires verified enabled declarations")
+        specs, _ = _load_specs(root, sources, result)
+        matches = [spec for spec in specs if spec.destination == destination]
+        if result.blocking or len(matches) != 1:
+            raise ValueError("unpaired source is not unambiguously enabled")
+        spec = matches[0]
+        return delivery_io.resolve_unpaired(
+            root, destination, render_projection(spec, include_prefer_local=False).content,
+            render_projection(replace(spec, delivery_mode="inline", delivery_declared=False),
+                              include_prefer_local=False).content, _delivery_io(),
+        )
+    entry = entries[destination]
+    _validate_projection_file(root, entry, result)
+    if result.blocking:
+        raise ValueError("reviewed selector validation failed")
+    return delivery_io.resolve_source(root, entry, _delivery_io())
+
+
+def instruction_delivery_inventory(root: Path, automatic: set[Path]) -> dict:
+    return delivery_io.inventory(root, automatic, load_lock_entries(root), _delivery_io())
+
+
 def _iter_projection_files(repo_root: Path) -> Iterable[Path]:
     """Yield checked-in ``*.instructions.md`` files for the orphan scan. A
     ``*.local.instructions.md`` file is excluded unless
@@ -1830,6 +1786,11 @@ def _scan_orphan_files(
     lock: dict[str, dict[str, object]],
     result: Result,
 ) -> None:
+    try:
+        for path in delivery_io.orphan_fallbacks(repo_root, lock, _delivery_io()):
+            result.add(WARNING, "projection-orphan-fallback", path, "fallback is not locked")
+    except (OSError, ValueError) as exc:
+        result.add(BLOCKING, "projection-fallback", "<fallbacks>", str(exc))
     for path in _iter_projection_files(repo_root):
         try:
             raw = _read_bounded_regular(path, 256 * 1024)
@@ -1937,6 +1898,8 @@ def _desired_entry_matches(
             entry["destination"] == spec.destination,
             entry["customizationKind"] == spec.customization_kind,
             entry["applyTo"] == spec.apply_to,
+            entry.get("deliveryMode", "inline") == spec.delivery_mode,
+            entry["renderedSha256"] == render_projection(spec).sha256,
         )
     )
 
@@ -1957,6 +1920,7 @@ def scan_repository(
     total_bytes = 0
     for entry in lock.values():
         raw = _validate_projection_file(root, entry, result)
+        _validate_fallback(root, entry, result)
         if raw is not None:
             total_bytes += len(raw)
     if total_bytes > aggregate_budget:
@@ -2001,11 +1965,11 @@ def scan_repository(
                     )
                 else:
                     result.add(
-                        BLOCKING,
-                        "projection-missing",
+                        WARNING,
+                        "projection-source-update",
                         destination,
-                        "enabled plugin declares this projection but it is not "
-                        "checked in or locked; run projection sync",
+                        "enabled source has no reviewed lock or destination; "
+                        "checked-in freshness awaits adopted maintenance",
                     )
                 continue
             locked_key = f"{entry['plugin']}:{entry['sourceId']}"
@@ -2027,6 +1991,7 @@ def scan_repository(
                         ("templateBytes", spec.template_bytes),
                         ("customizationKind", spec.customization_kind),
                         ("applyTo", spec.apply_to),
+                        ("deliveryMode", spec.delivery_mode),
                     )
                     if entry.get(field) != desired_value
                 ]
@@ -2240,11 +2205,16 @@ def _sync_repository_locked(
     _scan_legacy_regions(root, specs, result)
     rendered: dict[str, RenderedProjection] = {}
     projection_preimages: dict[str, bytes | None] = {}
+    fallback_changes: list[tuple[Path, bytes, bytes | None]] = []
 
     for spec in specs:
         try:
             projection = render_projection(spec)
             _safe_destination(root, PurePosixPath(spec.destination))
+            if projection.fallback_content is not None:
+                fallback_path = _safe_destination(
+                    root, PurePosixPath(delivery.fallback_destination(spec.destination))
+                )
         except ValueError as exc:
             result.add(
                 BLOCKING,
@@ -2261,10 +2231,27 @@ def _sync_repository_locked(
                 f"rendered projection is {projection.byte_count} bytes; budget "
                 f"is {MAX_PROJECTION_BYTES} bytes",
             )
+        if projection.fallback_content is not None and len(projection.fallback_content) > delivery.MAX_FALLBACK_BYTES:
+            result.add(BLOCKING, "projection-budget", spec.destination,
+                       "rendered reviewed fallback exceeds the safety read limit")
+            continue
         rendered[spec.destination] = projection
 
         path = root.joinpath(*PurePosixPath(spec.destination).parts)
         existing_entry = lock.get(spec.destination)
+        if projection.fallback_content is not None:
+            fallback_before = None
+            if existing_entry is not None and existing_entry.get("deliveryMode") == "selector":
+                fallback_before = _validate_fallback(root, existing_entry, result)
+            elif fallback_path.exists():
+                result.add(
+                    BLOCKING, "projection-ownership", fallback_path,
+                    "refusing to overwrite a fallback without matching lock ownership",
+                )
+            if fallback_before != projection.fallback_content:
+                fallback_changes.append(
+                    (fallback_path, projection.fallback_content, fallback_before)
+                )
         if path.exists():
             if not lock_exists or existing_entry is None:
                 result.add(
@@ -2329,7 +2316,9 @@ def _sync_repository_locked(
             projection_changes.append((path, projection.content, preimage))
             changed_destinations.append(destination)
         lock_changed = lock_preimage != lock_content
-        changes = list(projection_changes)
+        for path, _, _ in fallback_changes:
+            _prepare_destination_parent(root, PurePosixPath(path.relative_to(root).as_posix()))
+        changes = fallback_changes + projection_changes
         if lock_changed:
             changes.append((lock_path, lock_content, lock_preimage))
         _transactional_write(changes)
@@ -2344,6 +2333,7 @@ def _sync_repository_locked(
         )
         return result
     result.changed.extend(changed_destinations)
+    result.changed.extend(path.relative_to(root).as_posix() for path, _, _ in fallback_changes)
     result.lock_updated = lock_changed
     result.locked = len(merged)
     return result

@@ -1,0 +1,9 @@
+{
+  "comment": "Add local-first selectors, owned reviewed fallbacks, body receipts and accounting; treat unreviewed new-source freshness as advisory maintenance drift while preserving integrity blockers.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
