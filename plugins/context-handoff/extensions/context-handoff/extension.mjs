@@ -178,8 +178,9 @@ async function observeNativeContext(fresh = false) {
   }
   state.nativeContext = observation;
   for (const warning of observation.warnings) {
-    if (nativeWarnings.has(warning)) continue;
-    nativeWarnings.add(warning);
+    const warningKey = `${revision}:${warning}`;
+    if (nativeWarnings.has(warningKey)) continue;
+    nativeWarnings.add(warningKey);
     session.log(`[Context Handoff] ${warning}`, { level: "warning" });
   }
   if (observation.native) state.blockMutatingTools = false;
@@ -1677,6 +1678,7 @@ session.on("session.compaction_complete", (event) => {
     state.blockMutatingTools = false;
     pendingNudge = null;
     state.windowRevision++;
+    nativeWarnings.clear();
     nativeObserver.invalidate();
     session.log(
       `[Context Handoff] Compaction complete. ` +
@@ -1689,6 +1691,7 @@ session.on("session.compaction_complete", (event) => {
 session.on("session.context_cleared", (event) => {
   if (event.agentId) return;
   state.windowRevision++;
+  nativeWarnings.clear();
   state.softReminderSent = false;
   state.hardReminderSent = false;
   state.softLogShown = false;
@@ -1711,6 +1714,7 @@ session.on("session.context_cleared", (event) => {
 session.on("session.tools_updated", (event) => {
   if (event.agentId) return;
   state.windowRevision++;
+  nativeWarnings.clear();
   nativeObserver.invalidate();
 });
 
@@ -1718,5 +1722,6 @@ session.on("session.context_changed", (event) => {
   if (event.agentId) return;
   if (event.data?.cwd) state.cwd = event.data.cwd;
   state.windowRevision++;
+  nativeWarnings.clear();
   nativeObserver.invalidate();
 });

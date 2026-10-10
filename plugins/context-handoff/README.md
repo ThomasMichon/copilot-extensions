@@ -6,7 +6,8 @@ Context window monitoring and session handoff for GitHub Copilot CLI.
 or the complete currently offered context tool set selects native checkpoint/
 terminal rollover rather than a competing custom session transfer. Explicit false
 or confirmed missing tools selects existing custom mode-governed recovery.
-The extension reads JSONC settings in `COPILOT_HOME` (default `~/.copilot`),
+The extension reads JSONC settings and user-local overrides in `COPILOT_HOME`
+(default `~/.copilot`),
 then repository and local `.github/copilot/settings*.json` overrides. Legacy
 `config.json` native settings are honored after user settings for older hosts
 that still layer those keys; remove stale legacy flags on newer hosts.

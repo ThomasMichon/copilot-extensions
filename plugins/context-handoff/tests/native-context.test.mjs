@@ -58,6 +58,9 @@ test("settings layer precedence, explicit false and errors", async () => {
     assert.match(setting.warnings[0], /invalid-settings/);
     assert.doesNotMatch(setting.warnings[0], /"true"/);
     await rm(join(root, ".github", "copilot", "settings.local.json"));
+    await writeFile(join(home, "settings.local.json"), '{"contextManagementTools":false}');
+    assert.equal((await readNativeSetting(root, { configHome: home })).enabled, false);
+    await rm(join(home, "settings.local.json"));
     await writeFile(join(home, "config.json"), '{"contextManagementTools":false}');
     assert.equal((await readNativeSetting(root, { configHome: home })).enabled, false);
   } finally { await rm(root, { recursive: true, force: true }); }

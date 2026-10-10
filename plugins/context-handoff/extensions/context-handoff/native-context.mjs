@@ -97,6 +97,7 @@ export async function readNativeSetting(cwd, {
   const root = await findRepositoryRootAsync(cwd);
   const paths = [
     join(configHome, "settings.json"),
+    join(configHome, "settings.local.json"),
     // Installed hosts still accepting legacy user keys layer them last.
     join(configHome, "config.json"),
     ...(root ? [
