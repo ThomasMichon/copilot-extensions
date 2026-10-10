@@ -57,9 +57,10 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
                                     just one manifest file
     check-admission <version> --payload-hash H
                                     print 'reuse' | 'content-conflict' |
-                                    'construct' for <version> given the
-                                    caller's current source fingerprint H,
-                                    without taking a construction lease
+                                    'construct' | 'health-repair-required' for
+                                    <version> given the caller's current
+                                    source fingerprint H, without taking a
+                                    construction lease
                                     (phase-3-runtime-admission)
 
 Exit code is 0 on success, non-zero on error; errors print to stderr.
@@ -1262,6 +1263,7 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 ADMIT_REUSE = "reuse"
 ADMIT_CONTENT_CONFLICT = "content-conflict"
 ADMIT_CONSTRUCT = "construct"
+ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
 
 
 def fingerprint_source(paths) -> str:
@@ -1274,11 +1276,15 @@ def fingerprint_source(paths) -> str:
     alone -- a prior audit on this effort found exactly that narrower scope
     on one adopter, #5472). Hashes each regular file's path (relative to
     whichever declared root most specifically contains it, labeled by that
-    root's own full resolved POSIX path -- never just its basename, which is
-    not unique across declared roots -- so the fingerprint is stable across
-    OSes and across any two roots that happen to share a directory name) and
-    content, sorted by label for determinism; a directory is walked
-    recursively.
+    root's own path relative to the common ancestor of every declared root
+    -- never the root's bare basename, which is not unique across declared
+    roots, and never its absolute filesystem path, which would make the
+    digest depend on WHERE the checkout happens to live) and content, sorted
+    by label for determinism; a directory is walked recursively. Relocating
+    an entire checkout to a different absolute path -- a fresh clone, a
+    different OS, a renamed parent directory -- does not change the
+    fingerprint of logically-identical content, so long as the declared
+    roots' positions relative to EACH OTHER are unchanged.
 
     Each ``(label, content)`` pair is framed with an explicit 8-byte
     big-endian length prefix before hashing, so two different payloads can
@@ -1321,6 +1327,21 @@ def fingerprint_source(paths) -> str:
     # regardless of the order `paths` was passed in.
     ordered_roots = sorted(roots, key=lambda r: len(r.parts), reverse=True)
 
+    # The common ancestor of every declared root is itself a deterministic
+    # function of the ROOT SET (never of the order `paths` was passed in,
+    # and never of where that set happens to live on disk): relocating the
+    # whole checkout moves the ancestor too, but every root's path RELATIVE
+    # to it is unchanged. Label roots by that relative path instead of their
+    # absolute one, so the fingerprint is both order- and location-
+    # independent while still disambiguating two roots that merely share a
+    # basename (e.g. "src" under two different parents).
+    common_root = Path(_os.path.commonpath([str(r) for r in roots]))
+
+    def _root_label(root_path: Path) -> str:
+        if root_path == common_root:
+            return "."
+        return root_path.relative_to(common_root).as_posix()
+
     def _raise(exc: OSError) -> None:
         raise OSError(f"fingerprint_source: could not scan a directory: {exc}") from exc
 
@@ -1346,16 +1367,16 @@ def fingerprint_source(paths) -> str:
             files.add(root_path)
 
     def _label(f: Path) -> str:
-        # The root's own full resolved POSIX path, never just its
-        # basename (`.name`), which is not unique across declared roots --
-        # two different roots that happen to share a directory name (e.g.
-        # "src" under two different parents) must never collide.
+        # The root's path relative to the common ancestor of every declared
+        # root (see `_root_label`), never the root's bare basename (not
+        # unique across declared roots) and never its absolute path
+        # (would make the digest depend on checkout location).
         for root_path in ordered_roots:
             try:
                 rel = f.relative_to(root_path)
             except ValueError:
                 continue
-            return root_path.as_posix() + "/" + rel.as_posix()
+            return _root_label(root_path) + "/" + rel.as_posix()
         return f.as_posix()
 
     def _frame(data: bytes) -> bytes:
@@ -1391,8 +1412,21 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
       ``docs/patterns/mutable-dev-slot.md``'s *Ordinary installers* section).
       The caller must refuse with actionable guidance (bump the version, or
       use the claimed ``dev`` slot), never rebuild in place.
-    - ``ADMIT_CONSTRUCT`` -- the slot is absent or lacks a valid marker
-      (never built, or a prior build crashed/was killed before completing):
+    - ``ADMIT_HEALTH_REPAIR_REQUIRED`` -- the slot directory exists and HAS a
+      completion-marker file, but that file fails validation (corrupt JSON,
+      duplicate keys, wrong schema, a mismatched version field). This is
+      deliberately NOT the same as "never built": a marker FILE existing but
+      unreadable is ambiguous evidence -- it could mean an already-published,
+      possibly-in-use slot's marker was later corrupted on disk (truncated
+      write, disk fault, a concurrent writer racing outside this contract) --
+      so a caller must never silently treat it as safe to construct over.
+      Surface this for explicit operator/health-repair handling (e.g.
+      ``toss_incomplete`` only after confirming the slot is not live) instead
+      of reconstructing over possibly-published content.
+    - ``ADMIT_CONSTRUCT`` -- the slot is absent, or exists but has no
+      completion-marker FILE at all (never built, or a prior build crashed
+      or was killed before ever reaching the marker-write step): this is the
+      known-unpublished/incomplete case, unambiguous and safe to (re)build --
       a caller needs to serialize on the construction lease and build it.
 
     Never takes or checks the construction lease itself -- a caller that
@@ -1400,13 +1434,18 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
     re-check admission, since a concurrent builder may have published a
     completed slot in the meantime) before writing anything.
     """
-    if is_complete(root, version):
-        marker = read_marker(root, version)
-        recorded_hash = (marker or {}).get("payload_hash")
-        if recorded_hash == payload_hash:
-            return ADMIT_REUSE
-        return ADMIT_CONTENT_CONFLICT
-    return ADMIT_CONSTRUCT
+    if not version_dir(root, version).is_dir():
+        return ADMIT_CONSTRUCT
+    if not marker_path(root, version).exists():
+        return ADMIT_CONSTRUCT
+    marker = read_marker(root, version)
+    if marker is None:
+        # The marker FILE is present but failed validation -- ambiguous
+        # evidence, never treated as "never built".
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+    if marker.get("payload_hash") == payload_hash:
+        return ADMIT_REUSE
+    return ADMIT_CONTENT_CONFLICT
 
 
 # --------------------------------------------------------------------------

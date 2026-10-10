@@ -1202,6 +1202,38 @@ def test_fingerprint_source_frames_labels_and_content_unambiguously(tmp_path):
     assert vr.fingerprint_source([one_file_root]) != vr.fingerprint_source([two_file_root])
 
 
+def test_fingerprint_source_is_independent_of_absolute_location(tmp_path_factory):
+    """Relocating an entire checkout to a different absolute path (a fresh
+    clone, a different OS, a renamed parent directory) must not change the
+    fingerprint of logically-identical content: labels must never embed a
+    declared root's own absolute path text, only its position relative to
+    the OTHER declared roots."""
+    first_base = tmp_path_factory.mktemp("first-location")
+    second_base = tmp_path_factory.mktemp("a-very-differently-named-second-spot")
+
+    def _populate(base):
+        src = base / "proj" / "src"
+        src.mkdir(parents=True)
+        (src / "a.py").write_text("x = 1", encoding="utf-8")
+        manifest = base / "proj" / "pyproject.toml"
+        manifest.write_text("[project]\nname='x'\n", encoding="utf-8")
+        return manifest, src
+
+    first_manifest, first_src = _populate(first_base)
+    second_manifest, second_src = _populate(second_base)
+
+    first = vr.fingerprint_source([first_manifest, first_src])
+    second = vr.fingerprint_source([second_manifest, second_src])
+    assert first == second
+
+    # And genuinely different content under the relocated tree still
+    # changes the fingerprint -- relocation-independence must not collapse
+    # into "always reuses", only "location alone doesn't matter".
+    (second_src / "a.py").write_text("x = 2", encoding="utf-8")
+    third = vr.fingerprint_source([second_manifest, second_src])
+    assert third != second
+
+
 
 def test_check_admission_construct_when_slot_absent(tmp_path):
     assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_CONSTRUCT
@@ -1237,6 +1269,30 @@ def test_check_admission_never_mutates_the_slot(tmp_path):
     assert vr.marker_path(tmp_path, "1.0.0").read_bytes() == marker_before
 
 
+def test_check_admission_health_repair_required_when_marker_is_malformed(tmp_path):
+    """A marker FILE that exists but fails validation (corrupt JSON, wrong
+    schema) is ambiguous evidence, NOT the same as "never built": a caller
+    following plain ``ADMIT_CONSTRUCT`` would acquire the lease and write
+    into what could be an already-published, possibly-live slot whose
+    marker was merely corrupted on disk after the fact."""
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{not valid json", encoding="utf-8")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+def test_check_admission_health_repair_required_never_mutates_the_slot(tmp_path):
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{not valid json", encoding="utf-8")
+    before = marker.read_bytes()
+    vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+    assert marker.read_bytes() == before
+
+
 def test_cli_fingerprint_json(tmp_path, capsys):
     src = tmp_path / "src"
     src.mkdir()
@@ -1267,4 +1323,17 @@ def test_cli_check_admission_reuse(tmp_path, capsys):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out == {"version": "1.0.0", "admission": vr.ADMIT_REUSE}
+
+
+def test_cli_check_admission_health_repair_required(tmp_path, capsys):
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{not valid json", encoding="utf-8")
+    rc = vr.main([
+        "--root", str(tmp_path), "--json", "check-admission", "1.0.0",
+        "--payload-hash", "abc",
+    ])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"version": "1.0.0", "admission": vr.ADMIT_HEALTH_REPAIR_REQUIRED}
 
