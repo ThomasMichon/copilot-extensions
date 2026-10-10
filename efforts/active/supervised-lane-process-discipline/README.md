@@ -166,14 +166,24 @@ stands as originally asked.
       case leaves the candidate alone (bounded cost: a lingering idle
       process) rather than terminating it (unbounded cost: killing a live,
       in-flight unrelated process) — but "leave it alone" must not mean
-      "silently stuck forever": an ambiguous candidate still holds Phase
-      2's singleton lock, so the restarted daemon can neither adopt nor
-      replace it, preserving the lane outage indefinitely with no signal
-      anyone needs to look. Surface this as an explicit operator-visible
-      blocked/unhealthy state (e.g. in the same health-file mechanism
-      Phase 4 adds) naming the ambiguous PID and why reconciliation
-      refused it, plus a defined later retry-or-manual-repair seam —
-      without ever relaxing the refusal to terminate unsafely.
+      "silently stuck forever" **when the candidate is still genuinely
+      live and holding Phase 2's singleton lock** (the owner-validation
+      refusal case specifically): that keeps the restarted daemon from
+      ever adopting or replacing it, preserving the lane outage
+      indefinitely with no signal anyone needs to look. Surface that case
+      as an explicit operator-visible blocked/unhealthy state (e.g. in the
+      same health-file mechanism Phase 4 adds) naming the PID and why
+      reconciliation refused it, plus a defined later retry-or-manual-
+      repair seam — without ever relaxing the refusal to terminate
+      unsafely. The identity-mismatch refusal case is different and must
+      **not** report this same blocked state unconditionally: the OS
+      releases the original holder's lock the instant that process exits
+      (`libs/single-instance-lease`'s exclusive, non-blocking,
+      kernel-held lock — see its own module docstring), so a reused PID
+      means the lease is already acquirable again; reconciliation should
+      simply retry rather than report a persistent block. Make the
+      surfaced state conditional on the lease still actually being
+      contended at the time of refusal, not on which refusal case fired.
 
 ### Phase 4 — supervised-lane child logging/health file
 - [ ] Give supervised-lane children the same `ok`/`returncode`/`error`/
@@ -209,10 +219,16 @@ stands as originally asked.
       owner validation independently fails; confirm termination is refused
       here too, since identity matching and owner validation are separate
       required guards in the plan. (d) a blocked-state visibility case —
-      for whichever refusal case above the daemon hits, confirm the
-      ambiguous candidate's held Phase 2 lock is surfaced as an explicit
-      operator-visible blocked/unhealthy state (naming the PID and refusal
-      reason), not merely silently left alone.
+      for the owner-validation refusal (c) specifically, confirm the still
+      genuinely-live candidate's held Phase 2 lock is surfaced as an
+      explicit operator-visible blocked/unhealthy state (naming the PID
+      and refusal reason), not merely silently left alone; (e) a
+      non-blocked-after-PID-reuse case — for the identity-mismatch refusal
+      (b), confirm the daemon does **not** report that same blocked state,
+      since the OS already released the original holder's lease when that
+      process exited and the lease is acquirable again — the daemon should
+      simply retry reconciliation, not surface a persistent block for a
+      race that already resolved itself.
 - [ ] **Phase 4:** automated test confirming a supervised-lane child's
       health file reflects a real crash (non-zero exit, error captured) the
       same way an emitter's already does — using the actual crash shape
@@ -299,4 +315,18 @@ _Pending — begin with Phase 1 (trace the actual spawn entry points)._
   the current diff (GitHub reports `line: null`), consistent with a stale
   unresolved thread rather than a persisting content gap. Left as-is
   rather than guessing at further rewording with no new information.
+
+### 2026-10-10 — Plan PR #5309 review round 4 (1 new Medium)
+- **Medium:** round 3's blocked-state fix was unconditionally worded,
+  which round 4 correctly flagged as misclassifying the identity-mismatch
+  (PID-reuse) refusal case: `libs/single-instance-lease`'s lock is an
+  OS-level, kernel-held, non-blocking lease released automatically the
+  instant the original holder's process exits (see that library's own
+  module docstring) — a reused PID therefore means the lease is already
+  acquirable again, not still contended. Scoped the blocked/unhealthy
+  surface to the owner-validation refusal case specifically (the one
+  where the candidate is still genuinely live), and added an explicit
+  Validation Plan case proving the identity-mismatch case does *not*
+  report that same blocked state, since that race already resolved
+  itself and the daemon should simply retry.
 
