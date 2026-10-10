@@ -74,10 +74,14 @@ Delivery is **at least once, not exactly-once subprocess execution**. Retry
 delays are 1, 2, 4, 8, 16, 32, then 60 seconds, capped at 60 indefinitely.
 Restart/crash recovery replays the same event identity and payload, including
 when the consumer committed its effect but the local ACK was lost. Consumers
-must commit idempotently by event/registration identity before exiting 0.
+must commit idempotently by event/registration identity before exiting 0 and
+make that commit concurrency-safe: a callback can outlive a crashed owner
+while a successor replays the same event.
 Independent callback workers prevent a slow callback from blocking another
-subscriber (including one on the same PR); a registration never has overlapping
-active deliveries. No persistence lock is held while running a callback.
+subscriber (including one on the same PR); one live owner never overlaps
+deliveries for the same registration. Graceful restart drains those callbacks,
+but ungraceful owner death does not provide that execution guarantee.
+No persistence lock is held while running a callback.
 
 `watch status` exposes pending event/registration identity, failed attempt count,
 next retry time (Unix seconds) and sanitized reason codes:

@@ -67,6 +67,11 @@ class WatchRegistry(RegistryState):
     def __init__(self) -> None:
         self._subscribers: dict[WatchKey, dict[str, Subscriber]] = {}
         self._lock = threading.Lock()
+        self._revision = 0
+
+    def revision(self) -> int:
+        with self._lock:
+            return self._revision
 
     def register(
         self,
@@ -86,6 +91,7 @@ class WatchRegistry(RegistryState):
         )
         with self._lock:
             self._subscribers.setdefault(key, {})[subscriber_id] = sub
+            self._revision += 1
         return sub
 
     def unregister(
@@ -98,6 +104,7 @@ class WatchRegistry(RegistryState):
             if registration_id is not None and bucket[subscriber_id].registration_id != registration_id:
                 return False
             del bucket[subscriber_id]
+            self._revision += 1
             if not bucket:
                 del self._subscribers[key]
             return True
@@ -154,6 +161,7 @@ class WatchRegistry(RegistryState):
             ) is event.subscriber
 
     def _fire(self, event: FiredEvent, bucket: dict) -> None:
+        self._revision += 1
         sub = event.subscriber
         if not sub.acknowledged:
             del bucket[sub.subscriber_id]
@@ -196,12 +204,16 @@ class WatchRegistry(RegistryState):
                         self._fire(fired[-1], bucket)
                         continue
                     sub.baseline = Baseline.from_snapshot(snap)
+                    self._revision += 1
                     if sub.acknowledged and sub.deadline is not None and now >= sub.deadline:
                         fired.append(FiredEvent(key, sub, (), snap, timed_out=True))
                         self._fire(fired[-1], bucket)
                     continue
                 transitions = compute_transitions(sub.baseline, snap, sub.until)
-                sub.baseline = advance_baseline(sub.baseline, snap)
+                baseline = advance_baseline(sub.baseline, snap)
+                if baseline != sub.baseline:
+                    self._revision += 1
+                sub.baseline = baseline
                 if transitions:
                     fired.append(FiredEvent(key, sub, transitions, snap))
                     self._fire(fired[-1], bucket)

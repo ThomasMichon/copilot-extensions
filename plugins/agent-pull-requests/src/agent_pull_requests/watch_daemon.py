@@ -157,11 +157,20 @@ class WatchDaemon:
         if kind == "unregister":
             key = WatchKey(repo=str(payload.get("repo", "")), number=int(payload.get("number", 0)))
             with self._persist_lock:
+                identity = str(payload.get("subscriber_id", ""))
+                sub = self._registry.subscriber(key, identity)
+                expected = payload.get("registration_id")
+                if sub is None or (expected is not None and expected != sub.registration_id):
+                    return {"unregistered": False}
+                entries = [
+                    entry for entry in self._registry.snapshot_state()
+                    if (entry["repo"], entry["number"], entry["subscriber_id"])
+                    != (key.repo, key.number, identity)
+                ]
+                self._persist(entries)
                 ok = self._registry.unregister(
-                    key, str(payload.get("subscriber_id", "")),
-                    registration_id=payload.get("registration_id"),
+                    key, identity, registration_id=sub.registration_id,
                 )
-                self._persist()
             return {"unregistered": ok}
         if kind == "status":
             return self.status()
@@ -270,18 +279,23 @@ class WatchDaemon:
                 self._shutdown_event.wait(timeout=0.5)
                 continue
             idle_since = None
+            if not self._registry.watching_count(key):
+                self._deliveries.resume()
+                self._shutdown_event.wait(timeout=self._poll_interval)
+                continue
             try:
                 snap = self._fetch(key.repo, key.number) if self._registry.watching_count(key) else None
             except Exception:
                 snap = None
             try:
                 with self._persist_lock:
+                    before = self._registry.revision()
                     fired = (
                         self._registry.apply_snapshot(key, snap) if snap is not None
                         else self._registry.sweep_timeouts((key,))
                     )
-                    # Also save baseline progress, not just firing transitions.
-                    self._persist()
+                    if self._registry.revision() != before or self._persistence_error is not None:
+                        self._persist()
             except OSError:
                 self._shutdown_event.wait(timeout=self._poll_interval)
                 continue

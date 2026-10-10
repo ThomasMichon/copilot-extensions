@@ -195,6 +195,69 @@ def test_failed_replacement_preserves_original_registration(make, monkeypatch):
     assert daemon._registry.subscriber(key, "one") is original
     assert read_subscriptions_state()[0]["registration_id"] == first["registration_id"]
 
+def test_failed_cancellation_preserves_pending_registration(make, monkeypatch):
+    from agent_pull_requests import watch_daemon
+
+    entered, release = threading.Event(), threading.Event()
+
+    def notify(event):
+        entered.set()
+        assert release.wait(3)
+        return 1
+
+    daemon = make(notify=notify)
+    registered = daemon.compute("register", spec())
+    assert entered.wait(2)
+    key = WatchKey("example/project", 1)
+    original = daemon._registry.subscriber(key, "one")
+    saved = read_subscriptions_state()
+    write = watch_daemon.write_subscriptions_state
+
+    def fail(entries):
+        raise OSError("cancel write unavailable")
+
+    try:
+        monkeypatch.setattr(watch_daemon, "write_subscriptions_state", fail)
+        with pytest.raises(OSError):
+            daemon.compute("unregister", {
+                "repo": key.repo, "number": key.number, "subscriber_id": "one",
+                "registration_id": registered["registration_id"],
+            })
+        assert daemon._registry.subscriber(key, "one") is original
+        assert read_subscriptions_state() == saved
+        assert daemon.status()["pending_deliveries"][0]["event_id"] == saved[0]["pending"]["event_id"]
+        monkeypatch.setattr(watch_daemon, "write_subscriptions_state", write)
+        assert daemon.compute("unregister", {
+            "repo": key.repo, "number": key.number, "subscriber_id": "one",
+            "registration_id": registered["registration_id"],
+        }) == {"unregistered": True}
+        assert read_subscriptions_state() == []
+    finally:
+        release.set()
+
+
+def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):
+    from agent_pull_requests import watch_daemon
+
+    writes, polls = [], []
+    write = watch_daemon.write_subscriptions_state
+
+    def record(entries):
+        writes.append(entries)
+        write(entries)
+
+    def fetch(*_):
+        polls.append(1)
+        return PRSnapshot()
+
+    monkeypatch.setattr(watch_daemon, "write_subscriptions_state", record)
+    daemon = make(fetch=fetch)
+    daemon.compute("register", spec())
+    wait(lambda: len(polls) >= 4)
+    daemon.close()
+    assert len(writes) == 2
+    assert writes[-1][0]["baseline"] is not None
+
 
 def test_default_shutdown_drains_actual_callback_beyond_old_deadline(make, tmp_path):
     started, finished = tmp_path / "started", tmp_path / "finished"
