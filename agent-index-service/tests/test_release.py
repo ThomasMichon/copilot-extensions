@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import copy
+import csv
 import hashlib
+import io
 import json
 import stat
 import zipfile
@@ -13,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 from packaging.version import Version
 
+from agent_index_service import release
 from agent_index_service.release import ReleaseError, build_descriptor, verify_descriptor
 
 COMMIT = "0123456789abcdef" * 2 + "01234567"
@@ -35,6 +39,34 @@ EXTRAS = {"agent-index-service": ["native"], "agent-index": ["store", "server"]}
 WHEEL = "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n"
 
 
+def _record_bytes(entries, record_name, algorithm="sha256"):
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    signatures = {record_name + ".jws", record_name + ".p7s"}
+    for name, value in entries.items():
+        if name == record_name or name in signatures or name.endswith("/"):
+            continue
+        digest = hashlib.new(algorithm, value).digest()
+        writer.writerow([
+            name, algorithm + "=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode(),
+            str(len(value)),
+        ])
+    writer.writerow([record_name, "", ""])
+    return output.getvalue().encode()
+
+
+def _write_archive(path, entries, *, regenerate=True):
+    if regenerate:
+        record_name = next((name for name in entries if name.endswith("/RECORD")), None)
+        if record_name is None:
+            metadata = next(name for name in entries if name.endswith("/METADATA"))
+            record_name = metadata.removesuffix("METADATA") + "RECORD"
+        entries[record_name] = _record_bytes(entries, record_name)
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
+
+
 def _make_wheel(root, name, version, requirements=None):
     normalized = str(Version(version))
     escaped = name.replace("-", "_")
@@ -46,12 +78,11 @@ def _make_wheel(root, name, version, requirements=None):
     ))
     lines.extend(f"Provides-Extra: {extra}" for extra in EXTRAS.get(name, []))
     path = root / filename
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(f"{info}/METADATA", "\n".join(lines) + "\n\n")
-        archive.writestr(f"{info}/WHEEL", WHEEL)
-        archive.writestr(
-            f"{escaped}/__init__.py", "raise AssertionError('must not import wheel')\n",
-        )
+    _write_archive(path, {
+        f"{info}/METADATA": ("\n".join(lines) + "\n\n").encode(),
+        f"{info}/WHEEL": WHEEL.encode(),
+        f"{escaped}/__init__.py": b"raise AssertionError('must not import wheel')\n",
+    })
     return path
 
 
@@ -59,13 +90,11 @@ def _find(root, distribution):
     return next(root.glob(f"{distribution.replace('-', '_')}-*.whl"))
 
 
-def _rewrite(path, transform):
+def _rewrite(path, transform, *, regenerate=True):
     with zipfile.ZipFile(path) as archive:
         entries = {entry.filename: archive.read(entry) for entry in archive.infolist()}
     changed = transform(entries)
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name, value in changed.items():
-            archive.writestr(name, value)
+    _write_archive(path, changed, regenerate=regenerate)
 
 
 def _mutate_metadata(bundle, transform, name="agent-index-service", record="METADATA"):
@@ -477,3 +506,274 @@ def test_descriptor_requires_json_object(bundle, text):
     path.write_text(text)
     with pytest.raises(ReleaseError):
         verify_descriptor(path, expected_source_commit=COMMIT)
+
+
+@pytest.mark.parametrize("header,values", [
+    ("Provides-Dist", ["example-one", "example-two"]),
+    ("Obsoletes-Dist", ["example-old", "example-older"]),
+    ("Import-Name", ["example_one", "example_two"]),
+    ("Import-Namespace", ["example.one", "example.two"]),
+])
+def test_standard_repeatable_headers(bundle, header, values):
+    _mutate_metadata(bundle, lambda text: text.replace(
+        "Metadata-Version: 2.4",
+        "Metadata-Version: 2.6\n" + "\n".join(f"{header}: {value}" for value in values),
+    ))
+    descriptor = build_descriptor(bundle, source_commit=COMMIT)
+    actual = verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
+    assert actual == descriptor
+
+
+def test_core_metadata_26(bundle):
+    _mutate_metadata(bundle, lambda text: text.replace("Metadata-Version: 2.4",
+                                                     "Metadata-Version: 2.6"))
+    assert build_descriptor(bundle, source_commit=COMMIT)["service_version"] == "0.1.1.dev1"
+
+
+def _change_record(bundle, change):
+    def mutate(entries):
+        name = next(name for name in entries if name.endswith("/RECORD"))
+        rows = list(csv.reader(io.StringIO(entries[name].decode(), newline="")))
+        rows = change(rows)
+        output = io.StringIO(newline="")
+        csv.writer(output).writerows(rows)
+        entries[name] = output.getvalue().encode()
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate, regenerate=False)
+
+
+@pytest.mark.parametrize("kind", ["missing", "second", "wrong-directory", "duplicate-member"])
+def test_record_location_and_uniqueness(bundle, kind):
+    def mutate(entries):
+        name = next(name for name in entries if name.endswith("/RECORD"))
+        if kind == "missing":
+            del entries[name]
+        elif kind == "wrong-directory":
+            entries["other.dist-info/RECORD"] = entries.pop(name)
+        elif kind == "second":
+            entries["other.dist-info/RECORD"] = entries[name]
+        return entries
+
+    path = _find(bundle, "agent-index-service")
+    _rewrite(path, mutate, regenerate=False)
+    if kind == "duplicate-member":
+        with zipfile.ZipFile(path, "a") as archive:
+            name = next(name for name in archive.namelist() if name.endswith("/RECORD"))
+            data = archive.read(name)
+            with pytest.warns(UserWarning, match="Duplicate name"):
+                archive.writestr(name, data)
+    with pytest.raises(ReleaseError, match="RECORD|duplicate"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize("change", [
+    lambda rows: rows + [rows[0]],
+    lambda rows: rows[1:],
+    lambda rows: rows[:-1],
+    lambda rows: rows + [["unlisted.py", "sha256=anything", "1"]],
+    lambda rows: [rows[0] + ["extra"]] + rows[1:],
+    lambda rows: [["../escape", *rows[0][1:]]] + rows[1:],
+    lambda rows: [[rows[0][0], "", rows[0][2]]] + rows[1:],
+    lambda rows: [[rows[0][0], rows[0][1], ""]] + rows[1:],
+    lambda rows: [[rows[0][0], rows[0][1], "999"]] + rows[1:],
+    lambda rows: [[rows[0][0], rows[0][1], "-1"]] + rows[1:],
+    lambda rows: [[rows[0][0], rows[0][1], "1.0"]] + rows[1:],
+    lambda rows: [*rows[:-1], [rows[-1][0], "sha256=invalid", ""]],
+])
+def test_invalid_record_rows_inventory_hash_size(bundle, change):
+    _change_record(bundle, change)
+    with pytest.raises(ReleaseError):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize("digest", [
+    "md5=abc", "sha1=abc", "md5-sha1=abc", "sha224=abc", "shake_256=abc", "unknown=abc",
+    "sha256=not+urlsafe", "sha256=haspadding=", "sha256=short", "sha256=", "sha256",
+])
+def test_unsupported_weak_or_malformed_record_digest(bundle, digest):
+    _change_record(bundle, lambda rows: [[rows[0][0], digest, rows[0][2]]] + rows[1:])
+    with pytest.raises(ReleaseError):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512", "sha3_256", "blake2b"])
+def test_supported_secure_record_hashes(bundle, algorithm):
+    def mutate(entries):
+        name = next(name for name in entries if name.endswith("/RECORD"))
+        entries[name] = _record_bytes(entries, name, algorithm)
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate, regenerate=False)
+    assert build_descriptor(bundle, source_commit=COMMIT)["service_version"] == "0.1.1.dev1"
+
+
+def test_payload_tamper_fails_even_with_new_outer_digest(bundle, descriptor):
+    path = _find(bundle, "agent-index-service")
+
+    def mutate(entries):
+        name = next(name for name in entries if name.endswith("/__init__.py"))
+        entries[name] = b"tampered"
+        return entries
+
+    _rewrite(path, mutate, regenerate=False)
+    for artifact in descriptor["artifacts"]:
+        if artifact["distribution"] == "agent-index-service":
+            artifact["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(ReleaseError, match="size|digest"):
+        verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
+
+
+@pytest.mark.parametrize("kind", ["unlisted", "missing"])
+def test_payload_inventory(bundle, kind):
+    def mutate(entries):
+        if kind == "unlisted":
+            entries["unlisted.py"] = b"unlisted"
+        else:
+            del entries[next(name for name in entries if name.endswith("/__init__.py"))]
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate, regenerate=False)
+    with pytest.raises(ReleaseError, match="inventory"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize("name", [
+    "../escape.py", "/absolute.py", "pkg/../escape.py", "pkg//alias.py",
+    "pkg/./alias.py", "C:drive.py", "pkg\\backslash.py", "pkg/null\x00.py",
+])
+def test_unsafe_archive_paths(bundle, name):
+    def mutate(entries):
+        entries[name] = b"unsafe"
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate)
+    with pytest.raises(ReleaseError, match="unsafe|inventory"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_archive_symlink_member(bundle):
+    path = _find(bundle, "agent-index-service")
+    with zipfile.ZipFile(path, "a") as archive:
+        entry = zipfile.ZipInfo("link")
+        entry.create_system = 3
+        entry.external_attr = (stat.S_IFLNK | 0o777) << 16
+        archive.writestr(entry, "target")
+    with pytest.raises(ReleaseError, match="regular"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_standard_signature_exceptions_and_directory_entries(bundle):
+    def mutate(entries):
+        record = next(name for name in entries if name.endswith("/RECORD"))
+        entries[record + ".jws"] = b"legacy-signature"
+        entries[record + ".p7s"] = b"legacy-signature"
+        entries["package/"] = b""
+        entries["package/unicode-\u00e9, space.txt"] = b"valid CSV quoting and UTF-8"
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate)
+    descriptor = build_descriptor(bundle, source_commit=COMMIT)
+    actual = verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
+    assert actual == descriptor
+
+
+def test_signature_must_not_be_listed_in_record(bundle):
+    def mutate(entries):
+        record = next(name for name in entries if name.endswith("/RECORD"))
+        entries[record + ".jws"] = b"signature"
+        entries[record] += f"{record}.jws,,\n".encode()
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate, regenerate=False)
+    with pytest.raises(ReleaseError, match="inventory"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize("limit", ["member", "total", "count"])
+def test_archive_resource_limits(bundle, monkeypatch, limit):
+    if limit == "member":
+        monkeypatch.setattr(release, "_MEMBER_LIMIT", 1024)
+        _rewrite(_find(bundle, "agent-index-service"),
+                 lambda entries: {**entries, "oversized.bin": b"x" * 1025})
+    elif limit == "total":
+        monkeypatch.setattr(release, "_TOTAL_LIMIT", 100)
+    else:
+        monkeypatch.setattr(release, "_ENTRY_LIMIT", 2)
+    with pytest.raises(ReleaseError, match="limit"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_record_csv_is_bounded(bundle, monkeypatch):
+    monkeypatch.setattr(release, "_LIMIT", 128)
+    with pytest.raises(ReleaseError, match="RECORD.*1 MiB"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_malformed_record_csv(bundle):
+    def mutate(entries):
+        name = next(name for name in entries if name.endswith("/RECORD"))
+        entries[name] = b'"unterminated'
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate, regenerate=False)
+    with pytest.raises(ReleaseError, match="CSV"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_same_size_payload_tamper_is_digest_failure(bundle):
+    def mutate(entries):
+        name = next(name for name in entries if name.endswith("/__init__.py"))
+        entries[name] = b"x" * len(entries[name])
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate, regenerate=False)
+    with pytest.raises(ReleaseError, match="RECORD digest mismatch"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_signature_elsewhere_requires_normal_hash_and_size(bundle):
+    def mutate(entries):
+        entries["package/RECORD.jws"] = b"not a signature exemption"
+        return entries
+
+    _rewrite(_find(bundle, "agent-index-service"), mutate, regenerate=False)
+    with pytest.raises(ReleaseError, match="inventory"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_archive_compressed_size_is_bounded(bundle, monkeypatch):
+    monkeypatch.setattr(release, "_ARCHIVE_LIMIT", 100)
+    with pytest.raises(ReleaseError, match="archive limit"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_streaming_member_limit_not_only_zip_header(bundle, monkeypatch):
+    real_open = zipfile.ZipFile.open
+
+    def expanded(archive, entry, *args, **kwargs):
+        if isinstance(entry, zipfile.ZipInfo) and entry.filename.endswith("/__init__.py"):
+            return io.BytesIO(b"x" * 1025)
+        return real_open(archive, entry, *args, **kwargs)
+
+    monkeypatch.setattr(release, "_MEMBER_LIMIT", 1024)
+    monkeypatch.setattr(zipfile.ZipFile, "open", expanded)
+    with pytest.raises(ReleaseError, match="streaming decompression limit"):
+        build_descriptor(bundle, source_commit=COMMIT)
+
+
+def test_zip_crc_failure_is_explicit(bundle):
+    path = _find(bundle, "agent-index-service")
+    with zipfile.ZipFile(path) as archive:
+        entry = next(entry for entry in archive.infolist()
+                     if entry.filename.endswith("/__init__.py"))
+        offset = entry.header_offset
+    data = bytearray(path.read_bytes())
+    # ZIP local header's filename/extra lengths locate the compressed payload.
+    filename_length = int.from_bytes(data[offset + 26:offset + 28], "little")
+    extra_length = int.from_bytes(data[offset + 28:offset + 30], "little")
+    payload = offset + 30 + filename_length + extra_length
+    data[payload] ^= 0xFF
+    path.write_bytes(data)
+    with pytest.raises(ReleaseError):
+        build_descriptor(bundle, source_commit=COMMIT)

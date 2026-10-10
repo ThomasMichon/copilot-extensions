@@ -118,9 +118,10 @@ After the merge-only pause, the operator authorized resumption:
 ### Phase 2 - Independent service distribution
 - [ ] Align component contracts with the API/controller, execution, persistence
   and client decomposition before moving or distributing code.
-- [ ] Define the service package, executable and portable release descriptor
+- [x] Define the service package, executable and portable release descriptor
   outside the plugin marketplace. The normal package/executable landed in
-  #5863; pinned bundle validation is the next descriptor slice.
+  #5863; pinned bundle integrity/compatibility validation is implemented.
+  Authenticated acquisition/build provenance remains a lifecycle gate.
 - [x] Extract or compose the existing hosted query, indexing and worker code
   without rebuilding a parallel implementation (#5863, local adapters).
 - [ ] Implement the version-slot installer and durable configuration/state
@@ -320,3 +321,8 @@ boundaries from implementation decisions and deployment-specific policy.
   hosted deployment cycles, passed 183 tests. Pinned-release pure contracts are
   part of the base-only path-gated smoke lane; native deployment/build coverage
   remains in the full lane.
+- Review extended wheel completeness checks to mandatory RECORD inventory,
+  streaming member hashes/sizes and explicit archive/decompression budgets.
+  Standard repeatable metadata fields and Core Metadata 2.6 are accepted.
+  The complete corrected contained suite passed 244 tests, including real
+  package wheels and hosted/cutover regressions. No live indexer change occurred.

@@ -9,16 +9,22 @@ siblings. Callers must keep verified inputs immutable until later consumption.
 The initial service contract requires an unconditional base core dependency and
 an extra == "native" dependency on its store/server extras. All declarations
 referencing bundled distributions are checked regardless of platform markers.
+Resource policy: 1 MiB metadata/RECORD, 64 MiB per member, 256 MiB total
+uncompressed data, 512 MiB archive bytes and 10,000 ZIP entries per wheel.
 """
 
 from __future__ import annotations
 
+import base64
+import csv
 import hashlib
+import io
 import json
 import os
 import re
 import stat
 import zipfile
+import zlib
 from dataclasses import dataclass
 from email import policy
 from email.parser import Parser
@@ -40,9 +46,14 @@ _FIELDS = {
 }
 _ARTIFACT_FIELDS = {"distribution", "version", "file", "sha256"}
 _LIMIT = 1024 * 1024
+_MEMBER_LIMIT = 64 * 1024 * 1024
+_TOTAL_LIMIT = 256 * 1024 * 1024
+_ARCHIVE_LIMIT = 512 * 1024 * 1024
+_ENTRY_LIMIT = 10000
 _REPEATED_HEADERS = {
     "requires-dist", "provides-extra", "classifier", "project-url", "requires-external",
     "platform", "supported-platform", "dynamic", "license-file", "tag",
+    "provides-dist", "obsoletes-dist", "import-name", "import-namespace",
 }
 
 
@@ -133,6 +144,102 @@ def _message(archive: zipfile.ZipFile, entry: zipfile.ZipInfo):
     return message
 
 
+def _member_path(name: str, *, directory: bool = False) -> None:
+    path = name[:-1] if directory and name.endswith("/") else name
+    if (
+        not path or "\\" in path or ":" in path
+        or any(ord(char) < 32 for char in path)
+        or any(part in {"", ".", ".."} for part in path.split("/"))
+    ):
+        raise ReleaseError(f"unsafe wheel member path: {name!r}")
+
+
+def _record(archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory: str) -> None:
+    """Validate wheel RECORD per PyPA, with explicit verifier resource limits.
+
+    Regular files require hashes of sha256 strength or better and sizes.
+    Legacy RECORD.jws/p7s in this dist-info are excluded, not authenticated.
+    Directory ZIP entries carry no payload and need not appear in RECORD.
+    """
+    record_name = f"{directory}/RECORD"
+    records = [entry for entry in entries if entry.filename.rsplit("/", 1)[-1] == "RECORD"]
+    if len(records) != 1 or records[0].filename != record_name:
+        raise ReleaseError("wheel requires exactly one RECORD in its dist-info directory")
+    if len(entries) > _ENTRY_LIMIT or sum(entry.file_size for entry in entries) > _TOTAL_LIMIT:
+        raise ReleaseError("wheel exceeds member count or total decompression limit")
+    files = {}
+    for entry in entries:
+        _member_path(entry.filename, directory=entry.is_dir())
+        mode = stat.S_IFMT(entry.external_attr >> 16)
+        if mode not in {0, stat.S_IFDIR if entry.is_dir() else stat.S_IFREG}:
+            raise ReleaseError("wheel members must be regular files or directories")
+        if entry.file_size > _MEMBER_LIMIT or (entry.is_dir() and entry.file_size):
+            raise ReleaseError("wheel exceeds member decompression limit")
+        if not entry.is_dir():
+            files[entry.filename] = entry
+    if records[0].file_size > _LIMIT:
+        raise ReleaseError("RECORD exceeds the 1 MiB limit")
+    with archive.open(records[0]) as stream:
+        data = stream.read(_LIMIT + 1)
+    if len(data) > _LIMIT:
+        raise ReleaseError("RECORD exceeds the 1 MiB limit")
+    rows = {}
+    try:
+        for row in csv.reader(io.StringIO(data.decode("utf-8"), newline=""), strict=True):
+            if len(row) != 3:
+                raise ReleaseError("RECORD rows must have exactly three fields")
+            name, digest, size = row
+            _member_path(name)
+            if name in rows:
+                raise ReleaseError("duplicate RECORD row")
+            rows[name] = (digest, size)
+    except csv.Error as exc:
+        raise ReleaseError(f"invalid RECORD CSV: {exc}") from exc
+    signatures = {f"{directory}/RECORD.jws", f"{directory}/RECORD.p7s"}
+    if set(rows) != set(files) - signatures:
+        raise ReleaseError("RECORD inventory does not match wheel files")
+    total = 0
+    for name, entry in files.items():
+        digest, size = rows.get(name, ("", ""))
+        if size and (
+            re.fullmatch(r"[0-9]+", size) is None
+            or (size.lstrip("0") or "0") != str(entry.file_size)
+        ):
+            raise ReleaseError(f"RECORD size mismatch: {name}")
+        hasher = None
+        expected = ""
+        if name == record_name:
+            if digest:
+                raise ReleaseError("RECORD must not hash itself")
+        elif name not in signatures:
+            if not size or "=" not in digest:
+                raise ReleaseError(f"RECORD hash and size required: {name}")
+            algorithm, expected = digest.split("=", 1)
+            try:
+                hasher = hashlib.new(algorithm)
+            except ValueError as exc:
+                raise ReleaseError("unsupported RECORD hash algorithm") from exc
+            if hasher.name in {"md5", "sha1", "md5-sha1"} or hasher.digest_size < 32:
+                raise ReleaseError("RECORD requires sha256 or stronger fixed-length hashes")
+            if re.fullmatch(r"[A-Za-z0-9_-]+", expected) is None:
+                raise ReleaseError("RECORD digest must be URL-safe base64 without padding")
+        count = 0
+        with archive.open(entry) as stream:
+            while block := stream.read(256 * 1024):
+                count += len(block)
+                total += len(block)
+                if count > _MEMBER_LIMIT or total > _TOTAL_LIMIT:
+                    raise ReleaseError("wheel exceeds streaming decompression limit")
+                if hasher is not None:
+                    hasher.update(block)
+        if count != entry.file_size:
+            raise ReleaseError(f"actual wheel member size mismatch: {name}")
+        if hasher is not None and (
+            base64.urlsafe_b64encode(hasher.digest()).rstrip(b"=").decode("ascii") != expected
+        ):
+            raise ReleaseError(f"RECORD digest mismatch: {name}")
+
+
 def _metadata(stream: BinaryIO, filename: str, digest: str) -> _Wheel:
     try:
         project, file_version, build, tags = parse_wheel_filename(filename)
@@ -159,6 +266,7 @@ def _metadata(stream: BinaryIO, filename: str, digest: str) -> _Wheel:
             or _version(info_version, "dist-info version") != str(file_version)
         ):
             raise ReleaseError("dist-info identity does not match wheel filename")
+        _record(archive, entries, directory)
         message = _message(archive, metadata[0])
         wheel_message = _message(archive, wheel[0])
     name = canonicalize_name(_text(message.get("Name"), "metadata Name"))
@@ -167,7 +275,7 @@ def _metadata(stream: BinaryIO, filename: str, digest: str) -> _Wheel:
         raise ReleaseError(f"unknown bundled distribution: {name}")
     if name != project or version != str(file_version):
         raise ReleaseError("wheel filename/project/version identity mismatch")
-    if message.get("Metadata-Version") not in {"2.1", "2.2", "2.3", "2.4", "2.5"}:
+    if message.get("Metadata-Version") not in {"2.1", "2.2", "2.3", "2.4", "2.5", "2.6"}:
         raise ReleaseError("unsupported or missing Metadata-Version")
     if (
         wheel_message.get("Wheel-Version") != "1.0"
@@ -218,6 +326,8 @@ def _metadata(stream: BinaryIO, filename: str, digest: str) -> _Wheel:
 def _wheel(root: Path, filename: str) -> _Wheel:
     path = root / _filename(filename)
     before = _stat(path)
+    if before.st_size > _ARCHIVE_LIMIT:
+        raise ReleaseError("wheel exceeds the 512 MiB archive limit")
     if path.resolve(strict=True).parent != root:
         raise ReleaseError("wheel path escapes descriptor directory")
     with path.open("rb") as stream:
@@ -299,7 +409,9 @@ def build_descriptor(bundle: Path, *, source_commit: str) -> dict:
         root = _root(bundle)
         filenames = sorted(path.name for path in root.iterdir() if path.suffix.lower() == ".whl")
         return _assemble([_wheel(root, name) for name in filenames], commit)
-    except (OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
+    except (
+        OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError, zlib.error,
+    ) as exc:
         raise ReleaseError(f"cannot read release bundle: {exc}") from exc
 
 
@@ -369,6 +481,6 @@ def verify_descriptor(path: Path, *, expected_source_commit: str) -> dict:
         return result
     except (
         OSError, UnicodeError, json.JSONDecodeError, zipfile.BadZipFile,
-        RuntimeError, NotImplementedError,
+        RuntimeError, NotImplementedError, zlib.error,
     ) as exc:
         raise ReleaseError(f"cannot verify release descriptor: {exc}") from exc

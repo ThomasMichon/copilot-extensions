@@ -107,6 +107,13 @@ dependency constraints without importing or extracting wheel code. Invalid,
 incomplete or modified bundles fail explicitly; verification never installs,
 activates, rewrites configuration or changes a running host.
 
+Wheel validation includes the mandatory `RECORD` inventory and member
+hashes/sizes, not just the outer archive digest. Supported core metadata extends
+through 2.6. Resource admission is explicit: metadata/RECORD at most 1 MiB,
+10,000 ZIP entries, 64 MiB per uncompressed member, 256 MiB total decompression
+and 512 MiB archive size. Legacy wheel signature files are permitted by the
+format but are not authenticated by this verifier.
+
 This is an **integrity and pinning contract, not a signature or release approval**.
 The trusted release controller must select a real released `main` snapshot and
 obtain its bundle/descriptor through its own authenticated source. Supplying a
