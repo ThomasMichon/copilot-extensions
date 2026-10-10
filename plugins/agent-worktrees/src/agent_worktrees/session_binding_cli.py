@@ -8,7 +8,7 @@ import sys
 
 import yaml
 
-from . import activity, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity
+from . import activity, anchor_ledger, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity
 from . import config as cfg, hook_ipc, session_context as session_context_mod
 from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
 
@@ -398,6 +398,13 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         candidate = _resolve_mux_worktree_id(candidate) or candidate
         if candidate and _activate_project_for_worktree_id(candidate):
             wt_id = candidate
+    if not wt_id and cwd:
+        anchor = worktree_identity._anchor_checkout_for_cwd(cwd)
+        if anchor is not None:
+            anchor_ledger.register_session(
+                session_id, anchor, pid=pid, pane_id=pane_id, event_at=event_at,
+                source=source, launch_id=getattr(args, "launch_id", None),
+            )
     if not wt_id:
         if getattr(args, "emit_context", False):
             from . import session_projection
@@ -910,8 +917,12 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
         yaml_path = _find_tracking_file_by_session(session_id)
         if yaml_path is not None:
             try:
-                wt_id = tracking.load_record(yaml_path).worktree_id
-                _activate_project_for_worktree_id(wt_id)
+                found = tracking.load_record(yaml_path)
+                wt_id = found.worktree_id
+                if wt_id == tracking.ANCHOR_ID and found.repo:
+                    cfg.set_active_project(found.repo)
+                else:
+                    _activate_project_for_worktree_id(wt_id)
             except Exception:
                 wt_id = None
     if wt_id:
@@ -930,7 +941,8 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
             ended_at=event_at,
             source=source,
         )
-        _capture_session_title(wt_id, session_id)
+        if wt_id != tracking.ANCHOR_ID:
+            _capture_session_title(wt_id, session_id)
     except Exception as e:
         output.err(f"Failed to deregister session: {e}")
         return 1

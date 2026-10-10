@@ -1,0 +1,9 @@
+{
+  "comment": "Record Copilot sessions started in a project's main checkout on the @anchor ledger so list-sessions and head-session return them; the anchor stays excluded from list, picker, finalize, and reap (#5997)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

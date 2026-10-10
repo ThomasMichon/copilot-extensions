@@ -45,6 +45,7 @@ from agent_procutil import no_window_flags, no_window_kwargs
 
 from . import (
     activity,
+    anchor_ledger,
     env_scrub,
     git_ops,
     hooks,
@@ -247,6 +248,8 @@ def push_changes(
     Returns:
         True on success, False on failure (worktree preserved).
     """
+    if anchor_ledger.refuse(worktree_id, "push-changes"):
+        return False
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
@@ -1514,6 +1517,8 @@ def validate_and_finalize(
     Returns:
         True on success, False if content is not yet on upstream.
     """
+    if anchor_ledger.refuse(worktree_id, "finalize"):
+        return False
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)

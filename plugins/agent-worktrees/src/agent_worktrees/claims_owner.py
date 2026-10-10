@@ -33,7 +33,7 @@ def _iter_records() -> Iterable[tuple[str, tracking.WorktreeRecord]]:
         if tracking_dir is None:
             continue
         try:
-            records = tracking.list_records(tracking_dir)
+            records = tracking.list_records(tracking_dir, include_anchor=True)
         except Exception:
             continue
         for record in records:

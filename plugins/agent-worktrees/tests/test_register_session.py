@@ -1343,3 +1343,237 @@ class TestRegisterSessionReseedsStatusUpdater:
         assert json.loads(capsys.readouterr().out) == {
             "additionalContext": "validated recovery pointer"
         }
+
+
+class TestRegisterSessionInMainCheckout:
+    """A session started in the project's main checkout is recorded on the
+    ``@anchor`` ledger without turning the anchor into a worktree."""
+
+    def _setup(
+        self, tmp_path: Path, monkeypatch, *, bare: bool = False
+    ) -> tuple[Path, Path, cfg.Config, list]:
+        anchor, linked = _repo_with_worktree(tmp_path)
+        if bare:
+            # A bare anchor (as used by worktree-class projects) has no work
+            # tree; its own linked worktree must still be excluded.
+            source = anchor
+            anchor = tmp_path / "bare-anchor"
+            git_ops.git("clone", "--bare", "-q", str(source), str(anchor))
+            linked = tmp_path / "bare-anchor.worktrees" / "app-session"
+            linked.parent.mkdir()
+            git_ops.git(
+                "--git-dir", str(anchor), "worktree", "add", str(linked),
+                "-b", "bare-session", "master", cwd=anchor,
+            )
+        config = cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="test-project",
+            repos={
+                "test-project": cfg.RepoConfig(
+                    anchor=str(anchor),
+                    worktree_root=str(tmp_path / "anchor.worktrees"),
+                    default_branch="master",
+                )
+            },
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda *_a, **_k: "test")
+        m.cfg.set_active_project(config.repo_name)
+        stamps: list = []
+        from agent_worktrees import handoff_diagnostics
+
+        monkeypatch.setattr(
+            handoff_diagnostics,
+            "stamp_session_state_worktree_binding",
+            lambda sid, wid, **kw: stamps.append((sid, wid, kw)),
+        )
+        return anchor, linked, config, stamps
+
+    def _start(self, monkeypatch, session_id: str, cwd: Path) -> int:
+        payload = json.dumps({"sessionId": session_id, "cwd": str(cwd), "source": "new"})
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+        return m.cmd_register_session(_args(stdin=True))
+
+    def test_main_checkout_session_is_recorded_on_anchor_ledger(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, _linked, _config, stamps = self._setup(tmp_path, monkeypatch)
+        (anchor / "sub").mkdir()
+
+        assert self._start(monkeypatch, "anchor-sess", anchor / "sub") == 0
+
+        record = load_record(tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml")
+        assert record.worktree_id == tracking.ANCHOR_ID
+        assert record.pair_kind == "anchor"
+        assert Path(record.worktree_path).resolve() == anchor.resolve()
+        entry = record.session_entry("anchor-sess")
+        assert entry is not None and entry.ended_at is None
+        assert entry.activations and entry.activations[-1].start_source == "hook:new"
+        assert record.resolved_head_session == "anchor-sess"
+        assert [(sid, wid) for sid, wid, _ in stamps] == [("anchor-sess", tracking.ANCHOR_ID)]
+        # The anchor is never surfaced as a worktree or matched by cwd.
+        assert tracking.list_records(tmp_tracking_dir) == []
+        assert [r.worktree_id for r in tracking.list_records(
+            tmp_tracking_dir, include_anchor=True)] == [tracking.ANCHOR_ID]
+        assert tracking.find_worktree_id_by_cwd(str(anchor)) is None
+
+    def test_bare_main_checkout_session_is_recorded_on_anchor_ledger(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, linked, _config, stamps = self._setup(tmp_path, monkeypatch, bare=True)
+        # Hardened hosts refuse implicit bare-repo discovery; resolution must still work.
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.bareRepository")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "explicit")
+        assert worktree_identity._anchor_checkout_for_cwd(linked) is None
+
+        assert self._start(monkeypatch, "bare-sess", anchor) == 0
+
+        record = load_record(tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml")
+        assert Path(record.worktree_path).resolve() == anchor.resolve()
+        assert record.session_entry("bare-sess") is not None
+        assert record.resolved_head_session == "bare-sess"
+        assert [(sid, wid) for sid, wid, _ in stamps] == [("bare-sess", tracking.ANCHOR_ID)]
+
+    def test_concurrent_first_use_keeps_both_sessions_and_claims(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        from agent_worktrees import anchor_ledger
+
+        anchor, _linked, _config, _stamps = self._setup(tmp_path, monkeypatch)
+        real = {
+            name: getattr(tracking, name)
+            for name in ("create_new_record", "create_new_record_if_absent")
+        }
+        raced: list[bool] = []
+
+        def interleave(name):
+            # Session A has passed the ledger's absence check; session B now
+            # creates the ledger and registers before A creates it.
+            def wrapper(*args, **kwargs):
+                if not raced:
+                    raced.append(True)
+                    assert anchor_ledger.register_session(
+                        "sess-b", anchor, pid=None, pane_id=None, event_at=None,
+                        source="hook:new",
+                    )
+                return real[name](*args, **kwargs)
+            return wrapper
+
+        for name in real:
+            monkeypatch.setattr(tracking, name, interleave(name))
+
+        assert anchor_ledger.register_session(
+            "sess-a", anchor, pid=None, pane_id=None, event_at=None, source="hook:new"
+        )
+
+        assert raced == [True]
+        record = load_record(tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml")
+        assert {s.session_id for s in record.sessions} >= {"sess-a", "sess-b"}
+        live_session_claims = sorted(
+            c.ref.rsplit("#", 1)[-1]
+            for c in record.resources
+            if c.kind == "session" and c.is_live
+        )
+        assert live_session_claims == ["sess-a", "sess-b"]
+
+    def test_list_and_head_session_return_anchor_session(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        from agent_worktrees import sessions as S
+        from conftest import make_session_dir
+
+        anchor, _linked, _config, _stamps = self._setup(tmp_path, monkeypatch)
+        state_dir = tmp_path / "session-state"
+        make_session_dir(state_dir, "anchor-sess", str(anchor))
+        monkeypatch.setattr(S, "_session_state_dir", lambda: state_dir)
+        assert self._start(monkeypatch, "anchor-sess", anchor) == 0
+        from agent_worktrees import output
+
+        emitted: list[dict] = []
+        monkeypatch.setattr(output, "_json_output", lambda data: emitted.append(data))
+
+        assert m.cmd_list_sessions(
+            argparse.Namespace(worktree_id=tracking.ANCHOR_ID, json=True)) == 0
+        listed = emitted.pop()
+        rows = listed["sessions"]
+        assert [row["id"] for row in rows] == ["anchor-sess"]
+        assert rows[0]["worktree_id"] == tracking.ANCHOR_ID
+        assert rows[0]["interface"] == "cli"
+        assert rows[0]["origin"] == "user"
+        assert listed["head_session"] == "anchor-sess"
+
+        assert m.cmd_head_session(
+            argparse.Namespace(worktree_id=tracking.ANCHOR_ID, json=True)) == 0
+        head = emitted.pop()
+        assert head["tracked"] is True
+        assert head["worktree_id"] == tracking.ANCHOR_ID
+        assert head["head_session"] == "anchor-sess"
+        assert head["active"] is True
+
+    def test_session_end_closes_anchor_session(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, _linked, _config, _stamps = self._setup(tmp_path, monkeypatch)
+        assert self._start(monkeypatch, "anchor-sess", anchor) == 0
+        monkeypatch.setattr(
+            m.sys, "stdin",
+            io.StringIO(json.dumps({"sessionId": "anchor-sess", "cwd": str(anchor)})),
+        )
+        args = argparse.Namespace(
+            worktree_id=None, session_id=None, cwd=None, stdin=True, launch_id=None)
+
+        assert m.cmd_deregister_session(args) == 0
+
+        record = load_record(tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml")
+        assert record.session_entry("anchor-sess").ended_at
+
+    def test_linked_worktree_session_is_still_adopted_not_anchored(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _anchor, linked, _config, _stamps = self._setup(tmp_path, monkeypatch)
+
+        assert self._start(monkeypatch, "linked-sess", linked) == 0
+
+        assert not (tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml").exists()
+        record = load_record(tmp_tracking_dir / "app-session.yaml")
+        assert [e.session_id for e in record.sessions] == ["linked-sess"]
+
+    def test_unrelated_repository_is_not_anchored(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        self._setup(tmp_path, monkeypatch)
+        other = tmp_path / "other"
+        git_ops.git("init", "-b", "master", str(other))
+
+        assert self._start(monkeypatch, "other-sess", other) == 0
+
+        assert not (tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml").exists()
+
+    def test_anchor_is_never_finalized_pushed_or_reaped(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        from agent_worktrees import finalize
+
+        anchor, _linked, config, _stamps = self._setup(tmp_path, monkeypatch)
+        assert self._start(monkeypatch, "anchor-sess", anchor) == 0
+        ledger = tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml"
+
+        assert finalize.validate_and_finalize(tracking.ANCHOR_ID, config) is False
+        assert finalize.push_changes(tracking.ANCHOR_ID, config) is False
+        reaped = m.reap_one(tracking.ANCHOR_ID)
+        assert reaped["removed"] is False and reaped["skipped"] is True
+        assert ledger.exists()
+        assert anchor.exists()
+
+    def test_anchor_is_not_resolved_by_suffix(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        tracking.load_or_create_anchor_record(
+            "/tmp/src/anchor", "test-project", "test", "linux", tmp_tracking_dir)
+
+        assert worktree_identity._resolve_worktree_id(tracking.ANCHOR_ID) == tracking.ANCHOR_ID
+        # A short suffix never resolves to the ledger, although its stem ends in it.
+        assert worktree_identity._resolve_worktree_id("anchor") == "anchor"

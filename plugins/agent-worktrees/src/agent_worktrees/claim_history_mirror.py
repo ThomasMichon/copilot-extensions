@@ -698,7 +698,7 @@ def _current_project_worktree_ids() -> set[str]:
     try:
         from . import config as cfg
         from . import tracking
-        records = tracking.list_records(cfg.tracking_dir())
+        records = tracking.list_records(cfg.tracking_dir(), include_anchor=True)
     except Exception:
         return set()
     return {r.worktree_id for r in records if getattr(r, "worktree_id", None)}

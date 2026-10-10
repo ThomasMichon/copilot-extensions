@@ -686,7 +686,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
 
     reclaimed: list[dict[str, str]] = []
     tdir = cfg.tracking_dir()
-    for rec in tracking.list_records(tdir):
+    for rec in tracking.list_records(tdir, include_anchor=True):
         rec_path = tdir / f"{rec.worktree_id}.yaml"
         verdicts: dict[str, tuple[bool | None, bool | None]] = {}
         for claim in rec.resources:
@@ -786,7 +786,7 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
     selectors = set(target[1:])
     tdir = cfg.tracking_dir()
     released: list[dict[str, str]] = []
-    for rec in tracking.list_records(tdir):
+    for rec in tracking.list_records(tdir, include_anchor=True):
         if selectors and rec.worktree_id not in selectors:
             continue
         rec_path = tdir / f"{rec.worktree_id}.yaml"
