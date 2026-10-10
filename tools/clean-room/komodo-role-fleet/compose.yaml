@@ -1,0 +1,113 @@
+services:
+  mongo:
+    image: mongo@sha256:d0d926f94df099bff534b7ee5b5986458131a22489dfff8664509af0c1e2ca9c
+    command: --quiet --wiredTigerCacheSizeGB 0.25
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: proof-admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/database
+    secrets: [database]
+    volumes: [db:/data/db]
+    networks: [proof]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+  core:
+    image: ghcr.io/moghtech/komodo-core@sha256:bca73d0eee143066228fb9b80c38a5a2726e573ad2758f7aa92b5c91a8aef1c7
+    init: true
+    depends_on:
+      mongo:
+        condition: service_healthy
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      KOMODO_DATABASE_ADDRESS: mongo:27017
+      KOMODO_BIND_IP: 0.0.0.0
+      KOMODO_DATABASE_USERNAME: proof-admin
+      KOMODO_DATABASE_PASSWORD_FILE: /run/secrets/database
+      KOMODO_LOCAL_AUTH: "true"
+      KOMODO_INIT_ADMIN_USERNAME: proof-admin
+      KOMODO_INIT_ADMIN_PASSWORD_FILE: /run/secrets/admin
+      KOMODO_DISABLE_USER_REGISTRATION: "true"
+      KOMODO_DISABLE_INIT_RESOURCES: "true"
+      KOMODO_JWT_SECRET_FILE: /run/secrets/jwt
+      KOMODO_WEBHOOK_SECRET_FILE: /run/secrets/webhook
+      KOMODO_FIRST_SERVER_NAME: Proof
+      KOMODO_PERIPHERY_PUBLIC_KEY: file:/config/keys/periphery.pub
+    secrets: [database, admin, jwt, webhook]
+    volumes: [keys:/config/keys]
+    networks: [proof]
+  periphery:
+    image: ghcr.io/moghtech/komodo-periphery@sha256:fa3f1a641a265216066676950d5eecdf506955a7bafe2f01996135ae93115cd5
+    init: true
+    depends_on: [core]
+    mem_limit: 384m
+    cpus: 1
+    environment:
+      PERIPHERY_CORE_ADDRESS: ws://core:9120
+      PERIPHERY_CONNECT_AS: Proof
+      PERIPHERY_CORE_PUBLIC_KEYS: file:/config/keys/core.pub
+      PERIPHERY_DISABLE_TERMINALS: "true"
+      PERIPHERY_DISABLE_CONTAINER_TERMINALS: "true"
+    volumes: [keys:/config/keys]
+    networks: [proof]
+  nested:
+    image: docker@sha256:0b6d18a4a222e71c88be6034926b4f6cde2fc33c2218643d03ccfddc65995470
+    profiles: [enroll]
+    privileged: true
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["dockerd", "--host=unix:///var/run/docker.sock", "--tls=false"]
+    volumes: [nested-socket:/var/run, nested-data:/var/lib/docker]
+    networks: [proof]
+  enrolled:
+    image: ghcr.io/moghtech/komodo-periphery@sha256:fa3f1a641a265216066676950d5eecdf506955a7bafe2f01996135ae93115cd5
+    profiles: [enroll]
+    init: true
+    mem_limit: 384m
+    cpus: 1
+    environment:
+      PERIPHERY_CORE_PUBLIC_KEYS: file:/config/keys/core.pub
+      PERIPHERY_PRIVATE_KEY: file:/instance/periphery.key
+      PERIPHERY_DISABLE_TERMINALS: "true"
+      PERIPHERY_DISABLE_CONTAINER_TERMINALS: "true"
+    volumes:
+      - keys:/config/keys:ro
+      - enrolled-keys:/instance
+      - nested-socket:/var/run
+      - ./enrolled.toml:/config/config.toml:ro
+    networks: [proof]
+  client:
+    image: node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+    command: node /proof/client.mjs
+    profiles: [client]
+    mem_limit: 256m
+    cpus: 1
+    volumes:
+      - ./client.mjs:/proof/client.mjs:ro
+      - .:/exchange
+    secrets: [admin]
+    networks: [proof]
+networks:
+  proof:
+    internal: true
+volumes:
+  db:
+  keys:
+  nested-socket:
+  nested-data:
+  enrolled-keys:
+secrets:
+  database:
+    file: database.secret
+  admin:
+    file: admin.secret
+  jwt:
+    file: jwt.secret
+  webhook:
+    file: webhook.secret
