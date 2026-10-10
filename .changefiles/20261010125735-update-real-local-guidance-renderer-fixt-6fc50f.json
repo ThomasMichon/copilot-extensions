@@ -1,0 +1,9 @@
+{
+  "comment": "Update real local-guidance renderer fixtures for persisted folder trust and isolated home identity; retain untrusted-repository rejection coverage.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
