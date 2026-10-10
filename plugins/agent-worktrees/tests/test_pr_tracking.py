@@ -558,11 +558,11 @@ class TestClassifyRecordsConvo:
 
 class TestPRTrackingUpdates(PRWorkflowSetup):
     def test_record_pushed_head_uses_the_locked_push_identity(
-        self, pr_repo, monkeypatch,
+        self, published_pr_repo, monkeypatch,
     ):
         """A remote repointed after push must not change the recorded fork repo."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         expected = pr_publish.push_slug("fork", cwd=str(wt_path))
         other = fork_dir.parent / "elsewhere.git"
@@ -578,10 +578,10 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         saved = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert (saved.pr.remote, saved.pr.head_repo) == ("fork", expected)
 
-    def test_a_stale_writer_never_erases_the_recorded_fork(self, pr_repo):
+    def test_a_stale_writer_never_erases_the_recorded_fork(self, published_pr_repo):
         """A process that loaded the record before create-pr recorded the PR's
         fork saves an unrelated change later: the fork stays recorded."""
-        config, wid, wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         stale = tracking.load_record(path)
         stale.pr.remote = stale.pr.head_repo = ""
@@ -593,11 +593,11 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         rec = tracking.load_record(path)
         assert (rec.pr.remote, rec.pr.head_repo, rec.title) == ("fork", "alice/ext", "an unrelated update")
 
-    def test_a_stale_writer_never_erases_a_backfilled_fork_identity(self, pr_repo):
+    def test_a_stale_writer_never_erases_a_backfilled_fork_identity(self, published_pr_repo):
         """A legacy record (fork recorded, no host identity yet) loaded by one process;
         another push backfills the identity; the first saves an unrelated change: the
         identity stays."""
-        config, wid, wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         legacy = tracking.load_record(path)
         legacy.pr.remote, legacy.pr.head_repo, legacy.pr.head_identity = "fork", "alice/ext", ""
@@ -611,10 +611,10 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         rec = tracking.load_record(path)
         assert (rec.pr.remote, rec.pr.head_repo, rec.pr.head_identity) == ("fork", "alice/ext", "github.com/alice/ext")
 
-    def test_set_pr_reassigning_a_record_clears_its_old_fork_target(self, pr_repo):
+    def test_set_pr_reassigning_a_record_clears_its_old_fork_target(self, published_pr_repo):
         """Correcting a tracked entry to a different PR drops the old PR's fork target;
         attaching the first number keeps it."""
-        config, wid, wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.number, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner = None, "fork", "alice/ext", "alice"
@@ -636,10 +636,10 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
     @pytest.mark.parametrize("identity", ["number", "repo", "provider"])
     @pytest.mark.parametrize("competing_revision_increment", [0, 1])
     def test_set_pr_reassignment_discards_previous_tip_and_lifecycle(
-        self, pr_repo: tuple[cfg.Config, str, Path, Path], identity: str,
+        self, published_pr_repo: tuple[cfg.Config, str, Path, Path], identity: str,
         competing_revision_increment: int,
     ) -> None:
-        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.number, rec.pr.repo, rec.pr.provider = 7, "acme/ext", "github"
@@ -668,10 +668,10 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         assert updated.opened_at and updated.opened_at != "old-open"
         assert updated.closed_at == ""
 
-    def test_set_pr_reassigning_a_numberless_record_to_another_repo_clears_its_fork(self, pr_repo):
+    def test_set_pr_reassigning_a_numberless_record_to_another_repo_clears_its_fork(self, published_pr_repo):
         """A numberless record moved to a PR in another repository: the on-disk copy still
         has no number, but it's a different PR -- the save must not merge its fork back."""
-        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.number, rec.pr.repo = None, "acme/ext"
@@ -682,11 +682,11 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         assert (rec.pr.repo, rec.pr.number) == ("other-org/other-repo", 7)
         assert (rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner) == ("", "", "")
 
-    def test_set_pr_correcting_an_established_provider_clears_its_fork(self, pr_repo):
+    def test_set_pr_correcting_an_established_provider_clears_its_fork(self, published_pr_repo):
         """Another provider is another PR: its old fork target is dropped (and the
         save's field merge doesn't restore it), while attaching a first provider
         keeps the PR's fork."""
-        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.provider, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner = "", "fork", "alice/ext", "alice"
@@ -698,10 +698,10 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         rec = tracking.load_record(path)
         assert (rec.pr.provider, rec.pr.remote, rec.pr.head_repo, rec.pr.head_owner) == ("ado", "", "", "")
 
-    def test_a_stale_writer_of_another_provider_never_restores_its_fork(self, pr_repo):
+    def test_a_stale_writer_of_another_provider_never_restores_its_fork(self, published_pr_repo):
         """The save's field merge only fills fork fields from the on-disk copy while both
         describe the same PR: one under another established provider doesn't."""
-        _config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        _config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.provider, rec.pr.head_repo = "github", "alice/ext"
@@ -716,10 +716,10 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         assert (rec.pr.provider, rec.pr.remote, rec.pr.head_repo) == ("ado", "", "")
 
     @pytest.mark.parametrize("change", [{"provider": "ado"}, {"number": 99}])
-    def test_a_stale_writer_saving_after_a_reassignment_never_restores_the_old_pr(self, pr_repo, change):
+    def test_a_stale_writer_saving_after_a_reassignment_never_restores_the_old_pr(self, published_pr_repo, change):
         """A process that loaded the record before set_pr reassigned it saves an unrelated
         change afterwards: the reassignment (a newer revision) wins, fork target included."""
-        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.provider, rec.pr.number, rec.pr.head_repo = "github", 7, "alice/ext"
@@ -733,10 +733,10 @@ class TestPRTrackingUpdates(PRWorkflowSetup):
         assert (rec.pr.provider, rec.pr.number) == (change.get("provider", "github"), change.get("number", 7))
         assert (rec.pr.remote, rec.pr.head_repo, rec.title) == ("", "", "an unrelated update")
 
-    def test_set_pr_correcting_only_the_repo_slug_case_keeps_the_fork(self, pr_repo):
+    def test_set_pr_correcting_only_the_repo_slug_case_keeps_the_fork(self, published_pr_repo):
         """GitHub slugs are case-insensitive: re-entering the same PR's URL in another case
         is the same PR, so its fork target and its head observation stay."""
-        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(pr_repo)
+        config, wid, _wt_path, _fork_dir, _branch = self._fork_headed_rerun(published_pr_repo)
         path = cfg.tracking_dir() / f"{wid}.yaml"
         rec = tracking.load_record(path)
         rec.pr.number, rec.pr.repo, rec.pr.head_repo, rec.pr.head_owner = 7, "acme/ext", "alice/ext", "alice"

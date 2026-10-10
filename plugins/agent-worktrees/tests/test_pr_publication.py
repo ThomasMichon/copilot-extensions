@@ -273,7 +273,7 @@ class TestPRPublication(PRWorkflowSetup):
         assert seen.get("fork_head_identity") == "github.com/alice/ext"
         assert seen.get("pr_head", "").startswith("alice:")
 
-    def test_create_pr_rerun_updates_a_fork_headed_pr_on_its_fork(self, pr_repo, monkeypatch):
+    def test_create_pr_rerun_updates_a_fork_headed_pr_on_its_fork(self, published_pr_repo, monkeypatch):
         """Today's config resolves origin, but the live PR's head is on the fork
         it was published to: the re-squashed head goes there, stays recorded, and
         the PR head is the fork owner's (so a not-yet-opened PR opens from it)."""
@@ -281,7 +281,7 @@ class TestPRPublication(PRWorkflowSetup):
         real_slug = pr_publish.push_slug
         monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
             "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
-        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         result = pr_ops.create_pr(wid, config, title="Add feature")
         assert result.get("success"), result
         assert result["remote"] == "fork"
@@ -292,7 +292,7 @@ class TestPRPublication(PRWorkflowSetup):
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert (rec.pr.remote, rec.pr.head_repo) == ("fork", "alice/ext")
 
-    def test_a_fork_repointed_to_the_same_slug_on_another_host_refuses(self, pr_repo, monkeypatch):
+    def test_a_fork_repointed_to_the_same_slug_on_another_host_refuses(self, published_pr_repo, monkeypatch):
         """`owner/name` alone isn't the fork: the same slug on another host (here,
         another destination the slug check can't tell apart) is another repository.
         The recorded host/owner/name identity refuses it, both when choosing the
@@ -302,7 +302,7 @@ class TestPRPublication(PRWorkflowSetup):
         real_slug = pr_publish.push_slug
         monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
             "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
-        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         assert pr_ops.create_pr(wid, config, title="Add feature").get("success")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.head_repo == "alice/ext" and rec.pr.head_identity  # recorded, with its host
@@ -321,11 +321,11 @@ class TestPRPublication(PRWorkflowSetup):
         assert fin.push_changes(wid, config) is False
         assert pushed == []
 
-    def test_a_recorded_fork_remote_repointed_elsewhere_refuses(self, pr_repo, monkeypatch):
+    def test_a_recorded_fork_remote_repointed_elsewhere_refuses(self, published_pr_repo, monkeypatch):
         """Fork setup repoints `fork` when the identity changes: a remote that now
         names another repo than the PR's head repo isn't the PR's fork."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, _fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, _fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.head_repo = "alice/ext"
         tracking.save_record(rec)
@@ -340,13 +340,13 @@ class TestPRPublication(PRWorkflowSetup):
         assert result.get("error") == pr_publish.UNREADABLE_REMOTE
         assert not _git("ls-remote", "--heads", "origin", branch, cwd=wt_path)
 
-    def test_a_fork_remote_whose_push_url_names_another_repo_refuses(self, pr_repo):
+    def test_a_fork_remote_whose_push_url_names_another_repo_refuses(self, published_pr_repo):
         """`git push fork` honors `remote.fork.pushurl`: a fork fetched from the
         PR's head repo but pushing to another one would publish the update (and
         lease it on a tip read) elsewhere. Recorded or discovered, it's refused."""
         from agent_worktrees import finalize as fin
         from agent_worktrees import pr_publish
-        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         other = fork_dir.parent / "other.git"
         _git("init", "--bare", "-b", "master", str(other), cwd=wt_path)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -363,14 +363,14 @@ class TestPRPublication(PRWorkflowSetup):
         assert not git_ops.git("--git-dir", str(other), "rev-parse", "--verify", "-q",
                                f"refs/heads/{branch}", check=False).stdout.strip()
 
-    def test_a_fork_repointed_after_it_was_chosen_is_refused_at_push_time(self, pr_repo, monkeypatch):
+    def test_a_fork_repointed_after_it_was_chosen_is_refused_at_push_time(self, published_pr_repo, monkeypatch):
         """Another worktree's fork setup repoints the shared remote between
         resolution and push: the push re-checks under the publication lock,
         and repointing takes that same lock, so it can't land mid-push."""
         import threading
 
         from agent_worktrees import pr_publish
-        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.head_repo = pr_publish.push_slug("fork", cwd=str(wt_path))
         rec.pr.head_identity = pr_publish.push_identity("fork", cwd=str(wt_path))  # every fork push knows it
@@ -398,12 +398,12 @@ class TestPRPublication(PRWorkflowSetup):
         assert len(pushed) == 1
 
     def test_a_fresh_fork_push_repointed_before_the_lock_is_refused(
-        self, pr_repo, monkeypatch,
+        self, published_pr_repo, monkeypatch,
     ):
         """A fork target chosen for a fresh/unrecorded PR must still be checked
         under the publication lock; an empty recorded head_repo is not a bypass."""
         from agent_worktrees import pr_publish
-        _config, _wid, wt_path, fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        _config, _wid, wt_path, fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{_wid}.yaml")
         expected = pr_publish.push_slug("fork", cwd=str(wt_path))
         other = fork_dir.parent / "elsewhere.git"
@@ -420,7 +420,7 @@ class TestPRPublication(PRWorkflowSetup):
         assert not result and result.stderr == pr_publish.REPOINTED
         assert pushed == []
 
-    def test_a_fresh_fork_target_is_checked_by_its_full_identity_under_the_lock(self, pr_repo, monkeypatch):
+    def test_a_fresh_fork_target_is_checked_by_its_full_identity_under_the_lock(self, published_pr_repo, monkeypatch):
         """A fresh/legacy target has no recorded identity: the one read when the target
         was chosen is required, so a same-slug repoint before the lock is refused, and
         a fork push with no identity at all is refused too."""
@@ -428,7 +428,7 @@ class TestPRPublication(PRWorkflowSetup):
         real_slug = pr_publish.push_slug
         monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
             "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
-        _config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        _config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.remote = rec.pr.head_repo = rec.pr.head_identity = ""  # fresh/legacy: nothing recorded
         chosen = pr_publish.push_identity("fork", cwd=str(wt_path))
@@ -486,14 +486,14 @@ class TestPRPublication(PRWorkflowSetup):
         assert not git_ops.git("--git-dir", str(other), "rev-parse", "--verify", "-q",
                                f"refs/heads/{rec.pr.branch}", check=False).stdout.strip()
 
-    def test_an_explicit_fork_owner_survives_a_rerun(self, pr_repo, monkeypatch):
+    def test_an_explicit_fork_owner_survives_a_rerun(self, published_pr_repo, monkeypatch):
         """The PR head's owner recorded at publish (an explicit pr.fork.owner) wins over
         the fork repository's owner on a rerun, e.g. after opening was deferred."""
         from agent_worktrees import pr_publish
         real_slug = pr_publish.push_slug
         monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
             "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
-        config, wid, wt_path, _fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, _fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.head_owner = "alice-org"
         tracking.save_record(rec)
@@ -591,11 +591,11 @@ class TestPRPublication(PRWorkflowSetup):
                     holder.kill()
                     holder.wait(timeout=5)
 
-    def test_create_pr_rerun_never_overwrites_a_fork_head_another_checkout_pushed(self, pr_repo):
+    def test_create_pr_rerun_never_overwrites_a_fork_head_another_checkout_pushed(self, published_pr_repo):
         """The fork head moved since this checkout published it (another checkout
         pushed): the re-squash's push is leased against the PR tip this checkout
         last observed (#5298), so it's refused and the other push survives."""
-        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         other = wt_path.parent / "second-checkout"
         _git("clone", "-q", "-b", branch, str(fork_dir), str(other), cwd=wt_path.parent)
         _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
@@ -607,9 +607,9 @@ class TestPRPublication(PRWorkflowSetup):
         on_fork = git_ops.git("--git-dir", str(fork_dir), "rev-parse", f"refs/heads/{branch}")
         assert on_fork.stdout.strip() == theirs
 
-    def test_create_pr_rerun_refuses_when_the_recorded_fork_is_gone(self, pr_repo):
+    def test_create_pr_rerun_refuses_when_the_recorded_fork_is_gone(self, published_pr_repo):
         from agent_worktrees import pr_publish
-        config, wid, wt_path, _fork_dir, branch = self._fork_headed_rerun(pr_repo)
+        config, wid, wt_path, _fork_dir, branch = self._fork_headed_rerun(published_pr_repo)
         _git("remote", "remove", "fork", cwd=wt_path)
         result = pr_ops.create_pr(wid, config, title="Add feature")
         assert result.get("error") == pr_publish.UNREADABLE_REMOTE

@@ -840,6 +840,24 @@ _Pending review of this plan._
   nonempty tuples are truthy. A direct empty-native-group regression proves
   the existing probe preserves `(0, 0)` without invoking `ps`; no speculative
   production workaround was added.
+- Complete diagnostic 38091020889 passed the expanded portfolio (7,901
+  passes and 57 explicit/platform skips) but took 987.73 seconds including
+  cleanup. Normal 38091013070 stopped at 903.39 seconds; neither is
+  performance acceptance. Reported call work totals 1,361.20 seconds,
+  versus 192.70 seconds setup. The largest modules include recovery
+  (86.33), publication (86.19), landing (80.72), providers (79.71),
+  tracking (71.65), preconditions (64.68), and lease-store (57.26).
+- Twenty fork-rerun/tracking scenarios still called initial publication
+  solely to prepare state. Bound only those scenarios to independent real
+  published copies and let the shared helper reuse existing publication;
+  all actual fork movement, feedback commit, rerun, concurrency and
+  stale-record operations remain unchanged. AST equivalence confirms
+  both entire test modules differ only in fixture binding names.
+  Publication's full 32-case module passes. The combined and tracking-only
+  local runs still exceed existing bounds or lose workers to per-item
+  timeouts; a directly selected changed stale-reassignment case passes.
+  Those are unresolved performance evidence, not permission to lift limits
+  or claim the host is harmless. Hosted full validation remains required.
 
 ### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
 - `dev` advanced during review and contained a broader, already-merged
