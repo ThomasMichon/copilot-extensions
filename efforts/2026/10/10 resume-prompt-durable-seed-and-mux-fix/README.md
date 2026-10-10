@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-10-05
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `picker` / `cold-start-resume-prompt`
 - **Umbrella issue:** [#5415](https://github.com/ThomasMichon/copilot-extensions/issues/5415)
 
@@ -191,10 +191,11 @@ is this effort's actual Phase 1 deliverable.)
       pending-seed fallback.
 - [x] Exercise engine, real Picker composer/dispatch, delegated launcher,
       actual shell rejection and argv boundaries, plus New-worktree behavior.
-- [ ] Confirm a live Picker-to-Copilot cold resume on the delivered build
+- [x] Confirm a live Picker-to-Copilot cold resume on the delivered build
       (the earlier Phase 2 live observation remains unclosed).
-- [ ] Land through current-head green CI and a passing review, then deploy
-      through unified update and synchronize consumer projections.
+- [x] Land through current-head green CI and a passing review.
+- [x] Confirm promotion and deploy the delivered fix through unified update,
+      then synchronize consumer projections for that delivered build.
 
 The latest per-attempt staging amendment also supersedes this slice's earlier
 invocation-only/no-persistence Resume rule. The earlier Phase 2 live-Open
@@ -259,7 +260,7 @@ daemon/write authority, without adding a separate service.
       (confirming it does NOT embed the seed), and `headless_new_session`'s
       updated flag.
 
-### Phase 2 — Picker UI: "Resume prompt…" Actions-menu entry (In progress -- live validation pending)
+### Phase 2 — Picker UI: "Resume prompt…" Actions-menu entry (Done)
 - [x] Add a "Resume prompt…" entry to the worktree row's Actions submenu
       (`engine_worktree_actions.py`, sibling to "Launch in new window"/"Bare
       resume"/"Messages"), offered for the same Open/Resume-eligible rows
@@ -326,7 +327,7 @@ daemon/write authority, without adding a separate service.
       `--interactive <text>` for a genuine resume target, confirming the
       resume-mode seed contract Phase 2 wires the Picker onto is real, not
       assumed.
-- [ ] Validate beyond unit tests (per `AGENTS.md`'s own policy, and this
+- [x] Validate beyond unit tests (per `AGENTS.md`'s own policy, and this
       effort's own Phase 1 cautionary tale about trusting a CLI's
       self-reported success alone): an actual live "Resume…" launch from the
       real Picker with a typed prompt, confirmed via `recent-messages`/a
@@ -336,10 +337,16 @@ daemon/write authority, without adding a separate service.
       and the Textual-pilot tests drive the real, unmocked `PromptDlgScreen`
       and dispatch code -- but no actual compiled-Picker session has yet
       exercised "Resume prompt…" end-to-end. This phase stays **in
-      progress** until that direct observation happens.
+      progress** until that direct observation happens. Closed by the
+      delivered-build observation in the 2026-10-10 Journal entry.
 
-### Phase 3 — Migrate "New worktree"'s own delivery onto the durable path (Not started)
-- [ ] `_create_worktree_core`'s own plan deliberately does NOT carry the
+### Phase 3 — Historical migration proposals (Resolved or transferred)
+
+The proposals below describe the earlier implementation. PR #5756 superseded
+its plan-time claim and live-Open delivery architecture with the typed,
+daemon-mediated cold-start contract. No live Resume injection is restored.
+
+- [x] `_create_worktree_core`'s own plan deliberately does NOT carry the
       seed in argv (Phase 1 -- single-owner, no double-delivery); evaluate
       whether `launch-session.{ps1,sh}`'s post-create
       `Invoke-SeedDeliverySafe`/`agent-worktrees embody --worktree-id <id>
@@ -348,8 +355,10 @@ daemon/write authority, without adding a separate service.
       `resolve --worktree-id --seed`-style durable delivery, rather than
       the send-keys mechanism, now that the durable-argv path exists for
       resume. Confirm with a live trace before touching the script; do not
-      remove a safety-net fallback on an assumption.
-- [ ] **Deferred from Phase 1:** `_resolve_json_mode`/
+      remove a safety-net fallback on an assumption. Resolved by the deferred
+      invocation wrapper and its single-owner fresh-create guard; the actual
+      delivered New-worktree launch no longer races the legacy helper.
+- [x] **Deferred from Phase 1:** `_resolve_json_mode`/
       `_resolve_resume_context` claim (clear) a persisted `pending_seed` at
       PLAN-BUILD time, before the external launcher script has actually
       exec'd the returned command -- a failure in that script before exec
@@ -359,7 +368,9 @@ daemon/write authority, without adding a separate service.
       same primitive `embody`'s own post-attempt mux-pane delivery already
       uses for its own restore-on-failure case) -- this requires touching
       `launch-session.{ps1,sh}` directly, which is why it's deferred here
-      rather than attempted in Phase 1.
+      rather than attempted in Phase 1. Resolved by retaining typed state
+      through planning and setup, reserving only at backend start, and releasing
+      proven startup failures instead of clearing at plan-build time.
 - [x] A live-mux reattach (`_resolve_resume_context`'s `verdict.mux_live`
       branch, Phase 1) correctly QUEUES a seed instead of losing it, and
       now also DELIVERS it on that exact reattach, not only on a later
@@ -370,7 +381,7 @@ daemon/write authority, without adding a separate service.
       fresh-mux-create path already calls (a no-op when nothing is
       queued). `test_launch_session_unwrap.py`'s drift guard asserts both
       call sites and their relative ordering.
-- [ ] `claim_pending_seed` cannot distinguish "nothing was pending" from
+- [x] Deferred to `ThomasMichon/copilot-extensions#6045`: `claim_pending_seed` cannot distinguish "nothing was pending" from
       "claim failed" (lock contention, an unreadable record) -- both
       return `None`. With an explicit seed supplied, the current code
       proceeds with the explicit value regardless, silently leaving an
@@ -381,7 +392,7 @@ daemon/write authority, without adding a separate service.
       "claim-failed") threaded through every existing call site, not a
       narrow single-file fix -- real design surgery, scoped here rather
       than rushed.
-- [ ] `_RecordLock.__enter__` creating/opening its sidecar file can itself
+- [x] Deferred to `ThomasMichon/copilot-extensions#6045`: `_RecordLock.__enter__` creating/opening its sidecar file can itself
       raise `OSError`/`PermissionError`, which currently escapes
       `pending_seed`'s own documented "degrade to False, never raise"
       contract in `claim_pending_seed`/`set_pending_seed`/
@@ -408,6 +419,10 @@ daemon/write authority, without adding a separate service.
   depended on it, and that whatever out-of-band attach case it existed for
   still degrades safely (a clearly reported "unseeded" launch, never a
   silent loss).
+  The New-only out-of-band fallback remains. Its typed origin fence and failure
+  handling are covered by the implementation portfolio; the delivered Picker
+  New launch was observed using the deferred boundary without the legacy
+  helper. Historical lock-contract work is transferred to #6045.
 
 ## Proposal
 
@@ -1136,3 +1151,51 @@ _Pending._
   142 focused engine cases pass (2 platform skips), and 113 Manager cases
   pass; Ruff, module-size ceilings and diff whitespace checks pass.
   Publication, current-head review/CI and actual merge remain before pause.
+- **2026-10-09** -- PR #5756 merged into `dev` as `27a7fe57bb98bad473570c8ca3e02ca4106cdada`
+  after a current-head Copilot Comment with zero open findings and green CI.
+  Reconciled the owning worktree's PR claim; all descendant PR claims are
+  released. Ran the required post-merge unified force-update and consumer
+  projection synchronization against the currently published marketplace.
+  The refresh completed with optional provider-exec/MCP dependency and
+  service-registration warnings; no unrelated remediation was attempted.
+  Generated consumer changes are version-marker-only and retained locally
+  without opening another PR. This does not prove promotion or installation
+  of this newly merged fix. The operator requested a pause after pending PRs
+  merged: no further feature, promotion or live Picker validation work is
+  running, no scheduled prompt is armed, and the effort remains Active.
+  Resume with delivered-build promotion/deployment confirmation, actual
+  Picker-to-Copilot evidence and the outstanding effort closure gates only
+  when the operator resumes the work.
+- **2026-10-10** -- Resumed after the operator's pause. Confirmed promotion by
+  comparing the released `main` seed-state, invocation and eligibility blobs
+  with PR #5756's final implementation; all three are identical. Release
+  history is regenerated, so raw merge-commit ancestry is not the proof.
+  Unified update selected engine `1.24.40-dev1` and Manager `0.6.21-dev1`;
+  the installed state/invocation modules match the merged implementation.
+  Consumer projection synchronization completed.
+  Drove the actual delivered Picker in an isolated terminal, opened a stopped
+  worktree's Resume prompt composer and confirmed a unique validation prompt.
+  Observed its exact typed Resume intent retained, unreserved, throughout
+  launch updates. At backend startup the seed file disappeared; native
+  Copilot had one full `--interactive` argument and the original conversation
+  target. The resumed conversation recorded the prompt once and returned
+  the expected answer with its prior marker. Repeated the actual Picker flow
+  for New worktree: exact New provenance survived both resolve hops and
+  preflight, then was discarded at native backend start; the first
+  conversation turn and expected answer were observed once.
+  These are genuine conversation observations, not only plan JSON or tests.
+  No source change was needed. No-Mux parity retains the earlier real
+  PowerShell/Git-Bash refusal/retry and exact-argv evidence; this final live
+  observation used muxed launches. No additional external-machine lane was
+  selected for this local Picker feature.
+  Resolved the historical migration proposals against the shipped design and
+  transferred remaining legacy lock/API hardening to #6045. A seedless
+  `pane-create` diagnostic failed because the Windows wrapper never writes
+  its receipt without an initial prompt; tracked separately as #6046.
+  Ordinary Picker/Copilot front doors succeeded. The initial New-dialog
+  automation focused Create rather than its optional textarea, producing a
+  seedless control worktree; corrected the focus, verified text before
+  confirmation and observed the real seeded launch. That control is not
+  counted as seed-delivery evidence.
+  The implementation, release, live observation and scope-disposition gates
+  are complete; the effort is Done and ready for archive review.
