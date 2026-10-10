@@ -36,6 +36,15 @@ no host at all — is driving the process underneath it.
 
 ## Concepts & Components
 
+- **Native-compatible continuity** — when context management is enabled in
+  effective settings or otherwise detected, continuity policy enhances native
+  checkpoint/recovery and keeps a stable session rather than creating another
+  session solely for context refresh. Operational pressure handling backs off
+  competing custom cutover when native support is viable; explicit handoff and
+  unsupported-venue recovery remain available. Settings select behavior, not
+  permission to invent unavailable tools or bypass policy. Compaction remains
+  emergency recovery rather than the planned continuity path.
+
 - **Pressure monitor** — continuously tracks context utilization for the
   running session and classifies it into an escalating series of tiers as it
   climbs toward exhaustion.

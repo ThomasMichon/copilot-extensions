@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Draft; implementation planned | #6028 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Draft | #6007 |
 | [PR Recovery Break Glass](active/pr-recovery-break-glass/README.md) | Draft | #5817 |
 | [Transparent PSMux Launch](active/transparent-psmux-launch/README.md) | Active | #5878 |
