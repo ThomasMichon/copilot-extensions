@@ -306,6 +306,15 @@ def test_mutation_requests_never_coalesce_different_subscribers(monkeypatch, kin
         cli._watch_request(kind, {"repo": "example/project", "number": 1, "subscriber_id": identity})
     assert len(set(keys)) == 3
 
+def test_registration_transport_fallback_reports_ambiguous_mutation(monkeypatch):
+    import work_coalescing_singleton
+    from agent_pull_requests import __main__ as cli
+
+    monkeypatch.setattr(work_coalescing_singleton, "call_with_fallback",
+                        lambda **kwargs: kwargs["fallback"]())
+    result = cli._watch_request("register", spec())
+    assert result["ambiguous_registration"] is True and "registered" not in result
+
 
 def test_legacy_restored_notify_timeout_keeps_fixed_ceiling(monkeypatch):
     from agent_pull_requests import watch_notification

@@ -472,7 +472,10 @@ def _watch_request(
     import uuid
 
     def _fallback() -> dict:
-        return {"error": "no watch daemon reachable and no inline fallback for this kind"}
+        result = {"error": "no watch daemon reachable and no inline fallback for this kind"}
+        if kind == "register":
+            result["ambiguous_registration"] = True
+        return result
 
     return call_with_fallback(
         dial=_watch_dial,

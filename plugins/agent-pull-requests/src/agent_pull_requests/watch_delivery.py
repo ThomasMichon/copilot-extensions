@@ -24,6 +24,7 @@ class Deliveries:
         self.scheduler: threading.Thread | None = None
         self.max_workers = 8
         self.changed = threading.Event()
+        self.prefer_legacy = True
 
     def resume(self) -> None:
         with self.lock:
@@ -49,17 +50,17 @@ class Deliveries:
                     return
                 available = self.max_workers - len(self.workers)
                 candidates = []
-                while self.legacy_queue and len(candidates) < available:
-                    candidates.append((self.legacy_queue.popleft(), self._run_legacy))
-                for event in pending:
-                    identity = event.subscriber.registration_id
-                    if (
-                        len(candidates) >= available
-                        or event.subscriber.pending["next_attempt"] > time.time()
-                        or identity in self.workers
-                    ):
-                        continue
-                    candidates.append((event, self._run))
+                ready = deque(
+                    event for event in pending
+                    if event.subscriber.pending["next_attempt"] <= time.time()
+                    and event.subscriber.registration_id not in self.workers
+                )
+                while len(candidates) < available and (ready or self.legacy_queue):
+                    if self.legacy_queue and (self.prefer_legacy or not ready):
+                        candidates.append((self.legacy_queue.popleft(), self._run_legacy))
+                    else:
+                        candidates.append((ready.popleft(), self._run))
+                    self.prefer_legacy = not self.prefer_legacy
                 for event, target in candidates:
                     identity = event.subscriber.registration_id
                     thread = threading.Thread(
