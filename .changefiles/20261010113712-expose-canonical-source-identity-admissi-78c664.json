@@ -1,0 +1,9 @@
+{
+  "comment": "Expose canonical source identity admission through session-sync push --source-identity-file, with bounded loading and fail-closed namespace validation.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
