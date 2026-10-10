@@ -1,5 +1,12 @@
 ## Effort-Backed Session Continuation
 
+For **native context-only rollover**, use the same objective/gate/delta and live
+obligation fields in the current owner's revision-guarded `session_artifacts`
+checkpoint, plus **exactly one next action**. Keep ownership and live flows in
+place. Read the verified bound artifact after terminal `new_context`, refresh
+durable guidance, and execute that action. The custom task-completion/transfer
+instructions below do not apply to an in-place native rollover.
+
 Use this compact shape when the current worktree has a valid open
 `active_effort` binding. The effort README already owns the durable request,
 intent, plan, validation plan, coordination, and journal; link it instead of

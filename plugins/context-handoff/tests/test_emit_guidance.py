@@ -23,12 +23,18 @@ def _powershell() -> str | None:
 
 
 def _bash() -> str | None:
-    executable = shutil.which("bash")
+    git = shutil.which("git")
+    git_bash = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+    executable = (
+        str(git_bash)
+        if os.name == "nt" and git_bash and git_bash.is_file()
+        else shutil.which("bash")
+    )
     if not executable:
         return None
     try:
         result = subprocess.run(
-            [executable, "-lc", "exit 0"],
+            [executable, "-lc", "test -f \"$1\"", "--", str(BASH_PRODUCER)],
             capture_output=True,
             check=False,
             timeout=5,
@@ -121,6 +127,10 @@ def test_bash_emits_owned_bounded_continuity_guidance() -> None:
     assert "quiesce+sync first if pressure-driven, then compose and store" in context
     assert "trigger_handoff" in context
     assert "do not ask first" in context
+    assert "First select continuity: contextManagementTools enabled" in context
+    assert "For custom new-owner/process transfer only" in context
+    assert "exactly one next action" in context
+    assert "No custom pickup, raw clear, guessed artifact files, or policy bypass" in context
     assert "ending the turn with proposed follow-ups" in context
     assert "always stores/seeds; never performs process management" in context
     assert "Live signaling needs" in context
@@ -129,7 +139,7 @@ def test_bash_emits_owned_bounded_continuity_guidance() -> None:
     assert "Consuming or producing a handoff is setup or progress, never completion" in context
     assert "one slice of the larger effort" in context
     assert "The session owning the objective stops only" in context
-    assert "Use the `context-handoff` skill" in context
+    assert "use the `context-handoff` skill" in context.lower()
     # Fresh-session awareness (Goal 2/3): a session did not need to begin
     # from a handoff to learn the mechanism exists -- delivered here (static,
     # naturally idempotent session-start guidance) rather than a runtime
@@ -173,7 +183,7 @@ def test_aggregate_mode_is_owned_compact_and_cross_platform() -> None:
     assert "Near token pressure" in context
     assert "Turn-end follow-ups ask before" in context
     assert "one slice" in context
-    assert "Use the `context-handoff` skill" in context
+    assert "use the `context-handoff` skill" in context.lower()
     assert len(context.encode("utf-8")) <= 700
 
     if _powershell():

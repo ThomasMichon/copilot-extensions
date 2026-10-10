@@ -72,6 +72,7 @@ import {
   formatContextUsage,
 } from "./thresholds.mjs";
 import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnostics.mjs";
+import { createNativeContextObserver, nativePressurePrompt } from "./native-context.mjs";
 
 // --- Emergency crash diagnostics ---------------------------------------
 // This extension has been observed, on at least one machine, to reach the
@@ -158,7 +159,32 @@ const state = {
   toolDefinitionsTokens: 0,
   messagesLength: 0,
   lastUtilization: 0,             // currentTokens / tokenLimit
+  windowRevision: 0,
+  nativeContext: null,
 };
+
+let nativeObserver;
+const nativeWarnings = new Set();
+async function observeNativeContext(fresh = false) {
+  const revision = state.windowRevision;
+  const observation = await nativeObserver.observe(state.cwd || process.cwd(), { fresh });
+  if (revision !== state.windowRevision) return observation;
+  if (state.nativeContext && state.nativeContext.native !== observation.native &&
+      !state.forceTriggered && !state.handoffGenerated) {
+    state.softReminderSent = false;
+    state.hardReminderSent = false;
+    state.softLogShown = false;
+    state.hardLogShown = false;
+  }
+  state.nativeContext = observation;
+  for (const warning of observation.warnings) {
+    if (nativeWarnings.has(warning)) continue;
+    nativeWarnings.add(warning);
+    session.log(`[Context Handoff] ${warning}`, { level: "warning" });
+  }
+  if (observation.native) state.blockMutatingTools = false;
+  return observation;
+}
 
 // --- Helpers ---
 
@@ -332,6 +358,7 @@ function formatHandoffMarkdown(handoffData, scope) {
 // unit-testable without the live SDK connection.
 
 async function onPermissionRequest(request, invocation) {
+  if (state.blockMutatingTools && nativeObserver) await observeNativeContext(true);
   if (state.blockMutatingTools && !isReadOnlyPermissionRequest(request)) {
     return { kind: "reject", feedback: FORCE_TIER_DENY_FEEDBACK };
   }
@@ -537,13 +564,20 @@ const session = await joinSession({
       handler: async (args, invocation) => {
         ensureState(invocation);
         await handoffConfigPromise;
+        const nativeObservation = await observeNativeContext(true);
         const sid = state.sessionId || invocation?.sessionId || "unknown";
         const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
 
-        state.handoffGenerated = true;
+        if (!nativeObservation.native) state.handoffGenerated = true;
 
         return {
           textResultForLlm: [
+            nativeObservation.native
+              ? nativePressurePrompt(formatContextUsage(state.currentTokens, state.tokenLimit),
+                "requested", nativeObservation) +
+                "\nThe custom transfer instructions below apply only to an explicit " +
+                "new-owner/process handoff, not native context-only rollover."
+              : "",
             "## Handoff Data",
             "",
             `**Session:** ${handoffData.sessionId}`,
@@ -759,6 +793,9 @@ const session = await joinSession({
         return (
           `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
           "baton without arming the pickup flow.\n\n" +
+          "For native-selected context-only continuity, use the native checkpoint flow " +
+          "instead of the custom transfer instructions below; a saved custom baton " +
+          "does not require a new owner or authorize pickup.\n\n" +
           "If this handoff exists because context pressure is rising and work " +
           "still remains: you should already have quiesced owned background " +
           "work (stopped or waited out owned background agents/async shells " +
@@ -1260,6 +1297,11 @@ const session = await joinSession({
   ],
 });
 emergencyDiagnostics.markReady();
+nativeObserver = createNativeContextObserver({
+  getMetadata: typeof session.rpc?.tools?.getCurrentMetadata === "function"
+    ? () => session.rpc.tools.getCurrentMetadata()
+    : undefined,
+});
 
 // --- Session lifecycle reconstructed from events (SDK callback hooks removed) ---
 // The native runtime dropped SDK callback hooks ("SDK hook callbacks are no
@@ -1293,6 +1335,7 @@ handoffConfigPromise.then((resolved) => {
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 session.on("user.message", (event) => {
+  if (event.agentId) return;
   state.turnCount++;
   if (!state.firstUserPrompt && event.data?.content) {
     state.firstUserPrompt = event.data.content;
@@ -1337,6 +1380,7 @@ session.on("user.message", (event) => {
 const pendingToolArgs = new Map();  // toolCallId -> { toolName, arguments }
 
 session.on("tool.execution_start", (event) => {
+  if (event.agentId) return;
   const d = event.data;
   if (!d?.toolCallId) return;
   pendingToolArgs.set(d.toolCallId, {
@@ -1350,6 +1394,7 @@ session.on("tool.execution_start", (event) => {
 });
 
 session.on("tool.execution_complete", (event) => {
+  if (event.agentId) return;
   const d = event.data;
   const pend = d?.toolCallId ? pendingToolArgs.get(d.toolCallId) : null;
   if (d?.toolCallId) pendingToolArgs.delete(d.toolCallId);
@@ -1415,7 +1460,11 @@ session.on("tool.execution_complete", (event) => {
 // the skill registry, producing a transient "Skill not found: context-handoff").
 let pendingNudge = null;  // null | "soft" | "hard"
 
-session.on("session.idle", () => {
+session.on("session.idle", async (event) => {
+  if (event.agentId || !pendingNudge) return;
+  const revision = state.windowRevision;
+  const observation = await observeNativeContext(true);
+  if (revision !== state.windowRevision) return;
   const messages = [];
   if (pendingNudge) {
     const level = pendingNudge;
@@ -1424,7 +1473,9 @@ session.on("session.idle", () => {
     // The nudge JUST hands the agent to the context-handoff skill. Under context
     // pressure, that skill should compose/save and then trigger_handoff directly
     // without asking. The ask-first branch is only for turn-end follow-up handoffs.
-    const msg = level === "hard"
+    const msg = observation.native
+      ? nativePressurePrompt(usage, level, observation)
+      : level === "hard"
       ? `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
         `(${usage.tokens}). ` +
         `The configured hard threshold was reached; auto-compaction still triggers ` +
@@ -1449,6 +1500,8 @@ session.on("session.idle", () => {
 // model interaction. This is the authoritative signal for context usage.
 
 session.on("session.usage_info", async (event) => {
+  if (event.agentId) return;
+  const revision = state.windowRevision;
   const d = event.data;
   state.currentTokens = d.currentTokens;
   state.tokenLimit = d.tokenLimit;
@@ -1469,6 +1522,8 @@ session.on("session.usage_info", async (event) => {
     persistState();
     return;
   }
+  const observation = await observeNativeContext();
+  if (revision !== state.windowRevision) return;
 
   let pressure;
   try {
@@ -1498,7 +1553,17 @@ session.on("session.usage_info", async (event) => {
   // "manual-only", context pressure still WARNS (below) but never forces a
   // handoff or blocks tools on its own.
   if (automaticHandoffEnabled(handoffConfig.mode) &&
-      pressure.force && !state.forceTriggered && !state.handoffGenerated) {
+      pressure.force && !observation.native && !state.forceTriggered && !state.handoffGenerated) {
+    const currentObservation = await observeNativeContext(true);
+    if (revision !== state.windowRevision) return;
+    if (state.forceTriggered || state.handoffGenerated) return;
+    if (currentObservation.native) {
+      pendingNudge = "hard";
+      state.hardReminderSent = true;
+      state.softReminderSent = true;
+      persistState();
+      return;
+    }
     state.forceTriggered = true;
     state.blockMutatingTools = true;
     state.handoffGenerated = true;
@@ -1540,7 +1605,10 @@ session.on("session.usage_info", async (event) => {
       !state.hardLogShown && !state.handoffGenerated) {
     state.hardLogShown = true;
     state.softLogShown = true;  // hard implies soft
-    session.log(
+    session.log(observation.native
+      ? `[Context Handoff] Native checkpoint boundary reached (${usage.utilization}); ` +
+        "custom force/cutover is suppressed. Preserve the native checkpoint before rollover."
+      :
       `[Context Handoff] ⚠️ Context utilization ${usage.utilization} ` +
       `(${usage.tokens}; ` +
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
@@ -1556,7 +1624,9 @@ session.on("session.usage_info", async (event) => {
   } else if (pressure.soft &&
       !state.softLogShown && !state.handoffGenerated) {
     state.softLogShown = true;
-    session.log(
+    session.log(observation.native
+      ? `[Context Handoff] Native checkpoint preparation boundary reached (${usage.utilization}).`
+      :
       `[Context Handoff] Context utilization ${usage.utilization} ` +
       `(${usage.tokens}; ` +
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
@@ -1576,6 +1646,7 @@ session.on("session.usage_info", async (event) => {
 
 // Also monitor compaction events for awareness
 session.on("session.compaction_start", (event) => {
+  if (event.agentId) return;
   session.log(
     `[Context Handoff] Compaction starting. ` +
     `Conversation tokens: ${event.data.conversationTokens?.toLocaleString() ?? "?"}, ` +
@@ -1585,6 +1656,7 @@ session.on("session.compaction_start", (event) => {
 });
 
 session.on("session.compaction_complete", (event) => {
+  if (event.agentId) return;
   const d = event.data;
   if (d.success) {
     // Reset reminder state after successful compaction — utilization
@@ -1603,10 +1675,48 @@ session.on("session.compaction_complete", (event) => {
     // suppressed too, since handoffGenerated (set when force first fired)
     // is never cleared here -- one auto-handoff per session is the contract.
     state.blockMutatingTools = false;
+    pendingNudge = null;
+    state.windowRevision++;
+    nativeObserver.invalidate();
     session.log(
       `[Context Handoff] Compaction complete. ` +
       `${d.tokensRemoved?.toLocaleString() ?? "?"} tokens removed, ` +
       `${d.postCompactionTokens?.toLocaleString() ?? "?"} tokens remaining.`
     );
   }
+});
+
+session.on("session.context_cleared", (event) => {
+  if (event.agentId) return;
+  state.windowRevision++;
+  state.softReminderSent = false;
+  state.hardReminderSent = false;
+  state.softLogShown = false;
+  state.hardLogShown = false;
+  state.thresholdWarningShown = false;
+  if (state.forceTriggered) state.handoffGenerated = false;
+  state.forceTriggered = false;
+  state.blockMutatingTools = false;
+  state.currentTokens = 0;
+  state.conversationTokens = 0;
+  state.systemTokens = 0;
+  state.toolDefinitionsTokens = 0;
+  state.messagesLength = 0;
+  state.lastUtilization = 0;
+  pendingNudge = null;
+  nativeObserver.invalidate();
+  persistState();
+});
+
+session.on("session.tools_updated", (event) => {
+  if (event.agentId) return;
+  state.windowRevision++;
+  nativeObserver.invalidate();
+});
+
+session.on("session.context_changed", (event) => {
+  if (event.agentId) return;
+  if (event.data?.cwd) state.cwd = event.data.cwd;
+  state.windowRevision++;
+  nativeObserver.invalidate();
 });

@@ -8,6 +8,12 @@ Loads without `context-handoff`; needs only a shell.
 
 ## Preparing a brief
 
+For native-selected context-only rollover, use the skill's verified current-owner
+checkpoint/terminal `new_context` flow, not custom pickup. Preserve the parent
+gate, unresolved work, live obligations and one next action. The sequence below
+is only for actual new-owner/process transfer or diagnosed unavailable-native
+recovery; do not turn policy caps or partial-clear errors into alternate sessions.
+
 Never end a turn with work outstanding, no handoff. Trigger on
 context-pressure (no confirmation), or once agreed on turn-end. Quiesce
 FIRST, before sync (a running task can still write into the tree):

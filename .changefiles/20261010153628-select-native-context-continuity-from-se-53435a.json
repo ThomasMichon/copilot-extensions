@@ -1,0 +1,9 @@
+{
+  "comment": "Select native context continuity from settings or offered tools, substitute native checkpoint pressure guidance, and preserve explicit handoff recovery",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
