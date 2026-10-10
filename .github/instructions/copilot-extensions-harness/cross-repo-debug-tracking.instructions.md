@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.13-dev1","renderedBytes":1404,"schema":"copilot-extensions.instruction-projection","sourceId":"cross-repo-debug-tracking","templateSha256":"0f678caacab324ccb58ce1ecfee01109852bcfc73155f7bd3cd186f3f17f4474","version":2} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.14-dev1","renderedBytes":1404,"schema":"copilot-extensions.instruction-projection","sourceId":"cross-repo-debug-tracking","templateSha256":"1e36d1ad73a5d0b2b22d656cb3953518272a4bc97147478bbd8d7545aebc3eee","version":2} -->
 
 Before dependent action, acquire guidance or BLOCK. No body delivery asserted.
 Local `.github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.local.instructions.md`; reviewed `.github/copilot/context-fallbacks/copilot-extensions-harness/cross-repo-debug-tracking.md`.

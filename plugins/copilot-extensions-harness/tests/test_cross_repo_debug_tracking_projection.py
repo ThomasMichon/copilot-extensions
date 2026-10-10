@@ -49,17 +49,22 @@ def test_template_is_reviewable_static_fallback():
         assert forbidden not in content
 
 
-def test_postmerge_freshness_belongs_to_consented_maintenance():
+def test_postmerge_guidance_waits_for_promotion_and_local_update():
     content = " ".join(_TEMPLATE.read_text(encoding="utf-8").split())
-    assert "adopted, consented maintenance" in content
-    assert "normally once daily" in content
+    assert "merge to `dev` does not make the change live" in content
+    assert "promote it to `main`" in content
+    assert "`<repo> update` installs that promoted release" in content
+    assert "Manual instruction sync is not required" in content
     assert "permissionless local rendering" in content
     assert "reviewed offline fallback" in content
     assert "missing/corrupt locked artifacts remain blocking" in content
-    assert "primed/pending, not deployed" in content
+    assert "Before promotion, report merged/pending release" in content
+    assert "After promotion but before local rollout, report released/pending rollout" in content
+    assert "Neither state means live or deployed" in content
     assert "explicit rollout authorization" in content
     assert "immediately force-update" not in content
     assert "before ending your turn" not in content
+    assert "checked-in projection refresh" not in content
 
 
 def test_contribution_rollout_preserves_authorization_and_running_state_proof():
@@ -71,9 +76,14 @@ def test_contribution_rollout_preserves_authorization_and_running_state_proof():
     assert "required deployment workflow" in normalized
     assert "running system reflects the change" in normalized
     assert "Adopted, consented maintenance" in normalized
-    assert "not deployed" in normalized
+    assert "neither means live or deployed" in normalized
+    assert "merged/pending release before promotion" in normalized
+    assert "released/pending rollout after promotion" in normalized
     assert "deployment completion obligation" in normalized
     assert "<repo> update" in normalized
+    assert "pipeline promotes it to `main`" in normalized
+    assert "local updater installs that promoted release" in normalized
+    assert "Manual instruction sync is not required" in normalized
 
 
 def test_cross_linking_preserves_public_traceability_without_private_publication():

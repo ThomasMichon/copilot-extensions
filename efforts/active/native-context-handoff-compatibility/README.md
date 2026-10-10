@@ -3,11 +3,11 @@
 - **Slug:** `native-context-handoff-compatibility`
 - **Repo:** copilot-extensions
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/context-handoff/README.md`; native-convergence
 - **Umbrella issue:** #6028
 - **Branch(es):** independent implementation branches off `dev`; coordinator owns publication.
-- **Implementation:** not started; this change establishes reviewed intent.
+- **Implementation:** capability-contract investigation; runtime behavior unchanged.
 
 ## Guiding Intent
 
@@ -62,11 +62,12 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 
 ### Phase 1 - Reviewed intent and capability contract
 
-- [ ] Publish/review this plan and the corresponding vision extension before
+- [x] Publish/review this plan and the corresponding vision extension before
   modifying runtime behavior.
-- [ ] Trace effective settings, tool capability, permissions, and context events
-  available to the plugin; document a supported detection seam.
-- [ ] Define precedence for effective true/false/absent settings, detected native
+- [x] Trace settings, tool capability, permissions, and context events available
+  to the plugin; document the operator-selected settings-file detection seam
+  and distinguish it from unproved effective-admission/capability observation.
+- [x] Define precedence for effective true/false/absent settings, detected native
   capability, stale/unknown evidence, and confirmed unavailable implementation.
   Enabled settings select native guidance; they do not manufacture tool support.
 - [ ] _(agent-recommended)_ Distinguish supported-but-not-viable transitions,
@@ -90,14 +91,20 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 
 ### Phase 3 - Pressure behavior and fallback
 
-- [ ] Back off competing custom soft/hard/force triggers when the selected
-  native path is viable; never block native checkpoint writes.
+- [ ] Select native pressure behavior from explicit settings-file enablement
+  or a complete current offered-tool set unless support/availability is confirmed
+  unavailable. Replace custom soft/hard session-transfer prompts with native
+  checkpoint prompts; suppress custom force action/tool blocking. Unknown
+  metadata does not undo explicit opt-in or silence diagnostic pressure guidance;
+  bound re-evaluation and never block native checkpoint writes.
 - [ ] Reset per-window pressure accounting after confirmed native transitions
   without changing worktree/session ownership.
 - [ ] Retain explicit save/trigger/consume and real new-owner/process recovery.
   Preserve existing consent and automatic/manual/off-mode semantics.
 - [ ] Retain diagnostic, authorized fallback for unavailable native support.
-  Unknown capability is not a silent permanent fallback disablement.
+  Confirmed unsupported/unavailable support overrides a true flag; policy caps
+  and partial persistence failure are not permission for automatic cutover.
+  Unknown capability retains diagnostics/explicit recovery, not silent suppression.
 - [ ] Preserve emergency compaction. Do not invoke low-level context clearing
   opportunistically from a timer or non-terminal hook.
 
@@ -150,3 +157,55 @@ alone does not complete the update.
 - Split compatibility from unrelated workspace preparation/cleanup proposals.
 - No deployed handoff, compaction, native-context setting, or runtime behavior
   was changed by this planning slice.
+
+### 2026-10-10 - Plan reviewed and merged
+
+- Plan and vision publication merged through #6029 after review; addressed all
+  three low-severity documentation findings.
+- Preserved the operator quotation and clarified its context-management meaning.
+- Continuing Phase 1: establish supported effective-setting and native-tool
+  detection before changing pressure behavior. Planning merge does not complete
+  this effort or authorize a live context reset.
+- Added detection acceptance boundaries to the design: session-effective policy,
+  provider/override provenance, uninitialized-versus-unavailable metadata, and
+  root context-clear versus cwd/subagent events. Public protocol/installed-host
+  verification remains open; no internal API or name-only detection is adopted.
+
+### 2026-10-10 - Installed extension contract investigated
+
+- Inspected CLI 1.0.88's installed extension guide, exported `CopilotSession`,
+  `SessionCapabilities`, `ToolInvocation`, `CurrentToolMetadata`, and event/RPC
+  declarations. The published metadata and capability surfaces do not establish
+  session-effective native admission plus built-in/override provenance.
+- Recorded the exact missing host observation and selection precedence in
+  `design.md`. Settings-only/name-only automatic suppression remains blocked;
+  generated declarations are not permission to call internal methods.
+- Aligned the canonical effort index with the effort's Active status.
+- No plugin runtime, deployed policy, live context, or ownership changed.
+  Isolated CLI/ACP transition proof and the supported detection seam remain
+  open; this investigation does not complete Phase 1 or the compatibility update.
+
+### 2026-10-10 - Settings-file contract selected
+
+- Operator clarified that the contract should read `settings.json` for
+  `contextManagementTools`; explicit true selects native-first compatibility.
+  A new CAR admission/provenance API is not required for this declared opt-in.
+- Preserved the installed SDK limitations as evidence, not an implementation
+  blocker for settings-file selection. Separate name-only capability detection
+  remains unproved; setting enablement is not a successful native invocation.
+- Updated precedence to place native execution failures before generic selection
+  rows, avoiding shadowed failure handling.
+- Continue authorized plugin implementation: boolean/layer resolution, guidance,
+  pressure backoff and window bookkeeping, explicit recovery, then acceptance.
+  No product hook/API implementation or upstream lifecycle posting is authorized.
+- Operator additionally prefers checking offered native-context tools when
+  possible. The installed read-only `session.rpc.tools.getCurrentMetadata()`
+  supplies that availability seam; null/partial/error snapshots are not positive.
+  Full offered availability may select native-first without claiming provider
+  provenance or successful rollover; explicit false settings take precedence.
+- Corrected the earlier description of `ToolInvocation.availableTools`: the SDK
+  populates it only for a tool-search override, not ordinary handoff calls.
+- Aligned Phase 3 with intentional settings-only native selection: pressure
+  prompts remain native/diagnostic while metadata is unknown, rather than all
+  continuity being disabled. Confirmed unsupported/unavailable support takes
+  precedence over a true flag; execution failures/policy caps remain distinct.

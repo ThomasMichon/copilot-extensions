@@ -18,8 +18,131 @@ enabled in effective settings **or otherwise detected**. Preserve both signals:
 | Unknown/stale observation | Bounded re-evaluation; no silent suppression of all recovery |
 | Native transition not viable | Repair checkpoint/static load or report configured limit; fallback only when authorized |
 
-Exact precedence and supported query APIs are Phase 1 decisions, not invented
-flags in this design. Do not use "ACP" as an automatic fallback classifier.
+The top-down selection precedence below defines the acceptance ordering.
+Direct settings-file opt-in and the published offered-tool metadata query are
+the selected observation seams. Neither claims arbitrary session-effective
+policy introspection. Do not use "ACP" as an automatic fallback classifier.
+
+## Detection acceptance boundary
+
+An explicit `contextManagementTools: true` in the applicable `settings.json`
+configuration is the operator-selected native-first contract. Read the flag;
+do not require a new host RPC or tool-provider provenance for this positive
+opt-in. The plugin selects guidance and backs off its own automatic context-only
+handoffs; it does not execute native tools or manufacture implementation support.
+An absent flag is not enablement, and a higher-precedence explicit false must
+override a lower-precedence true.
+
+Distinguish this declared-setting contract from observed effective admission. A
+user-settings snapshot that excludes repository/managed overrides is not an
+effective-session policy snapshot. Matching tool names or schemas alone is not
+proof of native implementation for a separate automatic capability-detection
+path. Those limitations must not block the explicit settings-file opt-in.
+
+Uninitialized metadata is unknown, not unavailable. A descriptor-building API
+may perform initialization; do not call it merely to observe capability. An
+in-process-only API is not an extension contract even if generated declarations
+exist. Do not use private SDK members, raw internal RPC, or guessed flags to
+bridge those gaps.
+
+If a flag-enabled host does not offer the native tools, report the actual
+availability failure and retain explicit custom recovery under its existing
+mode/consent rules. Do not automatically invoke a nonexistent tool, clear context,
+or switch sessions to evade a policy cap. Backoff from a declared setting is not
+proof that the host admitted or completed a native transition.
+
+Observe a host-confirmed root `session.context_cleared` event for window
+bookkeeping where supported. A cwd-change event is not a model-window rollover.
+Ignore subagent clears for root pressure state; do not parse checkpoint-looking
+prompt text as proof of a native transition.
+
+### Installed SDK boundary (CLI 1.0.88)
+
+Inspection of the installed extension documentation and exported SDK declarations
+confirms the following contract, independently of runtime source:
+
+| Published surface | What it establishes | What it does not establish |
+|-------------------|---------------------|----------------------------|
+| `joinSession()` and `CopilotSession.capabilities` | Extension attachment; advertised UI capabilities | Native context admission or effective context-management policy |
+| `session.rpc.tools.getCurrentMetadata()` | Currently initialized tool metadata; nullable before initialization | Built-in versus external override provenance, or native transition viability |
+| `ToolInvocation.availableTools` | Offered metadata for a built-in tool-search override invocation only | A general snapshot for ordinary handoff invocations, or additional provider provenance |
+| `user.settings.get()` | User values/defaults, explicitly excluding repository/enterprise overrides | Session-effective admission or an explicit policy denial |
+| Root `session.context_cleared` event | Confirmed conversation clear and optional initial message | Native terminal-tool execution, checkpoint durability, or permission for another clear |
+
+`CurrentToolMetadata` exports name, optional namespaced/MCP names, description,
+input schema, and deferral. None identifies an external override of a built-in
+tool. The presence of generated `getBuiltinDescriptors` declarations does not
+make an internal-only method callable by an extension.
+
+This is declaration/documentation evidence, not an isolated live CLI/ACP rollover
+proof. No live session was cleared, tool list initialized, settings changed, or
+private RPC invoked to obtain it. No supported effective-admission/provenance seam
+has been established for this installed version. The later operator clarification
+selects direct settings-file opt-in instead; it does not require such a seam.
+
+### Current offered-tool detection
+
+The operator also prefers an availability check when possible. Use the published,
+read-only `session.rpc.tools.getCurrentMetadata()` to inspect the initialized
+tool set, without calling `initializeAndValidate`, `getBuiltinDescriptors`, or
+executing tools as a probe. Detect the complete offered set
+`get_context_remaining`, `session_artifacts`, `session_history`, `new_context`;
+partial sets, missing methods, query failures, and null metadata are not positive
+capability evidence. Inspect exact offered names rather than searching an
+unrelated MCP catalog for similar names.
+
+With no explicit selected-setting denial, the complete offered set can select
+native-oriented guidance/backoff. Report this as offered-tool availability, not
+verified built-in provenance or successful rollover. The plugin does not execute
+those tools; the agent uses the host's normal permission/terminal pipeline.
+Explicit settings enablement remains an independent selection signal and must
+not be negated merely because metadata is uninitialized.
+
+Re-read the offered snapshot at bounded event/decision boundaries so a tool
+filter/replacement or reconnect does not leave a stale positive observation.
+Report a query failure explicitly, without leaking raw payloads, and retain
+diagnostic explicit recovery. `ToolInvocation.availableTools` is populated only
+for a built-in tool-search override, not ordinary handoff invocations, so it is
+not the handoff handler's general availability seam.
+
+### Selection precedence
+
+This is the acceptance matrix, not current plugin behavior. Apply rows top-down.
+Declared settings-file selection and observed effective policy are distinct;
+never label a user-only default as an explicit effective opt-out.
+
+| Current evidence | Selected guidance | Automatic pressure behavior |
+|------------------|-------------------|-----------------------------|
+| Explicit effective denial, including conflicting advertised tools | Respect denial; diagnose conflict | Never auto-cut over to evade policy; explicit recovery remains policy-governed |
+| Selected native path with checkpoint/static-load/cap failure | Repair or diagnose the precise native failure | No blind alternate-session policy bypass or double clear |
+| Confirmed unsupported implementation or currently unavailable required tool set, without policy denial | Explain unsupported/unavailable path; custom recovery | Existing custom mode/consent semantics, even if the flag is true |
+| Applicable explicit false setting | Do not infer enablement from an offered-tool conflict; diagnose it | Existing custom modes, without using alternate sessions to evade a policy denial |
+| Applicable explicit `contextManagementTools: true` setting; no confirmed unsupported/unavailable path | Native-first checkpoint/terminal rollover; agent checks tool availability | Replace custom session-transfer soft/hard prompts with native checkpoint prompts; suppress custom force action/tool blocking; preserve explicit handoff |
+| No explicit setting denial; complete current offered native-context tool set | Native-first, based on offered availability rather than provider provenance | Suppress competing custom soft/hard/force actions; preserve explicit recovery |
+| No positive setting; absent, uninitialized, failed, stale, or conflicting observations | Explain uncertainty; bounded re-evaluation | Existing custom mode/consent behavior; do not treat uncertainty as confirmed native support |
+
+Re-evaluate on supported invalidations and before committing an automatic
+pressure action. Bound retries and report failures once per observation revision;
+do not poll arbitrary private APIs. Runtime emergency compaction remains intact.
+
+Settings-only selection is intentional: on a flag-enabled host, an uninitialized
+or failed metadata query does not undo the declared opt-in. It also must not
+silence pressure handling: native checkpoint prompts report uncertainty, request
+an agent-side availability check, and describe explicit recovery. Re-evaluation
+is bounded; do not retry forever or claim a viable transition was observed.
+A valid initialized snapshot missing required tools establishes current
+unavailability, unlike null metadata or an unsupported query method. A confirmed
+native availability failure takes the earlier custom-recovery row; a policy cap
+or partial-persistence failure takes the native-failure row, not that fallback.
+
+### 2026-10-10 - Operator clarification
+
+The operator selected reading `settings.json` for the public flag as the contract,
+rather than adding a CAR host API. Implementation must resolve applicable
+configuration layers and boolean precedence, handle invalid/unreadable input
+explicitly, keep load-time I/O non-blocking, and distinguish declared enablement
+from live tool/rollover proof. Lifecycle work stays a private proposal awaiting
+review, with no product edits or upstream posting.
 
 ## Native checkpoint semantics
 
