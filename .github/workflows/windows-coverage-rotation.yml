@@ -94,11 +94,23 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_REF: ${{ inputs.ref }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "ref=${INPUT_REF:-dev}" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=dev" >> "$GITHUB_OUTPUT"
+          ref="${INPUT_REF:-dev}"
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            ref="dev"
           fi
+          # A legitimate Git ref name never contains CR/LF (Git itself
+          # rejects control characters in ref names). Reject any value
+          # that does before it ever reaches $GITHUB_OUTPUT -- writing an
+          # unsanitized value containing an embedded newline there would
+          # let a crafted ref inject extra, attacker-controlled
+          # key=value lines into this step's own output set.
+          case "$ref" in
+            *$'\n'*|*$'\r'*)
+              echo "::error::ref input contains a CR or LF; refusing" >&2
+              exit 1
+              ;;
+          esac
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.resolve-ref.outputs.ref }}
