@@ -507,7 +507,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
     """
     backend = getattr(args, "spawn_backend", "bridge")
     if backend == "embody":
-        from . import embody
+        from . import embody, spawn_factories
 
         if embody.embody_available():
             worker_id = f"embody-{uuid.uuid4().hex[:8]}"
@@ -517,6 +517,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
                     worker_id=worker_id,
                     route=route,
                     worktree_id=(task.get("target_worktree") or task.get("spawn_worktree")),
+                    resume_head=spawn_factories.resume_worktree_eligible(task),
                     verify_timeout=getattr(args, "verify_timeout", 0) or 0,
                 )
             except embody.EmbodyUnavailable as exc:

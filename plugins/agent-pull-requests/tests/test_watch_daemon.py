@@ -190,8 +190,8 @@ def test_atomic_writers_use_independent_temporary_files(tmp_path, monkeypatch):
     dump = json.dump
     sources = []
 
-    def simultaneous_dump(data, handle):
-        dump(data, handle)
+    def simultaneous_dump(data, handle, **kwargs):
+        dump(data, handle, **kwargs)
         sources.append(Path(handle.name))
         ready.wait(timeout=3)
 
@@ -345,7 +345,7 @@ def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
         monkeypatch.setattr(cli, "_WATCH_HANDLER_DRAIN_TIMEOUT_S", 0)
         with pytest.raises(TimeoutError, match="request handlers did not drain"):
             cli._cmd_serve(SimpleNamespace(poll_interval=30))
-        assert lifecycle == ["acquire", "close-admission", "stop-listener", "drain"]
+        assert lifecycle == ["acquire", "close-admission", "stop-listener", "drain", "join"]
     else:
         assert cli._cmd_serve(SimpleNamespace(poll_interval=30)) == 0
         assert lifecycle == [

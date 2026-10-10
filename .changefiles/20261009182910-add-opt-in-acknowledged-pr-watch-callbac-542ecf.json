@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in acknowledged PR watch callbacks with durable event replay, bounded independent retries and generation-fenced cancellation.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
