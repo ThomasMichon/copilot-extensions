@@ -1333,7 +1333,7 @@ class TestCmdHandoffCutover:
         assert logged[-1][1]["outcome"] == "gone"
 
     def test_retire_mode_emits_stage_13_when_head_is_already_linked(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, capfd, tmp_tracking_dir, registered_retire_project,
     ):
         """#2457 Stage 13: a successful retire (outcome="gone") for a token
         whose handoff is ALREADY linked (the successor claimed head before
@@ -1385,7 +1385,7 @@ class TestCmdHandoffCutover:
         assert complete[0]["handoff_token"] == "task-retire-13"
 
     def test_retire_confirmed_dead_predecessor_clears_zombie_head(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, capfd, tmp_tracking_dir, registered_retire_project,
     ):
         """A bare self-retire (no handoff-token successor -- e.g. a
         double-Ctrl-C idle-quit with nobody waiting to take over) must not
@@ -1543,7 +1543,7 @@ class TestCmdHandoffCutover:
         assert after.session_entry("old-sess").state == "handed-off"
 
     def test_retire_does_not_resurrect_a_released_session_claim(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, capfd, tmp_tracking_dir, registered_retire_project,
     ):
         """A ``deregister_session`` (``sessionEnd``) that raced ahead and
         released the predecessor's claim before this retire ran must not be
@@ -1592,7 +1592,7 @@ class TestCmdHandoffCutover:
         assert after_claim.state == "released"
 
     def test_retire_does_not_infer_succession_for_an_unrelated_active_session(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, capfd, tmp_tracking_dir, registered_retire_project,
     ):
         """A session that registered while the predecessor was still head is
         not necessarily its successor -- it could be an unrelated parallel
@@ -1645,7 +1645,7 @@ class TestCmdHandoffCutover:
         assert after.session_entry("other-sess").state == "active"
 
     def test_retire_with_pending_handoff_token_does_not_preempt_late_acknowledgement(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, capfd, tmp_tracking_dir, registered_retire_project,
     ):
         """A confirmed-dead retire that STILL carries a ``handoff_token``
         belongs to the ordinary token-mediated handoff, not the bare-retire
@@ -3067,6 +3067,78 @@ class TestHandoffRepairDispatchArgs:
         assert captured["args"]["only_if_active"] is True
 
 
+@pytest.mark.parametrize("verb", ["claim_settle", "session_conclude"])
+@pytest.mark.parametrize("error", ["execution_space", "rejected"])
+def test_retire_report_does_not_claim_success_when_ledger_repair_is_refused(
+    verb, error, monkeypatch, tmp_tracking_dir,
+):
+    from agent_worktrees import handoff_cutover, tracking
+
+    record = tracking.create_new_record(
+        "wt-repair", "worktree/wt-repair", str(tmp_tracking_dir), "test-repo",
+        "test", "wsl", tmp_tracking_dir,
+    )
+    before = record.yaml_path.read_bytes()
+    monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda wt: tmp_tracking_dir)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(m, "_resolve_retire_pane_mux_session", lambda pane, expected: "wt-repair")
+    monkeypatch.setattr(
+        m.pane_lifecycle, "pane_terminate",
+        lambda *args, **kwargs: {"ok": True, "gone": True, "method": "graceful"},
+    )
+    monkeypatch.setattr(
+        reclaim, "ensure_session_copilot_reaped",
+        lambda *args, **kwargs: {"checked": False, "identity_verified": True},
+    )
+    monkeypatch.setattr(activity, "log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(m, "_maybe_emit_stage_13", lambda *args, **kwargs: None)
+    calls = []
+
+    def dispatch(name, args):
+        calls.append(name)
+        if name == verb:
+            return {"error": error, "message": "foreign authority refused"}
+        return {"ok": True}
+
+    monkeypatch.setattr(handoff_cutover, "_dispatch_handoff_repair", dispatch)
+    rc, result = m._handoff_cutover_retire_result(_ns(
+        worktree_id=record.worktree_id, retire_pane="%9", session_id="session-1",
+    ))
+    key = "claim_settlement" if verb == "claim_settle" else "session_conclusion"
+    assert rc == 1 and result["ok"] is False
+    assert result["gone"] is True
+    assert result[key] == {"error": error, "message": "foreign authority refused"}
+    assert calls == ["claim_settle", "session_conclude"]
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("repair", ["_settle_predecessor_session_claim", "_conclude_retired_predecessor"])
+def test_retire_repair_propagates_ambiguous_sent_write_without_retry(
+    repair, monkeypatch, tmp_tracking_dir,
+):
+    from agent_worktrees import handoff_cutover, tracking, tracking_write
+
+    record = tracking.create_new_record(
+        "wt-repair", "worktree/wt-repair", str(tmp_tracking_dir), "test-repo",
+        "test", "wsl", tmp_tracking_dir,
+    )
+    before = record.yaml_path.read_bytes()
+    monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda wt: tmp_tracking_dir)
+    error = tracking_write.AmbiguousWriteOutcome("sent request lost its acknowledgement")
+    calls = []
+
+    def ambiguous(verb, args):
+        calls.append(verb)
+        raise error
+
+    monkeypatch.setattr(handoff_cutover, "_dispatch_handoff_repair", ambiguous)
+    with pytest.raises(tracking_write.AmbiguousWriteOutcome) as raised:
+        getattr(handoff_cutover, repair)(record.worktree_id, "session-1")
+    assert raised.value is error
+    assert len(calls) == 1
+    assert record.yaml_path.read_bytes() == before
+
+
 class TestCmdHandoffsCheck:
     """``handoffs-check`` -- the on-demand diagnostic + repair counterpart to
     the resident status-monitor's own automatic predecessor-retire sweep."""
@@ -3689,6 +3761,7 @@ def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(m, "_settle_predecessor_session_claim", lambda *args: None)
     monkeypatch.setattr(
         m.pane_lifecycle,
         "pane_terminate",
@@ -3727,6 +3800,7 @@ def test_retire_result_passes_expected_mux_session_to_pane_terminate(monkeypatch
     observed: dict[str, object] = {}
 
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(m, "_settle_predecessor_session_claim", lambda *args: None)
     monkeypatch.setattr(m, "_conclude_retired_predecessor", lambda *args, **kwargs: None)
     monkeypatch.setattr(m, "_maybe_emit_stage_13", lambda *args, **kwargs: None)
     monkeypatch.setattr(m, "_resolve_retire_pane_mux_session", lambda pane, expected: "wt-retire")

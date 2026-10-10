@@ -8,6 +8,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import pytest
+
+from agent_worktrees import config as cfg
 from agent_worktrees import output
 from agent_worktrees import handoff_successor_repair_cli as repair_cli
 from agent_worktrees import session_tracking_cli, sessions, tracking
@@ -17,6 +20,17 @@ _SEED_TEXT = (
     "Task: finish the thing | Resume: /consume-handoff to take over | "
     "Recovery: context-handoff task:abc123"
 )
+
+
+@pytest.fixture(autouse=True)
+def registered_project(tmp_tracking_dir, monkeypatch):
+    config = cfg.Config(
+        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        repos={"test-repo": cfg.RepoConfig(
+            anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
 
 
 def _terminal_bridge_record(tmp_tracking_dir: Path, *, worktree_path: str) -> WorktreeRecord:
@@ -96,6 +110,32 @@ def test_resolves_stale_pending_handoff_with_matching_evidence(
     assert rec.session_entry("successor").state == "concluded"
     assert rec.handoffs[0].state == "linked"
     assert rec.handoffs[0].successor == "successor"
+
+
+def test_resolve_cli_reports_foreign_authority_without_success(
+    tmp_tracking_dir, monkeypatch,
+):
+    from machine_transport.registry import MachineEntry
+
+    rec = _terminal_bridge_record(tmp_tracking_dir, worktree_path=str(tmp_tracking_dir / "wt-1"))
+    rec.machine = "other-space"
+    save_record(rec)
+    before = rec.yaml_path.read_bytes()
+    entries = {
+        key: MachineEntry(key=key, display_name=key, execution_platform="wsl")
+        for key in ("test", "other-space")
+    }
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    _wire_evidence(monkeypatch, cwd=rec.worktree_path)
+    result = _run(
+        monkeypatch, tmp_tracking_dir,
+        worktree_id="wt-1", token="tok-1", successor="successor",
+    )
+    assert result["_rc"] == 1
+    assert "pending_handoffs" not in result and "ok" not in result
+    assert "different execution space" in result["error"]
+    assert rec.yaml_path.read_bytes() == before
 
 
 def test_refuses_when_cwd_does_not_match(tmp_tracking_dir: Path, monkeypatch):

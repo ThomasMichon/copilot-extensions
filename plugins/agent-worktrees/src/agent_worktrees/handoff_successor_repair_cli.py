@@ -163,7 +163,7 @@ def cmd_resolve_handoff_successor(args: argparse.Namespace) -> int:
         return output._json_error(
             f"resolve-handoff-successor: write to {raw} is in an unknown state: {exc}"
         )
-    if result.get("error") == "lifecycle":
+    if result.get("error") in ("lifecycle", "execution_space"):
         return output._json_error(result["message"])
     output._json_output(result)
     return 0

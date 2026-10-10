@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import tracking_session_lifecycle_write, tracking_write
+from agent_worktrees import config as cfg, tracking_session_lifecycle_write, tracking_write
 from agent_worktrees.tracking import SessionEntry, WorktreeRecord, load_record, save_record
 
 
@@ -27,7 +27,14 @@ def _clean_verb_registry():
 
 
 @pytest.fixture
-def record_path(tmp_tracking_dir: Path) -> Path:
+def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
+    config = cfg.Config(
+        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        repos={"test-repo": cfg.RepoConfig(
+            anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
     path = tmp_tracking_dir / "wt-1.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-1",
@@ -53,6 +60,9 @@ def test_importing_the_module_registers_both_verbs():
     verbs = tracking_write.registered_verbs()
     assert "session_conclude" in verbs
     assert "session_link_succession" in verbs
+    assert tracking_write._VERB_VERSIONS["session_conclude"] == 2
+    assert tracking_write._VERB_VERSIONS["session_link_succession"] == 2
+    assert tracking_write._VERB_VERSIONS["session_resolve_handoff_successor"] == 2
 
 
 def test_conclude_hands_off_and_clears_head(record_path):

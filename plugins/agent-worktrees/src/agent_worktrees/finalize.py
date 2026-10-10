@@ -2011,15 +2011,16 @@ def validate_and_finalize(
                         c, worktree_id=worktree_id, machine=record.machine, note="finalized",
                         project=record.repo)
 
-            # Obligation settlement, upward (resource-obligation-settlement Ph3):
-            # this worktree finalizing means its OWN work is safe, so settle the
-            # claim its PARENT holds on it -- flip the parent-visible claim to
-            # at-rest so the parent's finalize gate stops treating this child as
-            # unsettled. This is the recursion-collapse: the parent never
-            # re-derives the child's state, it trusts this flip. Best-effort +
-            # same-machine only (a cross-machine parent settles via the lease
-            # disposition mirror / reclaim sweep). Never blocks the finalize.
-            _settle_parent_obligation(record, config, worktree_id)
+            # Finalization is committed; a fresh parent-authority refusal cannot
+            # undo checkout removal or resurrect this child's released resources.
+            try:
+                _settle_parent_obligation(record, config, worktree_id)
+            except ExecutionSpaceError as exc:
+                output.warn(
+                    f"Worktree {worktree_id} remains finalized; parent-obligation "
+                    f"settlement is unconfirmed: {exc}. Parent obligation retained; "
+                    "inspect the owning ledger before retrying settlement."
+                )
 
         activity.log_event(
             "worktree_finalized",

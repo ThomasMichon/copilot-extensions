@@ -242,10 +242,9 @@ def _revalidate_cleanup_safety(
       WIP/claims/follow-ups/branch-merge are NOT re-checked), but still
       refreshes liveness fresh, under the lock, via the *same* liveness-read
       code path as the non-forced contract (closing the gap where ``--force``
-      used to trust a stale pre-lock ``active_paths`` snapshot). The one
-      check ``--force`` never bypasses is an active/hosted session. Forced
-      mode does not take ``_RecordLock`` -- its narrower contract isn't
-      gated on the fields other writers mutate.
+      used to trust a stale pre-lock ``active_paths`` snapshot). Liveness checks
+      and execution-space authority never yield to ``--force``.
+      The same sidecar lock fences identity changes through forced removal.
 
     A worktree with no on-disk path (``GONE``) re-proves the branch-merged
     gate itself (``cleanup_disposition`` deliberately excludes ``GONE`` --
@@ -290,26 +289,6 @@ def _revalidate_cleanup_safety(
             return reap(latest, fresh_info)
         return 0, []
 
-    if force:
-        latest = tracking.load_record(yaml_path)
-        from .execution_spaces import ExecutionSpaceError, require_cleanup_identity
-        try:
-            require_cleanup_identity(latest, repo.anchor)
-        except ExecutionSpaceError as exc:
-            return RevalidationResult(False, str(exc), "execution-space")
-        if _hosted_session_blocks_cleanup(latest):
-            return RevalidationResult(
-                False, "active hosted Copilot session in use", "active")
-        fresh_info, _active_paths, _ctx = _fresh_liveness(latest)
-        if fresh_info.state == git_ops.WorktreeState.ACTIVE:
-            return RevalidationResult(
-                False, "worktree became active since the initial scan", "active")
-        failures, warnings = _do_reap(latest, fresh_info)
-        return RevalidationResult(
-            True, "forced", "forced", latest, fresh_info,
-            failures=failures, warnings=warnings, reaped=reap is not None,
-        )
-
     try:
         with tracking._RecordLock(yaml_path, require_sidecar=True):
             latest = tracking.load_record(yaml_path)
@@ -326,6 +305,13 @@ def _revalidate_cleanup_safety(
                 return RevalidationResult(
                     False, "worktree became active since the initial scan",
                     "active")
+
+            if force:
+                failures, warnings = _do_reap(latest, fresh_info)
+                return RevalidationResult(
+                    True, "forced", "forced", latest, fresh_info,
+                    failures=failures, warnings=warnings, reaped=reap is not None,
+                )
 
             if fresh_info.state == git_ops.WorktreeState.GONE:
                 upstream = f"{repo.remote}/{repo.default_branch}"

@@ -175,6 +175,73 @@ class TestSingleHopAToB:
         assert finalize.validate_and_finalize("wt-A", config) is True
 
 
+@pytest.mark.parametrize("race_after_removal", [False, True])
+def test_finalize_preserves_committed_child_when_fresh_parent_authority_refuses(
+    race_after_removal, _env, monkeypatch, capsys,
+):
+    from machine_transport.registry import MachineEntry
+
+    tmp_path, tracking_d, config = _env
+    anchor = Path(config.default_repo.anchor)
+    child_id, parent_id = "wt-child", "wt-parent"
+    worktree_path = tmp_path / child_id
+    _git(
+        "worktree", "add", "-b", f"worktree/{child_id}", str(worktree_path), "origin/base",
+        cwd=anchor,
+    )
+    child_ref = tracking.format_claim_ref(config.machine, PROJECT, child_id)
+    parent_ref = tracking.format_claim_ref(config.machine, PROJECT, parent_id)
+    child = tracking.create_new_record(
+        child_id, f"worktree/{child_id}", str(worktree_path), PROJECT,
+        config.machine, config.platform, tracking_d, owner_ref=parent_ref,
+    )
+    child.resources = [tracking.ResourceClaim(kind="pr", ref="o/r#9", state=ob.AT_REST)]
+    tracking.save_record(child)
+    parent = tracking.create_new_record(
+        parent_id, f"worktree/{parent_id}", str(tmp_path / "parent"), PROJECT,
+        config.machine if race_after_removal else "other-space", "linux", tracking_d,
+    )
+    parent.resources = [tracking.ResourceClaim(kind="worktree", ref=child_ref, state=ob.ACTIVE)]
+    tracking.save_record(parent)
+    entries = {
+        key: MachineEntry(key=key, display_name=key, execution_platform="linux")
+        for key in (config.machine, "other-space")
+    }
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(finalize.sessions, "kill_tmux_session", lambda *_args: None)
+    monkeypatch.setattr(finalize.procs, "terminate_processes_under", lambda *_args: [])
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_args: None)
+    monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *_args: None)
+    remove_worktree = finalize.git_ops.remove_worktree
+    removed = []
+
+    def remove_then_race(anchor, path):
+        result = remove_worktree(anchor, path)
+        removed.append(result)
+        if race_after_removal:
+            fresh = tracking.load_record(parent.yaml_path)
+            fresh.machine = "other-space"
+            tracking.save_record(fresh)
+        return result
+
+    monkeypatch.setattr(finalize.git_ops, "remove_worktree", remove_then_race)
+    assert finalize.validate_and_finalize(child_id, config) is True
+    assert removed == [True] and not worktree_path.exists()
+    assert not _git("branch", "--list", child.branch, cwd=anchor)
+    final_child = tracking.load_record(child.yaml_path)
+    assert final_child.status == "finalized"
+    assert final_child.owner_ref == parent_ref
+    assert final_child.resources[0].state == ob.RELEASED
+    final_parent = tracking.load_record(parent.yaml_path)
+    assert final_parent.machine == "other-space"
+    assert final_parent.resources[0].state == ob.ACTIVE
+    report = capsys.readouterr().out
+    assert "remains finalized" in report
+    assert "settlement is unconfirmed" in report and "Parent obligation retained" in report
+    assert "Finalization cleanup failed" not in report
+
+
 class TestMultiHopAToBToC:
     """One level deeper: A creates B, B creates C -- genuine multi-hop
     propagation, not just the single hop the existing unit tests cover."""

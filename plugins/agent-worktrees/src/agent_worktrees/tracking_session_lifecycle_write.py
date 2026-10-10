@@ -26,19 +26,20 @@ The fifth cluster (this same PR) reuses ``apply_session_conclude`` for
 differing in whether an already-non-active entry is a silent no-op
 (repair) or unconditionally reasserted (the public CLI command).
 
-Both commands are "project-agnostic" (``_find_tracking_file`` searches
-every project, since a higher-layer caller's CWD is unrelated to the
-target worktree) -- the resolved ``yaml_path`` is already correct
-regardless of ambient project, so unlike ``status_disposition_write``
-there is no cross-project scoping concern to thread through here either.
+Both commands locate records across projects (``_find_tracking_file`` searches
+every project, since a caller's CWD is unrelated to the target worktree).
+Every verb resolves the record's own project authority inside the required
+sidecar lock; the caller's identity cannot authorize that write.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import logging
 from pathlib import Path
 
 from . import tracking, tracking_write
+from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
 
 def _conclude_session_result(record, raw_worktree_id: str, session_id: str) -> dict:
@@ -59,7 +60,8 @@ def apply_session_conclude(args: dict) -> dict:
     (including its post-save reload, kept for behavior parity). Returns
     ``{"error": "lifecycle", "message": ...}`` for a
     ``tracking.SessionLifecycleError`` rejection (an unknown session or
-    invalid state), never raising.
+    invalid state). Execution-space authority is resolved on the receiving side
+    against the fresh, sidecar-locked record before any lifecycle mutation.
 
     ``only_if_active`` (default ``False``, preserving the public
     ``conclude-session`` CLI command's existing behavior unchanged) is an
@@ -79,8 +81,15 @@ def apply_session_conclude(args: dict) -> dict:
     handoff_token = args.get("handoff_token")
     only_if_active = bool(args.get("only_if_active"))
 
-    with tracking._RecordLock(yaml_path):
+    with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        try:
+            require_project_record_mutation(record)
+        except ExecutionSpaceError as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting session conclusion for %s: %s", worktree_id, exc,
+            )
+            return {"error": "execution_space", "message": str(exc)}
         if only_if_active:
             entry = record.session_entry(session_id)
             if entry is None or entry.state != "active":
@@ -108,8 +117,15 @@ def apply_session_link_succession(args: dict) -> dict:
     predecessor_state = args.get("predecessor_state", "handed-off")
     handoff_token = args.get("handoff_token")
 
-    with tracking._RecordLock(yaml_path):
+    with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        try:
+            require_project_record_mutation(record)
+        except ExecutionSpaceError as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting session succession for %s: %s", worktree_id, exc,
+            )
+            return {"error": "execution_space", "message": str(exc)}
         # Idempotency + attribution: base this on the pre-call ownership
         # head, not on whatever lineage metadata (handoff tokens,
         # predecessor/successor fields) happens to already be in place --
@@ -157,8 +173,8 @@ def apply_session_link_succession(args: dict) -> dict:
     }
 
 
-tracking_write.register_verb("session_conclude", apply_session_conclude)
-tracking_write.register_verb("session_link_succession", apply_session_link_succession)
+tracking_write.register_verb("session_conclude", apply_session_conclude, version=2)
+tracking_write.register_verb("session_link_succession", apply_session_link_succession, version=2)
 
 
 def apply_resolve_handoff_successor(args: dict) -> dict:
@@ -201,8 +217,15 @@ def apply_resolve_handoff_successor(args: dict) -> dict:
     linked_at = args.get("linked_at")
     expected_worktree_path = args.get("expected_worktree_path")
 
-    with tracking._RecordLock(yaml_path):
+    with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        try:
+            require_project_record_mutation(record)
+        except ExecutionSpaceError as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting handoff-successor repair for %s: %s", worktree_id, exc,
+            )
+            return {"error": "execution_space", "message": str(exc)}
         if record.kind not in tracking.MANAGED_KINDS or record.status not in (
             "complete", "completed", "finalized",
         ):
@@ -292,5 +315,5 @@ def apply_resolve_handoff_successor(args: dict) -> dict:
 
 
 tracking_write.register_verb(
-    "session_resolve_handoff_successor", apply_resolve_handoff_successor,
+    "session_resolve_handoff_successor", apply_resolve_handoff_successor, version=2,
 )
