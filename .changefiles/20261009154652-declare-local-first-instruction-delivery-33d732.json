@@ -1,0 +1,9 @@
+{
+  "comment": "Declare local-first instruction delivery with explicit retained decision kernels.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

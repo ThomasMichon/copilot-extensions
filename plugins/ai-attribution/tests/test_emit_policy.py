@@ -1538,6 +1538,7 @@ def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
     ]
     assert declaration["projections"][1] == {
         "id": "session-guidance",
+        "deliveryMode": "selector",
         "template": "instructions/session-guidance.instructions.md",
         "destination": (
             ".github/instructions/ai-attribution/"

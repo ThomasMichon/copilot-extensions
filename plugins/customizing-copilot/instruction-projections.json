@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "local-cache-catchall",
+      "deliveryMode": "inline",
       "template": "instructions/local-cache-catchall.instructions.md",
       "destination": ".github/instructions/customizing-copilot/local-cache-catchall.instructions.md",
       "customizationKind": "instructions",

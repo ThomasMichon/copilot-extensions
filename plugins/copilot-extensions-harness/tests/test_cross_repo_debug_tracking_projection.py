@@ -47,3 +47,40 @@ def test_template_is_reviewable_static_fallback():
         "/home/",
     ):
         assert forbidden not in content
+
+
+def test_postmerge_freshness_belongs_to_consented_maintenance():
+    content = " ".join(_TEMPLATE.read_text(encoding="utf-8").split())
+    assert "adopted, consented maintenance" in content
+    assert "normally once daily" in content
+    assert "permissionless local rendering" in content
+    assert "reviewed offline fallback" in content
+    assert "missing/corrupt locked artifacts remain blocking" in content
+    assert "primed/pending, not deployed" in content
+    assert "explicit rollout authorization" in content
+    assert "immediately force-update" not in content
+    assert "before ending your turn" not in content
+
+
+def test_contribution_rollout_preserves_authorization_and_running_state_proof():
+    path = _PLUGIN / "skills" / "contributing-to-copilot-extensions" / "SKILL.md"
+    step = path.read_text(encoding="utf-8").split("8. **", 1)[1].split("\n##", 1)[0]
+    normalized = " ".join(step.split())
+    assert "explicit rollout authorization" in normalized
+    assert "safety/permission gates" in normalized
+    assert "required deployment workflow" in normalized
+    assert "running system reflects the change" in normalized
+    assert "Adopted, consented maintenance" in normalized
+    assert "not deployed" in normalized
+    assert "deployment completion obligation" in normalized
+    assert "<repo> update" in normalized
+
+
+def test_cross_linking_preserves_public_traceability_without_private_publication():
+    content = " ".join(_TEMPLATE.read_text(encoding="utf-8").split())
+    assert "cross-links in both directions only when both trackers and artifacts are public" in content
+    assert "private downstream tracker may link to public upstream work" in content
+    assert "public upstream artifacts must never receive private links, IDs or context" in content
+    assert "private symptom/rationale downstream" in content
+    assert "public report self-contained" in content
+    assert "local tracking issue in the upstream one" not in content

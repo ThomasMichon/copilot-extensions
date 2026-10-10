@@ -4,6 +4,7 @@
   "projections": [
     {
       "id": "publication-safety",
+      "deliveryMode": "inline",
       "template": "instructions/publication-safety.instructions.md",
       "destination": ".github/instructions/ai-attribution/publication-safety.instructions.md",
       "customizationKind": "instructions",
@@ -14,6 +15,7 @@
     },
     {
       "id": "session-guidance",
+      "deliveryMode": "selector",
       "template": "instructions/session-guidance.instructions.md",
       "destination": ".github/instructions/ai-attribution/session-guidance.instructions.md",
       "customizationKind": "instructions",
