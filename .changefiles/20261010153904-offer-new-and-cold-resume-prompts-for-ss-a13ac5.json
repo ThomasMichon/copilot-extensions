@@ -1,0 +1,9 @@
+{
+  "comment": "Offer New and cold Resume prompts for SSH machine sources using target-owned launch admission",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

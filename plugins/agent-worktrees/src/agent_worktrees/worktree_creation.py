@@ -23,6 +23,8 @@ this band makes the call, exactly as the handoff-cutover slice's own
 
 from __future__ import annotations
 
+import re
+
 import argparse
 import os
 import secrets
@@ -539,6 +541,8 @@ def _create_worktree_core(
     bound_agent: str | None = None,
     no_pair: bool = False,
     pending_seed: str | None = None,
+    pending_seed_id: str | None = None,
+    allocation: tuple[str, str] | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -591,6 +595,14 @@ def _create_worktree_core(
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
+    if allocation is not None:
+        timestamp, suffix = allocation
+        if (
+            kind != "session"
+            or re.fullmatch(r"\d{8}-\d{6}", timestamp) is None
+            or re.fullmatch(r"[0-9a-f]{32}", suffix) is None
+        ):
+            raise ValueError("Invalid admitted worktree allocation")
     if kind == "system":
         # Recognizable id for daemon worktrees: sys-<name>-<ts>-<suffix>.
         slug = _slugify(name or owner or "daemon")
@@ -818,7 +830,7 @@ def _create_worktree_core(
     from . import launch_seed_state
     from .launch_seed_exec import deferred_command
 
-    seed_id = uuid.uuid4().hex
+    seed_id = pending_seed_id or uuid.uuid4().hex
     try:
         staged_seed = None
         if pending_seed:

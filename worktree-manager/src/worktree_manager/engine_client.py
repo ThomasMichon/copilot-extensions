@@ -581,8 +581,9 @@ def resolve_launch_plan(
     full ``--interactive`` only at backend handoff, not at plan construction.
     Meaningful with either ``new=True`` or a plain resume
     (``worktree_id`` set, ``bare_resume=False``); the engine's own CLI already
-    rejects it with ``base=True``, ``bare_resume=True``, or alongside
-    ``target_machine``, so this is intentionally NOT re-validated here.
+    rejects it with ``base=True`` or ``bare_resume=True``. With a target machine,
+    the engine admits intent through that target's daemon before returning an
+    identity-only SSH launch plan.
 
     Prompted New/Resume requests require typed retry staging. An older engine
     must refuse the capability flag before mutation, rather than silently
@@ -621,7 +622,10 @@ def resolve_launch_plan(
         args += ["--seed", seed]
 
     try:
-        obj = run_json(project, args, timeout=timeout)
+        obj = run_json(
+            project, args,
+            timeout=max(timeout, 240) if target_machine and seed else timeout,
+        )
     except EngineError as e:
         detail = _engine_error_detail(e)
         if require_staging and "unrecognized arguments" in detail and "--stage-launch-seed" in detail:

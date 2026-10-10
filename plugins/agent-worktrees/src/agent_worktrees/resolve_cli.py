@@ -287,6 +287,8 @@ def add_parsers(sub) -> None:
     )
     parser.add_argument("--stage-launch-seed", action="store_true", help="Require typed launch-seed staging")
     parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
+    parser.add_argument("--launch-request-b64", default=None, help="Accept a structured target-local launch request")
+    parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
     parser.add_argument(
         "--environment",
@@ -347,6 +349,10 @@ def add_parsers(sub) -> None:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
+    if getattr(args, "launch_request_b64", None) or getattr(args, "launch_request_status", None):
+        from .launch_request import cmd_request
+
+        return cmd_request(args)
     append_launch_event("resolve_handler_start")
     try:
         state = ResolveCommandState.from_args(args)
@@ -372,7 +378,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         output.err(message)
         return 2
 
-    if state.requested_machine and requested_seed:
+    if state.requested_machine and requested_seed and (
+        not state.use_json or getattr(state.args, "seed_id", None)
+        or getattr(state.args, "dry_run", False)
+    ):
         # Validated here, before the JSON/non-JSON split: the non-JSON
         # dispatcher checks state.use_new before state.requested_machine
         # (below) and would otherwise silently create/resume a LOCAL
@@ -382,10 +391,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # space-joined command string with zero shell quoting, unsafe for
         # an arbitrary --seed value. Applies to both --new and
         # --worktree-id (resume) targets alike.
-        message = (
-            "--seed is not yet supported for a remote --machine target; "
-            "use --seed on this machine only, or omit --machine."
-        )
+        message = "Remote prompts require non-preview JSON admission; staged identities execute on the target."
         if state.use_json:
             return output._json_error(message)
         output.err(message)
@@ -555,11 +561,12 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 remote_args.append("--restore")
         if getattr(state.args, "target_no_mux", False):
             remote_args.append("--no-mux")
-        rc = _emit_remote_plan_for_env(
-            config,
-            state.requested_machine,
-            getattr(state.args, "environment", None) or "",
-            remote_args,
+        route_args = (config, state.requested_machine,
+                      getattr(state.args, "environment", None) or "", remote_args)
+        seed = getattr(state.args, "seed", None)
+        rc = (
+            _emit_remote_plan_for_env(*route_args, seed=seed)
+            if seed else _emit_remote_plan_for_env(*route_args)
         )
         if rc is not None:
             return rc

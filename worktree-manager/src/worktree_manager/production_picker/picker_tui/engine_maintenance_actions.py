@@ -449,8 +449,7 @@ class PickerScreenMaintenanceActionsMixin:
         # reasoning `_SEED_PROMPT_ENABLED` documents for Anchor/Bare/No Mux,
         # which ARE offered here since they're live checkboxes in this same
         # dialog, not known until Confirm is pressed).
-        is_remote = (tm, te) != self.src.LOCAL
-        show_prompt = _SEED_PROMPT_ENABLED and not is_remote
+        show_prompt = _SEED_PROMPT_ENABLED
         scr = ScopeDlgScreen(dlg, show_prompt=show_prompt)
 
         def _after(confirmed):
