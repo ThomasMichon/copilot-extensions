@@ -205,6 +205,50 @@ def test_registry_install_manifest_git_probes_remain_headless(authority_state, m
     assert len(observed) == 3
 
 
+def test_doctor_repairs_hold_full_registry_authority(authority_state, monkeypatch):
+    from agent_worktrees import doctor
+
+    calls = []
+
+    def reconcile(*, fix=False, plat=None):
+        calls.append((fix, bool(getattr(pr_authority._held, "paths", ()))))
+        return []
+
+    monkeypatch.setattr(doctor, "_reconcile", reconcile)
+    assert doctor.reconcile(fix=True) == []
+    assert doctor.reconcile() == []
+    assert calls == [(True, True), (False, False)]
+
+
+def test_unregister_preserves_legacy_active_pr(authority_state, monkeypatch):
+    from agent_worktrees import unregister_cli
+
+    config, record, _root, _registry, _ledgers = authority_state
+    record.pr.state = "active"
+    monkeypatch.setattr(tracking, "list_records", lambda *a, **k: [record])
+    assert "1 open PR(s)" in unregister_cli._unregister_blockers(config.repo_name)
+
+
+@pytest.mark.parametrize("status,expected", [
+    ("active", "open"), ("completed", "merged"), ("abandoned", "closed"), ("future", None),
+])
+def test_azure_head_lookup_uses_canonical_lifecycle(monkeypatch, status, expected):
+    from agent_worktrees.providers import azure_devops
+    from agent_worktrees.providers.base import ProviderError
+
+    monkeypatch.setattr(azure_devops, "run_cli", lambda *a, **k: subprocess.CompletedProcess(
+        ["az"], 0, stdout=json.dumps([{"status": status, "pullRequestId": 42}]), stderr="",
+    ))
+    provider = azure_devops.AzureDevOpsProvider()
+    if expected is None:
+        with pytest.raises(ProviderError):
+            provider.find_pull_by_head("example/project", "feature", api_base="https://dev.azure.com/example")
+    else:
+        assert provider.find_pull_by_head(
+            "example/project", "feature", api_base="https://dev.azure.com/example",
+        ).state == expected
+
+
 @pytest.mark.parametrize("operation", ["stat", "iterdir"])
 def test_pr_authority_refuses_unreadable_ledger(authority_state, monkeypatch, operation):
     config, record, root, registry, ledgers = authority_state

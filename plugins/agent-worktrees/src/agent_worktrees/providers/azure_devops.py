@@ -566,7 +566,7 @@ class AzureDevOpsProvider:
         p = data[0]
         status = str(p.get("status", "active")).lower()
         merged = (status == "completed")
-        state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
+        state = self._canonical_state(status)
         return PullResult(
             url=self._web_url(api_base, project, name, int(p["pullRequestId"])),
             number=int(p["pullRequestId"]),

@@ -85,7 +85,7 @@ def _unregister_blockers(project: str) -> list[str]:
         1
         for r in records
         for pr in (r.prs or [])
-        if pr.state in ("creating", "open")
+        if not _tracking._pr_is_terminal(pr)
     )
     if open_prs:
         blockers.append(f"{open_prs} open PR(s)")
