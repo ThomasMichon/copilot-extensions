@@ -16,7 +16,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from agent_logger.sync.provenance import ensure_real_directory
+from agent_logger.sync.provenance import ensure_real_directory, windows_extended_path
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -78,7 +78,7 @@ def _open_lock_file(lock_file: Path):
     close_handle.restype = wintypes.BOOL
 
     handle = create_file(
-        str(lock_file),
+        windows_extended_path(lock_file),
         generic_read | generic_write,
         share_all,
         None,
@@ -110,7 +110,7 @@ def _open_lock_file(lock_file: Path):
     if info.FileAttributes & file_attribute_reparse_point:
         close_handle(handle)
         handle = create_file(
-            str(lock_file),
+            windows_extended_path(lock_file),
             generic_read | generic_write,
             share_all,
             None,

@@ -80,6 +80,59 @@ def _mkdir(path: Path) -> None:
     os.mkdir(_windows_extended_path(path))
 
 
+def fsync_directory(path: Path) -> None:
+    """Persist directory-entry changes where the platform exposes that barrier."""
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(_windows_extended_path(path), flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def durable_replace(source: Path, destination: Path) -> None:
+    """Rename with a durable directory-entry barrier.
+
+    Shared by every sync target that lands an authoritative file via
+    rename -- a plain ``os.replace`` is atomic but not durable: on POSIX,
+    fsyncing the temp file never persists the *directory-entry* change
+    itself, and on Windows a write-through move is needed for the same
+    guarantee. A power loss right after an unsynced rename can otherwise
+    silently revert to the prior (or no) file on next boot.
+    """
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        movefile_replace_existing = 0x00000001
+        movefile_write_through = 0x00000008
+        move_file = ctypes.WinDLL(
+            "kernel32",
+            use_last_error=True,
+        ).MoveFileExW
+        move_file.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+        ]
+        move_file.restype = wintypes.BOOL
+        if not move_file(
+            _windows_extended_path(source),
+            _windows_extended_path(destination),
+            movefile_replace_existing | movefile_write_through,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return
+    source_parent = source.parent
+    destination_parent = destination.parent
+    os.replace(_windows_extended_path(source), _windows_extended_path(destination))
+    fsync_directory(source_parent)
+    if destination_parent != source_parent:
+        fsync_directory(destination_parent)
+
+
 def rescue_session_key(session_id: str) -> str:
     """Return the (truncated) directory key for one session's rescue
     snapshots. Every writer/reader must derive this the same way -- see
@@ -214,8 +267,20 @@ def existing_real_directory(path: Path) -> Path | None:
     return absolute
 
 
-def ensure_real_directory(path: Path) -> Path:
-    """Create a directory only through real directory components."""
+def ensure_real_directory(path: Path, *, durable: bool = False) -> Path:
+    """Create a directory only through real directory components.
+
+    Tolerates a concurrent creator: two processes racing to create the same
+    component (e.g. two cross-writer identity-admission claims resolving
+    the same destination lock's parent directory for the first time) must
+    both succeed rather than one seeing an uncaught ``FileExistsError`` --
+    the component still gets the same real-directory validation below
+    either way.
+
+    ``durable=True`` additionally flushes parent entries on POSIX, including
+    components created by a concurrent publisher. Unsupported barriers raise;
+    ordinary callers retain the original directory-creation behavior.
+    """
     absolute = anchored_path(path)
     current = Path(absolute.anchor)
     anchor_mode = _lstat(current).st_mode
@@ -226,10 +291,15 @@ def ensure_real_directory(path: Path) -> Path:
         try:
             mode = _lstat(current).st_mode
         except FileNotFoundError:
-            _mkdir(current)
+            try:
+                _mkdir(current)
+            except FileExistsError:
+                pass
             mode = _lstat(current).st_mode
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"directory is unsafe: {current}")
+        if durable:
+            fsync_directory(current.parent)
     return absolute
 
 

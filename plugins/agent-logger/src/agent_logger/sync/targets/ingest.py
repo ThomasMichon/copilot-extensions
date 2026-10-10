@@ -24,6 +24,7 @@ from agent_logger.sync.targets.base import (
     NO_WINDOW_KWARGS,
     DoctorResult,
     PushResult,
+    SourceIdentityLike,
     Target,
     rsync_session_filters,
 )
@@ -60,7 +61,16 @@ class IngestTarget(Target):
         include_sessions: set[str] | None = None,
         *,
         batch_mode: bool = False,
+        source_identity: SourceIdentityLike | None = None,
     ) -> PushResult:
+        if source_identity is not None:
+            return PushResult(
+                ok=False,
+                detail=(
+                    "identity-admission unsupported for the ingest target: "
+                    "no receiver-side atomic admission check exists yet"
+                ),
+            )
         url = self._url()
         if not url:
             return PushResult(ok=False, detail="ingest target requires a url")
