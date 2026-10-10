@@ -698,3 +698,14 @@ def test_inline_second_read_rejects_concurrent_uncommitted_projection(
     monkeypatch.setattr(delivery_io, "resolve_source", interleave)
     with pytest.raises(ValueError, match="inline bytes differ from the locked digest"):
         projections.resolve_instruction_source(repo, spec.destination, [source])
+
+
+def test_budget_inventory_reports_malformed_lock_instead_of_empty_success(tmp_path: Path) -> None:
+    repo, source, _ = fixture(tmp_path)
+    assert not projections.sync_repository(repo, [source]).blocking
+    (repo / projections.LOCK_RELATIVE).write_bytes(b"{}")
+    from context_budget import build_context_budget
+    budget = build_context_budget(repo, home=tmp_path / "home")
+    assert budget["instruction_delivery"]["validation_errors"]
+    assert "malformed" in budget["instruction_delivery"]["validation_errors"][0]["error"]
+    assert "categories" not in budget["instruction_delivery"]

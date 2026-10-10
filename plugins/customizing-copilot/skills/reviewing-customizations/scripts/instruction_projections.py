@@ -1742,7 +1742,11 @@ def resolve_instruction_source(
 
 
 def instruction_delivery_inventory(root: Path, automatic: set[Path]) -> dict:
-    return delivery_io.inventory(root, automatic, load_lock_entries(root), _delivery_io())
+    result = Result(operation="delivery-inventory")
+    entries, _, _ = _load_lock(root, result)
+    if result.blocking:
+        raise ValueError("; ".join(finding.message for finding in result.findings))
+    return delivery_io.inventory(root, automatic, entries, _delivery_io())
 
 
 def _iter_projection_files(repo_root: Path) -> Iterable[Path]:
