@@ -287,6 +287,8 @@ class WatchDaemon:
                 snap = self._fetch(key.repo, key.number) if self._registry.watching_count(key) else None
             except Exception:
                 snap = None
+            if self._shutdown_event.is_set():
+                break
             try:
                 with self._persist_lock:
                     before = self._registry.revision()

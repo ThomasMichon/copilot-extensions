@@ -78,7 +78,9 @@ must commit idempotently by event/registration identity before exiting 0 and
 make that commit concurrency-safe: a callback can outlive a crashed owner
 while a successor replays the same event.
 Independent callback workers prevent a slow callback from blocking another
-subscriber (including one on the same PR); one live owner never overlaps
+subscriber (including one on the same PR), with at most eight callback workers
+per owner. Pending retries remain queued, not one sleeping thread per event.
+One live owner never overlaps
 deliveries for the same registration. Graceful restart drains those callbacks,
 but ungraceful owner death does not provide that execution guarantee.
 No persistence lock is held while running a callback.

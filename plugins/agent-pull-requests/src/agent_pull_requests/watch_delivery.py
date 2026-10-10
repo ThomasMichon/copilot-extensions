@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from collections import deque
 
 from .watch_notification import event_payload
 
@@ -18,31 +19,59 @@ class Deliveries:
         self.shutdown = shutdown
         self.workers: dict[str, threading.Thread] = {}
         self.lock = threading.Lock()
+        self.legacy_queue = deque()
+        self.scheduler: threading.Thread | None = None
+        self.max_workers = 8
 
     def resume(self) -> None:
         with self.lock:
             if self.shutdown.is_set():
                 return
-            for event in self.registry.pending_events():
-                identity = event.subscriber.registration_id
-                worker = self.workers.get(identity)
-                if worker is not None and worker.is_alive():
-                    continue
-                thread = threading.Thread(
-                    target=self._run, args=(event,), name=f"pr-notify:{identity}", daemon=True,
+            if self.scheduler is None or not self.scheduler.is_alive():
+                self.scheduler = threading.Thread(
+                    target=self._schedule, name="pr-notify-scheduler", daemon=True,
                 )
-                self.workers[identity] = thread
-                thread.start()
+                self.scheduler.start()
+
+    def _schedule(self) -> None:
+        while not self.shutdown.is_set():
+            with self.transaction:
+                pending = sorted(
+                    self.registry.pending_events(),
+                    key=lambda e: e.subscriber.pending["next_attempt"],
+                )
+            with self.lock:
+                if self.shutdown.is_set():
+                    return
+                available = self.max_workers - len(self.workers)
+                candidates = []
+                while self.legacy_queue and len(candidates) < available:
+                    candidates.append((self.legacy_queue.popleft(), self._run_legacy))
+                for event in pending:
+                    identity = event.subscriber.registration_id
+                    if (
+                        len(candidates) >= available
+                        or event.subscriber.pending["next_attempt"] > time.time()
+                        or identity in self.workers
+                    ):
+                        continue
+                    candidates.append((event, self._run))
+                for event, target in candidates:
+                    identity = event.subscriber.registration_id
+                    thread = threading.Thread(
+                        target=target, args=(event,), name=f"pr-notify:{identity}", daemon=True,
+                    )
+                    self.workers[identity] = thread
+                    thread.start()
+            self.shutdown.wait(0.05)
 
     def legacy(self, event) -> None:
         """Keep legacy best-effort delivery from blocking observation or other callbacks."""
         with self.lock:
-            thread = threading.Thread(
-                target=self._run_legacy, args=(event,),
-                name=f"pr-notify:{event.subscriber.registration_id}", daemon=True,
-            )
-            self.workers[event.subscriber.registration_id] = thread
-            thread.start()
+            if self.shutdown.is_set():
+                return
+            self.legacy_queue.append(event)
+        self.resume()
 
     def _run_legacy(self, event) -> None:
         try:
@@ -56,14 +85,13 @@ class Deliveries:
     def _run(self, event) -> None:
         sub = event.subscriber
         try:
-            while not self.shutdown.is_set():
+            if not self.shutdown.is_set():
                 with self.transaction:
                     if not self.registry.is_current(event):
                         return
                     delay = max(0.0, sub.pending["next_attempt"] - time.time())
                 if delay:
-                    self.shutdown.wait(min(delay, 0.5))
-                    continue
+                    return
                 try:
                     with self.transaction:
                         if not self.registry.is_current(event):
@@ -101,7 +129,8 @@ class Deliveries:
                         self.persist()
                 except OSError:
                     # The persisted event remains authoritative; never acknowledge a failed write.
-                    self.shutdown.wait(1.0)
+                    if sub.pending is not None:
+                        sub.pending["next_attempt"] = time.time() + 1.0
         finally:
             with self.lock:
                 if self.workers.get(sub.registration_id) is threading.current_thread():
@@ -123,8 +152,14 @@ class Deliveries:
             ]
 
     def close(self, deadline: float) -> list[str]:
+        scheduler = self.scheduler
+        if scheduler is not None:
+            scheduler.join(max(0.0, deadline - time.monotonic()))
         with self.lock:
             workers = list(self.workers.values())
         for worker in workers:
             worker.join(max(0.0, deadline - time.monotonic()))
-        return [worker.name for worker in workers if worker.is_alive()]
+        live = [worker.name for worker in workers if worker.is_alive()]
+        if scheduler is not None and scheduler.is_alive():
+            live.append(scheduler.name)
+        return live

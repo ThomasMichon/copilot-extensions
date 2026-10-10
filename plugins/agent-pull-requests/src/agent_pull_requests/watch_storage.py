@@ -38,6 +38,12 @@ def _atomic_write_json(path: Path, data: object) -> None:
             os.fsync(handle.fileno())
         with _ATOMIC_REPLACE_LOCK:
             tmp.replace(path)
+            if os.name != "nt":
+                directory = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
     finally:
         tmp.unlink(missing_ok=True)
 

@@ -74,6 +74,8 @@ class RegistryState:
                         acknowledged=opted_in,
                     )
                     if opted_in:
+                        if "deadline_at" not in entry:
+                            raise ValueError("missing acknowledged deadline")
                         sub.registration_id = entry["registration_id"]
                         if (
                             not isinstance(sub.registration_id, str) or not sub.registration_id

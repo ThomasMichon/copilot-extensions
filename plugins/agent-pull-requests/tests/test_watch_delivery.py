@@ -258,6 +258,68 @@ def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):
     assert len(writes) == 2
     assert writes[-1][0]["baseline"] is not None
 
+def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
+    release = threading.Event()
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+    calls = []
+
+    def notify(event):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            calls.append(event.subscriber.subscriber_id)
+        try:
+            assert release.wait(3)
+            return 0
+        finally:
+            with lock:
+                active -= 1
+
+    daemon = make(notify=notify)
+    try:
+        for number in range(20):
+            daemon.compute("register", spec(str(number)))
+        wait(lambda: active == 8)
+        assert len(daemon._deliveries.workers) == 8
+        release.set()
+        wait(lambda: len(calls) == 20 and not daemon.status()["subscribers"])
+        assert peak == 8 and len(set(calls)) == 20
+    finally:
+        release.set()
+
+
+def test_shutdown_during_fetch_preserves_subscriber_for_successor(make):
+    entered, release = threading.Event(), threading.Event()
+    callbacks = []
+
+    def fetch(*_):
+        entered.set()
+        assert release.wait(3)
+        return PRSnapshot(merged=True)
+
+    daemon = make(fetch=fetch, notify=lambda e: callbacks.append(e) or 0)
+    daemon.compute("register", spec())
+    assert entered.wait(2)
+    daemon.compute("shutdown", {})
+    release.set()
+    daemon.close()
+    assert callbacks == []
+    saved = read_subscriptions_state()
+    assert len(saved) == 1 and saved[0]["pending"] is None
+
+
+def test_acknowledged_state_requires_absolute_deadline_field():
+    registry = WatchRegistry()
+    registry.register(WatchKey("example/project", 1), "one", until=(MERGED,),
+                      acknowledged=True, notify={"argv": ["consumer"]}, timeout=20)
+    entries = registry.snapshot_state()
+    del entries[0]["deadline_at"]
+    with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
+        WatchRegistry().restore_state(entries)
+
 
 def test_default_shutdown_drains_actual_callback_beyond_old_deadline(make, tmp_path):
     started, finished = tmp_path / "started", tmp_path / "finished"
