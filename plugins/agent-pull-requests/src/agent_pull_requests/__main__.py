@@ -483,6 +483,8 @@ def _watch_request(
         result = {"error": "no watch daemon reachable and no inline fallback for this kind"}
         if kind == "register":
             result["ambiguous_registration"] = True
+        elif kind == "unregister":
+            result["ambiguous_cancellation"] = True
         return result
 
     return call_with_fallback(

@@ -350,6 +350,8 @@ def test_registration_transport_fallback_reports_ambiguous_mutation(monkeypatch)
                         lambda **kwargs: kwargs["fallback"]())
     result = cli._watch_request("register", spec())
     assert result["ambiguous_registration"] is True and "registered" not in result
+    cancelled = cli._watch_request("unregister", spec())
+    assert cancelled["ambiguous_cancellation"] is True and "unregistered" not in cancelled
 
 def test_watch_fetch_has_finite_subprocess_deadline(monkeypatch):
     from agent_pull_requests import __main__ as cli
