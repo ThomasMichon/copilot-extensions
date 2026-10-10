@@ -16,6 +16,7 @@ from .producers.evaluator import (
     EvaluatorError,
     load_registration_evaluator,
     NoOp,
+    Reject,
 )
 from .queue import Status, TaskError, TaskQueue
 from .pr_observation_store import observation_store_path
@@ -279,11 +280,26 @@ def evaluate_submitted_task(
                     _publish(bus, outcome.event_type, abandoned)
                 applied.append({"decision": "abandon", "abandoned": abandoned})
                 continue
+            if isinstance(decision, Reject):
+                outcome = queue.reject_submission(
+                    task_id,
+                    reason=decision.reason,
+                    feedback=decision.feedback,
+                    expected_generation=task.generation,
+                    expected_owner_session_id=task.owner_session_id,
+                    expected_completed_by=task.completed_by,
+                    expected_updated_at=task.updated_at,
+                )
+                recovered = asdict(outcome.task)
+                if outcome.event_type is not None:
+                    _publish(bus, outcome.event_type, recovered)
+                applied.append({"decision": "reject", "recovered": recovered})
+                continue
             if isinstance(decision, NoOp):
                 applied.append(decision.to_dict())
                 continue
             raise EvaluatorError(
-                "whole-goal verification evaluators may decide only complete/abandon/noop"
+                "whole-goal verification evaluators may decide only complete/abandon/noop/reject"
             )
     except EvaluatorError as exc:
         return _verification_report(
