@@ -21,6 +21,30 @@ enabled in effective settings **or otherwise detected**. Preserve both signals:
 Exact precedence and supported query APIs are Phase 1 decisions, not invented
 flags in this design. Do not use "ACP" as an automatic fallback classifier.
 
+## Detection acceptance boundary
+
+Before operational suppression, require a supported, read-only session-scoped
+signal for effective native admission and currently offered native tools. A
+user-settings snapshot that excludes repository/managed overrides is not an
+effective-session policy snapshot. Likewise, matching tool names or schemas
+without provider/override provenance is not proof of native implementation.
+
+Uninitialized metadata is unknown, not unavailable. A descriptor-building API
+may perform initialization; do not call it merely to observe capability. An
+in-process-only API is not an extension contract even if generated declarations
+exist. Do not use private SDK members, raw internal RPC, or guessed flags to
+bridge those gaps.
+
+If the installed host does not expose sufficient admission/provenance, preserve
+conditional native-first agent guidance and explicit recovery, but do not claim
+operational backoff has been implemented or proved. Record the missing host
+contract and resolve it before enabling automatic suppression.
+
+Observe a host-confirmed root `session.context_cleared` event for window
+bookkeeping where supported. A cwd-change event is not a model-window rollover.
+Ignore subagent clears for root pressure state; do not parse checkpoint-looking
+prompt text as proof of a native transition.
+
 ## Native checkpoint semantics
 
 Ambient system/developer instructions teach native-first continuity. Targeted

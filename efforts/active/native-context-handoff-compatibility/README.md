@@ -3,11 +3,11 @@
 - **Slug:** `native-context-handoff-compatibility`
 - **Repo:** copilot-extensions
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/context-handoff/README.md`; native-convergence
 - **Umbrella issue:** #6028
 - **Branch(es):** independent implementation branches off `dev`; coordinator owns publication.
-- **Implementation:** not started; this change establishes reviewed intent.
+- **Implementation:** capability-contract investigation; runtime behavior unchanged.
 
 ## Guiding Intent
 
@@ -62,7 +62,7 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 
 ### Phase 1 - Reviewed intent and capability contract
 
-- [ ] Publish/review this plan and the corresponding vision extension before
+- [x] Publish/review this plan and the corresponding vision extension before
   modifying runtime behavior.
 - [ ] Trace effective settings, tool capability, permissions, and context events
   available to the plugin; document a supported detection seam.
@@ -150,3 +150,16 @@ alone does not complete the update.
 - Split compatibility from unrelated workspace preparation/cleanup proposals.
 - No deployed handoff, compaction, native-context setting, or runtime behavior
   was changed by this planning slice.
+
+### 2026-10-10 - Plan reviewed and merged
+
+- Plan and vision publication merged through #6029 after review; addressed all
+  three low-severity documentation findings.
+- Preserved the operator quotation and clarified its context-management meaning.
+- Continuing Phase 1: establish supported effective-setting and native-tool
+  detection before changing pressure behavior. Planning merge does not complete
+  this effort or authorize a live context reset.
+- Added detection acceptance boundaries to the design: session-effective policy,
+  provider/override provenance, uninitialized-versus-unavailable metadata, and
+  root context-clear versus cwd/subagent events. Public protocol/installed-host
+  verification remains open; no internal API or name-only detection is adopted.
