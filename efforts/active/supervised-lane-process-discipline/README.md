@@ -145,19 +145,27 @@ stands as originally asked.
       not proof at the moment of action; the PID can exit and be reused by
       an unrelated process in between):
       1. **Identity-bound termination** — re-verify the PID's identity
-         token (process creation time, analogous to
-         `zdd.diagnostics.process_start_time`/
-         `terminate_pid_if_identity`) immediately before signaling; refuse
-         on any mismatch or uncertainty rather than guessing.
+         token immediately before signaling via `agent-zdd`'s own
+         `zdd.diagnostics.process_start_time`/`terminate_pid_if_identity`
+         (already an `agent-dispatch` dependency, per
+         `plugins/agent-dispatch/pyproject.toml`); refuse on any mismatch
+         or uncertainty rather than guessing.
       2. **Owner validation** — a separate, higher-level check that the
          candidate is genuinely the orphan being reconciled, not merely an
-         unrelated live process that happens to match superficially.
-      Reuse the *discipline*, not the code — `zdd`'s primitives are
-      explicitly not cross-plugin importable; agent-dispatch needs its own
-      analogous pair. Fail-safe default throughout: an ambiguous case
-      leaves the candidate alone (bounded cost: a lingering idle process)
-      rather than terminating it (unbounded cost: killing a live, in-flight
-      unrelated process).
+         unrelated live process that happens to match superficially, via
+         `zdd.diagnostics.audit_daemon_health`/`apply_daemon_health`,
+         scoped to managed-child ownership rather than daemon routing.
+      Reuse `agent-zdd`'s shared primitives directly, not a private
+      reimplementation — per `docs/patterns/graceful-daemon-cutover.md`
+      point 5, `zdd`'s diagnostics are a proper installable shared library
+      meant for cross-plugin reuse (unlike a plugin-private module such as
+      `agent_worktrees.locks`/`agent_worktrees.procs`, which is not).
+      Managed-child *owner validation* stays agent-dispatch-specific logic
+      built on top of those primitives, not duplicated low-level
+      identity-token handling. Fail-safe default throughout: an ambiguous
+      case leaves the candidate alone (bounded cost: a lingering idle
+      process) rather than terminating it (unbounded cost: killing a live,
+      in-flight unrelated process).
 
 ### Phase 4 — supervised-lane child logging/health file
 - [ ] Give supervised-lane children the same `ok`/`returncode`/`error`/
@@ -178,17 +186,21 @@ stands as originally asked.
       attempts for the same managed-child id; exactly one acquires the
       lock, the other exits cleanly (or defers) rather than running
       duplicated.
-- [ ] **Phase 3:** **dedicated, direct safety tests for the termination
-      path specifically** — not merely an end-to-end rehearsal (per
-      `graceful-daemon-cutover.md` point 5): (a) a positive case — a
-      genuine stale orphan is correctly identified and terminated; (b) a
-      refusal case — the discovered PID has since exited and been reused
-      by an unrelated process; confirm termination is refused, not
-      attempted, on the identity-token mismatch. Plus the original
-      duplication-avoidance test: simulate a daemon restart with a
-      still-alive orphaned child from a previous generation; confirm the
-      new daemon detects and reconciles it rather than launching a
-      duplicate alongside it.
+- [ ] **Phase 3:** the restart/reconciliation test is unconditional —
+      simulate a daemon restart with a still-alive orphaned child from a
+      previous generation; confirm the new daemon detects and reconciles
+      it rather than launching a duplicate alongside it. **If termination
+      is the chosen reconciliation path**, add dedicated, direct safety
+      tests for that path specifically — not merely an end-to-end
+      rehearsal (per `graceful-daemon-cutover.md` point 5): (a) a positive
+      case — a genuine stale orphan is correctly identified and
+      terminated; (b) an identity-mismatch refusal case — the discovered
+      PID has since exited and been reused by an unrelated process;
+      confirm termination is refused, not attempted; (c) an
+      owner-validation refusal case — the identity token still matches but
+      owner validation independently fails; confirm termination is refused
+      here too, since identity matching and owner validation are separate
+      required guards in the plan.
 - [ ] **Phase 4:** automated test confirming a supervised-lane child's
       health file reflects a real crash (non-zero exit, error captured) the
       same way an emitter's already does — using the actual crash shape
@@ -223,15 +235,35 @@ _Pending — begin with Phase 1 (trace the actual spawn entry points)._
   it before termination actually runs). Read the cited existing patterns
   (`docs/patterns/graceful-daemon-cutover.md` point 5,
   `docs/patterns/process-slot-ownership.md`'s fail-safe-defaults rationale)
-  and found agent-worktrees' `zdd` module already solves this with a
+  and found the shared `agent-zdd` library already solves this with a
   two-layer discipline (identity-token re-verification immediately before
-  signaling, plus a separate owner-validation check) — not importable
-  cross-plugin, but the *discipline* is now specified for agent-dispatch's
-  own analogous primitive, plus the dedicated positive/refusal safety tests
-  the pattern doc requires (not just an end-to-end rehearsal).
+  signaling, plus a separate owner-validation check) — `agent-dispatch`
+  already depends on `agent-zdd`
+  (`plugins/agent-dispatch/pyproject.toml`), so the Plan now specifies
+  reusing `zdd.diagnostics`'s primitives directly rather than a private
+  reimplementation, keeping only managed-child owner validation
+  dispatch-specific, plus the dedicated positive/refusal safety tests the
+  pattern doc requires (not just an end-to-end rehearsal).
 - Medium: the original Request explicitly asked to diagnose the crash-loop
   cause ("are the emitters failing?" — confirmed during investigation they
   were not), but the Plan only committed to tracing *spawn* triggers, never
   committed to actually diagnosing *why* a child exits. Added that as an
   explicit Phase 1 validation obligation, and made Phase 4's logging design
   depend on Phase 1's real diagnosed cause rather than a generic shape.
+
+### 2026-10-09 — Plan PR #5309 review round 2 (1 High + 2 Low)
+- **High:** confirmed `agent-dispatch` already declares `agent-zdd` as a
+  real dependency (`plugins/agent-dispatch/pyproject.toml`), and
+  `graceful-daemon-cutover.md` point 5 requires reusing its
+  `zdd.diagnostics` identity-bound termination and owner-validation
+  primitives directly — the Plan's "not cross-plugin importable, needs its
+  own analogous pair" claim was factually wrong (that describes a
+  plugin-private module, not a proper installable shared library like
+  `zdd`). Corrected Phase 3 and the prior journal entry to require direct
+  reuse, keeping only managed-child owner validation dispatch-specific.
+- **Low:** corrected the Validation Plan so the restart/reconciliation test
+  stays unconditional regardless of whether termination is the chosen
+  reconciliation path, with termination-specific tests conditional on that
+  choice; added the owner-validation-fails-despite-matching-identity
+  refusal case alongside the existing identity-mismatch refusal case.
+
