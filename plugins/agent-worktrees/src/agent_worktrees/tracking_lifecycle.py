@@ -653,6 +653,7 @@ def create_new_record_if_absent(
     interface: tracking.WorktreeInterface | None = None,
     origin: tracking.WorktreeOrigin | None = None,
     checkout_managed: bool = True,
+    pair_kind: str | None = None,
 ) -> tuple[tracking.WorktreeRecord, bool]:
     tracking = _tracking()
     path = tracking_path / f"{worktree_id}.yaml"
@@ -680,6 +681,7 @@ def create_new_record_if_absent(
             interface=interface,
             origin=origin,
             checkout_managed=checkout_managed,
+            pair_kind=pair_kind or None,
             creation_nonce=secrets.token_hex(8),
         )
         tracking._save_record_unlocked(record, path)

@@ -402,7 +402,9 @@ def load_or_create_anchor_record(
     path = tracking_path / f"{ANCHOR_ID}.yaml"
     if path.exists():
         return tracking.load_record(path)
-    return tracking.create_new_record(
+    # Check-and-create under the record lock: concurrent first users (e.g. two
+    # sessionStart hooks) must not overwrite a ledger another one just created.
+    record, _created = tracking.create_new_record_if_absent(
         ANCHOR_ID,
         ANCHOR_ID,
         anchor_path,
@@ -412,6 +414,7 @@ def load_or_create_anchor_record(
         tracking_path,
         pair_kind="anchor",
     )
+    return record
 
 
 def claim_handoff_reservation(

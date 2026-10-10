@@ -1437,6 +1437,48 @@ class TestRegisterSessionInMainCheckout:
         assert record.resolved_head_session == "bare-sess"
         assert [(sid, wid) for sid, wid, _ in stamps] == [("bare-sess", tracking.ANCHOR_ID)]
 
+    def test_concurrent_first_use_keeps_both_sessions_and_claims(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        from agent_worktrees import anchor_ledger
+
+        anchor, _linked, _config, _stamps = self._setup(tmp_path, monkeypatch)
+        real = {
+            name: getattr(tracking, name)
+            for name in ("create_new_record", "create_new_record_if_absent")
+        }
+        raced: list[bool] = []
+
+        def interleave(name):
+            # Session A has passed the ledger's absence check; session B now
+            # creates the ledger and registers before A creates it.
+            def wrapper(*args, **kwargs):
+                if not raced:
+                    raced.append(True)
+                    assert anchor_ledger.register_session(
+                        "sess-b", anchor, pid=None, pane_id=None, event_at=None,
+                        source="hook:new",
+                    )
+                return real[name](*args, **kwargs)
+            return wrapper
+
+        for name in real:
+            monkeypatch.setattr(tracking, name, interleave(name))
+
+        assert anchor_ledger.register_session(
+            "sess-a", anchor, pid=None, pane_id=None, event_at=None, source="hook:new"
+        )
+
+        assert raced == [True]
+        record = load_record(tmp_tracking_dir / f"{tracking.ANCHOR_ID}.yaml")
+        assert {s.session_id for s in record.sessions} >= {"sess-a", "sess-b"}
+        live_session_claims = sorted(
+            c.ref.rsplit("#", 1)[-1]
+            for c in record.resources
+            if c.kind == "session" and c.is_live
+        )
+        assert live_session_claims == ["sess-a", "sess-b"]
+
     def test_list_and_head_session_return_anchor_session(
         self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):
