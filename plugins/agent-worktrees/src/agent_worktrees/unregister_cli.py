@@ -85,7 +85,7 @@ def _unregister_blockers(project: str) -> list[str]:
         1
         for r in records
         for pr in (r.prs or [])
-        if pr.state in ("creating", "open")
+        if not _tracking._pr_is_terminal(pr)
     )
     if open_prs:
         blockers.append(f"{open_prs} open PR(s)")
@@ -118,13 +118,15 @@ def cmd_unregister(args: argparse.Namespace) -> int:
     except inst.BinstubOwnershipError as exc:
         output.warn(str(exc))
 
-    registry = inst.read_projects_registry()
-    if project in registry.get("projects", {}):
-        del registry["projects"][project]
-        inst.write_projects_registry(registry)
-        output.changed(f"Removed '{project}' from projects.yaml")
-    else:
-        output.skipped(f"'{project}' was not present in projects.yaml")
+    from . import pr_authority
+    with pr_authority.guard():
+        registry = inst.read_projects_registry()
+        if project in registry.get("projects", {}):
+            del registry["projects"][project]
+            inst.write_projects_registry(registry)
+            output.changed(f"Removed '{project}' from projects.yaml")
+        else:
+            output.skipped(f"'{project}' was not present in projects.yaml")
 
     from . import repos as _repos
 

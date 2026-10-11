@@ -919,24 +919,20 @@ def push(
     cwd: str | Path,
     force_with_lease: bool = False,
     force_with_lease_expect: str | None = None,
+    allow_history_rewrite: bool = False,
     timeout: float | None = push_timeout.DEFAULT_PUSH_TIMEOUT,
 ) -> PushResult:
     """Push a branch to remote. Returns a :class:`PushResult` (truthy on success).
 
-    Auto-authenticates when the remote is owned by a different ``gh`` account than the active one,
-    without persisting a token in ``.git/config`` (#29). *force_with_lease_expect*, when given,
-    takes precedence with an expected-old-object lease (``--force-with-lease=<dest-ref>:<expect>``,
-    verified as an ancestor of the source ref first) so a divergent, deleted, or locally
-    rebased/reset branch all fail atomically rather than silently dropping commits (#5298/#5300).
-    The result carries git's ``stderr`` and a ``retryable`` classification so a caller's retry loop
-    can surface the real error (a pre-push hook decline, an auth 403, a protected-branch block) and
-    fail fast instead of masking every failure as a generic "rejected" and retrying a doomed push
-    (#993). Bounded by ``timeout`` (:mod:`push_timeout`); a stall kills the whole process tree.
+    Auto-authenticates without persisting tokens (#29). The explicit old-object lease is
+    ancestor-checked unless the owned-PR publisher explicitly authorizes a rewrite.
+    Failures retain both streams and retryability (#993). A timeout kills the process tree.
     Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real pre-push release guard
-    must be allowed to block a non-compliant push. Worktree-originated callers wrap this with
-    ``hooks.allow_pr_push()``.
+    must be allowed to block a push. Worktree callers wrap this with ``hooks.allow_pr_push()``.
     """
-    if force_with_lease_expect is not None and not is_commit_ancestor(
+    if allow_history_rewrite and not force_with_lease_expect:
+        return PushResult(ok=False, stderr="History rewrites require an exact expected-head lease.")
+    if force_with_lease_expect and not allow_history_rewrite and not is_commit_ancestor(
         force_with_lease_expect, branch.split(":", 1)[0] if ":" in branch else branch, cwd=cwd):
         return PushResult(ok=False, stderr=f"Refusing: {force_with_lease_expect} not an ancestor.")
     from .git_push_transport import push as transport

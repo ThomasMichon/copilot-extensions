@@ -722,8 +722,14 @@ def test_unregister_reregister_and_late_ack_do_not_remove_new_registration(make)
         }) == {"unregistered": False}
         wait(lambda: len(payloads) == 2)
         release.set()
-        wait(lambda: len(daemon._deliveries.workers) == 1)
-        assert read_subscriptions_state()[0]["registration_id"] == new["registration_id"]
+        def old_delivery_finished():
+            with daemon._deliveries.lock:
+                return old["registration_id"] not in daemon._deliveries.workers
+
+        wait(old_delivery_finished)
+        state = read_subscriptions_state()[0]
+        assert state["registration_id"] == new["registration_id"]
+        assert state["pending"]["payload"]["registration_id"] == new["registration_id"]
     finally:
         release.set()
 
