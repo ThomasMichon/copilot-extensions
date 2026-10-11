@@ -264,7 +264,7 @@ def load(
     overrides them so the local machine's rows carry its ``machines.yaml``
     display name and env label, matching the multi-machine tab descriptors.
 
-    ``classify=False`` requests the provider's cache-only first-paint contract;
+    ``classify=False`` requests cached rows with one live mux enumeration;
     ``classify=True`` requests canonical git/session/mux enrichment plus the
     Group C batched PR/session/mux reconcile overlay. Both calls cross the same
     attributable process boundary as remote reads and run on the caller's
@@ -285,7 +285,7 @@ def load(
         engine_client.list_worktree_rows(
             context.project(),
             classify=classify,
-            mux_details=classify,
+            mux_details=True,
             cache_only=not classify,
             runner=runner,
         )

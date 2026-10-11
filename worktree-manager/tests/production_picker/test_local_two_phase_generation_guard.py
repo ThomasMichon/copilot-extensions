@@ -78,3 +78,54 @@ def test_current_generation_local_phase1_failure_is_recorded(monkeypatch):
     loader._load_local_two_phase(source)
 
     assert loader.state_for_source(source.cache_key) == "failed"
+
+
+def test_local_classify_failure_preserves_mux_rows_and_reports_error(monkeypatch):
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    mux_rows = [{"id4": "example", "sess": "MUX(2)", "mux_live": True}]
+
+    def fetch(*_args, classify=True, **_kwargs):
+        if classify:
+            raise RuntimeError("classification timed out")
+        return mux_rows
+
+    failures = []
+    monkeypatch.setattr(data_ssh, "_fetch", fetch)
+    monkeypatch.setattr(loader, "_log_fetch_failure",
+                        lambda *_args, **kwargs: failures.append(kwargs["phase"]))
+    loader._load_local_two_phase(source)
+
+    assert loader.records_for_source(source.cache_key) == mux_rows
+    assert loader.state_for_source(source.cache_key) == "ready"
+    assert loader._error[source.cache_key] == "classification timed out"
+    assert failures == ["local-classify"]
+
+
+def test_remote_cache_first_retains_mux_details_when_classification_fails(monkeypatch):
+    source = data_ssh.Source(
+        "remote", "Linux",
+        ["ssh", "remote", "example list --json --classify --mux-details"],
+    )
+    loader = data_ssh.LiveLoader([source])
+    monkeypatch.setattr(data_ssh, "_CACHE_ONLY_GATE", True)
+    monkeypatch.setattr(data_ssh, "_ssh_log", lambda *_args: None)
+    calls = []
+    mux_rows = [{"id4": "example", "sess": "MUX(0)", "mux_live": True}]
+
+    def fetch(_source, *, argv=None, **_kwargs):
+        calls.append(argv)
+        if argv is None:
+            raise RuntimeError("classification timed out")
+        command = " ".join(argv)
+        assert "--cache-only" in command
+        assert "--mux-details" in command
+        assert "--classify" not in command
+        return mux_rows
+
+    monkeypatch.setattr(data_ssh, "_fetch", fetch)
+    loader._load_remote_two_phase(source)
+
+    assert len(calls) == 2
+    assert loader.records_for_source(source.cache_key) == mux_rows
+    assert loader.state_for_source(source.cache_key) == "ready"

@@ -61,6 +61,14 @@ treated as confirmed drift.
 
 ## Resume prompt
 
+The Picker's fast worktree listing joins cached rows with one mux-session
+enumeration on the target machine. Mux presence and attached-client counts
+therefore make Open available before git and transcript enrichment completes.
+If mux enumeration is unavailable, the listing reports the failure and leaves
+the live mux observation unknown rather than probing each worktree or declaring
+its session absent. Slow classification failures retain the fast rows and are
+reported separately.
+
 For a local, stopped worktree, **Actions > Resume prompt…** supplies the first
 turn of the cold Copilot start alongside its prior `--resume=<session>` target.
 It uses the full `--interactive` argument, including with **No Mux**. A live

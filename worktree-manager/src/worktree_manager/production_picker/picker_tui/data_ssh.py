@@ -220,11 +220,10 @@ def _drop_classify_arg(argv: list[str]) -> list[str]:
 # picker-cache-first-paint (dotfiles#948): the remote fast phase can request a
 # **cache-only** listing (``list --json --cache-only``) that builds rows from the
 # remote's tracking-record cache with no events.jsonl / process / git scan --
-# symmetric with the local cache-only first paint. Opt-in per box (default off)
-# during fleet rollout, since a remote whose runtime predates ``--cache-only``
-# would reject it; when enabled the fetch falls back gracefully (drops the flag)
-# for such a remote. Flip on once a box's remotes all carry the flag.
-_CACHE_ONLY_GATE = os.environ.get("AGENT_WORKTREES_PICKER_CACHE_ONLY") == "1"
+# symmetric with the local cache-only first paint. Enabled by default so mux
+# enumeration does not wait on transcripts; older remotes reject the flag and
+# the fetch retries without it. An explicit 0 retains the legacy fast listing.
+_CACHE_ONLY_GATE = os.environ.get("AGENT_WORKTREES_PICKER_CACHE_ONLY", "1") != "0"
 
 
 def _edit_remote_cmd(argv: list[str], transform) -> list[str]:
@@ -1995,25 +1994,12 @@ class LiveLoader(LazyLoadMixin):
     def _load_local_two_phase(self, source: Source, gen: int | None = None):
         """Fast-then-fill for the local tab.
 
-        Phase 1 (``classify=False``) is cheap -- tracking + sessions + mux, no
-        per-worktree git -- so the local rows paint at once (via ``derive``'s
-        classification-absent heuristic: status + turns + PR) instead of blocking
-        on git classification of every worktree, which can take seconds or stall.
-        Phase 2 (``classify=True``) runs the full git classification and swaps
-        the authoritative ``state`` in. A generation guard keeps a concurrent
-        :meth:`reload` from being clobbered by this pass's phase 2 (#1421), and
-        -- mirroring the sibling ``_load_remote_stream`` fix (#2347) -- Phase 1's
-        own failure write too: a superseded Phase 1 attempt (a newer
-        ``reload()``/``reload_source()`` already bumped the generation and
-        committed a fresher, genuinely successful ready state) must never
-        clobber that with a stale failure marker.
-
-        ``gen`` is the generation captured by the caller (``_load_one``) when
-        THIS load started -- mirrors ``_load_remote_two_phase``'s guard so a
-        ``cancel_source()``/``reload_source()`` bump raced against an
-        in-flight local load can't have its bump ignored. Defaults to the
-        source's current generation when omitted (unchanged direct/test call
-        behavior)."""
+        Phase 1 joins cached worktree rows with a target-local mux snapshot.
+        Phase 2 adds git/transcript enrichment; failures retain the usable mux
+        rows and report a diagnostic. Every publication checks the captured
+        generation so a superseded load cannot overwrite a newer result.
+        ``gen`` defaults to the source's current generation for direct calls.
+        """
         if gen is None:
             gen = self._gen.get(source.cache_key, 0)
         t0 = _dt.datetime.now()
@@ -2034,15 +2020,24 @@ class LiveLoader(LazyLoadMixin):
             self._records[source.cache_key] = fast
             self._state[source.cache_key] = "ready"
         # Phase 2: authoritative git classification, swapped in on success.
+        t1 = _dt.datetime.now()
         try:
             full = _fetch(source, classify=True)
-        except Exception:
-            return  # keep the honest phase-1 heuristic rows
+        except Exception as exc:
+            self._log_fetch_failure(
+                source, exc, t1, phase="local-classify",
+                timeout=data_local.engine_client._DEFAULT_TIMEOUT,
+            )
+            with self._lock:
+                if not self._cancelled.is_set() and self._gen.get(source.cache_key, 0) == gen:
+                    self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
+            return
         with self._lock:
             if (not self._cancelled.is_set()
                     and self._state.get(source.cache_key) == "ready"
                     and self._gen.get(source.cache_key, 0) == gen):
                 self._records[source.cache_key] = full
+                self._error[source.cache_key] = ""
 
     def _log_load_header(self):
         """Enumerate every source this load pass will (or won't) resolve.
