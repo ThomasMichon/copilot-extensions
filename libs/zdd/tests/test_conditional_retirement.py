@@ -145,3 +145,29 @@ def test_legacy_recovery_and_reap_refuse_conditional_state(case, state):
     assert not result.ok and "owner-led recovery" in result.error
     assert events == []
     assert breadcrumb.breadcrumb_path(root).read_bytes() == before
+
+
+def test_legacy_recovery_cannot_race_native_transition(case):
+    from zdd.cutover_lock import CutoverLock
+
+    root, old, _, _, _, _, _ = case
+    stale = breadcrumb.write_breadcrumb(
+        root, state="draining", old=old.to_dict(), new_pid=202
+    )
+    before = breadcrumb.breadcrumb_path(root).read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("contended native authority must prevent legacy side effects")
+
+    with CutoverLock(root):
+        recovery = breadcrumb.recover_stale_cutover(root, forbidden)
+        reap = breadcrumb.reap_abandoned_passive(
+            root, pid_alive=forbidden, terminate=forbidden, record=stale, grace_seconds=0
+        )
+    assert recovery["refused"] and reap["refused"]
+    assert breadcrumb.breadcrumb_path(root).read_bytes() == before
+    breadcrumb.write_breadcrumb(root, state="conditional-draining", old=old.to_dict())
+    reap = breadcrumb.reap_abandoned_passive(
+        root, pid_alive=forbidden, terminate=forbidden, record=stale, grace_seconds=0
+    )
+    assert reap["refused"]

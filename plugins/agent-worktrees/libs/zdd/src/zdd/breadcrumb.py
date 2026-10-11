@@ -168,6 +168,26 @@ def recover_stale_cutover(
     *,
     health_check: Callable[[str, int], bool] | None = None,
 ) -> dict:
+    """Recover only while holding native transition authority, without waiting."""
+    from .cutover_lock import CutoverLock, CutoverLockedError
+
+    try:
+        with CutoverLock(config_dir):
+            return _recover_stale_cutover_locked(
+                config_dir, make_client, health_check=health_check
+            )
+    except CutoverLockedError:
+        log.error("Legacy recovery refused while native cutover authority is held")
+        return {"recovered": False, "refused": True,
+                "reason": "native cutover in progress; recovery refused"}
+
+
+def _recover_stale_cutover_locked(
+    config_dir: str | os.PathLike[str],
+    make_client: Callable[[str], Any],
+    *,
+    health_check: Callable[[str, int], bool] | None = None,
+) -> dict:
     """Undrain a survivor stranded by an aborted cutover (#1756).
 
     Reads the breadcrumb; if it marks an aborted cutover (non-terminal state)
@@ -295,6 +315,35 @@ def _record_age_seconds(record: dict, *, now: datetime | None = None) -> float |
 
 
 def reap_abandoned_passive(
+    config_dir: str | os.PathLike[str],
+    *,
+    pid_alive: Callable[[int], bool],
+    terminate: Callable[[int], bool],
+    active_pid: int | None = None,
+    grace_seconds: float = DEFAULT_ABANDONED_PASSIVE_GRACE_S,
+    record: dict | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Reap only under native transition authority with a fresh breadcrumb."""
+    from .cutover_lock import CutoverLock, CutoverLockedError
+
+    try:
+        with CutoverLock(config_dir):
+            current = read_breadcrumb(config_dir)
+            if current is not None and requires_conditional_recovery(current):
+                record = current
+            return _reap_abandoned_passive_locked(
+                config_dir, pid_alive=pid_alive, terminate=terminate,
+                active_pid=active_pid, grace_seconds=grace_seconds,
+                record=record, now=now,
+            )
+    except CutoverLockedError:
+        log.error("Passive reap refused while native cutover authority is held")
+        return {"reaped": False, "refused": True,
+                "reason": "native cutover in progress; reap refused", "pid": None}
+
+
+def _reap_abandoned_passive_locked(
     config_dir: str | os.PathLike[str],
     *,
     pid_alive: Callable[[int], bool],

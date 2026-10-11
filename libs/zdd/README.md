@@ -120,6 +120,10 @@ Conditional breadcrumbs use distinct `conditional-started`,
 `conditional-flipped`, and `conditional-draining` states. Legacy recovery,
 passive reaping, and ordinary cutover refuse those states without probing or
 undraining either generation. Only the conditional owner may resolve them.
+Legacy recovery and passive reaping acquire native transition authority
+non-blockingly before reading or mutating recovery state, closing the race
+where an earlier legacy observation could overwrite a newly-started conditional
+attempt. Contention is an explicit refusal, not a stale-state repair.
 
 The supported in-process adapter is `run_conditional_cutover(config_dir,
 version=..., request=...)`. Bridge deployment/service restart and Dispatch
