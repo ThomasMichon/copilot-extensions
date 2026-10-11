@@ -243,3 +243,65 @@ def test_scheduler_template_forwards_managed_overwrite_consent() -> None:
         "skills/setting-up-instruction-sync-worker/references/templates/scheduler-config.md"
     )
     assert "overwrite_existing_managed=consent.overwrite_existing_managed" in template.read_text()
+
+
+def test_owned_content_edit_after_comparison_is_authoritatively_superseded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.sync_repository(repo, [source]).blocking
+    fallback = repo / delivery.fallback_destination(spec.destination)
+    expected = fallback.read_bytes()
+    fallback.write_bytes(expected + b"\nunsupported edit\n")
+    opt_in(repo)
+    original = projections._atomic_write
+
+    def write(path: Path, content: bytes) -> None:
+        path.write_bytes(b"racing unsupported content edit")
+        original(path, content)
+
+    monkeypatch.setattr(projections, "_atomic_write", write)
+    assert not projections.sync_repository(repo, [source], overwrite_existing_managed=True).blocking
+    assert fallback.read_bytes() == expected
+
+
+def test_unowned_creation_between_compare_and_publication_is_never_clobbered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    path = repo / delivery.fallback_destination(spec.destination)
+    original = projections.transaction.create_exclusive
+
+    def create(target: Path, content: bytes) -> None:
+        target.write_bytes(b"unowned racing creation")
+        original(target, content)
+
+    monkeypatch.setattr(projections.transaction, "create_exclusive", create)
+    assert projections.sync_repository(repo, [source]).blocking
+    assert path.read_bytes() == b"unowned racing creation"
+    assert not (repo / spec.destination).exists()
+
+
+@pytest.mark.parametrize("case", ["consent", "lock"])
+def test_final_write_rechecks_safety_and_rolls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.sync_repository(repo, [source]).blocking
+    fallback = repo / delivery.fallback_destination(spec.destination)
+    before = fallback.read_bytes() + b"\nedit\n"
+    fallback.write_bytes(before)
+    consent_path = opt_in(repo)
+    lock = repo / projections.LOCK_RELATIVE
+    original = projections._atomic_write
+
+    def write(path: Path, content: bytes) -> None:
+        original(path, content)
+        if case == "consent":
+            consent_path.write_text("{}")
+        else:
+            lock.write_bytes(b"changed ownership")
+
+    monkeypatch.setattr(projections, "_atomic_write", write)
+    assert projections.sync_repository(repo, [source], overwrite_existing_managed=True).blocking
+    assert fallback.read_bytes() == before

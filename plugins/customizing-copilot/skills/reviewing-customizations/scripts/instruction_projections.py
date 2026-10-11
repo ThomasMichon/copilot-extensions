@@ -2038,24 +2038,7 @@ def scan_repository(
 
 
 def _atomic_write(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+    transaction.atomic_write(path, content)
 
 
 def _current_regular_bytes(path: Path) -> bytes | None:
@@ -2067,10 +2050,11 @@ def _transactional_write(
     *,
     before_write: Callable[[], None] | None = None,
     validate_path: Callable[[Path], None] | None = None,
+    after_write: Callable[[], None] | None = None,
 ) -> None:
     transaction.write(
         changes, read=_current_regular_bytes, atomic_write=_atomic_write,
-        before_write=before_write, validate_path=validate_path,
+        before_write=before_write, validate_path=validate_path, after_write=after_write,
     )
 
 
@@ -2331,7 +2315,16 @@ def _sync_repository_locked(
             except ValueError as exc:
                 raise OSError(str(exc)) from exc
 
-        _transactional_write(changes, before_write=recheck, validate_path=validate_target)
+        def final_recheck() -> None:
+            if overwrite_existing_managed and projection_reflect_consent.load_consent(root) != consent:
+                raise OSError("managed overwrite consent changed during publication")
+            if _current_regular_bytes(lock_path) != (lock_content if lock_changed else lock_preimage):
+                raise OSError("projection ownership lock changed during publication")
+
+        _transactional_write(
+            changes, before_write=recheck, validate_path=validate_target,
+            after_write=final_recheck,
+        )
     except (OSError, ValueError) as exc:
         result.unchanged.clear()
         result.add(

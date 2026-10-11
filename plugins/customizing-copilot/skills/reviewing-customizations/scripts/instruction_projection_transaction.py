@@ -1,11 +1,43 @@
-"""Compare-before-replace transaction with injected filesystem safety checks."""
+"""Cooperative transaction; owned content is authoritative, not content CAS."""
 
 from __future__ import annotations
 
 import os
 import stat
+import tempfile
 from pathlib import Path
 from typing import Callable
+
+
+def atomic_write(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(staged, path)
+    finally:
+        try:
+            staged.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def create_exclusive(path: Path, content: bytes) -> None:
+    """Publish complete bytes without replacing an existing directory entry."""
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(staged, path)
+    finally:
+        staged.unlink()
 
 
 def current_regular_bytes(
@@ -31,6 +63,7 @@ def write(
     atomic_write: Callable[[Path, bytes], None],
     before_write: Callable[[], None] | None = None,
     validate_path: Callable[[Path], None] | None = None,
+    after_write: Callable[[], None] | None = None,
 ) -> None:
     replaced: list[tuple[Path, bytes | None, bytes | None]] = []
     try:
@@ -43,9 +76,18 @@ def write(
                 raise OSError(f"{path.as_posix()} changed after validation")
             if content is None:
                 path.unlink()
+            elif expected_content is None:
+                create_exclusive(path, content)
             else:
                 atomic_write(path, content)
             replaced.append((path, content, expected_content))
+        if after_write is not None:
+            after_write()
+        for path, content, _ in changes:
+            if validate_path is not None:
+                validate_path(path)
+            if read(path) != content:
+                raise OSError("destination changed after transaction publication")
     except OSError as exc:
         rollback_errors: list[str] = []
         for path, written_content, previous_content in reversed(replaced):

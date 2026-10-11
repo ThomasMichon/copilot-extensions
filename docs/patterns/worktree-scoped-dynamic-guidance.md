@@ -132,7 +132,18 @@ must validate; unmarked files, invalid locks and indirection never qualify.
 Actual edited selector/inline and fallback bytes are transaction preimages,
 not trusted guidance. Live consent is rechecked under the sync lock before each
 write; withdrawal or a concurrent edit aborts and rolls back prior writes
-without discarding that concurrent edit. Fallback retirement still requires
+when a changed preimage is observed. Authorized managed outputs are
+single-authoritative-writer artifacts: unsupported content edits racing after
+comparison may be superseded by exact upstream bytes. Put customizations in
+repository-owned `AGENTS.md` or separate sidecar instructions, never generated
+artifacts. There is no shadow/update-blocking mechanism in this contract.
+Absent destinations use exclusive no-clobber publication; a concurrently
+created unowned file is never replaced. Consent, lock and output integrity are
+rechecked after publication, with best-effort rollback on failure.
+These checks are not filesystem content CAS or protection against
+noncooperating filesystem attackers. Supported local filesystems must provide
+exclusive hard-link publication and atomic rename; unsupported filesystems
+fail closed, without a clobbering fallback. Fallback retirement still requires
 its full integrity proof. This opt-in changes neither the eight inline floors
 nor local-cache discovery; pointer-only local-body relocation is separate.
 
