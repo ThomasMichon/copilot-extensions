@@ -46,6 +46,14 @@ def test_both_body_classes_excluded_from_repository_discovery(tmp_path: Path) ->
     assert not inventory["local_bodies"]["automatically_discovered"]
     assert inventory["reviewed_fallbacks"]["count"] == 1
     assert not inventory["reviewed_fallbacks"]["automatically_discovered"]
+    legacy = repo / delivery.legacy_local_destination(spec.destination)
+    legacy.write_bytes(local.read_bytes())
+    automatic, _ = _repo_instruction_files(repo)
+    assert legacy in automatic
+    inventory = projections.instruction_delivery_inventory(repo, automatic)["categories"]
+    assert inventory["legacy_local_bodies"]["count"] == 1
+    assert inventory["legacy_local_bodies"]["automatically_discovered"]
+    assert not inventory["local_bodies"]["automatically_discovered"]
 
 
 def test_nested_local_body_paths_preserve_subdirectories() -> None:
