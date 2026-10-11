@@ -1,0 +1,9 @@
+{
+  "comment": "Enforce confirm:true before running a contributed worktree/config-section/task action (#6044).",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
