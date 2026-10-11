@@ -5,6 +5,7 @@ function Invoke-SupervisorAudit {
         [string]$Event, [string]$Reason, [string]$Name = '',
         [string]$EnvFile = '', [string]$Outcome = 'begin', [int]$ExitCode = -1
     )
+    try {
     $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
     if (-not $py) {
         Write-Warn "Supervisor lifecycle audit unavailable ($Event/$Reason); action is not suppressed"
@@ -48,6 +49,9 @@ function Invoke-SupervisorAudit {
     } catch {
         Write-Warn "Supervisor lifecycle audit unavailable ($Event/$Reason); action is not suppressed"
     } finally { $global:LASTEXITCODE = $previousExitCode }
+    } catch {
+        Write-Warn "Supervisor lifecycle audit probe unavailable ($Event/$Reason); action is not suppressed"
+    }
 }
 
 function Invoke-SupervisorTaskAction {
@@ -59,6 +63,13 @@ function Invoke-SupervisorTaskAction {
             'start' { Start-ScheduledTask -TaskName $Name -ErrorAction Stop }
             'enable' { Enable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null }
             'disable' { Disable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null }
+        }
+        if ($Operation -eq 'start') {
+            if (-not $script:SupervisorReconciledNames) { $script:SupervisorReconciledNames = @{} }
+            $startedTask = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
+            if ($startedTask -and $startedTask.State -eq 'Running') {
+                $script:SupervisorReconciledNames[$Name] = $true
+            }
         }
         Invoke-SupervisorAudit -Event $Operation -Reason $Reason -Name $Name -Outcome ok
     } catch {

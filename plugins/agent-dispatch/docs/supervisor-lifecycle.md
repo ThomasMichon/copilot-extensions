@@ -58,8 +58,8 @@ disabled or masked native supervisors are not automatically re-enabled.
 An inert configuration that was installed disabled also requires an explicit
 native enablement after its configuration changes; there is no safe inference
 that a disabled unit is merely installer-generated rather than operator-owned.
-A disabled native master does not authorize retirement of its native profile
-units; Linux additionally requires the master to be active. Pool overrides and
+A disabled or unconfirmed native master does not authorize retirement of its native profile
+units; both native adapters require positive master activation. Pool overrides and
 budget pauses are not modified. On Windows, enabled profiles stopped by the
 generation-retirement pass are restarted when the master remains disabled;
 disabled profiles are not started or re-enabled.
@@ -92,8 +92,9 @@ successful exit.
 
 Windows and non-native launchers retain their existing spawned-successor
 handoff. The native ownership gate is Linux-only and requires exact main-PID
-and cgroup identity; inherited metadata in a child or an unrelated service
-does not authorize a native restart.
+and cgroup identity. Valid native-unit metadata with an unreadable or mismatched
+main PID/cgroup defers before mutation instead of selecting detached spawn;
+only a genuinely non-native launch uses the retained spawn path.
 
 This closes the diagnosability portion of the
 [plugin-services vision](../../../visions/plugin-services/README.md) under the

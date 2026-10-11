@@ -35,10 +35,12 @@ def test_native_identity_requires_main_pid_and_exact_unit_cgroup(monkeypatch):
     _native_identity(monkeypatch)
     assert native.native_restart_unit() == UNIT
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_MAIN_PID", str(os.getpid() + 1))
-    assert native.native_restart_unit() is None
+    with pytest.raises(native.NativeOwnershipUnconfirmed, match="main-PID"):
+        native.native_restart_unit()
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_MAIN_PID", str(os.getpid()))
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT", "agent-dispatch-supervisor-other.service")
-    assert native.native_restart_unit() is None
+    with pytest.raises(native.NativeOwnershipUnconfirmed, match="cgroup"):
+        native.native_restart_unit()
     monkeypatch.setattr(native.sys, "platform", "darwin")
     assert native.native_restart_unit() is None
     monkeypatch.setattr(native.sys, "platform", "win32")
@@ -68,7 +70,8 @@ def test_native_handoff_drains_releases_returns_restart_code_without_successor(m
     assert "spawn-request-returned" not in {e["detail"]["reason"] for e in events}
 
 
-def test_unconfirmed_native_identity_defers_before_draining_or_releasing(monkeypatch, tmp_path, caplog):
+@pytest.mark.parametrize("failure", ["unreadable", "pid-mismatch", "cgroup-mismatch"])
+def test_unconfirmed_native_identity_defers_before_draining_or_releasing(monkeypatch, tmp_path, caplog, failure):
     _native_identity(monkeypatch)
     read_text = Path.read_text
 
@@ -78,6 +81,11 @@ def test_unconfirmed_native_identity_defers_before_draining_or_releasing(monkeyp
         return read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", read)
+    if failure == "pid-mismatch":
+        monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_MAIN_PID", str(os.getpid() + 1))
+    elif failure == "cgroup-mismatch":
+        monkeypatch.setattr(Path, "read_text", read_text)
+        monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT", "agent-dispatch-supervisor-other.service")
     launcher = FakeLauncher()
     lock = FakeLock(granted=True)
     spawned = []
@@ -95,7 +103,7 @@ def test_unconfirmed_native_identity_defers_before_draining_or_releasing(monkeyp
     assert not launcher.proc_for("example").terminated
     assert not spawned
     assert daemon._self_update_last_spawn is None
-    assert "cgroup identity unavailable" in caplog.text
+    assert "self-update deferred" in caplog.text
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX native launcher contract")

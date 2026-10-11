@@ -2011,7 +2011,8 @@ class SupervisorDaemon:
         # daemon's still-held lock.
         try:
             native_unit = native_restart_unit()
-        except NativeOwnershipUnconfirmed:
+        except NativeOwnershipUnconfirmed as exc:
+            log.warning("supervisor self-update deferred: %s", exc)
             return False
         self._self_update_last_spawn = now
         daemon_audit(self, "handoff", "new-slot-selected")

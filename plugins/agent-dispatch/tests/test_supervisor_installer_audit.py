@@ -145,7 +145,8 @@ def test_powershell_adapter_records_failures_and_preserves_native_disable(tmp_pa
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
-def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path):
+@pytest.mark.parametrize("master_state", ["Disabled", "Absent", "Ready"])
+def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master_state):
     text = (PLUGIN / "scripts/install.ps1").read_text()
 
     def function(name):
@@ -156,6 +157,7 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path):
         "$ErrorActionPreference='Stop'; $NoSupervisor=$false; $NoService=$false; $env:OS='Windows_NT'",
         "$SupervisorTaskName='agent-dispatch-supervisor'; $InstallDir='fixture'; $SupervisorProfileDir='fixture'",
         "$script:Started=@(); $script:Stopped=@(); $script:Retired=0",
+        f"$script:MasterState='{master_state}'",
         "function Invoke-SupervisorAudit { param($Event,$Reason,$Name,$EnvFile,$Outcome) }",
         "function Write-Warn { param($message) }; function Write-Step { param($message) }; function Write-Ok { param($message) }",
         "function Retire-SupervisorProcesses { $script:Retired++; return 0 }",
@@ -165,10 +167,11 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path):
         "function Write-SupervisorLauncher { return 'launcher.ps1' }",
         "function Install-SupervisorTaskInstance { param($Name,$EnvFile,$Launcher,$DisplayName) }",
         "function Get-SupervisorMode { param($EnvFile) return 'serve' }",
+        "function Get-ScheduledTaskDisabled { return [pscustomobject]@{TaskName='agent-dispatch-supervisor-disabled';State='Disabled'} }",
         "function Get-SupervisorProfileFiles { return @([pscustomobject]@{BaseName='enabled';FullName='enabled.env'}, [pscustomobject]@{BaseName='disabled';FullName='disabled.env'}) }",
         'function Get-SupervisorTaskName { param($ProfileName) return "$SupervisorTaskName-$ProfileName" }',
-        "function Get-ScheduledTask { param($TaskName) if($TaskName -eq 'agent-dispatch-supervisor-enabled'){return [pscustomobject]@{TaskName=$TaskName;State='Ready'}}; if($TaskName -eq 'agent-dispatch-supervisor-*'){return @([pscustomobject]@{TaskName='agent-dispatch-supervisor-enabled';State='Running'},[pscustomobject]@{TaskName='agent-dispatch-supervisor-disabled';State='Disabled'})}; return [pscustomobject]@{TaskName=$TaskName;State='Disabled'} }",
         "function Get-ItemProperty { param($Path,$Name) return $null }",
+        "function Get-ScheduledTask { param($TaskName) if($TaskName -eq 'agent-dispatch-supervisor-disabled'){return Get-ScheduledTaskDisabled}; if($TaskName -eq 'agent-dispatch-supervisor-enabled'){return [pscustomobject]@{TaskName=$TaskName;State='Ready'}}; if($TaskName -eq 'agent-dispatch-supervisor-*'){return @([pscustomobject]@{TaskName='agent-dispatch-supervisor-enabled';State='Running'},(Get-ScheduledTaskDisabled))}; if($script:MasterState -eq 'Absent'){return $null}; return [pscustomobject]@{TaskName=$TaskName;State=$script:MasterState} }",
         "function Remove-ProfileSupervisorTasks { throw 'must preserve profiles' }",
         "function Invoke-SupervisorTaskAction { param($Operation,$Name,$Reason) if($Operation -eq 'start'){$script:Started+=$Name}; if($Operation -eq 'stop'){$script:Stopped+=$Name} }",
         *(function(name) for name in ("Install-SupervisorTask", "Invoke-SupervisorStart", "Invoke-SupervisorsStart", "Invoke-SupervisorsStop")),
@@ -182,7 +185,27 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path):
     data = json.loads(result.stdout)
     assert data["retired"] == 1
     assert data["started"] == ["agent-dispatch-supervisor-enabled"]
-    assert set(data["stopped"]) == {
-        "agent-dispatch-supervisor", "agent-dispatch-supervisor-enabled",
-        "agent-dispatch-supervisor-disabled",
-    }
+    assert "agent-dispatch-supervisor-enabled" in data["stopped"]
+    assert "agent-dispatch-supervisor-disabled" in data["stopped"]
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+def test_audit_scheduler_probe_failure_does_not_suppress_native_action(tmp_path):
+    helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    script = "\n".join([
+        "$ErrorActionPreference='Stop'",
+        f"$PluginDir='{PLUGIN}'; $InstallDir='{tmp_path}'; $VenvPython='{sys.executable}'; $LinkPython=$VenvPython",
+        "$SrcVersion='1.2.3'; $Action='stop'; $SupervisorTaskName='agent-dispatch-supervisor'; $script:Stopped=$false",
+        "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
+        "function Get-CimInstance { param($ClassName,$Filter) [pscustomobject]@{ParentProcessId=100} }",
+        "function Get-ScheduledTask { param($TaskName) throw 'fixture scheduler probe unavailable' }",
+        "function Stop-ScheduledTask { param($TaskName) $script:Stopped=$true }",
+        f". '{helper}'",
+        "Invoke-SupervisorTaskAction -Operation stop -Name $SupervisorTaskName -Reason lifecycle-stop",
+        "if(-not $script:Stopped){throw 'native action was suppressed'}",
+    ])
+    fixture = tmp_path / "probe-failure.ps1"
+    fixture.write_text(script)
+    result = subprocess.run(["pwsh", "-NoProfile", "-File", str(fixture)], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert "audit probe unavailable" in result.stderr

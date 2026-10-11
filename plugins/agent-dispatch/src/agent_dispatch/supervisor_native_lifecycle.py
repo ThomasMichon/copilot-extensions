@@ -26,13 +26,15 @@ def native_restart_unit() -> str | None:
     if not re.fullmatch(r"agent-dispatch-supervisor(?:-[A-Za-z0-9_-]+)?\.service", unit):
         return None
     if os.environ.get("AGENT_DISPATCH_SUPERVISOR_MAIN_PID") != str(os.getpid()):
-        return None
+        raise NativeOwnershipUnconfirmed("native main-PID metadata does not match")
     try:
         lines = Path("/proc/self/cgroup").read_text().splitlines()
     except OSError as exc:
         log.warning("native supervisor cgroup identity unavailable; native restart ownership is unconfirmed")
         raise NativeOwnershipUnconfirmed("native cgroup identity unavailable") from exc
-    return unit if any(line.rsplit("/", 1)[-1] == unit for line in lines) else None
+    if not any(line.rsplit("/", 1)[-1] == unit for line in lines):
+        raise NativeOwnershipUnconfirmed("native cgroup identity does not match")
+    return unit
 
 
 def request_native_restart(daemon: SupervisorDaemon, unit: str) -> None:

@@ -3331,6 +3331,10 @@ function Install-SupervisorTaskInstance {
             Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile
             if (Install-InteractiveScheduledTask -Name $Name -Launcher $Launcher `
                     -Description 'agent-dispatch -- embody + companion supervisor (interactive)') {
+                $startedTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+                if ($startedTask -and $startedTask.State -eq 'Running') {
+                    $script:SupervisorReconciledNames[$Name] = $true
+                }
                 Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile -Outcome ok
                 if (Remove-SupervisorAutostart -Name $Name) {
                     Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
@@ -3410,6 +3414,7 @@ function Install-SupervisorTaskInstance {
         $regOk = $false
     }
     if (-not $regOk) {
+        $script:SupervisorReconcileFailed = $true
         $ErrorActionPreference = $prevEAP
         Write-Warn "$DisplayName not registered (first-time task registration needs elevation) -- run elevated ONCE to install the task; subsequent updates refresh it in place, no elevation"
         return
@@ -3437,6 +3442,7 @@ function Install-SupervisorTaskInstance {
 
 function Install-SupervisorTask {
     $script:SupervisorReconcileFailed = $false
+    $script:SupervisorReconciledNames = @{}
     Invoke-SupervisorAudit -Event service-reconcile -Reason configured-supervisor-pass
     # Install only where the full coordinator lives (a client-only host has no
     # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
@@ -3478,10 +3484,14 @@ function Install-SupervisorTask {
         # (--legacy-env), so the per-profile tasks are redundant and would
         # double-run -- retire them (their .env files stay; the daemon reads them).
         $master = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-        if ($master -and $master.State -eq 'Disabled') {
+        if (-not $script:SupervisorReconciledNames[$SupervisorTaskName] -or $script:SupervisorReconcileFailed) {
+            if (-not $master -or $master.State -ne 'Disabled') { $script:SupervisorReconcileFailed = $true }
             Invoke-SupervisorAudit -Event selection -Reason master-not-active -Name $SupervisorTaskName -EnvFile $envFile -Outcome skipped
-            Write-Warn 'Master supervisor remains disabled; preserving per-profile tasks'
-            Invoke-SupervisorsStart
+            Write-Warn 'Master supervisor reconciliation is unconfirmed; preserving per-profile tasks'
+            foreach ($profile in @(Get-SupervisorProfileFiles)) {
+                $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
+                Invoke-SupervisorStart -Name $name -EnvFile $profile.FullName -Label "Embody supervisor profile '$($profile.BaseName)'"
+            }
         } else { Remove-ProfileSupervisorTasks }
     } else {
         foreach ($profile in @(Get-SupervisorProfileFiles)) {

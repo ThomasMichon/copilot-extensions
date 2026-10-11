@@ -157,7 +157,14 @@ for the ownership/visibility distinction and supported primitives.
   daemon with no in-flight request to drain (agent-dispatch's `supervise
   serve`, #2259), the lighter shape: wind down owned units, release the
   single-instance lease, spawn a successor on the new interpreter with the
-  same argv, then exit. Make it **default-ON with an opt-out env var**, not
+  same argv, then exit on Windows/non-native launches. An identity-confirmed
+  Linux systemd supervisor instead drains/releases and exits with a failure
+  sentinel so its native `Restart=on-failure` owns the replacement; its stable
+  launcher resolves the current complete slot. Never pre-spawn a successor into
+  that unit's kill-on-exit cgroup or mark its restart-request sentinel as success.
+  Native ownership ambiguity defers before mutation. See agent-dispatch's
+  `docs/supervisor-lifecycle.md` for the evidence and remaining validation limits.
+  Make it **default-ON with an opt-out env var**, not
   opt-in — this harness's launch paths have no protocol for flipping an
   opt-in flag before a daemon's first boot, so an opt-in gate here simply
   never activates for anyone. Validate the handoff mechanism end-to-end (real
