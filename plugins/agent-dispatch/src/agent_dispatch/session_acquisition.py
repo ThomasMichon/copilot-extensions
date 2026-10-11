@@ -69,6 +69,19 @@ def acquire(
             failure = {}
         detail = failure.get("detail") if isinstance(failure, dict) else None
         if (
+            result.returncode == 2
+            and not result.stdout.strip()
+            and result.stderr.startswith("usage: agent-bridge ")
+            and any(line.startswith(
+                "agent-bridge: error: argument command: invalid choice: 'acquire' (choose from "
+            ) for line in result.stderr.splitlines())
+        ):
+            detail = {
+                "code": "unsupported_acquisition_cli",
+                "message": "bridge executable does not support session acquisition",
+                "effect": "not_started",
+            }
+        if (
             isinstance(failure, dict) and failure.get("status") == 426
             and detail == "daemon does not support strict session acquisition"
         ):

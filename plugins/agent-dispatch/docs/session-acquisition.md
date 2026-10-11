@@ -42,6 +42,10 @@ observation reports `observation_error` and a warning while retaining successful
 acquisition status, bridge/native identities, and the cleanup handle; it never
 turns an existing body into a spawn failure. Protocol-29 pre-request capability
 refusal is a proven unsupported capability, not an ambiguous launch.
+An old bridge executable's exact argparse exit-2 rejection of the `acquire`
+command (empty stdout, bridge usage and command diagnostic) also proves no
+request was issued. It fails capability without deferred reconciliation; other
+non-JSON errors remain ambiguous.
 
 Bridge-delivered prompts supply the verified native conversation to
 `start --owner-session-id <native-id>`; the CLI forwards it into the existing

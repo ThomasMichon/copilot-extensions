@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import subprocess
 import argparse
+import contextlib
+import io
 
 import pytest
 
@@ -181,6 +183,40 @@ def test_cli_factory_unsupported_options_fail_without_deferred_retry(monkeypatch
     assert not failure.get("deferred")
     assert "execution overrides" in failure["error"]
     assert len(calls) == 1
+
+
+def test_old_bridge_cli_argparse_refusal_is_proven_pre_effect(monkeypatch):
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    parser = argparse.ArgumentParser(prog="agent-bridge")
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("create")
+    commands.add_parser("send")
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), pytest.raises(SystemExit) as error:
+            parser.parse_args(argv[1:])
+        return subprocess.CompletedProcess(argv, error.value.code, "", stderr.getvalue())
+    monkeypatch.setattr(session_acquisition.subprocess, "run", run)
+    ok, failure = spawn_factories.make_embody_spawn()(task())
+    assert not ok and not failure.get("deferred")
+    assert failure["error"] == "bridge executable does not support session acquisition"
+    assert calls == [["bridge", "acquire", "--request-file", "-"]]
+
+
+@pytest.mark.parametrize("exit_code,stdout,error", [
+    (1, "", "agent-bridge: error: argument command: invalid choice: 'acquire' (choose from 'create')"),
+    (2, '{"effect":"unknown"}', "agent-bridge: error: argument command: invalid choice: 'acquire' (choose from 'create')"),
+    (2, "", "another-tool: error: argument command: invalid choice: 'acquire' (choose from 'create')"),
+    (2, "", "agent-bridge: error: argument --request-file: invalid choice: '-' (choose from 'file')"),
+])
+def test_argparse_lookalikes_do_not_claim_absent_launch(monkeypatch, exit_code, stdout, error):
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    monkeypatch.setattr(session_acquisition.subprocess, "run", lambda argv, **kwargs:
+        subprocess.CompletedProcess(argv, exit_code, stdout, "usage: agent-bridge ...\n" + error))
+    with pytest.raises(bridge.BridgeCarriedSessionBusy):
+        session_acquisition.acquire(task(), mode="cli", prompt="work")
 
 
 def test_postlaunch_dispatch_fence_refusal_defers_instead_of_authorizing_cleanup(monkeypatch):
