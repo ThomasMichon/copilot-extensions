@@ -7,7 +7,8 @@
 - **Vision:** `visions/plugins/context-handoff/README.md`; native-convergence
 - **Umbrella issue:** #6028
 - **Branch(es):** independent implementation branches off `dev`; coordinator owns publication.
-- **Implementation:** capability-contract investigation; runtime behavior unchanged.
+- **Implementation:** native selection, checkpoint guidance and pressure backoff
+  implemented in the open implementation PR; review, release and live acceptance pending.
 
 ## Guiding Intent
 
@@ -140,7 +141,8 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 ## Proposal
 
 [design.md](design.md) separates selection, semantic guidance, operational
-backoff, and recovery. It is proposed behavior, not an implemented API.
+backoff, and recovery. The implementation realizes these plugin behaviors without
+adding a host API; live acceptance and deployment remain open.
 
 ## Completion Gate
 

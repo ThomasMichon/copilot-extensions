@@ -51,7 +51,7 @@ export function parseSettings(text) {
       quoted = true;
       output += char;
     } else if (char === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
+      while (i < text.length && !/[\n\r\u2028\u2029]/.test(text[i])) i++;
       output += "\n";
     } else if (char === "/" && text[i + 1] === "*") {
       i += 2;

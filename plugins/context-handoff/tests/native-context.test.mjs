@@ -36,6 +36,7 @@ test("JSONC preserves credential-shaped strings and rejects malformed input", ()
   assert.throws(() => parseSettings("[]"));
   assert.throws(() => parseSettings('{"contextManagementTools":tru}'));
   assert.throws(() => parseSettings('{"contextManagementTools":true,"x":[,]}'));
+  assert.equal(parseSettings('{//comment\r"contextManagementTools":true\r}').contextManagementTools, true);
 });
 
 test("settings layer precedence, explicit false and errors", async () => {

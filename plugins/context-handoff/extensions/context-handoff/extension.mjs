@@ -1460,6 +1460,18 @@ session.on("tool.execution_complete", (event) => {
 // closed (a mid-session extension/skill reload replayed the nudge and raced
 // the skill registry, producing a transient "Skill not found: context-handoff").
 let pendingNudge = null;  // null | "soft" | "hard"
+let latestUsageEvent = null;
+let usageRetryTimer = null;
+
+function retryLatestUsage() {
+  if (usageRetryTimer || !latestUsageEvent) return;
+  usageRetryTimer = setTimeout(() => {
+    usageRetryTimer = null;
+    if (!latestUsageEvent) return;
+    handleUsage(latestUsageEvent).catch((error) =>
+      session.log(`[Context Handoff] Usage re-evaluation failed: ${error.message}`, { level: "warning" }));
+  }, 50);
+}
 
 session.on("session.idle", async (event) => {
   if (event.agentId || !pendingNudge) return;
@@ -1500,7 +1512,7 @@ session.on("session.idle", async (event) => {
 // The session.usage_info event fires with exact token counts after each
 // model interaction. This is the authoritative signal for context usage.
 
-session.on("session.usage_info", async (event) => {
+async function handleUsage(event) {
   if (event.agentId) return;
   const revision = state.windowRevision;
   const d = event.data;
@@ -1643,6 +1655,11 @@ session.on("session.usage_info", async (event) => {
   }
 
   persistState();
+}
+session.on("session.usage_info", async (event) => {
+  if (event.agentId) return;
+  latestUsageEvent = event;
+  await handleUsage(event);
 });
 
 // Also monitor compaction events for awareness
@@ -1691,6 +1708,9 @@ session.on("session.compaction_complete", (event) => {
 session.on("session.context_cleared", (event) => {
   if (event.agentId) return;
   state.windowRevision++;
+  latestUsageEvent = null;
+  clearTimeout(usageRetryTimer);
+  usageRetryTimer = null;
   nativeWarnings.clear();
   state.softReminderSent = false;
   state.hardReminderSent = false;
@@ -1716,6 +1736,7 @@ session.on("session.tools_updated", (event) => {
   state.windowRevision++;
   nativeWarnings.clear();
   nativeObserver.invalidate();
+  retryLatestUsage();
 });
 
 session.on("session.context_changed", (event) => {
@@ -1724,4 +1745,5 @@ session.on("session.context_changed", (event) => {
   state.windowRevision++;
   nativeWarnings.clear();
   nativeObserver.invalidate();
+  retryLatestUsage();
 });
