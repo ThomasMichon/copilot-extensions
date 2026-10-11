@@ -101,7 +101,7 @@ the capability-gated CLI/HTTP operation, and migrate **all seven dispatch
 surfaces above**. No caller migration, native process-exit integration,
 provider parity, release, or rollout is credited by the foundation tests.
 
-### Connected local slice (2026-10-10, awaiting independent review)
+### Connected local slice (2026-10-10)
 
 The subsequent slice exposes `agent-bridge acquire --request-file -` and
 `POST /api/v1/acquisitions`, capability-gated at HTTP protocol 30. It composes

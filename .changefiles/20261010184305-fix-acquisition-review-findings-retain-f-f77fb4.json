@@ -1,5 +1,5 @@
 {
-  "comment": "Fix acquisition review findings: retain failed-attach ambiguity, atomically persist prepared recovery, strictly resume undelivered native sessions, and preserve acquisition identity across observation failures",
+  "comment": "Retain failed-attach ambiguity, atomically persist prepared recovery, strictly resume undelivered native sessions, and preserve acquisition identity across observation failures",
   "changes": [
     {
       "plugin": "agent-bridge",
