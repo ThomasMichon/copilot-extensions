@@ -559,7 +559,7 @@ def _bootstrap_first_install(payload: dict) -> dict:
     return result
 
 
-def _fallback_legacy_session_start(payload: dict) -> dict:
+def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = False) -> dict:
     scripts = Path(__file__).resolve().parent
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -591,6 +591,8 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
         }
     )
     for name, extra in specs:
+        if skip_reconcile and name in {"bootstrap-check", "provision-check"}:
+            continue
         script = scripts / f"{name}{suffix}"
         if not script.is_file():
             continue
@@ -602,7 +604,14 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    env={**os.environ, "PYTHONPATH": ""},
+                    env={
+                        **os.environ,
+                        "PYTHONPATH": "",
+                        **(
+                            {"WORKTREE_NO_RECONCILE": "1", "WORKTREE_NO_PROVISION": "1"}
+                            if skip_reconcile else {}
+                        ),
+                    },
                     **group_kwargs,
                 )
             )
@@ -724,7 +733,9 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
         and _version_key(runtime_version) < _version_key(payload_version)
     ):
         if _external_update_driver_active(home, python):
-            return {}
+            return {} if contextual else _fallback_legacy_session_start(
+                payload, skip_reconcile=True
+            )
         return {} if contextual else _fallback_legacy_session_start(payload)
     try:
         environment = os.environ.copy()

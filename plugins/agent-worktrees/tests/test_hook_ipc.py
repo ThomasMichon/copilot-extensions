@@ -414,13 +414,14 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
             _pid_image_path=lambda pid: str(python),
         ),
     )
-    monkeypatch.setattr(
-        hook_client, "_fallback_legacy_session_start",
-        lambda payload: pytest.fail(
-            "must not fall back to the legacy reconcile path when an "
-            "external update driver is active"
-        ),
-    )
+    seen = {}
+
+    def lifecycle(payload, *, skip_reconcile=False):
+        seen["skip_reconcile"] = skip_reconcile
+        seen["sessionId"] = payload["sessionId"]
+        return {"additionalContext": "registered"}
+
+    monkeypatch.setattr(hook_client, "_fallback_legacy_session_start", lifecycle)
     monkeypatch.setattr(
         hook_client.subprocess,
         "run",
@@ -434,7 +435,34 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
             "environment": {},
         },
     }
-    assert hook_client._fallback_session_start(payload, tmp_path) == {}
+    assert hook_client._fallback_session_start(payload, tmp_path) == {
+        "additionalContext": "registered"
+    }
+    assert seen == {"skip_reconcile": True, "sessionId": "session-1"}
+
+
+def test_active_update_preserves_non_reconcile_legacy_hooks(monkeypatch):
+    launched = []
+
+    class Process:
+        def __init__(self, argv, **kwargs):
+            script = next(arg for arg in argv if arg.endswith((".ps1", ".sh")))
+            launched.append((Path(script).stem, kwargs["env"]))
+
+        def communicate(self, *args, **kwargs):
+            return '{"additionalContext":"lifecycle"}', ""
+
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: "shell")
+    monkeypatch.setattr(hook_client.subprocess, "Popen", Process)
+    assert hook_client._fallback_legacy_session_start(
+        {"sessionId": "session-1"}, skip_reconcile=True
+    ) == {"additionalContext": "lifecycle"}
+    assert {name for name, env in launched} == {
+        "project-hooks", "register-nudge", "register-session", "anchor-hygiene-check"
+    }
+    for name, env in launched:
+        assert env["WORKTREE_NO_RECONCILE"] == "1"
+        assert env["WORKTREE_NO_PROVISION"] == "1"
 
 
 @pytest.mark.parametrize(

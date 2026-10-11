@@ -30,6 +30,9 @@ configured root, successful version probe, completed stage, or cached
 `skipped: locked` result alone does not suppress recovery. Missing, expired,
 invalid, dead-owner, or unverified-process ownership falls through to the
 existing fallback. This read-only check neither starts nor repairs a service.
+During live stage ownership only `bootstrap-check` and `provision-check` are
+omitted; project hooks, session/nudge registration, and anchor hygiene still
+run with reconciliation/provisioning opt-outs scoped to their child environment.
 Process identity uses the existing runtime helper on Windows and Linux and
 Darwin's native `proc_pidpath` on macOS; unavailable native probes preserve
 recovery rather than treating driver installation as proof of ownership.
