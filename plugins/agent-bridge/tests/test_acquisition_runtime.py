@@ -219,6 +219,7 @@ async def test_every_preflight_retry_retains_a_bound_refusal_receipt(rig, monkey
     "missing_receipt", "missing_history", "history_gap", "spawned", "wrong_task",
     "digest", "launched", "native_handle", "not_created", "database_replaced",
     "stale_current", "retired", "future_generation", "strict_continuation", "existing_head",
+    "active_predecessor",
 ])
 async def test_initial_creation_refuses_unproven_or_historical_launch(rig, monkeypatch, defect):
     retry = await preflight_retry(rig, monkeypatch)
@@ -259,6 +260,8 @@ async def test_initial_creation_refuses_unproven_or_historical_launch(rig, monke
         retry = retry.model_copy(update={"intent": "continue"})
     elif defect == "existing_head":
         rig.head["id"] = "native-prior"
+    elif defect == "active_predecessor":
+        previous["state"] = "reserving"
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(retry)
     assert error.value.code == ("authority_unknown" if defect == "existing_head" else "continuity_ambiguous")

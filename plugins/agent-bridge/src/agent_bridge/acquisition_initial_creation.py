@@ -46,7 +46,10 @@ def initial_creation_proven(request: AcquisitionRequest, venue: dict[str, Any], 
             or row.get("task_id") != request.task_id or row.get("worktree") != request.worktree_id
             or row.get("worktree_ownership") != ("created" if number == 1 else "reused")
             or row.get("conversation_retired") is not False or row.get("session_handle")
-            or row.get("release_requested") or row.get("state") not in {"reserving", "deferred", "failed"}
+            or row.get("release_requested")
+            or row.get("state") not in (
+                {"reserving"} if number == count else {"deferred", "failed"}
+            )
         ):
             return False
     records = store.db.execute_read(
