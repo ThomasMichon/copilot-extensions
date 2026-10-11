@@ -860,7 +860,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -943,7 +943,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

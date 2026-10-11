@@ -606,6 +606,8 @@ def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
             "tools/_admission_protocol.py", "tools/conftest.py",
             "libs/single-instance-lease/src/single_instance_lease/lease.py",
             ".github/workflows/ci.yml",
+            ".devcontainer/test-isolation/devcontainer.json",
+            ".devcontainer/test-isolation/Dockerfile",
         ):
             assert re.search(pattern, path)
         assert not re.search(pattern, "plugins/voice-announcer/README.md")
