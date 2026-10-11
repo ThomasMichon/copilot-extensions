@@ -209,3 +209,27 @@ def test_audit_scheduler_probe_failure_does_not_suppress_native_action(tmp_path)
     result = subprocess.run(["pwsh", "-NoProfile", "-File", str(fixture)], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     assert "audit probe unavailable" in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+@pytest.mark.parametrize("state", ["Running", "Ready"])
+def test_native_start_audit_requires_running_receipt(tmp_path, state):
+    helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    script = "\n".join([
+        "$ErrorActionPreference='Stop'",
+        f"$PluginDir='{PLUGIN}'; $InstallDir='{tmp_path}'; $VenvPython='{sys.executable}'; $LinkPython=$VenvPython",
+        "$SrcVersion='1.2.3'; $Action='update'; $SupervisorTaskName='agent-dispatch-supervisor'",
+        "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
+        "function Get-CimInstance { param($ClassName,$Filter) [pscustomobject]@{ParentProcessId=100} }",
+        f"function Get-ScheduledTask {{ param($TaskName) [pscustomobject]@{{State='{state}'}} }}",
+        "function Start-ScheduledTask { param($TaskName) }",
+        f". '{helper}'",
+        "Invoke-SupervisorTaskAction -Operation start -Name $SupervisorTaskName -Reason configured-opt-in",
+    ])
+    fixture = tmp_path / "start-result.ps1"
+    fixture.write_text(script)
+    result = subprocess.run(["pwsh", "-NoProfile", "-File", str(fixture)], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    events = [json.loads(line) for line in (tmp_path / "lifecycle.log").read_text().splitlines()]
+    assert events[-1]["outcome"] == ("ok" if state == "Running" else "fail")
+    assert ("activation is unconfirmed" in result.stderr) == (state != "Running")

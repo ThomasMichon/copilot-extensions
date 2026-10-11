@@ -72,7 +72,9 @@ POSIX `start_new_session` does not escape a systemd service cgroup.
 `KillMode=control-group` can terminate a self-update successor still owned by
 its predecessor's unit. A runtime spawn log alone is insufficient lifetime
 proof. For a native Linux supervisor, the generated launcher exports its main
-PID and the unit supplies its exact identity. When both match the daemon and
+PID and the unit supplies its exact identity through the launcher's
+`--systemd-unit` argument, overriding any stale editable env metadata.
+When both match the daemon and
 its live cgroup, self-update drains its units, releases its singleton lease,
 and returns exit 42 without spawning a detached successor.
 `Restart=on-failure` owns that replacement, and the stable launcher reuses the

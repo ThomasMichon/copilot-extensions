@@ -120,6 +120,7 @@ def test_stable_supervisor_launcher_resolves_active_slot_instead_of_installer_pi
         python = slot / "bin/python"
         python.write_text(
             f'#!/bin/bash\n[[ "$AGENT_DISPATCH_SUPERVISOR_MAIN_PID" == "$$" ]] || exit 99\n'
+            '[[ "$AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT" == agent-dispatch-supervisor.service ]] || exit 98\n'
             f'printf "{version} %s\\n" "$*"\n'
         )
         python.chmod(0o700)
@@ -137,8 +138,9 @@ def test_stable_supervisor_launcher_resolves_active_slot_instead_of_installer_pi
     ])
     subprocess.run(["/bin/bash"], input=script, text=True, check=True, timeout=10)
     result = subprocess.run(
-        [str(launcher)], env=dict(os.environ, AGENT_DISPATCH_SUPERVISE_MODE="serve",
-                                  AGENT_DISPATCH_SUPERVISE_MACHINE="host-a"),
+        [str(launcher), "--systemd-unit", UNIT], env=dict(os.environ, AGENT_DISPATCH_SUPERVISE_MODE="serve",
+                                  AGENT_DISPATCH_SUPERVISE_MACHINE="host-a",
+                                  AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT="malformed-override"),
         capture_output=True, text=True, timeout=10,
     )
     assert result.returncode == 0, result.stderr
@@ -146,4 +148,4 @@ def test_stable_supervisor_launcher_resolves_active_slot_instead_of_installer_pi
     unit_text = text[text.index("_install_supervisor_unit() {"):]
     assert "Restart=on-failure" in unit_text
     assert "SuccessExitStatus=42" not in unit_text
-    assert "Environment=AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT=$unit" in unit_text
+    assert "ExecStart=$SUPERVISOR_LAUNCHER --systemd-unit $unit" in unit_text

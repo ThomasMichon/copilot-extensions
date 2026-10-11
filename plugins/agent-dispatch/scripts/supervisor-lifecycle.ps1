@@ -69,6 +69,8 @@ function Invoke-SupervisorTaskAction {
             $startedTask = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
             if ($startedTask -and $startedTask.State -eq 'Running') {
                 $script:SupervisorReconciledNames[$Name] = $true
+            } else {
+                throw 'native task start returned but activation is unconfirmed'
             }
         }
         Invoke-SupervisorAudit -Event $Operation -Reason $Reason -Name $Name -Outcome ok

@@ -1603,6 +1603,13 @@ export PYTHONUTF8=1
 export PATH="\$HOME/.local/bin:\$HOME/.bun/bin:\$PATH"
 export AGENT_DISPATCH_INSTALL_DIR="$INSTALL_DIR"
 
+# Native identity comes from the owning unit's argv, not editable env values.
+if [[ "\${1:-}" == --systemd-unit ]]; then
+    export AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT="\${2:?missing native unit identity}"
+    shift 2
+else
+    unset AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT
+fi
 AGENT_RT_ROOT="$INSTALL_DIR"
 resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
 if [[ ! -r "\$resolver" ]]; then
@@ -1752,10 +1759,9 @@ Type=simple
 Environment=PATH=$SUPERVISOR_PATH
 Environment=AGENT_DISPATCH_INSTALL_DIR=$INSTALL_DIR
 Environment=AGENT_DISPATCH_SUPERVISOR_ENV_FILE=$env_file
-Environment=AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT=$unit
 EnvironmentFile=-$env_file
 Environment=PYTHONUTF8=1
-ExecStart=$SUPERVISOR_LAUNCHER
+ExecStart=$SUPERVISOR_LAUNCHER --systemd-unit $unit
 Restart=on-failure
 RestartSec=10
 WorkingDirectory=$INSTALL_DIR

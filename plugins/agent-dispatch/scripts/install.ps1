@@ -3334,8 +3334,12 @@ function Install-SupervisorTaskInstance {
                 $startedTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
                 if ($startedTask -and $startedTask.State -eq 'Running') {
                     $script:SupervisorReconciledNames[$Name] = $true
+                    Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile -Outcome ok
+                } else {
+                    $script:SupervisorReconcileFailed = $true
+                    Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile -Outcome fail
+                    Write-Warn "$DisplayName interactive task activation is unconfirmed"
                 }
-                Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile -Outcome ok
                 if (Remove-SupervisorAutostart -Name $Name) {
                     Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
                 }
@@ -3424,7 +3428,10 @@ function Install-SupervisorTaskInstance {
         Invoke-SupervisorTaskAction -Operation enable -Name $Name -Reason configured-opt-in
         Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason configured-opt-in
         $ErrorActionPreference = $prevEAP
-        if ($mode -eq 'serve') {
+        if (-not $script:SupervisorReconciledNames[$Name]) {
+            $script:SupervisorReconcileFailed = $true
+            Write-Warn "$DisplayName task activation is unconfirmed"
+        } elseif ($mode -eq 'serve') {
             Write-Ok "$DisplayName installed + started (Scheduled Task '$Name' -- MODE=serve: master registrar daemon)"
         } else {
             Write-Ok "$DisplayName installed + started (Scheduled Task '$Name')"
