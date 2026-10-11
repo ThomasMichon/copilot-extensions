@@ -1,0 +1,9 @@
+{
+  "comment": "Align reserved-exit installer regression with HOME working-directory isolation and absolute coordinator inputs.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
