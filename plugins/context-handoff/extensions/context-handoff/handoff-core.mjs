@@ -2704,7 +2704,12 @@ export function formatConsumeResult(
       (result?.predecessorSession
         ? `\n\nHandoff predecessor session: \`${result.predecessorSession}\`.`
         : "") +
-      (claimant
+      (claimant && result?.busy
+        ? `\n\nLock holder session: \`${claimant}\`. This transient lock is ` +
+          "shared by consume and abort; it does not establish baton ownership " +
+          "or a head-repair target. Wait for that operation to finish before " +
+          "retrying pickup."
+        : claimant
         ? `\n\nClaimant session: \`${claimant}\`. Follow the context-handoff ` +
           "skill's already-claimed recovery procedure: inspect this exact " +
           "session's authoritative lineage and the associated worktree's " +

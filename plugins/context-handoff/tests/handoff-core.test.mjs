@@ -782,6 +782,17 @@ test("formatConsumeResult without a known claimant does not fabricate a bug offe
   assert.doesNotMatch(text, /Offer to bind|Claimant session|deduced true head/);
 });
 
+test("formatConsumeResult does not infer baton ownership from a shared file lock", () => {
+  const text = formatConsumeResult({
+    ok: false, busy: true, claimedBySession: "abort-session",
+    message: "An active consume or abort is in progress.",
+  });
+  assert.match(text, /Lock holder session: `abort-session`/);
+  assert.match(text, /does not establish baton ownership/);
+  assert.match(text, /finish before retrying pickup/);
+  assert.doesNotMatch(text, /Claimant session|Offer to bind|deduced true head/);
+});
+
 test("noteHandoffInRecord returns the CLI's confirmed outcome, not the request", () => {
   const execute = (bin, argv) => {
     assert.equal(bin, "agent-worktrees");

@@ -6,6 +6,11 @@ does not acquire that objective.
 
 ## 1. Deduce the continuation session
 
+First distinguish a completed or checkpointed claim from transient `busy`
+file-lock contention. The shared consume/abort lock identifies only its holder,
+which may be aborting the baton. Wait for that operation to finish before
+retrying pickup; do not use a lock holder as a claimant or head-repair target.
+
 State the reported claimant id. It is an evidence-backed starting point, not
 necessarily the current head: the claimant may have handed off again.
 
