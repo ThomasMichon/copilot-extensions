@@ -130,6 +130,7 @@ def test_finalized_display_is_independent_of_cached_removal_permission():
     assert interpreted["action_disposition"] == "blocked"
     from agent_worktrees.picker_support import derive
     assert derive._state({"state": "completed", "closure": descriptor}) == "FINAL"
+    assert derive._state({"state": "completed", "closure": {}}) == "MERGED"
 
 
 def test_new_work_and_responsibility_do_not_inherit_finalized_display():

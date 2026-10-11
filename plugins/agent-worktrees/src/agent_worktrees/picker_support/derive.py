@@ -174,7 +174,7 @@ def _state(w):
             closure_label = interpreted["label"] if interpreted["supported"] else None
             if closure_label in ("FINAL", "MERGED"):
                 return closure_label
-            return "FINAL"
+            return "MERGED"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")
