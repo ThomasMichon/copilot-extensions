@@ -79,20 +79,50 @@ each adopter is already safe.
 
 ### 3a — Shared admission, construction ownership, and publication contracts
 
-- [ ] Add one canonical installer-facing admission seam that distinguishes
+- [x] Add one canonical installer-facing admission seam that distinguishes
       exact completed reuse, completed-content conflict, genuinely unfinished
       construction, and health-repair-required states. Decisions are explicit;
       unavailable validation and malformed ownership/completion evidence must
       not silently select a rebuild of a published identity.
-- [ ] Fingerprint the full runtime install input from an attributable frozen
+      (`check_admission()` returns one of `reuse` / `content-conflict` /
+      `construct` / `health-repair-required`. A missing completion-marker
+      FILE is the unambiguous "never built" case (`construct`); a marker
+      FILE present but failing validation, or `versions/<version>` existing
+      but not being a directory, is ambiguous evidence and returns
+      `health-repair-required` instead of silently selecting a rebuild. A
+      genuine stat failure -- e.g. permission denied -- raises rather than
+      guessing. This covers the admission seam's own malformed-evidence
+      cases; it is NOT a deeper venv/package health audit beyond the
+      completion marker and slot-path shape.)
+- [x] Fingerprint the full runtime install input from an attributable frozen
       source/snapshot, including source-only and vendored dependency changes.
       Do not hash mutable input before building and then publish a marker for
       different input observed afterward.
-- [ ] Return exact completed reuse without taking an exclusive construction
+      (`fingerprint_source()` takes every declared root -- not just one
+      manifest file, closing the exact gap a prior audit found on one
+      adopter, #5472 -- and is a stateless, repeatable probe a caller can
+      call cheaply and often before ever contending for a build. A
+      NESTED symlink (discovered mid-walk, not itself a declared root) is
+      hashed as its own identity only when its target's actual bytes are
+      ALREADY covered by one of the declared roots; otherwise it is
+      rejected outright, so an undeclared external target can never
+      change invisibly behind a mere pointer-identity hash. A dangling
+      target is the one exception, allowed through as identity-only since
+      there is no content it could be hiding. A DECLARED ROOT that is
+      itself a symlink is rejected UNCONDITIONALLY, never identity-hashed
+      even when its target happens to be covered elsewhere: a root is the
+      caller's own attributable content declaration, so the caller must
+      replace it with its resolved content path instead.)
+- [x] Return exact completed reuse without taking an exclusive construction
       lease or invoking venv/package writers. Refuse numbered content drift,
       including forced updates, with actionable published-version/dev guidance.
       Completion publication is create-once for a completed immutable identity,
       not a timestamp/PID rewrite on every healthy reuse.
+      (`check_admission()` is read-only against the existing
+      `is_complete`/`read_marker` primitives -- no new lease, no mutation;
+      wiring an adopter's *refusal* message/guidance for the
+      `content-conflict` decision is each adopter's own integration work,
+      tracked under 3b, not duplicated here.)
 - [ ] Serialize unfinished construction with a real OS-backed, installation/
       version-scoped lease. After acquiring it, revalidate the target before any
       write; after contention, wait within the caller's bounded budget and

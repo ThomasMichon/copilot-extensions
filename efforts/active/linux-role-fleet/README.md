@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Reviewed plan, then independent serial implementation PRs against `dev`
 - **Created:** 2026-10-10
-- **Status:** Draft; substrate selection approved, plan review pending
+- **Status:** Active; plan reviewed, isolated adoption proof delivered
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `repeatable-role-fleet-adoption`, `bounded-desired-state-control`,
   `role-placement-preserves-service-authority`
@@ -85,19 +85,21 @@ requirements below are **agent-recommended**, not additional operator mandates.
 ## Plan
 
 ### Phase 1 - Reviewed intent and substrate contract
-- [ ] Land the machine-fleet vision amendment and this effort through automated
+- [x] Land the machine-fleet vision amendment and this effort through automated
   review before expanding runtime/deployment behavior.
-- [ ] Record primary-source substrate evidence, required operator inputs and
+- [x] Record primary-source substrate evidence, required operator inputs and
   the fresh-install experiment that falsifies the claimed headless Komodo path.
-- [ ] Define the deployment adapter boundary against existing machine transport,
+- [x] Define the deployment adapter boundary against existing machine transport,
   installer/update, role/service and credential authorities; retain #5789 scope.
 
 ### Phase 2 - Repeatable first adoption
 - [ ] Implement explicit inspect/plan/apply behavior for the chosen adapter:
   no mutation on discovery or mere plugin installation.
-- [ ] Prove initial Core deployment, configured first admin, authenticated API
+- [x] Prove initial Core deployment, configured first admin, authenticated API
   access, bounded onboarding and Periphery enrollment without browser steps.
   Use supported APIs and provider-injected secrets, never embedded credentials.
+  Isolated synthetic-credential proof; production credential-provider adoption
+  is still required before live deployment.
 - [ ] Prove rerun, partial-failure recovery and owned uninstall; preserve an
   existing manager, unrelated roles, settings and data unless separately approved.
 - [ ] Capture a fresh-environment receipt with exact release/images, commands,
@@ -167,3 +169,27 @@ not to the vision. This effort does not acquire or migrate live capacity.
   deferred, and confirmed the slug. Claimed #6030 under existing #5861.
 - Public capture preserves core intent; private substrate identity and example
   deployment stay downstream. No runtime or live enrollment is claimed here.
+
+### 2026-10-10 - Reviewed intent and isolated first-adoption proof
+- #6032 merged after genuine current-head Copilot approval and real green CI.
+  Reconciled only an effort-index addition conflict, retaining both campaigns.
+- The operator approved starting the existing local Linux Docker engine and
+  separately approved a privileged disposable nested-Docker target. Neither is
+  live fleet enrollment or a claim of hostile-container isolation.
+- Digest-pinned Core 2.3.3 created a synthetic initial admin, authenticated an
+  isolated API client, created a short-lived nonprivileged onboarding key and
+  enrolled a second real Periphery without browser use.
+- The controlled nested daemon deployed the fixed harmless test role through
+  Komodo's execute API. The update completed and independent Docker inspection
+  confirmed running state; the role survived Core/enrolled-Periphery outage.
+  Restart and repeated Compose/API operations retained exactly two server rows.
+- Corrected fixture shortcomings: database readiness, writable generated key
+  ownership, release-specific tagged login response, digest-to-image-ID loading,
+  and teardown of every Compose profile. Final reusable runner passed on a fresh
+  project with no host Docker socket or published ports; all owned resources and
+  synthetic secrets were removed.
+- [Proof harness](../../../tools/clean-room/komodo-role-fleet/README.md) is
+  opt-in integration tooling, not a production installer or finished fleet.
+  Two logical Periphery instances in one local test engine do not satisfy the
+  two independent Linux host, service-role packaging, credential rotation,
+  stateful placement or safe-update gates.

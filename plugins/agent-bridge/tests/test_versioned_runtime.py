@@ -1027,3 +1027,796 @@ def test_windows_gc_reclaims_junction_slot_under_nonzero_min_age(tmp_path):
     assert vr.gc(tmp_path, min_age_days=3650) == ["1.0.0"]
     assert not os.path.lexists(junction)
     assert target.is_dir()
+
+
+# ---------------------------------------------------------------------------
+# fingerprint_source / check_admission (phase-3-runtime-admission, #5472/#5788)
+# ---------------------------------------------------------------------------
+
+def test_fingerprint_source_is_stable_for_identical_content(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("print('hi')", encoding="utf-8")
+    (src / "b.py").write_text("x = 1", encoding="utf-8")
+    first = vr.fingerprint_source([src])
+    second = vr.fingerprint_source([src])
+    assert first == second
+    assert len(first) == 64  # sha256 hex digest
+
+
+def test_fingerprint_source_changes_with_content(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("print('hi')", encoding="utf-8")
+    before = vr.fingerprint_source([src])
+    (src / "a.py").write_text("print('bye')", encoding="utf-8")
+    after = vr.fingerprint_source([src])
+    assert before != after
+
+
+def test_fingerprint_source_changes_when_a_file_is_added(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("print('hi')", encoding="utf-8")
+    before = vr.fingerprint_source([src])
+    (src / "b.py").write_text("x = 1", encoding="utf-8")
+    after = vr.fingerprint_source([src])
+    assert before != after
+
+
+def test_fingerprint_source_covers_every_declared_root_not_just_one_manifest(tmp_path):
+    """A prior real-world gap (#5472): fingerprinting only `pyproject.toml`
+    missed a changed `src/` tree entirely. Passing multiple roots must make
+    BOTH matter."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "mod.py").write_text("x = 1", encoding="utf-8")
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text("[project]\nname='x'\n", encoding="utf-8")
+
+    before = vr.fingerprint_source([manifest, src])
+    (src / "mod.py").write_text("x = 2", encoding="utf-8")
+    after = vr.fingerprint_source([manifest, src])
+    assert before != after
+
+
+def test_fingerprint_source_is_order_independent(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("a", encoding="utf-8")
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text("m", encoding="utf-8")
+    assert vr.fingerprint_source([src, manifest]) == vr.fingerprint_source([manifest, src])
+
+
+def test_fingerprint_source_raises_on_a_missing_declared_root(tmp_path):
+    """A missing declared root must never silently collapse to a
+    best-effort digest over whatever remained -- that could let a marker's
+    recorded hash match a later, genuinely different input set whose
+    declared root also happened to vanish the same way."""
+    missing = tmp_path / "does-not-exist"
+    with pytest.raises(FileNotFoundError):
+        vr.fingerprint_source([missing])
+
+
+def test_fingerprint_source_raises_on_an_unreadable_file(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("x", encoding="utf-8")
+
+    real_read_bytes = Path.read_bytes
+
+    def _boom(self):
+        if self.name == "a.py":
+            raise OSError("simulated unreadable file")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_raises_on_an_unscannable_directory(tmp_path, monkeypatch):
+    """A directory that cannot be scanned/stat'd during the walk (e.g.
+    permission-denied) must raise, never be silently omitted from the
+    fingerprint -- ``Path.rglob``/``is_file`` swallow scandir/stat
+    ``PermissionError`` on supported Python versions, so the walk must use
+    a mechanism (``os.walk`` with ``onerror``) that does not."""
+    src = tmp_path / "src"
+    (src / "locked").mkdir(parents=True)
+    (src / "locked" / "a.py").write_text("x", encoding="utf-8")
+
+    import os as _os
+
+    real_walk = _os.walk
+
+    def _boom(top, *args, **kwargs):
+        onerror = kwargs.get("onerror")
+        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+            if dirpath.endswith("locked") and onerror is not None:
+                onerror(PermissionError(13, "simulated permission denied", dirpath))
+                continue
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(_os, "walk", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_raises_when_an_entry_cannot_be_lstatted(tmp_path, monkeypatch):
+    """A single file entry whose metadata lookup is denied mid-walk must
+    raise, never be silently omitted as if it simply wasn't a file/symlink
+    -- ``Path.is_symlink()``/``Path.is_file()`` catch ``OSError``
+    (including ``PermissionError``) internally and return ``False``,
+    which would otherwise let this entry vanish from the fingerprint
+    entirely and authorize a later `reuse` decision over a partial
+    digest."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("x", encoding="utf-8")
+
+    import os as _os
+
+    real_lstat = _os.lstat
+
+    def _boom(path, *args, **kwargs):
+        if Path(path).name == "a.py":
+            raise PermissionError(13, "simulated permission denied", str(path))
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(_os, "lstat", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_is_independent_of_overlapping_root_order(tmp_path):
+    """With overlapping roots (a parent and its own child directory), the
+    SAME two roots passed in either order must agree: each file is labeled
+    relative to whichever declared root most specifically contains it
+    (independent of argument order), and is hashed exactly once even though
+    it is reachable through both roots."""
+    parent = tmp_path / "parent"
+    child = parent / "child"
+    child.mkdir(parents=True)
+    (child / "a.py").write_text("x", encoding="utf-8")
+    (parent / "b.py").write_text("y", encoding="utf-8")
+
+    forward = vr.fingerprint_source([parent, child])
+    backward = vr.fingerprint_source([child, parent])
+    assert forward == backward
+
+
+def test_fingerprint_source_labels_are_unique_across_same_named_roots(tmp_path):
+    """Two different declared roots that happen to share a directory name
+    (e.g. "src" under two different parents) must never collide: a file's
+    label is derived from its root's own full resolved path, never just
+    the root's basename."""
+    a_src = tmp_path / "a" / "src"
+    a_src.mkdir(parents=True)
+    (a_src / "x.py").write_text("one", encoding="utf-8")
+
+    b_src = tmp_path / "b" / "src"
+    b_src.mkdir(parents=True)
+    (b_src / "x.py").write_text("two", encoding="utf-8")
+
+    assert vr.fingerprint_source([a_src]) != vr.fingerprint_source([b_src])
+    # And the combined fingerprint must be stable/repeatable despite the
+    # label collision risk (same basename "src" for both roots).
+    combined_first = vr.fingerprint_source([a_src, b_src])
+    combined_second = vr.fingerprint_source([a_src, b_src])
+    assert combined_first == combined_second
+
+
+def test_fingerprint_source_frames_labels_and_content_unambiguously(tmp_path):
+    """Labels and content must be framed unambiguously: a bare separator
+    (even a NUL) does not unambiguously delimit arbitrary file bytes -- one
+    file whose content embeds another file's label+separator could
+    otherwise serialize identically to two genuinely different files.
+    Construct that exact adversarial example (same root name on both
+    sides, so the labels line up byte-for-byte under a naive separator
+    scheme) and confirm the two distinct input sets fingerprint
+    differently."""
+    one_file_root = tmp_path / "g1" / "r"
+    one_file_root.mkdir(parents=True)
+    (one_file_root / "a").write_bytes(b"x\0r/b\0y")
+
+    two_file_root = tmp_path / "g2" / "r"
+    two_file_root.mkdir(parents=True)
+    (two_file_root / "a").write_bytes(b"x")
+    (two_file_root / "b").write_bytes(b"y")
+
+    assert vr.fingerprint_source([one_file_root]) != vr.fingerprint_source([two_file_root])
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
+def test_fingerprint_source_rejects_an_unsupported_filesystem_object_nested(tmp_path):
+    """A FIFO/device/socket/etc. discovered mid-walk must never be
+    silently omitted from the fingerprint (letting a later admission
+    decision treat a changed install input as unchanged) -- only a
+    regular file, directory, or symlink is a supported attributable
+    input."""
+    src = tmp_path / "src"
+    src.mkdir()
+    os.mkfifo(src / "a_fifo")
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([src])
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
+def test_fingerprint_source_rejects_an_unsupported_filesystem_object_as_root(tmp_path):
+    fifo = tmp_path / "a_fifo"
+    os.mkfifo(fifo)
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([fifo])
+
+
+def test_fingerprint_source_is_independent_of_absolute_location(tmp_path_factory):
+    """Relocating an entire checkout to a different absolute path (a fresh
+    clone, a different OS, a renamed parent directory) must not change the
+    fingerprint of logically-identical content: labels must never embed a
+    declared root's own absolute path text, only its position relative to
+    the OTHER declared roots."""
+    first_base = tmp_path_factory.mktemp("first-location")
+    second_base = tmp_path_factory.mktemp("a-very-differently-named-second-spot")
+
+    def _populate(base):
+        src = base / "proj" / "src"
+        src.mkdir(parents=True)
+        (src / "a.py").write_text("x = 1", encoding="utf-8")
+        manifest = base / "proj" / "pyproject.toml"
+        manifest.write_text("[project]\nname='x'\n", encoding="utf-8")
+        return manifest, src
+
+    first_manifest, first_src = _populate(first_base)
+    second_manifest, second_src = _populate(second_base)
+
+    first = vr.fingerprint_source([first_manifest, first_src])
+    second = vr.fingerprint_source([second_manifest, second_src])
+    assert first == second
+
+    # And genuinely different content under the relocated tree still
+    # changes the fingerprint -- relocation-independence must not collapse
+    # into "always reuses", only "location alone doesn't matter".
+    (second_src / "a.py").write_text("x = 2", encoding="utf-8")
+    third = vr.fingerprint_source([second_manifest, second_src])
+    assert third != second
+
+
+def test_fingerprint_source_preserves_file_symlink_identity(tmp_path):
+    """A symlink must never be silently resolved away and conflated with
+    its target: an `alias.py -> real.py` symlink sitting alongside the
+    real file it targets must be hashed as its OWN entry, so adding,
+    removing, or re-pointing it changes the fingerprint even though its
+    resolved path is identical to `real.py`'s."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "real.py").write_text("x = 1", encoding="utf-8")
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(src / "real.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    with_alias = vr.fingerprint_source([src])
+    alias.unlink()
+    without_alias = vr.fingerprint_source([src])
+    assert with_alias != without_alias
+
+
+def test_fingerprint_source_changes_when_a_symlink_is_repointed(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "real_a.py").write_text("x = 1", encoding="utf-8")
+    (src / "real_b.py").write_text("x = 2", encoding="utf-8")
+    link = src / "alias.py"
+    try:
+        link.symlink_to(src / "real_a.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    before = vr.fingerprint_source([src])
+    link.unlink()
+    link.symlink_to(src / "real_b.py")
+    after = vr.fingerprint_source([src])
+    assert before != after
+
+
+def test_fingerprint_source_rejects_a_nested_symlinked_directory_to_an_undeclared_target(tmp_path):
+    """A nested symlinked directory pointing OUTSIDE every declared root
+    is rejected outright, never silently reduced to pointer-identity
+    text: its content is not otherwise covered by this fingerprint, so a
+    change made through it (an installer that follows the link) could
+    change the real install input with NO effect on the digest."""
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "nested.py").write_text("x = 1", encoding="utf-8")
+
+    src = tmp_path / "src"
+    src.mkdir()
+    link = src / "linked_dir"
+    try:
+        link.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_allows_a_nested_symlinked_directory_to_a_declared_target(tmp_path):
+    """A nested symlinked directory whose target lies INSIDE one of the
+    declared roots is allowed (never walked into, but its target's
+    content is already covered by that root's own separate walk, so
+    identity-only hashing is safe here): changing the target's content
+    IS visible in the digest, through the target's own direct entry."""
+    src = tmp_path / "src"
+    src.mkdir()
+    real_dir = src / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "nested.py").write_text("x = 1", encoding="utf-8")
+    link = src / "linked_dir"
+    try:
+        link.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    before = vr.fingerprint_source([src])
+    (real_dir / "nested.py").write_text("x = 2", encoding="utf-8")
+    after = vr.fingerprint_source([src])
+    assert before != after
+
+    # Re-pointing the link itself (to a different, also-declared target)
+    # must also change the digest.
+    other_dir = src / "other_dir"
+    other_dir.mkdir()
+    (other_dir / "nested.py").write_text("x = 1", encoding="utf-8")
+    link.unlink()
+    link.symlink_to(other_dir, target_is_directory=True)
+    after_repoint = vr.fingerprint_source([src])
+    assert after_repoint != after
+
+
+def test_fingerprint_source_rejects_a_nested_file_symlink_to_an_undeclared_target(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    external = tmp_path / "external.py"
+    external.write_text("x = 1", encoding="utf-8")
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(external)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_allows_a_nested_symlink_to_a_dangling_target(tmp_path):
+    """A dangling symlink has no actual content to hide, so it is allowed
+    through as identity-only (unlike an undeclared-but-EXISTING external
+    target, which is rejected)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(src / "does-not-exist.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    # Must not raise.
+    vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_raises_when_symlink_target_lookup_is_denied(tmp_path, monkeypatch):
+    """A PermissionError (or any OSError other than FileNotFoundError)
+    while resolving a symlink's target must never be treated the same as
+    "dangling": the target may genuinely exist with unverified content,
+    so silently allowing identity-only hashing would violate this
+    function's fail-closed contract. Only an actual FileNotFoundError
+    (a truly dangling target) is allowed through."""
+    src = tmp_path / "src"
+    src.mkdir()
+    alias = src / "alias.py"
+    try:
+        alias.symlink_to(src / "does-not-exist.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    real_resolve = Path.resolve
+
+    def _boom(self, *args, **kwargs):
+        if self.name == "alias.py":
+            raise PermissionError(13, "simulated permission denied", str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", _boom)
+    with pytest.raises(OSError):
+        vr.fingerprint_source([src])
+
+
+def test_normalize_windows_extended_path_converts_unc_form():
+    """The \\\\?\\UNC\\server\\share\\... extended-length form must become
+    an ordinary \\\\server\\share\\... UNC path, never a naive 4-character
+    strip (which would leave `UNC\\server\\share\\...`, a path Windows
+    treats as RELATIVE, silently breaking downstream isabs()/resolve()
+    comparisons)."""
+    assert (
+        vr._normalize_windows_extended_path(r"\\?\UNC\myserver\myshare\file.txt")
+        == r"\\myserver\myshare\file.txt"
+    )
+
+
+def test_normalize_windows_extended_path_strips_generic_prefix():
+    assert vr._normalize_windows_extended_path(r"\\?\C:\a\b.txt") == r"C:\a\b.txt"
+
+
+def test_normalize_windows_extended_path_leaves_ordinary_paths_unchanged():
+    assert vr._normalize_windows_extended_path(r"C:\a\b.txt") == r"C:\a\b.txt"
+    assert vr._normalize_windows_extended_path("relative/path.py") == "relative/path.py"
+
+
+def test_fingerprint_source_rejects_a_symlink_to_an_external_target_regardless_of_location(tmp_path_factory):
+    """A nested symlink to an undeclared EXTERNAL target is rejected
+    outright (see the dedicated rejection tests above); this must hold
+    consistently regardless of where the declared source tree itself
+    lives, since the rejection is based on root-containment, never on
+    absolute-location comparison."""
+    external = tmp_path_factory.mktemp("external-fixed-location")
+    (external / "shared.py").write_text("x = 1", encoding="utf-8")
+
+    for base_name in ("first-tree", "a-very-differently-named-second-tree"):
+        base = tmp_path_factory.mktemp(base_name)
+        src = base / "src"
+        src.mkdir()
+        try:
+            (src / "alias.py").symlink_to(external / "shared.py")
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+        with pytest.raises(ValueError):
+            vr.fingerprint_source([src])
+
+
+def test_fingerprint_source_symlink_to_internal_target_is_relocation_stable(tmp_path_factory):
+    """An absolute symlink target that lies INSIDE the declared source set
+    is made relocation-invariant the same way a file label is: relocating
+    the WHOLE tree moves the target the same way it moves everything
+    else, so the relative-to-common-ancestor form stays stable."""
+    first_base = tmp_path_factory.mktemp("first-tree")
+    second_base = tmp_path_factory.mktemp("a-very-differently-named-second-tree")
+    for base in (first_base, second_base):
+        src = base / "src"
+        src.mkdir()
+        (src / "real.py").write_text("x = 1", encoding="utf-8")
+        try:
+            (src / "alias.py").symlink_to(src / "real.py")
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+
+    first = vr.fingerprint_source([first_base / "src"])
+    second = vr.fingerprint_source([second_base / "src"])
+    assert first == second
+
+
+def test_fingerprint_source_rejects_a_target_under_common_ancestor_but_outside_declared_roots(tmp_path_factory):
+    """Containment must be checked against the ACTUAL declared roots, not
+    merely their common ancestor: a sibling path under that ancestor
+    (e.g. `project/shared.py` alongside declared roots `project/src` and
+    `project/pyproject.toml`) was never itself declared. It must be
+    rejected as an undeclared external target, consistently, regardless
+    of whether the declared roots happen to live alongside it (so a naive
+    common-ancestor containment check would wrongly treat it as
+    "inside") or at a wholly different location."""
+    project = tmp_path_factory.mktemp("project")
+    (project / "shared.py").write_text("shared", encoding="utf-8")
+
+    def _declare_roots(base):
+        src = base / "src"
+        src.mkdir()
+        try:
+            (src / "alias.py").symlink_to(project / "shared.py")
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+        manifest = base / "pyproject.toml"
+        manifest.write_text("[project]\nname='x'\n", encoding="utf-8")
+        return manifest, src
+
+    # Roots physically alongside the external `project/shared.py` sibling.
+    first_manifest, first_src = _declare_roots(project)
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([first_manifest, first_src])
+
+    # The SAME two roots at a wholly different location; `shared.py`
+    # itself never moves.
+    other_base = tmp_path_factory.mktemp("elsewhere")
+    second_manifest, second_src = _declare_roots(other_base)
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([second_manifest, second_src])
+
+
+def test_fingerprint_source_rejects_a_declared_root_that_is_itself_a_symlink(tmp_path):
+    """A declared ROOT -- the caller's own attributable content
+    declaration -- that is itself a symlink must be REJECTED, not silently
+    reduced to the link's own target-identity text: doing so would hash
+    only "where this points", never the content actually read through
+    that path, recreating the exact content-drift blind spot this
+    function exists to close. This applies to both a symlinked directory
+    root and a symlinked file root."""
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "nested.py").write_text("x = 1", encoding="utf-8")
+    dir_root_link = tmp_path / "dir_root_link"
+    try:
+        dir_root_link.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([dir_root_link])
+
+    real_file = tmp_path / "real_file.py"
+    real_file.write_text("x = 1", encoding="utf-8")
+    file_root_link = tmp_path / "file_root_link.py"
+    file_root_link.symlink_to(real_file)
+    with pytest.raises(ValueError):
+        vr.fingerprint_source([file_root_link])
+
+    # Declaring the REAL path (not the symlink) still works normally and
+    # does cover its actual content.
+    before = vr.fingerprint_source([real_dir])
+    (real_dir / "nested.py").write_text("x = 2", encoding="utf-8")
+    after = vr.fingerprint_source([real_dir])
+    assert before != after
+
+
+def test_fingerprint_source_distinguishes_a_file_from_a_symlink_with_matching_bytes(tmp_path):
+    """The digest must encode each entry's TYPE, not just its label and
+    payload bytes: a regular file whose raw content happens to equal the
+    byte-string a symlink's own target would encode to must never hash
+    identically to that symlink at the same label."""
+    file_root = tmp_path / "g1" / "r"
+    file_root.mkdir(parents=True)
+    # The literal relative target text a symlink "r/x.py" -> "y.py" would
+    # encode to (kept in sync with fingerprint_source's own target-framing
+    # format: the posix-relative target string, UTF-8 encoded).
+    (file_root / "x.py").write_bytes(Path("y.py").as_posix().encode("utf-8"))
+
+    symlink_root = tmp_path / "g2" / "r"
+    symlink_root.mkdir(parents=True)
+    (symlink_root / "y.py").write_text("irrelevant", encoding="utf-8")
+    try:
+        (symlink_root / "x.py").symlink_to(symlink_root / "y.py")
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    assert vr.fingerprint_source([file_root]) != vr.fingerprint_source([symlink_root])
+
+
+def test_check_admission_construct_when_slot_absent(tmp_path):
+    assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_CONSTRUCT
+
+
+def test_check_admission_construct_when_slot_incomplete(tmp_path):
+    vr.version_dir(tmp_path, "1.0.0").mkdir(parents=True)
+    assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_CONSTRUCT
+
+
+def test_check_admission_health_repair_required_when_slot_path_is_a_file(tmp_path):
+    """`versions/<version>` existing but NOT being a directory (a stray
+    file, or a broken symlink sitting where the slot should be) is an
+    invalid slot shape -- ambiguous evidence, never "never built"."""
+    vdir = vr.version_dir(tmp_path, "1.0.0")
+    vdir.parent.mkdir(parents=True)
+    vdir.write_text("not a directory", encoding="utf-8")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+def test_check_admission_health_repair_required_when_slot_path_is_a_dangling_symlink(tmp_path):
+    """`Path.exists()` reports a dangling symlink as absent (it follows
+    the link to a target that is not there). A dangling symlink sitting at
+    the slot path is still ambiguous evidence -- SOMETHING is declared
+    there -- and must never be silently treated as "never built"."""
+    vdir = vr.version_dir(tmp_path, "1.0.0")
+    vdir.parent.mkdir(parents=True)
+    try:
+        vdir.symlink_to(vdir.parent / "does-not-exist", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+def test_check_admission_health_repair_required_when_slot_path_is_a_valid_symlink(tmp_path):
+    """A slot symlink that resolves to a PERFECTLY VALID, complete,
+    matching-hash directory must still be rejected, never silently
+    followed through to `reuse`: a published slot's own path must be an
+    immutable real directory, never an indirection, because an
+    indirection can be RETARGETED later without this contract's
+    create-once guarantee ever noticing."""
+    real_dir = tmp_path / "real_target_dir"
+    real_dir.mkdir()
+    marker = json.dumps({
+        "version": "1.0.0", "completed_at": "2020-01-01T00:00:00Z",
+        "pid": 1, "payload_hash": "abc",
+    })
+    (real_dir / vr.COMPLETE_MARKER).write_text(marker, encoding="utf-8")
+
+    vdir = vr.version_dir(tmp_path, "1.0.0")
+    vdir.parent.mkdir(parents=True)
+    try:
+        vdir.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+def test_check_admission_health_repair_required_when_marker_path_is_a_symlink(tmp_path):
+    """Same rationale as the slot-path check above, applied to the marker
+    path itself: even a marker symlink that resolves to a perfectly valid
+    marker file must be rejected, never silently read through."""
+    vr.version_dir(tmp_path, "1.0.0").mkdir(parents=True)
+    real_marker = tmp_path / "real-marker.json"
+    real_marker.write_text(
+        json.dumps({"version": "1.0.0", "completed_at": "x", "pid": 1,
+                    "payload_hash": "abc"}),
+        encoding="utf-8",
+    )
+    marker_file = vr.marker_path(tmp_path, "1.0.0")
+    try:
+        marker_file.symlink_to(real_marker)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="O_NOFOLLOW is POSIX-only")
+def test_check_admission_catches_a_marker_swapped_to_a_symlink_mid_probe(tmp_path, monkeypatch):
+    """Simulates the exact TOCTOU race the O_NOFOLLOW/dir_fd-anchored read
+    exists to close: something swaps the marker path for a symlink to a
+    DIFFERENT, otherwise-perfectly-valid-and-matching marker in between
+    this function's own checks and its actual open/read of the marker. A
+    pathname re-resolved a second time would silently follow the swapped-
+    in symlink and return `reuse`; the open-time O_NOFOLLOW guard must
+    instead catch it (ELOOP) and report `health-repair-required`."""
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    marker_file = vr.marker_path(tmp_path, "1.0.0")
+
+    decoy_dir = tmp_path / "decoy"
+    decoy_dir.mkdir()
+    decoy_marker = decoy_dir / vr.COMPLETE_MARKER
+    decoy_marker.write_text(marker_file.read_text(encoding="utf-8"), encoding="utf-8")
+
+    real_open = os.open
+    state = {"swapped": False}
+
+    def _swap_then_open(path, flags, *args, **kwargs):
+        p = path if isinstance(path, Path) else Path(path)
+        if not state["swapped"] and p.name == vr.COMPLETE_MARKER:
+            state["swapped"] = True
+            marker_file.unlink()
+            marker_file.symlink_to(decoy_marker)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", _swap_then_open)
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+
+def test_check_admission_reuse_when_marker_matches(tmp_path):
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    assert vr.check_admission(tmp_path, "1.0.0", payload_hash="abc") == vr.ADMIT_REUSE
+
+
+def test_check_admission_content_conflict_when_marker_differs(tmp_path):
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="different")
+        == vr.ADMIT_CONTENT_CONFLICT
+    )
+
+
+def test_check_admission_never_mutates_the_slot(tmp_path):
+    """A stateless probe: calling it repeatedly, in either admission state,
+    must never write anything -- an ordinary caller is expected to call this
+    cheaply and often, with no construction lease held."""
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    marker_before = vr.marker_path(tmp_path, "1.0.0").read_bytes()
+    for _ in range(5):
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="other")
+    assert vr.marker_path(tmp_path, "1.0.0").read_bytes() == marker_before
+
+
+def test_check_admission_health_repair_required_when_marker_is_malformed(tmp_path):
+    """A marker FILE that exists but fails validation (corrupt JSON, wrong
+    schema) is ambiguous evidence, NOT the same as "never built": a caller
+    following plain ``ADMIT_CONSTRUCT`` would acquire the lease and write
+    into what could be an already-published, possibly-live slot whose
+    marker was merely corrupted on disk after the fact."""
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{not valid json", encoding="utf-8")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+def test_check_admission_health_repair_required_when_marker_is_invalid_utf8(tmp_path):
+    """A marker read through a TEXT-mode wrapper would raise
+    ``UnicodeDecodeError`` on invalid UTF-8 bytes BEFORE the JSON-parse
+    handler ever runs, escaping this function's documented
+    health-repair-required contract entirely. Invalid UTF-8 is exactly as
+    malformed as invalid JSON and must be classified the same way."""
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(b"\x80\x81\x82\x83 not valid utf-8 or json")
+    assert (
+        vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+        == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    )
+
+
+def test_check_admission_health_repair_required_never_mutates_the_slot(tmp_path):
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{not valid json", encoding="utf-8")
+    before = marker.read_bytes()
+    vr.check_admission(tmp_path, "1.0.0", payload_hash="abc")
+    assert marker.read_bytes() == before
+
+
+def test_cli_fingerprint_json(tmp_path, capsys):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("x", encoding="utf-8")
+    rc = vr.main(["--root", str(tmp_path), "--json", "fingerprint", str(src)])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert set(out) == {"fingerprint"}
+    assert len(out["fingerprint"]) == 64
+
+
+def test_cli_check_admission_construct(tmp_path, capsys):
+    rc = vr.main([
+        "--root", str(tmp_path), "--json", "check-admission", "1.0.0",
+        "--payload-hash", "abc",
+    ])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"version": "1.0.0", "admission": vr.ADMIT_CONSTRUCT}
+
+
+def test_cli_check_admission_reuse(tmp_path, capsys):
+    vr.mark_complete(tmp_path, "1.0.0", payload_hash="abc")
+    rc = vr.main([
+        "--root", str(tmp_path), "--json", "check-admission", "1.0.0",
+        "--payload-hash", "abc",
+    ])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"version": "1.0.0", "admission": vr.ADMIT_REUSE}
+
+
+def test_cli_check_admission_health_repair_required(tmp_path, capsys):
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{not valid json", encoding="utf-8")
+    rc = vr.main([
+        "--root", str(tmp_path), "--json", "check-admission", "1.0.0",
+        "--payload-hash", "abc",
+    ])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"version": "1.0.0", "admission": vr.ADMIT_HEALTH_REPAIR_REQUIRED}
+

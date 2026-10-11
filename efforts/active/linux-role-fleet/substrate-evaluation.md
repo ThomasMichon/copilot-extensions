@@ -95,3 +95,20 @@ provider-injected initial credentials, authenticated API access, one enrolled
 target, repeat without duplication, failure/recovery and owned teardown.
 Missing credential acquisition or an unsupported automation API is an explicit
 blocker, not permission to use browser automation or expose secrets.
+
+## First-adoption result
+
+The [opt-in real proof runner](../../../tools/clean-room/komodo-role-fleet/README.md)
+passed a fresh local Compose project with Core/Periphery 2.3.3 and digest-pinned
+Mongo, client and nested-Docker artifacts. Configured first-admin creation,
+supported API login, bounded onboarding, actual second Periphery enrollment,
+named harmless-role deployment, independent running inspection, manager/agent
+outage survival, restart/repeat and owned teardown were exercised without a
+browser. Synthetic credentials were removed; Periphery never received the host
+daemon socket and no ports were published.
+
+This establishes that the tested Core setup path is not inherently UI-only.
+It does not establish production trust onboarding, Core HA, two independent
+Linux hosts, safe stateful movement, a service-role artifact or rollback. The
+privileged nested-Docker target is a controlled integration fixture, not a
+hostile-code sandbox or a required production fleet topology.
