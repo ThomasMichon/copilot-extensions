@@ -132,6 +132,11 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 
 ## Scenarios & the scenario contract
 
+The [Komodo role-fleet proof](komodo-role-fleet/README.md) is a separate opt-in,
+host-driven multi-container integration lane. It requires explicit privileged
+nested-Docker approval and uses no host Docker socket or published ports.
+It is not selected through `-Scenario` and is not a fast/required CI check.
+
 The runner is **scenario-driven** (design doc `docs/clean-room-test-rig.md`
 Sec.6): `-Scenario <name|dir>` selects a self-describing scenario directory that
 the runner mounts (with the shared `lib/`) read-only into the box and runs. This

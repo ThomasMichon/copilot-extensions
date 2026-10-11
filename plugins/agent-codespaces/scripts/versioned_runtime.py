@@ -51,6 +51,17 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
                                     prints the version current-version should
                                     be restored to (its value before the claim)
     dev-status                      print the current dev-slot claim (or null)
+    fingerprint <path> ...          print a stable sha256 over the given
+                                    source file(s)/directory(ies) -- the full
+                                    attributable runtime install input, not
+                                    just one manifest file
+    check-admission <version> --payload-hash H
+                                    print 'reuse' | 'content-conflict' |
+                                    'construct' | 'health-repair-required' for
+                                    <version> given the caller's current
+                                    source fingerprint H, without taking a
+                                    construction lease
+                                    (phase-3-runtime-admission)
 
 Exit code is 0 on success, non-zero on error; errors print to stderr.
 """
@@ -64,6 +75,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -1112,18 +1124,19 @@ def marker_path(root: Path, version: str) -> Path:
     return version_dir(root, version) / COMPLETE_MARKER
 
 
-def _load_unique_json(path: Path):
-    def unique_object(pairs):
-        out = {}
-        for key, value in pairs:
-            if key in out:
-                raise ValueError(f"duplicate JSON field: {key}")
-            out[key] = value
-        return out
+def _unique_object_pairs_hook(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate JSON field: {key}")
+        out[key] = value
+    return out
 
+
+def _load_unique_json(path: Path):
     return json.loads(
         path.read_text(encoding="utf-8"),
-        object_pairs_hook=unique_object,
+        object_pairs_hook=_unique_object_pairs_hook,
     )
 
 
@@ -1234,6 +1247,611 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Construction admission (phase-3-runtime-admission, #5472/#5788): a
+# canonical, shared answer to "does THIS caller need to build versions/<v>,
+# or can it reuse an already-completed, matching-content slot" -- stateless,
+# no construction lease taken, so a caller can make this check cheaply and
+# often (e.g. as an ordinary installer's own fast-path probe before it ever
+# considers contending for a build). This is the 3a "exact completed reuse"
+# half of the shared admission seam; the construction-lease half (bounded
+# join for genuine concurrent first builds) is tracked as this effort's next
+# slice -- see efforts/active/mutable-dev-slot/phase-3-runtime-admission.md.
+# --------------------------------------------------------------------------
+
+#: Admission decision states. A caller branches on these, never guesses from
+#: `is_complete` alone, because "incomplete" is itself two different cases
+#: (genuinely never built vs. a REQUIRED rebuild due to content drift) that
+#: demand different caller behavior (build vs. refuse-with-guidance).
+ADMIT_REUSE = "reuse"
+ADMIT_CONTENT_CONFLICT = "content-conflict"
+ADMIT_CONSTRUCT = "construct"
+ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
+
+
+def _normalize_windows_extended_path(target: str) -> str:
+    """Strip Windows' extended-length path prefix from a raw symlink
+    target string, so later ``isabs()``/``resolve()`` comparisons see an
+    ordinary absolute path exactly like every other path in this module.
+
+    ``os.readlink()`` on Windows can return the extended-length form
+    (``\\\\?\\C:\\...``) for a target that is otherwise an ordinary
+    absolute path -- strip it. The UNC variant
+    (``\\\\?\\UNC\\server\\share\\...``) needs its OWN conversion back to
+    an ordinary UNC path (``\\\\server\\share\\...``): naively stripping
+    just the generic ``\\\\?\\`` prefix would leave
+    ``UNC\\server\\share\\...``, which Windows path handling treats as a
+    RELATIVE path, silently breaking ``isabs()``/``resolve()`` instead of
+    recognizing the server/share location.
+    """
+    if target.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + target[len("\\\\?\\UNC\\"):]
+    if target.startswith("\\\\?\\"):
+        return target[4:]
+    return target
+
+
+def fingerprint_source(paths) -> str:
+    """Return a stable sha256 fingerprint over a frozen set of source paths.
+
+    Covers the FULL attributable runtime install input, not just one
+    manifest file -- an adopter must pass every path whose content changing
+    should be treated as "this version's payload changed" (e.g. a plugin's
+    whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
+    alone -- a prior audit on this effort found exactly that narrower scope
+    on one adopter, #5472). Hashes each regular file's path (relative to
+    whichever declared root most specifically contains it, labeled by that
+    root's own path relative to the common ancestor of every declared root
+    -- never the root's bare basename, which is not unique across declared
+    roots, and never its absolute filesystem path, which would make the
+    digest depend on WHERE the checkout happens to live) and content, sorted
+    by label for determinism; a directory is walked recursively. Relocating
+    an entire checkout to a different absolute path -- a fresh clone, a
+    different OS, a renamed parent directory -- does not change the
+    fingerprint of logically-identical content, so long as the declared
+    roots' positions relative to EACH OTHER are unchanged.
+
+    Each ``(label, content)`` pair is framed with an explicit 8-byte
+    big-endian length prefix before hashing, so two different payloads can
+    never serialize to the same byte stream (a bare separator byte, even a
+    NUL, does not unambiguously frame arbitrary file content -- a label or
+    file ending in that same byte could make two distinct inputs collide).
+
+    Root matching is independent of the ORDER ``paths`` is passed in: roots
+    are tried longest-path-first (the most specific containing root always
+    wins over a shallower, overlapping one), and the same file reached
+    through more than one overlapping root is only ever hashed once
+    (deduplicated by its resolved absolute path). Swapping the order of
+    overlapping roots cannot change the result. Note this is strictly about
+    ORDER: declaring an additional, redundant child root that is already
+    covered by a passed parent root is a DIFFERENT, more specific
+    declaration (that child's own files are now labeled relative to it
+    instead of the parent) and is expected to change the result -- this
+    function does not treat "this subtree was separately named" as
+    equivalent to "this subtree was already covered".
+
+    Fails closed: a missing declared root, any unreadable file, or any
+    directory that cannot be scanned/stat'd during the walk (e.g. a
+    permission-denied subdirectory) raises immediately rather than being
+    silently skipped -- a caller relying on this fingerprint for an
+    admission decision must never see a best-effort digest over whatever
+    happened to remain accessible stand in for "the full attributable input
+    was validated". A caller that genuinely needs to fingerprint a
+    partially-staged tree must check for that itself before calling this.
+
+    Symlinks are never silently resolved away: a discovered symlink (to a
+    file OR a directory) is hashed as ITS OWN entry -- its label, plus a
+    record of what it points to -- never collapsed with whatever it
+    happens to point at. Resolving a path and deduplicating by the
+    resolved path would let a symlink alias (``alias.py -> real.py``, both
+    under a declared root) vanish from the digest entirely once both paths
+    resolved the same way. A NESTED symlinked DIRECTORY (one discovered
+    mid-walk, not itself a declared root) is deliberately never
+    followed/walked into (cycle-unsafe, and ambiguous which identity --
+    the link or its target -- would own the nested names); instead the
+    link itself is hashed as a single entry recording where it points, so
+    re-pointing or adding/removing it still changes the digest even though
+    its nested contents, if any, are not separately walked.
+
+    A NESTED symlink's target must itself fall inside one of the DECLARED
+    roots (so its actual bytes are already covered by that root's own,
+    separate walk) -- this raises otherwise, exactly like a symlinked
+    DECLARED ROOT does (below): hashing only a symlink's identity/pointer
+    is only safe when the content it points at is attributable some other
+    way, never when it is an undeclared external target whose bytes could
+    change invisibly to this digest. A DANGLING target (resolves to
+    nothing at all) is the one exception -- allowed through as identity-
+    only, since there is no actual content it could be hiding.
+
+    A symlink target is recorded as-is when relative (already stable under
+    whole-tree relocation, since it is interpreted relative to the
+    symlink's own location, which moves together with everything else).
+    An ABSOLUTE target is made relocation-invariant the same way a file
+    label is -- relative to the common ancestor of every declared root --
+    but ONLY when it actually falls inside one of the declared roots
+    themselves (never merely under their common ancestor, which can
+    include undeclared sibling paths); an absolute target outside every
+    declared root is rejected per the previous paragraph, so this
+    normalization step only ever runs for a target already known to be
+    covered.
+
+    A DECLARED ROOT that is itself a symlink is treated differently from a
+    nested one, and deliberately raises instead of silently succeeding: a
+    root is the caller's own attributable content declaration, so reducing
+    it to mere link-target identity -- never hashing what is actually read
+    through that path -- would recreate exactly the content-drift blind
+    spot this function exists to close (#5472: fingerprinting too little
+    of the real install input). The caller must declare the real resolved
+    content path (or the symlink's target) instead of a symlinked root.
+
+    Each entry's kind ("file" vs "symlink") is itself framed as its own
+    length-prefixed record alongside the label and content/target, so a
+    regular file can never hash identically to a symlink merely because
+    its raw bytes happen to equal some symlink's encoded target text.
+    """
+    import hashlib
+    import os as _os
+
+    def _lstat_mode(p: Path, context: str) -> int:
+        # An explicit lstat (never following the final symlink component),
+        # with any OSError other than "does not exist" propagating. This is
+        # deliberately NOT Path.is_symlink()/is_dir()/is_file(): those
+        # catch OSError internally (including PermissionError) and return
+        # False, which would silently misclassify -- and potentially drop
+        # -- an entry this function could not actually stat, rather than
+        # failing closed like every other check in this function.
+        try:
+            return _os.lstat(p).st_mode
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise OSError(f"fingerprint_source: could not stat {p} ({context})") from exc
+
+    def _declared_root_path(p) -> Path:
+        # Resolve the PARENT chain (handles relative paths, intermediate
+        # symlinks, '..' components) to get a canonical absolute path, but
+        # preserve the final component exactly as declared -- never follow
+        # it -- so a declared root that is itself a symlink is classified
+        # with its own lstat identity below, instead of being silently
+        # resolved through to whatever it points at.
+        raw = Path(p)
+        if not raw.is_absolute():
+            raw = Path.cwd() / raw
+        return raw.parent.resolve() / raw.name
+
+    roots = [_declared_root_path(p) for p in paths]
+    root_modes: dict[Path, int] = {}
+    for root_path in roots:
+        try:
+            root_modes[root_path] = _lstat_mode(root_path, "declared root")
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"fingerprint_source: declared input path does not exist: {root_path}"
+            )
+    # Longest-path-first: the most specific containing root always wins,
+    # regardless of the order `paths` was passed in.
+    ordered_roots = sorted(roots, key=lambda r: len(r.parts), reverse=True)
+
+    # The common ancestor of every declared root is itself a deterministic
+    # function of the ROOT SET (never of the order `paths` was passed in,
+    # and never of where that set happens to live on disk): relocating the
+    # whole checkout moves the ancestor too, but every root's path RELATIVE
+    # to it is unchanged. Label roots by that relative path instead of their
+    # absolute one, so the fingerprint is both order- and location-
+    # independent while still disambiguating two roots that merely share a
+    # basename (e.g. "src" under two different parents).
+    common_root = Path(_os.path.commonpath([str(r) for r in roots]))
+
+    def _root_label(root_path: Path) -> str:
+        if root_path == common_root:
+            return "."
+        return root_path.relative_to(common_root).as_posix()
+
+    def _raise(exc: OSError) -> None:
+        raise OSError(f"fingerprint_source: could not scan a directory: {exc}") from exc
+
+    def _require_target_within_declared_roots(candidate: Path) -> None:
+        # A NESTED symlink's content is otherwise invisible to this
+        # fingerprint (only its own identity/target-pointer is hashed --
+        # see docstring); that is only safe when its target's actual
+        # bytes are ALREADY covered by one of the declared roots (walked
+        # separately, in its own right). A target outside every declared
+        # root -- an undeclared external file or directory -- could have
+        # its content changed with NO effect on the digest, recreating
+        # exactly the content-drift blind spot this function exists to
+        # close. Fail closed by rejecting it outright; the caller must
+        # either declare the target directly as its own root, or avoid
+        # this undeclared external symlink. A dangling target (resolves
+        # to nothing at all) is allowed through as identity-only: there is
+        # no actual content it could be hiding.
+        try:
+            target_resolved = candidate.resolve(strict=True)
+        except FileNotFoundError:
+            return  # dangling -- nothing to hide, allow identity-only.
+        except OSError as exc:
+            # A genuine lookup failure (e.g. permission denied) is NOT
+            # the same as "dangling" -- target content may exist and is
+            # simply unverifiable here, which must never silently permit
+            # an identity-only hash. Fail closed like every other stat
+            # failure in this function.
+            raise OSError(
+                f"fingerprint_source: could not resolve symlink target "
+                f"for {candidate}: {exc}"
+            ) from exc
+        if any(
+            target_resolved == r or target_resolved.is_relative_to(r)
+            for r in roots
+        ):
+            return
+        raise ValueError(
+            f"fingerprint_source: symlink {candidate} points outside "
+            f"every declared root (to {target_resolved}) -- its content "
+            f"is not otherwise covered by this fingerprint; declare the "
+            f"target directly as an additional root, or avoid this "
+            f"undeclared external symlink"
+        )
+
+    # Each discovered entry is kept under its OWN (never resolved) path, so
+    # a symlink is never conflated with whatever it points to. Dict value
+    # is "file" for a regular file, or "symlink" for anything that is a
+    # symlink (to a file OR a directory). Keying by the un-resolved,
+    # as-walked path is also what makes the existing overlapping-root
+    # dedup work without an extra resolve() call: the same physical file
+    # reached via two overlapping roots is always discovered at the exact
+    # same path both times (`root_path` is already resolved up front), so
+    # the dict naturally collapses it to one entry.
+    entries: dict[Path, str] = {}
+    for root_path in roots:
+        mode = root_modes[root_path]
+        if stat.S_ISLNK(mode):
+            # Unlike a NESTED symlink discovered mid-walk (hashed as its
+            # own identity -- see docstring), a DECLARED ROOT that is
+            # itself a symlink is rejected outright, never silently
+            # reduced to link-target text: a root is the caller's own
+            # attributable content declaration, so quietly fingerprinting
+            # only "where this points" -- while never hashing what is
+            # actually read through that path -- would recreate exactly
+            # the content-drift blind spot this function exists to close
+            # (#5472). The caller must declare the real resolved path (or
+            # the symlink's target) instead.
+            raise ValueError(
+                f"fingerprint_source: declared root is a symlink, not a "
+                f"resolved content path: {root_path} -> "
+                f"{_os.readlink(root_path)!r} -- declare the real target "
+                f"path so its actual content is covered"
+            )
+        elif stat.S_ISDIR(mode):
+            # os.walk with onerror=_raise (NOT Path.rglob/is_file, which
+            # silently swallow scandir/stat PermissionError on the
+            # supported Python versions) so an unreadable subdirectory
+            # fails closed instead of being quietly omitted from the
+            # fingerprint. followlinks=False is explicit: a symlinked
+            # directory is never descended into (see docstring).
+            for dirpath, dirnames, filenames in _os.walk(
+                root_path, onerror=_raise, followlinks=False
+            ):
+                for dname in dirnames:
+                    candidate = Path(dirpath) / dname
+                    cmode = _lstat_mode(candidate, "nested directory entry")
+                    if stat.S_ISLNK(cmode):
+                        _require_target_within_declared_roots(candidate)
+                        entries[candidate] = "symlink"
+                    elif not stat.S_ISDIR(cmode):
+                        # os.walk placed this name in dirnames, but an
+                        # explicit lstat here disagrees it is a plain
+                        # directory (e.g. a device/FIFO/socket, or a
+                        # TOCTOU race) -- fail closed rather than
+                        # silently traverse or skip it.
+                        raise ValueError(
+                            f"fingerprint_source: unsupported filesystem "
+                            f"object type at {candidate} (not a regular "
+                            f"file, directory, or symlink)"
+                        )
+                for name in filenames:
+                    candidate = Path(dirpath) / name
+                    cmode = _lstat_mode(candidate, "nested file entry")
+                    if stat.S_ISLNK(cmode):
+                        _require_target_within_declared_roots(candidate)
+                        entries[candidate] = "symlink"
+                    elif stat.S_ISREG(cmode):
+                        entries[candidate] = "file"
+                    else:
+                        # A FIFO/device/socket/etc. discovered mid-walk
+                        # must never be silently omitted from the
+                        # fingerprint (a FIFO could also block indefinitely
+                        # if ever read) -- only a regular file, directory,
+                        # or symlink is a supported attributable input.
+                        raise ValueError(
+                            f"fingerprint_source: unsupported filesystem "
+                            f"object type at {candidate} (not a regular "
+                            f"file, directory, or symlink)"
+                        )
+        elif stat.S_ISREG(mode):
+            entries[root_path] = "file"
+        else:
+            # A declared root that is a FIFO/device/socket/etc. is not a
+            # supported attributable input -- fail closed instead of
+            # silently reading it as an ordinary file (a FIFO could block
+            # indefinitely).
+            raise ValueError(
+                f"fingerprint_source: unsupported filesystem object type "
+                f"at declared root {root_path} (not a regular file, "
+                f"directory, or symlink)"
+            )
+
+    def _label(f: Path) -> str:
+        # The root's path relative to the common ancestor of every declared
+        # root (see `_root_label`), never the root's bare basename (not
+        # unique across declared roots) and never its absolute path
+        # (would make the digest depend on checkout location).
+        for root_path in ordered_roots:
+            try:
+                rel = f.relative_to(root_path)
+            except ValueError:
+                continue
+            return _root_label(root_path) + "/" + rel.as_posix()
+        return f.as_posix()
+
+    def _frame(data: bytes) -> bytes:
+        return len(data).to_bytes(8, "big") + data
+
+    digest = hashlib.sha256()
+    for f in sorted(entries, key=_label):
+        kind = entries[f]
+        if kind == "symlink":
+            try:
+                target = _os.readlink(f)
+            except OSError as exc:
+                raise OSError(
+                    f"fingerprint_source: could not read symlink {f}: {exc}"
+                ) from exc
+            target = _normalize_windows_extended_path(target)
+            if _os.path.isabs(target):
+                # An absolute target is only made relocation-invariant
+                # when it actually falls INSIDE one of the DECLARED roots
+                # themselves (never merely under their common ancestor,
+                # which can include undeclared sibling paths the caller
+                # never opted into relocating together with the rest --
+                # e.g. roots `project/src` and `project/pyproject.toml`
+                # share ancestor `project/`, but `project/shared.py` was
+                # never declared and is not guaranteed to move with the
+                # declared roots). Relocating the WHOLE declared set then
+                # moves the target's effective position the same way it
+                # moves everything else, so the relative form stays
+                # stable. A target outside every declared root (a fixed
+                # external location, or on a different drive on Windows)
+                # is NOT part of what gets relocated -- its raw absolute
+                # text is already the stable identity in that case.
+                try:
+                    target_resolved = Path(target).resolve()
+                except OSError:
+                    target_resolved = None
+                if target_resolved is not None and any(
+                    target_resolved == r or target_resolved.is_relative_to(r)
+                    for r in roots
+                ):
+                    target = _root_label(target_resolved)
+            data = Path(target).as_posix().encode("utf-8")
+        else:
+            try:
+                data = f.read_bytes()
+            except OSError as exc:
+                raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
+        digest.update(_frame(_label(f).encode("utf-8")))
+        # The entry's kind is framed as ITS OWN length-prefixed record,
+        # never concatenated into `data` as a string prefix: a regular
+        # file whose raw bytes happen to equal some symlink's encoded
+        # "target text" must never hash identically to that symlink (or
+        # vice versa) just because the two kind tags were distinguished
+        # only by unframed leading bytes.
+        digest.update(_frame(kind.encode("utf-8")))
+        digest.update(_frame(data))
+    return digest.hexdigest()
+
+
+def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
+    """Decide what an ordinary (non-``dev``) caller should do for ``version``
+    without taking a construction lease.
+
+    Returns one of:
+
+    - ``ADMIT_REUSE`` -- the slot already exists, is healthy (valid
+      completion marker), and its recorded payload hash matches
+      ``payload_hash``: there is nothing to build. A caller must not
+      reinstall into it (dotfiles #2174) -- this is the create-once,
+      never-rewrite-a-published-slot half of the immutable-versioned-
+      runtime invariant.
+    - ``ADMIT_CONTENT_CONFLICT`` -- the slot is healthy but its recorded
+      hash does NOT match: this is the same numbered version being asked to
+      publish DIFFERENT content, which the invariant forbids outright (never
+      silently rewrite a published slot, `--force` included -- see
+      ``docs/patterns/mutable-dev-slot.md``'s *Ordinary installers* section).
+      The caller must refuse with actionable guidance (bump the version, or
+      use the claimed ``dev`` slot), never rebuild in place.
+    - ``ADMIT_HEALTH_REPAIR_REQUIRED`` -- either the completion-marker path
+      is present but is not a plain regular file (a directory, or a
+      symlink -- dangling or not), or fails validation once read (corrupt
+      JSON, duplicate keys, wrong schema, a mismatched version field); or
+      ``versions/<version>`` exists but is NOT a plain directory (a regular
+      file, or a symlink -- dangling or not). A symlink at either path is
+      deliberately NEVER followed to check what it points to: a published
+      slot/marker must be an immutable REAL directory/file, never an
+      indirection, because an indirection can be silently RETARGETED later
+      (even to another otherwise-valid, complete slot) without this
+      contract's create-once guarantee ever noticing -- the whole point of
+      immutability is defeated if "is this the same identity" can be
+      answered by whatever a mutable link currently happens to point at.
+      None of this is the same as "never built": it is ambiguous/invalid
+      evidence that an already-published, possibly-in-use slot was altered
+      outside this contract (truncated write, disk fault, a concurrent
+      writer racing outside this contract, or a tampered/retargeted link)
+      -- so a caller must never silently treat it as safe to construct
+      over. Surface this for explicit operator/health-repair handling (e.g.
+      ``toss_incomplete`` only after confirming the slot is not live)
+      instead of reconstructing over possibly-published content.
+    - ``ADMIT_CONSTRUCT`` -- the slot path is genuinely ABSENT, or exists as
+      a plain directory with no completion-marker path at all (never built,
+      or a prior build crashed or was killed before ever reaching the
+      marker-write step): this is the known-unpublished/incomplete case,
+      unambiguous and safe to (re)build -- a caller needs to serialize on
+      the construction lease and build it.
+
+    Never takes or checks the construction lease itself -- a caller that
+    gets ``ADMIT_CONSTRUCT`` must still acquire the lease (and, once held,
+    re-check admission, since a concurrent builder may have published a
+    completed slot in the meantime) before writing anything.
+
+    A genuine stat failure (e.g. permission denied) while probing the slot
+    or marker path raises rather than guessing at an admission decision --
+    same fail-closed philosophy as :func:`fingerprint_source`. Both probes
+    use an explicit ``os.lstat()`` (never ``Path.exists()``/``Path.is_dir()``,
+    which catch OSError internally -- including PermissionError -- and
+    return False, silently masking a stat failure as "absent"; and never a
+    symlink-following ``os.stat()`` either, per the immutability rationale
+    above), so a DANGLING OR a perfectly-valid-but-mutable slot/marker
+    symlink is correctly treated as present-but-invalid
+    (``ADMIT_HEALTH_REPAIR_REQUIRED``), never as "genuinely absent" and
+    never silently followed through to "reuse", while an actual permission
+    error still raises.
+
+    The marker is read through an identity-anchored, no-follow handle
+    rather than by its pathname a second time: an initial ``lstat()``
+    confirming "not a symlink" and a LATER, separate pathname-based open
+    to actually read the content would leave a TOCTOU window in which a
+    concurrent process could swap either the slot directory or the marker
+    file for a symlink (to another, otherwise-valid-and-matching slot) in
+    between the two steps, and this function would never notice. On POSIX,
+    both the slot directory and the marker are instead opened with
+    ``O_NOFOLLOW`` -- the directory first, then the marker opened
+    *relative to that already-open directory file descriptor*
+    (``dir_fd=``), never by re-resolving ``versions/<version>/<marker>``
+    as a fresh pathname -- so a same-named replacement of either path
+    after this function's own probe is caught as a symlink at open time
+    rather than silently followed. Where ``dir_fd``-relative opens are not
+    supported by the platform (notably Windows, which also lacks
+    ``O_NOFOLLOW``), this falls back to the best available guarantee: a
+    plain pathname open followed by an ``fstat()`` identity check against
+    what was probed, narrowing (never fully closing) the same window.
+    """
+    vdir = version_dir(root, version)
+    try:
+        vdir_lstat = os.lstat(vdir)
+    except FileNotFoundError:
+        return ADMIT_CONSTRUCT
+    except OSError as exc:
+        raise OSError(f"check_admission: could not stat {vdir}: {exc}") from exc
+    if not stat.S_ISDIR(vdir_lstat.st_mode):
+        # Something exists at the slot path, but it is not a plain
+        # directory -- a stray file, or a symlink (dangling OR pointing at
+        # a perfectly valid directory). Never follow it: a mutable
+        # indirection at a published slot's own path defeats this
+        # contract's immutability guarantee regardless of what it
+        # currently resolves to.
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    dir_fd_supported = os.open in os.supports_dir_fd
+    marker_file = marker_path(root, version)
+    vdir_fd = None
+    marker_fd = None
+    try:
+        if dir_fd_supported:
+            # POSIX: open the slot directory itself with O_NOFOLLOW, then
+            # open the marker RELATIVE to that already-open, already-
+            # verified directory fd (dir_fd=) -- never by re-resolving
+            # `vdir`'s pathname a second time, which could have been
+            # swapped to point elsewhere in the meantime.
+            try:
+                vdir_fd = os.open(vdir, os.O_RDONLY | nofollow)
+            except OSError as exc:
+                if nofollow and exc.errno == errno.ELOOP:
+                    # Swapped to a symlink after the lstat() above.
+                    return ADMIT_HEALTH_REPAIR_REQUIRED
+                raise OSError(f"check_admission: could not open {vdir}: {exc}") from exc
+            vdir_fd_stat = os.fstat(vdir_fd)
+            if not stat.S_ISDIR(vdir_fd_stat.st_mode):
+                return ADMIT_HEALTH_REPAIR_REQUIRED
+            try:
+                marker_fd = os.open(
+                    COMPLETE_MARKER, os.O_RDONLY | nofollow, dir_fd=vdir_fd
+                )
+            except FileNotFoundError:
+                return ADMIT_CONSTRUCT
+            except OSError as exc:
+                if nofollow and exc.errno == errno.ELOOP:
+                    return ADMIT_HEALTH_REPAIR_REQUIRED
+                raise OSError(
+                    f"check_admission: could not open marker under {vdir}: {exc}"
+                ) from exc
+        else:
+            # A platform without dir_fd-relative opens (notably Windows,
+            # which also lacks O_NOFOLLOW and cannot os.open() a bare
+            # directory at all): explicitly lstat the marker path first
+            # (Windows has no open-time no-follow guard) and reject
+            # anything that is not a plain regular file there -- a
+            # symlink, OR a directory (opening a directory via os.open()
+            # raises on Windows rather than failing gracefully, so this
+            # must be checked before ever attempting the open) -- then
+            # fall back to an ordinary pathname open. The lstat() of
+            # `vdir` above is the only slot-directory guard available
+            # here; together these narrow, but do not fully close, the
+            # TOCTOU window the dir_fd path closes on POSIX.
+            try:
+                marker_lstat = os.lstat(marker_file)
+            except FileNotFoundError:
+                return ADMIT_CONSTRUCT
+            except OSError as exc:
+                raise OSError(
+                    f"check_admission: could not stat {marker_file}: {exc}"
+                ) from exc
+            if not stat.S_ISREG(marker_lstat.st_mode):
+                return ADMIT_HEALTH_REPAIR_REQUIRED
+            try:
+                marker_fd = os.open(marker_file, os.O_RDONLY | nofollow)
+            except FileNotFoundError:
+                return ADMIT_CONSTRUCT
+            except OSError as exc:
+                if nofollow and exc.errno == errno.ELOOP:
+                    return ADMIT_HEALTH_REPAIR_REQUIRED
+                raise OSError(
+                    f"check_admission: could not open {marker_file}: {exc}"
+                ) from exc
+        marker_fd_stat = os.fstat(marker_fd)
+        if not stat.S_ISREG(marker_fd_stat.st_mode):
+            return ADMIT_HEALTH_REPAIR_REQUIRED
+        # Read raw bytes, never a text-mode wrapper: json.loads() accepts
+        # bytes directly and folds any decoding failure into the same
+        # JSONDecodeError the parse step below already catches as
+        # malformed-marker evidence. A text-mode read (`"r",
+        # encoding="utf-8"`) would instead raise UnicodeDecodeError on
+        # invalid UTF-8 BEFORE that handler ever runs, escaping this
+        # function's health-repair-required contract entirely.
+        with os.fdopen(marker_fd, "rb") as fh:
+            marker_fd = None  # fdopen now owns the fd
+            marker_bytes = fh.read()
+    finally:
+        if marker_fd is not None:
+            os.close(marker_fd)
+        if vdir_fd is not None:
+            os.close(vdir_fd)
+
+    try:
+        raw = json.loads(marker_bytes, object_pairs_hook=_unique_object_pairs_hook)
+    except Exception:
+        # Malformed JSON, including invalid UTF-8/other encoding errors --
+        # ambiguous evidence, never "never built".
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+    marker = validate_marker(raw, version)
+    if marker is None:
+        # The marker is a plain file read through a verified, no-follow
+        # handle, but its content failed schema validation -- ambiguous
+        # evidence, never treated as "never built".
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+    if marker.get("payload_hash") == payload_hash:
+        return ADMIT_REUSE
+    return ADMIT_CONTENT_CONFLICT
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1312,6 +1930,19 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("toss-incomplete",
                    help="remove non-current slots lacking a completion marker")
 
+    fp = sub.add_parser("fingerprint",
+                        help="print a stable sha256 fingerprint over the given "
+                             "source paths (files and/or directories)")
+    fp.add_argument("paths", nargs="+", help="source file(s)/directory(ies)")
+    cap = sub.add_parser("check-admission",
+                        help="decide reuse/content-conflict/construct/"
+                             "health-repair-required for <version> without "
+                             "taking a construction lease")
+    cap.add_argument("version")
+    cap.add_argument("--payload-hash", required=True,
+                     help="the caller's current source fingerprint, typically "
+                          "from 'fingerprint'")
+
     dcp = sub.add_parser("dev-claim", help="claim the mutable dev slot")
     dcp.add_argument("--owner", required=True,
                      help="claimant ref (e.g. a worktree/session owner ref)")
@@ -1389,6 +2020,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "toss-incomplete":
             tossed = toss_incomplete(root, link_name)
             _emit({"tossed": tossed} if args.json else tossed, args.json)
+        elif args.cmd == "fingerprint":
+            fp_hash = fingerprint_source(args.paths)
+            _emit({"fingerprint": fp_hash} if args.json else fp_hash, args.json)
+        elif args.cmd == "check-admission":
+            decision = check_admission(root, args.version,
+                                       payload_hash=args.payload_hash)
+            _emit({"version": args.version, "admission": decision}
+                  if args.json else decision, args.json)
         elif args.cmd == "dev-claim":
             record = claim_dev(root, args.owner, host=args.host,
                                previous_version=args.previous_version,
