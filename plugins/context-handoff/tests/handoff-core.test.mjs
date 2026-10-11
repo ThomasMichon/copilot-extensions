@@ -1162,6 +1162,8 @@ test("task-backed consume checkpoints payload before one-time consume and surviv
     assert.equal(replay.worktree, "wt-example");
     assert.equal(replay.predecessorSession, "predecessor-1");
     assert.match(formatConsumeResult(replay), /Offer to bind/);
+    assert.match(formatConsumeResult(replay), /Handoff worktree: `wt-example`/);
+    assert.match(formatConsumeResult(replay), /Handoff predecessor session: `predecessor-1`/);
     assert.equal(consumeCalls, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -2696,6 +2696,12 @@ export function formatConsumeResult(
       `${result?.message || "Handoff could not be consumed."}\n\n` +
       "Handoff consumption is blocked. Do not treat the missing brief as " +
       "completion or reconstruct a different objective from session history." +
+      (result?.worktree
+        ? `\n\nHandoff worktree: \`${result.worktree}\`.`
+        : "") +
+      (result?.predecessorSession
+        ? `\n\nHandoff predecessor session: \`${result.predecessorSession}\`.`
+        : "") +
       (claimant
         ? `\n\nClaimant session: \`${claimant}\`. Follow the context-handoff ` +
           "skill's already-claimed recovery procedure: inspect this exact " +
