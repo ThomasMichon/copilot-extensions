@@ -182,3 +182,25 @@ def test_publication_revalidates_owning_record_after_wait(tmp_path, field, value
     tracking.save_record(rec)
     with pytest.raises(ValueError, match="Owning worktree identity changed"):
         pr_publication_state.require_current(stale, stale.active_pr())
+
+
+@pytest.mark.parametrize("field,value", [
+    ("worktree_path", "relocated"), ("repo", "other"), ("branch", "worktree/other"),
+])
+def test_owner_identity_change_requires_authority_during_publication(tmp_path, monkeypatch, field, value):
+    rec = tracking.create_new_record("owner", "worktree/owner", str(tmp_path), "ext", "test", "linux", tmp_path)
+    rec.prs = [tracking.PRRecord(state="open", branch="pr/example", number=42)]
+    tracking.save_record(rec)
+    stale = tracking.load_record(rec.yaml_path)
+    setattr(stale, field, value)
+
+    @contextmanager
+    def occupied(**kwargs):
+        raise TimeoutError("publication owns authority")
+        yield
+
+    monkeypatch.setattr(pr_authority, "guard", occupied)
+    with pytest.raises(TimeoutError, match="publication owns authority"):
+        tracking.save_record(stale)
+    current = tracking.load_record(rec.yaml_path)
+    assert getattr(current, field) == getattr(rec, field)

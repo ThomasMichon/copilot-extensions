@@ -96,7 +96,7 @@ def guard(*, timeout: float | None = None):
 def _projection(record: tracking.WorktreeRecord | None) -> tuple:
     if record is None or not record.prs:
         return ()
-    return (record.repo, record.worktree_id, record.worktree_path, tuple(
+    return (record.repo, record.worktree_id, record.worktree_path, record.branch, tuple(
         pr_publication_state.authority(p)
         for p in record.prs
     ))
