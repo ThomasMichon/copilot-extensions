@@ -131,6 +131,12 @@ def execute(config, request: dict) -> dict:
                 allocation=(receipt["timestamp"], receipt["suffix"]),
                 pending_seed=request["text"], pending_seed_id=request_id,
             )
+            _dispatch("launch_request_creation_finish", {
+                "tracking_dir": str(directory), "request_id": request_id,
+                "fingerprint": fingerprint,
+            })
+        elif request["kind"] == "new" and not receipt.get("creation_complete"):
+            raise ValueError("Admitted New creation is incomplete; inspect before launch")
         _dispatch("launch_request_stage", {
             "tracking_dir": str(directory), "request_id": request_id,
             "fingerprint": fingerprint, "text": request["text"],
@@ -190,6 +196,17 @@ def _apply_creation_start(args: dict) -> dict:
     return {"started": True}
 
 
+def _apply_creation_finish(args: dict) -> dict:
+    path = _admission_path(Path(args["tracking_dir"]), args["request_id"])
+    with tracking._RecordLock(path.with_suffix(".yaml"), require_sidecar=True):
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        if receipt["fingerprint"] != args["fingerprint"] or not receipt.get("creation_started"):
+            raise ValueError("Launch creation identity mismatch")
+        receipt["creation_complete"] = True
+        tracking._atomic_write(path, json.dumps(receipt) + "\n")
+    return {"created": True}
+
+
 def cmd_request(args) -> int:
     """The request stays local on the target; never recursively SSH it."""
     from . import output
@@ -200,6 +217,7 @@ def cmd_request(args) -> int:
         if not args.json or any(getattr(args, key, None) for key in forbidden):
             raise ValueError("Structured launch requests require local --json execution")
         if args.launch_request_status:
+            request_id = args.launch_request_status
             if args.launch_request_b64:
                 raise ValueError("Specify admission or status, not both")
             print(json.dumps(inspect(args.launch_request_status)))
@@ -227,7 +245,7 @@ def inspect(request_id: str) -> dict:
     receipt = json.loads(admission.read_text(encoding="utf-8"))
     path = directory / f"{receipt['worktree_id']}.yaml"
     seed = launch_seed_state.peek(path)
-    available = seed is not None and seed.seed_id == receipt["seed_id"]
+    available = bool(receipt.get("accepted")) and seed is not None and seed.seed_id == receipt["seed_id"]
     return {
         "version": 1, "request_id": request_id, "worktree_id": receipt["worktree_id"],
         "seed_id": receipt["seed_id"], "seed_kind": receipt["kind"],
@@ -260,3 +278,4 @@ def _guard(handler):
 tracking_write.register_verb("launch_request_admit", _guard(_apply_admit))
 tracking_write.register_verb("launch_request_stage", _guard(_apply_stage))
 tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start))
+tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish))

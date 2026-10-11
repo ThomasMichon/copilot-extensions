@@ -190,3 +190,20 @@ hiding the problem or silently dropping text.
   The reachable POSIX target has an old engine without the new capability:
   its fresh/old-target refusal and eventual candidate/deployed live validation
   remain explicit next gates. No target provisioning or remote mutation occurred.
+- **2026-10-10** -- Operator authorized isolated POSIX validation setup after
+  the only reachable cell proved too old and unregistered. Used the existing
+  project's unified update, repaired the stale Manager through its repository
+  bootstrap, registered a source checkout and created an isolated managed
+  candidate worktree. No installed payload was edited. Candidate tests in that
+  cell pass 22 admission/transport cases (PowerShell unavailable there).
+  Actual SSH admission staged New provenance and fixed allocation, followed by
+  native Copilot first-turn receipt and the expected answer through the target's
+  installed No-Mux launcher. The first detached-mux attempt could not switch a
+  client that was not attached; its seed remained intact, and retrying the same
+  worktree/intent with No Mux succeeded. This is target admission/backend
+  evidence, not yet a delivered remote Picker observation.
+  Cold Resume has been staged for that same conversation and is under
+  observation. Windows routes remain unreachable. The expanded full guard run
+  reached the runner's 300-second sub-suite wall limit with no assertion failure
+  reported before termination; split/targeted validation remains rather than
+  bypassing containment or treating the timeout as a pass.
