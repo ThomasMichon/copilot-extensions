@@ -109,6 +109,8 @@ class CliTransport(Transport):
         try:
             env.update(await self.injector.child_env())
         except Exception as exc:
+            if self.cfg.routed_target:
+                raise RuntimeError("routing target authentication failed") from exc
             log.warning("cli transport: auth injection failed (%s); "
                         "spawning with ambient environment", exc)
         return env

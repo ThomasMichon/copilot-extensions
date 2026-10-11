@@ -62,17 +62,111 @@ register or retain the catalog, the agent preserves that error, probes the
 identity-matched fleet, and continues through the CLI surface. It stops only
 when both surfaces fail.
 
-This is equivalent transport only when authorization is expressed by the shared
-bridge auth and top-level `tools:` allow/deny filter. `call`/`materialize` do
-not apply decorator stacks. Duplicate static name restrictions in top-level
-`tools:`; conditional `gate`/argument-dependent authorization cannot be
-represented there and therefore forbids this fallback. Shape-only decorators
-yield a wider raw fallback catalog that the agent must document. A credential
+`call` executes the same decorator pipeline as the MCP bridge, including
+conditional `gate`/`input_gate` authorization. `materialize` and one-shot
+`list_tools` discover the raw catalog (with the top-level `tools:` filter), not
+the decorator-shaped catalog; shape-only decorators can therefore yield a wider
+fallback catalog that the agent must document. Request-scoped routing below
+that pipeline applies identically to both surfaces. A credential
 failure, denied operation, confirmation gate, or unavailable upstream still
 fails honestly.
 
 Identity-affecting values belong in the bridge config/overlay, not only in
 `mcp-servers.env`, because shell fallback does not inherit frontmatter-only env.
+
+### Request-scoped multi-upstream routing
+
+A routed bridge publishes **one common catalog**, with one locally required
+selector on every real upstream tool. The trusted `catalog` target defines the
+contract for discovery only: it is **never an execution default**.
+
+```yaml
+routing:
+  parameter: organization
+  catalog: alpha
+  targets:
+    alpha:
+      server: {type: http, url: "https://example.test/alpha"}
+      auth: {kind: env, source_env: ALPHA_TOKEN}
+      tools: {allow: ["read", "action"]}
+    beta:
+      server: {type: http, url: "https://example.test/beta"}
+      auth: {kind: env, source_env: BETA_TOKEN}
+      tools: {allow: ["read", "action"]}
+      decorators:
+        - type: input_gate
+          match_tools: ["action"]
+          deny_when: {path: action, not_in: ["get", "list", "search"]}
+          reason: "Only audited read actions are permitted."
+timeout: 30
+```
+
+Call `read` with `{"organization":"beta"}`. Its published object schema has a
+required `organization` string enum `["alpha","beta"]`; the actual upstream
+payload contains no `organization` argument. Missing, malformed, or unknown
+selectors fail before any upstream connection or credential acquisition.
+Per-target allow/deny globs authorize execution, **not discovery**; they never
+produce alternate catalogs or tool-name mappings. Deny wins over allow.
+For action-multiplexed tools, target `input_gate` predicates inspect the real
+arguments **after selector removal**, before auth/connect. `not_in` denies
+missing, null, and unknown actions as well as explicit writes; keep its
+allowlist limited to audited reads. Unlisted tools need an explicit name
+allowlist when operating under a restrictive role.
+
+Top-level `decorators` wrap routing exactly once and remain common to all
+targets. Only `input_gate` is supported in target `decorators`: target-specific
+renaming, filtering, preflights, and catalog shaping are rejected. Targets
+own `server` and `auth`; routed configs cannot also declare those at the top
+level. Shared `headers`, `timeout`, `retries`, and `idle_timeout` are inherited,
+with target overrides. `routing` accepts only `parameter`, `catalog`, `targets`;
+external registries should project ordinary bridge configs rather than imply
+an ambient execution target.
+
+On first use, each target's complete, paginated raw catalog must match the
+trusted contract (tool names, descriptions, schemas, and metadata, ignoring
+tool order). A mismatch raises an explicit compatibility error before tool
+execution, never an intersection, reroute, or silent fallback. Input schemas
+must be objects and must not already declare the local selector. Separate
+sessions, auth injectors, and endpoint/tenant/identity-qualified token cache
+keys isolate concurrent calls, including explicitly overridden cache keys.
+Routed Entra auth resolves the actual local Azure account (principal, tenant,
+subscription, cloud, and Azure config context) on each real request and
+qualifies the session and cache key with that identity. A changed identity
+closes the old connection and opens a new isolated session; calls on a target
+are serialized across this transition while distinct targets remain concurrent.
+Local acquisition pins the selected subscription without changing the global
+account, bypasses the credential source's unqualified internal cache, and checks
+identity before and after token acquisition/cache use. An identity change
+mid-acquisition fails before execution rather than silently rerouting.
+An explicit `auth.tenant` selects that tenant's unique local principal;
+unavailable or ambiguous accounts fail loudly.
+
+The current `ado-auth-helper` relay protocol cannot probe or bind its actual
+host identity. Routed Entra configurations that select that helper fail closed
+with an identity-binding diagnostic, never silently fall back to local Azure.
+Use an explicitly identity-pinned `command` or `env`/`static` credential source
+instead when a relay cannot provide this contract. Providers other than Entra
+remain responsible for honoring their configured identity; command definitions
+must pin acquisition rather than consult mutable ambient accounts.
+When selected-target auth is configured, empty or failed injection is fatal
+(including CLI targets), never an ambient-auth fallback. `auth: {kind: none}`
+remains an explicit unauthenticated choice.
+
+MCP `BridgeSession`, one-shot `call`, materialized stubs, and warm `serve`
+calls all use this enforcement core. Discovery starts only the trusted catalog
+target. Materialized schemas retain the required selector; `defer` and
+`code-mode` expose the common contract and every real downstream call they
+synthesize must supply it in its own arguments (for example
+`tools.read({organization:"beta"})`). Synthetic discovery helpers do not
+require an execution selector. Non-tool routes such as resources/prompts,
+subscriptions, and cancellation cannot be forwarded safely without an
+execution context and fail loudly; initialization/discovery and ping are local.
+
+`validate` lists each routed target's configured transport/auth and explicitly
+does not attest connectivity. `diagnose` reports an unchecked routing context
+and fails rather than treating the inert outer `auth: none` or trusted catalog
+target as proof that every execution target is healthy. Use a bounded audited
+read with an explicit selector to validate a particular target.
 
 Use an existing fleet first. Re-materialize when the expected stub is absent or
 `manifest.json.generated_by` differs from `agent-mcp --version`.
@@ -1258,6 +1352,9 @@ answers `call`/`list` requests over a local IPC socket (default handle
 - **Warm pool** — sessions open lazily on first use, are reused, serialized
   per-bridge, evicted after `--idle-timeout` (default 300s), and reopened if the
   upstream dies.
+- **Attach liveness** — a pending attach reserves the host before upstream
+  startup, so a slow connect cannot trigger idle eviction. Failed starts release
+  the reservation and close partially-open sessions.
 - **No secrets held** — each warm session fetches credentials through the
   bridge's own auth injector at open time; per-bridge sessions preserve identity
   separation.

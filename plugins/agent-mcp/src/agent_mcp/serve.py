@@ -449,18 +449,20 @@ class Server:
                     pass  # a closed/broken client just drops the push
 
         session = BridgeSession(cfg, sink)
-        try:
-            await session.start()
-        except Exception as exc:
-            await self._send(writer, {"ok": False, "error": f"session start: {exc}"})
-            return
-        # Ack; from here the stream is raw MCP JSON-RPC in both directions.
-        await self._send(writer, {"ok": True, "attached": True})
+        # Opening an upstream is live work too: reserve before the first await,
+        # or a slow connect can let the idle sweeper evict this host mid-attach.
         self._attached += 1
         self._touch()
-        log.info("session attached: %s (%d decorators; %d live)", bridge,
-                 session.decorator_count, self._attached)
         try:
+            try:
+                await session.start()
+            except Exception as exc:
+                await self._send(writer, {"ok": False, "error": f"session start: {exc}"})
+                return
+            # Ack; from here the stream is raw MCP JSON-RPC in both directions.
+            await self._send(writer, {"ok": True, "attached": True})
+            log.info("session attached: %s (%d decorators; %d live)", bridge,
+                     session.decorator_count, self._attached)
             while not reader.at_eof():
                 line = await reader.readline()
                 if not line:

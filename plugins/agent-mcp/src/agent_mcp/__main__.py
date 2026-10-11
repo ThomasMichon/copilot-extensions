@@ -101,6 +101,16 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         print(f"INVALID: {exc}", file=sys.stderr)
         return 1
     where = cfg.source_path or args.name
+    if cfg.routing is not None:
+        targets = "; ".join(
+            f"{key}: {target.server.type} -> {target.server.launch_desc} "
+            f"(auth: {'+'.join(a.kind for a in target.auths)})"
+            for key, target in cfg.routing.targets.items()
+        )
+        print(f"OK: {where} -- routing selector={cfg.routing.parameter}; "
+              f"catalog={cfg.routing.catalog} (discovery only); {targets}; "
+              "configuration validated, target connectivity not checked")
+        return 0
     auth_desc = "+".join(a.kind for a in cfg.auths)
     print(f"OK: {where} -- {cfg.server.type} -> "
           f"{cfg.server.launch_desc} (auth: {auth_desc})")

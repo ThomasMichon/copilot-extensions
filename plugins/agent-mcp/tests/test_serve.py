@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 
@@ -588,6 +589,77 @@ async def test_attach_refcount_keeps_host_alive_then_evicts(tmp_path):
     writer.close()
     await asyncio.wait_for(task, timeout=5)
     assert serve_socket_if_available(str(sock)) is None
+
+
+async def test_pending_attach_reserves_host_before_upstream_start(tmp_path, monkeypatch):
+    """Admission holds liveness even when opening the upstream exceeds idle time."""
+    import time
+    from agent_mcp.serve import BridgeSession, open_attached_session
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_start = BridgeSession.start
+
+    async def slow_start(session):
+        entered.set()
+        await release.wait()
+        await original_start(session)
+
+    monkeypatch.setattr(BridgeSession, "start", slow_start)
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock, idle_timeout=0.3)
+    task = asyncio.create_task(server.serve_forever())
+    attach = None
+    writer = None
+    try:
+        await _await_socket(sock)
+        attach = asyncio.create_task(open_attached_session(sock, str(bridge)))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert server.attached == 1
+        server._last_active = time.monotonic() - 10
+        server._maybe_idle_evict()
+        assert not server._stop.is_set()
+        release.set()
+        _reader, writer = await asyncio.wait_for(attach, timeout=5)
+        assert (await request_via_socket(sock, {"op": "ping"}))["attached"] == 1
+    finally:
+        release.set()
+        if attach is not None and writer is None:
+            with contextlib.suppress(Exception):
+                _reader, writer = await asyncio.wait_for(attach, timeout=5)
+        if writer is not None:
+            writer.close()
+        if not task.done():
+            await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
+
+
+async def test_failed_attach_releases_reservation_and_closes_session(tmp_path, monkeypatch):
+    from agent_mcp.serve import BridgeSession, open_attached_session
+
+    closed = []
+
+    async def failed_start(session):
+        raise RuntimeError("fixture connect failure")
+
+    async def record_close(session):
+        closed.append(session)
+
+    monkeypatch.setattr(BridgeSession, "start", failed_start)
+    monkeypatch.setattr(BridgeSession, "aclose", record_close)
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        await _await_socket(sock)
+        with pytest.raises(OSError, match="fixture connect failure"):
+            await open_attached_session(sock, str(bridge))
+        assert (await request_via_socket(sock, {"op": "ping"}))["attached"] == 0
+        assert len(closed) == 1
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
 
 
 async def test_disabling_lease_allows_two_hosts(tmp_path):

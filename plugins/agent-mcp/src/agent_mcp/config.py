@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from ._predicate import validate_predicate
+from .config_routing import RoutingSpec as RoutingSpec, _deep_merge, _parse_routing
 
 # Transport kinds (mirror MCP server-launch ``type`` values, plus ``cli`` --
 # the local CLI->MCP responder that has no upstream MCP at all).
@@ -274,6 +275,8 @@ class AuthSpec:
     target_env: str | None = None
     # optional shared/on-disk token caching (see auth.token_cache)
     cache: CacheSpec = field(default_factory=CacheSpec)
+    # Internal, verified acquisition identity for a routed request.
+    identity_context: dict[str, str] | None = None
 
     @property
     def normalized_kind(self) -> str:
@@ -330,6 +333,9 @@ class BridgeConfig:
     # config's ``auth`` is a *list* -- e.g. a bridge that must inject two
     # vault-sourced secrets into two env vars. Empty for the single-auth form.
     extra_auths: list[AuthSpec] = field(default_factory=list)
+    routing: RoutingSpec | None = None
+    # Internal execution marker, never accepted from config input.
+    routed_target: bool = False
 
     @property
     def auths(self) -> list[AuthSpec]:
@@ -706,6 +712,8 @@ def _parse_decorators(raw: Any) -> list[DecoratorSpec]:
 def parse_config(data: dict[str, Any], *, name: str | None = None,
                  source_path: Path | None = None) -> BridgeConfig:
     """Build a :class:`BridgeConfig` from a parsed mapping (no I/O)."""
+    if "routing" in data:
+        return _parse_routing(data, name=name, source_path=source_path)
     raw_server = data.get("server")
     if not isinstance(raw_server, dict):
         raise ConfigError("config must have a 'server' mapping")
@@ -805,23 +813,6 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         bullet = "\n  - ".join(errors)
         raise ConfigError(f"invalid bridge config:\n  - {bullet}")
     return cfg
-
-
-def _deep_merge(base: Any, overlay: Any) -> Any:
-    """Merge ``overlay`` onto ``base``.
-
-    Two mappings merge recursively (keys present only in ``base`` survive; keys
-    in ``overlay`` win). Any non-mapping value in ``overlay`` -- a scalar, a
-    list, or a type that differs from ``base`` -- **replaces** the base value
-    wholesale (lists are replaced, not concatenated, so an override fully
-    restates e.g. a ``tools.allow`` list rather than appending to it).
-    """
-    if isinstance(base, dict) and isinstance(overlay, dict):
-        merged = dict(base)
-        for key, val in overlay.items():
-            merged[key] = _deep_merge(merged[key], val) if key in merged else val
-        return merged
-    return overlay
 
 
 def _overlay_id(data: dict[str, Any], path: Path) -> str:

@@ -51,6 +51,7 @@ class BridgeSession:
         self._client: UpstreamClient | None = None
         self._pipeline: Pipeline | None = None
         self._tasks: set[asyncio.Task] = set()
+        self._router = None
 
     @property
     def decorator_count(self) -> int:
@@ -69,6 +70,14 @@ class BridgeSession:
 
     async def start(self) -> None:
         """Build the injector + transport + upstream client + pipeline, connect."""
+        if self.cfg.routing is not None:
+            from .routing import RoutedCore
+
+            self._router = RoutedCore(self.cfg)
+            ctx = BridgeContext(new_id=self._router.new_id, emit_to_client=self._write)
+            self._pipeline = Pipeline(
+                build_decorators(self.cfg, ctx), self._router.handle)
+            return
         injector = build_injector(self.cfg)
         self._transport = build_transport(self.cfg, injector)
         self._client = UpstreamClient(self._transport)
@@ -118,6 +127,8 @@ class BridgeSession:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         if self._pipeline is not None:
             await self._pipeline.aclose()
+        if self._router is not None:
+            await self._router.aclose()
         if self._client is not None:
             self._client.fail_pending()
         if self._transport is not None:
