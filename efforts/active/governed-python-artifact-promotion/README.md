@@ -418,7 +418,7 @@ win grows with build complexity.
 - Implemented `tools/seasoned_public_feed.py`:
   `resolve_seasoned_public_version(package, *, min_age_days=7, now=None,
   fetch=...)` queries PyPI's JSON API (`https://pypi.org/pypi/<package>/json`)
-  and returns the newest release whose EARLIEST uploaded file is at least
+  and returns the newest release whose NEWEST uploaded file is at least
   `min_age_days` old, excluding any release PyPI reports as yanked or that
   parses as a pre/dev release. `min_age_days=7` is a deliberately modest
   default floor for the toolchain specifically -- not derived from Phase 1's
@@ -434,27 +434,52 @@ win grows with build complexity.
   process, so this tool keeps working on a genuinely clean machine with no
   `packaging` installed anywhere yet) -- this module honors the same rule,
   via a narrow, self-contained `_parse_release_version` (recognizes only a
-  clean, unsuffixed numeric release segment, optionally with a PEP 440
-  epoch; anything else, including every genuine pre/post/dev release, is
-  excluded rather than guessed at).
-- Age is measured from a release's EARLIEST uploaded file, not its latest
-  -- a version later re-uploaded (e.g. to add a missing wheel tag) is still
-  measured from when it first became available, not artificially
-  refreshed. The real network fetch is isolated behind an injectable
+  clean numeric release segment with an optional PEP 440 epoch and/or
+  stable `.postN` suffix; anything else, including every genuine pre/dev
+  release, is excluded rather than guessed at).
+- Age is measured from a release's NEWEST uploaded file, not its earliest
+  -- this resolver returns a bare version, not a pinned exact file hash,
+  so a later install could select whichever file ends up published for
+  that version, including one added after the fact; every file must clear
+  the age floor for the seasoning guarantee to actually hold. The real
+  network fetch is isolated behind an injectable
   `fetch` parameter so tests exercise the actual selection logic against
   fixed, synthetic responses rather than real (slow, flaky, not
   reproducible) calls to pypi.org.
-- 26 unit tests (`tools/test_seasoned_public_feed.py`): newest-seasoned
-  selection, yanked/pre-release exclusion (including when they'd otherwise
-  be the newest-and-old-enough candidate), earliest-file age measurement,
-  the exact min-age-days boundary, empty/no-qualifying-release and
-  malformed-JSON/missing-`releases`-key fail-closed paths, HTTP/URL error
-  wrapping, a naive (non-timezone-aware) `now` rejection, the real
-  `_default_fetch`'s request/timeout construction (stubbed at
-  `urllib.request.urlopen`, never touching the real network), and
-  `_parse_release_version`'s own parametrized accept/reject cases. `ruff
-  check` and `tools/check-module-size.py` both pass; no changefile
-  required (this diff touches no `plugins/<name>/` tree).
+- 32 unit tests (`tools/test_seasoned_public_feed.py`): newest-seasoned
+  selection (including a stable `.postN` release), yanked/pre-release
+  exclusion (including when they'd otherwise be the newest-and-old-enough
+  candidate), newest-file age measurement, the exact min-age-days
+  boundary, empty/no-qualifying-release and malformed-JSON/wrong-root-
+  shape/missing-`releases`-key/offset-less-timestamp/negative-min-age-days
+  fail-closed paths, HTTP/URL error wrapping, a naive (non-timezone-aware)
+  `now` rejection, the real `_default_fetch`'s request/timeout
+  construction (stubbed at `urllib.request.urlopen`, never touching the
+  real network), and `_parse_release_version`'s own parametrized
+  accept/reject cases. `ruff check` and `tools/check-module-size.py` both
+  pass; no changefile required (this diff touches no `plugins/<name>/`
+  tree).
+- **Review round found 5 real issues, all fixed before merge:** (1) the
+  version parser rejected stable `.postN` releases along with genuine
+  pre/dev ones, even though the resolver's own contract only excludes
+  pre/dev -- extended the parser to accept an optional `.postN` suffix,
+  ordered so a bare release sorts before its own post release. (2) a
+  negative `min_age_days` silently disabled the seasoning control entirely
+  (and could admit a future-dated upload) -- now rejected up front. (3) a
+  non-object JSON root (e.g. a bare list) raised `AttributeError` instead
+  of the documented `SeasonedVersionError` -- fixed by checking the root's
+  type before calling `.get()` on it. (4) an offset-less upload timestamp
+  parsed successfully via `datetime.fromisoformat` but then raised an
+  uncaught `TypeError` when compared against the timezone-aware `now` --
+  now treated as a malformed timestamp (any file with one disqualifies the
+  whole version, never computed from only the files that happened to
+  parse). (5) **the most significant catch:** age was being measured from
+  a version's EARLIEST file, but this resolver returns a bare version
+  string, not a pinned file hash -- a version could look seasoned while
+  quietly carrying a brand-new file added after the fact, which a later
+  install could select. Switched to measuring from the NEWEST file (every
+  file for a version must clear the age floor), updated the docstrings,
+  and inverted the test that had codified the old (incorrect) behavior.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never

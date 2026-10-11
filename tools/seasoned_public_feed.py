@@ -24,7 +24,12 @@ querying one directly (Phase 3's consumer-side admission check, by
 contrast, queries a REAL governed feed directly at install time on a
 managed machine, since it has one available -- see that phase's own
 Validation Plan). Yanked and pre-release versions are never selected,
-regardless of age.
+regardless of age, and a version's age is measured from its NEWEST
+uploaded file -- not its oldest -- since this resolver returns a bare
+version string, never a pinned exact file hash: an install can select
+whichever file ends up published for that version, including one added
+after the fact, so every file must clear the seasoning floor for the
+guarantee to actually hold.
 """
 from __future__ import annotations
 
@@ -59,38 +64,42 @@ _PYPI_JSON_URL = "https://pypi.org/pypi/{package}/json"
 #: any other resolution failure, never a silent hang.
 _REQUEST_TIMEOUT_SECONDS = 30
 
-#: Matches ONLY an unsuffixed numeric release segment (optionally with a
-#: leading PEP 440 epoch, e.g. "1!2.3.4") -- deliberately narrower than
-#: real PEP 440 (no pre/post/dev/local segments at all). This module
-#: never imports the third-party `packaging` library (the exact
-#: constraint `build_toolchain_lock.py` already applies to itself --
-#: see its own `_assert_toolchain_satisfies_build_requires` docstring --
-#: so this tool keeps working on a genuinely clean machine with no
-#: `packaging` installed anywhere yet). A version string this pattern
-#: doesn't match is never guessed at: `_parse_release_version` returns
-#: `None` and the caller excludes it, the same conservative "can't
-#: safely classify it as a stable release, so don't use it" stance this
-#: module takes for an unparseable upload timestamp too. In practice
-#: this excludes every genuine pre/post/dev release (which is exactly
-#: the set this module must exclude anyway), at the cost of also
-#: excluding any release whose version string this narrow pattern
-#: doesn't recognize for some other reason -- an acceptable trade for a
-#: toolchain-only resolver that only ever needs to rank ordinary
-#: `setuptools`/`wheel`/`packaging` release versions.
-_RELEASE_VERSION_RE = re.compile(r"^(?:(\d+)!)?(\d+(?:\.\d+)*)$")
+#: Matches a numeric release segment (optionally with a leading PEP 440
+#: epoch, e.g. "1!2.3.4") and an optional, stable ``.postN`` suffix --
+#: deliberately narrower than real PEP 440 otherwise (no pre/dev/local
+#: segments at all, which stay excluded). This module never imports the
+#: third-party `packaging` library (the exact constraint
+#: `build_toolchain_lock.py` already applies to itself -- see its own
+#: `_assert_toolchain_satisfies_build_requires` docstring -- so this tool
+#: keeps working on a genuinely clean machine with no `packaging`
+#: installed anywhere yet). A version string this pattern doesn't match
+#: is never guessed at: `_parse_release_version` returns `None` and the
+#: caller excludes it, the same conservative "can't safely classify it
+#: as a stable release, so don't use it" stance this module takes for an
+#: unparseable upload timestamp too. `.postN` is included because post
+#: releases are stable (unlike pre/dev releases) -- excluding them could
+#: return an older version than a toolchain package's own corrective
+#: `.postN` republish, defeating the "newest seasoned stable release"
+#: contract this resolver advertises.
+_RELEASE_VERSION_RE = re.compile(r"^(?:(\d+)!)?(\d+(?:\.\d+)*)(?:\.post(\d+))?$")
 
 
-def _parse_release_version(version_str: str) -> tuple[int, tuple[int, ...]] | None:
-    """``(epoch, release_segments)`` for a clean, unsuffixed numeric
-    release version, or ``None`` if ``version_str`` doesn't match that
-    narrow shape (including every pre/post/dev release -- see
-    `_RELEASE_VERSION_RE`'s own docstring)."""
+def _parse_release_version(version_str: str) -> tuple[int, tuple[int, ...], int] | None:
+    """``(epoch, release_segments, post)`` for a clean release version (a
+    numeric release segment, with an optional PEP 440 epoch and/or stable
+    ``.postN`` suffix), or ``None`` if ``version_str`` doesn't match that
+    narrow shape (including every pre/dev release -- see
+    `_RELEASE_VERSION_RE`'s own docstring). ``post`` is ``-1`` when the
+    version has no ``.postN`` suffix, so a bare release sorts before its
+    own later ``.post1``, matching PEP 440's own ordering rule that an
+    unsuffixed release precedes its post releases."""
     match = _RELEASE_VERSION_RE.match(version_str.strip())
     if match is None:
         return None
     epoch = int(match.group(1)) if match.group(1) else 0
     release = tuple(int(part) for part in match.group(2).split("."))
-    return epoch, release
+    post = int(match.group(3)) if match.group(3) else -1
+    return epoch, release, post
 
 
 class SeasonedVersionError(RuntimeError):
@@ -118,21 +127,34 @@ def resolve_seasoned_public_version(
     now: datetime | None = None,
     fetch: Callable[[str], bytes] = _default_fetch,
 ) -> str:
-    """The newest public-PyPI release of ``package`` whose EARLIEST
-    uploaded file is at least ``min_age_days`` old as of ``now`` (defaults
-    to the real current UTC time), excluding any release PyPI reports as
-    yanked or that parses as a pre-release/dev release.
+    """The newest public-PyPI release of ``package`` whose NEWEST uploaded
+    file is at least ``min_age_days`` old as of ``now`` (defaults to the
+    real current UTC time), excluding any release PyPI reports as yanked
+    or that parses as a pre-release/dev release.
 
-    A release's age is measured from its earliest file's
-    ``upload_time_iso_8601`` -- not its latest -- so a release that was
-    later re-uploaded (e.g. to add a missing wheel tag) is still measured
-    from when it first became available, not artificially refreshed.
+    A release's age is measured from its NEWEST file's
+    ``upload_time_iso_8601`` -- not its earliest -- because this resolver
+    returns a bare version, never a pinned exact file hash: a later
+    install can select whichever file PyPI/the installer picks for that
+    version, including one added to an already-published release after
+    the fact. Measuring from the earliest file would let a seasoned-
+    looking old version quietly carry a brand-new, unseasoned wheel;
+    requiring every file for the version to meet the age floor is the
+    only way this resolver's "seasoned" guarantee actually holds for
+    whatever file ends up installed.
 
     Raises :class:`SeasonedVersionError` -- never returns a value silently
-    substituting a different guarantee -- on any network/HTTP failure, a
-    response that doesn't parse as the expected PyPI JSON shape, or when
-    no qualifying release exists at all (every release is too new,
-    yanked, or a pre-release)."""
+    substituting a different guarantee -- on a negative ``min_age_days``,
+    any network/HTTP failure, a response that doesn't parse as the
+    expected PyPI JSON shape, or when no qualifying release exists at all
+    (every release is too new, yanked, or a pre-release)."""
+    if min_age_days < 0:
+        raise SeasonedVersionError(
+            f"min_age_days={min_age_days!r} is negative -- this would "
+            "disable the seasoning control entirely (and could even admit "
+            "a future-dated upload); refusing rather than silently "
+            "treating every release as old enough"
+        )
     if now is None:
         now = datetime.now(timezone.utc)
     elif now.tzinfo is None:
@@ -161,7 +183,7 @@ def resolve_seasoned_public_version(
             f"{package}: PyPI JSON API response is not valid JSON"
         ) from exc
 
-    releases = data.get("releases")
+    releases = data.get("releases") if isinstance(data, dict) else None
     if not isinstance(releases, dict):
         raise SeasonedVersionError(
             f"{package}: PyPI JSON API response has no 'releases' object"
@@ -181,27 +203,47 @@ def resolve_seasoned_public_version(
             continue
         parsed = _parse_release_version(version_str)
         if parsed is None:
-            # Not a clean, unsuffixed release version -- either a
-            # pre/post/dev release (which must be excluded anyway) or a
-            # version string this narrow parser doesn't recognize for
-            # some other reason (see `_RELEASE_VERSION_RE`'s own
-            # docstring for why "exclude" is the safe default either
-            # way).
+            # Not a clean release version -- either a pre/dev release
+            # (which must be excluded anyway) or a version string this
+            # narrow parser doesn't recognize for some other reason (see
+            # `_RELEASE_VERSION_RE`'s own docstring for why "exclude" is
+            # the safe default either way).
             continue
         upload_times: list[datetime] = []
+        malformed_timestamp = False
         for f in files:
             raw_time = f.get("upload_time_iso_8601")
             if not isinstance(raw_time, str):
+                malformed_timestamp = True
                 continue
             try:
                 parsed_time = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
             except ValueError:
+                malformed_timestamp = True
+                continue
+            if parsed_time.tzinfo is None:
+                # An offset-less timestamp would otherwise raise an
+                # uncaught TypeError when compared against the
+                # timezone-aware `now` below -- treat it the same as any
+                # other malformed timestamp: never guessed at, excluded
+                # via the fail-closed path.
+                malformed_timestamp = True
                 continue
             upload_times.append(parsed_time)
-        if not upload_times:
+        if malformed_timestamp or not upload_times:
+            # A malformed/missing timestamp on ANY file is treated the
+            # same as "we cannot establish this version's age" -- never
+            # silently computed from only the files that DID parse,
+            # which could make a version that actually has a very recent,
+            # unparseable-timestamp file look older than it is.
             continue
-        earliest = min(upload_times)
-        age_days = (now - earliest).total_seconds() / 86400.0
+        # Measured from the NEWEST file, not the oldest -- see this
+        # function's own docstring for why (this resolver returns a bare
+        # version, not a pinned file hash, so every file for the version
+        # must meet the age floor for the "seasoned" guarantee to hold
+        # for whichever file actually gets installed).
+        newest = max(upload_times)
+        age_days = (now - newest).total_seconds() / 86400.0
         if age_days < min_age_days:
             continue
         candidates.append((parsed, version_str))

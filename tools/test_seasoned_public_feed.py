@@ -66,22 +66,68 @@ class TestResolveSeasonedPublicVersion:
         )
         assert got == "1.0.0"
 
-    def test_age_measured_from_earliest_file_not_latest(self):
-        # A version re-uploaded recently (e.g. to add a missing wheel tag)
-        # must still be measured from when it FIRST became available, not
-        # artificially refreshed by the later upload.
+    def test_accepts_seasoned_post_release_as_newest(self):
+        # A post release is stable (unlike pre/dev) -- a toolchain
+        # package's own corrective `.postN` republish must not be
+        # silently skipped in favor of an older base version.
         payload = _releases_payload(
             {
-                "1.0.0": [
-                    _file("2026-01-01T00:00:00.000000Z"),
-                    _file("2026-10-09T00:00:00.000000Z"),  # re-upload, 1 day old
-                ],
+                "1.0.0": [_file("2026-01-01T00:00:00.000000Z")],
+                "1.0.0.post1": [_file("2026-01-02T00:00:00.000000Z")],
             }
         )
         got = spf.resolve_seasoned_public_version(
             "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
         )
-        assert got == "1.0.0"
+        assert got == "1.0.0.post1"
+
+    def test_negative_min_age_days_rejected(self):
+        payload = _releases_payload({"1.0.0": [_file("2026-10-09T00:00:00.000000Z")]})
+        with pytest.raises(spf.SeasonedVersionError, match="negative"):
+            spf.resolve_seasoned_public_version(
+                "pkg", min_age_days=-1, now=_NOW, fetch=lambda url: payload
+            )
+
+    def test_wrong_json_root_shape_raises_seasoned_version_error(self):
+        payload = json.dumps([1, 2, 3]).encode("utf-8")
+        with pytest.raises(spf.SeasonedVersionError, match="no 'releases' object"):
+            spf.resolve_seasoned_public_version("pkg", now=_NOW, fetch=lambda url: payload)
+
+    def test_offsetless_upload_timestamp_excludes_the_version(self):
+        payload = _releases_payload(
+            {
+                # Malformed: no timezone offset on this file's timestamp.
+                "1.0.0": [{"upload_time_iso_8601": "2026-01-01T00:00:00", "yanked": False}],
+                "0.9.0": [_file("2026-01-01T00:00:00.000000Z")],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "0.9.0"
+
+    def test_age_measured_from_newest_file_not_oldest(self):
+        # A version re-uploaded recently (e.g. a new wheel added to an
+        # already-published release) must be measured from its NEWEST
+        # file, not its oldest -- this resolver returns a bare version,
+        # not a pinned file hash, so an install could select that fresh
+        # file; the seasoning guarantee only holds if every file for the
+        # version clears the age floor.
+        payload = _releases_payload(
+            {
+                "1.0.0": [
+                    _file("2026-01-01T00:00:00.000000Z"),
+                    _file("2026-10-09T00:00:00.000000Z"),  # fresh file, 1 day old
+                ],
+                "0.9.0": [_file("2026-01-01T00:00:00.000000Z")],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        # 1.0.0 is excluded (its newest file is only 1 day old); 0.9.0 is
+        # the newest version whose EVERY file clears the floor.
+        assert got == "0.9.0"
 
     def test_exact_boundary_age_is_accepted(self):
         exactly_seven_days_ago = "2026-10-03T00:00:00.000000Z"
@@ -199,18 +245,25 @@ class TestParseReleaseVersion:
     @pytest.mark.parametrize(
         "version_str,expected",
         [
-            ("1.0.0", (0, (1, 0, 0))),
-            ("2.3", (0, (2, 3))),
-            ("1!2.3.4", (1, (2, 3, 4))),
-            ("10.20.30", (0, (10, 20, 30))),
+            ("1.0.0", (0, (1, 0, 0), -1)),
+            ("2.3", (0, (2, 3), -1)),
+            ("1!2.3.4", (1, (2, 3, 4), -1)),
+            ("10.20.30", (0, (10, 20, 30), -1)),
+            ("1.0.0.post1", (0, (1, 0, 0), 1)),
+            ("1!2.3.4.post10", (1, (2, 3, 4), 10)),
         ],
     )
     def test_parses_clean_release_versions(self, version_str, expected):
         assert spf._parse_release_version(version_str) == expected
 
+    def test_bare_release_sorts_before_its_own_post_release(self):
+        base = spf._parse_release_version("1.0.0")
+        post = spf._parse_release_version("1.0.0.post1")
+        assert base < post
+
     @pytest.mark.parametrize(
         "version_str",
-        ["1.0.0rc1", "1.0.0.dev0", "1.0.0b2", "1.0.0a1", "1.0.0.post1", "not-a-version", ""],
+        ["1.0.0rc1", "1.0.0.dev0", "1.0.0b2", "1.0.0a1", "not-a-version", ""],
     )
     def test_rejects_non_clean_versions(self, version_str):
         assert spf._parse_release_version(version_str) is None
