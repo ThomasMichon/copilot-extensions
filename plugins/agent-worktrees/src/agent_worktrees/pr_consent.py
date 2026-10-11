@@ -36,9 +36,12 @@ def consent_update_key(
     evidence = [
         snap.head_sha,
         readiness["consent_label"].lower(),
-        sorted(
-            (r.id, r.state, r.user, r.commit_id, r.dismissed)
-            for r in snap.reviews if r.user != snap.author
+        max(
+            (r.id, r.user, r.commit_id)
+            for r in snap.reviews
+            if r.user != snap.author and not r.dismissed
+            and r.state.upper() == "APPROVED"
+            and r.commit_id in ("", snap.head_sha)
         ),
     ]
     return hashlib.sha256(json.dumps(evidence).encode("utf-8")).hexdigest()[:24]

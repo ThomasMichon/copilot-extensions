@@ -694,14 +694,15 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             merge = result.payload.get("merge") or {}
             if merge.get("needs_consent"):
                 label = merge.get("consent_label") or "the merge-consent label"
-                print(
-                    f"pr-watch: NEXT -> grant merge consent (add label "
-                    f"'{label}') -- the PR will not merge until you do "
-                    f"({merge.get('reason', '')})",
-                    file=sys.stderr,
-                )
                 if merge.get("consent_command"):
                     print(f"pr-watch: NEXT -> {merge['consent_command']}", file=sys.stderr)
+                else:
+                    print(
+                        f"pr-watch: NEXT -> grant merge consent (add label "
+                        f"'{label}') -- the PR will not merge until you do "
+                        f"({merge.get('reason', '')})",
+                        file=sys.stderr,
+                    )
             elif merge.get("consent_action") == "already":
                 print(
                     "pr-watch: merge consent already granted; the merge gate will proceed",

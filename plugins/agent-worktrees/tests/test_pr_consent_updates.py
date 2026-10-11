@@ -117,6 +117,24 @@ def test_cursor_clears_acknowledgement_on_block_and_reprompts_afterward():
     assert _wait(snap, baseline=cleared).matched
 
 
+def test_ignored_review_activity_does_not_repeat_consent_update():
+    snap = _approved()
+    cursor = pc.Baseline.from_cursor(_wait(snap).payload["cursor"])
+    for review in (
+        pc.Review(8, "COMMENTED", "reviewer", commit_id="head"),
+        pc.Review(8, "PENDING", "reviewer", commit_id="head"),
+        pc.Review(8, "APPROVED", "reviewer", commit_id="head", dismissed=True),
+        pc.Review(8, "APPROVED", "author", commit_id="head"),
+        pc.Review(6, "APPROVED", "older-reviewer", commit_id="head"),
+    ):
+        result = _wait(replace(snap, reviews=(*snap.reviews, review)), baseline=cursor)
+        assert not result.matched
+        assert "updates" not in result.payload
+        assert pc.Baseline.from_cursor(result.payload["cursor"]).consent_update == (
+            cursor.consent_update
+        )
+
+
 def test_fetch_errors_do_not_invent_actionable_state():
     def fetch():
         raise ProviderError("unavailable", transient=True)
@@ -172,6 +190,8 @@ def test_cli_wakes_with_action_and_exit_zero(monkeypatch, capsys, json_mode):
     assert payload["transitions"] == []
     if not json_mode:
         assert "NEXT -> agent-worktrees pr-merge owner/repo 42" in captured.err
+        assert captured.err.count("NEXT ->") == 1
+        assert "add label" not in captured.err
 
 
 def test_merge_preview_and_apply_share_readiness_without_waiting(capsys):

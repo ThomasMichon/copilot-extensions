@@ -198,8 +198,10 @@ the caller selected `--until merged`. This is a **state update**, reported as
 does not grant consent or authorize consenting for another author.
 An unchanged update is acknowledged only by the cursor returned with that
 update: re-arm with it to deduplicate; `pr-watch cursor` does not acknowledge
-an update it never delivered. A new head/review or an observed intervening block
-can prompt again. Drafts, holds, conflicts/unknown mergeability, pending/failed
+an update it never delivered. A new head/authoritative approval or an observed
+intervening block can prompt again; ignored comments, pending/dismissed reviews,
+and author reviews do not change the consent acknowledgement. Drafts, holds,
+conflicts/unknown mergeability, pending/failed
 checks, stale approvals, and wrong-base PRs do not receive this immediate wake.
 The provider's empty checks rollup retains its existing "no checks reported"
 meaning. Self-merge and human-merge profiles do not receive consent updates.
