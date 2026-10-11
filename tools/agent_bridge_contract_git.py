@@ -14,16 +14,32 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from functools import lru_cache
 import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 _GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
-_MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
-_FETCH_RECOVERY_ATTEMPTED = False
+_LOCAL_GIT_TIMEOUT = 10
+
+
+@lru_cache(maxsize=1)
+def require_local_object_reads() -> None:
+    result = subprocess.run(
+        ["git", "--version"], capture_output=True, text=True, check=True,
+        env=clean_git_environment(), timeout=_LOCAL_GIT_TIMEOUT,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    match = re.search(r"\b(\d+)\.(\d+)(?:\.(\d+))?", result.stdout)
+    if match is None or tuple(map(int, match.groups(default="0"))) < (2, 45, 0):
+        raise RuntimeError(
+            "Local-only contract validation requires Git 2.45+ "
+            "(GIT_NO_LAZY_FETCH support); no object probes were performed."
+        )
 
 
 def clean_git_environment() -> dict[str, str]:
@@ -53,33 +69,24 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+@lru_cache(maxsize=512)
 def git(*args: str) -> subprocess.CompletedProcess[str]:
+    require_local_object_reads()
     return subprocess.run(
         ["git", "-C", str(REPO), *args],
         capture_output=True,
         text=True,
         check=False,
         env=clean_git_environment(),
+        timeout=_LOCAL_GIT_TIMEOUT,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
 
 
 def ensure_commit_available(commit: str) -> bool:
-    global _FETCH_RECOVERY_ATTEMPTED
-
-    if git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
-        return True
-    if _FETCH_RECOVERY_ATTEMPTED:
-        return False
-    _FETCH_RECOVERY_ATTEMPTED = True
-    for fetch_args in (
-        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
-        ("fetch", "--quiet", "--unshallow", "origin"),
-        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
-    ):
-        git(*fetch_args)
-        if git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
-            return True
-    return False
+    # Validation is read-only. Missing historical commits are opportunistic
+    # evidence, not permission to fetch through a different credential context.
+    return git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0
 
 
 def git_blob(commit: str, path: str) -> str | None:
@@ -90,7 +97,9 @@ def git_blob(commit: str, path: str) -> str | None:
     return value if result.returncode == 0 and _GIT_OBJECT_RE.fullmatch(value) else None
 
 
+@lru_cache(maxsize=256)
 def git_file_sha256(commit: str, path: str) -> str | None:
+    require_local_object_reads()
     if not ensure_commit_available(commit):
         return None
     result = subprocess.run(
@@ -98,21 +107,27 @@ def git_file_sha256(commit: str, path: str) -> str | None:
         capture_output=True,
         check=False,
         env=clean_git_environment(),
+        timeout=_LOCAL_GIT_TIMEOUT,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
     if result.returncode != 0:
         return None
     return sha256_bytes(result.stdout)
 
 
+@lru_cache(maxsize=256)
 def blob_sha256(blob: str) -> str | None:
     """Hash a Git blob object's content directly by its own object id --
     content-addressed, so resolvable even when the commit that captured it
     is orphaned (e.g. by a squash merge)."""
+    require_local_object_reads()
     result = subprocess.run(
         ["git", "-C", str(REPO), "cat-file", "-p", f"{blob}^{{blob}}"],
         capture_output=True,
         check=False,
         env=clean_git_environment(),
+        timeout=_LOCAL_GIT_TIMEOUT,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
     if result.returncode != 0:
         return None
