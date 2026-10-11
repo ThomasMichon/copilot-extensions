@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any
 
 from ._peer_launch import ContextRefused
 from .acquisition_contract import AcquisitionRefused, AcquisitionRequest
-from .session_lifecycle_cli import _agent_worktrees_launch_prefix
+from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
 from .worktree_head import parse_head_payload
 
 
@@ -21,9 +20,7 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
     if not prefix:
         raise AcquisitionRefused("worktrees_unavailable", "worktree owner capability is unavailable")
     argv = [*prefix, *(["--project", project] if project else []), *args]
-    env = {key: value for key, value in os.environ.items()
-           if key not in {"VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "__PYVENV_LAUNCHER__",
-                          "AGENT_RT_ROOT", "AGENT_RT_PY", "COPILOT_PLUGIN_ROOT"}}
+    env = _agent_worktrees_environment()
     from agent_procutil import no_window_kwargs
 
     proc = await asyncio.create_subprocess_exec(

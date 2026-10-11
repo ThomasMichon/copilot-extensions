@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 import os
 import shutil
 import subprocess
@@ -163,14 +164,42 @@ async def test_actual_installed_peer_executes_with_service_path(installation, mo
         "import json, os, sys\n"
         "assert 'AGENT_RT_ROOT' not in os.environ\n"
         "assert 'COPILOT_PLUGIN_ROOT' not in os.environ\n"
+        "assert 'AGENT_HOME' not in os.environ\n"
         "print(json.dumps({'argv': sys.argv[1:]}))\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENT_RT_ROOT", str(installation[0]))
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/caller/payload")
+    monkeypatch.setenv("AGENT_HOME", "/caller/registry")
     result = await authority.worktree_command(["list", "--json", "--fresh"], "project-a")
     assert result == {"argv": ["--project", "project-a", "list", "--json", "--fresh"]}
     which.assert_not_called()
+
+
+def test_handoff_check_scrubs_owner_routing(installation, monkeypatch, capsys):
+    python = complete_slot(installation[1])
+    for key in (
+        "AGENT_HOME", "AGENT_RT_ROOT", "AGENT_RT_PY", "COPILOT_PLUGIN_ROOT",
+        "VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "__PYVENV_LAUNCHER__",
+    ):
+        monkeypatch.setenv(key, "/caller/override")
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, '{"findings":[]}', ""))
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    with pytest.raises(SystemExit) as error:
+        lifecycle._cmd_handoff_check(argparse.Namespace(
+            worktree_id="worktree-a", execute=True, json=True,
+        ))
+    assert error.value.code == 0
+    assert run.call_args.args[0][:6] == [
+        str(python), "-I", "-X", "utf8", "-m", "agent_worktrees",
+    ]
+    env = run.call_args.kwargs["env"]
+    assert "AGENT_HOME" not in env
+    assert not any(key in env for key in (
+        "PYTHONHOME", "PYTHONPATH", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT",
+        "AGENT_RT_PY", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__",
+    ))
+    assert json.loads(capsys.readouterr().out) == {"findings": []}
 
 
 @pytest.mark.asyncio
