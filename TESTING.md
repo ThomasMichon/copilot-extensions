@@ -22,6 +22,9 @@ object reads are memoized within one validation invocation, with bounded
 caches, so fixture fan-out does not multiply identical Git subprocesses. Fetch any
 additional history explicitly, using the repository's scoped identity, before
 running validation rather than asking the guard to recover it during a push.
+The headless-launch guard shares a single file read and AST parse among its
+Python rules within each invocation; its rule coverage, syntax-error refusal,
+and declarative checks are unchanged.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin under
 `.test-venvs/<platform>/` (git-ignored; uses `uv`, so vendored
