@@ -1,0 +1,40 @@
+"""Let an identity-confirmed native unit own its supervisor's version restart."""
+
+from __future__ import annotations
+
+import os
+import logging
+import re
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .supervisor_lifecycle import daemon_audit
+if TYPE_CHECKING:
+    from .supervisor_daemon import SupervisorDaemon
+log = logging.getLogger("agent-dispatch.supervisor-native-lifecycle")
+
+
+class NativeOwnershipUnconfirmed(RuntimeError):
+    pass
+
+
+def native_restart_unit() -> str | None:
+    if sys.platform != "linux":
+        return None
+    unit = os.environ.get("AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT", "")
+    if not re.fullmatch(r"agent-dispatch-supervisor(?:-[A-Za-z0-9_-]+)?\.service", unit):
+        return None
+    if os.environ.get("AGENT_DISPATCH_SUPERVISOR_MAIN_PID") != str(os.getpid()):
+        return None
+    try:
+        lines = Path("/proc/self/cgroup").read_text().splitlines()
+    except OSError as exc:
+        log.warning("native supervisor cgroup identity unavailable; native restart ownership is unconfirmed")
+        raise NativeOwnershipUnconfirmed("native cgroup identity unavailable") from exc
+    return unit if any(line.rsplit("/", 1)[-1] == unit for line in lines) else None
+
+
+def request_native_restart(daemon: SupervisorDaemon, unit: str) -> None:
+    daemon._self_update_native_unit = unit
+    daemon_audit(daemon, "handoff", "native-restart-requested")

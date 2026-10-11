@@ -577,8 +577,16 @@ def _resolve_bind_host_resilient(
 def _cmd_retire_supervisors(args: argparse.Namespace) -> int:
     """Internal Windows installer seam: retire every supervisor generation."""
     from .supervisor_processes import retire_windows_supervisor_generations
-
+    from pathlib import Path
+    from .supervisor_lifecycle import Invocation, audit
+    invocation = Invocation.create("retirement-cli", "retire")
+    audit(Path(args.install_dir), "retire", "windows-generation-inventory",
+          invocation=invocation, outcome="begin" if os.name == "nt" else "skipped")
     result = retire_windows_supervisor_generations(args.install_dir)
+    if os.name == "nt":
+        audit(Path(args.install_dir), "retire", "windows-generation-inventory",
+              invocation=invocation, outcome="ok" if result.ok else "fail",
+              selected_pids=result.selected, retired_pids=result.retired)
     payload = {
         "ok": result.ok,
         "selected": result.selected,
