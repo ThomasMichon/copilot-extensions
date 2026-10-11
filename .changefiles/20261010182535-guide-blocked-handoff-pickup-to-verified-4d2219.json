@@ -1,0 +1,9 @@
+{
+  "comment": "Guide blocked handoff pickup to verified continuation-head recovery instead of bug filing",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

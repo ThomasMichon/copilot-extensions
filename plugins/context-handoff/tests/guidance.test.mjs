@@ -40,6 +40,24 @@ function assertOrdered(text, before, after, message) {
   assert.ok(beforeIndex < afterIndex, message);
 }
 
+test("already-claimed recovery verifies lineage before offering a consent-gated bind", () => {
+  const skill = readFileSync(join(plugin, "skills", "context-handoff", "SKILL.md"), "utf8");
+  assert.match(skill, /references\/already-claimed-recovery\.md/);
+  const recovery = readFileSync(
+    join(plugin, "skills", "context-handoff", "references", "already-claimed-recovery.md"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  assertOrdered(recovery, "session-lineage", "offer to bind", "Inspect before offering repair");
+  assert.match(recovery, /claimant may have handed off again/);
+  assert.match(recovery, /explicit operator consent before changing the binding/);
+  assert.match(recovery, /refused session's ambient pane, PID, launch, and assignment bindings must not/);
+  assert.match(recovery, /bound: true` alone does not prove promotion/);
+  assert.match(recovery, /missing|Missing/);
+  assert.match(recovery, /\/consume-handoff.*pending baton/);
+  assert.match(recovery, /Do not recommend consumption when no pending delivery remains/);
+  assert.doesNotMatch(recovery, /offer to file a bug/i);
+});
+
 test("successor directive drives the parent objective across context windows", () => {
   assert.match(CONTINUATION_DIRECTIVE, /active responsibility within the authority it assigns/);
   assert.match(CONTINUATION_DIRECTIVE, /bounded delegates continue only their inherited scope/);
@@ -519,4 +537,3 @@ test("quiescing owned background work is required before composing, in every sur
     assert.match(emitSource, /quiesce/i);
   }
 });
-

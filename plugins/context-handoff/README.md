@@ -9,13 +9,15 @@ handoff batons, and can **signal that a handoff pickup is requested**. It does
 any other cutover choreography itself. Those actions belong to external control
 planes such as a worktree manager, agent-bridge, or a human operator.
 
-This plugin ships four cooperating payload pieces:
+This plugin ships six cooperating payload pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- soft/hard warnings fire under the default `manual-only` mode too (any mode other than `off`); only the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling, are opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
+| **[context-handoff-setup skill](skills/context-handoff-setup/SKILL.md)** | Skill | Configures the plugin and handoff policy |
+| **[diagnosing-handoff-cutover skill](skills/diagnosing-handoff-cutover/SKILL.md)** | Skill | Diagnoses head-session and cutover-state mismatches through the owning control plane |
 | **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, a lock/rebase-safe `sync-worktree` (shared with the force-tier path), `list-sessions`/`get-previous-session` lineage lookups, and `abort` to cancel a pending handoff before it's consumed. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
@@ -253,10 +255,21 @@ worktree's own state first rather than doing a global search.
 A consume attempt that fails because the handoff was already consumed (or is
 currently being consumed elsewhere) always reports the claimant's session id,
 via `result.claimedBySession` and inline in the message text -- for both the
-file-backed and agent-dispatch task-backed stores. When this happens, state
-the claimant session id to the user and offer to file a bug (do not file one
-automatically): repeated or racing consumption of the same handoff is
-typically a sign of a real defect upstream, not routine behavior.
+file-backed and agent-dispatch task-backed stores, including an in-progress
+task-delivery checkpoint. The blocked response directs the agent to inspect
+the claimant's authoritative lineage and worktree head before recommending
+recovery. The claimant may already have a later successor; it is not
+automatically the rightful head.
+
+Report the verified continuation session separately from any stale recorded
+head. If a supported exact-token binding repair is needed, offer to bind that
+session as the new head, require operator consent, and verify the head after
+the operation. Missing or conflicting evidence does not authorize a guessed
+binding or a raw override. Recommend resuming the verified session and using
+`/consume-handoff` there for its pending continuation, never replaying the old
+baton in the refused session. Same-claimant interrupted delivery retries
+remain supported. The [continuation skill](skills/context-handoff/SKILL.md)
+owns the detailed procedure; bug filing is not the default recovery offer.
 
 ### Extension-host disconnected mid-call
 

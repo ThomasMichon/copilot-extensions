@@ -753,7 +753,7 @@ test("a second consume racing a live in-progress lock reports the lock owner's s
   });
 });
 
-test("formatConsumeResult surfaces the claimant session id and offers to file a bug", () => {
+test("formatConsumeResult directs verified head recovery instead of bug filing", () => {
   const text = formatConsumeResult({
     ok: false,
     alreadyConsumed: true,
@@ -761,7 +761,14 @@ test("formatConsumeResult surfaces the claimant session id and offers to file a 
     message: "Handoff X was already consumed by session `some-other-session`.",
   });
   assert.match(text, /some-other-session/);
-  assert.match(text, /offer to file a bug/i);
+  assert.match(text, /authoritative lineage/);
+  assert.match(text, /deduced true head.*later successor/);
+  assert.match(text, /Offer to bind the verified continuation session/);
+  assert.match(text, /require explicit user consent and verify/);
+  assert.match(text, /resuming that session and using \/consume-handoff/);
+  assert.match(text, /not replaying this claimed baton/);
+  assert.match(text, /evidence is unavailable or conflicting/);
+  assert.doesNotMatch(text, /offer to file a bug/i);
 });
 
 test("formatConsumeResult without a known claimant does not fabricate a bug offer", () => {
@@ -770,6 +777,7 @@ test("formatConsumeResult without a known claimant does not fabricate a bug offe
     message: "File-backed handoff was not found.",
   });
   assert.doesNotMatch(text, /offer to file a bug/i);
+  assert.doesNotMatch(text, /Offer to bind|Claimant session|deduced true head/);
 });
 
 test("noteHandoffInRecord returns the CLI's confirmed outcome, not the request", () => {
@@ -1136,6 +1144,22 @@ test("task-backed consume checkpoints payload before one-time consume and surviv
     );
     assert.equal(second.ok, true);
     assert.equal(second.payload, "full brief");
+    assert.equal(consumeCalls, 1);
+
+    const replay = consumeDispatchHandoffTask(
+      "C:\\repo", "task-1", "refused-session", true,
+      {
+        readPayload: () => payload,
+        consumeTask: () => { throw new Error("must not replay"); },
+        stateDirResolver: () => dir,
+        promoteHead: () => { throw new Error("must not change head"); },
+      },
+    );
+    assert.equal(replay.ok, false);
+    assert.equal(replay.claimedBySession, "successor-1");
+    assert.equal(replay.worktree, "wt-example");
+    assert.equal(replay.predecessorSession, "predecessor-1");
+    assert.match(formatConsumeResult(replay), /Offer to bind/);
     assert.equal(consumeCalls, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
