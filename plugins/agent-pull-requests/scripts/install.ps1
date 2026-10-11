@@ -309,6 +309,27 @@ function Get-PayloadHash {
         Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
             Sort-Object FullName | ForEach-Object { $roots += $_.FullName }
     }
+    # This plugin's own dependencies on shared libraries are resolved live
+    # via [tool.uv.sources] `path = "..."` entries in pyproject.toml (e.g.
+    # "../../libs/work-coalescing-singleton") -- never vendored -- so
+    # those libraries' OWN content is just as much a part of this plugin's
+    # actual runtime payload as src\agent_pull_requests is. Fingerprint
+    # each referenced library's COMPLETE directory (not just its own
+    # pyproject.toml): a shared library's source changing without a
+    # version bump here must still be detected as content drift.
+    if (Test-Path $pp) {
+        $ppText = Get-Content $pp -Raw
+        $sourcesMatch = [regex]::Match($ppText, '(?ms)^\[tool\.uv\.sources\](.*?)(?=^\[|\z)')
+        if ($sourcesMatch.Success) {
+            $pathMatches = [regex]::Matches($sourcesMatch.Groups[1].Value, 'path\s*=\s*"([^"]*)"')
+            foreach ($m in ($pathMatches | Sort-Object { $_.Groups[1].Value })) {
+                $resolved = Join-Path $PluginDir $m.Groups[1].Value
+                if (Test-Path $resolved) {
+                    $roots += (Resolve-Path $resolved).Path
+                }
+            }
+        }
+    }
     if ($roots.Count -eq 0) { return '' }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
