@@ -1,0 +1,9 @@
+{
+  "comment": "Assert retired delivery identity instead of transient retry-worker count",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
