@@ -67,8 +67,8 @@ Additional request, with the private host identifier redacted:
       _(agent-recommended implementation)_
 - [x] Add focused regression coverage, update directly affected documentation,
       and add the required release changefile. _(agent-recommended)_
-- [ ] Merge the implementation after review and required checks.
-- [ ] Sweep test-flow launch boundaries and suppress unintended test-runner
+- [x] Merge the implementation after review and required checks.
+- [x] Sweep test-flow launch boundaries and suppress unintended test-runner
       windows, preserving explicitly interactive fixtures and containment.
 
 ### Phase 3 - Promote, deploy and close
@@ -94,7 +94,7 @@ Additional request, with the private host identifier redacted:
 - [ ] The promoted `main` snapshot contains the fix and release metadata.
 - [ ] Deployed runtime evidence establishes the fixed behavior, without private
       identifiers in public artifacts.
-- [ ] Shared test-runner validation covers nested Python, PowerShell and Git
+- [x] Shared test-runner validation covers nested Python, PowerShell and Git
       launches, stdio, timeout cleanup, POSIX parity and native desktop window
       observation. _(agent-recommended)_
 
@@ -197,3 +197,16 @@ contain terminal-multiplexer descendants.
   no-window primitive to both legacy and same-cell probes; 59 targeted config
   and peer-boundary tests passed. Capture, timeout, encoding and optional-peer
   behavior remain unchanged.
+- Implementation PR #6055 merged as `ee739cb13260` after current-head review
+  and all checks passed. The reviewer had no remaining Medium/High findings;
+  the carried index-status finding was already fixed in the reviewed head.
+  Native Windows and Linux CI runner checks passed. Release promotion and
+  authorized runtime rollout remain the next gates.
+- Promotion run `38099828902` passed every validation job except the bridge's
+  frozen wrapper-authority corpus. Issue #6098 tracks the stale component
+  digest after the shared process-helper change. Refreshed only the three
+  authority bindings and their registry checksums, preserving wire vectors and
+  refusal behavior. Targeted corpus/attestation validation passed 42 checks
+  with six Linux-only skips; the contract guard passed both contracts and all
+  35 fixtures. The local full runner was refused by an existing host admission
+  lease after a bounded wait; no competing workload was stopped.
