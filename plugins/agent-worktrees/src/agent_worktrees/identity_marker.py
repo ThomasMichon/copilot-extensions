@@ -142,6 +142,10 @@ def load_identity_key() -> bytes | None:
     wrong length) returns ``None`` rather than raising -- this is the
     hot-path reader used by every PR publish.
     """
+    from .identity_vault import ARGV_ENV, load_cached_vault_key
+
+    if ARGV_ENV in os.environ and KEY_ENV_VAR not in os.environ:
+        return load_cached_vault_key()
     path = identity_key_path()
     if path is None:
         return None
@@ -171,6 +175,13 @@ def generate_identity_key(path: Path | None = None, *, force: bool = False) -> P
     since overwriting silently would strand every marker already published
     under the old key (they would stop decrypting, with no warning).
     """
+    from .identity_vault import ARGV_ENV
+
+    if ARGV_ENV in os.environ:
+        raise IdentityMarkerError(
+            "vault-backed identity uses one shared owner key; provision it in the vault, "
+            "not as a new machine file"
+        )
     target = path or identity_key_path()
     if target is None:
         raise IdentityMarkerError(

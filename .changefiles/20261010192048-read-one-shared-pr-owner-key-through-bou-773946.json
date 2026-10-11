@@ -1,0 +1,9 @@
+{
+  "comment": "Read one shared PR owner key through bounded cache-only vault invocation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

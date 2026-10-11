@@ -82,6 +82,29 @@ session on a machine you didn't expect.
 
 ## Decrypting the `enc=` field
 
+### One owner key through the vault cache
+
+Set `AGENT_WORKTREES_IDENTITY_VAULT_ARGV` to a JSON argv array naming the
+absolute payload-local agent-vault command from its session catalog.
+`AGENT_WORKTREES_IDENTITY_VAULT_ENTRY` selects the common entry (default:
+`Identity/PR-attribution`). Store one base64-encoded 32-byte owner key in that
+entry in the synced vault database; all machines use the same entry and key.
+Do not create an identity key independently on each machine.
+
+Enable the vault's protected local cache and explicitly unlock/populate it
+once on each machine with the vault's `cache-populate` flow. Publication and
+decode use `get <entry> password --cache-only`: no daemon contact, automatic
+unlock, prompt or key creation. A cache miss or invalid key emits a sanitized
+warning and never switches silently to another key source. The existing
+`AGENT_WORKTREES_IDENTITY_KEY` file override takes precedence for compatibility;
+it must contain the same owner key. Without either explicit source, legacy
+OneDrive file resolution is unchanged.
+
+The vault database is the common portable authority; local cache wrapping is
+machine-bound and must not itself be synced. Rotating the vault key requires
+explicit cache refresh on every machine; keep the previous key securely for
+older PR tokens, which cannot be decrypted with a replacement key.
+
 Windows encryption uses native CNG AES-256-GCM, including on ARM64, with the
 same portable token format and shared key as the cryptography backend used on
 other platforms. No machine-derived key is used for PR tokens. Machine-bound
