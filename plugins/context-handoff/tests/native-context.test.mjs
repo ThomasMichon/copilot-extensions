@@ -94,7 +94,9 @@ test("observer rechecks changes, bounds failures and retains flag on unknown", a
   metadata = { tools: [] };
   assert.equal((await observer.observe("/repo")).native, true);
   observer.invalidate();
-  assert.equal((await observer.observe("/repo")).native, false);
+  const unavailable = await observer.observe("/repo");
+  assert.equal(unavailable.native, false);
+  assert.match(unavailable.warnings[0], /enabled in settings.*unavailable/);
   assert.equal(calls, 2);
   const timeout = createNativeContextObserver({
     readSetting: async () => ({ enabled: true, warnings: [] }),
@@ -114,6 +116,11 @@ test("observer rechecks changes, bounds failures and retains flag on unknown", a
   const recovered = await slowSettings.observe("/repo");
   assert.equal(recovered.native, true);
   assert.match(recovered.warnings[0], /settings observation failed/);
+  const disabled = createNativeContextObserver({
+    readSetting: async () => ({ enabled: false, warnings: [] }),
+    getMetadata: async () => full,
+  });
+  assert.match((await disabled.observe("/repo")).warnings[0], /explicit settings opt-out/);
 });
 
 test("real extension event path suppresses force and resets only root windows", async () => {

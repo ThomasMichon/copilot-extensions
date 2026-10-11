@@ -195,6 +195,11 @@ export function createNativeContextObserver({
             warnings.push("Native-context offered-tool observation failed or timed out.");
           }
         }
+        if (setting.enabled === true && availability === "unavailable") {
+          warnings.push("Native context is enabled in settings, but required offered tools are unavailable; using custom recovery.");
+        } else if (setting.enabled === false && availability === "available") {
+          warnings.push("Native context tools are offered despite an explicit settings opt-out; respecting the opt-out.");
+        }
         const value = {
           ...selectNativeContext(setting.enabled, availability),
           setting: setting.enabled, availability, warnings,
