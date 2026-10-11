@@ -130,6 +130,165 @@ def _stamp_module():
     return module
 
 
+def _paths_module():
+    spec = importlib.util.spec_from_file_location("stamp_paths_test", PLUGIN / "scripts/stamp_paths.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("attributes,accepted", [
+    (0xC, True), (0xF, True), (0x7, False), (0x8, False),
+    (0x4, False), (0x1F, False), (0, False),
+])
+def test_windows_owner_requires_enabled_owner_capable_not_deny_only(attributes, accepted):
+    module = _paths_module()
+    owners = module._windows_owner_sids("user", [("group", attributes)])
+    assert ("group" in owners) is accepted
+    assert "user" in owners
+    assert "foreign" not in owners
+
+
+@pytest.mark.parametrize("kind,flags,mask,sid,accepted", [
+    (0, 0, 0x1F01FF, "user", True),
+    (0, 0, 0x1F01FF, "owner-group", True),
+    (0, 0, 0x1F01FF, "S-1-5-18", True),
+    (0, 0, 0x1F01FF, "S-1-5-32-544", True),
+    (0, 0, 0x1F01FF, "S-1-3-4", True),
+    (0, 0, 0x120089, "ordinary-group", True),
+    (0, 8, 0x1F01FF, "ordinary-group", True),
+    (1, 0, 0x1F01FF, "ordinary-group", True),
+    (0, 0, 0x1F01FF, "ordinary-group", False),
+    (0, 0, 0x40000000, "ordinary-group", False),
+    (0, 0, 0x10000000, "ordinary-group", False),
+    (0, 0, 0x40000, "ordinary-group", False),
+    (0, 0, 0x80000, "ordinary-group", False),
+    (0, 0, 0x10000, "ordinary-group", False),
+    (0, 0, 0x40, "ordinary-group", False),
+    (0, 0, 0x100, "ordinary-group", False),
+    (0, 0, 0x10, "ordinary-group", False),
+    (0, 0, 0x4, "ordinary-group", False),
+    (0, 0, 0x2, "ordinary-group", False),
+    (9, 0, 0x1F01FF, "user", False),
+])
+def test_windows_dacl_does_not_admit_shared_mutation(kind, flags, mask, sid, accepted):
+    assert _paths_module()._windows_private_dacl(
+        [(kind, flags, mask, sid)], {"user", "owner-group"},
+    ) is accepted
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows SID and ACL APIs")
+@pytest.mark.parametrize("owner,acl,accepted", [
+    ("user", "(A;;FA;;;OW)", True),
+    ("owner-group", "(A;;FA;;;OW)", True),
+    ("ordinary-group", "(A;;FA;;;OW)", False),
+    ("S-1-5-21-1-2-3-1001", "(A;;FA;;;OW)", False),
+    ("user", "(A;;FA;;;WD)", False),
+    ("owner-group", "(A;;FA;;;WD)", False),
+    ("user", "NO_ACCESS_CONTROL", False),
+    ("user", "(A;;FR;;;WD)(A;;FA;;;OW)", True),
+    ("user", "(D;;FA;;;WD)(A;;FA;;;WD)", False),
+])
+def test_native_windows_owner_and_acl_admission_without_acl_mutation(
+    tmp_path, monkeypatch, owner, acl, accepted,
+):
+    import ctypes
+    from ctypes import wintypes
+    import win32api
+    import win32con
+    import win32security
+
+    token = win32security.OpenProcessToken(
+        win32api.GetCurrentProcess(), win32con.TOKEN_QUERY,
+    )
+    try:
+        user = win32security.ConvertSidToStringSid(
+            win32security.GetTokenInformation(token, win32security.TokenUser)[0],
+        )
+        groups = [(win32security.ConvertSidToStringSid(sid), attributes) for sid, attributes
+                  in win32security.GetTokenInformation(token, win32security.TokenGroups)]
+    finally:
+        token.Close()
+    if owner == "owner-group":
+        eligible = [sid for sid, attributes in groups
+                    if attributes & 0xC == 0xC and not attributes & 0x10]
+        if not eligible:
+            pytest.skip("current standard token has no enabled owner-capable group")
+        owner_sid = eligible[0]
+    elif owner == "ordinary-group":
+        owner_sid = next(sid for sid, attributes in groups
+                         if attributes & 4 and not attributes & 8)
+    else:
+        owner_sid = user if owner == "user" else owner
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = (
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID),
+        wintypes.LPVOID,
+    )
+    security.GetSecurityDescriptorOwner.argtypes = (
+        wintypes.LPVOID, ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.BOOL),
+    )
+    security.GetSecurityDescriptorDacl.argtypes = (
+        wintypes.LPVOID, ctypes.POINTER(wintypes.BOOL),
+        ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.BOOL),
+    )
+
+    def descriptor_for_test(handle, kind, information, owner_out, group, dacl_out, sacl, out):
+        descriptor = wintypes.LPVOID()
+        assert security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            f"O:{owner_sid}D:{acl}", 1, ctypes.byref(descriptor), None,
+        )
+        ctypes.cast(out, ctypes.POINTER(wintypes.LPVOID))[0] = descriptor
+        present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+        assert security.GetSecurityDescriptorOwner(descriptor, owner_out, ctypes.byref(defaulted))
+        assert security.GetSecurityDescriptorDacl(
+            descriptor, ctypes.byref(present), dacl_out, ctypes.byref(defaulted),
+        )
+        return 0
+
+    class SecurityProxy:
+        GetSecurityInfo = staticmethod(descriptor_for_test)
+
+        def __getattr__(self, name):
+            return getattr(security, name)
+
+    original = ctypes.WinDLL
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **kwargs:
+                        SecurityProxy() if name == "advapi32" else original(name, **kwargs))
+    module = _paths_module()
+    fd = module._windows_open(tmp_path, directory=True)
+    try:
+        assert module._windows_owned(fd) is accepted
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows pinned ownership and lock APIs")
+def test_native_windows_owned_directory_and_lock_preserve_identity(tmp_path):
+    module = _paths_module()
+    command, environment, repo = _hook(tmp_path, "powershell")
+    root = Path(environment["AGENT_INDEX_HOME"])
+    root.mkdir()
+    path = root / ".publication.lock"
+    path.write_bytes(b"native installer lock sentinel")
+    before = path.stat()
+    with module.Directory(root) as directory:
+        fd = directory.open(".publication.lock", create=True)
+        try:
+            assert module.lock(fd)
+            result = _run(command, environment, repo)
+            assert result.returncode == 0, result.stderr
+            assert set(p.name for p in root.iterdir()) == {".publication.lock"}
+        finally:
+            os.close(fd)
+    result = _run(command, environment, repo)
+    assert result.returncode == 0, result.stderr
+    assert (root / "stamped-version").read_text() == "9.9.9\n"
+    assert path.read_bytes() == b"native installer lock sentinel"
+    assert (path.stat().st_ino, path.stat().st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX lock failure injection")
 def test_unknown_lock_error_is_not_contention(tmp_path, monkeypatch):
     import fcntl
@@ -257,6 +416,8 @@ def test_native_windows_actual_hook_refuses_unowned_links(tmp_path, fault):
     result = _run(command, environment, repo)
     assert result.returncode != 0
     assert "session stamp failed" in result.stderr
+    expected = "single-link regular file" if fault == "lock-hardlink" else "linked stamp destination"
+    assert expected in result.stderr
     assert sentinel.read_bytes() == b"native Windows sentinel"
     assert sentinel.stat().st_mtime_ns == before.st_mtime_ns
     assert set(p.name for p in external.iterdir()) == {".publication.lock"}

@@ -44,6 +44,29 @@ def _windows_open(path: Path, *, directory: bool, create: bool = False) -> int:
     return fd
 
 
+def _windows_owner_sids(user: str, groups: list[tuple[str, int]]) -> set[str]:
+    # Enabled ownership-capable groups, not ordinary or deny-only membership.
+    return {user} | {sid for sid, attributes in groups
+                     if attributes & 0xC == 0xC and not attributes & 0x10}
+
+
+def _windows_private_dacl(
+    aces: list[tuple[int, int, int, str]], owners: set[str],
+) -> bool:
+    trusted = owners | {"S-1-5-18", "S-1-5-32-544", "S-1-3-4"}
+    for kind, flags, mask, sid in aces:
+        if flags & 8:  # INHERIT_ONLY_ACE does not grant access to this object.
+            continue
+        if kind == 1:  # Denials cannot grant mutation rights.
+            continue
+        if kind != 0:
+            return False
+        # Generic write/all, delete, write owner/DACL, data/EA/attributes/children.
+        if mask & 0x500D0156 and sid not in trusted:
+            return False
+    return True
+
+
 def _windows_owned(fd: int) -> bool:
     import ctypes
     from ctypes import wintypes
@@ -54,40 +77,110 @@ def _windows_owned(fd: int) -> bool:
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel.LocalFree.argtypes = (wintypes.LPVOID,)
+    kernel.LocalFree.restype = wintypes.LPVOID
     security.OpenProcessToken.argtypes = (
         wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE),
     )
+    security.OpenProcessToken.restype = wintypes.BOOL
     security.GetTokenInformation.argtypes = (
         wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
         ctypes.POINTER(wintypes.DWORD),
     )
+    security.GetTokenInformation.restype = wintypes.BOOL
     security.GetSecurityInfo.argtypes = (
         wintypes.HANDLE, ctypes.c_int, wintypes.DWORD,
-        ctypes.POINTER(wintypes.LPVOID), wintypes.LPVOID, wintypes.LPVOID,
+        ctypes.POINTER(wintypes.LPVOID), wintypes.LPVOID,
+        ctypes.POINTER(wintypes.LPVOID),
         wintypes.LPVOID, ctypes.POINTER(wintypes.LPVOID),
     )
-    security.EqualSid.argtypes = (wintypes.LPVOID, wintypes.LPVOID)
+    security.GetSecurityInfo.restype = wintypes.DWORD
+    security.ConvertSidToStringSidW.argtypes = (
+        wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR),
+    )
+    security.ConvertSidToStringSidW.restype = wintypes.BOOL
+    security.GetAclInformation.argtypes = (
+        wintypes.LPVOID, wintypes.LPVOID, wintypes.DWORD, ctypes.c_int,
+    )
+    security.GetAclInformation.restype = wintypes.BOOL
+    security.GetAce.argtypes = (
+        wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID),
+    )
+    security.GetAce.restype = wintypes.BOOL
+
+    class SidAndAttributes(ctypes.Structure):
+        _fields_ = [("Sid", wintypes.LPVOID), ("Attributes", wintypes.DWORD)]
+
+    class TokenGroups(ctypes.Structure):
+        _fields_ = [("GroupCount", wintypes.DWORD), ("Groups", SidAndAttributes * 1)]
+
+    class AclSize(ctypes.Structure):
+        _fields_ = [("AceCount", wintypes.DWORD), ("BytesInUse", wintypes.DWORD),
+                    ("BytesFree", wintypes.DWORD)]
+
+    class AllowedAce(ctypes.Structure):
+        _fields_ = [("Type", ctypes.c_ubyte), ("Flags", ctypes.c_ubyte),
+                    ("Size", wintypes.WORD), ("Mask", wintypes.DWORD),
+                    ("SidStart", wintypes.DWORD)]
+
+    def sid_string(sid: int) -> str:
+        text = wintypes.LPWSTR()
+        if not security.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return text.value
+        finally:
+            kernel.LocalFree(ctypes.cast(text, wintypes.LPVOID))
+
+    def token_info(kind: int):
+        size = wintypes.DWORD()
+        if security.GetTokenInformation(token, kind, None, 0, ctypes.byref(size)):
+            raise OSError("unexpected empty Windows token information")
+        if ctypes.get_last_error() != 122:
+            raise ctypes.WinError(ctypes.get_last_error())
+        buffer = ctypes.create_string_buffer(size.value)
+        if not security.GetTokenInformation(token, kind, buffer, size, ctypes.byref(size)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return buffer
+
     token = wintypes.HANDLE()
     if not security.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token)):
         raise ctypes.WinError(ctypes.get_last_error())
     descriptor = wintypes.LPVOID()
     try:
-        size = wintypes.DWORD()
-        security.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
-        if ctypes.get_last_error() != 122:
-            raise ctypes.WinError(ctypes.get_last_error())
-        user = ctypes.create_string_buffer(size.value)
-        if not security.GetTokenInformation(token, 1, user, size, ctypes.byref(size)):
-            raise ctypes.WinError(ctypes.get_last_error())
+        user = token_info(1)  # TokenUser
+        groups = token_info(2)  # TokenGroups (the first entry is pointer-aligned).
+        group_count = ctypes.cast(groups, ctypes.POINTER(TokenGroups)).contents.GroupCount
+        entries = (SidAndAttributes * group_count).from_buffer(
+            groups, TokenGroups.Groups.offset,
+        )
+        owners = _windows_owner_sids(
+            sid_string(ctypes.cast(user, ctypes.POINTER(SidAndAttributes)).contents.Sid),
+            [(sid_string(entry.Sid), entry.Attributes) for entry in entries],
+        )
         owner = wintypes.LPVOID()
+        dacl = wintypes.LPVOID()
         code = security.GetSecurityInfo(
-            msvcrt.get_osfhandle(fd), 1, 1, ctypes.byref(owner), None, None, None,
-            ctypes.byref(descriptor),
+            msvcrt.get_osfhandle(fd), 1, 5, ctypes.byref(owner), None,
+            ctypes.byref(dacl), None, ctypes.byref(descriptor),
         )
         if code:
             raise ctypes.WinError(code)
-        user_sid = ctypes.cast(user, ctypes.POINTER(wintypes.LPVOID))[0]
-        return bool(security.EqualSid(owner, user_sid))
+        if not owner or sid_string(owner) not in owners or not dacl:
+            return False
+        size = AclSize()
+        if not security.GetAclInformation(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
+            raise ctypes.WinError(ctypes.get_last_error())
+        aces = []
+        for index in range(size.AceCount):
+            address = wintypes.LPVOID()
+            if not security.GetAce(dacl, index, ctypes.byref(address)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            ace = ctypes.cast(address, ctypes.POINTER(AllowedAce)).contents
+            if ace.Type not in (0, 1):
+                return False
+            aces.append((ace.Type, ace.Flags, ace.Mask,
+                         sid_string(address.value + AllowedAce.SidStart.offset)))
+        return _windows_private_dacl(aces, owners)
     finally:
         if descriptor:
             kernel.LocalFree(descriptor)

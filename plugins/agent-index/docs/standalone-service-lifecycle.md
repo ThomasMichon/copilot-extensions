@@ -43,12 +43,19 @@ supervision.
   remains an explicit deployment path. `ensure-service` compatibility scripts
   remain no-ops.
   The shared Python stamp transaction pins every root ancestor with no-follow
-  directory handles, validates file identity/type and current-user ownership,
+  directory handles, validates file identity/type and creator ownership,
   and keeps the installer's existing `.publication.lock` inode open without
   truncation throughout metadata publication. POSIX uses nonblocking `fcntl`
   locking even without the `flock` executable. Windows rejects reparse points
   using opened handles, denies delete sharing to pin ancestors, checks owner
-  SIDs and retains the installer's publication mutex. Only genuine contention
+  SIDs and retains the installer's publication mutex. Windows accepts the token
+  user or an enabled `SE_GROUP_OWNER` group (never mere membership, a disabled
+  group or a deny-only group), including the default Administrators ownership
+  used by elevated creators. The opened root and files must have a non-null
+  DACL with no mutation grants outside those creator identities, SYSTEM,
+  Administrators and OWNER RIGHTS. Read-only and inherit-only grants do not
+  authorize mutation; unsupported ACE types fail closed. This does not elevate,
+  change ACLs or admit an ordinary shared writable directory. Only genuine contention
   is a successful no-op; unsafe paths and I/O/lock errors fail explicitly.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
