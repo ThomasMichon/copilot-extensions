@@ -7,7 +7,8 @@
 - **Status:** Draft
 - **Vision:** `visions/plugin-services/README.md` - service-scaled process count, transient hooks, discovered local endpoints
 - **Umbrella issue:** #6086
-- **Sub-issues:** #6087, #6088, #6092; independently owned #6040, #6077, #6079
+- **Sub-issues:** #6087
+- **Related, independently owned:** #6040, #6077, #6079, #6088, #6092
 
 ## Guiding Intent
 
