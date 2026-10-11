@@ -1,8 +1,8 @@
 # Worktree Manager — Out-of-Plugin Control Plane (installer · configurator · picker)
 
 - **Slug:** `worktree-manager-control-plane`
-- **Repo:** copilot-extensions (control-plane home; PR-required `main`, self-merge)
-- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
+- **Repo:** copilot-extensions (control-plane home; PR-required `dev`, self-merge)
+- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`; release via promotion
 - **Created:** 2026-08-17
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Umbrella issue:** [#352](https://github.com/ThomasMichon/copilot-extensions/issues/352)
@@ -838,13 +838,26 @@ worktree-manager.
       edits in its own process), so it correctly never needs one either.
 
 ### Phase 5 — Configurator: adoption, discovery, per-plugin config (Planned — #356 / #357)
-- [ ] First-harness-repo adoption + repo discovery/registration; edit config the
-      harness already reads (link a knowledge repo, per-plugin config, machine &
-      connectivity). Closes installer §`first-harness-repo-adoption`,
-      §`repo-discovery-and-registration`, §`machine-and-connectivity-config`,
-      §`repo-plugin-enablement`.
-- [ ] Visual configurator surface (beyond today's read-only state views). Closes
-      installer §`visual-configurator`.
+The [Configuration workbench plan](phase-5-configuration-workbench.md) applies
+the revised [canonical vision](../../../visions/installer/configurator/README.md).
+Direct writes are machine-local; repository, knowledge, plugin, and preset
+sources are read-only. The sequencing and validation below are
+_(agent-recommended)_ realizations of that operator-approved boundary.
+
+- [ ] Wave 0: review contribution, effective-state, and local-write contracts
+      against existing owners; reconcile #543's old direct-repository-write
+      premise without claiming its implementation complete.
+- [ ] Wave 1: effective configuration/provenance and machine-local preview,
+      apply, reset, and killswitch controls through plugin-owned adapters.
+- [ ] Wave 2: first editable vertical slice for related repositories, venues,
+      registration, and machine-local pairing selections.
+- [ ] Wave 3: integrate dispatch, SSH mesh, and container-loadout panels through
+      existing domain APIs and separately claimed sibling efforts.
+- [ ] Wave 4: attributable templates/presets, then explicit delta-request
+      submission, maintenance-worker execution, and independent evaluation.
+- [ ] Wave 5: cross-platform, compatibility, clean-room, live-surface, and
+      documentation acceptance; reconcile Phase 7 preset scope to avoid a
+      second implementation.
 
 ### Phase 6 — Retire the bundled Picker (Done — the operator-visible end-state)
 - [x] Once the Manager Picker reaches parity (Phase 3), remove the in-plugin
@@ -1137,6 +1150,10 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 
 ## Validation Plan
 
+- [ ] Complete the wave-specific [Configuration validation matrix](phase-5-configuration-workbench.md#validation-plan).
+      No implementation wave is complete from a parser test or rendered
+      screenshot alone; prove source immutability and the owning consumer path.
+
 - **Headless render + golden checks.** The Manager Picker's `capture_svg` renders
   with no terminal, so list/interaction states are asserted as fixtures — closes
   picker §`renderable-and-assertable-headless`, §`programmatic-parity`.
@@ -1196,6 +1213,13 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-11** — Claimed the planning-only Phase 5 continuation on #357.
+  The revised Configuration vision landed through #6178. Added a linked
+  wave plan for provenance-aware read-only sources, machine-local controls,
+  domain-owned panels, and separately gated delta maintenance. This planning
+  slice claims no runtime implementation, daemon retirement, worker activation,
+  or sibling dispatch-panel scope. The parent effort remains Active.
 
 - **2026-10-08** — Confirmed the Phase 3 client-resolution design merged
   through #5795 (`f148d1c0`), with its implementation validation still open.
