@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("agent-dispatch.supervisor-lifecycle")
 _ORIGINS = ("installer.sh", "installer.ps1", "supervisor-daemon", "retirement-cli")
-_STATES = {"enabled", "disabled", "masked", "static", "active", "inactive", "failed", "absent", "unknown"}
+_STATES = {"enabled", "disabled", "masked", "masked-runtime", "static", "active", "inactive", "failed", "absent", "unknown"}
 
 
 @dataclass(frozen=True)

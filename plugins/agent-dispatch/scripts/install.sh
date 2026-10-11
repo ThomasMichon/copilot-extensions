@@ -1739,12 +1739,13 @@ _install_supervisor_unit() {
     local env_file="$2"
     local label="$3"
     local prior_enabled=absent
-    if [[ -f "$UNIT_DIR/$unit" || -L "$UNIT_DIR/$unit" ]]; then
-        prior_enabled="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
-    fi
-    if [[ "$prior_enabled" == masked ]]; then
+    local prior_unit_present=0
+    [[ ! -f "$UNIT_DIR/$unit" ]] || prior_unit_present=1
+    prior_enabled="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
+    [[ -n "$prior_enabled" ]] || prior_enabled=absent
+    if [[ "$prior_enabled" == masked || "$prior_enabled" == masked-runtime ]]; then
         _supervisor_audit selection prior-native-masked "$unit" "$env_file" skipped
-        _skip "$label remains masked; explicit native unmasking is required"
+        _skip "$label remains $prior_enabled; explicitly unmask, re-run the installer/update to restore the unit, then enable it"
         return 0
     fi
 
@@ -1773,7 +1774,7 @@ EOF
 
     local mode; mode="$(_supervisor_mode "$env_file")"
     if [[ "$mode" == "serve" ]] || _supervisor_labels_configured "$env_file"; then
-        if [[ "$prior_enabled" == disabled || "$prior_enabled" == masked ]]; then
+        if [[ "$prior_enabled" == disabled && "$prior_unit_present" -eq 1 ]]; then
             _supervisor_audit selection prior-native-disabled "$unit" "$env_file" skipped
             _skip "$label remains $prior_enabled; explicit native enablement is required"
             return 0

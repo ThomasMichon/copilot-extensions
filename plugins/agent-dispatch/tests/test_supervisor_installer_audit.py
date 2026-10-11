@@ -130,7 +130,7 @@ def test_powershell_adapter_records_failures_and_preserves_native_disable(tmp_pa
         "function Invoke-ShadowedAudit { $action=[pscustomobject]@{Execute='fixture'}; Invoke-SupervisorAudit -Event selection -Reason shadow-probe -Name $SupervisorTaskName -Outcome skipped }",
         "Invoke-ShadowedAudit",
         f"Install-SupervisorTaskInstance -Name $SupervisorTaskName -EnvFile '{env_file}' -Launcher fixture -DisplayName fixture",
-        "Invoke-SupervisorTaskAction -Operation stop -Name $SupervisorTaskName -Reason lifecycle-stop",
+        "$result=Invoke-SupervisorTaskAction -Operation stop -Name $SupervisorTaskName -Reason lifecycle-stop",
     ])
     script_path = tmp_path / "fixture.ps1"
     script_path.write_text(script)
@@ -236,6 +236,7 @@ def test_native_start_audit_requires_running_receipt(tmp_path, state):
         "function Start-ScheduledTask { param($TaskName) }",
         f". '{helper}'",
         "Invoke-SupervisorTaskAction -Operation start -Name $SupervisorTaskName -Reason configured-opt-in",
+        f"if($script:SupervisorActionSucceeded -ne ${'true' if state == 'Running' else 'false'}){{throw 'incorrect action result'}}",
     ])
     fixture = tmp_path / "start-result.ps1"
     fixture.write_text(script)

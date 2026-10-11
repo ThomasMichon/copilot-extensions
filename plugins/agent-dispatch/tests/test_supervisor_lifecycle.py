@@ -106,3 +106,14 @@ def test_failed_spawn_attempt_has_structured_failure(tmp_path, monkeypatch):
     events = [json.loads(line) for line in (tmp_path / "lifecycle.log").read_text().splitlines()]
     assert events[-1]["outcome"] == "fail"
     assert events[-1]["detail"]["reason"] == "spawn-request-returned"
+
+
+def test_runtime_mask_state_is_retained(tmp_path):
+    assert audit(
+        tmp_path, "selection", "prior-native-masked",
+        invocation=Invocation("installer.sh", "update", "123-456", 123, 100),
+        native_enabled="masked-runtime", outcome="skipped",
+    )
+    detail = json.loads((tmp_path / "lifecycle.log").read_text())["detail"]
+    assert detail["native_enabled"] == "masked-runtime"
+    assert detail["desired_enabled"] is False

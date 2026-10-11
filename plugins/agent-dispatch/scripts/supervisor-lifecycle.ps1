@@ -76,10 +76,12 @@ function Invoke-SupervisorTaskAction {
         }
 
         Invoke-SupervisorAudit -Event $Operation -Reason $Reason -Name $Name -Outcome ok
+        $script:SupervisorActionSucceeded = $true
     } catch {
         $script:SupervisorReconcileFailed = $true
         Invoke-SupervisorAudit -Event $Operation -Reason $Reason -Name $Name -Outcome fail
         Write-Warn "Supervisor $Operation failed ($Name): $($_.Exception.Message)"
+        $script:SupervisorActionSucceeded = $false
     }
 }
 

@@ -55,6 +55,9 @@ visible, but this log is not a transactional service-manager audit.
 
 Fresh eligible supervisors retain the label/serve-mode opt-in gate. Existing
 disabled or masked native supervisors are not automatically re-enabled.
+Runtime-only masks (`masked-runtime`) are also preserved and recorded as such.
+After a persistent mask is explicitly removed, rerun the installer/update to
+restore its unit definition before enabling it.
 An inert configuration that was installed disabled also requires an explicit
 native enablement after its configuration changes; there is no safe inference
 that a disabled unit is merely installer-generated rather than operator-owned.

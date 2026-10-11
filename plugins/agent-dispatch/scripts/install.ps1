@@ -3290,13 +3290,18 @@ function Restart-SupervisorTaskInPlace {
     )
     if ($Mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
         Invoke-SupervisorTaskAction -Operation enable -Name $Name -Reason configured-opt-in
+        $succeeded = $script:SupervisorActionSucceeded
         Invoke-SupervisorTaskAction -Operation stop -Name $Name -Reason runtime-refresh
+        $succeeded = $succeeded -and $script:SupervisorActionSucceeded
         Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason runtime-refresh
-        Write-Ok "$DisplayName refreshed in place (Scheduled Task '$Name'; restarted onto the new build -- no re-register, no elevation)"
+        if ($succeeded -and $script:SupervisorActionSucceeded) {
+            Write-Ok "$DisplayName refreshed in place (Scheduled Task '$Name'; restarted onto the new build -- no re-register, no elevation)"
+        }
     } else {
         Invoke-SupervisorTaskAction -Operation stop -Name $Name -Reason installer-inert
+        $succeeded = $script:SupervisorActionSucceeded
         Invoke-SupervisorTaskAction -Operation disable -Name $Name -Reason installer-inert
-        Write-Ok "$DisplayName INERT (no opt-in label; task disabled)"
+        if ($succeeded -and $script:SupervisorActionSucceeded) { Write-Ok "$DisplayName INERT (no opt-in label; task disabled)" }
     }
 }
 
@@ -3426,9 +3431,10 @@ function Install-SupervisorTaskInstance {
 
     if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
         Invoke-SupervisorTaskAction -Operation enable -Name $Name -Reason configured-opt-in
+        $enabled = $script:SupervisorActionSucceeded
         Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason configured-opt-in
         $ErrorActionPreference = $prevEAP
-        if (-not $script:SupervisorReconciledNames[$Name]) {
+        if (-not $enabled -or -not $script:SupervisorReconciledNames[$Name]) {
             $script:SupervisorReconcileFailed = $true
             Write-Warn "$DisplayName task activation is unconfirmed"
         } elseif ($mode -eq 'serve') {
@@ -3441,7 +3447,7 @@ function Install-SupervisorTaskInstance {
         # Windows analogue of an installed-but-not-enabled systemd unit.
         Invoke-SupervisorTaskAction -Operation disable -Name $Name -Reason installer-inert
         $ErrorActionPreference = $prevEAP
-        Write-Ok "$DisplayName installed (INERT: no opt-in label; task disabled). To enable: set"
+        if ($script:SupervisorActionSucceeded) { Write-Ok "$DisplayName installed (INERT: no opt-in label; task disabled). To enable: set" }
         Write-Step "AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile, then explicitly enable the native task:"
         Write-Step "Enable-ScheduledTask -TaskName $Name; Start-ScheduledTask -TaskName $Name"
     }
@@ -3522,7 +3528,7 @@ function Invoke-SupervisorStart {
     $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
     if ($task -and $task.State -ne 'Disabled') {
         Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason lifecycle-start
-        Write-Ok "$Label started"
+        if ($script:SupervisorActionSucceeded) { Write-Ok "$Label started" }
         return
     }
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
