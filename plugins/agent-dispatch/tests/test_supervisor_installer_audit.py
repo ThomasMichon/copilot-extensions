@@ -39,7 +39,7 @@ def test_shell_actions_audit_exact_results_preserve_disable_and_profile_scope(tm
         '#!/bin/bash\nset -eu\nshift\nop="$1"; shift\nunit="${1:-}"\n'
         'echo "$op $unit" >> "$STATE/calls"\n'
         'case "$op" in\n'
-        'is-enabled) if [[ -f "$STATE/$unit.enabled" ]]; then echo enabled; else echo disabled; exit 1; fi;;\n'
+        'is-enabled) if [[ -f "$STATE/runtime-mask" ]]; then echo masked-runtime; exit 1; elif [[ -f "$STATE/$unit.enabled" ]]; then echo enabled; else echo disabled; exit 1; fi;;\n'
         'is-active) if [[ -f "$STATE/$unit.active" ]]; then echo active; else echo inactive; exit 3; fi;;\n'
         'enable) touch "$STATE/$unit.enabled";;\n'
         'start|restart) [[ ! -f "$STATE/fail" ]] || exit 7; touch "$STATE/$unit.active";;\n'
@@ -65,6 +65,9 @@ def test_shell_actions_audit_exact_results_preserve_disable_and_profile_scope(tm
         "set -euo pipefail", '_warn() { echo "$*" >&2; }; _ok() { :; }; _skip() { :; }; _step() { :; }',
         functions, *(f"{key}={shlex.quote(str(value))}" for key, value in values.items()),
         f'_install_supervisor_unit "{unit}" "{env_file}" primary',
+        f'touch "{state}/runtime-mask"; echo stale > "{units}/{unit}"',
+        f'_install_supervisor_unit "{unit}" "{env_file}" primary',
+        f'grep -q -- "--systemd-unit" "{units}/{unit}"; rm "{state}/runtime-mask"',
         # An enabled refresh retains opt-in and records the actual command result.
         f'touch "{state}/fail"',
         f'_supervisor_action restart "{unit}" "{env_file}" runtime-refresh',
@@ -89,19 +92,21 @@ def test_shell_actions_audit_exact_results_preserve_disable_and_profile_scope(tm
     assert [(e["action"], e["outcome"]) for e in events] == [
         ("supervisor-enable", "begin"), ("supervisor-enable", "ok"),
         ("supervisor-restart", "begin"), ("supervisor-restart", "ok"),
+        ("supervisor-selection", "skipped"),
         ("supervisor-restart", "begin"), ("supervisor-restart", "fail"),
         ("supervisor-selection", "skipped"),
         ("supervisor-stop", "begin"), ("supervisor-stop", "ok"),
         ("supervisor-stop", "begin"), ("supervisor-stop", "ok"),
         ("supervisor-disable", "begin"), ("supervisor-disable", "ok"),
     ]
-    assert events[5]["detail"]["exit_code"] == 7
-    assert events[6]["detail"]["reason"] == "prior-native-disabled"
-    assert events[6]["detail"]["configured_enabled"] is True
-    assert events[6]["detail"]["native_enablement_provenance"] == "unknown"
-    assert events[7]["detail"]["profile"] == "example"
-    assert events[9]["detail"]["reason"] == "installer-inert"
-    assert events[9]["detail"]["configured_enabled"] is False
+    assert events[4]["detail"]["native_enabled"] == "masked-runtime"
+    assert events[6]["detail"]["exit_code"] == 7
+    assert events[7]["detail"]["reason"] == "prior-native-disabled"
+    assert events[7]["detail"]["configured_enabled"] is True
+    assert events[7]["detail"]["native_enablement_provenance"] == "unknown"
+    assert events[8]["detail"]["profile"] == "example"
+    assert events[10]["detail"]["reason"] == "installer-inert"
+    assert events[10]["detail"]["configured_enabled"] is False
     assert not (state / f"{unit}.enabled").exists()
     assert not (state / f"{profile}.active").exists()
 
