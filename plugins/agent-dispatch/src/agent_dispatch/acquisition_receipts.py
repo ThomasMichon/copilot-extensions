@@ -98,10 +98,13 @@ def start_authority(queue: Any, task_id: str) -> dict[str, Any] | None:
     with queue._connect() as conn:
         ensure(conn)
         row = conn.execute(
-            "SELECT a.delivery_id FROM spawn_reservations s LEFT JOIN acquisition_receipts a "
+            "SELECT a.delivery_id,a.task_generation FROM spawn_reservations s LEFT JOIN acquisition_receipts a "
             "ON s.key=a.reservation_key WHERE s.task_id=? "
             "ORDER BY s.attempt DESC LIMIT 1", (task_id,),
         ).fetchone()
+        task = queue._fetch(conn, task_id)
+        if row and row["delivery_id"] and task and task.generation > row["task_generation"] + 1:
+            return None
     return bridge_evidence(row["delivery_id"]) if row and row["delivery_id"] else None
 
 
@@ -122,6 +125,8 @@ def validate_start(
             raise TaskError("acquired worker start requires a bridge acquisition receipt")
         return
     receipt = rows[0]
+    if receipt["delivery_id"] and task.generation > receipt["task_generation"] + 1:
+        return
     if receipt["reservation_state"] not in {"reserving", "spawned"} or receipt["release_requested"]:
         raise TaskError("acquisition reservation was withdrawn before start")
     current = authority or {}

@@ -270,6 +270,30 @@ def test_marked_spawned_cli_requires_receipt(tmp_path):
     assert queue.get(task.id).status == "claimed"
 
 
+def test_later_independent_claim_is_not_fenced_by_old_acquisition(tmp_path, monkeypatch):
+    queue = TaskQueue(tmp_path / "later-claim.db")
+    task = queue.create("work")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="created")
+    receipt = {
+        "reservation_key": reservation.key, "task_id": task.id,
+        "task_generation": task.generation, "worktree_id": "worktree-a",
+        "session_id": "native-a", "native_session_id": "native-a",
+        "mode": "cli", "delivery_id": "delivery-a",
+    }
+    bind(queue, receipt, evidence=evidence(receipt))
+    queue.record_spawn(reservation.key, session_handle="native-a")
+    queue.claim_one("machine/worktree-a", task_id=task.id)
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: {
+        **evidence(receipt), "stage": "delivered",
+    })
+    queue.start(task.id, "machine/worktree-a", owner_session_id="native-a")
+    queue.yield_task(task.id, "machine/worktree-a", note="later worker")
+    queue.claim_one("manual-worker", task_id=task.id)
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: pytest.fail("historic receipt must not require bridge"))
+    assert queue.start(task.id, "manual-worker", owner_session_id="manual-native").status == "started"
+
+
 def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
