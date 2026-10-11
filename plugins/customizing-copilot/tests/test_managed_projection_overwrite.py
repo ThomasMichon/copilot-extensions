@@ -236,3 +236,10 @@ def test_managed_overwrite_uses_consent_changed_while_acquiring_lock(
     assert outcome.has_actionable_change
     assert not outcome.bypass_eligible
     assert "outside the trusted-source allowlist" in outcome.bypass.reasons[0]
+
+
+def test_scheduler_template_forwards_managed_overwrite_consent() -> None:
+    template = Path(__file__).resolve().parents[1] / (
+        "skills/setting-up-instruction-sync-worker/references/templates/scheduler-config.md"
+    )
+    assert "overwrite_existing_managed=consent.overwrite_existing_managed" in template.read_text()
