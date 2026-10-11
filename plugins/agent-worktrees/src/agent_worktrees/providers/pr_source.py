@@ -12,7 +12,7 @@ from .base import ProviderError
 def same_repository(source_identity: str, destination_identity: str, provider: str) -> bool:
     """Match Azure's secure SSH/HTTPS layouts without weakening other identities."""
     def canonical(identity: str) -> str:
-        if provider == "azure":
+        if provider == "azure-devops":
             ssh = re.fullmatch(r"ssh\.dev\.azure\.com/v3/([^/]+)/([^/]+)/([^/]+)", identity)
             if ssh:
                 organization, project, repository = ssh.groups()

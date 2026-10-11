@@ -271,7 +271,11 @@ stays unknown; this is not authenticated identity. Private rationale and invoker
 details are not posted to the provider. Audit `succeeded` records successful
 transport, not completed review/merge: a subsequent persistence failure explicitly
 reports that the remote was published and needs reconciliation. Do not repeat a
-push to repair a tracking or audit error. Inspect the provider and remote first.
+push to repair a tracking or audit error. A failed transport is followed by a
+bounded exact-ref observation: an approved commit on the remote is reconciled
+as succeeded, an unchanged leased head is failed, and an unreadable or different
+head is audited as `unknown` with an explicit reconciliation warning. Never
+repeat a push while its outcome is unknown. Inspect the provider and remote first.
 See the worktree skill's PR workflow reference for retention and restore guidance.
 
 Networked actor-specific commands resolve a shared **effective actor profile**:

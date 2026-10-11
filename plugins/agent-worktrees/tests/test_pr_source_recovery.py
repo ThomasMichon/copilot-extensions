@@ -286,7 +286,7 @@ def test_azure_source_matches_secure_transport_alias(destination: str) -> None:
 
     source = pr_publish._identity("https://dev.azure.com/example/team/_git/project", ".")
     target = pr_publish._identity(destination, ".")
-    assert same_repository(source, target, "azure")
+    assert same_repository(source, target, "azure-devops")
 
 
 @pytest.mark.parametrize("destination", [
@@ -303,7 +303,7 @@ def test_azure_source_refuses_distinct_destination(destination: str) -> None:
 
     source = pr_publish._identity("https://dev.azure.com/example/team/_git/project", ".")
     target = pr_publish._identity(destination, ".")
-    assert not same_repository(source, target, "azure")
+    assert not same_repository(source, target, "azure-devops")
     assert not same_repository(source, target, "github")
 
 

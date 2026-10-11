@@ -231,7 +231,7 @@ def _recovered_pr(pr_repo, monkeypatch: pytest.MonkeyPatch, *, stub_attribution=
 def test_azure_recovery_preview_matches_ssh_destination(
     pr_repo, monkeypatch: pytest.MonkeyPatch, source_repository: str,
 ) -> None:
-    config, wid, wt, _remote, old, branch = _recovered_pr(pr_repo, monkeypatch, provider="azure")
+    config, wid, wt, _remote, old, branch = _recovered_pr(pr_repo, monkeypatch, provider="azure-devops")
     record_path = cfg.tracking_dir() / f"{wid}.yaml"
     record = tracking.load_record(record_path)
     destination = pr_publish._identity("git@ssh.dev.azure.com:v3/example/team/project", str(wt))
@@ -247,7 +247,7 @@ def test_azure_recovery_preview_matches_ssh_destination(
     if source_repository == "project":
         with pytest.raises(recovery.ConfirmationRequired) as required:
             finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
-        assert required.value.preview["operation"]["provider"] == "azure"
+        assert required.value.preview["operation"]["provider"] == "azure-devops"
     else:
         assert not finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
     assert record_path.read_bytes() == before
@@ -422,6 +422,48 @@ def test_recovery_transport_pins_approved_objects(pr_repo, monkeypatch, race):
         confirm_break_glass=required.value.preview["confirmation"],
     ) is (race == "local")
     assert pr_publish._tip("origin", branch, str(wt)) == (moved if race == "remote" else source)
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("remote_state", ["accepted", "unchanged", "unreadable", "changed"])
+def test_recovery_reconciles_failed_transport_before_audit(pr_repo, monkeypatch, remote_state, capfd):
+    config, wid, wt, remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+    source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+    moved = git_ops.git("rev-parse", "origin/master", cwd=str(wt)).stdout.strip()
+    with pytest.raises(recovery.ConfirmationRequired) as required:
+        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    real_push = git_ops.push
+    real_tip = pr_publish._tip
+    failed = False
+
+    def lost_response(*args, **kwargs):
+        nonlocal failed
+        if remote_state == "accepted":
+            assert real_push(*args, **kwargs)
+        elif remote_state == "changed":
+            git_ops.git("--git-dir", str(remote), "update-ref", f"refs/heads/{branch}", moved, old, cwd=str(wt))
+        failed = True
+        return git_ops.PushResult(ok=False, stderr="lost transport response")
+
+    monkeypatch.setattr(git_ops, "push", lost_response)
+    monkeypatch.setattr(pr_publish, "_tip", lambda *args: (
+        None if failed and remote_state == "unreadable" else real_tip(*args)
+    ))
+    capfd.readouterr()
+    assert finalize.push_changes(
+        wid, config, break_glass_reason="Approved recovered plan",
+        confirm_break_glass=required.value.preview["confirmation"],
+    ) is (remote_state == "accepted")
+    directory = Path(git_ops.git("rev-parse", "--absolute-git-dir", cwd=str(wt)).stdout.strip())
+    audit = json.loads(next(directory.glob("agent-worktrees-pr-break-glass-*.json")).read_text())
+    assert audit["outcome"] == (
+        "succeeded" if remote_state == "accepted" else "failed" if remote_state == "unchanged" else "unknown"
+    )
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    assert record.pr.head_sha == (source if remote_state == "accepted" else old)
+    if remote_state in {"unreadable", "changed"}:
+        output = capfd.readouterr()
+        assert "Do not repeat the push" in output.out + output.err
 
 
 @pytest.mark.timeout(120)

@@ -200,10 +200,20 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                     timeout=publication_deadline.configured(repo.pr),
                 )
             if not result:
-                if audit is not None:
-                    audit.finish("failed")
-                output.err(f"PR rewrite failed.{result.failure_detail}")
-                return False
+                if audit is None:
+                    output.err(f"PR rewrite failed.{result.failure_detail}")
+                    return False
+                observed_tip = pr_publish._tip(target.remote, pr.branch, cwd)
+                if observed_tip != head_sha:
+                    definite_failure = observed_tip == pr.head_sha
+                    audit.finish("failed" if definite_failure else "unknown")
+                    output.err(
+                        f"PR rewrite failed.{result.failure_detail}" if definite_failure else
+                        "Recovery transport outcome is unknown; remote head needs reconciliation. "
+                        "Do not repeat the push."
+                    )
+                    return False
+                output.warn("Transport reported failure, but the exact remote ref confirms the approved commit.")
             remote_published = True
             pr_publish.record_pushed_head(
                 config, fresh, worktree_id, pr, head_sha,

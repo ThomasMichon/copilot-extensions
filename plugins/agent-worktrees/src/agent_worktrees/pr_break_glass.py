@@ -149,7 +149,7 @@ def publish_recovery(
     )
 
 
-AuditOutcome = Literal["attempted", "succeeded", "failed"]
+AuditOutcome = Literal["attempted", "succeeded", "failed", "unknown"]
 
 
 @dataclass
@@ -191,9 +191,9 @@ class RecoveryAudit:
         self.published_backup_ref = published_ref
         self._write()
 
-    def finish(self, outcome: Literal["succeeded", "failed"]) -> RecoveryAudit:
-        if outcome not in ("succeeded", "failed"):
-            raise ValueError("Recovery audit completion must record succeeded or failed.")
+    def finish(self, outcome: Literal["succeeded", "failed", "unknown"]) -> RecoveryAudit:
+        if outcome not in ("succeeded", "failed", "unknown"):
+            raise ValueError("Recovery audit completion must record succeeded, failed or unknown.")
         if self.outcome != "attempted":
             raise ValueError("A completed recovery audit cannot be completed again.")
         completed = replace(
