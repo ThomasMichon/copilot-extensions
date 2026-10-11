@@ -1952,8 +1952,7 @@ class SupervisorDaemon:
         Fail-safe and non-blocking: a no-op unless ``self_update_enabled`` and
         the poll cadence has elapsed since the last check; a staleness-check
         failure (a marker read raising, etc.) never propagates. Returns
-        ``True`` once native restart is committed or successor spawn returned;
-        this process should exit, but successor readiness is not proven.
+        ``True`` commits native restart or a returned spawn, not successor readiness.
         ``False`` otherwise, including when the spawn itself
         failed (in which case this daemon reclaims its singleton lease and
         keeps running rather than exiting into a void).
