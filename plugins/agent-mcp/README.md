@@ -1365,6 +1365,10 @@ answers `call`/`list` requests over a local IPC socket (default handle
 - **Attach liveness** — a pending attach reserves the host before upstream
   startup, so a slow connect cannot trigger idle eviction. Failed starts release
   the reservation and close partially-open sessions.
+  Pending attaches count as busy at the graceful-cutover drain boundary too:
+  a generation cannot retire while an admitted attach is opening. Draining
+  warm entries remain registered through lease drain and teardown; pending warm
+  opens also retain host liveness until startup succeeds or fails.
 - **No secrets held** — each warm session fetches credentials through the
   bridge's own auth injector at open time; per-bridge sessions preserve identity
   separation.

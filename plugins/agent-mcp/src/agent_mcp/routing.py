@@ -155,10 +155,18 @@ class RoutedCore:
         from . import protocol
 
         method = msg.get("method")
+        params = msg.get("params", {})
+        if not isinstance(params, dict):
+            return error_response(msg, "routing params must be an object", -32602) \
+                if is_request(msg) else None
+        if not is_request(msg) and method in {
+            "tools/list", "initialize", "server/discover", "ping",
+            "notifications/initialized",
+        }:
+            return None
         try:
             if method == "tools/call":
-                params = msg.get("params")
-                args = params.get("arguments") if isinstance(params, dict) else None
+                args = params.get("arguments")
                 target = args.get(self.spec.parameter) if isinstance(args, dict) else None
                 if not isinstance(target, str) or target not in self.spec.targets:
                     return error_response(msg, f"required routing selector '{self.spec.parameter}' "
@@ -175,7 +183,6 @@ class RoutedCore:
                           "params": {**params, "arguments": stripped}}
                 return await self._policies[target].handle(routed)
             if method == "tools/list":
-                params = msg.get("params") or {}
                 if params.get("cursor"):
                     return error_response(msg, "routed catalog has no continuation cursor", -32602)
                 tools = await self.catalog()
@@ -183,7 +190,7 @@ class RoutedCore:
                     t for t in tools if tool_visible(t["name"], self.cfg.tools)]})
             if method == "initialize":
                 version = protocol.negotiate(
-                    (msg.get("params") or {}).get("protocolVersion"),
+                    params.get("protocolVersion"),
                     protocol.SUPPORTED_VERSIONS,
                 ) or protocol.LEGACY
                 return result_response(msg, {

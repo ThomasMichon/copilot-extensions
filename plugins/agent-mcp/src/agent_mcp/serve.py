@@ -140,6 +140,7 @@ class WarmPool:
         self._key_locks: dict[str, asyncio.Lock] = {}
         self._idle_timeout = idle_timeout
         self._guard = asyncio.Lock()  # guards the open/evict of the entry map
+        self._opening = 0
 
     async def _key_lock(self, key: str) -> asyncio.Lock:
         async with self._guard:
@@ -149,19 +150,20 @@ class WarmPool:
         """Select/open a config-matched entry while the key lock is held."""
         async with self._guard:
             entry = self._entries.get(key)
-            if entry is not None and entry.session.cfg != cfg:
-                self._entries.pop(key, None)
         if entry is not None and entry.session.cfg != cfg:
-            await entry.idle.wait()
-            await entry.session.__aexit__(None, None, None)
+            await self._evict_locked(key, entry)
             log.info("warm session replaced after config change: %s", key)
             entry = None
         if entry is None:
             session = OneShotSession(cfg)
-            await session.__aenter__()
-            entry = _WarmEntry(session)
-            async with self._guard:
-                self._entries[key] = entry
+            self._opening += 1
+            try:
+                await session.__aenter__()
+                entry = _WarmEntry(session)
+                async with self._guard:
+                    self._entries[key] = entry
+            finally:
+                self._opening -= 1
             log.info("warm session opened: %s", key)
         return entry
 
@@ -228,11 +230,13 @@ class WarmPool:
             entry = self._entries.get(key)
             if expected is not None and entry is not expected:
                 return
-            entry = self._entries.pop(key, None)
         if entry is not None:
             await entry.idle.wait()
             with contextlib.suppress(Exception):
                 await entry.session.__aexit__(None, None, None)
+            async with self._guard:
+                if self._entries.get(key) is entry:
+                    self._entries.pop(key)
             log.info("warm session closed: %s", key)
 
     async def _evict(self, key: str) -> None:
@@ -255,7 +259,7 @@ class WarmPool:
 
     @property
     def size(self) -> int:
-        return len(self._entries)
+        return len(self._entries) + self._opening
 
 
 class Server:

@@ -109,3 +109,29 @@ async def test_boundary_does_not_swallow_cancellation_or_programming_errors(monk
             await session.list_tools()
         with pytest.raises(type(failure)):
             await session._router.handle({"id": 1, "method": "tools/list"})
+
+
+@pytest.mark.parametrize("method", [
+    "tools/list", "tools/call", "initialize", "server/discover", "ping",
+    "notifications/initialized", "resources/list",
+])
+@pytest.mark.parametrize("params", [[], ["value"], "", "value", 1, None])
+async def test_malformed_params_are_invalid_request_parameters(method, params):
+    core = RoutedCore(parse_config(definition()))
+    request = {"jsonrpc": "2.0", "id": 7, "method": method, "params": params}
+    assert await core.handle(request) == {"jsonrpc": "2.0", "id": 7, "error": {
+        "code": -32602, "message": "routing params must be an object"}}
+    request.pop("id")
+    assert await core.handle(request) is None
+    assert not core._sessions
+    await core.aclose()
+
+
+@pytest.mark.parametrize("method", [
+    "tools/list", "initialize", "server/discover", "ping", "notifications/initialized",
+])
+async def test_valid_local_notifications_never_produce_responses_or_start_targets(method):
+    core = RoutedCore(parse_config(definition()))
+    assert await core.handle({"method": method, "params": {}}) is None
+    assert not core._sessions
+    await core.aclose()

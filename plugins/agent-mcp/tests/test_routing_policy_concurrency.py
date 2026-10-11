@@ -9,7 +9,7 @@ import pytest
 from agent_mcp.client import OneShotSession
 from agent_mcp.config import ConfigError, parse_config
 from agent_mcp.routing import isolated_config
-from agent_mcp.serve import WarmPool
+from agent_mcp.serve import Server, WarmPool
 
 from .test_routing import MockUpstream, TOOLS, definition
 
@@ -79,7 +79,7 @@ def test_url_secret_rotation_qualifies_primary_and_url_auth_keys(monkeypatch):
 
 
 @pytest.mark.parametrize("transition", ["close", "replace"])
-async def test_warm_distinct_targets_parallel_and_transition_waits(monkeypatch, transition):
+async def test_warm_distinct_targets_parallel_and_transition_waits(monkeypatch, transition, tmp_path):
     import agent_mcp.client as client
 
     state = {"started": [], "tools": {key: copy.deepcopy(TOOLS)
@@ -101,6 +101,7 @@ async def test_warm_distinct_targets_parallel_and_transition_waits(monkeypatch, 
         target["auth"] = {"kind": "none"}
     cfg = parse_config(data)
     pool = WarmPool(idle_timeout=1)
+    server = Server(tmp_path / "serve.sock", pool=pool, idle_timeout=1, enable_lease=False)
     calls = [asyncio.create_task(pool.call("common", cfg, "read", {"organization": key}))
              for key in ("alpha", "beta")]
     cleanup = None
@@ -119,6 +120,10 @@ async def test_warm_distinct_targets_parallel_and_transition_waits(monkeypatch, 
                 "common", updated, "read", {"organization": "alpha"}))
         await asyncio.sleep(0)
         assert not cleanup.done()
+        assert pool.size == 1
+        server._last_active = time.monotonic() - 10
+        server._maybe_idle_evict()
+        assert not server._stop.is_set()
         assert all(not transport.closed for transport in state["started"])
         release.set()
         results = await asyncio.gather(*calls)
@@ -131,3 +136,31 @@ async def test_warm_distinct_targets_parallel_and_transition_waits(monkeypatch, 
         if cleanup is not None:
             await asyncio.gather(cleanup, return_exceptions=True)
         await pool.close_all()
+
+
+async def test_pending_warm_open_retains_host_liveness(monkeypatch, tmp_path):
+    import agent_mcp.serve as serve
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = serve.OneShotSession.__aenter__
+
+    async def blocked(session):
+        entered.set()
+        await release.wait()
+        return await original(session)
+
+    monkeypatch.setattr(serve.OneShotSession, "__aenter__", blocked)
+    pool = WarmPool()
+    server = Server(tmp_path / "serve.sock", pool=pool, idle_timeout=1, enable_lease=False)
+    task = asyncio.create_task(pool.list("common", parse_config(definition())))
+    try:
+        await entered.wait()
+        assert pool.size == 1
+        server._last_active = time.monotonic() - 10
+        server._maybe_idle_evict()
+        assert not server._stop.is_set()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await pool.close_all()
+    assert pool.size == 0
