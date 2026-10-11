@@ -1154,6 +1154,7 @@ def _render_local_cache_locked(
             continue
     candidate_relatives = sorted(
         {local_destination for local_destination, _spec, _rendered in accepted}
+        | {delivery.legacy_local_destination(spec.destination) for _, spec, _ in accepted}
         | set(existing_local_cache_relatives)
     )
     # One batched query for every path this call might write or delete,
@@ -1164,6 +1165,7 @@ def _render_local_cache_locked(
     tracked_paths, tracking_inconclusive = _resolve_git_tracked_paths(
         root, candidate_relatives
     )
+    ignored_paths = delivery_io.ignored_local_paths(root, [local for local, _, _ in accepted])
 
     valid_destinations: set[str] = set()
     for local_destination, spec, rendered in accepted:
@@ -1188,6 +1190,10 @@ def _render_local_cache_locked(
                     "untracked and the context-locals/**/*.local.md ignore rule "
                     "is in place",
                 )
+                continue
+            if local_destination not in ignored_paths:
+                result.add(WARNING, "projection-local-cache-ignore", local_destination,
+                           "new local body is not ignored by git; adopt context-locals ignore coverage first")
                 continue
             current = _read_existing_local_cache(path)
             if current == rendered.content:
@@ -1253,7 +1259,7 @@ def _render_local_cache_locked(
         if local_destination in valid_destinations:
             delivery_io.retire_legacy_local(
                 root, spec, _delivery_io(), result,
-                lambda paths: _resolve_git_tracked_paths(root, paths),
+                tracked_paths, tracking_inconclusive,
             )
     delivery_io.report_unmanaged_legacy_locals(
         root, {spec.destination for local, spec, _ in accepted if local in valid_destinations},

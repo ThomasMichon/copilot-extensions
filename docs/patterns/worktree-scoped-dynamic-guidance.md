@@ -151,6 +151,10 @@ tracking confirms it is untracked, and its path
 and preimage remain unchanged. Foreign, edited, tracked, or unsafe legacy
 files are retained with visible findings. They can remain auto-discovered until
 the adopter resolves the finding; relocation never silently deletes them.
+Git worktrees must first adopt ignore coverage for the new tree: until
+`git check-ignore` confirms coverage, publication and legacy retirement are
+skipped with `projection-local-cache-ignore`. Plain non-Git directories remain
+supported. Tracking/ignore probes are batched, never one Git process per body.
 These checks are not filesystem content CAS or protection against
 noncooperating filesystem attackers. Supported local filesystems must provide
 exclusive hard-link publication and atomic rename; unsupported filesystems

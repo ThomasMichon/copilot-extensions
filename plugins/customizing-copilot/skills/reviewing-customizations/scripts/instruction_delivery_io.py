@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Sequence
@@ -87,6 +88,32 @@ def iter_local_files(root: Path, io: DeliveryIO) -> list[Path]:
         ]
         found.extend(Path(current) / name for name in names if name.endswith(".local.md"))
     return found
+
+
+def ignored_local_paths(root: Path, relatives: list[str]) -> set[str]:
+    if not relatives:
+        return set()
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    try:
+        probe = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, timeout=5, env=env, **flags,
+        )
+        if probe.returncode != 0 or probe.stdout.strip() != b"true":
+            return set(relatives)
+        proc = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "--no-index", "-z", "--stdin"],
+            input=b"\0".join(path.encode() for path in relatives) + b"\0",
+            capture_output=True, timeout=5, env=env, **flags,
+        )
+        if proc.returncode not in (0, 1):
+            return set()
+        return {p for p in proc.stdout.decode("utf-8").split("\0") if p}
+    except FileNotFoundError:
+        return set(relatives)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return set()
 
 
 def resolve_source(
@@ -218,7 +245,7 @@ def resolve_unpaired(
 
 def retire_legacy_local(
     root: Path, spec: delivery.Projection, io: DeliveryIO, result: object,
-    tracked: Callable[[list[str]], tuple[set[str], bool]],
+    tracked_paths: set[str], inconclusive: bool,
 ) -> None:
     legacy = delivery.legacy_local_destination(spec.destination)
     try:
@@ -233,7 +260,6 @@ def retire_legacy_local(
         prior = delivery.canonical_renders(replace(spec, plugin_version=marker["pluginVersion"]))
         if raw not in prior:
             raise ValueError("legacy local is not the current enabled canonical body")
-        tracked_paths, inconclusive = tracked([legacy])
         if legacy in tracked_paths or inconclusive:
             raise ValueError("legacy local is tracked or tracking status is unknown")
         new = io.safe(root, PurePosixPath(delivery.local_destination(spec.destination)))

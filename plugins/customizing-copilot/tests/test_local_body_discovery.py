@@ -102,7 +102,7 @@ def test_legacy_local_retirement_requires_complete_owned_publication(
         def tracked(root: Path, paths: list[str]) -> tuple[set[str], bool]:
             nonlocal calls
             calls += 1
-            if calls == 2:
+            if calls == 1:
                 old.write_bytes(b"concurrent legacy edit")
             return original(root, paths)
 
@@ -168,3 +168,22 @@ def test_disabled_legacy_source_is_retained_with_visible_migration_finding(tmp_p
         f.check == "projection-local-cache-legacy" and old.name in f.path
         for f in result.findings
     )
+
+
+def test_git_adopter_requires_new_ignore_rule_before_publication(tmp_path: Path) -> None:
+    import subprocess
+    repo, source, spec = fixture(tmp_path)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    old = repo / delivery.legacy_local_destination(spec.destination)
+    old.parent.mkdir(parents=True)
+    raw = projections.render_projection(spec, include_prefer_local=False).content
+    old.write_bytes(raw)
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert old.read_bytes() == raw
+    assert not (repo / delivery.local_destination(spec.destination)).exists()
+    assert any(f.check == "projection-local-cache-ignore" for f in result.findings)
+    (repo / ".gitignore").write_text(".github/copilot/context-locals/**/*.local.md\n")
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert not result.blocking
+    assert not old.exists()
+    assert (repo / delivery.local_destination(spec.destination)).exists()
