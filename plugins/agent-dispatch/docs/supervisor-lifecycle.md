@@ -7,7 +7,7 @@ watchdog or a claim that an earlier outage's requester has been identified.
 
 ## Record contract
 
-The outer record contains UTC `ts`, emitting `pid`, `service`, `version` when
+The outer record contains UTC `ts`, emitting `pid`, source hostname `node`, `service`, `version` when
 known, `action`, and `outcome`. The detail schema is
 `agent-dispatch.supervisor-lifecycle/v1`. It carries the owning source `origin`,
 lifecycle `verb`, invocation `correlation`, initiating PID and parent PID, unit

@@ -135,3 +135,17 @@ def test_windows_selection_semantics_do_not_claim_posix_equivalence(tmp_path):
     assert windows["label_opt_in"] is True
     assert posix["mode"] == "legacy"
     assert posix["configured_enabled"] is False
+
+
+def test_native_state_vocabulary_preserves_transitions_but_not_arbitrary_text(tmp_path):
+    from agent_dispatch.supervisor_lifecycle import _ACTIVE_STATES, _ENABLED_STATES
+    invocation = Invocation("installer.sh", "update", "123-456", 123, 100)
+    for enabled in sorted(_ENABLED_STATES):
+        assert audit(tmp_path, "selection", "probe", invocation=invocation, native_enabled=enabled)
+    for active in sorted(_ACTIVE_STATES):
+        assert audit(tmp_path, "selection", "probe", invocation=invocation, native_active=active)
+    assert audit(tmp_path, "selection", "probe", invocation=invocation, native_enabled="arbitrary private text")
+    events = [json.loads(line)["detail"] for line in (tmp_path / "lifecycle.log").read_text().splitlines()]
+    assert {e["native_enabled"] for e in events[:-1]} == _ENABLED_STATES
+    assert {e["native_active"] for e in events[:-1]} == _ACTIVE_STATES
+    assert events[-1]["native_enabled"] == "unknown"

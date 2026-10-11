@@ -18,7 +18,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("agent-dispatch.supervisor-lifecycle")
 _ORIGINS = ("installer.sh", "installer.ps1", "supervisor-daemon", "retirement-cli")
-_STATES = {"enabled", "disabled", "masked", "masked-runtime", "static", "active", "inactive", "failed", "absent", "unknown"}
+_ENABLED_STATES = {
+    "enabled", "enabled-runtime", "disabled", "masked", "masked-runtime",
+    "static", "linked", "linked-runtime", "alias", "indirect", "generated",
+    "transient", "bad", "absent", "unknown",
+}
+_ACTIVE_STATES = {
+    "active", "inactive", "failed", "activating", "deactivating", "reloading",
+    "maintenance", "refreshing", "absent", "unknown",
+}
 
 
 @dataclass(frozen=True)
@@ -104,8 +112,8 @@ def audit(
         "initiator_pid": invocation.initiator_pid,
         "parent_pid": invocation.parent_pid,
         "unit": unit,
-        "native_enabled": native_enabled if native_enabled in _STATES else "unknown",
-        "native_active": native_active if native_active in _STATES else "unknown",
+        "native_enabled": native_enabled if native_enabled in _ENABLED_STATES else "unknown",
+        "native_active": native_active if native_active in _ACTIVE_STATES else "unknown",
         "native_main_pid": native_main_pid if native_main_pid and native_main_pid > 0 else None,
         "selection_observation": "audit-time",
         # A disabled unit is an observation, not proof of who disabled it.
