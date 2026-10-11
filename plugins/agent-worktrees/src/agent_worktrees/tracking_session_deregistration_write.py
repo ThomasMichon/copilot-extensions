@@ -62,37 +62,43 @@ def apply_session_deregister(args: dict) -> dict:
     source = args.get("source", "hook")
     recorded_at = args.get("recorded_at")
 
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        try:
-            require_project_record_mutation(record)
-        except ExecutionSpaceError as exc:
-            logging.getLogger(__name__).warning(
-                "Rejecting session deregistration for %s: %s", record.worktree_id, exc,
-            )
-            return {"error": "execution_space", "message": str(exc)}
-        if record.sessions is None:
-            return {"ok": True}
-        for entry in record.sessions:
-            if entry.session_id != session_id:
-                continue
-            changed = _end_session_activation(
-                entry,
-                event_at=ended_at or tracking._now_iso(),
-                recorded_at=recorded_at or tracking._now_iso(),
-                source=source,
-            )
-            if changed:
-                tracking._next_lifecycle_revision(record, session_id)
-                self_session_ref = tracking.format_claim_ref(
-                    record.machine, record.repo, record.worktree_id,
-                    session=session_id,
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            record = tracking.load_record(yaml_path)
+            try:
+                require_project_record_mutation(record)
+            except ExecutionSpaceError as exc:
+                logging.getLogger(__name__).warning(
+                    "Rejecting session deregistration for %s: %s", record.worktree_id, exc,
                 )
+                return {"error": "execution_space", "message": str(exc)}
+            if record.sessions is None:
+                return {"ok": True}
+            for entry in record.sessions:
+                if entry.session_id != session_id:
+                    continue
+                changed = _end_session_activation(
+                    entry,
+                    event_at=ended_at or tracking._now_iso(),
+                    recorded_at=recorded_at or tracking._now_iso(),
+                    source=source,
+                )
+                if changed:
+                    tracking._next_lifecycle_revision(record, session_id)
+                    self_session_ref = tracking.format_claim_ref(
+                        record.machine, record.repo, record.worktree_id,
+                        session=session_id,
+                    )
                 tracking.release_resource_claim(record, self_session_ref, save=False)
                 tracking.save_record(record, yaml_path)
                 if not _record_has_open_session(record):
                     stop_fsmonitor_daemon(record.worktree_path)
-            break
+                break
+    except TimeoutError as exc:
+        logging.getLogger(__name__).warning(
+            "Deregistration contended for %s: %s", yaml_path, exc,
+        )
+        return {"error": "execution_space", "message": f"contended by another process: {exc}"}
     return {"ok": True}
 
 

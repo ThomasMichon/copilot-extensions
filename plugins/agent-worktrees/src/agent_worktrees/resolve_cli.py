@@ -676,13 +676,18 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 "but will not be automatically submitted twice.", exit_code=3,
             )
     try:
-        with tracking._RecordLock(yaml_path):
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
             record = tracking.load_record(yaml_path)
             require_record_mutation(record, config)
             tracking.mark_resumed(record, save=False)
             tracking.save_record(record)
     except ExecutionSpaceError as exc:
         return output._json_error(str(exc), exit_code=3)
+    except TimeoutError as exc:
+        return output._json_error(
+            f"Cannot resolve {record.worktree_id}: contended by another process ({exc})",
+            exit_code=3,
+        )
 
     activity.log_event(
         "worktree_resumed",

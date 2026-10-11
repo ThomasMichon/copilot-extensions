@@ -1467,15 +1467,24 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
-def _authority_still_holds(yaml_path: Path, config: Config) -> bool:
-    """Reload fresh and re-verify authority right before a best-effort
-    write -- an earlier check only proves the record was local at load time."""
+def _authority_fenced_write(
+    yaml_path: Path, config: Config, mutate,
+) -> tracking.WorktreeRecord | None:
+    """Reload fresh, re-verify authority, then run ``mutate`` (given the
+    fresh record) under ONE required-sidecar lock, so a write off an
+    earlier, stale snapshot can never overwrite a record gone foreign since
+    (``mutate``'s own ``save_record`` nests safely, reentrant per path/
+    thread). Returns the fresh record, or ``None`` on a rejected check,
+    contention, or unreadable record -- callers treat that as "skip"."""
     from .execution_spaces import require_record_mutation
     try:
-        require_record_mutation(tracking.load_record(yaml_path), config)
-        return True
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            fresh = tracking.load_record(yaml_path)
+            require_record_mutation(fresh, config)
+            mutate(fresh)
+            return fresh
     except Exception:
-        return False
+        return None
 
 
 def validate_and_finalize(
@@ -1564,19 +1573,16 @@ def validate_and_finalize(
         return True
 
     # Seal the worktree's durable identity (title + session registry) from
-    # session-state BEFORE any teardown, so a finalized/pruned worktree never
+    # session-state before any teardown, so a finalized/pruned worktree never
     # reads as "(untitled)" with no session linkage -- even with a bypassed
-    # register/deregister-session hook (dispatched/crashed session, bare-resume
-    # cwd). Gap-filling + silent; mutates ``record`` for the later save.
-    if record is not None and _authority_still_holds(yaml_path, config):
-        try:
-            tracking.seal_worktree_identity(record)
-        except Exception:
-            pass
-    # Settle only the invoking session's claim before the obligation gate.
-    # The post-exit launcher lacks its child's session id, so missed sessionEnd
-    # claims remain active for the reclaim sweep; session claims do not block
-    # the obligation gate.
+    # register/deregister-session hook. Gap-filling + silent.
+    if record is not None:
+        fresh = _authority_fenced_write(yaml_path, config, tracking.seal_worktree_identity)
+        record = fresh if fresh is not None else record
+    # Settle only the invoking session's claim before the obligation gate
+    # (the post-exit launcher lacks its child's session id, so missed
+    # sessionEnd claims remain active for the reclaim sweep; session claims
+    # do not block the obligation gate).
     current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
     try:
@@ -1588,24 +1594,18 @@ def validate_and_finalize(
         return False
     _advise_other_live_sessions(record, current_session_ref)
     # pr-merge-obligation-gate defense 2: refresh the tracked PR(s) against
-    # the provider RIGHT BEFORE the obligation gate reads the local ledger.
-    # `_reconcile_active_pr` is the one shared observation path every other
-    # PR-workflow verb already funnels through (create-pr, pr-ready,
-    # pr-status, the Picker's background sweep, pr-reconcile); calling it
-    # here too means finalize never trusts a stale/never-verified local
-    # ``pr.state`` -- an out-of-band ``set-pr`` (no provider read at all)
-    # gets its first real confirmation right here, so its `pr`-kind claim
-    # is created (still open) or released (confirmed merged) before the
-    # gate below runs. Best-effort: degrades to local state like every
-    # other caller already tolerates -- never blocks on the reconcile
-    # itself, only on whatever obligation the ledger already records.
-    if record is not None and repo.pr.enabled and _authority_still_holds(yaml_path, config):
-        try:
-            from . import pr_ops as _pr_ops
+    # the provider right before the obligation gate reads the local ledger
+    # (the same shared `_reconcile_active_pr` create-pr/pr-ready/pr-status/
+    # the Picker's sweep/pr-reconcile all use), so an out-of-band `set-pr`
+    # (no provider read) gets its first real confirmation here. Best-effort:
+    # degrades to local state, never blocking on the reconcile itself.
+    if record is not None and repo.pr.enabled:
+        from . import pr_ops as _pr_ops
 
-            _pr_ops._reconcile_active_pr(record, config)
-        except Exception:
-            pass
+        fresh = _authority_fenced_write(
+            yaml_path, config, lambda r: _pr_ops._reconcile_active_pr(r, config),
+        )
+        record = fresh if fresh is not None else record
 
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.

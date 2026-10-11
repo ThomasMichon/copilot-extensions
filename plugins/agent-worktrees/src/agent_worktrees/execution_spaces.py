@@ -186,9 +186,9 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
     """Cleanup has only repo metadata; require config only for scoped registries.
 
     Resolves authority for ``record.repo`` (receiving-side), never ambient
-    ``cfg.load_config()`` (PR #5988 review): the caller's own active project
-    can differ from the record being cleaned, and an ambient config pointing
-    at an unscoped/legacy registry would make ``require_record_mutation``
+    ``cfg.load_config()``: the caller's own active project can differ from
+    the record being cleaned, and an ambient config pointing at an
+    unscoped/legacy registry would make ``require_record_mutation``
     silently no-op, letting a foreign record be reaped.
     """
     from . import config as cfg

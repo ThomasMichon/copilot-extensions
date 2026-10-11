@@ -947,8 +947,8 @@ def _capture_session_title(worktree_id: str, session_id: str) -> bool:
     """Read summary/name from the session's workspace.yaml and persist it.
 
     Re-reads and re-authorizes under its own sidecar lock immediately before
-    the write (PR #5988 review): a race after deregistration's own check
-    could still make the record foreign before this unlocked write ran."""
+    the write: a race after deregistration's own check could still make the
+    record foreign before this unlocked write ran."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False

@@ -325,10 +325,10 @@ def deregister_session(
 
     Raises ``tracking.SessionLifecycleError`` on an ``execution_space``
     rejection, matching ``register_session``'s contract -- the caller must
-    not treat a rejected deregistration as a silent success (PR #5988
-    review: the result was previously discarded, letting
-    ``cmd_deregister_session`` fall through to an unrelated, unauthorized
-    title write as if deregistration had actually happened).
+    not treat a rejected deregistration as a silent success (a discarded
+    result would let ``cmd_deregister_session`` fall through to an
+    unrelated, unauthorized title write as if deregistration had actually
+    happened).
     """
     tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"

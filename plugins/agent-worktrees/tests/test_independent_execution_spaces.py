@@ -185,13 +185,13 @@ def test_cleanup_identity_cannot_be_bypassed_by_current_physical_host(
 def test_cleanup_resolves_authority_from_record_repo_not_ambient_config(
     scoped_config, tmp_path, monkeypatch,
 ):
-    """Regression (PR #5988 review): cleanup must resolve authority for
-    ``record.repo`` (receiving-side), never the caller's own ambient active
-    project. An ambient config pointing at an unscoped/legacy project (no
-    ``execution_platform`` registry entries of its own) must never make a
-    cleanup of a DIFFERENT, scoped project's record silently no-op --
-    ``require_record_mutation`` would see no scoped entries in the wrong
-    project's own config and let a foreign record be reaped."""
+    """Cleanup must resolve authority for ``record.repo`` (receiving-side),
+    never the caller's own ambient active project. An ambient config
+    pointing at an unscoped/legacy project (no ``execution_platform``
+    registry entries of its own) must never make a cleanup of a DIFFERENT,
+    scoped project's record silently no-op -- ``require_record_mutation``
+    would see no scoped entries in the wrong project's own config and let a
+    foreign record be reaped."""
     from agent_worktrees import config as _cfg
 
     ambient = _cfg.Config(
@@ -209,30 +209,44 @@ def test_cleanup_resolves_authority_from_record_repo_not_ambient_config(
         execution_spaces.require_cleanup_identity(record, scoped_config.default_repo.anchor)
 
 
-def test_finalize_authority_recheck_catches_a_record_gone_foreign(
+def test_finalize_authority_fenced_write_catches_a_record_gone_foreign(
     scoped_config, tmp_path,
 ):
-    """Regression (PR #5988 review, finding r4240301749): ``finalize``'s
-    best-effort ``seal_worktree_identity``/``_reconcile_active_pr`` writes
-    relied on a single, stale, unlocked authority snapshot taken at the top
-    of ``validate_and_finalize``. ``_authority_still_holds`` reloads the
-    record fresh and re-verifies immediately before each such write,
-    catching a record that became foreign (or unreadable) in between."""
+    """``finalize``'s best-effort ``seal_worktree_identity``/
+    ``_reconcile_active_pr`` writes must not rely on a single, stale,
+    unlocked authority snapshot taken earlier in ``validate_and_finalize``.
+    ``_authority_fenced_write`` reloads the record fresh and re-verifies,
+    under a required-sidecar lock, immediately before running its given
+    mutation -- catching a record that became foreign (or unreadable) in
+    between, and returning the (possibly mutated) fresh record only on
+    success."""
     from agent_worktrees import finalize
 
     record = tracking.create_new_record(
         "wt-authority", "worktree/wt-authority", str(tmp_path), "project",
         scoped_config.machine, "windows", tmp_path,
     )
-    assert finalize._authority_still_holds(record.yaml_path, scoped_config) is True
+    calls = []
+    result = finalize._authority_fenced_write(
+        record.yaml_path, scoped_config, lambda r: calls.append(r.worktree_id),
+    )
+    assert result is not None and result.worktree_id == "wt-authority"
+    assert calls == ["wt-authority"]
 
     raw = yaml.safe_load(record.yaml_path.read_text(encoding="utf-8"))
     raw["machine"], raw["platform"] = "workstation-wsl", "wsl"
     record.yaml_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    assert finalize._authority_still_holds(record.yaml_path, scoped_config) is False
+    calls.clear()
+    assert finalize._authority_fenced_write(
+        record.yaml_path, scoped_config, lambda r: calls.append(r.worktree_id),
+    ) is None
+    assert calls == []
 
     record.yaml_path.write_text("not: [valid", encoding="utf-8")
-    assert finalize._authority_still_holds(record.yaml_path, scoped_config) is False
+    assert finalize._authority_fenced_write(
+        record.yaml_path, scoped_config, lambda r: calls.append(r.worktree_id),
+    ) is None
+    assert calls == []
 
 
 def test_handoff_equal_physical_labels_do_not_bypass_space_selection(scoped_config, monkeypatch):
@@ -989,8 +1003,7 @@ def test_session_lifecycle_fences_raced_fresh_foreign_record(
 def test_session_register_deregister_fence_raced_fresh_foreign_record(
     verb, via_daemon, tmp_path, scoped_config, monkeypatch,
 ):
-    """Review finding (PR #5988, discussion_r4239485564): the
-    authority-aware generation fencing ``session_conclude``/
+    """The authority-aware generation fencing ``session_conclude``/
     ``session_link_succession`` already carry must also cover
     ``session_register``/``session_deregister`` -- the same ledger-
     mutating hook verbs, now bumped to generation 2 and fenced with the

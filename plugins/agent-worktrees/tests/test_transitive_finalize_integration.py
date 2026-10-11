@@ -178,11 +178,18 @@ class TestSingleHopAToB:
         assert finalize.validate_and_finalize("wt-A", config) is True
 
 
-@pytest.mark.parametrize("transaction", [1, 2])
+@pytest.mark.parametrize("transaction", [2, 3])
 @pytest.mark.parametrize("field", ["machine", "platform", "owner_ref"])
 def test_finalize_rechecks_each_fresh_locked_identity_before_mutation_or_cleanup(
     transaction, field, _env, monkeypatch, capsys,
 ):
+    """``transaction`` numbers the first two genuinely ABORTING fresh-locked
+    authority rechecks after ``_authority_fenced_write``'s own best-effort,
+    skip-on-rejection seal-identity check (that one never halts finalize by
+    itself -- it has its own dedicated unit test in
+    test_independent_execution_spaces.py -- so a race injected there would
+    just silently defer to this test's transaction 2, not add a distinct,
+    separately countable stopping point)."""
     from machine_transport.registry import MachineEntry
 
     tmp_path, tracking_d, config = _env
@@ -254,10 +261,10 @@ def test_finalize_rechecks_each_fresh_locked_identity_before_mutation_or_cleanup
         )
     assert finalize.validate_and_finalize(child_id, config) is False
     assert lock_count == transaction
-    assert writes == ([] if transaction == 1 else ["finalizing"])
+    assert writes == ([] if transaction == 2 else ["finalizing"])
     assert record.yaml_path.read_bytes() == raced_bytes[-1]
     latest = tracking.load_record(record.yaml_path)
-    assert latest.status == ("active" if transaction == 1 else "finalizing")
+    assert latest.status == ("active" if transaction == 2 else "finalizing")
     assert worktree_path.exists()
     assert _git("branch", "--list", record.branch, cwd=anchor)
     assert depth == 0

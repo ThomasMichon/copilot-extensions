@@ -360,8 +360,7 @@ class TestFindMachineEntry:
         assert find_machine_entry(entries, "SHARED") is entries["other"]
 
     def test_scoped_lookup_handles_missing_physical_host_without_crashing(self):
-        """Regression (PR #5988 review, previously-missed finding):
-        ``physical_host`` is optional for a consumer-specific execution-
+        """``physical_host`` is optional for a consumer-specific execution-
         space record. A record declaring ``execution_platform`` but no
         ``physical_host`` must not raise ``AttributeError`` when a
         hostname/display-name match reaches the scoped rejection branch;

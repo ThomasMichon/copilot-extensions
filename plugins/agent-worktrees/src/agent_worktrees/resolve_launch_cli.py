@@ -438,7 +438,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         return _launch_preflight_error(launch_preflight)
 
     try:
-        with tracking._RecordLock(record.yaml_path):
+        with tracking._RecordLock(record.yaml_path, require_sidecar=True):
             fresh = tracking.load_record(record.yaml_path)
             require_record_mutation(fresh, config)
             tracking.mark_resumed(fresh, save=False)
@@ -446,6 +446,11 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     except ExecutionSpaceError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
+    except TimeoutError as exc:
+        message = f"Cannot resume {record.worktree_id}: contended by another process ({exc})"
+        output.err(message)
+        _emit_plan({"action": "error", "error": message, "exit_code": 3})
         return 3
     record.resume_count = fresh.resume_count
     record.last_resumed_at = fresh.last_resumed_at
