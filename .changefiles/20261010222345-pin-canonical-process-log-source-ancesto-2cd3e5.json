@@ -1,0 +1,9 @@
+{
+  "comment": "Pin canonical process-log source ancestors during enumeration, reads and sync transfers; fail closed without required POSIX protections.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

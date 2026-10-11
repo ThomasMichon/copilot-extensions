@@ -48,13 +48,19 @@ enforce their separate completeness and retention guarantees.
 
 ## Root identity and symlink safety
 
-On POSIX, a ref returned by `iter_process_log_refs` reopens the configured
-root with `O_NOFOLLOW` on every later `iter_lines()` call, rather than
-trusting the root by path name -- so replacing the root with a symlink,
-whether before enumeration or any time after a ref was handed to a caller,
-is rejected rather than silently followed. Windows has no `openat`
-equivalent and keeps the previous path-based behavior; this is a documented
-platform gap, not an equivalent guarantee.
+Enumeration, direct references, and process-log sync reads reuse the ZIP
+snapshot directory boundary. Each operation resolves intentionally relocated
+ancestors once, then pins every canonical ancestor. POSIX reads use directory
+descriptors with required no-follow/nonblocking flags; Windows holds native
+ancestor handles denying directory rename while pathname reads run. Missing
+safety primitives fail explicitly, never degrade to an unprotected open.
+
+The configured final root must be a real directory, not an alias. Pinning lasts
+for the operation, not across separate enumeration and read calls: references
+are observations, not immutable snapshots. Concurrent content writes remain
+possible. Sync destination writes and session-state readers retain their
+separate ancestor-containment limitations; this source-read change does not
+close the complete containment tracker.
 
 ## See Also
 
@@ -148,8 +154,9 @@ Windows ancestor handles denying directory rename. Intentionally relocated
 ancestors resolve once before pinning; later redirects cannot redirect archive
 I/O. ZIP file contents are flushed on both platforms; POSIX also flushes the
 containing directory. Windows directory-entry power-loss durability is not
-claimed. This new archive boundary does not retrofit the older sync/reader
-paths or close their remaining ancestor-containment tracker.
+claimed. Process-log source reads also reuse this boundary; older destination
+writes and session-state readers remain outside it, and their containment
+tracker stays open.
 Windows snapshot/verification read handles additionally deny writes and rename.
 Fingerprints use birth time there because native `lstat` and `fstat` can expose
 different `ctime` meanings; POSIX retains change time. Published ZIP verification

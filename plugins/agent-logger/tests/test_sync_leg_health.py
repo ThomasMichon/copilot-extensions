@@ -413,9 +413,9 @@ def test_root_replacement_after_validation_is_rejected(
     meta.write_sync_meta(root, "machine", "local", "ok")
     logs = tmp_path / "logs"
     logs.mkdir()
-    real_validate = filesystem._existing_real_directory_identity
+    real_validate = filesystem._lstat
 
-    def replaced(path: Path) -> tuple[Path, os.stat_result] | None:
+    def replaced(path: Path) -> os.stat_result:
         result = real_validate(path)
         if path == logs:
             path.rename(tmp_path / "original")
@@ -423,7 +423,7 @@ def test_root_replacement_after_validation_is_rejected(
             (path / "process-123-456.log").write_text("replacement\n", encoding="utf-8")
         return result
 
-    monkeypatch.setattr(filesystem, "_existing_real_directory_identity", replaced)
+    monkeypatch.setattr(filesystem, "_lstat", replaced)
     assert not target.push_process_logs(logs, "machine").ok
     assert not (root / "logs" / "process-123-456.log").exists()
     assert meta.read_sync_meta(root)["status"] == "partial"

@@ -19,6 +19,7 @@ import shutil
 import stat
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
@@ -27,6 +28,7 @@ from agent_logger import process_logs as _process_logs
 from agent_logger import sessions
 from agent_logger.process_logs import is_process_log_candidate
 from agent_logger.sessions import SessionRef
+from agent_logger.sync.archive_directory import archive_directory
 from agent_logger.sync.detritus import (
     DetritusSummary,
     discover_session_detritus,
@@ -397,32 +399,34 @@ def _same_file_content(src: Path, dst: Path) -> bool:
 def _copy_process_logs(
     source: Path, dest: Path, source_identity: os.stat_result | None = None,
 ) -> tuple[int, int, list[Path]]:
+    """Keep canonical source ancestors pinned for the entire transfer."""
+    with ExitStack() as stack:
+        try:
+            directory = stack.enter_context(archive_directory(source))
+        except ValueError as exc:
+            raise ValueError(f"process-log source is not a directory: {source}") from exc
+        opened = (
+            os.fstat(directory.fd) if directory.fd is not None else directory.path.stat()
+        )
+        if source_identity is not None and (
+            source_identity.st_dev, source_identity.st_ino,
+        ) != (opened.st_dev, opened.st_ino):
+            raise _SourceChangedDuringCopy("process-log source root changed before opening")
+        return _copy_process_logs_pinned(directory.path, dest, opened)
+
+
+def _copy_process_logs_pinned(
+    source: Path, dest: Path, source_identity: os.stat_result,
+) -> tuple[int, int, list[Path]]:
     """Flat, non-recursive incremental copy of process-log evidence.
 
-    Process logs sit directly under *source* (never a directory tree like a
-    session-state ``<id>/``), so this mirrors the incremental size/mtime copy
-    the session push loop performs, without that loop's recursive
-    directory-walk and detritus-discovery machinery -- neither applies to a
-    flat directory of log files. Returns ``(copied, bytes, locked_paths)``;
-    a locked source file (transient Windows sharing violation on a live
-    in-use log) or one whose identity/size changed mid-copy (a rotation or
-    replacement racing this pass) is recorded in *locked_paths* and
-    skipped, exactly like a deferred session file -- never aborting the
-    whole pass.
+    Returns ``(copied, bytes, locked_paths)`` for flat process-log candidates.
+    Size/mtime comparisons skip unchanged evidence; transient Windows sharing
+    violations and identity/size changes defer individual files for retry.
 
-    On POSIX, *source* is opened once with ``O_NOFOLLOW`` and every entry is
-    scanned and opened relative to that single directory handle, reusing
-    :mod:`agent_logger.process_logs`'s own root-pinning primitives (the same
-    ones :func:`~agent_logger.process_logs.iter_process_log_refs` uses) --
-    a swap of *source* onto a symlink after the caller's own initial
-    validation (e.g. between :func:`_existing_real_directory` and this scan)
-    cannot redirect traversal outside the configured root. This protects the
-    *named, configured* root itself; it does not pin every ancestor
-    component of *source* (see :func:`~agent_logger.process_logs.open_root_dir`'s
-    own docstring for why that's an explicit, deliberate scope boundary
-    rather than an oversight). Windows has no ``openat`` equivalent and
-    keeps the previous path-based behavior, the same documented platform
-    gap ``process_logs.py`` already carries.
+    The caller pins all canonical source ancestors for this entire operation.
+    POSIX entry I/O additionally uses the final directory fd; Windows pathname
+    reads run while ancestor handles prohibit directory rename.
 
     A source file that disappears mid-pass (log rotation or deletion racing
     this copy) is treated as an ordinary skipped candidate, never a
@@ -1897,32 +1901,30 @@ class FilesystemTarget(Target):
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
         """Publish process-log evidence; see :class:`Target`'s base method.
 
-        Scope note on the destination side, stated explicitly rather than
-        left implicit: ``dest`` is validated once via
-        :func:`_ensure_relative_directory` (path-component checks, same as
-        every other destination write in this module -- the session-state
-        push included), then every subsequent write under it
-        (``_copy_stream_replace``'s temp-create/fsync/unlink/replace) is
-        path-based, not re-pinned to a directory handle. A concurrent swap
-        of ``dest`` onto a symlink after that validation could in principle
-        redirect a write outside the configured target -- the same
-        TOCTOU class as the already-documented source-side ancestor gap
-        (see ``_copy_process_logs``'s docstring), but on the write path
-        instead of the read path, and shared by every destination write in
-        this file, not unique to process logs. Closing it needs a broader,
-        dir_fd-pinned rework of ``_copy_replace``/``_durable_replace``'s
-        whole write path -- out of scope for this bounded change; tracked
-        as a known limitation rather than silently assumed safe.
+        Source ancestors are pinned throughout the transfer. Destination
+        directories are only validated before pathname-based writes:
+        ``_copy_stream_replace`` does not pin their handles. A concurrent
+        directory redirect can therefore escape the target. This destination
+        containment limitation, shared with session-state writes, remains
+        tracked in #5727.
         """
         try:
-            safe_source = _existing_real_directory_identity(log_root)
+            log_root = _anchored_path(log_root)
+            try:
+                source_identity = _lstat(log_root)
+            except FileNotFoundError:
+                source_identity = None
+            if source_identity is not None and (
+                not stat.S_ISDIR(source_identity.st_mode)
+                or is_link_or_reparse(log_root, source_identity.st_mode)
+            ):
+                raise OSError("process-log source must be a real directory")
         except OSError as exc:
             self._record_process_log_health(machine, "partial", reason="unsafe process-log source")
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
-        if safe_source is None:
+        if source_identity is None:
             self._record_process_log_health(machine, "partial", reason="no process-log source")
             return PushResult(ok=True, detail="no process-log source")
-        log_root, source_identity = safe_source
         try:
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine) / "logs")

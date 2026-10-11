@@ -239,6 +239,23 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 - The effort remains Active; preservation, calibration, consumer adoption and
   the parent validation obligations remain open.
 
+### 2026-10-10 - Process-log source ancestor containment implementation
+- Resumed the source-read portion of #5727 under the canonical preservation
+  allocation. Enumeration, direct raw/gzip/ZIP reads and filesystem transfer
+  sources now reuse the canonical ancestor directory boundary from #6117;
+  intentionally relocated ancestors remain supported. Missing required POSIX
+  safety flags fail explicitly, and generator body errors retain their cause.
+- Bounded network-disconnected Linux selection covering process logs, ZIP
+  preservation, source roots and independent transfer-leg health passed
+  **231 tests, 5 skipped**. Native rename-denial regressions for enumeration,
+  direct reads and sync are included in the existing `source_roots` Windows
+  selection; native execution and exact-head full CI remain pre-merge gates,
+  not claims inferred from Linux. Install-contract and touched-file lint pass.
+- Destination publication containment remains open in #5727. Reclamation,
+  catalog/accounting/daily products, pinned consumer parity, release and
+  approved adoption remain active. No original evidence was retired and no
+  live source, target, configuration or deployed runtime changed.
+
 ### 2026-10-10 - Additive ZIP preservation landed
 - Source PR #6117 merged as `0f13c88d52d645ae22c90a836604fbd35608178d`
   after exact-head Copilot approval and complete successful CI run

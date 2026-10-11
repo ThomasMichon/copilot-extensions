@@ -8,7 +8,7 @@ import os
 import stat
 import zipfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
@@ -48,21 +48,20 @@ def is_process_log_candidate(name: str) -> bool:
 
 @contextmanager
 def _open_regular(path: Path) -> Iterator[BinaryIO]:
-    before = path.lstat()
-    if not stat.S_ISREG(before.st_mode):
-        raise ValueError(f"process-log evidence is not a regular file: {path}")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags)
-    try:
-        with os.fdopen(fd, "rb") as stream:
-            fd = -1
+    from agent_logger.sync.archive_directory import archive_directory
+    from agent_logger.sync.provenance import is_link_or_reparse
+
+    with archive_directory(path.parent) as directory:
+        before = directory.stat(path.name)
+        if not stat.S_ISREG(before.st_mode) or is_link_or_reparse(
+            directory.path / path.name, before.st_mode,
+        ):
+            raise ValueError(f"process-log evidence is not a regular file: {path}")
+        with directory.open(path.name) as stream:
             opened = os.fstat(stream.fileno())
             if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
                 raise ValueError(f"process-log evidence changed while opening: {path}")
             yield stream
-    finally:
-        if fd != -1:
-            os.close(fd)
 
 
 def _zip_logs(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
@@ -91,7 +90,7 @@ class ProcessLogRef:
 
     path: Path
     member: str | None = None
-    # Set only by `iter_process_log_refs` on POSIX: the directory this ref's
+    # Set by `iter_process_log_refs` on POSIX: the directory this ref's
     # `path` was discovered directly under, re-opened with O_NOFOLLOW at read
     # time instead of trusting `path`'s parent component by name. Excluded
     # from equality/repr so refs built directly (as every existing caller and
@@ -157,62 +156,32 @@ def supports_dir_fd() -> bool:
     """Whether directory-fd-pinned traversal (``open_root_dir``/
     ``open_regular_at``) is available on this platform.
 
-    POSIX only -- mirrors the directory-fd gate `_fsync_directory` already
-    uses elsewhere in this plugin's sync targets. Windows has no equivalent
-    "openat" primitive, so the root here is re-resolved by path instead; see
-    `iter_process_log_refs`'s docstring for the resulting platform gap.
+    Windows uses canonical ancestor handles denying directory renames instead.
     """
     return os.name != "nt"
 
 
 @contextmanager
 def open_root_dir(log_root: Path) -> Iterator[int]:
-    """Open ``log_root`` once and verify its identity, so later per-entry
-    traversal is bound to this directory handle rather than re-resolving the
-    root path -- a swap of the final root component (e.g. onto a symlink)
-    between the initial check and later entry opens would otherwise let an
-    attacker redirect enumeration/reads outside the configured root.
+    """Pin every canonical ancestor before exposing a POSIX directory fd.
 
-    Scope, stated explicitly rather than left implicit: ``O_NOFOLLOW``
-    rejects only a symlinked *final* component of ``log_root`` itself. Like
-    every other path-based open in this plugin (e.g.
-    ``filesystem._existing_real_directory``), the kernel's ordinary path
-    resolution still silently follows a symlink at any *ancestor* component
-    (e.g. replacing ``~/.copilot`` itself, several components above the
-    configured ``logs`` root). Closing that would need a full dir_fd-pinned
-    walk from a trusted anchor down to ``log_root`` -- and would also then
-    reject a legitimate system where an ancestor is itself an intentional
-    symlink (e.g. a relocated ``$HOME``), trading one failure mode for
-    another. The threat this function defends against is specifically a
-    swap of the *named, configured* root -- the component under direct
-    attacker or race control here -- not a compromised ancestor directory,
-    which is out of scope for this primitive.
+    Intentional ancestor aliases resolve once; subsequent traversal is relative
+    to pinned descriptors. The configured final directory must remain real.
+    """
+    from agent_logger.sync.archive_directory import archive_directory
 
-    Public (not module-private) because this root-pinning primitive is
-    shared with ``agent_logger.sync.targets.filesystem``'s process-log
-    publication path, not only ``iter_process_log_refs`` below."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
-    try:
-        fd = os.open(log_root, flags)
-    except FileNotFoundError:
-        raise
-    except NotADirectoryError as exc:
-        raise ValueError(f"process-log source is not a directory: {log_root}") from exc
-    except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            # A symlinked root rejected by O_NOFOLLOW: no dedicated subclass
-            # exists for this errno, so it only arrives as a bare OSError.
+    with ExitStack() as stack:
+        try:
+            directory = stack.enter_context(archive_directory(log_root))
+        except (NotADirectoryError, ValueError) as exc:
             raise ValueError(f"process-log source is not a directory: {log_root}") from exc
-        # Permission errors, I/O errors, descriptor exhaustion, overlong
-        # paths, etc. are genuine, actionable failures -- never relabel them
-        # as "not a directory".
-        raise
-    try:
-        if not stat.S_ISDIR(os.fstat(fd).st_mode):
-            raise ValueError(f"process-log source is not a directory: {log_root}")
-        yield fd
-    finally:
-        os.close(fd)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise ValueError(f"process-log source is not a directory: {log_root}") from exc
+            raise
+        if directory.fd is None:
+            raise OSError(errno.ENOTSUP, "process-log directory fd requires POSIX")
+        yield directory.fd
 
 
 @contextmanager
@@ -229,13 +198,14 @@ def open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
     this function exists to enforce, rather than relying on every caller
     to prefilter the value correctly.
     """
-    if "/" in name or "\\" in name or Path(name).is_absolute():
+    from agent_logger.sync.archive_directory import _posix_file_flags
+
+    if name in ("", ".", "..") or "/" in name or "\\" in name or Path(name).is_absolute():
         raise ValueError(f"process-log evidence name must be a bare filename: {name!r}")
     before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
         raise ValueError(f"process-log evidence is not a regular file: {name}")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(name, flags, dir_fd=dir_fd)
+    fd = os.open(name, _posix_file_flags(), dir_fd=dir_fd)
     try:
         with os.fdopen(fd, "rb") as stream:
             fd = -1
@@ -252,15 +222,11 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
     """Enumerate live, gzip, and flat ZIP observations without silently
     deduplicating.
 
-    On POSIX, directory listing, per-ZIP header reads, and every later
-    ``ProcessLogRef.iter_lines()`` call on a returned ref all reopen
-    ``log_root`` itself with ``O_NOFOLLOW`` rather than trusting a path
-    component by name -- so a swap of ``log_root`` onto a symlink, whether
-    before enumeration or any time after (including well after a ref was
-    returned), cannot redirect traversal or a later read outside the
-    configured root. Windows has no "openat" equivalent, so there the root
-    is re-resolved by path for each access; this is a known, platform-
-    specific gap rather than an equivalent guarantee.
+    Each enumeration/read pins canonical ancestors: POSIX uses directory fds,
+    Windows holds native handles denying directory renames during pathname I/O.
+    Intentional ancestor aliases are resolved once at the start of each
+    operation; this is containment during an operation, not a snapshot across
+    separate enumeration and read calls.
 
     A directory with no raw/gzip/ZIP process-log evidence -- including one
     containing only unrelated files, or a ZIP with no supported members --
@@ -292,14 +258,15 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
                     for member in names:
                         yield ProcessLogRef(log_root / name, member, verified_root=log_root)
         return
-    root_stat = log_root.lstat()
-    if not stat.S_ISDIR(root_stat.st_mode):
-        raise ValueError(f"process-log source is not a directory: {log_root}")
-    for path in sorted(log_root.iterdir()):
-        if _is_log_name(path.name.removesuffix(".gz")):
-            yield ProcessLogRef(path)
-        elif path.suffix == ".zip":
-            with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
-                names = [info.filename for info in _zip_logs(archive)]
-            for name in names:
-                yield ProcessLogRef(path, name)
+    from agent_logger.sync.archive_directory import archive_directory
+
+    with archive_directory(log_root) as directory:
+        for name in directory.names():
+            path = directory.path / name
+            if _is_log_name(name.removesuffix(".gz")):
+                yield ProcessLogRef(path)
+            elif path.suffix == ".zip":
+                with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
+                    names = [info.filename for info in _zip_logs(archive)]
+                for member in names:
+                    yield ProcessLogRef(path, member)
