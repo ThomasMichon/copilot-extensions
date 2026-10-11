@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import logging
 import os
@@ -191,10 +192,26 @@ def _agent_bridge_owner_root() -> Path:
     return _core().install_dir()
 
 
+def _agent_bridge_installation_context() -> str:
+    explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    own_root = _agent_bridge_owner_root()
+    if not explicit_context and (
+        own_root.name == "agent-bridge"
+        and own_root.parent.name == "plugins"
+        and own_root.parent.parent.parent.name == "marketplaces"
+    ):
+        explicit_context = str(own_root / "install.json")
+    return explicit_context
+
+
 def _agent_worktrees_launch_prefix() -> list[str] | None:
     core = _core()
-    explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    explicit_context = _agent_bridge_installation_context()
+    own_root = _agent_bridge_owner_root()
     if not explicit_context:
+        prefix = _legacy_worktrees_launch_prefix(own_root)
+        if prefix:
+            return prefix
         exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
         return [exe] if exe else None
     try:
@@ -210,6 +227,28 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
         raise core._peer_launch.ContextRefused(f"same-cell agent-worktrees resolution failed: {error}") from error
 
 
+def _legacy_worktrees_launch_prefix(own_root: Path) -> list[str] | None:
+    """Use the installed resolver, not an interactive shell's executable search."""
+    from .install_paths import uses_legacy_install_dir
+
+    if not uses_legacy_install_dir(own_root):
+        raise _peer_launch.ContextRefused("non-legacy bridge requires an installation context")
+    root = Path.home() / ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+    tombstone = root / ".installation-ownership.json"
+    if tombstone.exists() or tombstone.is_symlink():
+        raise _peer_launch.ContextRefused("legacy worktree owner has installation-cell ownership")
+    resolver = own_root / "scripts" / "versioned_runtime.py"
+    if not resolver.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("_bridge_versioned_runtime", resolver)
+    if spec is None or spec.loader is None:
+        raise _peer_launch.ContextRefused("installed runtime resolver is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    python = module.resolve_python(root)
+    return [str(python), "-I", "-X", "utf8", "-m", "agent_worktrees"] if python else None
+
+
 def _cmd_handoff_check(args: argparse.Namespace) -> None:
     core = _core()
     try:
@@ -221,7 +260,7 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
         if os.environ.get(_peer_launch.CONTEXT_ENV, ""):
             print("[FAIL] agent-worktrees is not installed in this installation cell; cannot check handoffs.", file=sys.stderr)
         else:
-            print("[FAIL] agent-worktrees is not on PATH; cannot check handoffs.", file=sys.stderr)
+            print("[FAIL] agent-worktrees has no installed runtime or compatible command; cannot check handoffs.", file=sys.stderr)
         sys.exit(1)
     argv = [*prefix, "handoffs-check", "--json"]
     argv += ["--worktree-id", args.worktree_id] if args.worktree_id else ["--all"]

@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve native-service worktree owners through completed installed runtimes and refuse missing pre-effect prerequisites without busy deferrals.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
