@@ -245,3 +245,24 @@ def test_truncated_finalized_display_never_overrides_live_picker():
     del row["closure"]["display"]["settled_sessions"]
     assert not prune.interpret_descriptor_payload(row["closure"])["supported"]
     assert derive.norm({**row, "mux_session": True}, "host", "wsl")["state"] == "ACTIVE"
+
+
+def test_descriptor_interpreters_share_acceptance_contract():
+    import copy
+    from agent_worktrees import prune as canonical
+    from worktree_manager.production_picker import prune as manager
+
+    payload = m._worktree_to_dict(
+        _rec(), state_info=git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED),
+    )["closure"]
+    variants = [None, {}, payload]
+    for key in ("settled_sessions", "finalized", "compact"):
+        altered = copy.deepcopy(payload)
+        del altered["display"][key]
+        variants.append(altered)
+    for drift in (False, True, "unknown"):
+        altered = copy.deepcopy(payload)
+        altered["git"]["branch_drift"] = drift
+        variants.append(altered)
+    for candidate in variants:
+        assert canonical.interpret_descriptor_payload(candidate) == manager.interpret_descriptor_payload(candidate)

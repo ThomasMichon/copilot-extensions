@@ -169,7 +169,7 @@ def test_finalized_display_rejects_contradictory_serialized_evidence(condition):
     elif condition == "handoff":
         descriptor["facts"]["pending_handoff"]["count"] = 1
     elif condition == "drift":
-        descriptor["git"]["branch_drift"] = True
+        descriptor["git"]["branch_drift"] = "unknown"
     else:
         descriptor["git"]["active_effort"] = True
     assert not prune.interpret_descriptor_payload(descriptor)["supported"]

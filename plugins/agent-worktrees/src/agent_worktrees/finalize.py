@@ -1842,7 +1842,8 @@ def validate_and_finalize(
         # verified upstream, so a merged-but-not-yet-cleaned worktree stops
         # rendering as diverged in the picker (#1106).
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
-
+        from .finalized_checkout import snapshot
+        finalized_identity = snapshot(worktree_path) if Path(worktree_path).exists() else None
         if not checkout_managed or inside_worktree or has_live_session:
             reason = (
                 "the checkout is owned by an external session host"
@@ -1977,9 +1978,7 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
-            from .finalized_checkout import snapshot
-
-            record.finalized_checkout = snapshot(worktree_path) if inside_worktree or has_live_session or not checkout_managed else None
+            record.finalized_checkout = finalized_identity if Path(worktree_path).exists() else None
             # Release settled outbound resources; children keep their prune gates.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")

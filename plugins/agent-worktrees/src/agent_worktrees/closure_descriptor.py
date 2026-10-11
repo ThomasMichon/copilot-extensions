@@ -398,7 +398,6 @@ def assemble_closure_descriptor(
         and evidence_complete
         and info.state in (S.COMPLETED, S.ACTIVE)
         and info.dirty == 0
-        and not info.branch_drift
         and held_claims == settled_sessions
         and open_follow_ups == 0
         and not rec.active_effort
@@ -526,7 +525,7 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
                 or open_follow_ups != 0
                 or not isinstance(git, dict)
                 or _non_negative_int(git.get("dirty")) != 0
-                or git.get("branch_drift") is not False
+                or not isinstance(git.get("branch_drift"), bool)
                 or git.get("active_effort") is not False
                 or not isinstance(payload.get("blockers"), list)
                 or any(b.get("code") not in ("held-claims", "paired-pending") for b in payload["blockers"] if isinstance(b, dict))
