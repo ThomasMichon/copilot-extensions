@@ -288,6 +288,21 @@ async def test_existing_cli_reservation_refuses_before_installing_acquisition_ga
 
 
 @pytest.mark.asyncio
+async def test_drain_during_preflight_refuses_native_launch(rig, monkeypatch):
+    original = rig.runtime._prepare_target
+    async def prepare(*args):
+        output = await original(*args)
+        rig.manager.set_draining(True)
+        return output
+    monkeypatch.setattr(rig.runtime, "_prepare_target", prepare)
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(req())
+    assert error.value.code == "acquisition_draining"
+    assert not rig.manager.list_sessions()
+    assert rig.manager._active_acquisitions == 0
+
+
+@pytest.mark.asyncio
 async def test_exact_owned_native_recovers_after_crash_before_ledger_registration(rig, monkeypatch):
     original = acquisition_runtime.worktree_command
     async def interrupted(args, project):

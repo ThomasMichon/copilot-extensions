@@ -40,6 +40,8 @@ class AcquisitionRuntime:
         self.store = AcquisitionStore(db)
 
     async def acquire(self, req: AcquisitionRequest) -> AcquisitionResult:
+        if self.manager.is_draining:
+            raise AcquisitionRefused("acquisition_draining", "bridge is draining")
         if req.mode == "cli" and any(
             item is not None for item in (req.charter, req.model, req.effort)
         ):
@@ -48,7 +50,13 @@ class AcquisitionRuntime:
             )
         async with _fresh_start_locks.setdefault(req.worktree_id, asyncio.Lock()):
             with executor(self.db, req.worktree_id):
-                return await self._acquire_locked(req)
+                if self.manager.is_draining:
+                    raise AcquisitionRefused("acquisition_draining", "bridge is draining")
+                self.manager._active_acquisitions = getattr(self.manager, "_active_acquisitions", 0) + 1
+                try:
+                    return await self._acquire_locked(req)
+                finally:
+                    self.manager._active_acquisitions -= 1
 
     async def _acquire_locked(self, req: AcquisitionRequest) -> AcquisitionResult:
         completed = self.db.execute_read(
@@ -278,6 +286,8 @@ class AcquisitionRuntime:
         target: Any,
         request_env: dict[str, str],
     ) -> tuple[str, str]:
+        if self.manager.is_draining:
+            raise AcquisitionRefused("acquisition_draining", "bridge drained before launch")
         if req.mode == "acp":
             if decision.conversation:
                 session = self.manager.get_session(decision.conversation.session_id)
@@ -498,6 +508,8 @@ class AcquisitionRuntime:
             raise AcquisitionRefused("head_changed", "native head changed before turn admission")
         # Dispatch is checked last: worktree resolution itself awaits owner I/O.
         await verify_dispatch(req, self.resolver)
+        if self.manager.is_draining:
+            raise AcquisitionRefused("acquisition_draining", "bridge drained before delivery")
 
     async def _recover(
         self,

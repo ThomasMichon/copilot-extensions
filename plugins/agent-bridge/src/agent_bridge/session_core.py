@@ -638,12 +638,12 @@ class _SessionCoreMixin:
             if preserved else "",
             timeout, " (force)" if force else "",
         )
-        while busy and time.monotonic() < deadline:
+        while (busy or getattr(self, "_active_acquisitions", 0)) and time.monotonic() < deadline:
             await _asyncio.sleep(poll)
             busy = [s for s in self.busy_sessions()
                     if s != exclude_session_id and s not in preserved]
 
-        drained = not busy
+        drained = not busy and not getattr(self, "_active_acquisitions", 0)
         if drained:
             log.info(
                 "Drain complete: no busy sessions remain%s",
@@ -974,5 +974,4 @@ class _SessionCoreMixin:
         if status:
             sessions = [s for s in sessions if s.status.value == status]
         return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
-
 
