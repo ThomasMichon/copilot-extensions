@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit consent for transactional repair of owned generated guidance and treat overlap warnings as audit advisories.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

@@ -142,7 +142,11 @@ the deterministic lock as one serialized, compare-before-replace,
 rollback-protected transaction. It refuses
 unmarked files, malformed or missing ownership, different owners, local body
 edits, nonportable or case-conflicting destinations, path escape, and
-symlink/reparse indirection. It never deletes repository-owned files; orphaned
+symlink/reparse indirection. Scheduled adopters may explicitly consent to
+repairing content edits on valid, already-owned generated artifacts with
+`overwriteExistingManaged`; ordinary sync preserves edits by default.
+See `docs/patterns/worktree-scoped-dynamic-guidance.md` for that narrow
+transactional repair boundary. It never deletes repository-owned files; orphaned
 projections and old managed regions are review findings for a human or ordinary
 repository change to remove.
 
@@ -161,7 +165,9 @@ no rendering/writing/pushing of its own):
 - **Deterministic, fail-closed finding classification** (`classify_findings`):
   only `projection-missing` and `projection-source-update` are plain drift
   `sync` already resolved. Every other check name -- including one not yet
-  invented -- is conflict-routed by default; a newly added
+  invented -- is conflict-routed by default, except warning-only
+  `projection-overlap` and `projection-aggregate-budget` audit advisories;
+  blocking severities still conflict. A newly added
   `instruction_projections.py` check must be reviewed and explicitly
   allowlisted here before a worker may silently fold it into a bypass.
 - **Trusted-source allowlist** (`marketplace_of` + `bypass_decision`), keyed
@@ -194,7 +200,8 @@ implemented. A conflict a worker cannot bypass routes to
 `agent_dispatch.conflict_dispatch`'s generalized dispatch primitive, naming
 the
 [`projection-reconciler` agent template](references/projection-reconciler-agent-template.md)
--- report-only on a hand-edited managed projection, re-derive-fresh on an
+-- report-only on a hand-edited managed projection without live overwrite
+consent, consent-scoped canonical repair otherwise, re-derive-fresh on an
 ordinary git-level conflict, never a self-merge.
 
 ### `projection_sync_worker.py`: the one-shot deterministic sync tool

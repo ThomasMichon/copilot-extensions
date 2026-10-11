@@ -123,6 +123,19 @@ deterministic maintenance normally refreshes reviewed projections once daily;
 ordinary work does not require synchronous checked-in resync. This does not
 assert that installed payloads or running systems have been updated.
 
+Generated projections are not an authoring surface: change the canonical
+template or declaration instead of touching its generated output. Adopters may
+commit `overwriteExistingManaged: true` in their existing projection-reflect
+consent to repair content edits on already-lock-owned regular files. The default
+remains `false`. Ownership/provenance, scope, valid sources and path safety still
+must validate; unmarked files, invalid locks and indirection never qualify.
+Actual edited selector/inline and fallback bytes are transaction preimages,
+not trusted guidance. Live consent is rechecked under the sync lock before each
+write; withdrawal or a concurrent edit aborts and rolls back prior writes
+without discarding that concurrent edit. Fallback retirement still requires
+its full integrity proof. This opt-in changes neither the eight inline floors
+nor local-cache discovery; pointer-only local-body relocation is separate.
+
 Before dependent/consequential action the reader acquires authoritative
 content, or reports a visible blocker without assuming authorization.
 `manage-instruction-projections.py resolve-source <repository> <destination>

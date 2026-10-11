@@ -19,7 +19,8 @@ class DeliveryIO:
 
 
 def read_fallback(
-    root: Path, entry: Mapping[str, object], io: DeliveryIO
+    root: Path, entry: Mapping[str, object], io: DeliveryIO, *,
+    allow_content_edits: bool = False,
 ) -> bytes | None:
     if entry.get("deliveryMode") != "selector":
         return None
@@ -28,14 +29,20 @@ def read_fallback(
     path = io.safe(root, PurePosixPath(fallback["destination"]))
     raw = io.read(path, delivery.MAX_FALLBACK_BYTES)
     marker = delivery.parse_marker(raw)
-    delivery.validate_local_template(raw, marker)
+    if allow_content_edits:
+        delivery.validate_local_frontmatter(raw, marker)
+    else:
+        delivery.validate_local_template(raw, marker)
     expected = {
         key: value for key, value in entry.items() if key in delivery.BASE_KEYS
     } | {"renderedBytes": fallback["renderedBytes"]}
     if (
         any(marker.get(key) != value for key, value in expected.items())
-        or hashlib.sha256(raw).hexdigest() != fallback["renderedSha256"]
-        or not delivery.complete_body(raw, marker)
+        or marker.get("deliveryKind") != "body"
+        or (not allow_content_edits and (
+            hashlib.sha256(raw).hexdigest() != fallback["renderedSha256"]
+            or not delivery.complete_body(raw, marker)
+        ))
     ):
         raise ValueError("reviewed fallback integrity, ownership or body coverage mismatch")
     return raw
@@ -149,11 +156,15 @@ def resolve_authenticated(
 
 def plan_fallback_change(
     root: Path, destination: str, content: bytes | None,
-    previous: Mapping[str, object] | None, io: DeliveryIO,
+    previous: Mapping[str, object] | None, io: DeliveryIO, *,
+    overwrite_existing_managed: bool = False,
 ) -> list[tuple[Path, bytes | None, bytes | None]]:
     before = None
     if previous is not None and previous.get("deliveryMode") == "selector":
-        before = read_fallback(root, previous, io)
+        before = read_fallback(
+            root, previous, io,
+            allow_content_edits=overwrite_existing_managed and content is not None,
+        )
     if content is None and before is None:
         return []
     path = io.safe(root, PurePosixPath(delivery.fallback_destination(destination)))

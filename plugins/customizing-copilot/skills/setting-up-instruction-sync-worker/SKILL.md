@@ -66,7 +66,8 @@ matching this schema (validated by the sibling
   "reconcilerAgent": "projection-reconciler",
   "dispatchLabel": "projection-conflict",
   "trustedMarketplaces": ["copilot-extensions"],
-  "requireImmutablePin": false
+  "requireImmutablePin": false,
+  "overwriteExistingManaged": false
 }
 ```
 
@@ -79,6 +80,15 @@ unconditionally would silently disable the bypass path entirely for that
 common case. Only set it `true` once you understand that tradeoff (see
 issue #3132 for the still-open externally-installed-source half of this
 gap).
+
+`overwriteExistingManaged` is optional and defaults to `false`; a present
+non-boolean invalidates consent. Set it to `true` only when generated
+projections must be regenerated from canonical templates, never hand-edited.
+The worker forwards `overwrite_existing_managed` to `run_sync_pass`; sync
+revalidates live consent under its lock and before writes. It repairs content
+edits only on valid already-owned artifacts, retaining ownership, path and
+transaction protections. It is not a general force switch. The full boundary
+is in `docs/patterns/worktree-scoped-dynamic-guidance.md`.
 
 - **No file present, or `enabled` is not literally `true`:** decline to
   scaffold the reconciler agent, scheduler, or bypass profile. You may
@@ -169,7 +179,8 @@ scan depends on it.
    for whichever review gate the repo already uses. It must re-check
    `load_consent` on every PR (not cache a prior check), and restrict itself
    to: the stamp label present, every changed path inside
-   `.github/instructions/**` and the lock file, a diff shape of regular-file
+   exact declared instruction destinations, derived lock-owned fallback paths,
+   and the lock file, a diff shape of regular-file
    adds/modifies only, a byte-exact recompute match, and every changed
    source's marketplace inside the consent file's own
    `trustedMarketplaces` -- the same conjunction `projection_reflect.py`'s

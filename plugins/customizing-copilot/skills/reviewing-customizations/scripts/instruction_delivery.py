@@ -308,7 +308,9 @@ def complete_body(raw: bytes, marker: Mapping[str, object]) -> bool:
         return False
 
 
-def validate_local_template(raw: bytes, marker: Mapping[str, object]) -> None:
+def validate_local_frontmatter(
+    raw: bytes, marker: Mapping[str, object]
+) -> tuple[str, str]:
     text = raw.decode("utf-8")
     marker_line = MARKER_PREFIX + _json(marker) + " -->\n"
     if text.count(marker_line) != 1:
@@ -321,6 +323,11 @@ def validate_local_template(raw: bytes, marker: Mapping[str, object]) -> None:
         or decode_scope(lines[1].split(":", 1)[1].strip()) != marker["applyTo"]
     ):
         raise ValueError("local frontmatter scope mismatch")
+    return header, body
+
+
+def validate_local_template(raw: bytes, marker: Mapping[str, object]) -> None:
+    header, body = validate_local_frontmatter(raw, marker)
     if marker.get("deliveryKind") == "body":
         if not complete_body(raw, marker) or not body.startswith("\n"):
             raise ValueError("local body receipt/integrity mismatch")

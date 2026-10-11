@@ -185,6 +185,7 @@ def run_sync_pass(
     pinned_commits: Mapping[str, str] | None = None,
     resolve_pins: Callable[[list[object]], Mapping[str, str] | None] | None = None,
     refresh: Callable[[], None] | None = None,
+    overwrite_existing_managed: bool = False,
 ) -> SyncOutcome:
     """Run one complete sync -> scan -> decide pass; return the one outcome.
 
@@ -220,6 +221,8 @@ def run_sync_pass(
     silently disable pin enforcement for a caller that explicitly opted
     into it.
     """
+    # A true request still requires live consent inside the locked sync; the
+    # caller's earlier consent snapshot never authorizes the transaction.
     if refresh is not None:
         refresh()
 
@@ -275,7 +278,9 @@ def run_sync_pass(
             resolved = resolve_pins(sources)
             pinned_commits = resolved if resolved is not None else {}
         entries_before = projections.load_lock_entries(root)
-        sync_result = projections.sync_repository_locked(root, sources)
+        sync_result = projections.sync_repository_locked(
+            root, sources, overwrite_existing_managed=overwrite_existing_managed
+        )
         scan_result = projections.scan_repository(root, sources)
         entries_after = projections.load_lock_entries(root)
     finally:
@@ -402,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         sources,
         trusted_marketplaces=consent.trusted_marketplaces,
         resolve_pins=resolve_pins,
+        overwrite_existing_managed=consent.overwrite_existing_managed,
     )
     if args.json:
         print(json.dumps(outcome.to_dict(), indent=2, sort_keys=True))
