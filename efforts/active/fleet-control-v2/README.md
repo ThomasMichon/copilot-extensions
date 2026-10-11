@@ -1,0 +1,176 @@
+# Fleet Control V2
+
+- **Slug:** `fleet-control-v2`
+- **Repo:** copilot-extensions
+- **Branch(es):** Independent, serial per-slice PRs against `dev`
+- **Created:** 2026-10-11
+- **Status:** Draft; plan review and buildout preparation only
+- **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
+- **Umbrella issue:** #6236
+- **Sub-issues:** Existing dependencies #5789, #6030, #5861, #5862; implementation sub-issues are created after plan review and deduplication
+
+## Guiding Intent
+
+Replace fragmented integrated control ownership with one standalone fleet-manager
+product: one supported release/lifecycle implementation and a transactional
+Gateway coordination core usable locally or for multiple machines. Preserve
+independently useful guidance, existing standalone services, driver authority,
+credential isolation, durable execution and accepted work.
+
+This effort owns the cross-cutting architecture and finite migration contract,
+not a competing implementation of the routing or Linux deployment campaigns.
+Plan review is the gate before runtime buildout. Publishing this plan grants
+neither live enrollment nor deployment, destructive retirement or capacity access.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
+| Contract implementer | First reviewed local/Gateway/node operation slice after ownership assignment | Separate managed worktree; assigned sub-issue |
+| Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
+| Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
+
+## Coordination
+
+- **Topology:** Reviewed architecture followed by serial, independently reviewed slices.
+- **Host (owns PRs):** Plan steward for this proposal; each implementation slice names its PR owner.
+- **Delegates:** None assigned to runtime implementation by this plan.
+- **Slice ownership:** Never assign a slice already held by another campaign.
+  Coordinate #5789/#6030 and the standalone client PR #6133 before touching their files.
+- **Handoff:** Continue from the first unresolved Plan item with its validation
+  gates and current owner, not merely from the most recent merged PR.
+- **Canonical home:** This effort and its linked proposal are the upstream
+  implementation contract. Private presentation copies are non-authoritative
+  exports and are not linked from public artifacts.
+- **Completion boundary:** Plan publication is not V2 implementation completion.
+
+## Context
+
+[Architecture proposal](architecture.md) records the recommendation, alternatives,
+authority boundaries and implementation gates. It reconciles the
+[machine-fleet vision](../../../visions/machine-fleet/README.md) and the existing
+[fleet-manager system proposal](../linux-role-fleet/fleet-manager-system.md).
+
+The routing foundation #5789 provides fixed-service routing contracts, not
+already-proven resident Gateway/connector operation. Linux role fleet #6030 owns
+deployment adapter adoption, while #6133 proposes a thin standalone offline
+client planner. #5861 owns named reconciliation and #5862 observed recovery.
+Existing work is reused, not preempted or silently marked complete.
+
+The suite already has shared immutable runtime, installer, endpoint and cutover
+primitives. The redesign replaces distributed *authority and lifecycle ownership*
+where integration requires it; it does not presume all existing code is defective.
+Prior source investigation and a synthetic local SQLite model motivated the
+proposal. Neither establishes distributed reliability, service migration safety,
+real installer readiness or production performance.
+
+## Request
+
+Operator direction, captured verbatim:
+
+> "Ideally, your centraliziation proposal produces a service which can be put as
+> the Gateway service, and either used machine-local or act as the coordinator
+> for multiple machines seamlessly."
+
+> "This looks like a good plan. Get this plan deposited in my OneDrive (proper
+> organization please). Then, get this reviewed via PR, and prepare to start
+> driving it via effort buildout"
+
+The operator confirmed the slug `fleet-control-v2`. Personal artifact delivery
+is handled outside this public repository. The architecture details, phase
+breakdown and validation below are **agent-recommended** elaborations of the
+approved direction. No runtime or live rollout authorization is inferred from
+"prepare".
+
+## Plan
+
+All detailed slices are **agent-recommended** and remain subject to review.
+
+### Phase 0 - Reviewed intent and coordinated buildout
+- [x] Confirm canonical effort placement and slug; deduplicate and claim #6236.
+- [ ] Land the effort, [architecture proposal](architecture.md), and explicit
+  integrated-product vision/pattern amendments through actual PR review.
+- [ ] Re-read the merged plan; coordinate existing campaign owners and assign
+  non-overlapping sub-issues before any runtime implementation.
+- [ ] Capture actual launch/update/recovery baseline and select first vertical
+  slice acceptance criteria; do not invent performance targets from package counts.
+
+### Phase 1 - One release and role-selective lifecycle
+- [ ] Define a fleet-manager release manifest for thin client, Gateway and node
+  roles; reuse existing lifecycle code rather than implementing parallel installers.
+- [ ] Prove independent setup/update/doctor/recovery and bounded activation,
+  with no installation or update from Copilot hooks.
+- [ ] Prove thin client installation has no controller/container-manager effects;
+  keep ordinary standalone services usable outside the integrated profile.
+
+### Phase 2 - One authority, isolated execution
+- [ ] Implement identified command admission, content-bound idempotency,
+  transactional intent/claims/audit/outbox and target-side receipt reconciliation.
+- [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
+  locally, then through one Gateway and two separate nodes.
+- [ ] Persist scope/generation fences at cooperative effect owners; define
+  UNKNOWN and safe blocked reassignment for unsupported/uncertain effects.
+- [ ] Keep accepted agent/mux work, credentials and expensive workloads outside
+  coordinator lifetime; all integrated roles share one lifecycle implementation.
+
+### Phase 3 - Transfer authority without duplicate writers
+- [ ] Inventory V1 authorities, state schemas, live hosts, receipts and obligations;
+  coordinate imports with their current owners.
+- [ ] Implement restartable import/reconciliation, explicit admission freeze,
+  and verified adoption or drain without dual authoritative writes.
+- [ ] Establish per-domain drain deadline and owner/escalation decisions; do not
+  kill live work just because a compatibility window elapsed.
+- [ ] Retire only verified owned writers/registrations and prove repeated
+  installation cannot resurrect the previous lifecycle.
+
+### Phase 4 - Adoption evidence and closure
+- [ ] Record compatibility, data rollback/commit-forward boundaries, platform
+  support, diagnostics and mixed-version per-target outcomes.
+- [ ] Obtain separate adopter approval and prove a controlled live deployment;
+  no publication or green mock test substitutes for enrollment authority.
+- [ ] Resolve or transfer every Plan/Validation item, archive this effort,
+  and release ownership only after its full completion gate.
+
+## Validation Plan
+
+All entries are **agent-recommended implementation gates**, not completed tests.
+
+- [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
+  offline installed use and precise missing/incompatible/unauthorized failures.
+- [ ] Concurrent activation/admission: one authoritative writer, unique resource
+  ownership and bounded contention, with real process boundaries.
+- [ ] Crash injection at intent/effect/receipt and activation boundaries;
+  accepted work and queryable original operation survive without duplicate effects.
+- [ ] Separate Gateway and two node processes/hosts: reconnect, revoked connector,
+  stale offer, cross-fleet denial, slow-node isolation and result replay.
+- [ ] Partition plus attempted reassignment: expiry does not prove prior effects
+  stopped; actual resource owner prevents unsafe concurrent authority.
+- [ ] Real agent/mux host survival and reattachment across controller replacement,
+  including lost prompt acknowledgments and explicit UNKNOWN outcomes.
+- [ ] Schema migration/rollback, Gateway storage relocation and writer fencing;
+  never restore stale state over acknowledged post-upgrade writes.
+- [ ] Rolling release with offline/older nodes and invalid config revision:
+  individual acceptance/readiness/convergence, not false global success.
+- [ ] Two authority/account domains and separate credential providers:
+  no automatic grant widening or local fallback on Gateway outage.
+- [ ] V1 import with live work and unresolved obligations, then retirement/
+  reinstall/uninstall: no lost responsibility, double writers or revived feeders.
+- [ ] Unit, simple E2E, clean-room and available live-venue tiers recorded for each
+  implementation slice; skipped tiers and unsupported platforms remain explicit.
+- [ ] Required repository guards/CI and actual review pass before each merge;
+  runtime readiness and rollout remain separately proven.
+
+## Proposal
+
+[Architecture and migration contract](architecture.md).
+
+## Journal
+
+### 2026-10-11 - Approved direction and plan preparation
+- Operator approved the adversarial redesign, requested organized personal
+  artifact preservation and PR review, and confirmed this effort's slug.
+- Verified compatible target effort adoption and repository-scoped identity;
+  claimed #6236 after searching existing fleet issues and open PRs.
+- Kept #5789/#6030/#6133 ownership intact. Prepared only architecture/intent and
+  implementation gates; no runtime, host enrollment or live cutover performed.

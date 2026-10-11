@@ -48,6 +48,11 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 1. **À la carte first.** Every plugin is independently installable. Never assume a
    sibling is installed or running, and never require shared machine-wide plumbing
    (proxy, tunnel, registry, central coordinator). A lone install is first-class.
+   The explicit integrated coordination profile in the machine-fleet and
+   plugin-services visions is a scoped exception: its runtime-backed adapters
+   invoke the deliberately adopted fleet-manager product and fail explicitly
+   when it is absent. Static guidance and ordinary standalone defaults remain
+   independent; enrollment is not authority migration.
 2. **Compose gracefully.** When siblings *are* present, discover and use their
    optional capabilities without a mandatory central broker and without the user
    hand-wiring them. A missing sibling degrades a feature, never the whole plugin.
@@ -86,12 +91,17 @@ core of the principles above; a reviewer checks a change against these.
 - **No shared-infrastructure dependency by default.** A plugin service is
   installable and reachable using only what its *own* installer deployed. It
   must never *require* an external reverse proxy, tunnel, mesh, load balancer,
-  or service registry. The sole explicit exception is a
+  or service registry. One explicit exception is a
   [`managed-companion-runtime`](managed-companion-runtime.md): an optional
   heavyweight capability that is inert without its declared trusted supervisor
   and never masquerades as the plugin's ordinary standalone runtime. (Serves
   *Vision plugin-services §Non-Goals/no-shared-infrastructure-dependency* and
   §Features/`delegated-heavy-companion-runtime`.)
+  The explicit integrated coordination profile is an additional scoped
+  exception for adapters to an adopted fleet-manager product, not permission to
+  add hidden supervisors or dependencies to existing standalone services.
+  Integrated roles retain one lifecycle implementation, immutable activation,
+  provenance and effect-side authority fencing.
 - **Endpoints are collision-free by construction.** Two plugin services — and the
   same service across the Windows/WSL boundary — never contend for one address by
   design, not by a human maintaining a fixed-port table or applying per-platform
