@@ -28,6 +28,11 @@ def matches(record: tracking.WorktreeRecord) -> bool:
     ):
         return False
     try:
-        return snapshot(record.worktree_path) == stamp
+        if snapshot(record.worktree_path) != stamp:
+            return False
+        return not git_ops.git(
+            "status", "--porcelain", "--untracked-files=normal",
+            cwd=record.worktree_path, timeout=5,
+        ).stdout.strip()
     except (git_ops.GitError, OSError, ValueError, subprocess.TimeoutExpired):
         return False

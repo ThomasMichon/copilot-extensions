@@ -245,6 +245,15 @@ def test_successful_finalize_stays_final_on_fetch_free_status(
         assert cli._render_status_segment(
             str(checkout), fetch=False, plain=True, no_title=True,
         ).strip() == "[FINAL]"
+    from agent_worktrees import finalized_checkout, git_ops
+
+    (checkout / "new.txt").write_text("new unlanded work\n", encoding="utf-8")
+    assert not finalized_checkout.matches(finalized)
+    cached = cli._worktree_to_dict(
+        finalized,
+        state_info=git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED),
+    )
+    assert not cached["closure"]["display"]["finalized"]
     _init_identity(checkout)
     _commit(checkout, "new.txt", "new unlanded work\n")
     assert "FINAL" not in cli._render_status_segment(
