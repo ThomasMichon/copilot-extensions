@@ -27,6 +27,7 @@ try:
 
     import plugin_test_containment as containment
     import pytest_portfolio_guard as portfolio_guard
+    import _admission_protocol as admission
 finally:
     sys.path[:] = _previous_path
 
@@ -398,10 +399,10 @@ def test_admission_fails_fast_with_live_holder(monkeypatch, tmp_path: Path) -> N
         def acquire(self) -> None:
             raise runner.AlreadyRunningError(tmp_path / "runner.lock", 123)
 
-    monkeypatch.setattr(runner, "SingleInstance", lambda *_args, **_kwargs: BusyLease())
+    monkeypatch.setattr(admission, "SingleInstance", lambda *_args, **_kwargs: BusyLease())
 
     with pytest.raises(runner.AlreadyRunningError) as exc:
-        runner._acquire_admission(0)
+        runner._acquire_admission(0, tmp_path / "environment")
     assert exc.value.holder_pid == 123
 
 
@@ -416,15 +417,15 @@ def test_admission_wait_is_bounded_and_retries(monkeypatch) -> None:
 
     lease = EventuallyAvailableLease()
     clock = iter((10.0, 10.0))
-    monkeypatch.setattr(runner, "SingleInstance", lambda *_args, **_kwargs: lease)
+    monkeypatch.setattr(admission, "SingleInstance", lambda *_args, **_kwargs: lease)
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
 
-    assert runner._acquire_admission(1.0) is lease
+    assert runner._acquire_admission(1.0, Path("environment")) is lease
     assert lease.calls == 2
 
 
-def test_heavy_run_holds_admission_for_all_targets(monkeypatch) -> None:
+def test_run_holds_one_environment_lease_at_a_time(monkeypatch) -> None:
     events: list[str] = []
 
     class Lease:
@@ -436,7 +437,7 @@ def test_heavy_run_holds_admission_for_all_targets(monkeypatch) -> None:
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait: events.append("acquire") or Lease(),
+        lambda _wait, root: events.append(f"acquire:{root.name}") or Lease(),
     )
     monkeypatch.setattr(
         runner,
@@ -445,7 +446,7 @@ def test_heavy_run_holds_admission_for_all_targets(monkeypatch) -> None:
     )
 
     assert runner.main(["alpha", "beta"]) == 0
-    assert events == ["acquire", "run:alpha", "run:beta", "release"]
+    assert events == ["acquire:alpha", "run:alpha", "release", "acquire:beta", "run:beta", "release"]
 
 
 def test_unexpected_runner_error_does_not_wedge_remaining_plugins(monkeypatch) -> None:
@@ -474,17 +475,20 @@ def test_unexpected_runner_error_does_not_wedge_remaining_plugins(monkeypatch) -
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait: events.append("acquire") or Lease(),
+        lambda _wait, root: events.append(f"acquire:{root.name}") or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", _run_plugin)
 
     # Exit code 1 (a real failure was recorded), but every target was
     # still attempted -- "gamma" (after the raising "beta") must have run.
     assert runner.main(["alpha", "beta", "gamma"]) == 1
-    assert events == ["acquire", "run:alpha", "run:gamma", "release"]
+    assert events == [
+        "acquire:alpha", "run:alpha", "release",
+        "acquire:beta", "release", "acquire:gamma", "run:gamma", "release",
+    ]
 
 
-def test_guards_also_take_heavy_admission(monkeypatch) -> None:
+def test_guards_also_take_environment_admission(monkeypatch) -> None:
     # `--guards` still reaches `_ensure_venv()` and so can rebuild/delete
     # the SHARED on-disk venv a concurrent bare admitted run may be
     # relying on mid-execution -- it is not exempt.
@@ -498,7 +502,7 @@ def test_guards_also_take_heavy_admission(monkeypatch) -> None:
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda wait: acquire_calls.append(wait) or Lease(),
+        lambda wait, root: acquire_calls.append(wait) or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
@@ -506,7 +510,7 @@ def test_guards_also_take_heavy_admission(monkeypatch) -> None:
     assert acquire_calls == [0.0]
 
 
-def test_collect_only_also_takes_heavy_admission(monkeypatch) -> None:
+def test_collect_only_also_takes_environment_admission(monkeypatch) -> None:
     # `--collect-only` likewise reaches `_ensure_venv()` and so can
     # rebuild/delete the SHARED on-disk venv -- it is not exempt either.
     class Lease:
@@ -519,7 +523,7 @@ def test_collect_only_also_takes_heavy_admission(monkeypatch) -> None:
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda wait: acquire_calls.append(wait) or Lease(),
+        lambda wait, root: acquire_calls.append(wait) or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
@@ -527,7 +531,7 @@ def test_collect_only_also_takes_heavy_admission(monkeypatch) -> None:
     assert acquire_calls == [0.0]
 
 
-def test_prepare_only_takes_heavy_admission(monkeypatch) -> None:
+def test_prepare_only_takes_environment_admission(monkeypatch) -> None:
     # Like --guards/--collect-only, --prepare-only is NOT exempt: it can
     # rebuild/delete the SHARED on-disk venv a concurrent bare admitted
     # run may be relying on mid-execution.
@@ -541,7 +545,7 @@ def test_prepare_only_takes_heavy_admission(monkeypatch) -> None:
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda wait: acquire_calls.append(wait) or Lease(),
+        lambda wait, root: acquire_calls.append(wait) or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 

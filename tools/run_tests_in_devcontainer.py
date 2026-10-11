@@ -28,7 +28,7 @@ inside the container, with two normalizations (``--base`` rewritten to its
 resolved SHA; ``--reinstall`` applied to the prep pass then stripped from
 the real pass) and two exceptions: ``--allow-host-state`` is rejected, and
 an over-ceiling resource-limit override is rejected. ``--admission-wait``
-is also consulted for a HOST-side lease acquisition before any work begins.
+is validated before any work begins and passed to the inner environment lease.
 """
 
 from __future__ import annotations
@@ -930,66 +930,49 @@ def main(argv: list[str] | None = None) -> int:
         # commit -- see `_rewrite_base_to_resolved_sha`.
         passthrough = _rewrite_base_to_resolved_sha(passthrough)
 
-        # Acquire the host-wide lease `run-plugin-tests.py` itself uses, on the HOST, first -- its
-        # in-container acquisition is uncontested. Own try/finally from the moment of acquisition: a
-        # later failure (even as early as `_per_instance_config`) can never leak it. Resolve (validate)
-        # `--admission-wait` UNCONDITIONALLY, even for `--list` (which skips acquisition): a malformed
-        # or negative value must fail before any container is brought up, not only once `--list` does.
-        admission_wait = _admission.resolve_admission_wait(passthrough, _canonicalize_flag)
-        admission_lease = None
+        # Keep validation even for --list; each invocation's environments live
+        # in its own container workspace, so no host-global lease is needed.
+        _admission.resolve_admission_wait(passthrough, _canonicalize_flag)
+        instance_label = uuid.uuid4().hex[:12]
+        config_path, volume_name = _per_instance_config(instance_label)
+        container_id: str | None = None
+        result: int | None = None
+        primary_failed = False
         try:
-            if _admission.needs_admission(passthrough, _canonicalize_flag):
-                admission_lease = _admission.acquire(admission_wait)
-
-            instance_label = uuid.uuid4().hex[:12]
-            config_path, volume_name = _per_instance_config(instance_label)
-            # `container_id` doubles as the lifecycle marker the `finally`
-            # below uses to pick cleanup: still `None` means `_bring_up`
-            # never returned one, a real id means normal teardown. No
-            # window where a signal could raise before cleanup is active.
-            container_id: str | None = None
-            result: int | None = None
-            primary_failed = False
             try:
-                try:
-                    _create_bounded_volume(volume_name)
-                    container_id = _bring_up(instance_label, config_path)
-                    _populate_workspace(container_id, passthrough, include_untracked=ns.include_untracked)
-                    # Phase 2 networking split -- skipped for `--list`.
-                    if not _net_scope.is_list_only(passthrough, _canonicalize_flag):
-                        _net_scope.prepare_dependencies(
-                            _devcontainer_exe(), REPO, container_id, config_path, passthrough, _canonicalize_flag,
-                        )
-                        _net_scope.disconnect_container_networks(container_id)
-                        # The prep pass rebuilt the venv(s); --reinstall here would rebuild
-                        # again with no network left.
-                        passthrough = _net_scope.strip_reinstall(passthrough, _canonicalize_flag)
-                    result = _run_tests(container_id, config_path, passthrough)
-                    primary_failed = result != 0
-                except BaseException:
-                    primary_failed = True
-                    raise
-                finally:
-                    # The primary result/exception must win over a secondary cleanup failure -- a bare `finally` raising
-                    # would otherwise silently discard it. `primary_failed` says which case this is: report (don't
-                    # re-raise) a cleanup failure once the primary already failed; raise it directly only when it succeeded.
-                    if container_id is None:
-                        with _cleanup_signals_deferred():
-                            _cleanup_orphan(instance_label, volume_name)
-                    elif not ns.keep:
-                        try:
-                            with _cleanup_signals_deferred():
-                                _tear_down(container_id, volume_name)
-                        except BaseException as teardown_exc:
-                            if not primary_failed:
-                                raise
-                            print(f"warning: teardown also failed: {teardown_exc}", file=sys.stderr)
-                return result
+                _create_bounded_volume(volume_name)
+                container_id = _bring_up(instance_label, config_path)
+                _populate_workspace(container_id, passthrough, include_untracked=ns.include_untracked)
+                # Phase 2 networking split -- skipped for `--list`.
+                if not _net_scope.is_list_only(passthrough, _canonicalize_flag):
+                    _net_scope.prepare_dependencies(
+                        _devcontainer_exe(), REPO, container_id, config_path, passthrough, _canonicalize_flag,
+                    )
+                    _net_scope.disconnect_container_networks(container_id)
+                    # The prep pass rebuilt the venv(s); --reinstall here would rebuild
+                    # again with no network left.
+                    passthrough = _net_scope.strip_reinstall(passthrough, _canonicalize_flag)
+                result = _run_tests(container_id, config_path, passthrough)
+                primary_failed = result != 0
+            except BaseException:
+                primary_failed = True
+                raise
             finally:
-                shutil.rmtree(config_path.parent, ignore_errors=True)
+                # Preserve the primary failure if teardown also fails.
+                if container_id is None:
+                    with _cleanup_signals_deferred():
+                        _cleanup_orphan(instance_label, volume_name)
+                elif not ns.keep:
+                    try:
+                        with _cleanup_signals_deferred():
+                            _tear_down(container_id, volume_name)
+                    except BaseException as teardown_exc:
+                        if not primary_failed:
+                            raise
+                        print(f"warning: teardown also failed: {teardown_exc}", file=sys.stderr)
+            return result
         finally:
-            if admission_lease is not None:
-                admission_lease.release()
+            shutil.rmtree(config_path.parent, ignore_errors=True)
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm_handler)
         signal.signal(signal.SIGHUP, previous_sighup_handler)

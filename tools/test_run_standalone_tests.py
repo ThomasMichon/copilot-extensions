@@ -47,7 +47,7 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
 def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     called = []
-    monkeypatch.setattr(runner, "acquire", lambda wait: called.append(wait))
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: called.append(wait))
 
     with pytest.raises(SystemExit) as exc:
         runner.main([
@@ -58,8 +58,22 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
     assert called == []
 
 
+def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    python = tmp_path / ".test-venvs" / "fake" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setattr(runner, "interpreter_environment", lambda _: tmp_path / "host-environment")
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["agent-index-service", "--prepare", "--python", str(python)])
+    assert exc.value.code == 2
+
+
 @pytest.mark.parametrize("smoke", [False, True])
-def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, smoke):
+def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, monkeypatch, smoke):
     root = tmp_path / "agent-index-service"
     (root / "tests").mkdir(parents=True)
     python = tmp_path / "test-python"
@@ -71,7 +85,13 @@ def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, 
         def release(self):
             released.append(True)
 
-    monkeypatch.setattr(runner, "acquire", lambda wait: Lease())
+    environment_root = tmp_path / "actual-environment"
+    monkeypatch.setattr(runner, "interpreter_environment", lambda path: environment_root)
+    acquisitions = []
+    monkeypatch.setattr(
+        runner, "acquire",
+        lambda wait, root: acquisitions.append((wait, root)) or Lease(),
+    )
     captured = {}
 
     def run(command, **kwargs):
@@ -96,10 +116,11 @@ def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, 
     assert runner.main(args) == 0
     assert captured["cwd"] == root
     assert released == [True]
+    assert acquisitions == [(0.0, environment_root)]
 
 
 def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
-    monkeypatch.setattr(runner, "acquire", lambda wait: pytest.fail("unexpected admission"))
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main(["worktree-manager", "--smoke"])
     assert exc.value.code == 2
@@ -107,10 +128,33 @@ def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
 
 @pytest.mark.parametrize("timeout", ["nan", "inf", "-inf", "0", "-1"])
 def test_nonfinite_or_nonpositive_timeout_rejected_before_admission(monkeypatch, timeout):
-    monkeypatch.setattr(runner, "acquire", lambda wait: pytest.fail("unexpected admission"))
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main(["agent-index-service", f"--timeout={timeout}"])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("wait", ["nan", "inf", "-inf", "-1", "bad"])
+def test_invalid_admission_wait_rejected_before_preparation(monkeypatch, wait):
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["agent-index-service", "--prepare", f"--admission-wait={wait}"])
+    assert exc.value.code == 2
+
+
+def test_custom_interpreter_probe_failure_is_not_silent_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    python = tmp_path / "invalid-python"
+    python.touch()
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+
+    def fail(_):
+        raise ValueError("invalid prefix")
+
+    monkeypatch.setattr(runner, "interpreter_environment", fail)
+    assert runner.main(["agent-index-service", "--python", str(python)]) == 1
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="POSIX outer containment regression uses Linux procfs")
