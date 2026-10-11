@@ -172,7 +172,7 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
     assert called
 
 
-@pytest.mark.parametrize("target", ["EXAMPLE-HOST", "raw-host", "local-alias", "Example Host"])
+@pytest.mark.parametrize("target", [None, "", "EXAMPLE-HOST", "raw-host", "local-alias", "Example Host"])
 @pytest.mark.parametrize("environment,remote", [("Win", False), ("WSL", True)])
 def test_json_launch_canonicalizes_self_target_before_selecting_transport(
     monkeypatch, tmp_path, target, environment, remote,
@@ -211,8 +211,9 @@ def test_json_launch_canonicalizes_self_target_before_selecting_transport(
         lambda plan: calls.append("local") if plan["action"] == "exec" else None,
     )
 
-    assert resolve_cli._resolve_json_mode(state) == (7 if remote else 0)
-    assert calls == ["remote" if remote else "local"]
+    dispatch_remote = remote and bool(target)
+    assert resolve_cli._resolve_json_mode(state) == (7 if dispatch_remote else 0)
+    assert calls == ["remote" if dispatch_remote else "local"]
 
 
 def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):

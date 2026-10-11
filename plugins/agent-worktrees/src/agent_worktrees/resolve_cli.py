@@ -533,7 +533,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # cross-platform resume (e.g. the Windows Worktree Picker launching a
     # WSL worktree) fail closed with a bogus "Worktree not found" instead of
     # SSHing into the requested environment -- confirmed live.
-    same_machine = machine_identity.is_local_machine(state.requested_machine, config)
+    same_machine = bool(state.requested_machine) and machine_identity.is_local_machine(
+        state.requested_machine, config
+    )
     requested_environment = getattr(state.args, "environment", None) or ""
     same_environment = True
     if requested_environment:
