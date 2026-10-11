@@ -282,19 +282,33 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
+    # Use the canonical fingerprint_source() (libs/versioned-runtime), not a
+    # bespoke pyproject.toml-only hash: a prior audit (#5472) found exactly
+    # this narrower scope on another adopter -- changing src\agent_pull_requests
+    # WITHOUT touching pyproject.toml must still be detected as a content
+    # change, or an installed slot could wrongly report `reuse` for a
+    # genuinely different payload.
     try {
-        $parts = @()
+        $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+        $py = Get-BootstrapPython
+        if (-not $py) { return '' }
+        $roots = @()
         $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
+        if (Test-Path $pp) { $roots += $pp }
+        if (Test-Path $PkgSrcDir) { $roots += $PkgSrcDir }
         $libs = Join-Path $PluginDir 'libs'
         if (Test-Path $libs) {
             Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
+                Sort-Object FullName | ForEach-Object { $roots += $_.FullName }
         }
-        $joined = [string]::Join("`n", $parts)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
+        if ($roots.Count -eq 0) { return '' }
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $fpArgs = @($vr, '--root', $InstallDir, 'fingerprint') + $roots
+        $hash = (& $py @fpArgs 2>$null | Out-String).Trim()
+        $ErrorActionPreference = $prevEAP
+        if ($LASTEXITCODE -ne 0) { return '' }
+        return $hash
     } catch { return '' }
 }
 
