@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -194,6 +195,7 @@ def test_fallback_only_repair_uses_owner_and_live_bypass_policy(
     tmp_path: Path, case: str,
 ) -> None:
     repo, source, spec = fixture(tmp_path)
+    source.is_local_checkout = False
     assert not projections.sync_repository(repo, [source]).blocking
     fallback = repo / delivery.fallback_destination(spec.destination)
     fallback.write_bytes(fallback.read_bytes() + b"\nhand edit\n")
@@ -209,3 +211,28 @@ def test_fallback_only_repair_uses_owner_and_live_bypass_policy(
     assert not outcome.bypass_eligible
     assert not outcome.needs_conflict_dispatch
     assert outcome.bypass.reasons
+
+
+def test_managed_overwrite_uses_consent_changed_while_acquiring_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.sync_repository(repo, [source]).blocking
+    fallback = repo / delivery.fallback_destination(spec.destination)
+    fallback.write_bytes(fallback.read_bytes() + b"\nhand edit\n")
+    opt_in(repo)
+    original = projections.repository_sync_lock
+
+    @contextmanager
+    def acquire(root: Path):
+        with original(root):
+            opt_in(repo, trustedMarketplaces=["other"])
+            yield
+
+    monkeypatch.setattr(projections, "repository_sync_lock", acquire)
+    outcome = worker.run_sync_pass(
+        repo, [source], trusted_marketplaces=["market"], overwrite_existing_managed=True
+    )
+    assert outcome.has_actionable_change
+    assert not outcome.bypass_eligible
+    assert "outside the trusted-source allowlist" in outcome.bypass.reasons[0]
