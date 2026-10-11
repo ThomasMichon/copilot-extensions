@@ -127,6 +127,11 @@ class AcquisitionRuntime:
         except AcquisitionRefused as exc:
             self.store.journal.refuse(req, token, exc.code)
             raise
+        if req.mode == "cli" and decision.acquired != "reused":
+            existing = self.db.get_cli_mode_reservation(req.worktree_id)
+            if existing and existing["expires_at"] > time.time():
+                self.store.journal.refuse(req, token, "cli_launch_pending")
+                raise AcquisitionRefused("cli_launch_pending", "existing CLI launch reservation remains active")
         retired = (
             frozenset(
                 item.native_session_id for item in evidence.conversations if item.native_session_id
@@ -566,6 +571,8 @@ class AcquisitionRuntime:
                 raise AcquisitionRefused(
                     "native_identity_changed", "recovered launch changed native identity"
                 )
+            if req.mode == "acp":
+                await self._restore_recovered_head(req, session_id, native)
             _, head = await verify_worktree(req)
             if head != native:
                 raise AcquisitionRefused(
@@ -705,6 +712,9 @@ class AcquisitionRuntime:
                     session, native = found[0].session_id, found[0].acp_session_id
                 else:
                     session, native = await self._cli_native(previous, cli_driver(previous))
+                if previous.mode == "acp":
+                    await self._restore_recovered_head(req, session, native)
+                    _, head = await verify_worktree(req)
                 if native != head or (
                     data.get("native_session_id") and data["native_session_id"] != native
                 ):
@@ -756,6 +766,31 @@ class AcquisitionRuntime:
             + "This is the exact native conversation being delivered this task, "
             + "not the launch worker ID or a prior session's identity."
         )
+
+    async def _restore_recovered_head(
+        self, req: AcquisitionRequest, session_id: str, native: str,
+    ) -> None:
+        await verify_dispatch(req, self.resolver)
+        row, head = await verify_worktree(req)
+        if head == native:
+            return
+        session = self.manager.get_session(session_id)
+        if not session or session.acp_session_id != native or not (
+            session.caller_id and session.caller_id.startswith("acquisition:")
+        ) or session.target.worktree_id != req.worktree_id:
+            raise AcquisitionRefused("recovery_owner_unknown", "native acquisition owner cannot be verified")
+        if self.db.list_fresh_live_sessions(req.worktree_id, now=time.time()) or any(
+            item.session_id != session_id and item.target.worktree_id == req.worktree_id
+            and item.client and item.client.is_running
+            for item in self.manager.list_sessions()
+        ):
+            raise AcquisitionRefused("recovery_holder_conflict", "another holder prevents ledger restoration")
+        if not self.db.reserve_worktree_ownership(req.worktree_id, session_id, now=time.time()):
+            raise AcquisitionRefused("recovery_holder_conflict", "native ownership could not be restored")
+        await worktree_command([
+            "register-session", "--session-id", native,
+            "--worktree-id", req.worktree_id, "--cwd", row["path"],
+        ], req.project)
 
     @staticmethod
     def _result(

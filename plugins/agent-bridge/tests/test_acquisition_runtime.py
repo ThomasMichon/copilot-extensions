@@ -277,6 +277,37 @@ async def test_cli_actual_launch_native_rename_is_refused_without_delivery(rig, 
 
 
 @pytest.mark.asyncio
+async def test_existing_cli_reservation_refuses_before_installing_acquisition_gate(rig):
+    rig.db.create_cli_mode_reservation("worktree-a", now=time.time())
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(req(mode="cli"))
+    assert error.value.code == "cli_launch_pending"
+    assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    assert rig.db.execute_read("SELECT state FROM acquisition_attempts")[0]["state"] == "refused"
+
+
+@pytest.mark.asyncio
+async def test_exact_owned_native_recovers_after_crash_before_ledger_registration(rig, monkeypatch):
+    original = acquisition_runtime.worktree_command
+    async def interrupted(args, project):
+        if args[0] == "register-session":
+            raise RuntimeError("crash before register")
+        return await original(args, project)
+    monkeypatch.setattr(acquisition_runtime, "worktree_command", interrupted)
+    with pytest.raises(RuntimeError, match="crash before register"):
+        await rig.runtime.acquire(req())
+    assert rig.head["id"] is None
+    native = rig.manager.list_sessions()[0].acp_session_id
+    monkeypatch.setattr(acquisition_runtime, "worktree_command", original)
+    recovered = await rig.runtime.acquire(req())
+    assert recovered.native_session_id == native
+    assert rig.head["id"] == native
+    session = rig.manager.get_session(recovered.session_id)
+    if session._prompt_task:
+        await session._prompt_task
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
 async def test_interrupted_launch_reconciles_before_new_attempt_without_second_process(rig, mode):
     original = rig.runtime._deliver
