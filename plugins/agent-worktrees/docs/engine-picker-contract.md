@@ -7,6 +7,30 @@ boundary is what keeps the coupling one-way and dependency-free (the Picker owns
 no worktree logic or state), and it is why the TUI framework (Textual) stays
 entirely out of the plugin engine.
 
+## SSH launch-prompt admission
+
+The Worktrees composer is host-rendered for local and machine-SSH sources.
+Prompted remote `resolve --json --machine <target>` invokes the target's own
+`resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
+is bounded to 8192 bytes and carries version 1, a 32-character hexadecimal
+`request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
+and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
+are encoded. Prompt text never enters the interactive SSH launch string.
+
+The target's existing tracking-write daemon owns admission and seed staging.
+Admission retains a text-free fingerprint and allocated worktree/intent IDs
+under external tracking state. The returned receipt carries those identities,
+not prompt text. The host's subsequent remote plan launches the same worktree
+with `--stage-launch-seed --seed-id <id>`. The existing target setup and native
+backend boundary perform cold checks, reservation, failed-start release and
+successful handoff discard.
+
+`resolve --json --launch-request-status <request-id>` is read-only recovery.
+It returns `staged`, `handoff-unconfirmed`, `creation-incomplete` or
+`completed-or-superseded`, plus the allocated identities. A repeated admitted
+request cannot allocate another New worktree or restore a completed/replaced
+prompt. A target without the request capability rejects before mutation.
+
 ## Provider-backed source registry
 
 Venue providers may add project-scoped Picker sources by writing JSON registry
