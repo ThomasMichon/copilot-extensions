@@ -98,12 +98,12 @@ _Agent-recommended prerequisite, explicitly selected by the operator._
 
 _Agent-recommended implementation requirements._
 
-- [ ] Introduce an opt-in, capability-advertised acknowledged notification contract owned by `agent-pull-requests`; legacy subscriptions retain their existing wire behavior.
-- [ ] Persist the fired event before attempting delivery. Retain a stable event identity and replay the same payload until a successful callback acknowledgement, explicit cancellation, or a visibly recorded terminal recovery outcome.
-- [ ] Keep callback execution bounded; retry failures with bounded backoff without blocking unrelated subscriptions or holding persistence locks during subprocess execution.
-- [ ] Recover pending deliveries across daemon restart and supported cutover. Guard acknowledgement against unregister/re-register races so an old delivery cannot remove a newer registration.
-- [ ] Validate notification specifications and timeout inputs explicitly. Report delivery failures and pending retry state without logging credentials.
-- [ ] Land and verify the notification-contract PR before enabling dispatch delegation.
+- [x] Introduce an opt-in, capability-advertised acknowledged notification contract owned by `agent-pull-requests`; legacy subscriptions retain their existing wire behavior.
+- [x] Persist the fired event before attempting delivery. Retain a stable event identity and replay the same payload until a successful callback acknowledgement, explicit cancellation, or a visibly recorded terminal recovery outcome.
+- [x] Keep callback execution bounded; retry failures with bounded backoff without blocking unrelated subscriptions or holding persistence locks during subprocess execution.
+- [x] Recover pending deliveries across daemon restart and supported cutover. Guard acknowledgement against unregister/re-register races so an old delivery cannot remove a newer registration.
+- [x] Validate notification specifications and timeout inputs explicitly. Report delivery failures and pending retry state without logging credentials.
+- [x] Land and verify the notification-contract PR before enabling dispatch delegation.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -159,6 +159,7 @@ callback an implicit credential store.
 ### 2026-10-10 - Installation-cell prerequisite selected
 
 - The notification prerequisite #6019 merged. Dispatch integration remains saved locally, not publication-ready.
+- Reconciled its six completed Phase 2 Plan items; the remaining adoption, integration, and deployment items stay open.
 - The real peer-boundary test found missing PR-owner installation-context payload support, so merely adding the peer name cannot satisfy cell-scoped delegation.
 - Operator selected full PR-owner installation-cell adoption before finishing delegation. This amendment adds that reviewed prerequisite without discarding the saved integration.
 
