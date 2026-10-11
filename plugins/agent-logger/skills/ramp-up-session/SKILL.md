@@ -41,6 +41,27 @@ session discovery. The collated digest is written **ephemerally** (to
 - A machine restart killed a session mid-task.
 - You want to continue a different worktree's abandoned session from a fresh
   one.
+- A cleanup audit needs bounded evidence of whether a dormant objective
+  actually completed, without resuming it.
+
+## Audit-only use
+
+A cleanup audit is **not a takeover**. State `mode: audit-only` in the delegate
+prompt, explicitly permit the tool's ephemeral digest collation, and forbid
+repository edits, claim/head mutations, cleanup, and continuing the original
+work. Report-only describes those authority boundaries; it does not prohibit
+the digest files this reader needs. If the caller prohibits all filesystem
+writes, report that collation is unavailable rather than silently skipping the
+objective check.
+
+Request the subject, landed slice, canonical effort disposition, remaining
+responsibility and owner, evidence citations, and `safe candidate` / `preserve`
+/ `unknown`. An absent or stale effort binding is not evidence that no effort
+exists: locate a cited effort's current or archived canonical document before
+deciding an old completion note is still accurate. For sibling slices sharing
+one controller, reuse its bounded objective evidence rather than collating
+the same large session for every child. The coordinator still owns removal
+approval and action-time safety checks.
 
 ## Preferred: delegate the ramp-in to a sub-agent
 
@@ -82,7 +103,10 @@ supplied `read-session-digest` path, inspects the worktree's git state,
 reconciles intent vs. reality, and returns only the briefing — no raw
 transcript.
 
-### 3. Take over
+### 3. Take over or return the audit
+
+In audit-only mode, return the evidence verdict and stop. Do not execute the
+next actions or change any worktree/session state.
 
 Read the returned briefing (it's small by design). If it identifies an active
 effort, read that effort README first. Present a few-line situation

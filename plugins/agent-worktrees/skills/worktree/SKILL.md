@@ -350,15 +350,22 @@ exception and project-binstub ownership details.
 
 When the user asks to clean up worktrees:
 
-1. **Run default cleanup** -- `<agent-worktrees catalog argv[0]> cleanup --clean`
-   removes only `completed` worktrees (merged) and `gone` worktrees (path
-   missing, branch content verified merged first).
-2. **Report unused count** -- worktrees with no commits but possibly
-   planning/conversation history are preserved and reported.
-3. **Ask the user** whether to also purge unused worktrees --
-   `cleanup --clean --include-unused`. **Never auto-purge unused worktrees
-   without asking** -- a worktree may look "unused" if the session involved
-   only questions or planning with no commits yet.
+1. **Inventory before removal** -- run `<agent-worktrees catalog argv[0]>
+   cleanup` in report mode. For accumulated or stale worktrees, follow
+   [references/fleet-sweep.md](references/fleet-sweep.md) before treating its
+   eligibility list as an objective-completion verdict.
+2. **Verify and preview candidates** -- establish landed content, inactive
+   sessions, settled claims, resolved or explicitly transferred objectives,
+   and unambiguous ownership. State each candidate's subject and completion
+   evidence; honor the operator's exact approved scope and deletion policy.
+3. **Remove only approved candidates** -- use non-forced
+   `cleanup --worktree-id <full-id> --json` for a selected subset. Use
+   `cleanup --clean` only when the whole eligible set has been reviewed and
+   authorized. The tool refreshes safety evidence at removal time.
+4. **Report empty and conversation-only work separately.** Neither is
+   automatically disposable. Ask before adding `--include-unused` or
+   `--include-conversations`; the former does not authorize removal of
+   conversation-only work.
 
 **Never blanket-`--force` a batch of dirty worktrees.** `cleanup` refuses a
 worktree with uncommitted changes *on purpose* -- that refusal protects real,
