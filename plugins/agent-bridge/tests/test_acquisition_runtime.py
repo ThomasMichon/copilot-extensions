@@ -406,6 +406,32 @@ async def test_foreign_binding_cannot_be_overridden_by_current_carried_handle(ri
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_foreign_target_binding_refuses_before_any_resume_or_delivery(rig, mode):
+    output = await rig.runtime.acquire(req(mode=mode))
+    if mode == "acp":
+        session = rig.manager.get_session(output.session_id)
+        if session._prompt_task:
+            await session._prompt_task
+        session.status = SessionStatus.STOPPED
+        session.client = None
+        rig.db.update_session_status(session.session_id, "stopped", time.time())
+        rig.db.release_worktree_ownership(worktree_id="worktree-a")
+    else:
+        rig.db.execute_write("UPDATE live_messages SET delivered_at=?", (time.time(),))
+        rig.db.execute_write("UPDATE live_sessions SET status='expired',updated_at=0")
+    rig.db.execute_write("UPDATE acquisition_bindings SET target='different-target'")
+    rig.source["acquisition_reservation"].update(key="reservation-b", worktree_ownership="reused")
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(req(
+            mode=mode, allocation="reused", reservation_key="reservation-b", delivery_id="delivery-b",
+        ))
+    assert error.value.code == "evidence_scope_mismatch"
+    rig.client.load_session.assert_not_awaited()
+    assert rig.db.execute_read("SELECT COUNT(*) AS n FROM acquisition_attempts")[0]["n"] == 2
+
+
+@pytest.mark.asyncio
 async def test_unacknowledged_cli_delivery_blocks_a_second_turn(rig):
     await rig.runtime.acquire(req(mode="cli"))
     rig.source["acquisition_reservation"].update(key="reservation-b", worktree_ownership="reused")

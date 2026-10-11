@@ -204,7 +204,7 @@ class AcquisitionRuntime:
             )
             conversations.append(
                 ConversationEvidence(
-                    req.target,
+                    binding["target"] if binding else session.agent_name or req.target,
                     "acp",
                     req.task_id if ours else "foreign",
                     int(binding["task_generation"]) if binding else req.task_generation,
@@ -237,7 +237,7 @@ class AcquisitionRuntime:
             )
             conversations.append(
                 ConversationEvidence(
-                    req.target,
+                    binding["target"] if binding else req.target,
                     "cli",
                     req.task_id if ours else "foreign",
                     int(binding["task_generation"]) if binding else req.task_generation,

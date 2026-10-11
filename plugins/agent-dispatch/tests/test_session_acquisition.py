@@ -172,3 +172,16 @@ def test_postlaunch_dispatch_fence_refusal_defers_instead_of_authorizing_cleanup
     assert result.returncode == 1
     assert handle["deferred"] is True
     assert handle["worktree"] == "worktree-a"
+
+
+@pytest.mark.parametrize("error,expected", [
+    (FileNotFoundError("missing"), bridge.BridgeUnavailable),
+    (subprocess.TimeoutExpired(["bridge"], 1), bridge.BridgeCarriedSessionBusy),
+])
+def test_transport_failures_are_typed_at_acquisition_boundary(monkeypatch, error, expected):
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    def run(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(session_acquisition.subprocess, "run", run)
+    with pytest.raises(expected):
+        session_acquisition.acquire(task(), mode="acp", prompt="work")

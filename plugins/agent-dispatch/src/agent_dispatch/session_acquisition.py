@@ -52,11 +52,16 @@ def acquire(
         "project": project, "reservation_key": key, "driver": driver,
         "verify_timeout": verify_timeout,
     }
-    result = subprocess.run(
-        [*prefix, "acquire", "--request-file", "-"], input=json.dumps(payload),
-        capture_output=True, text=True, check=False, timeout=timeout,
-        **no_window_kwargs(),
-    )
+    try:
+        result = subprocess.run(
+            [*prefix, "acquire", "--request-file", "-"], input=json.dumps(payload),
+            capture_output=True, text=True, check=False, timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BridgeCarriedSessionBusy("acquisition transport timed out; outcome requires reconciliation") from exc
+    except OSError as exc:
+        raise BridgeUnavailable(f"acquisition executable could not be launched: {exc}") from exc
     if result.returncode:
         try:
             failure = json.loads(result.stdout or "{}")
