@@ -766,7 +766,9 @@ test("formatConsumeResult directs verified head recovery instead of bug filing",
   assert.match(text, /Offer to bind the verified continuation session/);
   assert.match(text, /require explicit user consent and verify/);
   assert.match(text, /resuming that session and using \/consume-handoff/);
-  assert.match(text, /not replaying this claimed baton/);
+  assert.match(text, /only after authoritative evidence confirms an exact pending baton/);
+  assert.match(text, /if neither remains, recommend resumption without consumption/);
+  assert.match(text, /Do not replay this claimed baton/);
   assert.match(text, /evidence is unavailable or conflicting/);
   assert.doesNotMatch(text, /offer to file a bug/i);
 });

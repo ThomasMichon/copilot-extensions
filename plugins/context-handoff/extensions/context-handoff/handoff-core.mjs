@@ -2707,7 +2707,9 @@ export function formatConsumeResult(
           "head only if repair is needed and the supported binding operation " +
           "can safely do so; require explicit user consent and verify the " +
           "result. Recommend resuming that session and using /consume-handoff " +
-          "there for its pending baton, not replaying this claimed baton in " +
+          "there only after authoritative evidence confirms an exact pending " +
+          "baton or interrupted same-claimant delivery; if neither remains, " +
+          "recommend resumption without consumption. Do not replay this claimed baton in " +
           "the refused session. Same-claimant delivery retries remain safe. " +
           "If evidence is unavailable or conflicting, report the blocker " +
           "without inventing a head or offering a speculative bind. Bug " +
