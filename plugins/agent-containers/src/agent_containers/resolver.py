@@ -26,6 +26,7 @@ import os
 import shlex
 import subprocess
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_procutil import no_window_flags
@@ -94,6 +95,196 @@ def host_gh_token() -> str | None:
         return None
     token = res.stdout.strip()
     return token or None
+
+
+def copilot_cli_config_path() -> Path:
+    """Resolve this host's own Copilot CLI config.json path.
+
+    ``AGENT_CONTAINERS_COPILOT_CLI_CONFIG`` overrides it (tests, non-default
+    installs); otherwise ``~/.copilot/config.json``, matching Copilot CLI's
+    own default.
+    """
+    override = os.environ.get("AGENT_CONTAINERS_COPILOT_CLI_CONFIG")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".copilot" / "config.json"
+
+
+def host_copilot_cli_token(
+    account: str, config_path: Path | str | None = None
+) -> str | None:
+    """Fetch ``account``'s live github.com OAuth token from this host's own
+    Copilot CLI login (``~/.copilot/config.json``'s ``authTokens``), or None.
+
+    This is a DIFFERENT credential source than :func:`host_gh_token` (which
+    reads ``gh``'s own OAuth store): Copilot CLI keeps its own login state,
+    completely independent of ``gh auth status`` -- an operator can be logged
+    into Copilot CLI as one account while ``gh`` (git/PR identity) stays a
+    different one. This is intentionally NOT vault-managed: it is a tier-3
+    interactive-OAuth token (see the facility's own four-tier auth-model
+    convention, where applicable) that the operator keeps current themselves
+    by running ``copilot login`` as ``account`` on this host; this function
+    only ever reads the live current value, never mints or refreshes one.
+
+    The file is JSONC (``//``-prefixed comment lines); those are stripped
+    before parsing. Returns None on any missing file, parse failure, or
+    absent/empty entry for ``account`` -- callers should fail closed rather
+    than launch a container with no Copilot inference auth.
+    """
+    path = Path(config_path) if config_path is not None else copilot_cli_config_path()
+    try:
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    cleaned = "\n".join(
+        line for line in raw.splitlines() if not line.strip().startswith("//")
+    )
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+    entry = data.get("authTokens", {}).get(f"https://github.com:{account}")
+    token = entry.get("token") if isinstance(entry, dict) else None
+    return token or None
+
+
+def copilot_cli_account_missing_hint(account: str, container_name: str) -> str:
+    """Shared guidance string for a missing ``copilot_cli_account`` login.
+
+    Used by every launch site that fails (closed or soft) when
+    ``copilot_cli_account`` is configured but :func:`host_copilot_cli_token`
+    found nothing -- keeps the three call sites' messages identical and out
+    of their own line-count budget.
+    """
+    return (
+        f"copilot_cli_account is set to '{account}' but no matching Copilot "
+        f"CLI login was found on this host -- run `copilot login` as "
+        f"{account} on this host, or `agent-containers copilot-login "
+        f"{container_name} --account {account}` to bootstrap one via "
+        "device-code auth inside the container"
+    )
+
+
+def resolve_copilot_cli_token_or_raise(config, fleet, container_name: str) -> str | None:
+    """Return ``config.copilot_cli_account_for(fleet)``'s live host token.
+
+    None if no account is configured for this fleet (the common case --
+    callers should simply skip forwarding ``COPILOT_GITHUB_TOKEN``). Raises
+    RuntimeError with the shared missing-login hint if an account IS
+    configured but :func:`host_copilot_cli_token` finds nothing -- the
+    fail-closed launch sites (copilot_detach, session-host-prepare).
+    """
+    account = config.copilot_cli_account_for(fleet)
+    if not account:
+        return None
+    token = host_copilot_cli_token(account)
+    if not token:
+        raise RuntimeError(copilot_cli_account_missing_hint(account, container_name))
+    return token
+
+
+def resolve_copilot_cli_token_or_warn(config, fleet, container_name: str, logger) -> str | None:
+    """Same resolution as :func:`resolve_copilot_cli_token_or_raise`, but
+    soft-fails (logs a warning, returns None) instead of raising -- for the
+    launch site (``_launch_container_agent``) whose existing GH_TOKEN
+    forwarding is likewise non-fatal.
+    """
+    account = config.copilot_cli_account_for(fleet)
+    if not account:
+        return None
+    token = host_copilot_cli_token(account)
+    if not token:
+        logger.warning(
+            "%s; the in-container Copilot CLI may be unauthenticated or "
+            "fall back to GH_TOKEN's identity.",
+            copilot_cli_account_missing_hint(account, container_name),
+        )
+        return None
+    return token
+
+
+def copilot_cli_token_from_json_text(account: str, raw: str) -> str | None:
+    """Extract ``account``'s token from an already-read config.json's text.
+
+    Same JSONC-comment-stripping/parse logic as :func:`host_copilot_cli_token`,
+    but takes the text directly -- used by the manual device-code-in-container
+    bootstrap flow (``agent-containers copilot-login``), which reads the
+    CONTAINER's own freshly-logged-in config.json via ``docker exec``, not a
+    local file.
+    """
+    cleaned = "\n".join(
+        line for line in raw.splitlines() if not line.strip().startswith("//")
+    )
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+    entry = data.get("authTokens", {}).get(f"https://github.com:{account}")
+    token = entry.get("token") if isinstance(entry, dict) else None
+    return token or None
+
+
+def import_copilot_cli_token(
+    account: str, token: str, config_path: Path | str | None = None
+) -> None:
+    """Merge ``account``'s token into this HOST's own Copilot CLI config.json.
+
+    Used only by the manual ``agent-containers copilot-login`` bootstrap: once
+    an operator completes a device-code login INSIDE a container (because no
+    live login for ``account`` existed on this host), this writes that same
+    token into the host's own ``authTokens``/``loggedInUsers`` so every future
+    launch finds it the normal way (:func:`host_copilot_cli_token`), without
+    repeating the in-container login. Preserves every other key in the file
+    and any leading ``//`` comment-header lines; round-trips the JSON body
+    through ``json.dumps`` (so interior comments elsewhere in the body, if
+    any, would NOT survive -- Copilot CLI itself only ever writes a leading
+    comment header in this file, confirmed by direct inspection, so this is
+    safe in practice). Writes atomically (temp file + replace).
+    """
+    path = Path(config_path) if config_path is not None else copilot_cli_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        raw = ""
+    lines = raw.splitlines()
+    header_lines: list[str] = []
+    body_start = 0
+    for i, line in enumerate(lines):
+        if line.strip().startswith("//") or not line.strip():
+            header_lines.append(line)
+            body_start = i + 1
+        else:
+            break
+    body_text = "\n".join(lines[body_start:]) or "{}"
+    try:
+        data = json.loads(body_text)
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    auth_tokens = data.setdefault("authTokens", {})
+    if not isinstance(auth_tokens, dict):
+        auth_tokens = {}
+        data["authTokens"] = auth_tokens
+    key = f"https://github.com:{account}"
+    auth_tokens[key] = {"token": token}
+    logged_in = data.get("loggedInUsers")
+    if not isinstance(logged_in, list):
+        logged_in = []
+    if not any(
+        isinstance(u, dict)
+        and u.get("host") == "https://github.com"
+        and u.get("login") == account
+        for u in logged_in
+    ):
+        logged_in.append({"host": "https://github.com", "login": account})
+    data["loggedInUsers"] = logged_in
+
+    rendered = "\n".join(header_lines + [json.dumps(data, indent=2)]) + "\n"
+    tmp_path = path.with_suffix(path.suffix + ".tmp-copilot-login")
+    tmp_path.write_text(rendered, encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def build_spawn_command(

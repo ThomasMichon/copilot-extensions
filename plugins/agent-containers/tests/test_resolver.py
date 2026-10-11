@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import textwrap
 import types
 from pathlib import Path
 
@@ -98,6 +99,99 @@ def test_build_wrapper_command_uses_payload_local_shim(monkeypatch, tmp_path):
     cmd = build_wrapper_command("myrepo-1")
 
     assert cmd == [str(shim), "exec", "--stdio", "myrepo-1"]
+
+
+def test_host_copilot_cli_token_reads_jsonc_auth_tokens(tmp_path):
+    from agent_containers.resolver import host_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            // User settings belong in settings.json.
+            {
+              "authTokens": {
+                "https://github.com:tmichon_microsoft": {"token": "gho_abc123"},
+                "https://github.com:ThomasMichon": {"token": "gho_def456"}
+              }
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+    assert host_copilot_cli_token("tmichon_microsoft", config_path) == "gho_abc123"
+    assert host_copilot_cli_token("ThomasMichon", config_path) == "gho_def456"
+    assert host_copilot_cli_token("nobody", config_path) is None
+
+
+def test_host_copilot_cli_token_missing_file_returns_none(tmp_path):
+    from agent_containers.resolver import host_copilot_cli_token
+
+    assert host_copilot_cli_token("tmichon_microsoft", tmp_path / "missing.json") is None
+
+
+def test_host_copilot_cli_token_malformed_json_returns_none(tmp_path):
+    from agent_containers.resolver import host_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{ not valid json", encoding="utf-8")
+    assert host_copilot_cli_token("tmichon_microsoft", config_path) is None
+
+
+def test_copilot_cli_token_from_json_text_matches_file_based_reader():
+    from agent_containers.resolver import copilot_cli_token_from_json_text
+
+    raw = '{"authTokens": {"https://github.com:tmichon_microsoft": {"token": "gho_xyz"}}}'
+    assert copilot_cli_token_from_json_text("tmichon_microsoft", raw) == "gho_xyz"
+    assert copilot_cli_token_from_json_text("nobody", raw) is None
+
+
+def test_import_copilot_cli_token_creates_new_file(tmp_path):
+    from agent_containers.resolver import host_copilot_cli_token, import_copilot_cli_token
+
+    config_path = tmp_path / "subdir" / "config.json"
+    import_copilot_cli_token("tmichon_microsoft", "gho_fresh", config_path)
+    assert host_copilot_cli_token("tmichon_microsoft", config_path) == "gho_fresh"
+
+
+def test_import_copilot_cli_token_preserves_other_keys_and_header(tmp_path):
+    import json
+
+    from agent_containers.resolver import host_copilot_cli_token, import_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            // User settings belong in settings.json.
+            {
+              "authTokens": {
+                "https://github.com:ThomasMichon": {"token": "gho_existing"}
+              },
+              "loggedInUsers": [{"host": "https://github.com", "login": "ThomasMichon"}],
+              "firstLaunchAt": "2026-01-01T00:00:00Z"
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    import_copilot_cli_token("tmichon_microsoft", "gho_new", config_path)
+
+    # The newly imported token resolves via the normal reader.
+    assert host_copilot_cli_token("tmichon_microsoft", config_path) == "gho_new"
+    # The pre-existing account's token and other top-level keys survive.
+    assert host_copilot_cli_token("ThomasMichon", config_path) == "gho_existing"
+    rendered = config_path.read_text(encoding="utf-8")
+    assert "// User settings belong in settings.json." in rendered
+    data = json.loads(
+        "\n".join(
+            line for line in rendered.splitlines() if not line.strip().startswith("//")
+        )
+    )
+    assert data["firstLaunchAt"] == "2026-01-01T00:00:00Z"
+    logins = {u["login"] for u in data["loggedInUsers"]}
+    assert logins == {"ThomasMichon", "tmichon_microsoft"}
 
 
 def _stub_agent_bridge(monkeypatch):

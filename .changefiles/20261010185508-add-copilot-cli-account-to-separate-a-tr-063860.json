@@ -1,0 +1,9 @@
+{
+  "comment": "Add copilot_cli_account to separate a trusted fleet's Copilot CLI inference identity (COPILOT_GITHUB_TOKEN) from its git/PR identity (GH_TOKEN), sourced from the host's own live Copilot CLI login; add agent-containers copilot-login for the manual device-code-in-container bootstrap fallback.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

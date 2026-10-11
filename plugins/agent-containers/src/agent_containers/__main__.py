@@ -44,6 +44,8 @@ from .resolver import (
     _append_copilot_args,
     build_restricted_spawn_command,
     host_gh_token,
+    resolve_copilot_cli_token_or_raise,
+    resolve_copilot_cli_token_or_warn,
     resolve_extra_copilot_args,
     resolve_live_exec_target,
 )
@@ -147,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     exec_p.add_argument("copilot_args", nargs="*", help="Extra copilot args (after --).")
 
+    from .copilot_login import add_copilot_login_subparser as _add_copilot_login_subparser
+    _add_copilot_login_subparser(sub)
     from .copilot_venue import add_copilot_subparser as _add_copilot_subparser
     _add_copilot_subparser(sub)
     from .forward_keeper import add_subparser as _add_forward_keeper_subparser
@@ -471,6 +475,10 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
                 "forward_gh_token is enabled but `gh auth token` returned nothing"
             )
         launch_env["GH_TOKEN"] = github_token
+
+    copilot_token = resolve_copilot_cli_token_or_raise(config, fleet, args.name)
+    if copilot_token:
+        launch_env["COPILOT_GITHUB_TOKEN"] = copilot_token
 
     reverse_forwards: list[str] = []
     if relay_enabled:
@@ -1046,6 +1054,10 @@ def _launch_container_agent(
                 "the in-container Copilot CLI may be unauthenticated."
             )
 
+    copilot_token = resolve_copilot_cli_token_or_warn(config, fleet, args.name, log)
+    if copilot_token:
+        env["COPILOT_GITHUB_TOKEN"] = copilot_token
+
     # On-demand credential relay. Trusted SSH carries a reverse forward from the
     # container's loopback relay port to agent-bridge's live host-loopback port;
     # restricted fleets cannot enable this path.
@@ -1091,6 +1103,8 @@ def _launch_container_agent(
     launch_env = container_environment(args.name, user)
     if forward and "GH_TOKEN" in env:
         launch_env["GH_TOKEN"] = env["GH_TOKEN"]
+    if "COPILOT_GITHUB_TOKEN" in env:
+        launch_env["COPILOT_GITHUB_TOKEN"] = env["COPILOT_GITHUB_TOKEN"]
     launch_env.update({
         name: env[name]
         for name in relay_env

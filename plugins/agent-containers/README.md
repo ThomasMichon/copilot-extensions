@@ -214,6 +214,62 @@ fleets:
     code_model: clone   # Model A: repo cloned inside the container
 ```
 
+### Separating Copilot CLI inference identity from git/PR identity
+
+By default, `forward_gh_token`'s GH_TOKEN does double duty for a trusted
+fleet: it is both the in-container `git`/`gh` identity AND (per Copilot
+CLI's own env-var precedence: `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` >
+`GITHUB_TOKEN`) the identity Copilot CLI itself authenticates inference
+requests as. Some setups want these to be two DIFFERENT GitHub accounts --
+e.g. a dedicated/dev account backs git commits and PRs while a separate
+seat's Copilot subscription backs the actual model calls. Set
+`copilot_cli_account` (globally or per-fleet) to the GitHub account whose
+own Copilot CLI login on THIS HOST should back `COPILOT_GITHUB_TOKEN`,
+independent of whatever GH_TOKEN carries:
+
+```yaml
+copilot_cli_account: tmichon_microsoft   # global default for every trusted fleet
+fleets:
+  myrepo:
+    repo: your-org/your-repo
+    devcontainer_path: D:/Src/myrepo-devcontainer
+    forward_gh_token: true   # still true: git/PR identity stays GH_TOKEN
+    # copilot_cli_account: some-other-account   # per-fleet override, if needed
+```
+
+This reads the configured account's **live** Copilot CLI login from this
+host's own `~/.copilot/config.json` (`authTokens`/`loggedInUsers` --
+completely separate storage from `gh`'s own OAuth store, so `gh auth
+status` is unaffected) at every launch -- never the vault, never minted or
+refreshed by agent-containers itself. The operator keeps it current simply
+by running `copilot login` as that account on this host; agent-containers
+only ever reads whatever is currently there, and fails closed (refuses to
+launch, naming the exact fallback command below) if that account has no
+live login yet. `None` (the default, for both the global and per-fleet
+settings) means no fleet separates the two identities -- Copilot CLI falls
+back to whatever GH_TOKEN/GITHUB_TOKEN already carries, the pre-existing
+behavior. Restricted fleets never receive this (or any) host credential,
+same hard boundary as `forward_gh_token`.
+
+**Worst case: no live login exists anywhere for the configured account yet.**
+Run the device-code flow INSIDE a running container of the target fleet
+instead of on the bare host (useful when the host itself can't run an
+interactive OAuth flow, or you'd rather not touch the host's own default
+login):
+
+```bash
+agent-containers copilot-login myrepo-1 --account tmichon_microsoft
+```
+
+This execs into the container, runs `copilot login --device-code`
+interactively (follow the printed URL/code in your own browser), then reads
+the resulting token back out of the container's own config.json and
+imports it into the **host's** `~/.copilot/config.json` -- so every future
+launch of this (or any other) fleet configured with that same
+`copilot_cli_account` finds it the normal way, with no repeat in-container
+login. This command is manual/on-demand only; it is never triggered
+automatically by any launch path.
+
 ### Security profiles
 
 Fleets default to `security_profile: trusted`, preserving the existing
