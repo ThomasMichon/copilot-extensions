@@ -62,6 +62,15 @@ child still runs). In that degraded case ordinary cleanup still applies, but a
 hard-killed owner can orphan the child. Do not use it for children meant to
 outlive their launcher (detached daemons, keepers).
 
+The synchronous helper also supports `require_job=True` to refuse Windows
+execution before resume if ownership cannot be armed, and
+`allow_breakaway=False` to omit the Job's explicit-breakaway permission.
+Bounded captured commands use both options. Defaults retain deliberate
+service-child breakaway for existing callers; strict mode prevents descendants
+escaping this Job. With nested Jobs, Windows may accept a breakaway launch
+while retaining the child in the strict Job; cleanup, not launch failure,
+is the required witness.
+
 ## Vendoring
 
 **In dev**, most consumers' `pyproject.toml` reference this library through

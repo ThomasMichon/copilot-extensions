@@ -62,7 +62,9 @@ for explicit selection, compatibility and lifecycle fences.
 Bounded Git publication and local-guidance discovery/rendering use a headless
 captured child on Windows, assigned to a kill-on-close Job before execution.
 Job admission failure is explicit; there is no detached fallback. Timeout or
-caller exit reaps ordinary descendants while preserving captured diagnostics.
+caller exit reaps descendants while preserving captured diagnostics.
+Explicit descendant escape is prevented by this bounded Job; durable-service
+launchers retain the shared helper's permissive default outside this seam.
 POSIX retains its process-group timeout cleanup. This is not a durable-daemon
 launch or an interactive terminal.
 

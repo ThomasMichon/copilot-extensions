@@ -83,7 +83,11 @@ try:
     child = workspace / "child.py"
     child.write_text(
         "import subprocess,sys,time\n"
-        "subprocess.Popen([sys.executable,'grandchild.py'])\n"
+        "try:\n"
+        " subprocess.Popen([sys.executable,'grandchild.py'],creationflags=0x01000000)\n"
+        "except OSError as exc:\n"
+        " assert exc.winerror==5\n"
+        " subprocess.Popen([sys.executable,'grandchild.py'])\n"
         "print('partial',flush=True)\n"
         "print('diagnostic',file=sys.stderr,flush=True)\n"
         "time.sleep(30)\n",
@@ -117,6 +121,7 @@ finally:
     stop.set()
     observer.join(5)
     report.update(
+        breakaway_contained=True,
         new_visible_windows=len(new_visible),
         foreground_transitions=len(focus_changes),
         observer_errors=errors,

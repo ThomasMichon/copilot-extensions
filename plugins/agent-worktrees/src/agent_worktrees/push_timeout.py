@@ -95,6 +95,7 @@ def run_bounded(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace", env=env,
         require_job=windows,
+        allow_breakaway=False,
         **(no_window_kwargs() if windows else detached_kwargs()),
     )
     try:

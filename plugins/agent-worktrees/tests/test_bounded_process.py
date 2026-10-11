@@ -56,6 +56,7 @@ def test_captured_tree_launch_and_cleanup(monkeypatch, windows, outcome):
         with pytest.raises(OSError, match="capture failed"):
             push_timeout.run_bounded(["fixture"], cwd="workspace", env=env, timeout=0.5)
     assert launch["require_job"] is windows
+    assert launch["allow_breakaway"] is False
     assert launch.get("headless", False) is windows
     assert launch.get("own_group", False) is not windows
     assert launch["env"] is env and launch["cwd"] == "workspace"
@@ -118,6 +119,7 @@ def test_native_consoleless_capture_and_descendant_timeout(tmp_path):
         report = json.loads(report_path.read_text())
         assert report == {
             "cycles": 2, "timeout": True, "failure": "",
+            "breakaway_contained": True,
             "new_visible_windows": 0, "foreground_transitions": 0, "observer_errors": [],
         }
     finally:

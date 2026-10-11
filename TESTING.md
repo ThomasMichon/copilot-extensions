@@ -156,7 +156,8 @@ Agent-worktrees' captured-child guard tests run in-process. Its opt-in
 and a quiet Windows desktop: a real consoleless Python parent exercises two
 captured venv-interpreter cycles, stdout/stderr and exit status, then a stalled
 child with a grandchild. The probe checks descendant teardown, visible-window
-creation and foreground transitions without pytest's headless spawn adapter.
+creation, cleanup despite explicit descendant breakaway requests, and foreground transitions without
+pytest's headless spawn adapter.
 The ambient desktop observations intentionally fail rather than excuse an
 unattributable window or focus change; run this lane separately from normal
 interactive desktop activity.
