@@ -228,6 +228,15 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
 
 
 def _legacy_worktrees_launch_prefix(own_root: Path) -> list[str] | None:
+    if not _legacy_worktrees_runtime_prefix(own_root):
+        return None
+    return [
+        sys.executable, "-I", "-X", "utf8", "-m",
+        "agent_bridge.worktree_owner_launch", str(own_root),
+    ]
+
+
+def _legacy_worktrees_runtime_prefix(own_root: Path) -> list[str] | None:
     """Use the installed resolver, not an interactive shell's executable search."""
     from .install_paths import uses_legacy_install_dir
 
@@ -266,7 +275,7 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
         print(f"[FAIL] {error}", file=sys.stderr)
         sys.exit(1)
     if not prefix:
-        if os.environ.get(_peer_launch.CONTEXT_ENV, ""):
+        if _agent_bridge_installation_context():
             print("[FAIL] agent-worktrees is not installed in this installation cell; cannot check handoffs.", file=sys.stderr)
         else:
             print("[FAIL] agent-worktrees has no installed runtime or compatible command; cannot check handoffs.", file=sys.stderr)

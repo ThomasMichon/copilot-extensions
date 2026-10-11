@@ -27,6 +27,8 @@ PLUGIN = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def installation(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     own = tmp_path / ".agent-bridge"
     scripts = own / "scripts"
@@ -56,9 +58,10 @@ def complete_slot(peer, version="1.0.0", *, interpreter=True):
 
 def test_completed_installed_owner_precedes_path(installation):
     _, peer, which = installation
-    python = complete_slot(peer)
+    complete_slot(peer)
     assert lifecycle._agent_worktrees_launch_prefix() == [
-        str(python), "-I", "-X", "utf8", "-m", "agent_worktrees",
+        sys.executable, "-I", "-X", "utf8", "-m", "agent_bridge.worktree_owner_launch",
+        str(installation[0]),
     ]
     which.assert_not_called()
 
@@ -177,7 +180,7 @@ async def test_actual_installed_peer_executes_with_service_path(installation, mo
 
 
 def test_handoff_check_scrubs_owner_routing(installation, monkeypatch, capsys):
-    python = complete_slot(installation[1])
+    complete_slot(installation[1])
     for key in (
         "AGENT_HOME", "AGENT_RT_ROOT", "AGENT_RT_PY", "COPILOT_PLUGIN_ROOT",
         "VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "__PYVENV_LAUNCHER__",
@@ -191,7 +194,7 @@ def test_handoff_check_scrubs_owner_routing(installation, monkeypatch, capsys):
         ))
     assert error.value.code == 0
     assert run.call_args.args[0][:6] == [
-        str(python), "-I", "-X", "utf8", "-m", "agent_worktrees",
+        sys.executable, "-I", "-X", "utf8", "-m", "agent_bridge.worktree_owner_launch",
     ]
     env = run.call_args.kwargs["env"]
     assert "AGENT_HOME" not in env
@@ -200,6 +203,20 @@ def test_handoff_check_scrubs_owner_routing(installation, monkeypatch, capsys):
         "AGENT_RT_PY", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__",
     ))
     assert json.loads(capsys.readouterr().out) == {"findings": []}
+
+
+def test_legacy_trampoline_rechecks_retirement_before_execution(installation):
+    complete_slot(installation[1])
+    prefix = lifecycle._agent_worktrees_launch_prefix()
+    assert prefix
+    (installation[1] / ".installation-ownership.json").write_text("{}", encoding="utf-8")
+    result = subprocess.run(
+        [*prefix, "list", "--json"], env=lifecycle._agent_worktrees_environment(),
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 126
+    assert "installation-cell ownership" in result.stderr
+    assert not result.stdout
 
 
 @pytest.mark.asyncio

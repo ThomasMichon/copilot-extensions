@@ -53,7 +53,9 @@ fence**, not immutable conversation lineage: claim/adoption increments it.
 
 Worktree-owner resolution does not require an interactive shell's `PATH`.
 A legacy bridge uses its installed canonical versioned-runtime resolver to
-select a completed worktree-owner interpreter, retaining the legacy command
+select a completed worktree-owner interpreter. Its execution trampoline rechecks
+legacy ownership and resolves the completed slot immediately before launch,
+retaining the legacy command
 compatibility path when no runtime resolves. A native service rooted in an
 installation cell derives its own `install.json` context when the launcher
 did not supply one; explicit and derived contexts use the existing validated
