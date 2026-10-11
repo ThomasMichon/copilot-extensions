@@ -224,7 +224,9 @@ def test_reconcile_launch_survives_hup_with_home_cwd(tmp_path: Path) -> None:
         'sleep 1\nprintf "done" >"$HOME/completed"\n', encoding="utf-8",
     )
     text = (ROOT / "plugins" / "agent-codespaces" / "scripts" / "bootstrap-check.sh").read_text()
-    launch = text[text.index('cd "$HOME" || { echo "reconcile launch failed:'):text.index("launched_pid=$!")]
+    launch_start = text.index('cd "$HOME" || { echo "reconcile launch failed:')
+    launch_end = text.index("\n", text.index("nohup bash ", launch_start))
+    launch = text[launch_start:launch_end]
     parent = subprocess.Popen(
         [BASH, "-c", 'target=("$1")\n' + launch + "\nwait", "bash", str(worker)],
         cwd=payload, env={**os.environ, "HOME": str(home)},
