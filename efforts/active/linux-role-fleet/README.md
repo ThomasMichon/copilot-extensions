@@ -132,6 +132,9 @@ Implementation sequencing below is **agent-recommended**:
   amended core intent before provider/service changes.
 - [ ] Implement bounded template/adopter/live/quota planning and version-bound
   apply receipts with no implicit provisioning/cleanup.
+  The initial standalone offline JSON planner produces preservation-safe
+  config suggestions, aggregate capacity proposals and revision-bound digests;
+  apply receipts, YAML/default harness integration and placement remain open.
 - [ ] Prove empty, existing-custom, no-quota, one-host and stale/partial states.
 - [ ] Supply harness default-template and paired-config integration downstream;
   keep the portable runtime name-free and the private capacity adapter private.
@@ -299,3 +302,18 @@ not to the vision. This effort does not acquire or migrate live capacity.
 - Native response #6034 remains held on confirmed partial-publication recovery
   #6038. No lease was hand-edited and the final test-only follow-up stays local;
   this does not transfer publisher ownership from the existing #5835 campaign.
+
+### 2026-10-11 - Safe setup gate and first offline planner
+- #6119 merged after actual current-head approval and successful CI. Its
+  review-request workflow hit the shared account's API rate limit; waited for
+  reset and reran that failed workflow rather than bypassing it.
+- Established the standalone `fleet-manager` package and release/test registry
+  entry. The first CLI accepts explicit non-secret JSON inputs and preserves
+  adopter roles/extensions while proposing aggregate quota/budget-bound capacity.
+- The CLI performs no provider, server, credential or cleanup operations.
+  Review-required output is not fleet readiness; YAML/harness default integration,
+  detailed role placement, installer/uninstaller and apply receipts remain open.
+- Installed contained-package tests cover existing custom state, stale/unknown
+  quota, unadmitted resources, one-host budget, future unsupported roles,
+  duplicate/oversized inputs and plan identity/freshness. An actual installed CLI
+  process proves no input/config writes or implicit hosting.

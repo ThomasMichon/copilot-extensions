@@ -15,6 +15,18 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
+def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    calls = []
+    monkeypatch.setattr(runner.subprocess, "run", lambda command, **kwargs: calls.append(command))
+    python = tmp_path / ".test-venvs" / "fleet-manager" / "bin" / "python"
+    runner.prepare("fleet-manager", python)
+    assert calls[-1] == [
+        "uv", "pip", "install", "--python", str(python), str(tmp_path / "fleet-manager") + "[dev]",
+    ]
+    assert "fleet-manager" in runner.STANDALONE_CONSUMERS
+
+
 @pytest.mark.parametrize("smoke", [False, True])
 def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monkeypatch, smoke):
     monkeypatch.setattr(runner, "REPO", tmp_path)

@@ -19,6 +19,12 @@ section.
 
 ## The plugins
 
+The independently packaged [fleet-manager](../fleet-manager/README.md) is the
+fleet system's standalone entry point. Its initial stdlib-only CLI performs
+offline preservation-safe config/capacity planning; controller, connector,
+install/uninstall and authenticated deployment surfaces remain implementation
+work. Installing the client does not host a controller or container manager.
+
 ### Runtime plugins (installer-deployed runtime + payload-local commands)
 
 | Plugin | Kind | Legacy runtime home | Global command surface (legacy wrapper / project binstubs) | Lifecycle |

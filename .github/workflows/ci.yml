@@ -934,6 +934,9 @@ jobs:
           tools/test_run_tests_in_devcontainer.py
           tools/tests/test_komodo_role_fleet.py
 
+      - name: Test thin fleet planner with installed package and host containment
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
+
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
     needs: discover
@@ -1014,6 +1017,9 @@ jobs:
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
+
+      - name: Test thin fleet planner with installed package and host containment
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
 
   archive-sources-windows:
     name: archive sources (windows-latest)
