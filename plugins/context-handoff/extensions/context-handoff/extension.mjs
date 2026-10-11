@@ -1490,6 +1490,14 @@ session.on("session.idle", async (event) => {
   const revision = state.windowRevision;
   const observation = await observeNativeContext(true);
   if (revision !== state.windowRevision) return;
+  if (!observation.native && latestUsageEvent &&
+      automaticHandoffEnabled(handoffConfig.mode) && !state.forceTriggered && !state.handoffGenerated) {
+    await handleUsage(latestUsageEvent);
+    if (revision !== state.windowRevision || state.forceTriggered) {
+      pendingNudge = null;
+      return;
+    }
+  }
   const messages = [];
   if (pendingNudge) {
     const level = pendingNudge;
