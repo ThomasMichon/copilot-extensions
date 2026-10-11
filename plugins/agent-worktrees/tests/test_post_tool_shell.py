@@ -29,6 +29,9 @@ def test_post_hook_uses_same_shell_and_installs_the_client():
         assert "post-tool-hook.ps1" in (PLUGIN / "scripts" / name).read_text(
             encoding="utf-8"
         )
+    assert "post-tool-hook.ps1" in (
+        PLUGIN / "src" / "agent_worktrees" / "installer.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch):
