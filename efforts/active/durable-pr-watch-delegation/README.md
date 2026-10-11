@@ -69,7 +69,25 @@ effort slug:
 The detailed protocol and validation work below are **agent-recommended
 implementation requirements**, not additional operator quotations.
 
+Follow-up scope selection, verbatim:
+
+> Adopt installation cells for agent-pull-requests before finishing delegation
+
+The real installation-cell integration test found that the PR owner had not
+adopted the shared installation-context payload contract. The operator selected
+adoption rather than a legacy-runtime-only optimization.
+
 ## Plan
+
+### Installation-cell prerequisite
+
+_Agent-recommended prerequisite, explicitly selected by the operator._
+
+- [ ] Review and merge this plan amendment before adoption implementation.
+- [ ] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback.
+- [ ] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer.
+- [ ] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract.
+- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Keep the saved dispatch integration resumable while this prerequisite clears.
 
 ### Phase 1 - Review the recovery contract
 
@@ -137,6 +155,12 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-10 - Installation-cell prerequisite selected
+
+- The notification prerequisite #6019 merged. Dispatch integration remains saved locally, not publication-ready.
+- The real peer-boundary test found missing PR-owner installation-context payload support, so merely adding the peer name cannot satisfy cell-scoped delegation.
+- Operator selected full PR-owner installation-cell adoption before finishing delegation. This amendment adds that reviewed prerequisite without discarding the saved integration.
 
 ### 2026-10-09 - Resumed deferred work
 
