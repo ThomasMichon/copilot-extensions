@@ -2364,6 +2364,11 @@ function Deploy-Venv {
         $script:DeployVenvAlreadyComplete = $true
         return $true
     }
+    if ($VersionedRuntime -and $SrcVersion -ne 'dev' -and
+        (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json'))) {
+        Write-ServiceErr "Completed runtime slot $SrcVersion cannot be rebuilt in place. Publish a new version or use the owned dev-slot workflow; repair requires a distinct healthy generation."
+        return $false
+    }
 
     # Validate the slot's liveness/cleanliness immediately after acquiring
     # the lease, UNCONDITIONALLY -- regardless of whether $VenvPython

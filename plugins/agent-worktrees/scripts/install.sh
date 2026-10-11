@@ -1809,6 +1809,11 @@ deploy_venv() {
     if _test_slot_already_complete; then
         return 2
     fi
+    if [[ "$VERSIONED_RUNTIME" == 1 && "$SRC_VERSION" != dev &&
+          -e "$VENV_DIR/.install-complete.json" ]]; then
+        err "Completed runtime slot $SRC_VERSION cannot be rebuilt in place. Publish a new version or use the owned dev-slot workflow; repair requires a distinct healthy generation."
+        return 1
+    fi
     local slot_clean=0
     _versioned_slot_clean && slot_clean=1
     if [[ "$slot_clean" -ne 1 ]]; then

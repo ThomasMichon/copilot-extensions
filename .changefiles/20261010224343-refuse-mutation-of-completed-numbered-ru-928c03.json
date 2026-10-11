@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse mutation of completed numbered runtime slots before package reinstall",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

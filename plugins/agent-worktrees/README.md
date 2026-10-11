@@ -13,6 +13,12 @@ CodeSpace/container resolvers), but their absence only disables those features.
 
 ## How It Works
 
+Completed numbered runtime slots are immutable. An unchanged completed slot
+is reused; a same-version payload mismatch is refused before venv or package
+mutation, including forced updates. Publish a new version for ordinary changes.
+Repair of a broken completed slot requires a distinct, health-checked generation,
+not an in-place dependency reinstall into a running CLI/monitor's files.
+
 Agent Worktrees has three shipped pieces:
 
 - **Plugin payload** (skills, hooks, live-pulse extension) -- loaded by Copilot
