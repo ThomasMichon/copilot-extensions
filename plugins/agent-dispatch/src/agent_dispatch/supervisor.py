@@ -3706,14 +3706,13 @@ class Supervisor:
                 resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id)
             except DispatchError:
                 continue
+            if resp.get("coordinator_launch"): break  # same-cycle capacity fence
             if not resp.get("reserved"):
-                if resp.get("coordinator_launch"): break  # conservative same-cycle capacity fence
                 continue
             reservation = resp["reservation"]
             key = reservation["key"]
             from . import bridge
             from .embody import EmbodyUnavailable
-
             try:
                 spawn_task = self._prepare_spawn_task(task, reservation)
             except SpawnPreparationRetained as exc:
