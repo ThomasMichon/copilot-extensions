@@ -36,6 +36,7 @@ from plugin_resolve import (
     has_plugin_manifest,
     load_marketplace,
     local_marketplace_path,
+    marketplace_manifest_name,
     marketplace_source_kind,
     plugin_dir,
     read_repo_settings,
@@ -189,7 +190,9 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
         # declare a plugin of that same name (plugin_resolve.resolve_repo_
         # plugins applies the identical check).
         payload = (
-            plugin_dir(mp, name) if mp is not None and mp.name == marketplace else None
+            plugin_dir(mp, name)
+            if mp is not None and mp.name == marketplace_manifest_name(marketplace, settings)
+            else None
         )
         if payload is None:
             return None

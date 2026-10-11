@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from plugin_resolve import (
     MarketplaceSourceKind,
     load_marketplace,
@@ -326,6 +328,55 @@ def test_resolve_repo_plugins_requires_marketplace_identity(tmp_path):
     result = resolve_repo_plugins(repo)
     assert result.resolved == {}
     assert result.unresolved == ["p@expected"]
+
+
+@pytest.mark.parametrize("manifest_name", ["canonical", "wrong", "", None, 17])
+def test_local_registration_manifest_mapping_is_exact(tmp_path, manifest_name):
+    repo = tmp_path / "repo"
+    _make_ai_marketplace(repo / ".ai", "canonical", "p")
+    settings = {
+        "extraKnownMarketplaces": {
+            "local-id": {
+                "source": {
+                    "source": "directory",
+                    "path": "./.ai",
+                    "stableId": "local-id",
+                    "manifestName": manifest_name,
+                }
+            }
+        },
+        "enabledPlugins": {"p@local-id": True, "disabled@local-id": False},
+    }
+    _w(repo / ".github" / "copilot" / "settings.json", settings)
+    before = (repo / ".github" / "copilot" / "settings.json").read_bytes()
+
+    result = resolve_repo_plugins(repo)
+
+    if manifest_name == "canonical":
+        assert result.resolved == {"p@local-id": (repo / ".ai" / "p").resolve()}
+        assert result.unresolved == []
+    else:
+        assert result.resolved == {}
+        assert result.unresolved == ["p@local-id"]
+    assert (repo / ".github" / "copilot" / "settings.json").read_bytes() == before
+
+
+def test_stable_id_alone_does_not_bypass_manifest_identity(tmp_path):
+    repo = tmp_path / "repo"
+    _make_ai_marketplace(repo / ".ai", "canonical", "p")
+    _w(repo / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {
+            "local-id": {
+                "source": {
+                    "source": "directory", "path": "./.ai", "stableId": "local-id",
+                }
+            }
+        },
+        "enabledPlugins": {"p@local-id": True},
+    })
+    result = resolve_repo_plugins(repo)
+    assert result.resolved == {}
+    assert result.unresolved == ["p@local-id"]
 
 
 def test_resolve_repo_plugins_remote_is_unresolved(tmp_path):

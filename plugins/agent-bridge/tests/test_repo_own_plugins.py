@@ -91,6 +91,50 @@ def test_installed_local_plugin_is_staged_from_local_source(tmp_path):
     ]
 
 
+def test_same_machine_alias_references_source_without_copying(tmp_path):
+    anchor = tmp_path / "repo"
+    mp = anchor / ".ai"
+    _make_local_marketplace(mp, "canonical", "hello")
+    _make_repo(
+        anchor,
+        enabled={"hello@local-id": True},
+        marketplaces={
+            "local-id": {
+                "source": {
+                    "source": "directory", "path": "./.ai",
+                    "manifestName": "canonical",
+                }
+            }
+        },
+    )
+    installed = tmp_path / "installed"
+    _write(installed / "local-id" / "hello" / "plugin.json", {"name": "hello"})
+    repo_own_plugins._INSTALLED = installed
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    assert repo_plugin_dir_args(anchor) == ["--plugin-dir", str(mp / "plugins" / "hello")]
+    assert repo_own_plugins._resolve_ref_dir("hello@local-id", [anchor]) == (
+        mp / "plugins" / "hello"
+    )
+    assert {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("mapping", ["wrong", "", None])
+def test_related_alias_rejects_invalid_mapping_without_falling_through(tmp_path, mapping):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for root in (first, second):
+        _make_local_marketplace(root / ".ai", "canonical", "hello")
+        _make_repo(root, enabled={}, marketplaces={
+            "local-id": {"source": {
+                "source": "directory", "path": "./.ai",
+                "manifestName": mapping if root == first else "canonical",
+            }}
+        })
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+    assert repo_own_plugins._resolve_ref_dir("hello@local-id", [first, second]) is None
+
+
 def test_installed_remote_marketplace_plugin_is_staged(tmp_path):
     anchor = tmp_path / "repo"
     _make_repo(
