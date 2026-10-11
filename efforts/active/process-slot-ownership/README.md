@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice PRs targeting `dev`
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/agent-fabric/README.md` - claimed-resource-not-reclaimed
   and reclaim-idle-process; `visions/plugin-services/README.md` -
   work-coalescing-singleton
@@ -105,7 +105,7 @@ verified by this effort's Validation Plan.
 - [x] Identify existing leases, crawl/probe coalescing, and namespace readers.
 - [x] Separate operational registry presentation (#5559) and lean launch
       lifecycle (#5579/#5664) from reader admission; do not duplicate them.
-- [ ] Land this plan through review before implementation.
+- [x] Land this plan through review before implementation (#6091).
 - [ ] Inventory remaining status/list/discovery caller seams and record
       already-satisfied versus unverified requirements.
 
@@ -178,3 +178,20 @@ Confirmed the slug and mapped current prior art before implementation.
 Existing coalescing and registry/lifecycle efforts prevent a greenfield
 rewrite. Continuation B's first slice is deliberately a deterministic reader-lifetime
 regression, not a live reaper, service restart, or fleet-wide rollout.
+
+### 2026-10-10 - Reader holder correction prepared
+
+The reviewed plan landed in #6091. The first implementation retains
+same-provider task/token admission after watchdog or warm-up cancellation
+timeouts, fences late publication independently, and tracks superseded
+providers until completion for shutdown accounting.
+
+Event-gated regressions cover exact-holder reuse, actual late-result rejection,
+watchdog recovery only after holder completion, and superseded-holder shutdown.
+The discovery report fixture now targets discovery directly rather than
+counting unrelated synchronous list-agent reconciliation; the hung-discovery
+fixture awaits the replacement task before claiming its worker executed.
+The roster-cache contract passed (49 passed, one skipped), touched F/E9 lint
+passed, and the install-contract guard reported zero violations.
+This is not native process-tree cleanup, budget/circuit implementation, or
+release/adoption proof; those remain open acceptance gates.
