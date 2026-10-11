@@ -27,7 +27,7 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), 120)
-    except TimeoutError as exc:
+    except (TimeoutError, asyncio.TimeoutError) as exc:
         # The owner may still be launching. Never terminate it or retry a launch.
         raise AcquisitionRefused("owner_operation_pending", "worktree owner operation timed out") from exc
     if proc.returncode:
