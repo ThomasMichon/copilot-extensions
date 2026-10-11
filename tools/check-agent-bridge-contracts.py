@@ -829,6 +829,7 @@ def _changed_files(base_ref: str, errors: list[str]) -> set[str]:
 
 
 def check(base_ref: str | None = None) -> tuple[int, list[str], int, int]:
+    _eg.reset_evidence_cache()
     errors: list[str] = []
     _validate_schema(errors)
     registry = _load_json(REGISTRY_PATH, errors, "registry")

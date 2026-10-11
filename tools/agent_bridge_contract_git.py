@@ -6,6 +6,9 @@ resolution (opportunistic across a squash-merge-orphaned commit), a source
 file's hash at a historical revision, and an integer module-level constant
 at a historical revision.
 
+Immutable object lookups are cached within one checker pass, then reset before
+the next pass so newly available evidence is still observed.
+
 Commit-based lookups return ``None``/``False`` once a commit is genuinely
 unresolvable -- callers treat that as "evidence unavailable", falling back
 to the content-addressed blob helpers below rather than failing outright.
@@ -18,6 +21,7 @@ import json
 import os
 import re
 import subprocess
+from functools import cache
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -63,6 +67,7 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@cache
 def ensure_commit_available(commit: str) -> bool:
     global _FETCH_RECOVERY_ATTEMPTED
 
@@ -82,6 +87,7 @@ def ensure_commit_available(commit: str) -> bool:
     return False
 
 
+@cache
 def git_blob(commit: str, path: str) -> str | None:
     if not ensure_commit_available(commit):
         return None
@@ -90,6 +96,7 @@ def git_blob(commit: str, path: str) -> str | None:
     return value if result.returncode == 0 and _GIT_OBJECT_RE.fullmatch(value) else None
 
 
+@cache
 def git_file_sha256(commit: str, path: str) -> str | None:
     if not ensure_commit_available(commit):
         return None
@@ -104,6 +111,7 @@ def git_file_sha256(commit: str, path: str) -> str | None:
     return sha256_bytes(result.stdout)
 
 
+@cache
 def blob_sha256(blob: str) -> str | None:
     """Hash a Git blob object's content directly by its own object id --
     content-addressed, so resolvable even when the commit that captured it
@@ -119,6 +127,7 @@ def blob_sha256(blob: str) -> str | None:
     return sha256_bytes(result.stdout)
 
 
+@cache
 def plugin_version_at(commit: str) -> str | None:
     if not ensure_commit_available(commit):
         return None
@@ -133,6 +142,7 @@ def plugin_version_at(commit: str) -> str | None:
     return version if isinstance(version, str) else None
 
 
+@cache
 def integer_constant_at(commit: str, path: str, name: str) -> int | None:
     if not ensure_commit_available(commit):
         return None
@@ -154,3 +164,15 @@ def integer_constant_at(commit: str, path: str, name: str) -> int | None:
         ):
             return node.value.value
     return None
+
+
+def reset_evidence_cache() -> None:
+    """Reuse immutable object reads only within one validation pass."""
+    global _FETCH_RECOVERY_ATTEMPTED
+
+    _FETCH_RECOVERY_ATTEMPTED = False
+    for lookup in (
+        ensure_commit_available, git_blob, git_file_sha256,
+        blob_sha256, plugin_version_at, integer_constant_at,
+    ):
+        lookup.cache_clear()

@@ -108,6 +108,9 @@ protected_branches: [main, dev]
 pr:
   enabled: true
   required: true
+  # The full pre-push guard exceeds the generic 180s transport budget on
+  # Windows. Keep every check within a bounded repository-owned deadline.
+  push_timeout_seconds: 600
   provider: github
   auto_open: true
   strategy: keep-alive  # keep the worktree to shepherd the PR to merge; detach is the rare opt-out
