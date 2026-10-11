@@ -145,6 +145,28 @@ def register_spawn_routes(
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
         result = _reservation_dict(reservation)
+        task = queue.get(body.task_id)
+        if reserved and task and task.source == "ci-repair":
+            # CI bodies launch inside the trusted coordinator, never the
+            # caller-selected supervisor factory. Return no launch permission.
+            from .ci_repair_spawn import make_ci_repair_spawn
+            registration = queue.get_registration(task.origin_ref)
+            spec = registration.spec if registration else {}
+            try:
+                spawn = make_ci_repair_spawn(
+                    spec["ci_repair_bindings"],
+                    admission_command=spec["ci_repair_admission_command"],
+                )
+                ok, handle = spawn(asdict(task))
+            except (ValueError, KeyError, OSError) as exc:
+                ok, handle = False, {"error": str(exc)}
+            if ok:
+                queue.record_spawn(reservation.key, session_handle=handle["session"])
+                bus.publish({"type": "spawn.spawned", "reservation": _reservation_dict(queue.get_reservation(reservation.key))})
+            else:
+                queue.fail_spawn(reservation.key, detail=handle.get("error"))
+            return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                    "coordinator_launch": {"ok": ok, **handle}}
         if reserved:
             bus.publish({"type": "spawn.reserved", "reservation": result})
         return {"reserved": reserved, "reservation": result}

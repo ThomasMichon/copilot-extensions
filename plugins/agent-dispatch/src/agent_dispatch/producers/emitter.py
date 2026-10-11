@@ -492,7 +492,10 @@ def run_tick(
             from .ci_repair import AdmissionRefused, run_tick as run_ci_tick
 
             try:
-                result = run_ci_tick(client, spec["ci_repair"], runner=runner, cwd=spec.get("cwd"))
+                ci_config = dict(spec["ci_repair"])
+                for key in ("source_command", "admission_command"):
+                    ci_config[key] = _render_command(ci_config[key])
+                result = run_ci_tick(client, ci_config, runner=runner, cwd=spec.get("cwd"))
             except AdmissionRefused as exc:
                 return {
                     "held": True, "lease": lease.get("lease"), "scope": scope,

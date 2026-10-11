@@ -498,6 +498,40 @@ def test_authority_probe_does_not_hold_coordinator_write_lock(tmp_path, monkeypa
                                  repo=task["repo"], task_id=task["id"])
 
 
+def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator_spawn import register_spawn_routes
+    from agent_dispatch.events import EventBus
+    client = Client(tmp_path)
+    task = ci_repair.run_tick(client, config(enabled=True), runner=adapters)["created"][0]
+    client.queue.register_registration("supervised-lane", {
+        "repo": task["repo"], "labels": ["ci-repair"], "ci_repair_bindings": [EXECUTION],
+        "ci_repair_admission_command": ["fake-admission"],
+    }, reg_id="repair-lane")
+    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", lambda command, config, **kwargs: {
+        "allowed": True, **kwargs["request"],
+    })
+    calls = []
+    monkeypatch.setattr(bridge, "spawn_worker", lambda *a, **k: (
+        calls.append(k) or SimpleNamespace(returncode=0, stdout='{"session_id":"trusted"}', stderr="")
+    ))
+    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", lambda command, config, **kwargs: {
+        **verdict(), **kwargs["request"],
+    })
+    app = FastAPI()
+    register_spawn_routes(app, client.queue, EventBus())
+    with TestClient(app) as http:
+        result = http.post("/spawn-reservations", json={
+            "task_id": task["id"], "reserved_by": "repair-lane",
+        })
+    assert result.status_code == 200, result.text
+    assert result.json()["reserved"] is False
+    assert result.json()["coordinator_launch"]["ok"] is True
+    assert calls[0]["agent"] == EXECUTION["venue"]
+    assert calls[0]["charter"] == EXECUTION["charter"]
+
+
 def test_watchdog_source_cli_uses_only_scoped_wrapper(monkeypatch, capsys):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
     source = importlib.import_module("agent_dispatch.producers.ci_failure_source")

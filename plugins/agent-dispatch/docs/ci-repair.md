@@ -15,7 +15,7 @@ is:
     "enabled": false,
     "repository": "example/project",
     "lane_registration": "ci-repair-lane",
-    "source_command": ["python", "-m", "agent_dispatch.producers.ci_failure_source", "--repo", "example/project", "--run-id", "123", "--sha", "0123456789012345678901234567890123456789", "--gh-command", "[\"reviewed-repository-gh-wrapper\"]"],
+    "source_command": ["{python}", "-m", "agent_dispatch.producers.ci_failure_source", "--repo", "example/project", "--run-id", "123", "--sha", "0123456789012345678901234567890123456789", "--gh-command", "[\"reviewed-repository-gh-wrapper\"]"],
     "admission_command": ["python", "tools/reviewed-ci-admission.py"],
     "execution": {
       "venue": "container:ci-repair-1",
@@ -94,6 +94,12 @@ The registrar serializes this to `--ci-repair-bindings`; it selects only
 admitted `ci-repair` tasks and exact allowlisted overlays and calls
 agent-bridge's real `create --target-dir ... --charter ...` transport.
 No host worktree is allocated. Other ordinary lanes/emitter types are unchanged.
+The coordinator owns CI body launch inside the reservation endpoint using
+the persisted reviewed factory/bindings. Its response never grants the calling
+supervisor permission to launch a CI body, so a forged supervisor ID cannot
+substitute a caller-selected venue before bookkeeping.
+`{python}` is expanded by the existing emitter to its own managed runtime
+interpreter; source invocation never relies on ambient PATH Python.
 Bind a dedicated label-gated, headless, non-fleet lane for this purpose.
 `lane_registration` must name that persisted lane's registration ID.
 Coordinator reservations refuse any other spawner, including catch-all pools;

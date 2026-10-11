@@ -60,7 +60,7 @@ authority from this template.
 - [x] Build the portable restricted image/fleet template under
   `plugins/agent-containers/templates/ci-repair/` and the default-OFF emitter
   `agent_dispatch.producers.ci_repair`, with a watchdog source adapter at
-  `tools/ci_failure_dispatch_source.py`.
+  `agent_dispatch.producers.ci_failure_source` in the installed plugin runtime.
 - [x] Exercise real config/Docker argv, leased emitter, coordinator dedup and
   bridge argv owners with network-free fake adapters. Distinct venue, charter
   and workspace selections, refusal/disabled paths, stale jobs and ordinary
