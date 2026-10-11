@@ -303,6 +303,18 @@ async def test_drain_during_preflight_refuses_native_launch(rig, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_drain_waits_for_active_acquisition_executor(rig, monkeypatch):
+    monkeypatch.setattr(rig.manager, "graceful_cancel_for_redeploy", AsyncMock())
+    monkeypatch.setattr(rig.manager, "_live_host_records", lambda: [])
+    rig.manager._active_acquisitions = 1
+    pending = asyncio.create_task(rig.manager.drain(timeout=1, poll=0.01))
+    await asyncio.sleep(0.03)
+    assert not pending.done()
+    rig.manager._active_acquisitions = 0
+    assert (await pending)["drained"] is True
+
+
+@pytest.mark.asyncio
 async def test_exact_owned_native_recovers_after_crash_before_ledger_registration(rig, monkeypatch):
     original = acquisition_runtime.worktree_command
     async def interrupted(args, project):
