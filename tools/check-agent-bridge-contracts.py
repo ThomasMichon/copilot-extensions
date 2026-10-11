@@ -5,6 +5,13 @@ The registry is intentionally dependency-free repository evidence. This checker
 validates its structure, path confinement, hashes, source provenance, production
 protocol constants, and optional diff-scoped source coverage.
 
+Validation reads local Git objects only; it never fetches missing history.
+Available commits still receive every provenance cross-check, and available
+source blobs still receive content-hash checks when a commit is unavailable.
+Refresh history explicitly before validation if additional historical evidence
+is needed. A timed-out local Git probe fails validation instead of treating
+unexamined evidence as unavailable.
+
 **Commit-based cross-checks are opportunistic, not load-bearing**: a squash
 merge can orphan a provenance ``commit`` (copilot-extensions#2230, #5050), so
 that cross-check is skipped, never failed, once unresolvable -- but

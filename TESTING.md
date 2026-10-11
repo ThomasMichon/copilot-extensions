@@ -9,6 +9,16 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The pre-push agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
+uses only local Git evidence. It does not fetch history or access credential
+helpers: unavailable historical commits remain opportunistic, while available
+commit and content-addressed blob cross-checks remain enforced. Local Git
+probes have a 10-second bound and a probe timeout fails the guard. Repeated
+object reads are memoized within one validation invocation, with bounded
+caches, so fixture fan-out does not multiply identical Git subprocesses. Fetch any
+additional history explicitly, using the repository's scoped identity, before
+running validation rather than asking the guard to recover it during a push.
+
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin under
 `.test-venvs/<platform>/` (git-ignored; uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:
