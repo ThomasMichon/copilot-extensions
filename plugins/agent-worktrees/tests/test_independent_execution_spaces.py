@@ -929,6 +929,74 @@ def test_session_lifecycle_fences_raced_fresh_foreign_record(
     assert latest.head_session == expected_head
 
 
+@pytest.mark.parametrize("via_daemon", [False, True])
+@pytest.mark.parametrize("verb", ["session_register", "session_deregister"])
+def test_session_register_deregister_fence_raced_fresh_foreign_record(
+    verb, via_daemon, tmp_path, scoped_config, monkeypatch,
+):
+    """Review finding (PR #5988, discussion_r4239485564): the
+    authority-aware generation fencing ``session_conclude``/
+    ``session_link_succession`` already carry must also cover
+    ``session_register``/``session_deregister`` -- the same ledger-
+    mutating hook verbs, now bumped to generation 2 and fenced with the
+    identical raced-lock-then-foreign-record proof those siblings use."""
+    from agent_worktrees import (
+        tracking_session_deregistration_write, tracking_session_registration_write,
+        tracking_write,
+    )
+
+    record = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+    )
+    record.sessions = [tracking.SessionEntry("session-1", "2026-01-01T00:00:00")]
+    tracking.save_record(record)
+    real_lock = tracking._RecordLock
+    foreign_bytes = []
+
+    @contextmanager
+    def raced_lock(path, *args, **kwargs):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw["machine"], raw["platform"] = "workstation-wsl", "wsl"
+        path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        foreign_bytes.append(path.read_bytes())
+        with real_lock(path, *args, **kwargs):
+            yield
+
+    monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
+    args = {
+        "worktree_id": record.worktree_id, "yaml_path": str(record.yaml_path),
+        "session_id": "session-1" if verb == "session_deregister" else "session-new",
+    }
+    monkeypatch.setattr(
+        tracking, "save_record",
+        lambda *args, **kwargs: pytest.fail("foreign session register/deregister saved a record"),
+    )
+    if via_daemon:
+        server = tracking_write.start_server(tracking_write.compute)
+        server.start()
+        try:
+            fields = tracking_write.rendezvous_fields(server)
+            assert fields["tracking_write_verb_versions"][verb] == 2
+            result = tracking_write.dispatch(
+                verb, args, read_lock_data=lambda: fields,
+                ensure_monitor=None, min_version=2,
+            )
+        finally:
+            server.close()
+    else:
+        handler = {
+            "session_register": tracking_session_registration_write.apply_session_register,
+            "session_deregister": tracking_session_deregistration_write.apply_session_deregister,
+        }[verb]
+        result = handler(args)
+    assert result["error"] == "execution_space"
+    assert "different execution space" in result["message"]
+    assert record.yaml_path.read_bytes() == foreign_bytes[-1]
+    latest = tracking.load_record(record.yaml_path)
+    assert latest.session_entry("session-1").ended_at is None
+
+
 @pytest.mark.parametrize(("caller", "verb"), [
     ("handoff", "session_conclude"), ("cli", "session_conclude"),
     ("cli", "session_link_succession"), ("cli", "session_resolve_handoff_successor"),

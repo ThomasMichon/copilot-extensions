@@ -48,9 +48,11 @@ ambient config from inside their own locked block.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from pathlib import Path
 
 from . import obligations, tracking, tracking_write
+from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 from .tracking_session_registry import _start_session_activation
 
 
@@ -107,6 +109,13 @@ def apply_session_register(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
+        try:
+            require_project_record_mutation(record)
+        except ExecutionSpaceError as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting session registration for %s: %s", worktree_id, exc,
+            )
+            return {"error": "execution_space", "message": str(exc)}
         if (
             record.kind in tracking.MANAGED_KINDS
             and record.status in {"complete", "completed", "finalized"}
@@ -306,4 +315,4 @@ def apply_session_register(args: dict) -> dict:
         }
 
 
-tracking_write.register_verb("session_register", apply_session_register)
+tracking_write.register_verb("session_register", apply_session_register, version=2)

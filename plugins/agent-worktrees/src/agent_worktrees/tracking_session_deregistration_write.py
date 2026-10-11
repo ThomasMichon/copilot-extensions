@@ -38,9 +38,11 @@ killed out from under it. Kept in-lock, matching old behavior exactly.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from . import tracking, tracking_write
+from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 from .tracking_session_registry import (
     _end_session_activation,
     _record_has_open_session,
@@ -62,6 +64,13 @@ def apply_session_deregister(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
+        try:
+            require_project_record_mutation(record)
+        except ExecutionSpaceError as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting session deregistration for %s: %s", record.worktree_id, exc,
+            )
+            return {"error": "execution_space", "message": str(exc)}
         if record.sessions is None:
             return {"ok": True}
         for entry in record.sessions:
@@ -87,4 +96,4 @@ def apply_session_deregister(args: dict) -> dict:
     return {"ok": True}
 
 
-tracking_write.register_verb("session_deregister", apply_session_deregister)
+tracking_write.register_verb("session_deregister", apply_session_deregister, version=2)

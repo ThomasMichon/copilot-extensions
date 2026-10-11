@@ -207,8 +207,9 @@ def register_session(
         ),
         boot_wait_s=0.0,
         request_deadline_s=_SESSION_REGISTER_REQUEST_DEADLINE_S,
+        min_version=2,
     )
-    if result.get("error") == "lifecycle":
+    if result.get("error") in ("lifecycle", "execution_space"):
         raise tracking.SessionLifecycleError(result["message"])
     linked = result.get("linked_handoff")
     return tracking.SessionHandoff(**linked) if linked else None
@@ -346,4 +347,5 @@ def deregister_session(
         ),
         boot_wait_s=0.0,
         request_deadline_s=_SESSION_DEREGISTER_REQUEST_DEADLINE_S,
+        min_version=2,
     )

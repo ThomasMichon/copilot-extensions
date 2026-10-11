@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import tracking, tracking_session_deregistration_write, tracking_write
+from agent_worktrees import config as cfg, tracking, tracking_session_deregistration_write, tracking_write
 from agent_worktrees.tracking import SessionEntry, WorktreeRecord, save_record
 
 
@@ -35,7 +35,14 @@ def _clean_verb_registry():
 
 
 @pytest.fixture
-def record_path(tmp_tracking_dir: Path) -> Path:
+def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
+    config = cfg.Config(
+        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        repos={"test-repo": cfg.RepoConfig(
+            anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
     path = tmp_tracking_dir / "wt-dereg.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-dereg", branch="worktree/wt-dereg", worktree_path="/tmp/wt-dereg",

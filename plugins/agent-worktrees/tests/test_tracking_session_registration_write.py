@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import tracking, tracking_session_registration_write, tracking_write
+from agent_worktrees import config as cfg, tracking, tracking_session_registration_write, tracking_write
 from agent_worktrees.tracking import WorktreeRecord, save_record
 
 
@@ -35,7 +35,14 @@ def _clean_verb_registry():
 
 
 @pytest.fixture
-def record_path(tmp_tracking_dir: Path) -> Path:
+def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
+    config = cfg.Config(
+        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        repos={"test-repo": cfg.RepoConfig(
+            anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
     path = tmp_tracking_dir / "wt-reg.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-reg", branch="worktree/wt-reg", worktree_path="/tmp/wt-reg",
@@ -128,8 +135,17 @@ def test_apply_session_register_existing_session_branch_feeds_claim_history(
 
 
 def test_apply_session_register_rejects_a_terminal_managed_worktree(
-    tmp_tracking_dir: Path,
+    tmp_tracking_dir: Path, monkeypatch,
 ):
+    import agent_worktrees.config as cfg
+
+    config = cfg.Config(
+        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        repos={"test-repo": cfg.RepoConfig(
+            anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
     path = tmp_tracking_dir / "wt-terminal.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-terminal", branch="worktree/wt-terminal",

@@ -350,6 +350,38 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
         "agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees"
     )
 
+    # Fencing verbs (session_register/session_deregister/session_conclude/...)
+    # resolve receiving-side project authority via
+    # ``execution_spaces.require_project_record_mutation`` ->
+    # ``config.load_project_config(record.repo)`` before any mutation. The
+    # isolated test HOME has no real registered project, so without this a
+    # record naming any repo not explicitly pre-registered would raise
+    # ``ExecutionSpaceError`` before reaching the behavior under test. Return
+    # a minimal single-repo ``Config`` for whatever project name is actually
+    # requested, with a REAL (empty) canonical ``machines.yaml`` at its
+    # anchor: ``registry_for_config`` -> ``load_machines_yaml`` then finds the
+    # canonical path directly and never falls through to its own
+    # ``_overlay_machines_yaml_path`` probe (which calls the bare,
+    # un-namespaced ``load_config()`` as a side effect) -- avoiding a spurious
+    # extra ``load_config()`` call a caller-side test might assert against.
+    # No ``execution_platform`` entries -> the authority check stays a no-op
+    # (the same fail-open behavior a real non-multi-platform deployment gets).
+    fake_anchor = tmp_path / ".aw-authority-fence-anchor"
+    (fake_anchor / ".agent-worktrees").mkdir(parents=True, exist_ok=True)
+    (fake_anchor / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines: {}\n", encoding="utf-8",
+    )
+
+    def _fake_load_project_config(name, **_kwargs):
+        return _cfg.Config(
+            srcroot=str(tmp_path), machine="test", platform="wsl", repo_name=name,
+            repos={name: _cfg.RepoConfig(
+                anchor=str(fake_anchor), worktree_root=str(tmp_tracking_dir),
+            )},
+        )
+
+    monkeypatch.setattr(_cfg, "load_project_config", _fake_load_project_config)
+
 
 @pytest.fixture
 def sample_record(tmp_tracking_dir: Path) -> tracking.WorktreeRecord:

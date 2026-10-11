@@ -556,7 +556,7 @@ def test_cli_remote_falls_back_to_unverified_local_history_when_the_lock_fails(
 # transitive-finalization effort) ─────────────────────────────────────
 
 def test_cli_history_is_complete_and_ordered_across_a_real_session_rebind(
-    tmp_tracking_dir, capsys,
+    tmp_tracking_dir, capsys, monkeypatch_config,
 ):
     """Proves the Phase 3b query end-to-end for the one combination not
     yet covered by a dedicated test: a claim's origin plus a REAL

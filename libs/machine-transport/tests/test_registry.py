@@ -358,3 +358,18 @@ class TestFindMachineEntry:
             "shared": MachineEntry(key="shared", display_name="Key"),
         }
         assert find_machine_entry(entries, "SHARED") is entries["other"]
+
+    def test_scoped_lookup_handles_missing_physical_host_without_crashing(self):
+        """Regression (PR #5988 review, previously-missed finding):
+        ``physical_host`` is optional for a consumer-specific execution-
+        space record. A record declaring ``execution_platform`` but no
+        ``physical_host`` must not raise ``AttributeError`` when a
+        hostname/display-name match reaches the scoped rejection branch;
+        it must instead raise the intended structured error."""
+        entries = {
+            "box-a": MachineEntry(
+                key="box-a", display_name="Box A", execution_platform="windows",
+            ),
+        }
+        with pytest.raises(ValueError, match="does not select an execution space"):
+            find_machine_entry(entries, "box a")
