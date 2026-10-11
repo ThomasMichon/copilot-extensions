@@ -76,6 +76,7 @@ def test_bootstrap_check_emits_exact_empty_object(
             **os.environ,
             "HOME": str(tmp_path),
             "USERPROFILE": str(tmp_path),
+            "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(tmp_path / "bootstrap-killswitch.json"),
             "PYTHONUTF8": "1",
         },
         capture_output=True,

@@ -664,6 +664,7 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
         "USERPROFILE": str(profile),
         "AGENT_INDEX_ROLE": "host",
         "PYTHONPATH": str(malicious_repo),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(profile / "bootstrap-killswitch.json"),
         "PYTHONUTF8": "1",
     }
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
