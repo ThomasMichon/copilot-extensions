@@ -9,7 +9,7 @@ from . import config as cfg, tracking
 
 def authority(pr: tracking.PRRecord) -> tuple:
     return tuple(getattr(pr, name) for name in (
-        "pr_id", "branch", "repo", "provider", "number", "url", "state",
+        "branch", "repo", "provider", "number", "url", "state",
         "base_sha", "head_sha", "patch_id", "remote", "head_repo",
         "head_identity", "head_owner", "rewrite_owner", "rewrite_identity",
     ))
@@ -22,7 +22,7 @@ def loaded(record: tracking.WorktreeRecord) -> tracking.WorktreeRecord:
 
 
 def same_loaded_authority(current: tracking.PRRecord, incoming: tracking.PRRecord) -> bool:
-    return incoming._loaded_authority is not None and authority(current)[1:] == incoming._loaded_authority[1:]
+    return incoming._loaded_authority is not None and authority(current) == incoming._loaded_authority
 
 
 def matches(current: tracking.PRRecord | None, expected: tracking.PRRecord) -> bool:

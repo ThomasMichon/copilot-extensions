@@ -78,3 +78,30 @@ def test_terminal_reconcile_preserves_concurrent_attribution_stamp(pr_repo, monk
     fresh = tracking.load_record(path)
     assert fresh.pr.state == stale.pr.state == "merged"
     assert fresh.pr.attribution_head == "b" * 40
+
+
+def test_legacy_id_backfill_attribution_write_does_not_take_authority(tmp_path, monkeypatch):
+    import yaml
+    from agent_worktrees import pr_publication_state
+
+    rec = tracking.create_new_record("legacy", "worktree/legacy", str(tmp_path), "ext", "test", "linux", tmp_path)
+    rec.prs = [tracking.PRRecord(state="open", branch="pr/test-aaaa", repo="example/project", number=42)]
+    tracking.save_record(rec)
+    data = yaml.safe_load(rec.yaml_path.read_text())
+    data["prs"][0].pop("pr_id", None)
+    rec.yaml_path.write_text(yaml.safe_dump(data))
+    legacy = tracking.load_record(rec.yaml_path)
+    before = pr_publication_state.authority(legacy.pr)
+    tracking.stamp_frozen_attribution(legacy.pr, attribution=False, explicit=True, assign_pr_id=False)
+
+    @contextmanager
+    def forbidden(**kwargs):
+        pytest.fail("attribution-only legacy backfill acquired publication authority")
+        yield
+
+    monkeypatch.setattr(pr_authority, "guard", forbidden)
+    tracking.save_record(legacy)
+    current = tracking.load_record(rec.yaml_path)
+    assert current.pr.pr_id
+    assert current.pr.attribution_mode == "false"
+    assert pr_publication_state.authority(current.pr) == before
