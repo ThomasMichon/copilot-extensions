@@ -2,6 +2,7 @@
 
 - **Subject:** Evidence-grounded fleet judgments and accountable feedback services
 - **Scope:** leaf
+- **Status:** Active
 - **Last revised:** 2026-10-10
 
 ## Purpose & Intent

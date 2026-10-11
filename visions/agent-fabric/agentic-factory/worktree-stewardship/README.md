@@ -2,6 +2,7 @@
 
 - **Subject:** Consent-based continuity of dormant worktree objectives
 - **Scope:** leaf
+- **Status:** Active
 - **Last revised:** 2026-10-10
 
 ## Purpose & Intent

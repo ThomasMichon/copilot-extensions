@@ -2,6 +2,7 @@
 
 - **Subject:** Independently composable harness, knowledge, and product repositories
 - **Scope:** leaf
+- **Status:** Active
 - **Last revised:** 2026-10-10
 
 ## Purpose & Intent

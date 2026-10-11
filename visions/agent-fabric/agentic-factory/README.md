@@ -2,6 +2,7 @@
 
 - **Subject:** Operator-steerable composition of agents, durable work, and planning
 - **Scope:** branch (links focused capability children)
+- **Status:** Active
 - **Last revised:** 2026-10-10
 
 ## Purpose & Intent
