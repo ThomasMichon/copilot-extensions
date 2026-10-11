@@ -1107,7 +1107,7 @@ STUBEOF
 }
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build until
-# explicit setup (fits a sessionStart hook's grace window). No venv, no uv.
+# explicit setup. This installer action is not a session hook. No venv, no uv.
 do_stamp() {
     _stamp_index_payload() {
     _index_publication_fresh || { _skip 'Newer runtime or stamp superseded stamp'; return 0; }
