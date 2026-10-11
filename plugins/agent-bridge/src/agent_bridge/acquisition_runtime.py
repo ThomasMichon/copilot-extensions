@@ -469,6 +469,7 @@ class AcquisitionRuntime:
                 now=time.time(),
                 expected_session_id=result.native_session_id,
                 idempotency_key=f"acquisition:{req.delivery_id}",
+                require_idle=True,
             )
             if message is None:
                 raise AcquisitionRefused(

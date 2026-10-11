@@ -317,6 +317,40 @@ async def test_inspection_requires_actual_durable_prompt_admission(rig, monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("race", ["message", "turn"])
+async def test_cli_admission_atomically_refuses_competing_work(rig, monkeypatch, race):
+    original = rig.db.enqueue_live_message_if_fresh
+    captured = {}
+    def competing(session_id, **kwargs):
+        captured.update(session_id=session_id, kwargs=kwargs)
+        if race == "message":
+            rig.db.enqueue_live_message(session_id, "other", "competing work", time.time())
+        else:
+            rig.db.execute_write(
+                "UPDATE live_sessions SET turn_state='running' WHERE session_id=?", (session_id,),
+            )
+        return original(session_id, **kwargs)
+    monkeypatch.setattr(rig.db, "enqueue_live_message_if_fresh", competing)
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(req(mode="cli"))
+    assert error.value.code == "session_busy"
+    assert not (await rig.runtime.inspect_pending("delivery-a"))["delivery_admitted"]
+    assert not rig.db.execute_read(
+        "SELECT id FROM live_messages WHERE idempotency_key='acquisition:delivery-a'",
+    )
+    rig.db.execute_write("DELETE FROM live_messages WHERE sender='other'")
+    rig.db.execute_write("UPDATE live_sessions SET turn_state='idle'")
+    first, reason = original(captured["session_id"], **captured["kwargs"])
+    assert first is not None and reason is None
+    rig.db.execute_write("UPDATE live_sessions SET turn_state='running'")
+    repeated, reason = original(captured["session_id"], **captured["kwargs"])
+    assert repeated == first and reason is None
+    assert len(rig.db.execute_read(
+        "SELECT id FROM live_messages WHERE idempotency_key='acquisition:delivery-a'",
+    )) == 1
+
+
+@pytest.mark.asyncio
 async def test_cli_overrides_are_refused_not_dropped(rig):
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(req(mode="cli", model="requested-model"))

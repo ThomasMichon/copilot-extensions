@@ -101,7 +101,11 @@ while waiting refuses the stale prompt without advancing its delivery stage.
 Its `delivery_admitted` flag is derived from the exact durable CLI inbox row or
 ACP turn (delivery key, session and constructed prompt), not the pre-effect
 `delivering` journal stage. Dispatch STARTED admission requires that proof;
-a receipt bound before insertion does not suffice. Unsupported CLI execution
+a receipt bound before insertion does not suffice.
+The CLI inbox's atomic admission statement also requires an idle/completed turn
+and no pending non-control message. Competing enqueue/turn transitions refuse
+as `session_busy`; an identical delivery-key retry returns its original row.
+Unsupported CLI execution
 overrides report `effect: not_started` before any journal, gate or launch, so
 dispatch fails the capability mismatch instead of deferring it for reconciliation.
 Terminal receipt retention and recovery of launches with no surviving native
