@@ -88,7 +88,9 @@ The automatic fallback waits **five minutes after its run starts**, without API
 polling, then checks the live PR once. It skips closed/draft/retargeted PRs,
 pending Copilot reviews, completed reviews of the current diff, and requests
 still inside their five-minute grace period. Completed reviews must be newer
-than the latest base-retarget/reopen event. A run superseded by a newer push
+than the latest base-retarget/reopen event. Identity checks accept the observed
+`Copilot` and `copilot-pull-request-reviewer[bot]` aliases only for API users
+typed `Bot`; the review write retains the canonical app login. A run superseded by a newer push
 leaves that push's grace period to its own queued run. Per-PR serialization keeps
 an active run plus the latest pending event; independent PRs remain concurrent.
 

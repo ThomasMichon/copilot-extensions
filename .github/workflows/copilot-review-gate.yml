@@ -90,7 +90,10 @@ jobs:
             }
             const { data: pending } = await reader.rest.pulls.listRequestedReviewers(request);
             const bot = "copilot-pull-request-reviewer[bot]";
-            if (pending.users.some(user => user.login === bot)) {
+            // Timeline/request APIs use "Copilot"; reviews use the app login.
+            const isCopilot = user => user?.type === "Bot" &&
+              [bot, "Copilot"].includes(user.login);
+            if (pending.users.some(isCopilot)) {
               core.info("Copilot review is pending; no nudge.");
               return;
             }
@@ -104,7 +107,7 @@ jobs:
             for (const event of events) {
               const epoch = ["base_ref_changed", "reopened"].includes(event.event);
               const requestEvent = event.event === "review_requested" &&
-                event.requested_reviewer?.login === bot;
+                isCopilot(event.requested_reviewer);
               if (!epoch && !requestEvent) continue;
               const timestamp = Date.parse(event.created_at);
               if (!Number.isFinite(timestamp) || timestamp > Date.now()) {
@@ -118,7 +121,7 @@ jobs:
               per_page: 100,
             });
             if (reviews.some(review =>
-              review.user?.login === bot &&
+              isCopilot(review.user) &&
               ["APPROVED", "COMMENTED", "CHANGES_REQUESTED"].includes(review.state) &&
               review.commit_id === livePr.head.sha &&
               review.submitted_at &&

@@ -39,7 +39,8 @@ async function run(options = {}) {
         },
         listRequestedReviewers: async () => {
           reads.push("pending");
-          return { data: { users: options.pending ? [{ login: BOT }] : [] } };
+          return { data: { users: options.pendingUsers ??
+            (options.pending ? [{ login: BOT, type: "Bot" }] : []) } };
         },
         listReviews: "reviews",
       },
@@ -76,7 +77,7 @@ async function run(options = {}) {
 }
 
 function review(overrides = {}) {
-  return { id: 1, user: { login: BOT }, commit_id: "event-head",
+  return { id: 1, user: { login: BOT, type: "Bot" }, commit_id: "event-head",
     state: "COMMENTED", submitted_at: new Date(NOW).toISOString(), ...overrides };
 }
 
@@ -138,7 +139,7 @@ test("post-retarget review suppresses new nudge", async () => {
 
 test("recent native/manual request suppresses duplicate nudge", async () => {
   const result = await run({
-    events: [{ event: "review_requested", requested_reviewer: { login: BOT },
+    events: [{ event: "review_requested", requested_reviewer: { login: BOT, type: "Bot" },
       created_at: new Date(NOW + 240_000).toISOString() }],
   });
   assert.equal(result.writes.length, 0);
@@ -146,10 +147,36 @@ test("recent native/manual request suppresses duplicate nudge", async () => {
 
 test("five-minute request boundary allows nudge when still no review", async () => {
   const result = await run({
-    events: [{ event: "review_requested", requested_reviewer: { login: BOT },
+    events: [{ event: "review_requested", requested_reviewer: { login: BOT, type: "Bot" },
       created_at: new Date(NOW).toISOString() }],
   });
   assert.equal(result.writes.length, 1);
+});
+
+test("Copilot Bot alias suppresses pending, recent-request and completed-review nudges", async () => {
+  const user = { login: "Copilot", type: "Bot" };
+  const pending = await run({ pendingUsers: [user] });
+  assert.equal(pending.writes.length, 0);
+  assert.deepEqual(pending.reads, ["pr", "pending"]);
+  assert.equal((await run({ events: [{
+    event: "review_requested", requested_reviewer: user,
+    created_at: new Date(NOW + 240_000).toISOString(),
+  }] })).writes.length, 0);
+  assert.equal((await run({ reviews: [review({ user })] })).writes.length, 0);
+});
+
+test("human and unrelated Bot identities cannot suppress a review request", async () => {
+  for (const user of [
+    { login: "Copilot", type: "User" },
+    { login: BOT, type: "User" },
+    { login: "other-bot", type: "Bot" },
+    { login: "Copilot" },
+  ]) {
+    assert.equal((await run({ pendingUsers: [user], reviews: [review({ user })],
+      events: [{ event: "review_requested", requested_reviewer: user,
+        created_at: new Date(NOW + 240_000).toISOString() }],
+    })).writes.length, 1);
+  }
 });
 
 test("rate-limit failure reports headers and performs no retry", async () => {
