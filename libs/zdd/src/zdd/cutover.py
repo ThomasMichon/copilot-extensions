@@ -680,8 +680,11 @@ class CutoverOrchestrator:
             if result.ok or (conditional and result.rolled_back):
                 breadcrumb.clear_breadcrumb(self.config_dir)
             else:
+                state = "rolled_back"
+                if conditional and not result.rolled_back:
+                    state = "flipped" if flipped else "started"
                 write_breadcrumb(
-                    state="rolled_back" if not conditional or result.rolled_back else "flipped" if flipped else "started",
+                    state=state,
                     old=old_dict,
                     new_port=new_port, new_pid=new_pid, error=result.error,
                     started_at=started_at,

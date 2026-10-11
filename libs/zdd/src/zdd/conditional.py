@@ -307,7 +307,11 @@ def run_conditional_cutover(
         raise RuntimeError("conditional operation used uncaptured runtime context")
 
     def pick_free_port() -> int:
-        host = request.expected_active.client_host
+        host = request.expected_active.bind
+        if host == "[::]":
+            host = "::"
+        if not host:
+            host = "127.0.0.1"
         family = socket.AF_INET6 if ":" in host else socket.AF_INET
         with socket.socket(family, socket.SOCK_STREAM) as sock:
             sock.bind((host, 0))

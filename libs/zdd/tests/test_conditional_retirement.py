@@ -171,3 +171,42 @@ def test_legacy_recovery_cannot_race_native_transition(case):
         root, pid_alive=forbidden, terminate=forbidden, record=stale, grace_seconds=0
     )
     assert reap["refused"]
+
+
+@pytest.mark.parametrize("bind", ["0.0.0.0", "::", "[::]"])
+def test_free_port_probe_uses_successor_bind_scope(case, monkeypatch, bind):
+    import socket
+
+    from zdd.conditional import run_conditional_cutover
+    from zdd.cutover import CutoverOrchestrator, CutoverResult
+
+    root, old, _, _, _, request, _ = case
+    expected_host = "::" if bind == "[::]" else bind
+    observed = []
+
+    class Socket:
+        def __init__(self, family, kind):
+            assert family == (socket.AF_INET6 if ":" in bind else socket.AF_INET)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def bind(self, address):
+            observed.append(address)
+
+        def getsockname(self):
+            return (expected_host, 61002)
+
+    def run(self, **kwargs):
+        assert self.pick_free_port() == 61002
+        return CutoverResult(ok=False)
+
+    monkeypatch.setattr("zdd.conditional.socket.socket", Socket)
+    monkeypatch.setattr(CutoverOrchestrator, "run", run)
+    run_conditional_cutover(
+        root, version="2.0.0", request=replace(request, expected_active=replace(old, bind=bind))
+    )
+    assert observed == [(expected_host, 0)]
