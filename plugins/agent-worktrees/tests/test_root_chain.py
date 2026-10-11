@@ -718,6 +718,27 @@ class TestResolveRootCodename:
 
 
 class TestOriginIdentity:
+    def test_root_config_without_default_is_omitted(self, tmp_path, monkeypatch):
+        from agent_worktrees.origin_identity import resolve_origin_identity
+
+        _seed(tmp_path, monkeypatch, "control", "wt-root")
+        child = _seed(
+            tmp_path, monkeypatch, "product", "wt-child",
+            owner_ref="anomalous-potato/control/wt-root",
+        )
+
+        class AmbiguousConfig:
+            @property
+            def default_repo(self):
+                raise KeyError("no default repo")
+
+        monkeypatch.setattr(
+            "agent_worktrees.config.load_project_config", lambda *args: AmbiguousConfig(),
+        )
+        assert resolve_origin_identity(
+            child, project="product", this_machine="anomalous-potato",
+        ) is None
+
     def test_private_origin_snapshot_and_opt_out(self, tmp_path, monkeypatch):
         from agent_worktrees.origin_identity import resolve_origin_identity
 

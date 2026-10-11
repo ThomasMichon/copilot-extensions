@@ -58,6 +58,6 @@ def resolve_origin_identity(
         return OriginIdentity(
             worktree_id=root.worktree_id, machine=root.machine, project=root_project,
         )
-    except (OSError, ValueError, AttributeError, TimeoutError):
+    except (OSError, ValueError, AttributeError, KeyError, TypeError, TimeoutError):
         log.warning("Private PR origin omitted: ownership or policy unavailable.")
         return None
