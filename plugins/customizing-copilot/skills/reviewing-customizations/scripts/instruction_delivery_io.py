@@ -75,6 +75,20 @@ def orphan_fallbacks(
     return found
 
 
+def iter_local_files(root: Path, io: DeliveryIO) -> list[Path]:
+    try:
+        directory = io.safe(root, PurePosixPath(".github/copilot/context-locals"))
+    except ValueError:
+        return []
+    found: list[Path] = []
+    for current, directories, names in os.walk(directory):
+        directories[:] = [
+            name for name in directories if not io.indirect(Path(current) / name)
+        ]
+        found.extend(Path(current) / name for name in names if name.endswith(".local.md"))
+    return found
+
+
 def resolve_source(
     root: Path, entry: Mapping[str, object], io: DeliveryIO,
     canonical: tuple[bytes, bytes] | None = None,

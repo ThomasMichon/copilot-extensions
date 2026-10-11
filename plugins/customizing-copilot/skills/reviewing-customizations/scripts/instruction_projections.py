@@ -1452,26 +1452,7 @@ def _parse_owned_local_cache_marker(
 
 
 def _iter_local_cache_files(repo_root: Path) -> Iterable[Path]:
-    if _is_indirection(repo_root / ".github"):
-        return ()
-    try:
-        instructions = _safe_destination(repo_root, PurePosixPath(".github/copilot/context-locals"))
-    except ValueError:
-        return ()
-    if not instructions.is_dir() or _is_indirection(instructions):
-        return ()
-    found: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(instructions):
-        safe_dirs: list[str] = []
-        for name in dirnames:
-            candidate = Path(dirpath) / name
-            if not _is_indirection(candidate):
-                safe_dirs.append(name)
-        dirnames[:] = safe_dirs
-        for name in filenames:
-            if name.endswith(".local.md"):
-                found.append(Path(dirpath) / name)
-    return found
+    return delivery_io.iter_local_files(repo_root, _delivery_io())
 
 
 _LOCK_ENTRY_KEYS = {
