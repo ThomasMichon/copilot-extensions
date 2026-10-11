@@ -235,3 +235,42 @@ def test_known_template_provenance_is_strict_while_custom_roles_remain_preserved
     }
     with pytest.raises(PlanError):
         compute(template, config, live)
+
+
+def test_installed_cli_blocked_plan_returns_two_and_valid_nonsecret_json(tmp_path):
+    template, _, live = inputs()
+    now = int(time.time())
+    live.update(observed_at=now - 1, expires_at=now + 60, quota_remaining=None)
+    for name, data in (("template.json", template), ("inventory.json", live)):
+        (tmp_path / name).write_text(json.dumps(data))
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [sys.executable, "-I", "-m", "fleet_manager", "plan",
+         "--template", str(tmp_path / "template.json"),
+         "--inventory", str(tmp_path / "inventory.json"),
+         "--fleet-id", "example", "--machine-limit", "5"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10, **flags,
+    )
+    assert result.returncode == 2, result.stderr
+    output = json.loads(result.stdout)
+    assert output["status"] == "blocked"
+    assert "provider-quota-unknown" in output["blockers"]
+    assert output["capacity"]["proposed_creations"] == 0
+
+
+@pytest.mark.parametrize("missing", ["template", "config", "inventory"])
+def test_cli_read_error_identifies_input_kind_without_disclosing_path(tmp_path, capsys, missing):
+    template, _, live = inputs()
+    for name, data in (("template", template), ("inventory", live)):
+        (tmp_path / name).write_text(json.dumps(data))
+    paths = {name: tmp_path / name for name in ("template", "config", "inventory")}
+    paths[missing] = tmp_path / "private-missing-name"
+    arguments = ["plan", "--template", str(paths["template"]), "--inventory", str(paths["inventory"]),
+                 "--fleet-id", "example", "--machine-limit", "5"]
+    if missing == "config":
+        arguments.extend(["--config", str(paths["config"])])
+    assert main(arguments) == 1
+    captured = capsys.readouterr()
+    assert f"{missing} file could not be read" in captured.err
+    assert "private-missing-name" not in captured.err
+    assert captured.out == ""

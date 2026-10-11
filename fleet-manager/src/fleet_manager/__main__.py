@@ -10,9 +10,12 @@ from . import __version__
 from .planning import MAX_BYTES, PlanError, decode, plan
 
 
-def read(path):
-    with path.open("rb") as stream:
-        return decode(stream.read(MAX_BYTES + 1))
+def read(path, label):
+    try:
+        with path.open("rb") as stream:
+            return decode(stream.read(MAX_BYTES + 1))
+    except OSError:
+        raise PlanError(f"{label} file could not be read") from None
 
 
 def main(argv=None):
@@ -27,8 +30,8 @@ def main(argv=None):
     planning.add_argument("--machine-limit", type=int, required=True)
     args = parser.parse_args(argv)
     try:
-        result = plan(read(args.template), read(args.config) if args.config else None,
-                      read(args.inventory), fleet_id=args.fleet_id,
+        result = plan(read(args.template, "template"), read(args.config, "config") if args.config else None,
+                      read(args.inventory, "inventory"), fleet_id=args.fleet_id,
                       machine_limit=args.machine_limit, now=time.time())
     except (PlanError, OSError) as exc:
         message = str(exc) if isinstance(exc, PlanError) else "Input file could not be read"

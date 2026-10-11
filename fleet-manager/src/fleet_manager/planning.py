@@ -24,7 +24,7 @@ def identifier(value, name):
 
 def integer(value, name, *, minimum=0, maximum=2**63 - 1):
     if type(value) is not int or not minimum <= value <= maximum:
-        raise PlanError(f"{name} must be a bounded nonnegative integer")
+        raise PlanError(f"{name} must be an integer between {minimum} and {maximum}")
 
 
 def boolean(value, name):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_pat
             root = Path(command[-1])
             (root / "bin").mkdir(parents=True, exist_ok=True)
             (root / "bin" / "python").touch()
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(runner.subprocess, "run", prepare_command)
     python = tmp_path / ".test-venvs" / "fleet-manager" / "bin" / "python"
