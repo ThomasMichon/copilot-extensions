@@ -50,8 +50,18 @@ def inventory_corpus(root: Path, *, include_sessions: bool = False) -> CorpusInv
         "sources": [],
         "errors": [],
     }
+
+    def rejected_source(key: str, error: OSError | ValueError) -> None:
+        result["complete"] = False
+        result["errors"].append(f"{key}: {error}")
+        result["source_count"] += 1
+        result["sources"].append({
+            "source_key": key, "live": 0, "archived": 0, "sessions": None,
+            "error": str(error),
+        })
+
     try:
-        for source in iter_archive_sources(root):
+        for source in iter_archive_sources(root, on_error=rejected_source):
             row: SourceInventory = {
                 "source_key": source.key,
                 "live": 0,

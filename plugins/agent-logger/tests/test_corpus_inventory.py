@@ -96,13 +96,33 @@ def test_inventory_archive_only_and_divergent_formats(tmp_path):
 def test_inventory_permission_error_is_not_an_empty_success(tmp_path, monkeypatch):
     from agent_logger import corpus_inventory
 
-    def denied(_root):
+    def denied(_root, **_kwargs):
         raise PermissionError("inventory access denied")
 
     monkeypatch.setattr(corpus_inventory, "iter_archive_sources", denied)
     result = inventory_corpus(tmp_path)
     assert not result["complete"]
     assert result["errors"] == ["inventory access denied"]
+
+
+@pytest.mark.parametrize("key", ["a-broken", "a.codespaces/broken"])
+def test_inventory_continues_after_malformed_source_metadata(tmp_path, key):
+    from agent_logger.source_roots import SOURCE_METADATA_MEMBER, iter_archive_sources
+
+    _session(tmp_path / key, "bad-session")
+    (tmp_path / key / SOURCE_METADATA_MEMBER).write_text("{broken", encoding="utf-8")
+    _session(tmp_path / "b-valid", "good-session")
+    result = inventory_corpus(tmp_path, include_sessions=True)
+    assert not result["complete"]
+    assert result["source_count"] == 2
+    assert result["session_count"] == 1
+    assert result["sources"][0]["source_key"] == key
+    assert result["sources"][0]["error"]
+    assert result["sources"][1]["sessions"] == [
+        {"session_id": "good-session", "kind": "live"},
+    ]
+    with pytest.raises(ValueError):
+        list(iter_archive_sources(tmp_path))
 
 
 def test_inventory_empty_root_succeeds(tmp_path):
