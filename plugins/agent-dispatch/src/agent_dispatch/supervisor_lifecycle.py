@@ -34,18 +34,31 @@ class Invocation:
         return cls(origin, verb, f"{os.getpid()}-{time.time_ns()}", os.getpid(), os.getppid())
 
 
-def selection_facts(env_file: Path | None) -> dict[str, object]:
+def selection_facts(env_file: Path | None, *, windows_adapter: bool = False) -> dict[str, object]:
     values: dict[str, str] = {}
     state = "not-sampled" if env_file is None else "absent"
     if env_file is not None:
         try:
             for line in env_file.read_text(encoding="utf-8").splitlines():
                 key, separator, value = line.partition("=")
+                if windows_adapter:
+                    key = key.upper()
                 if separator and key.strip() in {
                     "AGENT_DISPATCH_SUPERVISE_MODE", "AGENT_DISPATCH_SUPERVISE_LABELS",
                     "AGENT_DISPATCH_SUPERVISE_MACHINE",
                 }:
-                    values[key.strip()] = value.replace('"', "").replace("'", "").strip()
+                    parsed = value.replace('"', "").replace("'", "").strip()
+                    key = key.strip()
+                    if windows_adapter and key in {
+                        "AGENT_DISPATCH_SUPERVISE_MODE", "AGENT_DISPATCH_SUPERVISE_LABELS",
+                    }:
+                        if key == "AGENT_DISPATCH_SUPERVISE_MODE":
+                            if parsed.casefold() == "serve":
+                                values[key] = "serve"
+                        elif re.sub(r"[\s,]", "", parsed):
+                            values[key] = parsed
+                    else:
+                        values[key] = parsed
             state = "read"
         except FileNotFoundError:
             pass
@@ -101,7 +114,7 @@ def audit(
             "prior-native-disabled", "prior-native-masked", "installer-inert",
             "explicit-no-supervisor", "explicit-client-only", "client-only-policy",
         } else True if reason == "configured-opt-in" else None,
-        **selection_facts(env_file),
+        **selection_facts(env_file, windows_adapter=invocation.origin == "installer.ps1"),
     }
     if machine is not None:
         detail.update(machine=machine, scope_source="resolved-runtime", mode="serve")

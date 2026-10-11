@@ -117,3 +117,21 @@ def test_runtime_mask_state_is_retained(tmp_path):
     detail = json.loads((tmp_path / "lifecycle.log").read_text())["detail"]
     assert detail["native_enabled"] == "masked-runtime"
     assert detail["desired_enabled"] is False
+
+
+def test_windows_selection_semantics_do_not_claim_posix_equivalence(tmp_path):
+    from agent_dispatch.supervisor_lifecycle import selection_facts
+    env_file = tmp_path / "example.env"
+    env_file.write_text(
+        "agent_dispatch_supervise_mode=SERVE\n"
+        "AGENT_DISPATCH_SUPERVISE_MODE=legacy\n"
+        "AGENT_DISPATCH_SUPERVISE_LABELS=example\n"
+        "AGENT_DISPATCH_SUPERVISE_LABELS=\n"
+    )
+    windows = selection_facts(env_file, windows_adapter=True)
+    posix = selection_facts(env_file)
+    assert windows["mode"] == "serve"
+    assert windows["configured_enabled"] is True
+    assert windows["label_opt_in"] is True
+    assert posix["mode"] == "legacy"
+    assert posix["configured_enabled"] is False
