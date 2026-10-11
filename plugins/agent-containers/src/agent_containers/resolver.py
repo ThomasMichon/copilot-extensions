@@ -41,6 +41,7 @@ from .config import (
     load_config,
 )
 from .lease import deploy_hold_status, get_deploy_hold, get_lease
+from .inference import NativeInferenceConfig
 from .lifecycle import (
     get_container,
     inspect_state,
@@ -147,6 +148,35 @@ def build_restricted_spawn_command(
 
 
 AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV = "AGENT_CONTAINERS_EXEC_COPILOT_ARGS"
+
+
+def build_restricted_inference_spawn_command(
+    container: str,
+    user: str,
+    acp_command: str,
+    profile: NativeInferenceConfig,
+) -> list[str]:
+    """Add only a validated broker origin and nonsecret reference to ACP."""
+    command = build_restricted_spawn_command(container, user, acp_command)
+    projected: list[str] = []
+    for name, value in profile.environment().items():
+        projected.extend(["-e", f"{name}={value}"])
+    return command[:3] + projected + command[3:]
+
+
+def build_restricted_acp_spawn_command(
+    container: str,
+    user: str,
+    acp_command: str,
+    fleet: FleetConfig,
+) -> list[str]:
+    """Select the explicit ACP profile without changing generic restricted exec."""
+    fleet.validate_restricted()
+    if fleet.native_inference is not None:
+        return build_restricted_inference_spawn_command(
+            container, user, acp_command, fleet.native_inference,
+        )
+    return build_restricted_spawn_command(container, user, acp_command)
 
 
 def _append_copilot_args(acp_command: str, extra: list[str] | None) -> str:

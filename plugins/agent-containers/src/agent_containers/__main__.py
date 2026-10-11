@@ -42,7 +42,7 @@ from .config import (
 )
 from .resolver import (
     _append_copilot_args,
-    build_restricted_spawn_command,
+    build_restricted_acp_spawn_command,
     host_gh_token,
     resolve_extra_copilot_args,
     resolve_live_exec_target,
@@ -1019,10 +1019,11 @@ def _launch_container_agent(
 ) -> int:
     """Launch through the trust-profiled transport while holding its lock."""
     if actual_profile == RESTRICTED_PROFILE:
-        spawn_cmd = build_restricted_spawn_command(
+        spawn_cmd = build_restricted_acp_spawn_command(
             container_id or args.name,
             user,
             acp_command,
+            fleet,
         )
         log.info("exec transport=docker target=%s", args.name)
         env = os.environ.copy()

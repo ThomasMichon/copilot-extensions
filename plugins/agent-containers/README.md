@@ -283,6 +283,50 @@ restricted fleet, both resolve false. `agent-containers fleet --json` reports
 the effective `security_profile`, `network`, and `host_credentials` posture so a
 dispatcher can verify the venue before launch.
 
+### Opt-in native inference for restricted ACP
+
+An image-backed restricted fleet may opt into a host-controlled native
+inference broker without receiving a host credential:
+
+```yaml
+fleets:
+  inference-worker:
+    image: example/copilot-agent:pinned
+    security_profile: restricted
+    workspace_folder: /workspace
+    exec_user: agent
+    acp_command: "cd /workspace && copilot --acp --stdio --allow-all"
+    network: inference-only
+    native_inference:
+      endpoint: http://inference-broker:8080
+      reference: openshell:resolve:env:EXAMPLE_INFERENCE
+```
+
+The network must pass the existing Docker-internal, single-network policy.
+The endpoint is an HTTP(S) origin with a single-label broker name, not an
+arbitrary URL, localhost, IP address, credential-returning relay, or host
+gateway. The reference is a public identifier in the exact
+`openshell:resolve:env:NAME` form, never a GitHub or model-session credential.
+Both fields are required; unknown fields and generic environment overrides
+are rejected. Changing either field changes the restricted policy fingerprint.
+
+Only the ACP exec process receives `COPILOT_API_URL` and
+`COPILOT_GITHUB_TOKEN` containing this reference. The provider rereads the
+profile at launch; it does not place it in the bridge spawn spec or bake it
+into the image/container environment. The generic sensitive-environment guard,
+restricted SSH adapter, host-token prohibition, and relay prohibition are
+unchanged. Trusted and restricted-local launches remain unchanged when this
+profile is absent.
+
+This is a launch seam, not a broker or a live-service authorization. The
+operator supplies and secures the broker, owns upstream authentication,
+enforces actual wire-model/route admission, cancellation, budgets and revocation,
+and keeps upstream credentials out of responses and logs. A public reference
+is not caller authentication: use an exclusively admitted network/assignment.
+Parent and child model selection still belongs to ACP/runtime configuration;
+the broker must enforce the finite wire-model allowlist independently.
+Pin and test the CLI against the broker before enabling live inference.
+
 ### Host-backed persistence and systemd for trusted, image-backed fleets
 
 An `image:`-backed `trusted` fleet otherwise has no persistence mechanism at

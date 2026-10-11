@@ -28,6 +28,7 @@ from typing import Any
 import yaml
 
 from . import _peer_launch
+from .inference import NativeInferenceConfig
 from .private_state import ensure_private_dir
 
 log = logging.getLogger("agent-containers")
@@ -234,6 +235,7 @@ class FleetConfig:
     home_size: str | None = None
     # Explicit non-secret values baked into the container environment.
     environment: dict[str, str] = field(default_factory=dict)
+    native_inference: NativeInferenceConfig | None = None
     # Per-fleet credential overrides. Restricted fleets always resolve both
     # capabilities false, regardless of these values.
     forward_gh_token: bool | None = None
@@ -338,6 +340,16 @@ class FleetConfig:
                 "(an incomplete pair silently falls back to ephemeral home "
                 "storage instead of failing loudly)"
             )
+        if self.native_inference is not None:
+            if not self.restricted:
+                raise RuntimeError("native_inference is restricted-only")
+            self.native_inference.validate()
+            if self.effective_network() == "none":
+                raise RuntimeError("native_inference requires an internal broker network")
+            if self.environment.keys() & self.native_inference.environment().keys():
+                raise RuntimeError(
+                    "native_inference environment must not be overridden by environment"
+                )
         if not self.restricted:
             return
         if self.host_workspace_path or self.host_home_path or self.systemd_capable:
@@ -405,6 +417,8 @@ class FleetConfig:
             "host_mounts": False,
             "writable_surfaces": "bounded-tmpfs",
         }
+        if self.native_inference is not None:
+            policy["native_inference"] = self.native_inference.environment()
         encoded = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()[:16]
 
@@ -784,6 +798,11 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
                 str(k): str(v)
                 for k, v in raw_environment.items()
             },
+            native_inference=(
+                NativeInferenceConfig.from_mapping(raw["native_inference"])
+                if "native_inference" in raw
+                else None
+            ),
             forward_gh_token=(
                 bool(raw["forward_gh_token"])
                 if "forward_gh_token" in raw
