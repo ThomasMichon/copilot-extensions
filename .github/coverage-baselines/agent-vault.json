@@ -1,7 +1,7 @@
 {
   "asset": "agent-vault.json",
-  "measured_commit": "a2d63fbe83ef8705054de17ffdb9c12f2986e7a8",
+  "measured_commit": "bd6a90b4aed3033abefbeae1605df9edb606c3d5",
   "plugin": "agent-vault",
-  "release_tag": "coverage-baselines-a2d63fbe83ef8705054de17ffdb9c12f2986e7a8",
+  "release_tag": "coverage-baselines-bd6a90b4aed3033abefbeae1605df9edb606c3d5",
   "schema": "copilot-extensions.coverage-baseline-pointer"
 }
