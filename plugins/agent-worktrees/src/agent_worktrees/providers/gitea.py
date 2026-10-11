@@ -624,6 +624,8 @@ class GiteaProvider:
             return ""
         # Some versions report "pending" even with no statuses attached.
         statuses = data.get("statuses")
+        if not isinstance(statuses, list):
+            return ""
         if isinstance(statuses, list) and not statuses:
             return "none"
         raw = str(data.get("state", "")).strip().lower()

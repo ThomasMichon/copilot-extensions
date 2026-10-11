@@ -206,7 +206,10 @@ checks, stale approvals, and wrong-base PRs do not receive this immediate wake.
 Only a successful checks rollup or confirmed empty checks (`"none"`) permits
 this wake; unreadable/unknown checks (`""`) and unknown author/reviewer identity
 fail closed. GitHub requires both status and check-run reads to confirm
-success or no checks. Self-merge and human-merge profiles do not receive updates.
+success or no checks, rejects unknown completed conclusions, and raises a
+provider error rather than returning incomplete review pages. Approval commit
+IDs must exactly match the current head for this wake. Self-merge and
+human-merge profiles do not receive updates.
 
 Exit **0** means a selected transition **or** an actionable consent update, not
 proof of merge. Both text and `--json` expose the same result; text also prints

@@ -78,6 +78,7 @@ def test_approved_baselines_wake_even_merged_only_and_deduplicate():
     {"labels": ("AUTO-MERGE",)}, {"base_ref": "other"}, {"head_sha": ""},
     {"checks_state": ""}, {"author": ""},
     {"reviews": (pc.Review(7, "APPROVED", "", commit_id="head"),)},
+    {"reviews": (pc.Review(7, "APPROVED", "reviewer", commit_id=""),)},
 ])
 def test_blocked_or_already_consented_does_not_bounce(changes):
     result = _wait(_approved(**changes), hold_labels=("hold",),
@@ -180,13 +181,41 @@ def test_provider_partial_checks_failures_do_not_authorize_wake(monkeypatch):
             assert state == ""
             assert not _wait(_approved(checks_state=state)).matched
     gitea_provider = gitea.GiteaProvider()
-    for response in ((500, ""), (200, "{"), (200, "[]"), (200, "{}")):
+    for response in (
+        (500, ""), (200, "{"), (200, "[]"), (200, "{}"),
+        (200, '{"state":"success"}'),
+    ):
         monkeypatch.setattr(gitea_provider, "_curl", lambda *a, **k: response)
         state = gitea_provider._combined_status_state(
             "owner/repo", "head", "https://example.com", "",
         )
         assert state == ""
         assert not _wait(_approved(checks_state=state)).matched
+
+
+def test_incomplete_review_pages_and_unknown_conclusions_fail_closed(monkeypatch):
+    from agent_worktrees.providers import github
+    provider = github.GitHubProvider()
+    page = [{"id": n, "state": "APPROVED", "user": {"login": "reviewer"},
+             "commit_id": "head"} for n in range(100)]
+    for second in (
+        subprocess.CompletedProcess([], 1, "", "unavailable"),
+        subprocess.CompletedProcess([], 0, "{", ""),
+        subprocess.CompletedProcess([], 0, "{}", ""),
+    ):
+        responses = iter([subprocess.CompletedProcess([], 0, json.dumps(page), ""), second])
+        monkeypatch.setattr(github, "run_cli", lambda *a, **k: next(responses))
+        with pytest.raises(ProviderError):
+            provider._all_review_objs("owner/repo", 42, "")
+    for conclusion in (None, "", "unrecognized"):
+        responses = iter([
+            subprocess.CompletedProcess([], 0, '{"statuses":[]}', ""),
+            subprocess.CompletedProcess([], 0, json.dumps({"check_runs": [
+                {"status": "completed", "conclusion": conclusion},
+            ]}), ""),
+        ])
+        monkeypatch.setattr(github, "run_cli", lambda *a, **k: next(responses))
+        assert provider._combined_checks_state("owner/repo", "head", "") == ""
 
 
 def test_fetch_errors_do_not_invent_actionable_state():

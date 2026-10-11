@@ -349,14 +349,7 @@ class GitHubProvider:
         self, repo: str, number: int, token: str | None, *,
         host: str = "github.com",
     ) -> tuple[Review, ...]:
-        """Fetch every review as ``pr_contract.Review``s, paging the endpoint. GitHub's
-        REST ``/pulls/{n}/reviews`` paginates (default 30) in ascending id order; the
-        watcher keys off the highest review id, so a missed later page would make the
-        newest reviews invisible and hang the wait. Pages at an explicit ``per_page``
-        until a short/empty page. Best-effort: a page that fails to read stops paging
-        with what was gathered rather than breaking the whole snapshot (``pr bar``'s
-        read is fail-closed instead: ``github_bar``).
-        """
+        """Read every ascending review page; incomplete evidence raises explicitly."""
         reviews: list[Review] = []
         page = 1
         page_size = 100
@@ -370,19 +363,24 @@ class GitHubProvider:
                 env=self._env(token),
             )
             if proc.returncode != 0:
-                break
+                raise ProviderError(
+                    f"GitHub review page {page} failed: {proc.stderr.strip()}",
+                    transient=True,
+                )
             try:
                 batch = json.loads(proc.stdout or "[]")
-            except json.JSONDecodeError:
-                break
-            if not isinstance(batch, list) or not batch:
+            except json.JSONDecodeError as exc:
+                raise ProviderError(f"Malformed GitHub review page {page}: {exc}") from exc
+            if not isinstance(batch, list):
+                raise ProviderError(f"GitHub review page {page} is not a list")
+            if not batch:
                 break
             for r in batch:
                 if not isinstance(r, dict):
-                    continue
+                    raise ProviderError(f"Malformed GitHub review on page {page}")
                 rid = r.get("id")
                 if not isinstance(rid, int):
-                    continue
+                    raise ProviderError(f"GitHub review on page {page} has no integer id")
                 state = str(r.get("state", "")).upper()
                 reviews.append(
                     Review(
@@ -472,6 +470,8 @@ class GitHubProvider:
                         "startup_failure", "stale",
                     ):
                         failure = True
+                    elif conclusion not in ("success", "neutral", "skipped"):
+                        readable -= 1
 
         if failure:
             return "failure"

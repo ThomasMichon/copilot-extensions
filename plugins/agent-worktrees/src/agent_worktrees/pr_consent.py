@@ -40,7 +40,7 @@ def consent_update_key(
             for r in snap.reviews
             if r.user and r.user != snap.author and not r.dismissed
             and r.state.upper() == "APPROVED"
-            and r.commit_id in ("", snap.head_sha)
+            and r.commit_id == snap.head_sha
         ),
         default=None,
     )
