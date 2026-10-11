@@ -194,6 +194,28 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-10 - Additive ZIP preservation landed
+- Source PR #6117 merged as `0f13c88d52d645ae22c90a836604fbd35608178d`
+  after exact-head Copilot approval and complete successful CI run
+  `38108854234` on `0eeed158d04b4944f16d66924238b32f5b4928ce`.
+  Required checks were complete before merge; the earlier non-required
+  review-request throttle did not substitute for a review.
+- The final source explicitly refuses unsupported POSIX safety flags with
+  `ENOTSUP`, rather than dropping no-follow/directory protections. The two
+  carried-over Medium findings were revalidated after replies anchored them
+  to the existing fix; no additional speculative rewrite was needed.
+- Final bounded preservation tests passed 438 Linux cases (21 skips) and
+  190 native Windows cases (21 skips), including absent-root and handle
+  lifetime cases. The isolated native test checkout was finalized only after
+  the tested source landed. The retained source checkout reconciled through
+  its normal PR completion command.
+- Phase 1's compaction and complete transport/discovery checkboxes remain
+  open: this is verified additive preservation, not source reclamation,
+  normalized-storage parity, full ancestor containment, release or adoption.
+  Next source slices remain reclamation and #5727 containment, followed by
+  catalog/accounting/daily products and pinned consumer parity. No live
+  publication, evidence retirement or system setting change was enabled.
+
 ### 2026-10-10 - Review-request recovery and absent-root correction
 - A confirmed GitHub REST quota exhaustion prevented the review-request
   workflow from reaching the request. After the reported reset and a cooldown,
