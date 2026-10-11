@@ -299,7 +299,13 @@ finally:
     while True:
         owned = descendants()
         for pid, identity in owned.items():
-            if identity[2] != 'Z' and descendants().get(pid) == identity:
+            try:
+                text = Path(f'/proc/{pid}/stat').read_text()
+                fields = text[text.rfind(')') + 2:].split()
+                current = (int(fields[1]), fields[19], fields[0])
+            except (OSError, ValueError, IndexError):
+                continue
+            if identity[2] != 'Z' and current == identity:
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError:
@@ -626,7 +632,8 @@ def stage_candidate(
             "descriptor_sha256": _hash(_json(descriptor)), "lock_sha256": _hash(lock_bytes),
             "build_policy_sha256": _hash(_json(policy)),
         }
-        receipt["identity"] = _hash(_json(receipt))
+        identity_input = dict(receipt)
+        receipt["identity"] = _hash(_json(identity_input))
         primitive = _primitive()
         version = descriptor["service_version"]
         deadline = time.monotonic() + build.timeout_seconds
