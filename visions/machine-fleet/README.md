@@ -23,6 +23,20 @@ container manager or a private infrastructure provider its required substrate.
 
 ## Concepts & Components
 
+### Standalone fleet-manager system
+
+`fleet-manager` is the standalone entry point and distribution home for the
+fleet's CLI, controller/Gateway and machine connectors. Its services are usable
+without Copilot or marketplace hooks, while optional harness integrations
+provide authenticated client access.
+
+Ordinary user machines install only the thin CLI client. Commands reach the
+explicitly configured remote controller API using supplied scoped authority;
+client installation never installs Komodo Core, starts a controller or directly
+mutates worker container managers. A designated service host runs the
+controller/Gateway and its selected deployment-manager integration. Worker hosts
+run only their explicitly adopted connectors and service roles.
+
 ### Harness-declared fleet
 
 Harness-side configuration declares the selected fleet driver, machine membership,
@@ -165,6 +179,21 @@ prerequisites, not hidden manual repairs.
 The deployment adapter is replaceable: adopting one manager does not bake its
 resource model into service contracts or require it for direct/standalone use.
 Inspection and planning do not install a manager, enroll hosts or start roles.
+
+### role-selective-system-lifecycle
+
+Client, controller and connector installations have explicit, independently
+usable install, update, diagnostics and owned-uninstall flows. The client has
+no heavy server dependencies or automatic hosting side effects. Server roles
+use existing service distributions and runtime activation authorities rather
+than introducing competing installers for the same service state.
+
+Live configuration changes are validated and applied atomically by the owning
+controller or connector. Invalid candidates preserve the last valid effective
+configuration and report why they were rejected. Changed trust, placement or
+roles require their own authorization and safe transitions; accepting a config
+file does not silently create capacity or activate a previously retired role.
+Restart-only changes are reported explicitly, not disguised as successful reload.
 
 ## Behaviors
 
