@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from .engine_action_confirm import confirm_then
 from .engine_dialogs import CfgMenuScreen, ScopeDlgScreen, TaskMenuScreen
 from .create_action_screen import CreateActionScreen
 from .background import run_background
@@ -54,7 +55,12 @@ class PickerScreenPivotActionsMixin:
             if target["kind"] == "section":
                 # A cross-plugin contributed Configuration section (#B slice 2):
                 # run it and rescan (it may have changed config/session state).
-                self._run_config_section(target["section"])
+                # ``confirm: true`` gates the run behind an explicit
+                # are-you-sure (#6044) -- the manifest schema has always
+                # accepted this field, but no dispatch path enforced it.
+                section = target["section"]
+                confirm_then(self.app, section,
+                             lambda section=section: self._run_config_section(section))
                 return
             self.htab = target["idx"]
             self.btn_idx = 0
@@ -120,8 +126,16 @@ class PickerScreenPivotActionsMixin:
             return
 
         def _after(choice):
-            if choice is not None:
-                self._run_task_action(reg, actions[choice], rec)
+            if choice is None:
+                return
+            action = actions[choice]
+            # ``confirm: true`` gates the run behind an explicit are-you-sure
+            # (#6044) -- ``PivotAction.confirm`` has always been parsed and
+            # schema-validated, but no dispatch path enforced it, so e.g.
+            # agent-dispatch's pause/unpause/force-stop/abandon actions ran
+            # immediately on Enter despite declaring it.
+            confirm_then(self.app, action,
+                         lambda action=action: self._run_task_action(reg, action, rec))
         self.app.push_screen(TaskMenuScreen(reg, rec, actions), _after)
     def _task_action_ctx(self, reg, rec):
         """Placeholder context for an action's argv template: the entry's own

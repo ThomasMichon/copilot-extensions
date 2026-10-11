@@ -9302,17 +9302,87 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
             from textual.widgets import OptionList
             assert menu.query_one(OptionList).has_focus
 
-            # Select "Abandon" (idx 1) and run it through the real pipeline.
+            # Select "Abandon" (idx 1): it declares `confirm: true` (#6044), so
+            # it must NOT run yet -- an ActionConfirmScreen gate opens first.
+            from worktree_manager.production_picker.picker_tui.engine import (
+                ActionConfirmScreen,
+                FocusGroup,
+            )
+
             await pilot.press("down")
+            await pilot.press("enter")
+            # Same pre-existing load-sensitive flake _open_task_menu_and_wait
+            # documents: poll briefly for the confirm modal to actually mount
+            # rather than assuming one pump always suffices.
+            for _ in range(50):
+                await pilot.pause()
+                if isinstance(app.screen, ActionConfirmScreen):
+                    break
+            assert isinstance(app.screen, ActionConfirmScreen)
+            assert not rt.actions
+            group = app.screen.query_one(FocusGroup)
+            assert group.value == "cancel"   # Cancel is the initial choice
+            await pilot.press("left")        # Cancel -> Confirm
+            assert group.value == "confirm"
             await pilot.press("enter")
             await pilot.pause()
             assert not _task_menu_open(scr)
+            assert not isinstance(app.screen, ActionConfirmScreen)
             assert rt.actions and rt.actions[0][0] == "abandon"
             # Placeholders resolved: {task_id} -> the entry id.
             _key, ctx = rt.actions[0]
             assert ctx["task_id"] == "t1"
             assert ctx["machine"] == "anomalous-potato"
             assert rt.invalidated is True
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_action_confirm_gate_cancel_is_noop(tmp_path, monkeypatch):
+    """The confirm gate's own Cancel path (#6044): a `confirm: true` task
+    action's Cancel choice must not run the action and must leave the
+    task menu closed -- the row is untouched."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import (
+        ActionConfirmScreen,
+    )
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "First task", "target_worktree": "wt-a",
+             "repo_name": "repoA", "labels": ["handoff"]}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            rt = _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+            scr.sel = ("T", 0)
+            await pilot.pause()
+
+            await _open_task_menu_and_wait(scr, pilot, row=0)
+            menu = _task_menu(scr)
+            assert menu is not None
+            from textual.widgets import OptionList
+            assert menu.query_one(OptionList).has_focus
+
+            await pilot.press("down")        # highlight "Abandon"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ActionConfirmScreen)
+
+            await pilot.press("enter")       # activate the initial "Cancel"
+            await pilot.pause()
+            assert not isinstance(app.screen, ActionConfirmScreen)
+            assert not _task_menu_open(scr)
+            assert not rt.actions
+            assert rt.invalidated is False
 
     asyncio.run(run())
 
@@ -10604,6 +10674,142 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             await pilot.pause()
             assert not _cfg_menu_open(scr)
             assert scr._kind() == "profiles"
+
+    asyncio.run(run())
+
+
+def test_contributed_config_section_confirm_gate(tmp_path, monkeypatch):
+    """A contributed config section's `confirm: true` (#6044) gates its run
+    behind an ActionConfirmScreen are-you-sure -- Cancel leaves it unrun,
+    Confirm runs it."""
+    from worktree_manager.production_picker.picker_tui import tasks
+    from worktree_manager.production_picker.picker_tui.engine import (
+        ActionConfirmScreen,
+        FocusGroup,
+    )
+
+    pv = tmp_path / "pivots"
+    _write_config_sections(pv, [
+        {"label": "SSH", "run": [sys.executable, "config"], "confirm": True},
+    ])
+    monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pv))
+    monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(tmp_path / "plugins"))
+    (tmp_path / "plugins").mkdir()
+
+    ran = []
+    monkeypatch.setattr(
+        tasks, "run_config_section",
+        lambda section, ctx: ran.append(section.label) or (True, "opened"))
+
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+
+            scr.sel = ("CFG", 0)
+            scr._activate()
+            await pilot.pause()
+            menu = _cfg_menu(scr)
+            assert menu is not None
+            labels = [it["label"] for it in menu._items]
+            for _ in range(labels.index("SSH")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            # confirm:true -- SSH must NOT have run yet; the cfg menu is gone,
+            # replaced by the confirm gate.
+            assert not _cfg_menu_open(scr)
+            assert isinstance(app.screen, ActionConfirmScreen)
+            assert ran == []
+
+            # Cancel (the initial choice) leaves it unrun.
+            group = app.screen.query_one(FocusGroup)
+            assert group.value == "cancel"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, ActionConfirmScreen)
+            assert ran == []
+
+            # Re-open and this time confirm -- it runs.
+            scr.sel = ("CFG", 0)
+            scr._activate()
+            await pilot.pause()
+            menu = _cfg_menu(scr)
+            for _ in range(labels.index("SSH")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ActionConfirmScreen)
+            await pilot.press("left")        # Cancel -> Confirm
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, ActionConfirmScreen)
+            assert ran == ["SSH"]
+
+    asyncio.run(run())
+
+
+def test_contributed_worktree_action_confirm_gate(tmp_path, monkeypatch):
+    """A contributed worktree action's `confirm: true` (#6044) gates its run
+    behind an ActionConfirmScreen are-you-sure -- Cancel leaves it unrun,
+    Confirm runs it."""
+    from worktree_manager.production_picker.picker_tui import tasks
+    from worktree_manager.production_picker.picker_tui.engine import (
+        ActionConfirmScreen,
+        FocusGroup,
+    )
+
+    pv = tmp_path / "pivots"
+    _write_wt_actions(pv, [
+        {"label": "Send message", "run": [sys.executable, "send"],
+         "confirm": True},
+    ])
+    monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pv))
+    monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(tmp_path / "plugins"))
+    (tmp_path / "plugins").mkdir()
+
+    ran = []
+    monkeypatch.setattr(
+        tasks, "run_worktree_action",
+        lambda action, ctx: ran.append(action.label) or (True, "sent"))
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.wt_actions
+
+            row = next(i for i, r in enumerate(scr.list_records())
+                       if r["state"] != "FINAL")
+            scr.sel = ("L", row)
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            acts = menu._actions
+            for _ in range(acts.index("Send message")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _sub_menu_open(scr)
+            assert isinstance(app.screen, ActionConfirmScreen)
+            assert ran == []
+
+            group = app.screen.query_one(FocusGroup)
+            assert group.value == "cancel"   # Cancel is the initial choice
+            await pilot.press("left")        # Cancel -> Confirm
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, ActionConfirmScreen)
+            assert ran == ["Send message"]
 
     asyncio.run(run())
 
