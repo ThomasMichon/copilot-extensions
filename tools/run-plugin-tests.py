@@ -251,7 +251,11 @@ def _dep_fingerprint(name: str) -> str:
 
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
-    """Create (or reuse) the cached dev venv for ``name`` and return its python."""
+    """Prepare the cached venv and return its Python interpreter.
+
+    The caller must establish the environment directory and hold its
+    environment-scoped lease throughout preparation and subsequent test use.
+    """
     venv = VENV_ROOT / name
     py = _venv_python(name)
     stamp = venv / ".dep-fingerprint"

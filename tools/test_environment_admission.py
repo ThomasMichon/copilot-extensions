@@ -113,7 +113,7 @@ def test_separate_processes_contend_only_for_concrete_environment(cache, other):
 
 
 def load_runner(filename: str):
-    spec = importlib.util.spec_from_file_location(filename.replace("-", "_"), TOOLS / filename)
+    spec = importlib.util.spec_from_file_location(Path(filename).stem.replace("-", "_"), TOOLS / filename)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     previous_path = sys.path.copy()

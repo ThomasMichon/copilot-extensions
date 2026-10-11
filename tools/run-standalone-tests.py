@@ -44,6 +44,11 @@ def interpreter_environment(python: Path) -> Path:
 
 
 def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
+    """Provision dependencies in an existing managed environment root.
+
+    The caller must validate and establish that root, then hold its
+    environment-scoped lease throughout preparation and subsequent test use.
+    """
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     root = python.parent.parent
     if not python.is_file():
