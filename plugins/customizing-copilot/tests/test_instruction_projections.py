@@ -380,38 +380,35 @@ def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
     checked_in.write_bytes(checked_in_content)
 
     local_path = repo / projections.local_sibling_destination(".github/instructions/policy/fallback.instructions.md")
-    real_replace = projections.os.link
-    replace_calls: list[Path] = []
+    real_link = projections.os.link
+    link_calls: list[Path] = []
 
-    def _replace_write_incapable(src: object, dst: object) -> None:
+    def _link_write_incapable(src: object, dst: object) -> None:
         if Path(dst) == local_path:
-            replace_calls.append(Path(dst))
+            link_calls.append(Path(dst))
             raise OSError(13, "Permission denied: simulated write-incapable target")
-        real_replace(src, dst)
+        real_link(src, dst)
 
-    monkeypatch.setattr(projections.os, "link", _replace_write_incapable)
+    monkeypatch.setattr(projections.os, "link", _link_write_incapable)
 
     result = projections.render_local_cache(repo, lambda: [source])
 
     # The injected failure branch genuinely ran exactly once -- proves this
-    # test exercises the real writer's replace call, not some unrelated
+    # test exercises the real writer's exclusive link publication, not some unrelated
     # earlier blocking path that happens to satisfy the assertions below.
-    assert replace_calls == [local_path]
+    assert link_calls == [local_path]
     assert result.blocking == 1
     assert [f.check for f in result.findings] == ["projection-local-cache"]
     assert "could not write local cache" in result.findings[0].message
     assert result.changed == []
     # The checked-in floor -- the only available content -- is untouched.
     assert checked_in.read_bytes() == checked_in_content
-    # No partial/corrupt sibling was left behind: the destination never
-    # came into existence (the real writer's own `os.replace` is exactly
-    # what was made to fail), and its temp file was genuinely created and
-    # then genuinely cleaned up by the real `_atomic_write`'s own
-    # `finally` block -- not merely never attempted.
+    # Exclusive publication failed after staging; both target and staged
+    # bytes must be absent in the relocated local-body directory.
     assert not local_path.exists()
-    leftovers = [p.name for p in checked_in.parent.iterdir()]
+    leftovers = [p.name for p in local_path.parent.iterdir()]
     assert not any(
-        name.startswith(".fallback.local.instructions.md.") for name in leftovers
+        name.startswith(f".{local_path.name}.") for name in leftovers
     )
 
 
