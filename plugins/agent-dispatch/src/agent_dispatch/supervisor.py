@@ -3706,7 +3706,7 @@ class Supervisor:
                 resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id)
             except DispatchError:
                 continue
-            if resp.get("coordinator_launch"): break  # same-cycle capacity fence
+            if resp.get("coordinator_launch"): return spawned + ([task["id"]] if resp["coordinator_launch"].get("ok") else [])
             if not resp.get("reserved"):
                 continue
             reservation = resp["reservation"]

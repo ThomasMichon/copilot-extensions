@@ -153,6 +153,8 @@ def register_spawn_routes(
             registration = queue.get_registration(task.origin_ref)
             spec = registration.spec if registration else {}
             try:
+                if not registration or registration.status != "active":
+                    raise ValueError("CI repair registration is no longer active")
                 spawn = make_ci_repair_spawn(
                     spec["ci_repair_bindings"],
                     admission_command=spec["ci_repair_admission_command"],

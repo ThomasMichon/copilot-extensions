@@ -50,7 +50,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
     if command is None and builtin is None and effort_builtin is None and ci_builtin is None:
         raise EmitterError(
             "emitter needs a 'command', 'repository_issue_loop', or "
-            "'effort_driver_loop' configuration"
+            "'effort_driver_loop', or 'ci_repair' configuration"
         )
     if command is not None and (
         not isinstance(command, list)
