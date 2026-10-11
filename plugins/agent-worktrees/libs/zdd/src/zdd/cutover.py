@@ -295,6 +295,12 @@ class CutoverOrchestrator:
             lock = CutoverLock(self.config_dir)
             lock.acquire(timeout=lock_timeout)
             try:
+                if conditional is None and breadcrumb.requires_conditional_recovery(
+                    breadcrumb.read_breadcrumb(self.config_dir)
+                ):
+                    reason = "conditional cutover requires owner-led recovery"
+                    log.error("Ordinary cutover refused: %s", reason)
+                    return CutoverResult(ok=False, error=reason, steps=[f"refused: {reason}"])
                 prepared = None
                 if conditional is not None:
                     from .conditional import PreparedCutover
@@ -335,6 +341,11 @@ class CutoverOrchestrator:
         from zdd import lifecycle
 
         result = CutoverResult(ok=False, conditional=conditional is not None)
+        def write_breadcrumb(**kwargs: Any) -> dict:
+            if conditional:
+                kwargs["state"] = "conditional-" + kwargs["state"]
+            return breadcrumb.write_breadcrumb(self.config_dir, **kwargs)
+
         spawn_passive = conditional.spawn if conditional else self.spawn_passive
         health_check = conditional.healthy if conditional else self.health_check
         make_client = conditional.snapshot.make_client if conditional else self.make_client
@@ -381,8 +392,8 @@ class CutoverOrchestrator:
             old.to_dict() if conditional and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
         )
-        started_at = breadcrumb.write_breadcrumb(
-            self.config_dir, state="started", old=old_dict, new_port=new_port,
+        started_at = write_breadcrumb(
+            state="started", old=old_dict, new_port=new_port,
         )["started_at"]
         self._emit(
             lifecycle.CUTOVER_BEGIN, lifecycle.BEGIN, port=new_port,
@@ -402,8 +413,8 @@ class CutoverOrchestrator:
         flipped = False
         try:
             if isinstance(new_pid, int):
-                breadcrumb.write_breadcrumb(
-                    self.config_dir, state="started", old=old_dict,
+                write_breadcrumb(
+                    state="started", old=old_dict,
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
             if not self._await_health(new_port, health_timeout, poll, health_check):
@@ -481,8 +492,8 @@ class CutoverOrchestrator:
                     if result.rolled_back:
                         breadcrumb.clear_breadcrumb(self.config_dir)
                     else:
-                        breadcrumb.write_breadcrumb(
-                            self.config_dir, state="started", old=old_dict,
+                        write_breadcrumb(
+                            state="started", old=old_dict,
                             new_port=new_port, new_pid=new_pid,
                             error=result.error, started_at=started_at,
                         )
@@ -509,16 +520,16 @@ class CutoverOrchestrator:
                 if terminated:
                     breadcrumb.clear_breadcrumb(self.config_dir)
                 else:
-                    breadcrumb.write_breadcrumb(
-                        self.config_dir, state="started", old=old_dict,
+                    write_breadcrumb(
+                        state="started", old=old_dict,
                         new_port=new_port, new_pid=new_pid,
                         error=result.error, started_at=started_at,
                     )
                 return result
             flipped = True
             result.steps.append("routing table flipped -> new active")
-            breadcrumb.write_breadcrumb(
-                self.config_dir, state="flipped", old=old_dict,
+            write_breadcrumb(
+                state="flipped", old=old_dict,
                 new_port=new_port, new_pid=new_pid, started_at=started_at,
             )
             self._emit(
@@ -530,8 +541,8 @@ class CutoverOrchestrator:
                 old_client = make_client(old.base_url)
                 # About to open the old daemon's drain gate -- record it first
                 # so an abort during the (possibly long) drain is traceable.
-                breadcrumb.write_breadcrumb(
-                    self.config_dir, state="draining", old=old_dict,
+                write_breadcrumb(
+                    state="draining", old=old_dict,
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
                 self._emit(lifecycle.DRAIN, lifecycle.BEGIN, port=old.port)
@@ -590,8 +601,8 @@ class CutoverOrchestrator:
                 # COMMIT POINT: retire the old daemon. Past here the new daemon
                 # is the only one, so we never roll back.
                 result.committed = True
-                breadcrumb.write_breadcrumb(
-                    self.config_dir, state="draining" if conditional else "committed", old=old_dict,
+                write_breadcrumb(
+                    state="draining" if conditional else "committed", old=old_dict,
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
                 if conditional:
@@ -612,8 +623,8 @@ class CutoverOrchestrator:
                 )
             else:
                 result.committed = True
-                breadcrumb.write_breadcrumb(
-                    self.config_dir, state="committed", old=old_dict,
+                write_breadcrumb(
+                    state="committed", old=old_dict,
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
                 result.steps.append("no prior active daemon -- nothing to retire")
@@ -643,8 +654,8 @@ class CutoverOrchestrator:
                 result.ok = conditional is None
                 log.error("Cutover post-commit error: %s", result.error)
                 if conditional and not result.retirement_confirmed:
-                    breadcrumb.write_breadcrumb(
-                        self.config_dir, state="draining", old=old_dict,
+                    write_breadcrumb(
+                        state="draining", old=old_dict,
                         new_port=new_port, new_pid=new_pid, started_at=started_at,
                         error=result.error,
                     )
@@ -666,11 +677,10 @@ class CutoverOrchestrator:
             # Record the terminal outcome durably. On a clean rollback (or
             # commit-forward) no daemon is left stranded; the breadcrumb marks
             # the attempt as resolved rather than lingering as "aborted".
-            if result.ok:
+            if result.ok or (conditional and result.rolled_back):
                 breadcrumb.clear_breadcrumb(self.config_dir)
             else:
-                breadcrumb.write_breadcrumb(
-                    self.config_dir,
+                write_breadcrumb(
                     state="rolled_back" if not conditional or result.rolled_back else "flipped" if flipped else "started",
                     old=old_dict,
                     new_port=new_port, new_pid=new_pid, error=result.error,

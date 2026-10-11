@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 
+import pytest
+
 from agent_dispatch import coordinator_cli
 from zdd import breadcrumb, routing
 from zdd.conditional import ConditionalCutover
@@ -69,3 +71,41 @@ def test_native_snapshot_health_client_uses_captured_token_not_caller_env(monkey
     finally:
         client.close()
     assert seen == ["/health"]
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_ordinary_dispatch_deploy_refuses_conditional_recovery(
+    tmp_path, monkeypatch, capsys, recover
+):
+    from agent_dispatch.config import Config
+
+    monkeypatch.setattr("agent_dispatch.install_paths.apply_service_env_overlay", lambda *_: None)
+    monkeypatch.setattr(coordinator_cli._config, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr(coordinator_cli._config, "load_config", lambda: Config(db_path="fixture.db"))
+    monkeypatch.setattr(coordinator_cli, "_client_token_value", lambda: None)
+    monkeypatch.setattr(coordinator_cli, "_emit", lambda data: print(json.dumps(data)))
+
+    class Lock:
+        def __init__(self, *_args):
+            pass
+
+        def acquire(self):
+            return True
+
+        def release(self):
+            pass
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("ordinary deploy must not probe/reap conditional generations")
+
+    monkeypatch.setattr("agent_dispatch.single_instance.SingleInstance", Lock)
+    monkeypatch.setattr(coordinator_cli._urllib, "urlopen", forbidden)
+    monkeypatch.setattr(coordinator_cli, "_core_helper", lambda name, local: forbidden)
+    breadcrumb.write_breadcrumb(tmp_path, state="conditional-draining", new_pid=123)
+    before = breadcrumb.breadcrumb_path(tmp_path).read_bytes()
+    args = argparse.Namespace(
+        json=True, force=False, recover=recover, health_timeout=0, drain_timeout=0
+    )
+    assert coordinator_cli._cmd_cutover(args) == 1
+    assert "owner-led recovery" in json.loads(capsys.readouterr().out)["error"]
+    assert breadcrumb.breadcrumb_path(tmp_path).read_bytes() == before

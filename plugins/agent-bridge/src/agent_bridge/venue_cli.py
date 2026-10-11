@@ -293,6 +293,12 @@ def _cmd_deploy(
 
     _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(config_dir())
     recovery = breadcrumb.recover_stale_cutover(config_dir(), make_client, health_check=health_check)
+    if recovery.get("refused"):
+        if getattr(args, "json", False):
+            core._json_out({"ok": False, "error": recovery["reason"], "recovery": recovery})
+        else:
+            print(f"[FAIL] {recovery['reason']}", file=sys.stderr)
+        sys.exit(1)
     passive_reap = core._reap_abandoned_passive(config_dir(), _pre_recovery_breadcrumb)
     if getattr(args, "recover", False):
         recovery["passive_reap"] = passive_reap

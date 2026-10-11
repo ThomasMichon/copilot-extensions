@@ -140,3 +140,34 @@ def test_native_bridge_cutover_health_probe_remains_anonymous(tmp_path, monkeypa
 
     monkeypatch.setattr(venue_cli.urllib.request, "urlopen", respond)
     assert captured["probe"]("127.0.0.1", 61001)
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_ordinary_deploy_refuses_unresolved_conditional_owner(
+    tmp_path, monkeypatch, capsys, recover
+):
+    from types import SimpleNamespace
+
+    core = venue_cli._core()
+    monkeypatch.setattr(core, "_active_endpoint_is_forward", lambda: False)
+    monkeypatch.setattr("agent_bridge.config.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "agent_bridge.config.load_config", lambda: SimpleNamespace(bind="127.0.0.1")
+    )
+    monkeypatch.setattr("agent_bridge.config.load_or_create_auth_token", lambda: "fixture-token")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("ordinary deploy must not recover/reap/probe conditional generations")
+
+    monkeypatch.setattr(core, "_reap_abandoned_passive", forbidden)
+    monkeypatch.setattr(venue_cli.urllib.request, "urlopen", forbidden)
+    breadcrumb.write_breadcrumb(tmp_path, state="conditional-draining", new_pid=123)
+    before = breadcrumb.breadcrumb_path(tmp_path).read_bytes()
+    args = argparse.Namespace(
+        json=True, force=False, recover=recover, health_timeout=0, drain_timeout=0
+    )
+    with pytest.raises(SystemExit) as exc:
+        venue_cli._cmd_deploy(args)
+    assert exc.value.code == 1
+    assert "owner-led recovery" in json.loads(capsys.readouterr().out)["error"]
+    assert breadcrumb.breadcrumb_path(tmp_path).read_bytes() == before

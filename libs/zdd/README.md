@@ -116,6 +116,10 @@ exact predecessor's exit through an authoritative native process handle.
 `retirement_timeout` defaults to 30 seconds and must be finite and nonnegative.
 False or unavailable exit evidence leaves the attempt failed and its recovery
 breadcrumb nonterminal, even after an accepted shutdown request.
+Conditional breadcrumbs use distinct `conditional-started`,
+`conditional-flipped`, and `conditional-draining` states. Legacy recovery,
+passive reaping, and ordinary cutover refuse those states without probing or
+undraining either generation. Only the conditional owner may resolve them.
 
 The supported in-process adapter is `run_conditional_cutover(config_dir,
 version=..., request=...)`. Bridge deployment/service restart and Dispatch

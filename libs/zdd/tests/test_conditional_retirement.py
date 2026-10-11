@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from zdd import breadcrumb, routing
 from zdd.cutover import CutoverError
 
@@ -121,3 +123,25 @@ def test_accepted_shutdown_without_exit_remains_unresolved(case):
     assert routing.read_table(root)["active"]["pid"] == 202
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
     assert result.to_dict()["retirement_confirmed"] is False
+
+
+@pytest.mark.parametrize("state", ["conditional-started", "conditional-flipped", "conditional-draining"])
+def test_legacy_recovery_and_reap_refuse_conditional_state(case, state):
+    root, old, events, _, _, _, orch = case
+    breadcrumb.write_breadcrumb(
+        root, state=state, old=old.to_dict(), new_pid=202, new_port=61002
+    )
+    before = breadcrumb.breadcrumb_path(root).read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("legacy recovery must not probe, undrain or terminate")
+
+    recovery = breadcrumb.recover_stale_cutover(root, forbidden, health_check=forbidden)
+    reap = breadcrumb.reap_abandoned_passive(
+        root, pid_alive=forbidden, terminate=forbidden, grace_seconds=0
+    )
+    assert recovery["refused"] and reap["refused"]
+    result = orch.run()
+    assert not result.ok and "owner-led recovery" in result.error
+    assert events == []
+    assert breadcrumb.breadcrumb_path(root).read_bytes() == before

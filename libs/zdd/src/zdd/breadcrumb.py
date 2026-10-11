@@ -62,7 +62,10 @@ _BREADCRUMB_FILENAME = "cutover.json"
 
 # States from which the orchestrator would still advance if it were alive; a
 # breadcrumb left in one of these is an aborted cutover.
-_NON_TERMINAL = frozenset({"started", "flipped", "draining"})
+_NON_TERMINAL = frozenset({
+    "started", "flipped", "draining",
+    "conditional-started", "conditional-flipped", "conditional-draining",
+})
 _TERMINAL = frozenset({"committed", "rolled_back", "failed"})
 
 
@@ -154,6 +157,11 @@ def is_stale(record: dict | None) -> bool:
     return str(record.get("state")) in _NON_TERMINAL
 
 
+def requires_conditional_recovery(record: dict | None) -> bool:
+    """Conditional attempts cannot be resolved by legacy undrain/reap."""
+    return bool(record and str(record.get("state", "")).startswith("conditional-"))
+
+
 def recover_stale_cutover(
     config_dir: str | os.PathLike[str],
     make_client: Callable[[str], Any],
@@ -182,6 +190,10 @@ def recover_stale_cutover(
     gate would see nothing to do.
     """
     record = read_breadcrumb(config_dir)
+    if requires_conditional_recovery(record):
+        log.error("Conditional cutover requires owner-led recovery; legacy recovery refused")
+        return {"recovered": False, "refused": True,
+                "reason": "conditional cutover requires owner-led recovery"}
     if not is_stale(record):
         return {"recovered": False, "reason": "no stale cutover breadcrumb"}
 
@@ -334,6 +346,10 @@ def reap_abandoned_passive(
     Returns a summary dict: ``{"reaped": bool, "reason": str, "pid": int | None}``.
     """
     rec = record if record is not None else read_breadcrumb(config_dir)
+    if requires_conditional_recovery(rec):
+        log.error("Conditional cutover requires owner-led recovery; passive reap refused")
+        return {"reaped": False, "refused": True,
+                "reason": "conditional cutover requires owner-led recovery", "pid": None}
     if not is_stale(rec):
         return {"reaped": False, "reason": "no stale cutover breadcrumb", "pid": None}
     new_pid = rec.get("new_pid")
