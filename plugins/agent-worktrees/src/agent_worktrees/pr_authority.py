@@ -141,13 +141,13 @@ def _mapping(loader, node):
 _StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
 
 
-def _read(path: Path) -> dict:
+def _read(path: Path, *, context: str = "PR authority state") -> dict:
     try:
         data = yaml.load(path.read_text(encoding="utf-8"), Loader=_StrictLoader)
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
-        raise ValueError(f"Cannot read PR authority state: {path}") from exc
+        raise ValueError(f"Cannot read {context}: {path}") from exc
     if not isinstance(data, dict):
-        raise ValueError(f"PR authority state must be a mapping: {path}")
+        raise ValueError(f"{context} must be a mapping: {path}")
     return data
 
 
@@ -234,7 +234,7 @@ def assert_exclusive(config: cfg.Config, record: tracking.WorktreeRecord, pr: tr
                         project = ledgers[ledger]
                         candidate_config = config
                         if project != config.repo_name:
-                            _read(cfg.project_dir(project) / "config.yaml")
+                            _read(cfg.project_dir(project) / "config.yaml", context="project configuration")
                             try:
                                 candidate_config = cfg.load_project_config(
                                     project, include_control_plane_related_pr=False,

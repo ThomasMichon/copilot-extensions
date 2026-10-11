@@ -31,7 +31,8 @@ def matches(current: tracking.PRRecord | None, expected: tracking.PRRecord) -> b
 
 def copy_pr(destination: tracking.PRRecord, source: tracking.PRRecord) -> None:
     for field in fields(source):
-        setattr(destination, field.name, getattr(source, field.name))
+        if not field.name.startswith("_"):
+            setattr(destination, field.name, getattr(source, field.name))
 
 
 def advance_authority_revisions(record: tracking.WorktreeRecord, current: tracking.WorktreeRecord) -> None:

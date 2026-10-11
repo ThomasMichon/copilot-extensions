@@ -1551,10 +1551,10 @@ def _yaml_safe_load(raw: str) -> object:
 
 def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
     """Load a worktree tracking record from a YAML file. Routed through
-    :mod:`record_cache` (2026-09-27) -- self-invalidating on the file's own
-    ``(mtime_ns, size)``. ``copy_result=False``: narrow read-only opt-in."""
+    :mod:`record_cache`; self-invalidating on ``(mtime_ns, size)``. ``copy_result=False`` is read-only."""
     from .pr_publication_state import loaded
-    return loaded(record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result))
+    record = record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
+    return loaded(record) if copy_result else record
 
 
 def _load_record_uncached(path: Path) -> WorktreeRecord:

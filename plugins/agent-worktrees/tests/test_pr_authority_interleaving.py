@@ -131,3 +131,28 @@ def test_unregister_checks_blockers_only_after_authority_admission(monkeypatch):
     monkeypatch.setattr(unregister_cli.inst, "remove_project_binstub", lambda *a: pytest.fail("removed blocked project"))
     assert unregister_cli.cmd_unregister(SimpleNamespace(force=False, keep_repo_entry=True)) == 1
     assert not state["held"]
+
+
+def test_copy_pr_preserves_destination_loaded_snapshot():
+    from agent_worktrees import pr_publication_state as state
+
+    destination = tracking.PRRecord(state="open", _loaded_authority=("destination",))
+    source = tracking.PRRecord(state="merged", _loaded_authority=("source",))
+    state.copy_pr(destination, source)
+    assert destination.state == "merged"
+    assert destination._loaded_authority == ("destination",)
+
+
+def test_unregister_blockers_use_named_ledger(tmp_path, monkeypatch):
+    from agent_worktrees import unregister_cli
+
+    selected = tmp_path / "selected"
+    ambient = tmp_path / "ambient"
+    selected.mkdir()
+    ambient.mkdir()
+    rec = tracking.create_new_record("selected", "worktree/selected", str(selected), "selected", "test", "linux", selected)
+    rec.prs = [tracking.PRRecord(state="active", branch="pr/example", number=42)]
+    tracking.save_record(rec)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: selected if name == "selected" else ambient)
+    assert "1 open PR(s)" in unregister_cli._unregister_blockers("selected")
+    assert unregister_cli._unregister_blockers("ambient") == []

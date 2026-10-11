@@ -64,7 +64,7 @@ def _unregister_blockers(project: str) -> list[str]:
     """
     blockers: list[str] = []
     try:
-        tracking_path = cfg.tracking_dir()
+        tracking_path = cfg.tracking_dir(project)
     except Exception:
         return blockers
 
