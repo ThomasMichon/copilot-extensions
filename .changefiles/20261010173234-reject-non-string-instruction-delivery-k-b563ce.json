@@ -1,0 +1,9 @@
+{
+  "comment": "Reject non-string instruction delivery kinds as structured blocking scan findings.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
