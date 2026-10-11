@@ -176,7 +176,7 @@ def test_unknown_and_competing_authority(
     "changes",
     [
         {"version": 2}, {"mode": "headless"}, {"task_generation": "1"},
-        {"conversation_retired": "false"}, {"force": True},
+        {"conversation_retired": "false"},
         {"intent": "continue", "conversation_retired": True},
         {"intent": "fresh"},
     ],
@@ -184,6 +184,22 @@ def test_unknown_and_competing_authority(
 def test_request_rejects_unsupported_or_conflicting_facts(changes: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         request(**changes)
+
+
+def test_additive_fields_do_not_override_acquisition_authority() -> None:
+    req = request(force=True, task={"id": "other"}, native_id="native-b")
+    assert req.model_dump() == request().model_dump()
+    decoded = result(req, future_observation={"status": "ready"})
+    validate_result(req, decoded)
+    assert decoded.model_dump() == result(req).model_dump()
+    with pytest.raises(AcquisitionRefused) as error:
+        select_acquisition(req, AcquisitionEvidence(
+            True, "native-a", (conversation(task_id="other"),),
+        ))
+    assert error.value.code == "continuity_ambiguous"
+    with pytest.raises(AcquisitionRefused) as error:
+        validate_result(req, result(req, task_id="other", force=True))
+    assert error.value.code == "result_mismatch"
 
 
 @pytest.mark.parametrize(

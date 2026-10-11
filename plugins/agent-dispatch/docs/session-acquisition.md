@@ -13,6 +13,11 @@ current generation/reservation, recorded worktree provenance, explicit
 retirement (including unknown), carried identity, charter, project, driver and
 verification timeout. The `dispatch:` namespace exposes current owner facts
 and the latest acquisition reservation for bridge verification.
+Only an active task (`queued`, `claimed`, `started`, or `suspended`) with a
+`reserving`/`spawned` reservation that has not requested release may use that
+reservation as its namespace worktree fallback. Historical reservations remain
+visible as evidence but cannot redirect a completed task away from its durable
+session.
 
 Prompt/delivery identity is stable per reservation, not a random worker ID on
 each retry. Bridge—not dispatch—selects reuse/resume/create. A task generation

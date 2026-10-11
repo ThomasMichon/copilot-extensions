@@ -294,7 +294,7 @@ def register_task_lifecycle_commands(sub) -> None:
     p.add_argument("task_id")
     p.add_argument(
         "--exclude",
-        help="remove only this exclusion token (e.g. 'machine:tmichon-cloud2'); "
+        help="remove only this exclusion token (e.g. 'machine:worker-node'); "
         "omit to clear every exclusion on the task",
     )
     p.add_argument("--actor", help="operator identity recorded in the audit trail")

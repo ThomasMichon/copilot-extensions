@@ -209,13 +209,24 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     app.state.db = rig.db
     app.state.acquisition_runtime = rig.runtime
     with TestClient(app) as http:
+        rig.source["task"]["id"] = "other"
+        foreign = http.post("/api/v1/acquisitions", json={
+            **req(mode="cli").model_dump(), "protocol_version": 30,
+            "force": True,
+        })
+        assert foreign.status_code == 409, foreign.text
+        assert foreign.json()["detail"]["code"] == "dispatch_fence_changed"
+        assert not rig.db.execute_read("SELECT * FROM live_messages")
+        rig.source["task"]["id"] = "task-a"
         response = http.post("/api/v1/acquisitions", json={
             **req(mode="cli").model_dump(), "protocol_version": 30,
+            "future_observation": {"status": "ready"},
         })
         assert response.status_code == 200, response.text
         assert response.json()["native_session_id"] == "cli-native-new"
         assert http.post("/api/v1/acquisitions", json={
             **req(mode="cli").model_dump(), "protocol_version": 29,
+            "force": True,
         }).status_code == 426
     client = BridgeClient("http://unused", "unused", connect_grace=0)
     client._daemon_proto = (30, 1)
@@ -223,7 +234,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
 
     def request(method, path, body, **kw):
         sent.append((method, path, body, kw))
-        return response.json()
+        return response.json() | {"future_observation": {"status": "ready"}}
 
     client._request = request
     result = client_acquire(client, req(mode="cli"))

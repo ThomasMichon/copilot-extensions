@@ -15,9 +15,14 @@ fleet acquisition remains outstanding.
 (`created`, `reused`, or `targeted`), tri-state conversation retirement,
 `automatic`/`fresh`/`continue` intent, carried bridge and native conversation
 identities, execution options, prompt, delivery ID, project, driver,
-verification timeout and the current spawn reservation key. Unknown fields,
-versions, modes, and conflicting strict-continuation/retirement intent refuse
-validation. No mode defaults to CLI.
+verification timeout and the current spawn reservation key. Additive unknown
+fields are ignored by request and result readers, following the repository's
+wire-compatibility contract; they grant no acquisition authority. Versions,
+modes, malformed required facts, and conflicting strict-continuation/retirement
+intent still refuse validation. Admission independently verifies the known
+task/reservation/native bindings. A new field that changes safety or continuity
+semantics requires a new negotiated protocol, not an ignorable extension.
+No mode defaults to CLI.
 
 `AcquisitionResult` requires the represented or owned session handle **and**
 the exact native conversation ID, requested bindings, delivery ID, and

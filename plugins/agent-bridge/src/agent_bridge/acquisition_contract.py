@@ -17,7 +17,7 @@ ACQUISITION_CONTRACT_VERSION: Literal[1] = 1
 class AcquisitionRequest(BaseModel):
     """Owner-supplied facts, separate from provider-verified session evidence."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     version: Literal[1] = ACQUISITION_CONTRACT_VERSION
     target: str = Field(min_length=1)
@@ -54,7 +54,7 @@ class AcquisitionRequest(BaseModel):
 class AcquisitionResult(BaseModel):
     """A native conversation is mandatory; a mux/provider handle is not proof."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     version: Literal[1] = ACQUISITION_CONTRACT_VERSION
     target: str = Field(min_length=1)

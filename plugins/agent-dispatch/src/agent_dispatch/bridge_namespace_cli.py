@@ -105,7 +105,12 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
         machine = task.get("target_machine")
         worktree_id = task.get("target_worktree")
     acquisition_reservation = reservations[0] if reservations else None
-    if isinstance(acquisition_reservation, dict):
+    if (
+        isinstance(acquisition_reservation, dict)
+        and status in {"queued", "claimed", "started", "suspended"}
+        and acquisition_reservation.get("state") in {"reserving", "spawned"}
+        and not acquisition_reservation.get("release_requested")
+    ):
         worktree_id = worktree_id or acquisition_reservation.get("worktree")
 
     if not worktree_id:
