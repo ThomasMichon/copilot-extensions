@@ -252,6 +252,15 @@ def resolve_unpaired(
     }
 
 
+def require_untracked(
+    relative: str,
+    probe: Callable[[list[str]], tuple[set[str], bool]],
+) -> None:
+    tracked, inconclusive = probe([relative])
+    if relative in tracked or inconclusive:
+        raise ValueError("local body became tracked or tracking status is unknown")
+
+
 def retire_legacy_local(
     root: Path, spec: delivery.Projection, io: DeliveryIO, result: object,
     tracked_paths: set[str], inconclusive: bool,
@@ -281,6 +290,9 @@ def retire_legacy_local(
         latest_tracked, latest_inconclusive = recheck_tracking([legacy])
         if legacy in latest_tracked or latest_inconclusive:
             raise ValueError("legacy local became tracked or tracking status is unknown")
+        path = io.safe(root, PurePosixPath(legacy))
+        if io.read(path, 2 * 1024 * 1024) != raw:
+            raise ValueError("legacy local changed during tracking validation")
         path.unlink()
         result.changed.append(legacy)
         result.removed.append(legacy)

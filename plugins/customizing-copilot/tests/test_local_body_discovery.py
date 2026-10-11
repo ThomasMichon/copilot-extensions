@@ -204,10 +204,62 @@ def test_legacy_index_race_is_rechecked_before_retirement(tmp_path: Path, monkey
 
     def tracked(root: Path, paths: list[str]) -> tuple[set[str], bool]:
         nonlocal calls
-        calls += 1
-        return ({old.relative_to(root).as_posix()} if calls >= 3 else set()), False
+        if paths == [delivery.legacy_local_destination(spec.destination)]:
+            calls += 1
+        return ({old.relative_to(root).as_posix()} if calls >= 2 else set()), False
 
     monkeypatch.setattr(projections, "_resolve_git_tracked_paths", tracked)
     result = projections.render_local_cache(repo, lambda: [source])
-    assert old.read_bytes() == raw and calls == 3
+    assert old.read_bytes() == raw and calls == 2
     assert any("became tracked" in f.message for f in result.findings)
+
+
+def test_legacy_edit_during_final_tracking_probe_is_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    old = repo / delivery.legacy_local_destination(spec.destination)
+    old.parent.mkdir(parents=True)
+    old.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
+    original = projections._resolve_git_tracked_paths
+    legacy_probes = 0
+
+    def tracking(root: Path, paths: list[str]) -> tuple[set[str], bool]:
+        nonlocal legacy_probes
+        if paths == [delivery.legacy_local_destination(spec.destination)]:
+            legacy_probes += 1
+            if legacy_probes == 2:
+                old.write_bytes(b"edited during final tracking probe")
+        return original(root, paths)
+
+    monkeypatch.setattr(projections, "_resolve_git_tracked_paths", tracking)
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert old.read_bytes() == b"edited during final tracking probe"
+    assert any("changed during tracking" in f.message for f in result.findings)
+
+
+def test_new_local_staged_during_render_is_not_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    local = repo / delivery.local_destination(spec.destination)
+    before = local.read_bytes()
+    template = source.payload_root / spec.template
+    template.write_bytes(template.read_bytes().replace(b"Never assume", b"Do not assume"))
+    original = projections._transactional_write
+    tracked_now = False
+
+    def write(*args, **kwargs):
+        nonlocal tracked_now
+        tracked_now = True
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(projections, "_transactional_write", write)
+    monkeypatch.setattr(
+        projections, "_resolve_git_tracked_paths",
+        lambda root, paths: (set(paths) if tracked_now else set(), False),
+    )
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert result.blocking
+    assert local.read_bytes() == before

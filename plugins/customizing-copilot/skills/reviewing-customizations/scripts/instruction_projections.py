@@ -1235,7 +1235,12 @@ def _render_local_cache_locked(
                         f"{marker.get('plugin')}:{marker.get('sourceId')}; "
                         f"now superseded by {spec.source_key}",
                     )
-            _transactional_write([(path, rendered.content, current)])
+            _transactional_write(
+                [(path, rendered.content, current)],
+                before_write=lambda: delivery_io.require_untracked(
+                    local_destination, lambda paths: _resolve_git_tracked_paths(root, paths)
+                ),
+            )
         except (OSError, ValueError) as exc:
             # A failed refresh must never leave a *stale* prior sibling
             # masquerading as current guidance: deliberately NOT adding
@@ -1307,6 +1312,9 @@ def _render_local_cache_locked(
             )
             continue
         try:
+            delivery_io.require_untracked(
+                relative, lambda paths: _resolve_git_tracked_paths(root, paths)
+            )
             path = _safe_destination(root, PurePosixPath(relative))
             if _read_bounded_regular(path, MAX_LOCAL_CACHE_BYTES) != raw:
                 raise OSError("stale local cache changed after validation")
