@@ -104,46 +104,60 @@ $policyPresent = (
     (Test-Path -LiteralPath $policy) -or
     $null -ne (Get-Item -LiteralPath $policy -Force -ErrorAction SilentlyContinue)
 )
-$provenanceBoundary = (
-    ($payloadRoot -replace '\\', '/') -match
-        '/\.copilot/installed-plugins/[^/]+/[^/]+/?$'
+$legacyUntransferred = (
+    $null -ne $resolution.legacy -and
+    [string]$resolution.legacy.disposition -ceq 'active' -and
+    $null -eq $resolution.legacy.tombstone
 )
-if (-not $provenanceBoundary) {
-    $probeRoot = $payloadRoot
-    while ($probeRoot) {
-        if (
-            Test-Path -LiteralPath (
-                Join-Path $probeRoot '.github\plugin\marketplace.json'
-            ) -PathType Leaf
-        ) {
-            $provenanceBoundary = $true
-            break
-        }
-        $parent = Split-Path -Parent $probeRoot
-        if (-not $parent -or $parent -eq $probeRoot) { break }
-        $probeRoot = $parent
-    }
-}
 $simplePolicyLegacy = $false
 if (
     -not $env:COPILOT_EXTENSIONS_CONTEXT -and
     -not $policyPresent -and
-    -not $provenanceBoundary -and
-    $resolutionStatus -ceq 'provenance-blocked'
+    $resolutionStatus -ceq 'provenance-blocked' -and
+    $legacyUntransferred -and
+    [string]$resolution.policy.state -ceq 'missing' -and
+    $resolution.policy.enabled -is [bool] -and
+    -not $resolution.policy.enabled -and
+    [string]$resolution.policy.reason -ceq 'policy-default-false'
 ) {
     $simplePolicyLegacy = $true
 }
 elseif (
     -not $env:COPILOT_EXTENSIONS_CONTEXT -and
     $resolutionStatus -ceq 'provenance-blocked' -and
+    $policyPresent -and
+    $legacyUntransferred -and
     [string]$resolution.policy.state -ceq 'valid' -and
     $resolution.policy.enabled -is [bool] -and
     -not $resolution.policy.enabled
 ) {
-    $marketplaces = $resolution.installationMode.PSObject.Properties['marketplaces']
+    try {
+        $policyDocument = Get-Content -LiteralPath $policy -Raw |
+            ConvertFrom-Json
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-logger] installation policy could not be read: $_"
+        )
+        exit 126
+    }
+    $installationMode = $policyDocument.PSObject.Properties['installationMode']
+    $enabled = if ($null -ne $installationMode) {
+        $installationMode.Value.PSObject.Properties['enabled']
+    } else { $null }
+    $marketplaces = if ($null -ne $installationMode) {
+        $installationMode.Value.PSObject.Properties['marketplaces']
+    } else { $null }
     $simplePolicyLegacy = (
-        $null -eq $marketplaces -or
-        $marketplaces.Value.PSObject.Properties.Count -eq 0
+        $null -ne $enabled -and
+        $enabled.Value -is [bool] -and
+        -not $enabled.Value -and
+        (
+            $null -eq $marketplaces -or
+            (
+                $marketplaces.Value -is [pscustomobject] -and
+                @($marketplaces.Value.PSObject.Properties).Count -eq 0
+            )
+        )
     )
 }
 if (
