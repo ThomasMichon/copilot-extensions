@@ -18,7 +18,14 @@ SPEC.loader.exec_module(runner)
 def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
-    monkeypatch.setattr(runner.subprocess, "run", lambda command, **kwargs: calls.append(command))
+    def prepare_command(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["uv", "venv"]:
+            root = Path(command[2])
+            (root / "bin").mkdir(parents=True)
+            (root / "bin" / "python").touch()
+
+    monkeypatch.setattr(runner.subprocess, "run", prepare_command)
     python = tmp_path / ".test-venvs" / "fleet-manager" / "bin" / "python"
     runner.prepare("fleet-manager", python)
     assert calls[-1] == [
