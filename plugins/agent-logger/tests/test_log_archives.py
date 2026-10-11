@@ -99,6 +99,71 @@ def test_invalid_or_nonlocal_policy_is_refused(raw: object) -> None:
         log_archives.resolve_log_archive_settings(raw)
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_missing_log_root_is_an_empty_pass(
+    tmp_path: Path, dry_run: bool,
+) -> None:
+    root = tmp_path / "missing"
+    assert log_archives.archive_settled_process_logs(
+        root, min_quiet_seconds=600, dry_run=dry_run,
+    ) == log_archives.LogArchiveResult()
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_missing_log_root_does_not_fail_snapshot_commands(
+    tmp_path: Path, manual: bool, capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    source = tmp_path / "copilot"
+    (source / "session-state").mkdir(parents=True)
+    cfg = Config({"sync": {
+        "source": str(source), "targets": {"local": {"path": str(tmp_path / "dest")}},
+        "process_logs": {"enabled": True, "zip_snapshots": {
+            "enabled": True, "local_source": True,
+        }},
+    }, "machine": {"name": "sample-machine"}}, home)
+    if manual:
+        assert engine.run_compact_logs(cfg, dry_run=True) == 0
+        assert engine.run_compact_logs(cfg, dry_run=False) == 0
+    else:
+        assert engine.run_sync(cfg) == 0
+    assert "process-log ZIP archived 0" in capsys.readouterr().out
+    assert not (source / "logs").exists()
+
+
+@pytest.mark.parametrize("failure", [PermissionError, FileNotFoundError])
+def test_root_open_errors_are_not_treated_as_initial_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[OSError],
+) -> None:
+    def failed_open(path: Path) -> object:
+        raise failure("archive root open failed")
+
+    monkeypatch.setattr(log_archives, "archive_directory", failed_open)
+    with pytest.raises(failure, match="archive root open failed"):
+        log_archives.archive_settled_process_logs(tmp_path, min_quiet_seconds=600)
+
+
+def test_non_directory_log_root_is_refused(tmp_path: Path) -> None:
+    root = tmp_path / "logs"
+    root.write_bytes(b"not a directory")
+    with pytest.raises(ValueError, match="real directory"):
+        log_archives.archive_settled_process_logs(root, min_quiet_seconds=600)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink fixture")
+@pytest.mark.parametrize("dangling", [False, True])
+def test_symlink_log_root_is_refused(tmp_path: Path, dangling: bool) -> None:
+    target = tmp_path / "target"
+    if not dangling:
+        target.mkdir()
+    root = tmp_path / "logs"
+    root.symlink_to(target, target_is_directory=True)
+    with pytest.raises(ValueError, match="real directory"):
+        log_archives.archive_settled_process_logs(root, min_quiet_seconds=600)
+
+
 def test_probe_failure_preserves_source_and_reports_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -239,6 +239,11 @@ def archive_settled_process_logs(
     ):
         raise ValueError("process-log min_quiet_seconds must be a positive integer")
     root = log_root.absolute()
+    try:
+        root.lstat()
+    except FileNotFoundError:
+        log.info("process-log ZIP snapshot skipped: no process-log source")
+        return LogArchiveResult()
     with archive_directory(root) as directory:
         return _archive_directory(directory, min_quiet_seconds, dry_run=dry_run)
 

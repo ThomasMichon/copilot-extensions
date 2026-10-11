@@ -130,6 +130,10 @@ Snapshot verification accepts stored or deflated members (new snapshots use
 deflate), and rejects other codecs without attempting a decoder. Encryption
 and deflate runtime failures are per-file errors: later eligible files and the
 scheduled raw-log transfer still run, while the command returns failure.
+An initially absent optional log root is an empty snapshot pass and is not
+created. Permission errors, non-directory or redirected roots, and a root
+that disappears during validated opening still fail explicitly. This does
+not change transfer-health semantics for missing requested evidence.
 Publication reuses the source-admission kernel-owned file boundary: Linux
 uses an anonymous `O_TMPFILE` inode linked from its descriptor; Windows uses
 the protected original handle and a no-replace handle rename. Cleanup never
