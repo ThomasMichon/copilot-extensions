@@ -239,6 +239,17 @@ def test_suspended_acquisition_adoption_requires_exact_native_receipt(tmp_path, 
     assert resumed.status == "started" and resumed.owner_session_id == "native-a"
 
 
+def test_cli_start_before_acquisition_receipt_binding_refuses(tmp_path):
+    queue = TaskQueue(tmp_path / "pre-receipt.db")
+    task = queue.create("work")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="created")
+    queue.claim_one("machine/worktree-a", task_id=task.id)
+    with pytest.raises(TaskError, match="bridge acquisition receipt"):
+        queue.start(task.id, "machine/worktree-a", owner_session_id="inferred-native")
+    assert queue.get(task.id).status == "claimed"
+
+
 def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

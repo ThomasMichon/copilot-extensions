@@ -109,12 +109,14 @@ def validate_start(
 ) -> None:
     ensure(conn)
     rows = conn.execute(
-        "SELECT a.*,s.state AS reservation_state,s.release_requested FROM spawn_reservations s "
+        "SELECT a.*,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON s.key=a.reservation_key WHERE s.task_id=? "
         "ORDER BY s.attempt DESC LIMIT 1", (task.id,),
     ).fetchall()
     if not rows or not rows[0]["delivery_id"]:
-        if (task.owner or "").startswith("acquired-"):
+        if (task.owner or "").startswith("acquired-") or (
+            rows and rows[0]["reservation_state"] == "reserving" and rows[0]["reserved_worktree"]
+        ):
             raise TaskError("acquired worker start requires a bridge acquisition receipt")
         return
     receipt = rows[0]
