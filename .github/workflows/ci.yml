@@ -604,6 +604,37 @@ jobs:
           ZDD_SINGLETON_SMOKE_ONLY: "1"
           PYTHONPATH: ${{ github.workspace }}/libs/zdd/src
         run: python -m pytest -q libs/zdd/tests
+      - id: vendored-library-tools
+        name: Detect vendored library tool changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          elif [ "$EVENT_NAME" = "push" ] && [ "$PUSH_BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            base="$PUSH_BASE_SHA"
+            head="HEAD"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base...$head")"
+          if printf '%s\n' "$changed" | grep -Eq \
+            '^(\.github/workflows/ci\.yml|tools/(sync-vendored-libs|check-vendored-libs-sync|check-version-bump|check-changefile-presence|vendored_lib_inventory|uv_editable_ref|standalone_consumers|installer_engine_ref|changefile|test_sync_vendored_libs|test_check_vendored_libs_sync|test_check_version_bump|test_check_changefile_presence)\.py)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Vendored library materialization regression tests
+        if: steps.vendored-library-tools.outputs.run == 'true'
+        run: >-
+          python -m pytest -q tools/test_sync_vendored_libs.py
+          tools/test_check_version_bump.py tools/test_check_changefile_presence.py
       - name: Vendored library synchronization
         run: >-
           python tools/check-vendored-libs-sync.py &&
