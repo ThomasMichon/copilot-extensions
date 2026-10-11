@@ -1,0 +1,9 @@
+{
+  "comment": "Scope the launch fast-path regression to the dispatch guard after execution-space validation integration",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

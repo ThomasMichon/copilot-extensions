@@ -222,8 +222,8 @@ def test_self_identity_fast_path_does_not_read_topology(monkeypatch, tmp_path):
         pytest.fail("a direct configured identity must not read topology")
 
     monkeypatch.setattr(cfg, "load_machines_yaml", unexpected_read)
-    assert resolve_cli.machine_identity.is_local_machine(
-        "EXAMPLE-HOST", _config(tmp_path, "example-host")
+    assert resolve_cli._target_is_local(
+        _config(tmp_path, "example-host"), "EXAMPLE-HOST"
     )
 
 
