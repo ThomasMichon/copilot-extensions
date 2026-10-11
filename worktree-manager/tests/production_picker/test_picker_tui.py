@@ -9366,7 +9366,7 @@ def test_registered_pivot_action_confirm_gate_cancel_is_noop(tmp_path, monkeypat
             scr.sel = ("T", 0)
             await pilot.pause()
 
-            await _open_task_menu_and_wait(scr, pilot)
+            await _open_task_menu_and_wait(scr, pilot, row=0)
             menu = _task_menu(scr)
             assert menu is not None
             from textual.widgets import OptionList
