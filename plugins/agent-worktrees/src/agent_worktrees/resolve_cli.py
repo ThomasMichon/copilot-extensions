@@ -394,15 +394,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         not state.use_json or getattr(state.args, "seed_id", None)
         or getattr(state.args, "dry_run", False)
     ):
-        # Validated here, before the JSON/non-JSON split: the non-JSON
-        # dispatcher checks state.use_new before state.requested_machine
-        # (below) and would otherwise silently create/resume a LOCAL
-        # seeded worktree instead of honoring (or rejecting) --machine --
-        # a confusing result regardless of --seed. The JSON path's own
-        # reason still applies too: its remote dispatch relays a naively
-        # space-joined command string with zero shell quoting, unsafe for
-        # an arbitrary --seed value. Applies to both --new and
-        # --worktree-id (resume) targets alike.
+        # Remote text uses structured non-preview JSON admission. The
+        # interactive resolver must not fall through into a local creation;
+        # an existing staged identity is executed only on its owning target.
         message = "--seed with --machine requires non-preview JSON admission; staged identities execute on the target."
         if state.use_json:
             return output._json_error(message)

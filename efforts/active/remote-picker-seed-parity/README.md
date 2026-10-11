@@ -207,3 +207,18 @@ hiding the problem or silently dropping text.
   reached the runner's 300-second sub-suite wall limit with no assertion failure
   reported before termination; split/targeted validation remains rather than
   bypassing containment or treating the timeout as a pass.
+- **2026-10-10** -- Real target-side Resume completed with the expected answer
+  in the same conversation as the preceding New validation. Latest recovery
+  revision also passes 22 POSIX candidate cases. Final draft review has only
+  documentation/status findings; the request selector, shell, routing and
+  incomplete-New recovery defects are addressed.
+  Full local Manager validation exposed a minimal self-update fixture that
+  relied on an editable-source layout for its provider manifest. Made the
+  fixture carry the real required template and pinned its running payload;
+  all six delivery cases pass with the installed-package runner.
+  CI exposed a callback race test waiting for a transient total worker count:
+  the replacement worker may finish before the old worker retires. Changed
+  its wait to the exact old registration identity; the persisted replacement
+  assertion remains. Added the required package changefile, with targeted
+  regression passing. These fixes are owed forward to make the encountered
+  validation gates honest, not dismissed as pre-existing failures.

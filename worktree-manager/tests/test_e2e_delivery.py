@@ -52,6 +52,12 @@ def _write_payload(root: Path, version: str) -> None:
         f"[project]\nname='copilot-extensions-worktree-manager'\nversion='{version}'\n",
         "utf-8",
     )
+    references = root / "worktree-manager" / "references"
+    references.mkdir()
+    shutil.copyfile(
+        Path(__file__).resolve().parents[1] / "references" / "control-plane-provider.json",
+        references / "control-plane-provider.json",
+    )
 
 
 def _write_payload_with_unresolvable_pointer(root: Path, version: str) -> None:
@@ -112,6 +118,7 @@ def _isolate_provider_registry(monkeypatch, tmp_path):
     """
     registry = tmp_path / ".agent-worktrees" / "control-plane-providers.d"
     monkeypatch.setattr(si, "control_plane_providers_dir", lambda: registry)
+    monkeypatch.setattr(si, "running_payload_dir", lambda: Path(__file__).resolve().parents[1])
     return registry
 
 
