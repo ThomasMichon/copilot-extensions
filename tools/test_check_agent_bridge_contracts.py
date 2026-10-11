@@ -543,7 +543,7 @@ def test_local_only_guard_refuses_unsupported_git_before_object_reads(
 
 
 @pytest.mark.parametrize("corrupt_hash", [False, True])
-def test_real_pre_push_preserves_orphan_blob_validation(
+def test_ci_preserves_orphan_blob_validation_outside_fast_pre_push(
     repo: Path, corrupt_hash: bool,
 ) -> None:
     bash = shutil.which("bash")
@@ -585,27 +585,29 @@ def test_real_pre_push_preserves_orphan_blob_validation(
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "contract evidence")
     _git(repo, "config", "core.hooksPath", "tools/hooks")
+    validation = _run(repo, "--base", "origin/dev")
+    assert (validation.returncode == 0) is not corrupt_hash, validation.stderr
     result = subprocess.run(
         ["git", "push", "origin", "HEAD:refs/heads/validated"],
         cwd=repo, capture_output=True, text=True, timeout=30,
         env={**os.environ, **{"GIT_TERMINAL_PROMPT": "0"}},
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
-    assert (result.returncode == 0) is not corrupt_hash, result.stderr
+    assert result.returncode == 0, result.stderr
     assert subprocess.run(
         ["git", "show-ref", "--verify", "refs/remotes/origin/main"],
         cwd=repo, capture_output=True, timeout=5,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     ).returncode != 0
     if corrupt_hash:
-        assert "direct blob" in result.stderr
+        assert "direct blob" in validation.stderr
         assert subprocess.run(
             ["git", "--git-dir", str(remote), "show-ref", "--verify",
              "refs/heads/validated"], capture_output=True, timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        ).returncode != 0
+        ).returncode == 0
     else:
-        assert "OK (2 contracts, 2 fixtures)" in result.stdout
+        assert "OK (2 contracts, 2 fixtures)" in validation.stdout
 
 
 @pytest.mark.parametrize(
