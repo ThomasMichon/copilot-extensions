@@ -330,8 +330,8 @@ def add_parsers(sub) -> None:
     parser.add_argument(
         "--seed",
         default=None,
-        help="With --new or --worktree-id (not supported alongside "
-        "--machine or --bare-resume): a prompt delivered as the session's "
+        help="With --new or --worktree-id (not --bare-resume): local or "
+        "non-preview --json --machine prompt admission, delivered as the session's "
         "first (--new) or next (--worktree-id resume) interactive turn "
         "once Copilot is actually ready. With --worktree-id, carried "
         "durably as a `--interactive` argument on the resume launch's own "
@@ -391,7 +391,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # space-joined command string with zero shell quoting, unsafe for
         # an arbitrary --seed value. Applies to both --new and
         # --worktree-id (resume) targets alike.
-        message = "Remote prompts require non-preview JSON admission; staged identities execute on the target."
+        message = "--seed with --machine requires non-preview JSON admission; staged identities execute on the target."
         if state.use_json:
             return output._json_error(message)
         output.err(message)

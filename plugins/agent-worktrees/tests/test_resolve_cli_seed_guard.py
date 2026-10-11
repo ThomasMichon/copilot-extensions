@@ -37,8 +37,8 @@ def _args(**overrides):
     return argparse.Namespace(**base)
 
 
-def test_resolve_new_with_machine_and_seed_is_rejected_json(capfd):
-    rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
+def test_resolve_new_with_machine_and_seed_preview_is_rejected_json(capfd):
+    rc = resolve_cli.cmd_resolve(_args(seed="do the thing", dry_run=True))
 
     assert rc != 0
     out = json.loads(capfd.readouterr().out)
@@ -169,17 +169,35 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
     assert called
 
 
-def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
+def test_resolve_worktree_id_with_machine_and_seed_preview_is_rejected_json(capfd):
     """The same remote-target rejection applies to a --worktree-id resume
     seed, not only --new."""
     rc = resolve_cli.cmd_resolve(
-        _args(new_worktree=False, worktree_id="some-wt", seed="do the thing")
+        _args(new_worktree=False, worktree_id="some-wt", seed="do the thing", dry_run=True)
     )
 
     assert rc != 0
     out = json.loads(capfd.readouterr().out)
     assert "seed" in out.get("error", "").lower()
     assert "machine" in out.get("error", "").lower()
+
+
+@pytest.mark.parametrize("new", [False, True])
+def test_remote_prompt_cli_routes_same_seed_selectors_and_no_mux(monkeypatch, new):
+    config = SimpleNamespace(machine="local")
+    monkeypatch.setattr(resolve_cli.cfg, "load_config", lambda *a, **k: config)
+    called = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *a, **k: called.append((a, k)) or 0,
+    )
+    args = _args(new_worktree=new, worktree_id=None if new else "wt-a",
+                 seed="line one\nquotes ' $()", environment="WSL", target_no_mux=True)
+    assert resolve_cli.cmd_resolve(args) == 0
+    route, keywords = called[0]
+    assert route[:3] == (config, "example-host", "WSL")
+    assert route[3] == (["--new", "--no-mux"] if new else ["--worktree-id", "wt-a", "--no-mux"])
+    assert keywords == {"seed": args.seed}
 
 
 def test_resolve_worktree_id_with_seed_and_no_machine_is_accepted(capfd):
