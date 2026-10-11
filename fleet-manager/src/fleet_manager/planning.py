@@ -143,6 +143,12 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
         integer(capacity["machine_limit"], "configured machine limit", minimum=1, maximum=MAX_ITEMS)
         integer(capacity["execution_hosts"], "configured execution hosts", maximum=MAX_ITEMS)
         _roles(config["roles"])
+        if "template" in config:
+            provenance = config["template"]
+            if not isinstance(provenance, dict) or set(provenance) != {"id", "revision"}:
+                raise PlanError("unsupported template provenance")
+            identifier(provenance["id"], "template provenance id")
+            identifier(provenance["revision"], "template provenance revision")
     else:
         capacity = {"machine_limit": machine_limit, "execution_hosts": template["execution_hosts"]}
 
@@ -187,7 +193,8 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
         "revision": "unapplied", "capacity": copy.deepcopy(capacity), "roles": {},
     }
     suggestions = []
-    for name, recommendation in template["roles"].items():
+    for name in sorted(template["roles"]):
+        recommendation = template["roles"][name]
         if name not in proposed["roles"]:
             proposed["roles"][name] = copy.deepcopy(recommendation)
             suggestions.append({"role": name, "change": "add"})
@@ -222,8 +229,8 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
         blockers.append("capacity-unmet")
 
     role_observations = []
-    for name, role in proposed["roles"].items():
-        observed = [host["id"] for host in ready if host["roles"].get(name) == "ready"] if fresh else []
+    for name in sorted(proposed["roles"]):
+        observed = sorted(host["id"] for host in ready if host["roles"].get(name) == "ready") if fresh else []
         recommended = template["roles"].get(name)
         if recommended is not None and recommended["required"] and not recommended["available"]:
             blockers.append("required-role-unsupported:" + name)

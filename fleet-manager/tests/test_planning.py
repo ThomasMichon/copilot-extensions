@@ -199,3 +199,39 @@ def test_installed_cli_outputs_bounded_proposal_without_hosting_or_file_writes(t
     assert output["schema"] == "fleet-manager.plan"
     assert not output["mutations_performed"]
     assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+
+def test_canonical_equivalent_object_order_produces_identical_plan_and_revalidation():
+    template, _, live = inputs()
+    config = {
+        "schema": "fleet-manager.config", "version": 1, "fleet_id": "example", "revision": "u1",
+        "capacity": {"machine_limit": 5, "execution_hosts": 0},
+        "roles": {"novel": {"mode": "keep"}, "index": {"custom": True}},
+        "template": {"id": "default", "revision": "r1"},
+    }
+    saved = compute(template, config, live)
+    reordered_template = dict(reversed(list(template.items())))
+    reordered_template["roles"] = dict(reversed(list(template["roles"].items())))
+    reordered_config = dict(reversed(list(config.items())))
+    reordered_config["roles"] = dict(reversed(list(config["roles"].items())))
+    current = compute(reordered_template, reordered_config, live)
+    assert current == saved
+    assert verify_plan(
+        saved, reordered_template, reordered_config, live,
+        fleet_id="example", machine_limit=5, now=160,
+    ) == saved
+
+
+@pytest.mark.parametrize("provenance", [
+    None, "default", [], {}, {"id": "default"}, {"id": True, "revision": "r1"},
+    {"id": "default", "revision": ""}, {"id": "default", "revision": "r1", "extra": True},
+])
+def test_known_template_provenance_is_strict_while_custom_roles_remain_preserved(provenance):
+    template, _, live = inputs()
+    config = {
+        "schema": "fleet-manager.config", "version": 1, "fleet_id": "example", "revision": "u1",
+        "capacity": {"machine_limit": 5, "execution_hosts": 0},
+        "roles": {"custom": {"novel-capability": True}}, "template": provenance,
+    }
+    with pytest.raises(PlanError):
+        compute(template, config, live)
