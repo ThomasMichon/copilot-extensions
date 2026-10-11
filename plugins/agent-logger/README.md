@@ -161,6 +161,33 @@ identity, default-branch state, declaration provenance, machine selectors,
 normalized claims, resource readiness, and conflicts are resolved before any
 later execution integration can perform side effects.
 
+To inspect an explicitly selected synced corpus without changing configuration,
+catalogs, or source files:
+
+```bash
+agent-logger corpus inventory --root /path/to/corpus
+agent-logger corpus inventory --root /path/to/corpus --include-sessions
+```
+
+The root contains source directories, each with `session-state/` and/or
+`archived/`, including legacy and qualified provider groups. JSON reports
+per-source live/archive counts, total source-qualified observations, and errors.
+`--include-sessions` adds session IDs and representation kinds; it does not emit
+transcripts. Missing or unreadable roots and source validation failures set
+`complete: false` and exit nonzero; counts in an incomplete report are partial.
+An empty readable corpus is a successful zero-count inventory.
+
+This is an explicit on-demand inventory, not a periodic refresh or index.
+It uses the shared archive reader's live precedence and overlap validation,
+without repository, settle-window, or already-journaled filters. Counts cover
+primary session stores, not rescue snapshot versions; they do not claim logical
+alias deduplication, full archive-content integrity, or available usage meters.
+It is not a point-in-time snapshot: a concurrently updated corpus can change
+during traversal. `complete` means the observed traversal finished without
+errors, not that every session's content or concurrent publication was verified.
+Ordinary single-archive discovery does not decompress transcript contents;
+conflicting compressed representations still require shared content validation.
+
 Repository files declare a `schema_version` (an omitted version is treated as
 the current schema, 3 as of this release) and may set `log.root`,
 `log.path_template`, `log.timezone`, `log.note_marker`, `log.template`,
