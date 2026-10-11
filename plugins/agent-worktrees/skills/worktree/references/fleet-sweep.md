@@ -91,12 +91,8 @@ without touching anything else.
 When `doctor` identifies stale tracking status, its non-destructive `--fix`
 path can reconcile that metadata. Do not add daemon-health, session-deletion,
 or process-retirement flags merely because a cleanup audit found stale status.
-For a verified completed, dormant session, `conclude-session --worktree
-<full-id> --session <session-id> --state concluded` records completion;
-`deregister-session --worktree-id <full-id> --session-id <session-id>` closes
-its registration and session claim. Neither substitutes for proving the
-objective complete. Do not conclude a live owner or an unfinished relay leg to
-clear a cleanup blocker.
+Session conclusion/deregistration is not part of this mechanical claims pass:
+perform it only after Step 3 establishes objective completion.
 
 ## Step 3 -- Verify session *content*, not just git + claims metadata
 
@@ -158,6 +154,13 @@ report of `completed`/`unused` plus a clear claims ledger is necessary but
 tell you the story resolved.
 
 ## Step 4 -- Respect the tool's own refusals
+
+Only after completing Step 3 for a verified completed, dormant session,
+`conclude-session --worktree <full-id> --session <session-id> --state concluded`
+records completion; `deregister-session --worktree-id <full-id> --session-id
+<session-id>` closes its registration and session claim. Neither substitutes for
+the objective evidence. Do not conclude a live owner or an unfinished relay leg
+to clear a cleanup blocker.
 
 Preview an exact candidate list with subject, PR/base landing evidence,
 objective disposition, outstanding owner, and any unknowns. Obtain the
