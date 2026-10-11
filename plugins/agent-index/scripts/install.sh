@@ -2144,9 +2144,7 @@ case "$ACTION" in
         _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
-    ensure)  # user-mode safety net + default durable auto-start registration; also
-             # stamps the binstub on a never-provisioned machine (fits a sessionStart
-             # hook's grace window -- no venv, no uv, no heavy runtime build here)
+    ensure)  # Explicit lifecycle action; never invoked by a sessionStart hook.
         [ -x "$STUB" ] || {
             mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
             deploy_binstub

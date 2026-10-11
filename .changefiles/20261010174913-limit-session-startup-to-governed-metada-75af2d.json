@@ -1,0 +1,9 @@
+{
+  "comment": "Limit session startup to governed metadata/binstub stamps; defer provisioning to explicit first use or update.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

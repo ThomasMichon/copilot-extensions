@@ -33,11 +33,15 @@ supervision.
   such as pre-login start, missed-trigger recovery, or task-owned restart
   policy. Choosing that tier supersedes the matching HKCU Run entries rather
   than stacking both.
-- **Session start:** `hooks.json` publishes guidance and invokes the installer
-  `ensure` action as a bounded safety net. That action can health-check and
-  restore an already-installed configured host and its engine without
-  provisioning dependencies. The separate `ensure-service` compatibility
-  scripts are no-ops; they are not the active hook wiring.
+- **Session start:** `hooks.json` publishes guidance and invokes only the
+  dependency-light metadata/binstub stamp adapter. No install script,
+  provisioning, package acquisition, venv creation, service/engine startup,
+  restart or autostart registration is permitted at this seam. Stamping is not
+  readiness. First admitted binstub operational use provisions through the real
+  runtime gate after repo opt-in and explicit role/setup intent; it never
+  silently chooses a host. Direct installer invocation via `<repo> update`
+  remains an explicit deployment path. `ensure-service` compatibility scripts
+  remain no-ops.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
   remain self-contained and do not require `agent-dispatch`.

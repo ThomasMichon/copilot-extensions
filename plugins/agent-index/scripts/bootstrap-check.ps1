@@ -1,4 +1,5 @@
-# Compatibility entry point: session startup never provisions even a client runtime.
-# Host dependencies and lifecycle belong to the already-running dispatch supervisor.
+# Only the dependency-light metadata adapter is admitted at session start.
+& (Join-Path $PSScriptRoot 'runtime-gate.ps1') __session-stamp | Out-Null
+$rc = $LASTEXITCODE
 [Console]::Out.Write('{}')
-exit 0
+exit $rc

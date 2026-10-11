@@ -10,8 +10,8 @@
       },
       {
         "type": "command",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { $r = (Get-Location).Path }; $s = (Join-Path $r 'scripts\\install.ps1'); try { if (Test-Path -LiteralPath $s -PathType Leaf) { & $s ensure *> $null } } catch {}; [Console]::Out.Write('{}')",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}}\"; s=\"$r/scripts/install.sh\"; if [ -f \"$s\" ]; then bash \"$s\" ensure >/dev/null 2>&1 || true; fi; printf '{}'",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { $r = (Get-Location).Path }; & (Join-Path $r 'scripts\\bootstrap-check.ps1'); exit $LASTEXITCODE",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}}\"; bash \"$r/scripts/bootstrap-check.sh\"",
         "timeoutSec": 20
       }
     ]

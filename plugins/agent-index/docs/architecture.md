@@ -92,10 +92,11 @@ config, an unsafe path, a conflicting singular/plural indexer declaration, a
 missing required binding for external-only activation, or an unavailable
 resolver leaves the plugin inactive.
 2. Session-start hooks emit retrieval guidance while that resolver reports
-active, then run a cheap `ensure` safety net. The hook never stamps or
-provisions a runtime; it only health-checks the already-installed host runtime
-and, when this machine is the configured host, starts the existing user-mode
-service/engine if they are absent. Retrieval guidance belongs in the
+active, then stamp metadata and a callable binstub through the dependency-light
+gate. Hooks never invoke install/ensure/provision, create venvs, acquire packages,
+register autostart, or start/restart a service or engine. A stamp is not runtime
+readiness; first admitted operational use owns provisioning, after explicit
+repository opt-in and role/setup intent. Retrieval guidance belongs in the
 exact-session guidance file when a session-file writer is present.
 3. Every payload CLI entry runs the same resolver before installation-context
 selection, runtime provisioning, or transport routing. `status` reports
@@ -120,7 +121,8 @@ service update.
 7. Namespaced marker CAS, deploy-manifest publication, profile receipts, and
 transaction recovery retain existing installation governance. Namespaced hosts
 use the same local slot/cutover primitives as legacy mode. Compatibility
-bootstrap/ensure hooks remain inert. Previously completed receipts remain
+`ensure-service` compatibility hooks remain inert; `bootstrap-check` stamps only
+metadata/binstubs. Previously completed receipts remain
 diagnostic/ownership evidence, never permission to bypass runtime validation.
 
 Client runtime selection requires the canonical exact four-field

@@ -26,8 +26,9 @@ deliberate exception: `corpus.sources` unions by source name instead of list
 replacement so the tiers can compose. A present invalid local config never
 falls through. Outside that scope, `status` reports `inactive` and other
 commands are refused.
-- Session start is non-mutating: it does not stamp or provision a runtime and
-does not start a service. After repository opt-in, an operator explicitly chooses
+- Session start stamps only metadata/binstubs; it never deploys, provisions
+packages/venvs, starts services/engines, or registers autostart. A stamp is not
+readiness. After repository opt-in, an operator explicitly chooses
 `setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call
 may provision only the lightweight client/base CLI (`::agent-provisioning::`).
 The configured host's light `[store,server]` runtime is then provisioned and

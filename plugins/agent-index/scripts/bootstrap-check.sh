@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Compatibility entry point: hooks never provision even a client runtime.
-# Host dependencies and lifecycle belong to the already-running dispatch supervisor.
+# Only the dependency-light metadata adapter is admitted at session start.
+set -uo pipefail
+script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+bash "$script_dir/runtime-gate.sh" __session-stamp >/dev/null
+rc=$?
 printf '{}'
-exit 0
+exit "$rc"

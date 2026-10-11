@@ -1382,10 +1382,13 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
      started and kept alive by a user-mode *ensure* — health-gate the live routing
      endpoint; if unhealthy, start it via the user-mode CLI (agent-index:
      `agent-index deploy` on Windows; `systemctl --user` / nohup on POSIX). The
-     installer's `install` / `update` / `start`, **and a `sessionStart` `ensure`
-     hook**, all funnel through this same idempotent ensure. A Copilot session
-     therefore guarantees the daemon, so it survives reboots **without** an
-     AtLogon scheduled task.
+     installer's explicit `install` / `update` / `start` actions funnel through
+     this idempotent ensure. **Index sessionStart is metadata/binstub-only:**
+     it never invokes install/ensure/provision, acquires packages, creates
+     venvs, registers autostart or starts services/engines. A session stamp is
+     not a daemon guarantee. Index's first admitted operational binstub use
+     provisions through its runtime gate after repository opt-in and explicit
+     role/setup intent; direct `<repo> update` remains an explicit deploy path.
    - **Windows:** the default path must NOT call `Install-Service` /
      `Register-ScheduledTask` / `Start-ScheduledTask`. Those live only behind the
      opt-in `register-tasks` action (rule 8). POSIX `systemd --user` units are

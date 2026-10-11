@@ -2638,9 +2638,7 @@ switch ($Action) {
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
     'ensure' {
-        # User-mode safety net + default durable auto-start registration; also
-        # stamps the binstub on a never-provisioned machine (fits a sessionStart
-        # hook's grace window -- no venv build, no heavy runtime provisioning here).
+        # Explicit lifecycle action; never invoked by a sessionStart hook.
         $ps1Stub = Join-Path $LocalBin 'agent-index.ps1'
         if (-not (Test-Path -LiteralPath $ps1Stub -PathType Leaf)) {
             foreach ($dir in @($InstallDir, $LocalBin)) {
