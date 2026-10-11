@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Draft; plan review and buildout preparation only
+- **Status:** Active; plan reviewed, contract-slice assignment pending
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
-- **Sub-issues:** Existing dependencies #5789, #6030, #5861, #5862; implementation sub-issues are created after plan review and deduplication
+- **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
 
 ## Guiding Intent
 
@@ -89,7 +89,7 @@ All detailed slices are **agent-recommended** and remain subject to review.
 
 ### Phase 0 - Reviewed intent and coordinated buildout
 - [x] Confirm canonical effort placement and slug; deduplicate and claim #6236.
-- [ ] Land the effort, [architecture proposal](architecture.md), and explicit
+- [x] Land the effort, [architecture proposal](architecture.md), and explicit
   integrated-product vision/pattern amendments through actual PR review.
 - [ ] Re-read the merged plan; coordinate existing campaign owners and assign
   non-overlapping sub-issues before any runtime implementation.
@@ -174,3 +174,16 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   claimed #6236 after searching existing fleet issues and open PRs.
 - Kept #5789/#6030/#6133 ownership intact. Prepared only architecture/intent and
   implementation gates; no runtime, host enrollment or live cutover performed.
+
+### 2026-10-11 - Plan reviewed and contract intake prepared
+- #6238 squash-merged into `dev` at `2026-10-11T22:23:40Z`, commit
+  `3c5d10ef5410455d52e4fd469e338f7cb69288ad`, after actual Copilot APPROVED review
+  on the corrected head and green required CI.
+- Addressed revision-date and PR cutover-impact observations. Preserved the
+  Request spelling verbatim rather than silently altering operator intent.
+- Re-read the canonical Plan. Created #6240 for release/lifecycle contracts and
+  #6241 for command/node-receipt contracts after deduplication; neither assigns a
+  competing runtime implementation owner.
+- Next gate is coordinating the existing campaign owners and assigning distinct
+  contract slices. The full effort, runtime proof, adoption and retirement remain
+  open. No runtime implementation or live deployment began.
