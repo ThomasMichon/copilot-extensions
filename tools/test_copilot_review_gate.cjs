@@ -232,6 +232,7 @@ test("pinned github-script bundle constructs independently authenticated clients
     path.resolve(process.env.COPILOT_REVIEW_ACTION_BUNDLE),
   ], {
     encoding: "utf8",
+    windowsHide: true,
     timeout: 15_000,
     env: {
       PATH: process.env.PATH,
