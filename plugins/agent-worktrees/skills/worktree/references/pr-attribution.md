@@ -91,7 +91,16 @@ If the marker carries an `enc=<token>` field, it is a self-contained
 AES-256-GCM-encrypted blob of the FULL raw identity (worktree id, machine,
 session, head SHA, project, timestamp). Worktree, machine, session and head
 correspond to the raw `true` marker; project and UTC timestamp are additional
-encrypted metadata, absent from the raw marker. Only the holder of the
+encrypted metadata, absent from the raw marker. The matching key also unlocks
+the optional nested `origin` identity: the originating
+root/control worktree's machine, project and worktree ID. The producer fields
+remain separate. Origin capture follows validated local ownership links and
+honors the origin repository's attribution opt-out. Missing, remote, cyclic,
+unsafe or changing chains omit `origin`, never guess it. Each new pushed marker
+captures the current chain; earlier encrypted markers remain historical
+snapshots after a handoff. Existing tokens without `origin` remain readable.
+
+Only the holder of the
 matching symmetric identity key can decrypt it; no SSH scan, no tracking
 store, and no network access needed:
 

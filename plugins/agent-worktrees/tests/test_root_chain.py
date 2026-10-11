@@ -717,6 +717,93 @@ class TestResolveRootCodename:
         ) is None
 
 
+class TestOriginIdentity:
+    def test_private_origin_snapshot_and_opt_out(self, tmp_path, monkeypatch):
+        from agent_worktrees.origin_identity import resolve_origin_identity
+
+        root_config = _cfg()
+        root_config.default_repo.pr.source_attribution = "codename"
+        _seed(tmp_path, monkeypatch, "control", "wt-root", config=root_config)
+        child = _seed(
+            tmp_path, monkeypatch, "product", "wt-child",
+            owner_ref="anomalous-potato/control/wt-root",
+        )
+        kwargs = {"project": "product", "this_machine": "anomalous-potato"}
+        assert resolve_origin_identity(child, **kwargs) == {
+            "worktree_id": "wt-root", "machine": "anomalous-potato", "project": "control",
+        }
+        root_config.default_repo.pr.source_attribution = False
+        assert resolve_origin_identity(child, **kwargs) is None
+
+    @pytest.mark.parametrize("owner", [
+        None, "remote/control/wt-root", "anomalous-potato/control/missing",
+        "anomalous-potato/../wt-root", "anomalous-potato/product/wt-child",
+    ])
+    def test_unresolved_origin_is_omitted(self, tmp_path, monkeypatch, owner):
+        from agent_worktrees.origin_identity import resolve_origin_identity
+
+        child = _seed(tmp_path, monkeypatch, "product", "wt-child", owner_ref=owner)
+        assert resolve_origin_identity(
+            child, project="product", this_machine="anomalous-potato",
+        ) is None
+
+    def test_leaf_handoff_during_capture_is_not_published(self, tmp_path, monkeypatch):
+        from agent_worktrees.origin_identity import resolve_origin_identity
+
+        root_config = _cfg()
+        root_config.default_repo.pr.source_attribution = "codename"
+        _seed(tmp_path, monkeypatch, "control", "wt-root", config=root_config)
+        child = _seed(
+            tmp_path, monkeypatch, "product", "wt-child",
+            owner_ref="anomalous-potato/control/wt-root",
+        )
+        original = root_chain._walk_to_root
+        calls = 0
+
+        def walk(*args, **kwargs):
+            nonlocal calls
+            result = original(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                path = tmp_path / ".product" / "worktrees" / "wt-child.yaml"
+                current = tracking.load_record(path)
+                current.owner_ref = None
+                tracking.save_record(current, path)
+            return result
+
+        monkeypatch.setattr(root_chain, "_walk_to_root", walk)
+        assert resolve_origin_identity(
+            child, project="product", this_machine="anomalous-potato",
+        ) is None
+
+    def test_origin_reaches_only_cipher_boundary(self, tmp_path, monkeypatch):
+        from agent_worktrees import identity_marker
+        from agent_worktrees.providers import attribution
+
+        root_config = _cfg()
+        root_config.default_repo.pr.source_attribution = "codename"
+        _seed(tmp_path, monkeypatch, "control", "private-root", config=root_config)
+        child = _seed(
+            tmp_path, monkeypatch, "product", "wt-child",
+            owner_ref="anomalous-potato/control/private-root",
+        )
+        captured = {}
+
+        def encrypt(payload):
+            captured.update(payload)
+            return "opaque-token"
+
+        monkeypatch.setattr(identity_marker, "encrypt_identity_payload", encrypt)
+        marker = root_chain.build_codename_marker_with_root(
+            "harbor-lattice", child,
+            types.SimpleNamespace(repo_name="product", machine="anomalous-potato"),
+        )
+        assert captured["origin"]["worktree_id"] == "private-root"
+        assert attribution.parse_marker(marker)["enc"] == "opaque-token"
+        assert "private-root" not in marker
+        assert "anomalous-potato" not in marker
+
+
 class TestMarkerComposition:
     def test_build_codename_marker_with_root_includes_root_field(
         self, tmp_path, monkeypatch,
