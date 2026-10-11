@@ -572,6 +572,16 @@ def test_terminate_mux_daemon_pid_accepts_a_matched_real_process():
     the exact root being operated on -- not merely report success against a
     stubbed-out terminator (the identity-bound safety net
     docs/patterns/graceful-daemon-cutover.md requires a direct test for)."""
+    import os
+    import pytest
+
+    if os.name != "nt":
+        import signal
+
+        if not callable(getattr(os, "pidfd_open", None)) or not callable(
+            getattr(signal, "pidfd_send_signal", None)
+        ):
+            pytest.skip("Interpreter lacks identity-bound POSIX PID termination primitives")
     root = Path.home() / ".worktree-manager-test-identity-match"
     proc = _spawn_fake_mux_daemon_process(root)
     try:
