@@ -89,6 +89,13 @@ class QueueClaimQueriesMixin:
                     ).fetchone()
                     if active is None or not active["session_handle"]:
                         continue
+                    from .ci_repair_spawn import reservation_authorized
+                    task = self._fetch(conn, row["id"])
+                    if not reservation_authorized(conn, task, task.origin_ref, transition={
+                        "phase": "claim", "worker_id": worker_id,
+                        "session_handle": active["session_handle"],
+                    }):
+                        continue
                 if repo is not None and row["repo"] != repo:
                     continue
                 rejection = self._claim_fence_rejection(conn, row)

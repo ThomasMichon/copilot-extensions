@@ -151,8 +151,12 @@ def test_refused_admission_never_authors(tmp_path, change):
             return adapters(command, **kwargs)
         return SimpleNamespace(returncode=0, stdout=json.dumps({**verdict(), **change}), stderr="")
 
-    with pytest.raises(ci_repair.AdmissionRefused):
-        ci_repair.run_tick(client, config(enabled=True), runner=runner)
+    if change.get("allowed") is False:
+        result = ci_repair.run_tick(client, config(enabled=True), runner=runner)
+        assert result["refused"][0]["reason"] == change["reason"]
+    else:
+        with pytest.raises(ci_repair.AdmissionRefused):
+            ci_repair.run_tick(client, config(enabled=True), runner=runner)
     assert not client.created
 
 
@@ -252,7 +256,10 @@ def test_watchdog_source_reuses_signature_and_rejects_stale_jobs(monkeypatch):
             )
 
 
-def test_real_adapter_processes_and_coordinator_lifecycle(tmp_path):
+def test_real_adapter_processes_and_coordinator_lifecycle(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", lambda command, config, **kwargs: {
+        "allowed": True, **kwargs["request"],
+    })
     client = Client(tmp_path)
     selected = config(enabled=True)
     selected["source_command"] = [
@@ -301,8 +308,7 @@ def test_real_adapter_processes_and_coordinator_lifecycle(tmp_path):
         "-c",
         "import json; print(json.dumps({'allowed':False,'reason':'not rearmed'}))",
     ]
-    with pytest.raises(ci_repair.AdmissionRefused, match="not rearmed"):
-        ci_repair.run_tick(client, selected)
+    assert ci_repair.run_tick(client, selected)["refused"][0]["reason"] == "not rearmed"
     assert len(client.created) == 1
 
 
@@ -387,7 +393,10 @@ def test_api_registration_rejects_bad_ci_bindings_before_reconciliation(tmp_path
 
 
 @pytest.mark.parametrize("scope", [{"all_repos": True}, {"repo": "https://github.com/example/project.git"}])
-def test_ci_reservation_accepts_canonical_and_all_repository_scopes(tmp_path, scope):
+def test_ci_reservation_accepts_canonical_and_all_repository_scopes(tmp_path, scope, monkeypatch):
+    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", lambda command, config, **kwargs: {
+        "allowed": True, **kwargs["request"],
+    })
     client = Client(tmp_path)
     task = ci_repair.run_tick(client, config(enabled=True, lane_repository="github.com/example/project"), runner=adapters)["created"][0]
     client.queue.register_registration("supervised-lane", {
@@ -437,6 +446,36 @@ def test_ci_repair_side_load_cannot_bypass_admission():
     }
     with pytest.raises(emitter.EmitterError, match="ungated side_load"):
         emitter.validate_spec(spec)
+
+
+def test_denied_signature_does_not_suppress_valid_peer(tmp_path):
+    second = {**EVIDENCE, "signature": "c" * 12}
+    def runner(command, **kwargs):
+        if command == ["fake-source"]:
+            value = [EVIDENCE, second]
+        else:
+            request = json.loads(kwargs["input"])
+            value = ({"allowed": False, "reason": "cooldown"} if request["failure"] == EVIDENCE
+                     else verdict(second))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(value), stderr="")
+    result = ci_repair.run_tick(Client(tmp_path), config(enabled=True), runner=runner)
+    assert len(result["created"]) == 1 and len(result["refused"]) == 1
+    assert result["created"][0]["dedup_key"].endswith("c" * 12)
+
+
+def test_spoofed_registration_id_and_fake_session_do_not_authorize_claim(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    task = ci_repair.run_tick(client, config(enabled=True), runner=adapters)["created"][0]
+    client.queue.register_registration("supervised-lane", {
+        "repo": task["repo"], "labels": ["ci-repair"], "ci_repair_bindings": [EXECUTION],
+        "ci_repair_admission_command": ["independent-authority"],
+    }, reg_id="repair-lane")
+    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke",
+                        lambda *a, **k: {"allowed": False, "reason": "unverified caller"})
+    with pytest.raises(TaskError):
+        client.queue.reserve_spawn(task["id"], reserved_by="repair-lane")
+    assert client.queue.claim_one("spoofed-worker", capabilities=["ci-repair-admitted"],
+                                 repo=task["repo"], task_id=task["id"]) is None
 
 
 def test_watchdog_source_cli_uses_only_scoped_wrapper(monkeypatch, capsys):

@@ -9,7 +9,7 @@ import uuid
 from .producers.ci_repair import AdmissionRefused, _invoke, execution, failure
 
 
-def reservation_authorized(conn, task, reserved_by: str | None) -> bool:
+def reservation_authorized(conn, task, reserved_by: str | None, *, transition: dict | None = None) -> bool:
     """Fence reservations to the persisted, validated specialized lane."""
     if not reserved_by or reserved_by != task.origin_ref:
         return False
@@ -26,8 +26,16 @@ def reservation_authorized(conn, task, reserved_by: str | None) -> bool:
         selected = execution(json.loads(task.prompt)["execution"])
         from .identity import canonicalize_remote
         lane_matches = spec.get("all_repos") is True or canonicalize_remote(spec.get("repo")) == task.repo
-        return selected in spec.get("ci_repair_bindings", []) and lane_matches
-    except (ValueError, TypeError, KeyError):
+        if selected not in spec.get("ci_repair_bindings", []) or not lane_matches:
+            return False
+        request = {"failure": json.loads(task.prompt)["failure"], "execution": selected,
+                   **(transition or {"phase": "reserve"})}
+        result = _invoke(spec["ci_repair_admission_command"], {}, runner=subprocess.run,
+                         cwd=None, request=request)
+        return isinstance(result, dict) and result.get("allowed") is True and all(
+            result.get(key) == value for key, value in request.items()
+        )
+    except (ValueError, TypeError, KeyError, OSError, subprocess.TimeoutExpired):
         return False
 
 

@@ -137,6 +137,7 @@ def run_tick(
     if not isinstance(candidates, list) or len(candidates) > 100:
         raise AdmissionRefused("source must return at most 100 failure candidates")
     admitted = []
+    refused = []
     # Validate the entire batch before creating anything.
     for candidate in candidates:
         evidence = failure(candidate, config["repository"])
@@ -147,6 +148,12 @@ def run_tick(
             cwd=cwd,
             request={"failure": evidence, "execution": config["execution"]},
         )
+        if isinstance(verdict, dict) and verdict.get("allowed") is False:
+            reason = verdict.get("reason")
+            if not isinstance(reason, str) or not reason:
+                raise AdmissionRefused("denied admission must name its reason")
+            refused.append({"failure": evidence, "reason": reason})
+            continue
         if not isinstance(verdict, dict) or verdict.get("allowed") is not True:
             reason = (
                 verdict.get("reason", "no authorization")
@@ -203,4 +210,5 @@ def run_tick(
                 require_verification=True,
             )
         )
-    return {"status": "admitted", "created": created}
+    return {"status": "admitted" if created else "refused" if refused else "empty",
+            "created": created, "refused": refused}

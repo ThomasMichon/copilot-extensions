@@ -68,7 +68,9 @@ never credentials; the two auth references must be different. The plugin
 checks the contract, not the external truths itself. A caller-controlled
 JSON file that merely says `allowed: true` is not a valid admission adapter.
 
-All candidates are admitted before task creation. Active tasks dedup by
+All candidates are validated before task creation. Expected policy denials
+are recorded per candidate and do not suppress independently admitted peers;
+malformed evidence/adapter responses still fail the tick. Active tasks dedup by
 repository/signature (independent of run ID and attempt). Coordinator dedup
 releases terminal tasks; **only the reviewed admission policy** decides whether
 a later episode may be emitted. This module does not choose that policy or
@@ -98,6 +100,13 @@ Coordinator reservations refuse any other spawner, including catch-all pools;
 claims require `ci-repair-admitted` and an admitted spawned reservation.
 The worker seed supplies that claim capability. Ordinary workers cannot claim
 the queued task or bypass the dedicated launch admission path.
+Registration IDs and claim capabilities are routing selectors, not credentials.
+The coordinator independently invokes the registered admission adapter for
+`phase: reserve`, `phase: spawned` with the proposed session handle, and
+`phase: claim` with that handle and worker ID. The adapter must verify the
+actual launch/worker identity through authoritative venue evidence and echo
+the exact transition on admission; self-asserted IDs or fake handles must be
+refused. These coordinator probes are bounded and do not retry.
 
 The [portable container template](../../agent-containers/templates/ci-repair/README.md)
 is network-disconnected and carries no identity. No auth adapter, live policy,

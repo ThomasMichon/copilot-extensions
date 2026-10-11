@@ -234,6 +234,15 @@ def register_spawn_routes(
 
     @app.post("/spawn-reservations/{key}/spawned")
     def record_spawn(key: str, body: RecordSpawnBody) -> dict:
+        reservation = queue.get_reservation(key)
+        task = queue.get(reservation.task_id) if reservation else None
+        if task and task.source == "ci-repair":
+            from .ci_repair_spawn import reservation_authorized
+            with queue._connect() as conn:
+                if not reservation_authorized(conn, task, task.origin_ref, transition={
+                    "phase": "spawned", "session_handle": body.session_handle,
+                }):
+                    raise HTTPException(status_code=403, detail="CI repair spawned identity not independently verified")
         result = _reservation_guard(
             lambda: queue.record_spawn(
                 key, session_handle=body.session_handle, worktree=body.worktree
