@@ -82,10 +82,12 @@ session on a machine you didn't expect.
 
 ## Decrypting the `enc=` field
 
-Encryption is installed automatically on supported platforms. Native Windows
-ARM64 omits the dependency because no compatible wheel is available; normal
-codename/root attribution still works. A missing encryption package produces
-a sanitized warning and omits `enc=`; decoding reports an explicit error.
+Windows encryption uses native CNG AES-256-GCM, including on ARM64, with the
+same portable token format and shared key as the cryptography backend used on
+other platforms. No machine-derived key is used for PR tokens. Machine-bound
+DPAPI protection applies only to local vault cache data. On other platforms,
+a missing encryption package produces a sanitized warning and omits `enc=`;
+decoding reports an explicit error.
 
 If the marker carries an `enc=<token>` field, it is a self-contained
 AES-256-GCM-encrypted blob of the FULL raw identity (worktree id, machine,

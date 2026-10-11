@@ -204,6 +204,10 @@ def generate_identity_key(path: Path | None = None, *, force: bool = False) -> P
 
 
 def _aesgcm(key: bytes):
+    if os.name == "nt":
+        from .identity_crypto_windows import WindowsAESGCM
+
+        return WindowsAESGCM(key)
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     except ImportError as exc:
@@ -281,10 +285,13 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
     malformed token, or a failed authentication tag (wrong key / tampered
     data).
     """
-    try:
-        from cryptography.exceptions import InvalidTag
-    except ImportError as exc:
-        raise IdentityMarkerError("identity decoding requires the cryptography package") from exc
+    if os.name == "nt":
+        from .identity_crypto_windows import IdentityCryptoError as InvalidTag
+    else:
+        try:
+            from cryptography.exceptions import InvalidTag
+        except ImportError as exc:
+            raise IdentityMarkerError("identity decoding requires the cryptography package") from exc
     resolved_key = key if key is not None else load_identity_key()
     if resolved_key is None:
         raise IdentityMarkerError(
