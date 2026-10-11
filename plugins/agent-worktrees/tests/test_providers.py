@@ -707,9 +707,9 @@ class TestGiteaProvider:
         assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "success"
         make("pending")
         assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "pending"
-        # No statuses attached -> unknown ("").
+        # An authoritative empty status list differs from an unreadable endpoint.
         make("pending", statuses=())
-        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == ""
+        assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "none"
 
     def test_combined_status_state_best_effort_on_error(self, monkeypatch):
         # A non-200 or malformed status read never breaks the snapshot -> "".
@@ -2173,6 +2173,7 @@ class TestGitHubProvider:
         ]]
         monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
             pr=pr, reviews_pages=reviews,
+            status={"statuses": []},
             check_runs={"check_runs": [{"status": "completed",
                                         "conclusion": "success"}]}))
         snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
@@ -2247,14 +2248,14 @@ class TestGitHubProvider:
             "success", [{"status": "completed", "conclusion": "skipped"}]))
         assert prov._combined_checks_state("o/r", "sha", "t") == "success"
 
-    def test_combined_checks_state_none_configured_is_empty(self, monkeypatch):
-        # No statuses and no check-runs -> "" (never fires checks_failed).
+    def test_combined_checks_state_none_configured_is_explicit(self, monkeypatch):
+        # Confirmed empty lists never fire checks_failed, but can allow consent.
         from agent_worktrees.providers import github
         prov = github.GitHubProvider()
         monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
             pr={}, status={"state": "pending", "statuses": []},
             check_runs={"check_runs": []}))
-        assert prov._combined_checks_state("o/r", "sha", "t") == ""
+        assert prov._combined_checks_state("o/r", "sha", "t") == "none"
         assert prov._combined_checks_state("o/r", "", "t") == ""  # no sha
 
     def test_get_snapshot_http_error_transient_vs_permanent(self, monkeypatch):
@@ -4062,4 +4063,3 @@ def test_no_pr_opened_is_explained_even_without_a_tracked_pr():
         pr_ops._finish_auto_open(result, None, None, None, open_pr=open_pr,
                                  prcfg=SimpleNamespace(auto_open=auto_open), **kw)
         assert result == {"pr_open_skipped": why}
-

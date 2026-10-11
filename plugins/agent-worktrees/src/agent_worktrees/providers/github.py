@@ -403,22 +403,14 @@ class GitHubProvider:
         self, repo: str, sha: str, token: str | None, *,
         host: str = "github.com",
     ) -> str:
-        """Provider-neutral CI rollup for ``sha`` over BOTH GitHub check systems.
-
-        GitHub reports CI two independent ways and a repo may use either or both:
-        legacy commit **statuses** (``/commits/{sha}/status``) and Actions
-        **check-runs** (``/commits/{sha}/check-runs``). This folds them into the
-        ``pr_contract`` vocabulary -- ``success`` | ``failure`` | ``pending`` |
-        ``""`` (nothing configured / unknown) -- with **failure dominating
-        pending dominating success**. Never raises: an unreadable endpoint
-        contributes nothing (a fully-unreadable pair yields ``""``, which never
-        fires ``checks_failed``), so a transient hiccup can't break the snapshot.
-        """
+        """Roll up statuses and check-runs; unreadable data stays unknown ("").
+        Failure dominates pending; success/none require both reads to succeed."""
         if not sha:
             return ""
         any_signal = False
         failure = False
         pending = False
+        readable = 0
 
         # 1. Legacy combined commit status.
         proc = run_cli(
@@ -435,6 +427,8 @@ class GitHubProvider:
                 data = {}
             if isinstance(data, dict):
                 statuses = data.get("statuses")
+                if isinstance(statuses, list):
+                    readable += 1
                 if isinstance(statuses, list) and statuses:
                     any_signal = True
                     raw = str(data.get("state", "")).strip().lower()
@@ -442,6 +436,8 @@ class GitHubProvider:
                         failure = True
                     elif raw == "pending":
                         pending = True
+                    elif raw != "success":
+                        readable -= 1
 
         # 2. Actions check-runs.
         cproc = run_cli(
@@ -457,10 +453,13 @@ class GitHubProvider:
             except json.JSONDecodeError:
                 cdata = {}
             runs = cdata.get("check_runs") if isinstance(cdata, dict) else None
+            if isinstance(runs, list):
+                readable += 1
             if isinstance(runs, list) and runs:
                 any_signal = True
                 for run in runs:
                     if not isinstance(run, dict):
+                        readable -= 1
                         continue
                     status = str(run.get("status", "")).strip().lower()
                     if status != "completed":
@@ -474,13 +473,11 @@ class GitHubProvider:
                     ):
                         failure = True
 
-        if not any_signal:
-            return ""
         if failure:
             return "failure"
         if pending:
             return "pending"
-        return "success"
+        return ("success" if any_signal else "none") if readable == 2 else ""
 
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",

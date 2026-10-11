@@ -158,7 +158,7 @@ class PRSnapshot:
     just-opened PR can briefly report None)."""
     checks_state: str = ""
     """Provider-neutral CI rollup for the head commit (#225): ``"success"`` |
-    ``"failure"`` | ``"pending"`` | ``""`` (unknown / no checks configured). A
+    ``"failure"`` | ``"pending"`` | ``"none"`` (confirmed empty) | ``""`` (unknown). A
     provider that doesn't report it leaves ``""`` -- which never fires a
     ``checks_failed``/``checks_succeeded`` transition, so the field is
     additive and safe."""

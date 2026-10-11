@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 import json
+import subprocess
 
 import pytest
 
@@ -75,6 +76,8 @@ def test_approved_baselines_wake_even_merged_only_and_deduplicate():
     {"checks_state": "pending"}, {"checks_state": "failure"},
     {"draft": True}, {"title": "WIP: change"}, {"labels": ("hold",)},
     {"labels": ("AUTO-MERGE",)}, {"base_ref": "other"}, {"head_sha": ""},
+    {"checks_state": ""}, {"author": ""},
+    {"reviews": (pc.Review(7, "APPROVED", "", commit_id="head"),)},
 ])
 def test_blocked_or_already_consented_does_not_bounce(changes):
     result = _wait(_approved(**changes), hold_labels=("hold",),
@@ -99,7 +102,7 @@ def test_real_approval_event_is_preserved_not_manufactured():
 
 
 def test_no_checks_reported_and_terminal_states_preserve_existing_semantics():
-    assert _wait(_approved(checks_state="")).matched
+    assert _wait(_approved(checks_state="none")).matched
     merged = _wait(_approved(pr_state="closed", merged=True))
     assert merged.payload["transitions"] == ["merged"]
     assert "updates" not in merged.payload
@@ -152,6 +155,38 @@ def test_missing_authoritative_approval_evidence_never_raises():
         reviews=(pc.Review(7, "approved", "reviewer", commit_id="head"),),
     )
     assert _wait(lowercase).matched
+
+
+def test_provider_partial_checks_failures_do_not_authorize_wake(monkeypatch):
+    from agent_worktrees.providers import github, gitea
+
+    github_provider = github.GitHubProvider()
+    for broken_endpoint in ("status", "check-runs"):
+        for bad in (
+            subprocess.CompletedProcess([], 1, "", "unavailable"),
+            subprocess.CompletedProcess([], 0, "{", ""),
+            subprocess.CompletedProcess([], 0, "{}", ""),
+        ):
+            def run(args, **kwargs):
+                if args[-1].endswith("/" + broken_endpoint):
+                    return bad
+                data = {"state": "success", "statuses": [{"id": 1}]} if (
+                    args[-1].endswith("/status")
+                ) else {"check_runs": []}
+                return subprocess.CompletedProcess([], 0, json.dumps(data), "")
+
+            monkeypatch.setattr(github, "run_cli", run)
+            state = github_provider._combined_checks_state("owner/repo", "head", "")
+            assert state == ""
+            assert not _wait(_approved(checks_state=state)).matched
+    gitea_provider = gitea.GiteaProvider()
+    for response in ((500, ""), (200, "{"), (200, "[]"), (200, "{}")):
+        monkeypatch.setattr(gitea_provider, "_curl", lambda *a, **k: response)
+        state = gitea_provider._combined_status_state(
+            "owner/repo", "head", "https://example.com", "",
+        )
+        assert state == ""
+        assert not _wait(_approved(checks_state=state)).matched
 
 
 def test_fetch_errors_do_not_invent_actionable_state():

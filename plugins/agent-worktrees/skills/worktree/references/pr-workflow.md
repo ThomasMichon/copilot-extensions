@@ -203,8 +203,10 @@ intervening block can prompt again; ignored comments, pending/dismissed reviews,
 and author reviews do not change the consent acknowledgement. Drafts, holds,
 conflicts/unknown mergeability, pending/failed
 checks, stale approvals, and wrong-base PRs do not receive this immediate wake.
-The provider's empty checks rollup retains its existing "no checks reported"
-meaning. Self-merge and human-merge profiles do not receive consent updates.
+Only a successful checks rollup or confirmed empty checks (`"none"`) permits
+this wake; unreadable/unknown checks (`""`) and unknown author/reviewer identity
+fail closed. GitHub requires both status and check-run reads to confirm
+success or no checks. Self-merge and human-merge profiles do not receive updates.
 
 Exit **0** means a selected transition **or** an actionable consent update, not
 proof of merge. Both text and `--json` expose the same result; text also prints

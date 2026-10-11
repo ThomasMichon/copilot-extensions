@@ -28,8 +28,9 @@ def consent_update_key(
         or readiness.get("verdict") != "APPROVED"
         or readiness.get("approval_stale")
         or not snap.head_sha
+        or not snap.author
         or snap.mergeable is not True
-        or snap.checks_state not in ("", "success")
+        or snap.checks_state not in ("none", "success")
         or (default_branch and snap.base_ref != default_branch)
     ):
         return ""
@@ -37,7 +38,7 @@ def consent_update_key(
         (
             (r.id, r.user, r.commit_id)
             for r in snap.reviews
-            if r.user != snap.author and not r.dismissed
+            if r.user and r.user != snap.author and not r.dismissed
             and r.state.upper() == "APPROVED"
             and r.commit_id in ("", snap.head_sha)
         ),
