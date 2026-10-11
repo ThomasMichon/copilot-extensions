@@ -2726,6 +2726,36 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
     assert "HOME is unavailable or inside the payload" in unsafe_home.stderr
 
 
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Windows registry provider")
+@pytest.mark.parametrize("template", ["powershell-shim.tmpl", "dispatcher-powershell.tmpl"])
+def test_powershell_cwd_boundary_rejects_registry_provider(
+    tmp_path: Path, template: str,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    source = (REPO / "libs" / "payload-invocation" / "templates" / template).read_text()
+    boundary = source[source.index("$_location = Get-Location"):source.index("\n}\n", source.index("} elseif ($_logicalInPayload")) + 3]
+    script = home / "boundary.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$_payloadRoot = '{str(payload).replace(chr(39), chr(39) * 2)}'\n"
+        "$_command = 'test'\nSet-Location -LiteralPath 'HKCU:\\Software'\n"
+        + boundary + "\n[IO.Directory]::GetCurrentDirectory()\n",
+        encoding="utf-8",
+    )
+    for project, expected in ((str(home), home), ("HKCU:\\Software", home)):
+        result = subprocess.run(
+            [shutil.which("pwsh"), "-NoProfile", "-File", str(script)],
+            cwd=payload, env={**os.environ, "HOME": str(home), "USERPROFILE": str(home), "COPILOT_PROJECT_DIR": project},
+            capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert Path(result.stdout.strip()).resolve() == expected.resolve()
+
+
 @pytest.mark.skipif(
     os.name != "nt" or shutil.which("pwsh") is None,
     reason="native Windows PowerShell shim test",

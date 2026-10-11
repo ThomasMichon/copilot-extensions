@@ -24,7 +24,6 @@ def _interpreter(extension: str) -> str:
     return interpreter
 
 
-@pytest.mark.guard
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 def test_read_only_and_cell_actions_never_allocate_legacy_stage(
     tmp_path: Path, extension: str,
@@ -68,7 +67,6 @@ def test_read_only_and_cell_actions_never_allocate_legacy_stage(
             assert not (home / ".agent-index").exists()
 
 
-@pytest.mark.guard
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("action", ["cell-provision", "cell-recover", "slot-cutover"])
 def test_cell_coordinator_does_not_reenter_payload(
@@ -151,7 +149,6 @@ def test_cell_coordinator_does_not_reenter_payload(
             process.communicate(timeout=10)
 
 
-@pytest.mark.guard
 def test_context_helper_child_uses_home_not_payload(tmp_path: Path, monkeypatch) -> None:
     spec = importlib.util.spec_from_file_location(
         "cwd_cell_runtime", PLUGIN / "scripts" / "cell-runtime.py",

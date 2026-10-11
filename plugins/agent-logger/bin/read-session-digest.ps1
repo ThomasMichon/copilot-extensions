@@ -46,7 +46,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
     exit 126
 }
 
-$_cwd = (Get-Location).Path
+$_location = Get-Location
+$_cwd = $_location.Path
 $_nativeCwd = [IO.Directory]::GetCurrentDirectory()
 $_separators = [char[]]@(
     [IO.Path]::DirectorySeparatorChar,
@@ -62,22 +63,31 @@ $_nativeInPayload = (
     $_nativeCwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
 )
 if ($_nativeInPayload -and -not $_logicalInPayload -and
+    $_location.Provider.Name -eq 'FileSystem' -and
     (Test-Path -LiteralPath $_cwd -PathType Container)) {
     [IO.Directory]::SetCurrentDirectory($_cwd)
 } elseif ($_logicalInPayload -or $_nativeInPayload) {
     $_outside = if ($env:COPILOT_PROJECT_DIR) { $env:COPILOT_PROJECT_DIR } else { $HOME }
-    if (Test-Path -LiteralPath $_outside -PathType Container) {
-        $_outside = (Resolve-Path -LiteralPath $_outside).Path
+    if ($_outside -and (Test-Path -LiteralPath $_outside -PathType Container)) {
+        $_resolvedOutside = Resolve-Path -LiteralPath $_outside
+        $_outside = if ($_resolvedOutside.Provider.Name -eq 'FileSystem') {
+            $_resolvedOutside.ProviderPath
+        } else { '' }
     }
     if (
+        -not $_outside -or
         -not (Test-Path -LiteralPath $_outside -PathType Container) -or
         [StringComparer]::OrdinalIgnoreCase.Equals($_outside, $_payloadRoot) -or
         $_outside.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
     ) { $_outside = $HOME }
-    if (Test-Path -LiteralPath $_outside -PathType Container) {
-        $_outside = (Resolve-Path -LiteralPath $_outside).Path
+    if ($_outside -and (Test-Path -LiteralPath $_outside -PathType Container)) {
+        $_resolvedOutside = Resolve-Path -LiteralPath $_outside
+        $_outside = if ($_resolvedOutside.Provider.Name -eq 'FileSystem') {
+            $_resolvedOutside.ProviderPath
+        } else { '' }
     }
     if (
+        -not $_outside -or
         -not (Test-Path -LiteralPath $_outside -PathType Container) -or
         [StringComparer]::OrdinalIgnoreCase.Equals($_outside, $_payloadRoot) -or
         $_outside.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)

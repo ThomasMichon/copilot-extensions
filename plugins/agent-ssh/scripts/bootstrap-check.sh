@@ -135,7 +135,8 @@ if [ -f "$lockFile" ]; then
 fi
 
 echo "[agent-ssh] runtime $deployed -> $current; reconciling in background..." >&2
-(cd "$HOME" && exec nohup bash "$init" >/dev/null 2>&1) &
+cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
+nohup bash "$init" >/dev/null 2>&1 &
 echo $! > "$lockFile" 2>/dev/null || true
 
 exit 0

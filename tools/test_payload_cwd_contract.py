@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import time
 
@@ -204,7 +205,56 @@ def test_all_reconcile_launchers_choose_home() -> None:
         text = script.read_text(encoding="utf-8")
         for line in text.splitlines():
             if re.search(r"^\s*(?:\(.*)?nohup bash ", line):
-                assert '(cd "$HOME" && exec nohup bash ' in line, script
+                assert line.lstrip().startswith("nohup bash "), script
+                before = text[:text.index(line)].rstrip().splitlines()[-1]
+                assert before.lstrip().startswith('cd "$HOME" || '), script
+
+
+@pytest.mark.skipif(os.name == "nt" or not BASH, reason="native POSIX signal contract")
+def test_reconcile_launch_survives_hup_with_home_cwd(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    receipt = home / "ready"
+    completed = home / "completed"
+    worker = home / "worker.sh"
+    worker.write_text(
+        'printf "%s\\n%s\\n" "$BASHPID" "$PWD" >"$HOME/ready"\n'
+        'sleep 1\nprintf "done" >"$HOME/completed"\n', encoding="utf-8",
+    )
+    text = (ROOT / "plugins" / "agent-codespaces" / "scripts" / "bootstrap-check.sh").read_text()
+    launch = text[text.index('cd "$HOME" || { echo "reconcile launch failed:'):text.index("launched_pid=$!")]
+    parent = subprocess.Popen(
+        [BASH, "-c", 'target=("$1")\n' + launch + "\nwait", "bash", str(worker)],
+        cwd=payload, env={**os.environ, "HOME": str(home)},
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not receipt.exists() and parent.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert receipt.exists()
+        worker_pid, cwd = receipt.read_text().splitlines()
+        assert Path(cwd).resolve() == home.resolve()
+        assert int(worker_pid) != parent.pid
+        payload.rename(tmp_path / "replaced-payload")
+        payload.mkdir()
+        os.killpg(parent.pid, signal.SIGHUP)
+        parent.wait(timeout=5)
+        deadline = time.monotonic() + 5
+        while not completed.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert completed.read_text() == "done"
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=5)
+        if not completed.exists():
+            try:
+                os.killpg(parent.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 @pytest.mark.skipif(os.name != "nt" or not BASH, reason="MSYS Windows launch contract")

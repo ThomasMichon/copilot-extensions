@@ -1492,6 +1492,9 @@ copy, never the whole (possibly-wedged) install. Guards:
   native process CWD are distinct. The staged installer also runs from HOME,
   resolving all build inputs by absolute runtime-owned staged paths. Ordinary
   task/workspace commands retain their caller's project context.
+  Standalone shell bootstrap processes relocate before directly backgrounding
+  `nohup`, rather than putting an unprotected subshell in front of it; the
+  invoking agent's separate process retains its workspace.
 - Structured worktrees installs retain their context-owned staging path even
   with inherited flags; they never fall through into legacy staging. Read-only
   index status and dependency-light cell-slot actions remain exempt from legacy
@@ -1515,6 +1518,8 @@ logical and native CWD before redirecting off a payload, including when a caller
 has already used `Set-Location` without releasing its native directory handle.
 When that logical location is already a safe workspace, only the native CWD is
 updated; the caller's workspace is preserved rather than replaced by HOME.
+Only FileSystem-provider locations qualify as native directory candidates;
+registry or other provider containers use the validated project/HOME fallback.
 The path-gated `Payload CWD contract` workflow runs a focused Linux/Windows smoke
 on relevant PRs; its scheduled/manual lane runs the full inherited-flag matrix.
 
