@@ -164,20 +164,29 @@ def register_spawn_routes(
             except (ValueError, KeyError, OSError) as exc:
                 ok, handle = False, {"error": str(exc)}
             if ok:
-                from .ci_repair_spawn import reservation_authorized
+                from .ci_repair_spawn import authority_snapshot, reservation_authorized
                 with queue._connect() as probe:
+                    expected = authority_snapshot(probe, task)
                     ok = reservation_authorized(probe, task, task.origin_ref, transition={
                         "phase": "spawned", "session_handle": handle["session"],
                     })
                 if not ok:
-                    queue.record_spawn(reservation.key, session_handle=handle["session"])
-                    queue.request_spawn_release(reservation.key, detail="spawned identity admission refused")
+                    queue.request_spawn_release(reservation.key, session_handle=handle["session"], detail="spawned identity admission refused")
                     return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
                             "coordinator_launch": {"ok": False, "error": "spawned identity admission refused", **handle}}
-                queue.record_spawn(reservation.key, session_handle=handle["session"])
+                try:
+                    queue.record_spawn(reservation.key, session_handle=handle["session"], authority_expected=expected)
+                except TaskError:
+                    queue.request_spawn_release(reservation.key, session_handle=handle["session"], detail="authority changed before publication")
+                    return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                            "coordinator_launch": {"ok": False, "error": "authority changed"}}
                 bus.publish({"type": "spawn.spawned", "reservation": _reservation_dict(queue.get_reservation(reservation.key))})
                 from . import bridge
-                if not bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30):
+                try:
+                    delivered = bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30)
+                except (OSError, __import__("subprocess").TimeoutExpired):
+                    delivered = False
+                if not delivered:
                     queue.request_spawn_release(reservation.key, detail="admitted task turn delivery failed")
                     return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
                             "coordinator_launch": {"ok": False, "error": "task turn delivery failed"}}
