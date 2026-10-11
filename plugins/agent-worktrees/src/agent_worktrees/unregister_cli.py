@@ -98,7 +98,8 @@ def cmd_unregister(args: argparse.Namespace) -> int:
     from . import pr_authority
 
     try:
-        with pr_authority.guard():
+        project = cfg.project_name()
+        with inst._binstub_lock("__registries__"), inst._binstub_lock(project), pr_authority.guard():
             return _unregister_guarded(args)
     except TimeoutError as exc:
         output.err(str(exc))

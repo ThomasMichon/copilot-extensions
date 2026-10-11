@@ -111,10 +111,19 @@ def test_unregister_checks_blockers_only_after_authority_admission(monkeypatch):
     from types import SimpleNamespace
     from agent_worktrees import unregister_cli
 
-    state = {"held": False, "publication": False}
+    state = {"held": False, "publication": False, "locks": []}
+
+    @contextmanager
+    def binstub(name):
+        state["locks"].append(name)
+        try:
+            yield
+        finally:
+            state["locks"].pop()
 
     @contextmanager
     def admit(**kwargs):
+        assert state["locks"] == ["__registries__", "example"]
         state.update(held=True, publication=True)
         try:
             yield
@@ -126,6 +135,7 @@ def test_unregister_checks_blockers_only_after_authority_admission(monkeypatch):
         return ["1 open PR(s)"]
 
     monkeypatch.setattr(pr_authority, "guard", admit)
+    monkeypatch.setattr(unregister_cli.inst, "_binstub_lock", binstub)
     monkeypatch.setattr(cfg, "project_name", lambda: "example")
     monkeypatch.setattr(unregister_cli, "_unregister_blockers", blockers)
     monkeypatch.setattr(unregister_cli.inst, "remove_project_binstub", lambda *a: pytest.fail("removed blocked project"))
