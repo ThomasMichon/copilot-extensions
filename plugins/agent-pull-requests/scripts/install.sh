@@ -267,6 +267,16 @@ _payload_hash() {
     # WITHOUT touching pyproject.toml must still be detected as a content
     # change, or an installed slot could wrongly report `reuse` for a
     # genuinely different payload.
+    #
+    # Returns 0 with EMPTY output only for the two legitimate "nothing to
+    # hash yet" cases (no bootstrap Python available on a first-ever
+    # install; no declared roots exist at all) -- both already degrade the
+    # same way the pre-fix hash did. Any OTHER failure (the fingerprint
+    # command itself erroring, e.g. on an unsupported filesystem object)
+    # returns NON-ZERO and prints to stderr: a caller must treat that as a
+    # hard install failure, never silently proceed as if "no content
+    # changed", which would be exactly the stale-slot-reuse this seam
+    # exists to prevent.
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
     py="$(_bootstrap_python)" || py=""
@@ -281,7 +291,12 @@ _payload_hash() {
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
     [[ ${#roots[@]} -gt 0 ]] || { printf ''; return 0; }
-    "$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>/dev/null || true
+    local hash
+    if ! hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>&1)"; then
+        _fail "Failed to compute payload fingerprint: $hash"
+        return 1
+    fi
+    printf '%s' "$hash"
 }
 
 _versioned_slot_clean() {
@@ -311,7 +326,9 @@ _versioned_mark_complete() {
         return 1
     fi
     local ph
-    ph="$(_payload_hash)"
+    if ! ph="$(_payload_hash)"; then
+        return 1
+    fi
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
     "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
@@ -435,7 +452,7 @@ mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
 _install_hook_files
 
-PAYLOAD_HASH="$(_payload_hash)"
+PAYLOAD_HASH="$(_payload_hash)" || exit 1
 SLOT_ALREADY_COMPLETE=0
 if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
     if _versioned_is_complete "$PAYLOAD_HASH"; then
