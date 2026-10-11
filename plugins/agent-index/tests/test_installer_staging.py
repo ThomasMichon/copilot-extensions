@@ -80,6 +80,10 @@ def test_cell_coordinator_does_not_reenter_payload(
     scripts.mkdir(parents=True)
     entry = scripts / f"install.{extension}"
     shutil.copyfile(PLUGIN / "scripts" / entry.name, entry)
+    shutil.copytree(
+        PLUGIN.parents[1] / "libs" / "installer-engine",
+        payload.parents[1] / "libs" / "installer-engine",
+    )
     (payload / "plugin.json").write_text('{"name":"agent-index"}\n', encoding="utf-8")
     (payload / "pyproject.toml").write_text('version = "0.1.0"\n', encoding="utf-8")
     receipt = home / "cwd.json"
