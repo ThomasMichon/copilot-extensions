@@ -99,7 +99,20 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
             "$bad = @{hook_transport='tcp';hook_endpoint='127.0.0.1:70000';hook_token='x'}\n"
             "if ($null -ne (Invoke-ResidentPostTool $bad '{}')) { throw 'bad port accepted' }\n"
             "$bad.hook_endpoint='example.invalid:80'\n"
-            "if ($null -ne (Invoke-ResidentPostTool $bad '{}')) { throw 'remote endpoint accepted' }\n",
+            "if ($null -ne (Invoke-ResidentPostTool $bad '{}')) { throw 'remote endpoint accepted' }\n"
+            "function Invoke-ResidentPostTool { return $null }\n"
+            "function Get-Command { [pscustomobject]@{Source='Invoke-FakePython'} }\n"
+            "function Invoke-FakePython {\n"
+            "  if ($args[-1] -ne '--local-fallback') { throw 'request would be resent' }\n"
+            "  [Console]::Out.Write('local-fallback')\n"
+            "}\n"
+            "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n"
+            "$env:COPILOT_EXTENSIONS_CONTEXT='selected-cell'\n"
+            "function Invoke-FakePython {\n"
+            "  if ($args[-1] -ne 'postToolUse') { throw 'cell bypassed validated client' }\n"
+            "  [Console]::Out.Write('cell-client')\n"
+            "}\n"
+            "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n",
             encoding="utf-8",
         )
         env = os.environ.copy()
@@ -115,6 +128,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
         assert result.stdout == (
             '{"additionalContext":"resident"}'
             '{"additionalContext":"resident"}'
+            'local-fallbackcell-client'
         )
         assert seen == [
             ("postToolUse", {"toolName": "view"}),
