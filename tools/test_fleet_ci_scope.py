@@ -22,11 +22,14 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     ("tools/standalone_consumers.py", True),
     ("tools/plugin_test_containment.py", True),
     ("libs/single-instance-lease/src/lease.py", True),
+    ("libs/agent-procutil/src/agent_procutil/__init__.py", True),
+    ("libs/agent-procutil/tests/test_no_window.py", True),
     (".github/workflows/ci.yml", True),
     ("plugins/agent-bridge/README.md", False),
     ("visions/machine-fleet/README.md", False),
     ("tools/run-standalone-tests.py.other", False),
     ("unrelated/fleet-manager/config.py", False),
+    ("libs/agent-procutil-other/src/process.py", False),
 ])
 def test_actual_workflow_regex_selects_only_fleet_and_runner_inputs(path, selected):
     assert len(PATTERNS) == 2
