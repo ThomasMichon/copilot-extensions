@@ -2967,6 +2967,7 @@ class Supervisor:
                             tracking.session_activity(local_by_id.get(local_sid)),
                             reservation_key=res["key"],
                             observed_at=local_observed_at,
+                            admission_fence={k: task.get(k) for k in ("generation", "status", "started_at", "owner_session_id")},
                         )
                     except DispatchError:
                         pass
@@ -3043,6 +3044,7 @@ class Supervisor:
                         tracking.session_activity(session),
                         reservation_key=res["key"],
                         observed_at=observed_at,
+                        admission_fence={k: task.get(k) for k in ("generation", "status", "started_at", "owner_session_id")},
                     )
                 except DispatchError:
                     pass

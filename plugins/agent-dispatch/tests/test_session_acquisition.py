@@ -159,3 +159,16 @@ def test_unqualified_protocol_string_failure_remains_ambiguous(monkeypatch):
         }), "unknown failure"))
     with pytest.raises(bridge.BridgeCarriedSessionBusy):
         session_acquisition.acquire(task(), mode="acp", prompt="work")
+
+
+def test_postlaunch_dispatch_fence_refusal_defers_instead_of_authorizing_cleanup(monkeypatch):
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    monkeypatch.setattr(session_acquisition.subprocess, "run", lambda argv, **kwargs:
+        subprocess.CompletedProcess(argv, 1, json.dumps({
+            "detail": {"code": "dispatch_fence_changed", "message": "task changed"},
+        }), "task changed"))
+    args = argparse.Namespace(spawn_backend="bridge", spawn_agent="worker", run_async=True)
+    result, _, handle = _do_spawn(args, task(spawn_worktree_ownership="created"))
+    assert result.returncode == 1
+    assert handle["deferred"] is True
+    assert handle["worktree"] == "worktree-a"

@@ -13,6 +13,7 @@ from tests._helpers import RepoDefaultingQueue as TaskQueue
 from agent_dispatch.queue import TaskError
 from agent_dispatch.acquisition_receipts import bind
 from agent_dispatch import acquisition_receipts
+from agent_dispatch.acquisition_receipts import bridge_evidence as bridge_evidence_real
 
 
 def evidence(receipt):
@@ -20,6 +21,14 @@ def evidence(receipt):
             "recorded_result": {k: v for k, v in receipt.items() if k != "reservation_key"}}
 
 pytestmark = pytest.mark.contract("agent_dispatch.acquisition_admission")
+
+
+@pytest.fixture(autouse=True)
+def receipt_delivery_authority(monkeypatch):
+    def inspect(delivery_id):
+        return {"delivery_id": delivery_id, "stage": "delivered", "state": "completed",
+                "recorded_result": {"task_id": "unused"}}
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", inspect)
 
 
 def test_native_start_argument_constructs_exact_request_without_ambient_identity(monkeypatch):
@@ -37,7 +46,7 @@ def test_native_start_argument_constructs_exact_request_without_ambient_identity
     )
 
 
-def test_claim_start_clear_prior_idle_and_reject_prestart_activity_sample(tmp_path):
+def test_claim_start_clear_prior_idle_and_reject_prestart_activity_sample(tmp_path, monkeypatch):
     queue = TaskQueue(tmp_path / "tasks.db")
     task = queue.create("review", now=10)
     reservation, _ = queue.reserve_spawn(task.id, now=11)
@@ -59,6 +68,9 @@ def test_claim_start_clear_prior_idle_and_reject_prestart_activity_sample(tmp_pa
         "mode": "acp", "delivery_id": "delivery-a",
     }
     bind(queue, receipt, evidence=evidence(receipt))
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: {
+        **evidence(receipt), "stage": "delivered",
+    })
     started = queue.start(task.id, "acquired-reservation-a", owner_session_id="native-a", now=16)
     assert started.owner_session_id == "native-a"
     assert started.activity is None
@@ -88,8 +100,26 @@ def test_active_owned_turn_beats_lingering_idle_metadata():
     }) is None
 
 
+def test_coordinator_admission_fence_ignores_supervisor_clock_skew(tmp_path):
+    from dataclasses import asdict
+    queue = TaskQueue(tmp_path / "clock.db")
+    task = queue.create("work", now=10)
+    reservation, _ = queue.reserve_spawn(task.id, now=11)
+    queue.record_spawn(reservation.key, session_handle="native-a", now=12)
+    claimed = queue.claim_one("worker", task_id=task.id, now=13)
+    old = {k: asdict(claimed)[k] for k in ("generation", "status", "started_at", "owner_session_id")}
+    started = queue.start(task.id, "worker", now=14)
+    result = queue.set_activity(task.id, "IDLE", reservation_key=reservation.key,
+                                observed_at=9999999999, admission_fence=old, now=15)
+    assert result.activity is None
+    current = {k: asdict(started)[k] for k in old}
+    result = queue.set_activity(task.id, "ACTIVE", reservation_key=reservation.key,
+                                observed_at=0, admission_fence=current, now=16)
+    assert result.activity == "ACTIVE"
+
+
 @pytest.mark.parametrize("owner,mode", [("acquired-reservation", "acp"), ("machine/worktree-a", "cli")])
-def test_receipt_fences_exact_native_start_for_both_explicit_and_worktree_owners(tmp_path, owner, mode):
+def test_receipt_fences_exact_native_start_for_both_explicit_and_worktree_owners(tmp_path, monkeypatch, owner, mode):
     queue = TaskQueue(tmp_path / "receipt.db")
     task = queue.create("work")
     reservation, _ = queue.reserve_spawn(task.id)
@@ -101,6 +131,9 @@ def test_receipt_fences_exact_native_start_for_both_explicit_and_worktree_owners
         "native_session_id": "native-a", "mode": mode, "delivery_id": "delivery-a",
     }
     bind(queue, receipt, evidence=evidence(receipt))
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: {
+        **evidence(receipt), "stage": "delivered",
+    })
     queue.record_spawn(reservation.key, session_handle="local-body:bridge-a" if mode == "acp" else "native-a")
     queue.claim_one(owner, task_id=task.id)
     for wrong in (None, "foreign-native"):
@@ -111,6 +144,25 @@ def test_receipt_fences_exact_native_start_for_both_explicit_and_worktree_owners
     assert started.owner_session_id == "native-a"
     with pytest.raises(TaskError):
         queue.start(task.id, owner, owner_session_id="foreign-native")
+
+
+def test_bound_but_unadmitted_receipt_cannot_start_task(tmp_path, monkeypatch):
+    queue = TaskQueue(tmp_path / "pending-receipt.db")
+    task = queue.create("work")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="created")
+    receipt = {
+        "reservation_key": reservation.key, "task_id": task.id,
+        "task_generation": task.generation, "worktree_id": "worktree-a",
+        "session_id": "native-a", "native_session_id": "native-a",
+        "mode": "cli", "delivery_id": "delivery-a",
+    }
+    bind(queue, receipt, evidence=evidence(receipt))
+    queue.claim_one("machine/worktree-a", task_id=task.id)
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: evidence(receipt))
+    with pytest.raises(TaskError, match="has not established"):
+        queue.start(task.id, "machine/worktree-a", owner_session_id="native-a")
+    assert queue.get(task.id).status == "claimed"
 
 
 def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_path, monkeypatch):
@@ -131,10 +183,14 @@ def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_p
     }
     calls = []
     monkeypatch.setattr(procutil, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    authority_stage = {"value": "launched"}
     def run(argv, **kwargs):
         calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, json.dumps(evidence(receipt)), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            **evidence(receipt), "stage": authority_stage["value"],
+        }), "")
     monkeypatch.setattr(acquisition_receipts.subprocess, "run", run)
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", bridge_evidence_real)
     app = FastAPI()
     acquisition_receipts.register_routes(app, queue)
     with TestClient(app) as client:
@@ -142,6 +198,7 @@ def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_p
         assert client.post("/acquisition-receipts", json=forged).status_code == 409
         assert client.post("/acquisition-receipts", json=receipt).status_code == 200
     assert calls == [["bridge", "acquisition-inspect", "delivery-a"]] * 2
+    authority_stage["value"] = "delivered"
     queue.claim_one("machine/worktree-a", task_id=task.id)
     with pytest.raises(TaskError):
         queue.start(task.id, "machine/worktree-a", owner_session_id="foreign")

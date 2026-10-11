@@ -137,6 +137,7 @@ class ActivityBody(BaseModel):
     activity: str | None = None
     reservation_key: str
     observed_at: float | None = None
+    admission_fence: dict | None = None
 
 
 class OwnerSessionBody(BaseModel):
@@ -861,6 +862,7 @@ def register_task_routes(
             lambda: queue.set_activity(
                 task_id, body.activity, reservation_key=body.reservation_key,
                 observed_at=body.observed_at,
+                admission_fence=body.admission_fence,
             ),
             "task.activity_updated",
         )

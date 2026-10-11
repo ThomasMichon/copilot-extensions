@@ -654,6 +654,7 @@ class QueueLifecycleMixin:
         *,
         reservation_key: str,
         observed_at: float | None = None,
+        admission_fence: dict | None = None,
         now: float | None = None,
     ) -> Task:
         """Publish activity fenced to this task's active spawn reservation."""
@@ -670,7 +671,13 @@ class QueueLifecycleMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
-            if observed_at is not None and observed_at < max(
+            if admission_fence is not None and admission_fence != {
+                "generation": task.generation, "status": task.status,
+                "started_at": task.started_at, "owner_session_id": task.owner_session_id,
+            }:
+                conn.execute("COMMIT")
+                return task
+            if admission_fence is None and observed_at is not None and observed_at < max(
                 task.claimed_at or 0, task.started_at or 0,
             ):
                 conn.execute("COMMIT")

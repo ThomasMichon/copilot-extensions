@@ -226,10 +226,11 @@ class QueueBackedClient:
     def heartbeat(self, task_id, worker_id):
         return asdict(self._q.heartbeat(task_id, worker_id))
 
-    def set_activity(self, task_id, activity, *, reservation_key, observed_at=None):
+    def set_activity(self, task_id, activity, *, reservation_key, observed_at=None, admission_fence=None):
         return asdict(
             self._q.set_activity(
-                task_id, activity, reservation_key=reservation_key, observed_at=observed_at
+                task_id, activity, reservation_key=reservation_key, observed_at=observed_at,
+                admission_fence=admission_fence,
             )
         )
 

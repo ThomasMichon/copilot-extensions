@@ -460,11 +460,13 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
     def set_activity(
         self, task_id: str, activity: str | None, *, reservation_key: str,
         observed_at: float | None = None,
+        admission_fence: dict | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/activity",
-                json={"activity": activity, "reservation_key": reservation_key, "observed_at": observed_at},
+                json={"activity": activity, "reservation_key": reservation_key,
+                      "observed_at": observed_at, "admission_fence": admission_fence},
             )
         )
 

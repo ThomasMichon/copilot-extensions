@@ -56,3 +56,9 @@ owners; missing or different native IDs refuse, including idempotent replay.
 CLI native-handle activity probes, as well as local ACP probes, timestamp their
 snapshot before the liveness query. A delayed pre-start IDLE response cannot
 restore stale task activity after start.
+Current local probes also carry the coordinator-issued generation/status/start/
+owner snapshot; that tuple, not cross-host clock comparison, fences admission.
+Legacy callers without the tuple retain the historical timestamp fallback.
+Start checks that bridge delivery has actually reached admission, not just that
+a pre-delivery receipt was prepared. Post-launch task-fence refusal defers;
+it never authorizes created-worktree teardown as a pre-effect failure.

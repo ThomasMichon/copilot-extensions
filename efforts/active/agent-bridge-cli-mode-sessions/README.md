@@ -777,6 +777,18 @@ from the host's).
 
 ## Journal
 
+### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
+
+Moved native receipt binding into the final locked delivery section, after
+resume/admission checks; start additionally verifies current bridge admission
+stage so a rejected pre-delivery receipt cannot authorize start. Added
+coordinator-issued admission snapshots to local CLI/ACP activity publication,
+avoiding cross-host clock comparisons. Post-launch task-fence changes now defer
+rather than authorizing ordinary spawn-failure cleanup.
+Bounded acquisition tests passed bridge 100 (1 skipped), dispatch 24 (2 skipped);
+final receipt/skew/post-launch regressions passed dispatch 26 (2 skipped).
+PR #6123 and all remaining Phase 6 gates remain open.
+
 ### 2026-10-10 — PR review: durable native start authority for CLI and ACP
 
 PR #6123 identified two missing start-authority checks: arbitrary supplied native

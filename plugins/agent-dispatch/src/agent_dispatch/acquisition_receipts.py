@@ -106,6 +106,16 @@ def validate_start(conn: Any, task: Any, native_id: str | None) -> None:
             raise TaskError("acquired worker start requires a bridge acquisition receipt")
         return
     receipt = rows[0]
+    current = bridge_evidence(receipt["delivery_id"])
+    if (
+        current.get("stage") not in {"delivering", "delivered"}
+        or current.get("state") not in {"pending", "completed"}
+        or not isinstance(current.get("recorded_result"), dict)
+        or any(current["recorded_result"].get(field) != receipt[field] for field in (
+            "task_id", "worktree_id", "session_id", "native_session_id", "mode", "delivery_id",
+        ))
+    ):
+        raise TaskError("acquisition delivery has not established current start authority")
     if (
         native_id != receipt["native_session_id"]
         or task.generation < receipt["task_generation"]

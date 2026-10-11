@@ -431,8 +431,11 @@ class AcquisitionRuntime:
         _, head = await verify_worktree(req)
         if head != result.native_session_id:
             raise AcquisitionRefused("head_changed", "native head changed before delivery")
-        await bind_dispatch_receipt(req, result, self.resolver)
         if req.mode == "cli":
+            await self._verify_delivery_admission(req, result)
+            await bind_dispatch_receipt(req, result, self.resolver)
+            await self._verify_delivery_admission(req, result)
+            self.store.stage(req, "delivering", result=result.model_dump())
             message, reason = self.db.enqueue_live_message_if_fresh(
                 result.session_id,
                 sender=req.driver,
@@ -461,6 +464,8 @@ class AcquisitionRuntime:
                     )
                 await self._verify_delivery_admission(req, result)
             async with session._turn_start_lock:
+                await self._verify_delivery_admission(req, result)
+                await bind_dispatch_receipt(req, result, self.resolver)
                 await self._verify_delivery_admission(req, result)
                 current = self.manager.get_session(result.session_id)
                 if current is not session or current.acp_session_id != result.native_session_id:
@@ -504,6 +509,11 @@ class AcquisitionRuntime:
             )
             validate_result(req, output, decision=decision)
             if stage == "delivering":
+                if req.mode == "cli":
+                    await self._deliver(req, output)
+                    self.store.journal.complete(req, token, output, decision=decision)
+                    self.store.release_gate(req)
+                    return output
                 turns = self.db.execute_read(
                     "SELECT prompt, acquisition_delivery_id FROM turns WHERE session_id=? AND turn_index=?",
                     (output.session_id, data["turn_index"]),
@@ -649,7 +659,14 @@ class AcquisitionRuntime:
                 continue
             if stage in {"delivered", "delivering"}:
                 output = AcquisitionResult.model_validate(data["result"])
-                if stage == "delivering":
+                if stage == "delivering" and previous.mode == "cli":
+                    admitted = self.db.execute_read(
+                        "SELECT session_id,body FROM live_messages WHERE idempotency_key=?",
+                        (f"acquisition:{previous.delivery_id}",),
+                    )
+                    if not admitted or admitted[0]["session_id"] != output.session_id or admitted[0]["body"] != self._delivery_prompt(previous, output):
+                        raise AcquisitionRefused("prior_delivery_ambiguous", "prior CLI admission is not proven")
+                elif stage == "delivering":
                     admitted = self.db.execute_read(
                         "SELECT session_id, prompt FROM turns WHERE acquisition_delivery_id=?",
                         (previous.delivery_id,),
