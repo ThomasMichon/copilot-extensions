@@ -6,8 +6,9 @@ renders provenance-marked repository instruction files, and maintains the
 checked-in projection lock. It never executes plugin code, and never removes
 a checked-in projection or the lock itself -- ``render_local_cache()`` is the
 one exception: it may reconcile away an *owned*, gitignored, worktree-local
-``*.local.instructions.md`` cache sibling that no longer matches a currently
-declared source (see ``docs/patterns/worktree-scoped-dynamic-guidance.md``),
+``context-locals/**/*.local.md`` body that no longer matches a declared
+source, or retire a verified untracked legacy local after new publication
+(see ``docs/patterns/worktree-scoped-dynamic-guidance.md``),
 never a checked-in file.
 """
 
