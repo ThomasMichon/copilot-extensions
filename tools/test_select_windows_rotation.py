@@ -7,6 +7,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import yaml
+
 SCRIPT = Path(__file__).resolve().parent / "select_windows_rotation.py"
 _previous_path = sys.path.copy()
 sys.path.insert(0, str(SCRIPT.parent))
@@ -77,3 +79,40 @@ def test_cli_github_output_format(capsys) -> None:
     assert rotation.main() == 0
     captured = capsys.readouterr()
     assert captured.out.startswith("plugins=[")
+
+
+def test_windows_workers_are_bounded_and_plugin_scoped() -> None:
+    workflow = yaml.safe_load(
+        (SCRIPT.parent.parent / ".github" / "workflows" /
+         "windows-coverage-rotation.yml").read_text(encoding="utf-8")
+    )
+    job = workflow["jobs"]["test"]
+    options = job["env"]["PYTEST_ADDOPTS"]
+    assert options.startswith(
+        "${{ matrix.plugin == 'agent-worktrees' && '-n 2 --dist=worksteal' || '' }}"
+    )
+    assert "inputs.profile_durations" in options
+    assert "|| '-v --durations=30 --durations-min=1'" in options
+    assert job["steps"][0]["with"]["ref"] == "${{ needs.select.outputs.sha }}"
+    assert "inputs.profile_durations && 60 || 30" in job["timeout-minutes"]
+    execution = job["steps"][-1]
+    assert execution["env"]["WORKTREE_WORKERS"] == "${{ matrix.plugin == 'agent-worktrees' }}"
+    assert "--exec-path" in execution["run"]
+    assert "$nativeVersion -ne $originalVersion" in execution["run"]
+    assert "Get-Command git -CommandType Application | Select-Object -First 1" in execution["run"]
+
+
+def test_canonical_manual_ref_and_schedule_pin_the_same_matrix_sha() -> None:
+    workflow = yaml.safe_load(
+        (SCRIPT.parent.parent / ".github" / "workflows" /
+         "windows-coverage-rotation.yml").read_text(encoding="utf-8")
+    )
+    select = workflow["jobs"]["select"]
+    assert select["outputs"]["sha"] == "${{ steps.resolve-sha.outputs.sha }}"
+    assert select["outputs"]["ref"] == "${{ steps.resolve-ref.outputs.ref }}"
+    assert select["steps"][0]["env"]["INPUT_REF"] == "${{ inputs.ref }}"
+    assert 'ref="dev"' in select["steps"][0]["run"]
+    assert select["steps"][1]["with"]["ref"] == "${{ steps.resolve-ref.outputs.ref }}"
+    report = workflow["jobs"]["report"]
+    assert report["needs"] == ["select", "test"]
+    assert "needs.select.outputs.ref == 'dev'" in report["if"]

@@ -1,6 +1,6 @@
 """Landing detection across a PR's bases (``finalize_landing`` / ``finalize_ref``).
 
-Real temporary repositories, one per case:
+Real temporary repositories, independently copied from a session seed per case:
 
 - a multi-commit branch squash-merged, after which upstream edits the same file
   (neither ``git cherry`` on the branch's own commits nor the blob comparison
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import shlex
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,10 +41,11 @@ def _commit(repo: Path, name: str, content: str, message: str = "") -> str:
     return _git("rev-parse", "HEAD", cwd=repo)
 
 
-@pytest.fixture
-def env(tmp_path: Path) -> SimpleNamespace:
+@pytest.fixture(scope="session")
+def _landing_seed(tmp_path_factory) -> Path:
     """``origin.git`` with ``main`` and ``dev``; ``seed`` publishes upstream
     changes; ``clone`` is the worktree checkout on ``worktree/<id>``."""
+    tmp_path = tmp_path_factory.mktemp("finalize-landing-seed")
     origin = tmp_path / "origin.git"
     _git("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
     seed = tmp_path / "seed"
@@ -57,8 +59,53 @@ def env(tmp_path: Path) -> SimpleNamespace:
     _identity(clone)
     worktree_id = "wt-landing"
     _git("checkout", "-q", "-b", f"worktree/{worktree_id}", "origin/main", cwd=clone)
+    return tmp_path
+
+
+def _copy_landing_env(source: Path, tmp_path: Path) -> SimpleNamespace:
+    """Copy object stores and preserve creation reflogs without shared state."""
+    shutil.copytree(source, tmp_path, dirs_exist_ok=True)
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    clone = tmp_path / "clone"
+    for repo in (seed, clone):
+        _git("remote", "set-url", "origin", str(origin), cwd=repo)
     return SimpleNamespace(tmp_path=tmp_path, origin=origin, seed=seed, clone=clone,
-                           worktree_id=worktree_id, slug="pr/landing")
+                           worktree_id="wt-landing", slug="pr/landing")
+
+
+@pytest.fixture
+def env(tmp_path: Path, _landing_seed: Path) -> SimpleNamespace:
+    return _copy_landing_env(_landing_seed, tmp_path)
+
+
+def _topology_snapshot(root: Path) -> dict[Path, bytes]:
+    return {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    }
+
+
+def test_landing_copies_isolate_commits_and_pushes(tmp_path, _landing_seed):
+    first = _copy_landing_env(_landing_seed, tmp_path / "first")
+    second = _copy_landing_env(_landing_seed, tmp_path / "second")
+    unchanged = {
+        root: _topology_snapshot(root)
+        for root in (_landing_seed, second.tmp_path)
+    }
+    previous = _git("--git-dir", str(first.origin), "rev-parse", "main", cwd=first.origin)
+    head = _commit(first.clone, "isolated.txt", "only in the first copy\n")
+    _git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=first.clone)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "main", cwd=first.origin) == head != previous
+    publisher_head = _commit(first.seed, "seed-only.txt", "only in the copied publisher\n")
+    _git("push", "-q", "origin", "HEAD:refs/heads/dev", cwd=first.seed)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "dev", cwd=first.origin) == publisher_head
+    for root, snapshot in unchanged.items():
+        assert _topology_snapshot(root) == snapshot
+        for relative in snapshot:
+            if "objects" in relative.parts:
+                assert relative.name != "alternates"
+                assert not (first.tmp_path / relative).samefile(root / relative)
 
 
 def _two_commit_change(clone: Path) -> str:

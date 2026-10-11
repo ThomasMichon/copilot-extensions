@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse an immutable PR repository fixture seed with independently copied Git stores and repaired worktree links; preserve real Git test isolation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

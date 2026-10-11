@@ -15,10 +15,34 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 _SCRIPT = Path(__file__).resolve().parent / "check-feed-neutrality.py"
 _spec = importlib.util.spec_from_file_location("check_feed_neutrality", _SCRIPT)
 guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
+
+
+def test_candidate_scan_preserves_patterns_and_prunes_only_existing_exclusions(
+    tmp_path, monkeypatch
+):
+    expected = {
+        tmp_path / "pyproject.toml",
+        tmp_path / "nested" / "Dockerfile.worker",
+        tmp_path / ".test-venvs" / "fixture" / "uv.toml",
+        tmp_path / ".github" / "workflows" / "check.yml",
+    }
+    for path in expected:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    for directory in guard._SCAN_DIR_EXCLUDE_PARTS:
+        path = tmp_path / "nested" / directory / "package.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    (tmp_path / "nested" / "unrelated.txt").write_text("", encoding="utf-8")
+    monkeypatch.setattr(guard, "REPO", tmp_path)
+
+    assert set(guard._iter_candidate_files()) == expected
 
 
 def test_bare_dockerfile_pin_is_flagged():
@@ -26,6 +50,16 @@ def test_bare_dockerfile_pin_is_flagged():
     problems = guard.scan_text(text, rel="Dockerfile")
     assert len(problems) == 1
     assert "download.pytorch.org" in problems[0]
+
+
+def test_candidate_scan_fails_on_unreadable_directory(monkeypatch):
+    def walk(root, *, onerror):
+        onerror(PermissionError("unreadable guard directory"))
+        yield root, [], []
+
+    monkeypatch.setattr(guard.os, "walk", walk)
+    with pytest.raises(PermissionError, match="unreadable guard directory"):
+        guard._iter_candidate_files()
 
 
 def test_dockerfile_arg_default_is_exempt():

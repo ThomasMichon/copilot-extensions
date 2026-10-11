@@ -14,6 +14,7 @@ already-merged PR.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,17 +46,17 @@ def _init_identity(repo: Path) -> None:
     _git("config", "user.name", "Test", cwd=repo)
 
 
-@pytest.fixture
-def refspec_worktree(tmp_path: Path) -> SimpleNamespace:
-    """Build a refspec-scheme worktree whose work is merged to origin/master.
+@pytest.fixture(scope="session")
+def _refspec_worktree_seed(tmp_path_factory) -> Path:
+    """Build the immutable refspec topology once, before any landing.
 
     Layout:
-      - ``origin.git`` bare remote with ``master`` carrying the merged work.
+      - ``origin.git`` bare remote with ``master`` carrying the base.
       - a clone checked out on ``worktree/<id>`` (never a local ``pr/<slug>``).
       - the remote has NO ``pr/<slug>`` head (auto-deleted on merge).
     """
+    tmp_path = tmp_path_factory.mktemp("finalize-precondition-seed")
     worktree_id = "anomalous-potato-wsl-test"
-    slug = "pr/some-fix-test"
 
     origin = tmp_path / "origin.git"
     _git("init", "--bare", "-b", "master", str(origin), cwd=tmp_path)
@@ -73,15 +74,62 @@ def refspec_worktree(tmp_path: Path) -> SimpleNamespace:
     # The refspec scheme keeps the worktree permanently on worktree/<id>.
     _git("checkout", "-b", f"worktree/{worktree_id}", cwd=clone)
     _commit(clone, "fix.txt", "the fix\n")
+    return tmp_path
 
+
+def _copy_refspec_worktree(source: Path, tmp_path: Path) -> SimpleNamespace:
+    """Copy all objects, refs and reflogs; only remote URLs need relocation."""
+    shutil.copytree(source, tmp_path, dirs_exist_ok=True)
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    clone = tmp_path / "worktree"
+    for repo in (seed, clone):
+        _git("remote", "set-url", "origin", str(origin), cwd=repo)
     return SimpleNamespace(
         tmp_path=tmp_path,
         origin=origin,
         clone=clone,
         seed=seed,
-        worktree_id=worktree_id,
-        slug=slug,
+        worktree_id="anomalous-potato-wsl-test",
+        slug="pr/some-fix-test",
     )
+
+
+@pytest.fixture
+def refspec_worktree(tmp_path: Path, _refspec_worktree_seed: Path) -> SimpleNamespace:
+    return _copy_refspec_worktree(_refspec_worktree_seed, tmp_path)
+
+
+def _topology_snapshot(root: Path) -> dict[Path, bytes]:
+    return {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    }
+
+
+def test_refspec_copies_isolate_commits_and_pushes(tmp_path, _refspec_worktree_seed):
+    first = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "first")
+    second = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "second")
+    unchanged = {
+        root: _topology_snapshot(root)
+        for root in (_refspec_worktree_seed, second.tmp_path)
+    }
+    previous = _git("--git-dir", str(first.origin), "rev-parse", "master", cwd=first.origin)
+    _commit(first.clone, "isolated.txt", "only in the first copy\n")
+    head = _git("rev-parse", "HEAD", cwd=first.clone)
+    _git("push", "origin", "HEAD:refs/heads/master", cwd=first.clone)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "master", cwd=first.origin) == head != previous
+    _commit(first.seed, "seed-only.txt", "only in the copied publisher\n")
+    _git("push", "origin", "HEAD:refs/heads/publisher", cwd=first.seed)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "publisher", cwd=first.origin) == _git(
+        "rev-parse", "HEAD", cwd=first.seed,
+    )
+    for root, snapshot in unchanged.items():
+        assert _topology_snapshot(root) == snapshot
+        for relative in snapshot:
+            if "objects" in relative.parts:
+                assert relative.name != "alternates"
+                assert not (first.tmp_path / relative).samefile(root / relative)
 
 
 def _land_on_master(env: SimpleNamespace, *, squash: bool) -> None:

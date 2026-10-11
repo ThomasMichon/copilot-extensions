@@ -135,11 +135,18 @@ def _iter_py(src: Path):
 
 
 def _iter_declarative(src: Path):
-    for ext in ("*.json", "*.yaml", "*.yml"):
-        for f in src.rglob(ext):
-            if _SKIP_DIR_PARTS & set(f.relative_to(src).parts):
-                continue
-            yield f
+    patterns = ("*.json", "*.yaml", "*.yml")
+    candidates: list[list[Path]] = [[] for _ in patterns]
+    for f in src.rglob("*.[jy]*"):
+        if _SKIP_DIR_PARTS & set(f.relative_to(src).parts):
+            continue
+        for pattern, matches in zip(patterns, candidates):
+            if f.match(pattern):
+                matches.append(f)
+                break
+    # Keep the original extension-grouped reporting order.
+    for matches in candidates:
+        yield from matches
 
 
 def _program_name(value: str) -> str | None:
@@ -170,6 +177,8 @@ class _SpawnFinder(ast.NodeVisitor):
         self._spawn_aliases: dict[str, str] = {}
         self._system_aliases: set[str] = set()
         self._func_stack: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+        self._lines: list[str] | None = None
+        self._safe_scopes: dict[ast.FunctionDef | ast.AsyncFunctionDef | None, bool] = {}
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module == "subprocess":
@@ -190,16 +199,24 @@ class _SpawnFinder(ast.NodeVisitor):
         if not self._func_stack:
             return self._text
         func = self._func_stack[-1]
-        lines = self._text.splitlines()
+        if self._lines is None:
+            self._lines = self._text.splitlines()
+        lines = self._lines
         end = getattr(func, "end_lineno", None) or len(lines)
         return "\n".join(lines[func.lineno - 1:end])
+
+    def _enclosing_has_safe_helper(self, node: ast.AST) -> bool:
+        scope = self._func_stack[-1] if self._func_stack else None
+        if scope not in self._safe_scopes:
+            source = self._enclosing_source(node)
+            self._safe_scopes[scope] = any(helper in source for helper in _SAFE_HELPERS)
+        return self._safe_scopes[scope]
 
     def _is_safe(self, call: ast.Call) -> bool:
         for kw in call.keywords:
             if kw.arg in _SAFE_KWARGS:
                 return True
-        source = self._enclosing_source(call)
-        return any(helper in source for helper in _SAFE_HELPERS)
+        return self._enclosing_has_safe_helper(call)
 
     def _first_argv_program(self, call: ast.Call) -> str | None:
         if not call.args:
@@ -235,8 +252,7 @@ class _SpawnFinder(ast.NodeVisitor):
             # flag directly, only via the enclosing function having already
             # routed the *actual* spawn elsewhere (unlikely for this call
             # itself, but tolerate the same enclosing-source heuristic).
-            source = self._enclosing_source(node)
-            if any(helper in source for helper in _SAFE_HELPERS):
+            if self._enclosing_has_safe_helper(node):
                 return
             self.hits.append((node.lineno, program))
             return
@@ -480,17 +496,29 @@ def _allowed(lines: list[str], lineno: int) -> bool:
 
 def verify() -> list[str]:
     problems: list[str] = []
-    cache: dict[Path, tuple[str, list[tuple[int, str]]]] = {}
+    roots = _production_src_roots()
+    candidates = {src: tuple(_iter_py(src)) for src in roots}
+    cache: dict[Path, tuple[str, list[tuple[int, str]], list[tuple[int, str]]]] = {}
+    content_cache: dict[str, tuple[list[tuple[int, str]], list[tuple[int, str]]]] = {}
     parse_failures: set[Path] = set()
 
-    def scan(f: Path) -> tuple[str, list[tuple[int, str]]]:
+    def scan(f: Path) -> tuple[str, list[tuple[int, str]], list[tuple[int, str]]]:
         if f in cache:
             return cache[f]
         try:
-            result = _find_flags(f)
+            text = f.read_text(encoding="utf-8")
+            if text not in content_cache:
+                tree = ast.parse(text, filename=str(f))
+                flags = _FlagFinder()
+                flags.visit(tree)
+                spawn_finder = _SpawnFinder(text)
+                spawn_finder.visit(tree)
+                content_cache[text] = (sorted(set(flags.hits)), sorted(set(spawn_finder.hits)))
+            flag_hits, spawn_hits = content_cache[text]
+            result = (text, flag_hits, spawn_hits)
         except SyntaxError as exc:
             text = f.read_text(encoding="utf-8")
-            result = (text, [])
+            result = (text, [], [])
             if f not in parse_failures:
                 parse_failures.add(f)
                 rel = f.relative_to(REPO).as_posix()
@@ -504,9 +532,9 @@ def verify() -> list[str]:
     # CREATE_NEW_CONSOLE is unsafe for background work regardless of whether a
     # package has adopted agent-procutil. Scan canonical shared libs as well as
     # plugin source so a vendored primitive cannot bypass the adoption gate.
-    for src in _production_src_roots():
-        for f in _iter_py(src):
-            text, hits = scan(f)
+    for src in roots:
+        for f in candidates[src]:
+            text, hits, _ = scan(f)
             lines = text.splitlines()
             rel = f.relative_to(REPO).as_posix()
             for lineno, tok in hits:
@@ -524,8 +552,8 @@ def verify() -> list[str]:
         src = plugin / "src"
         if not src.is_dir():
             continue
-        for f in _iter_py(src):
-            text, hits = scan(f)
+        for f in candidates[src]:
+            text, hits, _ = scan(f)
             if not hits:
                 continue
             lines = text.splitlines()
@@ -550,12 +578,9 @@ def verify() -> list[str]:
     # to triage line-by-line with inline comments in one pass -- see that
     # file's own header for the tracking issue.
     path_allow = _load_path_allowlist()
-    for src in _production_src_roots():
-        for f in _iter_py(src):
-            try:
-                text, hits = _find_unsuppressed_spawns(f)
-            except SyntaxError:
-                continue  # Already reported by the scan above.
+    for src in roots:
+        for f in candidates[src]:
+            text, _, hits = scan(f)
             if not hits:
                 continue
             lines = text.splitlines()
@@ -576,7 +601,7 @@ def verify() -> list[str]:
     # Rule 4: the same program list declared in JSON/YAML, which this guard
     # cannot trace to its eventual Python spawn site -- reported, not
     # silently verified, unless explicitly allowlisted.
-    for src in _production_src_roots():
+    for src in roots:
         for f in _iter_declarative(src):
             rel = f.relative_to(REPO).as_posix()
             for lineno, program in _find_declarative_spawns(f):

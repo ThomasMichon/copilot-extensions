@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         default: dev
+      profile_durations:
+        description: "Diagnostic only: allow a complete timing profile beyond normal runner budgets."
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   # A scheduled run and a manually dispatched run could otherwise overlap;
@@ -141,7 +146,12 @@ jobs:
     needs: select
     if: needs.select.outputs.plugins != '[]' && needs.select.outputs.plugins != ''
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.profile_durations && 60 || 30 }}
+    env:
+      PYTHONUNBUFFERED: "1"
+      PYTEST_ADDOPTS: >-
+        ${{ matrix.plugin == 'agent-worktrees' && '-n 2 --dist=worksteal' || '' }}
+        ${{ github.event_name == 'workflow_dispatch' && inputs.profile_durations && '-v --durations=0 --durations-min=0.05' || '-v --durations=30 --durations-min=1' }}
     strategy:
       fail-fast: false
       matrix:
@@ -159,7 +169,36 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }} (windows-latest)
-        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+        env:
+          PROFILE_DURATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.profile_durations }}
+          WORKTREE_WORKERS: ${{ matrix.plugin == 'agent-worktrees' }}
+        shell: pwsh
+        run: |
+          if ($env:WORKTREE_WORKERS -eq 'true') {
+            $git = (Get-Command git -CommandType Application | Select-Object -First 1).Source
+            $execPath = (& $git --exec-path).Replace('/', '\')
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the installed Git execution path.' }
+            $mingw = Split-Path (Split-Path $execPath -Parent) -Parent
+            $nativeBin = Join-Path $mingw 'bin'
+            $nativeGit = Join-Path $nativeBin 'git.exe'
+            if (-not (Test-Path $nativeGit -PathType Leaf)) {
+              throw 'The installed Git for Windows has no packaged native Git executable.'
+            }
+            $originalVersion = & $git --version
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot read the installed Git version.' }
+            $nativeVersion = & $nativeGit --version
+            if ($LASTEXITCODE -ne 0 -or $nativeVersion -ne $originalVersion) {
+              throw 'The packaged native Git does not match the installed Git version.'
+            }
+            $env:PATH = "$nativeBin;$env:PATH"
+            Write-Output 'Using the same-version packaged native Git within this test process.'
+          }
+          $budgetArgs = @()
+          if ($env:PROFILE_DURATIONS -eq 'true') {
+            Write-Output 'DIAGNOSTIC RUN: timing evidence only; not proof of meeting normal budgets.'
+            $budgetArgs = @('--timeout', '900', '--plugin-timeout', '2700')
+          }
+          python tools/run-plugin-tests.py ${{ matrix.plugin }} @budgetArgs
 
   report:
     name: file a tracking issue on failure

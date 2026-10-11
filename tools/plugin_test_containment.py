@@ -120,6 +120,10 @@ class ContainmentError(RuntimeError):
     """Raised when the process tree cannot be contained safely."""
 
 
+class UnreapedProcessError(ContainmentError):
+    """The owned tree may still be live; its sandbox must not be removed."""
+
+
 @dataclass(frozen=True)
 class _WindowsEnvironmentSnapshot:
     user: dict[str, tuple[Any, int]]
@@ -250,17 +254,24 @@ def isolated_environment(
 
 
 def _tree_size(path: Path) -> int:
+    # DirEntry caches Windows enumeration metadata; repeated Path.stat calls
+    # otherwise make the storage probe compete with Git-heavy test suites.
     total = 0
-    try:
-        files = path.rglob("*")
-        for entry in files:
-            try:
-                if entry.is_file() and not entry.is_symlink():
-                    total += entry.stat().st_size
-            except OSError:
-                continue
-    except OSError:
-        pass
+    pending: list[str | Path] = [path]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
     return total
 
 
@@ -277,7 +288,7 @@ def _linux_group_usage(pgid: int) -> tuple[int, int] | None:
         try:
             stat = (entry / "stat").read_text(encoding="ascii")
             fields = stat[stat.rfind(")") + 2 :].split()
-            if int(fields[2]) != pgid:
+            if int(fields[2]) != pgid or fields[0] == "Z":
                 continue
             count += 1
             statm = (entry / "statm").read_text(encoding="ascii").split()
@@ -292,7 +303,7 @@ def _ps_group_usage(pgid: int) -> tuple[int, int] | None:
     if not ps:
         return None
     result = subprocess.run(
-        [ps, "-eo", "pgid=,rss="],
+        [ps, "-eo", "pgid=,rss=,stat="],
         capture_output=True,
         text=True,
         check=False,
@@ -303,10 +314,10 @@ def _ps_group_usage(pgid: int) -> tuple[int, int] | None:
     rss_kib = 0
     for line in result.stdout.splitlines():
         fields = line.split()
-        if len(fields) != 2:
+        if len(fields) != 3 or fields[2].startswith("Z"):
             continue
         try:
-            row_pgid, row_rss = map(int, fields)
+            row_pgid, row_rss = map(int, fields[:2])
         except ValueError:
             continue
         if row_pgid == pgid:
@@ -319,22 +330,60 @@ def _posix_group_usage(pgid: int) -> tuple[int, int] | None:
     return _linux_group_usage(pgid) or _ps_group_usage(pgid)
 
 
-def _terminate_posix_group(pgid: int) -> None:
+def _posix_exit_code(proc: subprocess.Popen) -> int | None:
+    # WNOWAIT pins the child PID (and thus its group/session identity) until
+    # teardown has finished; Popen.poll() would reap it and permit PID reuse.
+    result = os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    if result is None:
+        return None
+    return result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
+
+
+def _posix_group_identity(pid: int) -> tuple[int, int]:
+    return os.getpgid(pid), os.getsid(pid)
+
+
+def _terminate_posix_group(
+    pgid: int, identity: tuple[int, int],
+) -> None:
+    def verify_identity() -> None:
+        try:
+            current = _posix_group_identity(pgid)
+        except OSError as exc:
+            raise UnreapedProcessError("Cannot verify owned POSIX process-group identity") from exc
+        if current != identity or identity != (pgid, pgid):
+            raise UnreapedProcessError("Refusing stale or reused POSIX process-group identity")
+
+    def wait_until_empty(seconds: float) -> bool:
+        deadline = time.monotonic() + seconds
+        while True:
+            usage = _posix_group_usage(pgid)
+            if usage is None:
+                raise UnreapedProcessError("Cannot verify POSIX process-group termination")
+            if usage[0] == 0:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+
+    verify_identity()
     try:
         os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
+    except ProcessLookupError:
         return
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        try:
-            os.killpg(pgid, 0)
-        except (ProcessLookupError, PermissionError, OSError):
-            return
-        time.sleep(0.05)
+    except OSError as exc:
+        raise UnreapedProcessError(f"Cannot terminate POSIX process group: {exc}") from exc
+    if wait_until_empty(2.0):
+        return
+    verify_identity()
     try:
         os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
-        pass
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise UnreapedProcessError(f"Cannot kill POSIX process group: {exc}") from exc
+    if not wait_until_empty(2.0):
+        raise UnreapedProcessError("POSIX process group remains live after SIGKILL")
 
 
 class _WindowsJob:
@@ -415,6 +464,7 @@ class _WindowsJob:
             wintypes.LPVOID,
         ]
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
 
         job = kernel32.CreateJobObjectW(None, None)
         if not job:
@@ -470,10 +520,29 @@ class _WindowsJob:
 
     def close(self) -> None:
         if self._handle:
-            self._kernel32.CloseHandle(self._handle)
-            self._handle = None
+            try:
+                if self.active_processes():
+                    if not self._kernel32.TerminateJobObject(self._handle, 124):
+                        raise UnreapedProcessError(
+                            "TerminateJobObject failed with error "
+                            f"{ctypes.get_last_error()}"
+                        )
+                    deadline = time.monotonic() + 5.0
+                    while self.active_processes():
+                        if time.monotonic() >= deadline:
+                            raise UnreapedProcessError(
+                                "Windows Job Object still has active processes after termination"
+                            )
+                        time.sleep(0.01)
+            except ContainmentError as exc:
+                if isinstance(exc, UnreapedProcessError):
+                    raise
+                raise UnreapedProcessError(str(exc)) from exc
+            finally:
+                self._kernel32.CloseHandle(self._handle)
+                self._handle = None
 
-    def usage(self) -> tuple[int, int]:
+    def active_processes(self) -> int:
         accounting = self._BasicAccounting()
         if not self._kernel32.QueryInformationJobObject(
             self._handle,
@@ -486,6 +555,10 @@ class _WindowsJob:
                 "QueryInformationJobObject(accounting) failed with error "
                 f"{ctypes.get_last_error()}"
             )
+        return int(accounting.ActiveProcesses)
+
+    def usage(self) -> tuple[int, int]:
+        active = self.active_processes()
         extended = self._ExtendedLimit()
         if not self._kernel32.QueryInformationJobObject(
             self._handle,
@@ -498,7 +571,7 @@ class _WindowsJob:
                 "QueryInformationJobObject(limits) failed with error "
                 f"{ctypes.get_last_error()}"
             )
-        return max(0, int(accounting.ActiveProcesses) - 1), int(
+        return max(0, active - 1), int(
             extended.PeakJobMemoryUsed
         )
 
@@ -531,6 +604,10 @@ def _run_contained_process(
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
+    if os.name != "nt" and not all(
+        hasattr(os, name) for name in ("waitid", "WNOWAIT", "WEXITED", "WNOHANG")
+    ):
+        raise ContainmentError("POSIX containment requires non-reaping waitid(WNOWAIT)")
     sandbox.mkdir(parents=True, exist_ok=True)
     ready = sandbox / ".containment-ready"
     ready.unlink(missing_ok=True)
@@ -541,6 +618,7 @@ def _run_contained_process(
         start_new_session=os.name != "nt",
     )
     job = None
+    posix_identity = None
     try:
         if os.name == "nt":
             try:
@@ -550,19 +628,25 @@ def _run_contained_process(
                 proc.terminate()
                 proc.wait(timeout=5)
                 raise
+        else:
+            posix_identity = _posix_group_identity(proc.pid)
         ready.write_text("assigned\n", encoding="ascii")
         started = time.monotonic()
         next_temp_check = started
         next_usage_check = started
         while True:
-            returncode = proc.poll()
+            returncode = proc.poll() if os.name == "nt" else _posix_exit_code(proc)
+            now = time.monotonic()
+            if now - started > limits.wall_seconds:
+                print(
+                    f"[LIMIT] wall-clock limit exceeded ({limits.wall_seconds:g}s)",
+                    file=sys.stderr,
+                )
+                return 124
             if returncode is not None:
                 return returncode
-            now = time.monotonic()
             violation = None
-            if now - started > limits.wall_seconds:
-                violation = f"wall-clock limit exceeded ({limits.wall_seconds:g}s)"
-            elif now >= next_temp_check:
+            if now >= next_temp_check:
                 temp_bytes = _tree_size(sandbox)
                 if temp_bytes > limits.max_temp_mb * 1024 * 1024:
                     violation = (
@@ -597,21 +681,26 @@ def _run_contained_process(
         print("[LIMIT] interrupted; reaping contained process tree", file=sys.stderr)
         return 130
     finally:
-        if os.name == "nt":
-            if job is not None:
-                job.close()
+        try:
+            if os.name == "nt":
+                if job is not None:
+                    job.close()
+            else:
+                if posix_identity is None:
+                    raise UnreapedProcessError("POSIX ownership identity was not captured")
+                _terminate_posix_group(proc.pid, posix_identity)
+        finally:
             if proc.poll() is None:
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    proc.kill()
-        else:
-            _terminate_posix_group(proc.pid)
-            if proc.poll() is None:
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        raise UnreapedProcessError(
+                            "Controller process could not be reaped"
+                        ) from exc
         ready.unlink(missing_ok=True)
 
 

@@ -315,6 +315,113 @@ def test_host_state_requires_explicit_tier_opt_in(capsys) -> None:
     assert "--allow-host-state requires --allow-explicit-tiers" in capsys.readouterr().err
 
 
+def test_plugin_budget_includes_final_sandbox_cleanup(monkeypatch, tmp_path, capsys):
+    clock = [0.0]
+    original_directory = runner._TestSandbox
+
+    class Directory(original_directory):
+        def __exit__(self, *args):
+            result = super().__exit__(*args)
+            clock[0] = 61.0
+            return result
+
+    plugin = tmp_path / "alpha"
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups",
+                        lambda *a, **k: [[plugin / "tests" / "test_one.py"]])
+    monkeypatch.setattr(runner, "run_contained", lambda *a, **k: 0)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner, "_TestSandbox", Directory)
+
+    rc = runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+    )
+
+    assert rc == 124
+    assert "including sandbox cleanup" in capsys.readouterr().err
+
+
+def test_reaped_group_cleanup_overlaps_the_next_group(monkeypatch, tmp_path):
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    original_directory = runner.tempfile.TemporaryDirectory
+
+    class Directory(original_directory):
+        @classmethod
+        def _rmtree(cls, name, *args, **kwargs):
+            if Path(name).name == "g1":
+                started.set()
+                assert release.wait(5), "next group never released cleanup"
+            super()._rmtree(name, *args, **kwargs)
+
+    plugin = tmp_path / "alpha"
+    calls = []
+
+    def run_contained(*args, **kwargs):
+        calls.append(args[0])
+        if len(calls) == 2:
+            try:
+                assert started.wait(5), "cleanup did not start after the first reaped group"
+            finally:
+                release.set()
+        return 0
+
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [
+        [plugin / "tests" / "test_one.py"], [plugin / "tests" / "test_two.py"],
+    ])
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+    monkeypatch.setattr(runner.tempfile, "TemporaryDirectory", Directory)
+
+    rc = runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+    )
+
+    assert rc == 0
+    assert len(calls) == 2
+    assert not list(tmp_path.glob("ce-alpha-*"))
+
+
+def test_unreaped_tree_retains_sandbox_and_never_schedules_group_cleanup(
+    monkeypatch, tmp_path, capsys
+):
+    plugin = tmp_path / "alpha"
+    sandbox_paths = []
+
+    def run_contained(*args, **kwargs):
+        sandbox_paths.append(kwargs["sandbox"])
+        (kwargs["sandbox"] / "still-owned.txt").write_text("preserve")
+        raise runner.UnreapedProcessError("forced teardown failure")
+
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups",
+                        lambda *a, **k: [[plugin / "tests" / "test_one.py"]])
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+
+    with pytest.raises(runner.UnreapedProcessError, match="forced teardown failure"):
+        runner.run_plugin(
+            "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+            plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+        )
+
+    assert (sandbox_paths[0] / "still-owned.txt").read_text() == "preserve"
+    assert (sandbox_paths[0] / "t" / "g1").is_dir()
+    assert "[KEEP] Unreaped process tree: sandbox retained at" in capsys.readouterr().err
+
+
 def test_admission_wait_rejects_infinite_value(monkeypatch, capsys) -> None:
     # `float("inf")` parses cleanly and isn't `< 0`, so it would otherwise
     # slip past a bare negative check and poll forever under contention,
@@ -372,4 +479,3 @@ def test_changed_plugins_empty_diff_schedules_nothing(monkeypatch) -> None:
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: next(calls))
     monkeypatch.setattr(runner, "_has_suite", lambda name: True)
     assert runner.changed_plugins("origin/main") == []
-

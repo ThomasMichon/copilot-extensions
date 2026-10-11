@@ -33,12 +33,24 @@ def _record(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
+@pytest.fixture
+def pr_repo(request, tmp_path, monkeypatch, _pr_repo_seed):
+    if getattr(request.node, "callspec", None) and request.node.callspec.params.get("scheme") == "snapshot":
+        from conftest import _copy_pr_repo
+
+        return _copy_pr_repo(_pr_repo_seed, tmp_path, monkeypatch)
+    return request.getfixturevalue("published_refspec_pr_repo")
+
+
 def _prepare(pr_repo, scheme="refspec", branch=None):
     config, wid, path, remote = pr_repo
     repo = dataclasses.replace(
         config.default_repo, pr=dataclasses.replace(config.default_repo.pr, head_scheme=scheme),
     )
     config = dataclasses.replace(config, repos={"ext": repo})
+    published = _record(wid).pr
+    if scheme == "refspec" and branch is None and published is not None:
+        return config, wid, path, remote, published.branch, published.head_sha
     first = pr_ops.create_pr(wid, config, title="Own change", branch=branch)
     assert first["success"], first
     return config, wid, path, remote, first["branch"], first["head_sha"]

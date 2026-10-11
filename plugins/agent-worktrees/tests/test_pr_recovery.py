@@ -14,6 +14,12 @@ from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_rebase, pr
 pytestmark = pytest.mark.timeout(180)
 
 
+@pytest.fixture
+def pr_repo(published_pr_repo):
+    """Recovery starts from independently copied, genuinely published Git state."""
+    return published_pr_repo
+
+
 def _git(*args, cwd):
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
@@ -25,8 +31,14 @@ def _record(wid):
 def _prepare(pr_repo, *, legacy=False):
     config, wid, path, remote = pr_repo
     branch = f"user/developer/topic-{git_ops.worktree_suffix(wid)}" if legacy else None
-    first = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
-    assert first["success"], first
+    if legacy:
+        first = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
+        assert first["success"], first
+        published_branch, published_head = first["branch"], first["head_sha"]
+    else:
+        published = _record(wid).pr
+        assert published is not None and published.state == "open"
+        published_branch, published_head = published.branch, published.head_sha
     if legacy:
         record = _record(wid)
         record.branch = wid
@@ -37,7 +49,7 @@ def _prepare(pr_repo, *, legacy=False):
     _git("add", "upstream.txt", cwd=anchor)
     _git("commit", "-m", "advance upstream", cwd=anchor)
     _git("push", "origin", "master", cwd=anchor)
-    return config, wid, path, remote, first["branch"], first["head_sha"]
+    return config, wid, path, remote, published_branch, published_head
 
 
 def _point(path, *, pending=False):
