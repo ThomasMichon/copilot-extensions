@@ -3,7 +3,8 @@
 Phase 6 of `efforts/active/agent-bridge-cli-mode-sessions` consolidates dispatch
 session acquisition beneath bridge. `agent-bridge acquire --request-file -`
 accepts version-1 JSON on stdin and calls `POST /api/v1/acquisitions`.
-HTTP protocol **30** gates this operation; older daemons refuse capability
+HTTP protocol **31** gates current clients, including post-preparation
+retirement/holder revalidation; older daemons refuse capability
 instead of falling back to create. Legacy unbound/explicit-fresh `create`
 semantics are unchanged. This slice supports **local** CLI and ACP; remote/
 fleet acquisition remains outstanding.
@@ -101,6 +102,9 @@ then revalidates the exact task/reservation/generation/retirement fence after
 target preparation and before launch. Revocation or a changed holder prevents
 creation. See the dispatch acquisition guide for the exact permission,
 concluded-reservation, liveness-attestation and deployment requirements.
+Current acquisition clients require protocol 31, refusing a protocol-30 daemon
+before sending retirement authorization. A protocol-31 daemon continues serving
+protocol-30 acquisition requests with its stronger holder/retirement checks.
 A bridge binding from an older generation of the same task remains resumable
 when current owner facts authorize it. A future/stale admission generation
 refuses. Historical expired registrations that are not the current native head

@@ -1,6 +1,8 @@
 """Explicit operator recovery preserves history and fences new authority."""
 
 import pytest
+import json
+import subprocess
 from fastapi.testclient import TestClient
 
 from agent_dispatch import __main__ as cli
@@ -66,6 +68,22 @@ def test_new_active_reservation_refuses_stale_authorization(recovery):
         queue.authorize_fresh_acquisition(task.id, **args)
 
 
+def test_active_exclusive_key_contender_without_worktree_refuses(recovery):
+    queue, task, _reservation, args = recovery
+    contender = queue.create("other occurrence", exclusive_key=task.exclusive_key)
+    pending, reserved = queue.reserve_spawn(contender.id)
+    assert reserved and pending.worktree == "worktree-a"
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET worktree=NULL, inherited_worktree=NULL WHERE key=?",
+            (pending.key,),
+        )
+        conn.commit()
+    with pytest.raises(TaskError, match="exclusive-key"):
+        queue.authorize_fresh_acquisition(task.id, **args)
+    assert queue.get(task.id).generation == task.generation
+
+
 @pytest.mark.parametrize("blocker", ["held", "claimed", "cleanup", "handle", "foreign"])
 def test_authorization_refuses_owner_cleanup_and_foreign_reservations(recovery, blocker):
     queue, task, reservation, args = recovery
@@ -89,7 +107,8 @@ def test_authorization_refuses_owner_cleanup_and_foreign_reservations(recovery, 
     assert queue.get_reservation(reservation.key).conversation_retired is False
 
 
-def test_http_requires_control_identity_not_worker_identity(recovery):
+def test_http_requires_control_identity_not_worker_identity(recovery, monkeypatch):
+    monkeypatch.setattr("agent_dispatch.acquisition_receipts.verify_recovery_bridge", lambda: None)
     queue, task, _reservation, args = recovery
     client = TestClient(create_app(queue, token="worker-test", control_token="control-test"))
     path = f"/spawn-reservations/tasks/{task.id}/authorize-fresh"
@@ -98,6 +117,41 @@ def test_http_requires_control_identity_not_worker_identity(recovery):
     response = client.post(path, json=args, headers={"Authorization": scheme + " control-test"})
     assert response.status_code == 200
     assert response.json()["authorization"] == "operator-fresh"
+
+
+def test_http_refuses_old_bridge_before_authorization(recovery, monkeypatch):
+    def unavailable():
+        raise TaskError("recovery requires bridge payload and daemon acquisition protocol 31")
+    monkeypatch.setattr("agent_dispatch.acquisition_receipts.verify_recovery_bridge", unavailable)
+    queue, task, reservation, args = recovery
+    client = TestClient(create_app(queue, token="worker-test", control_token="control-test"))
+    scheme = "Be" + "arer"
+    response = client.post(
+        f"/spawn-reservations/tasks/{task.id}/authorize-fresh", json=args,
+        headers={"Authorization": scheme + " control-test"},
+    )
+    assert response.status_code == 409
+    assert queue.get(task.id).generation == task.generation
+    assert queue.get_reservation(reservation.key).conversation_retired is False
+
+
+@pytest.mark.parametrize("version,supported,accepted", [(30, True, False), (31, False, False), (31, True, True)])
+def test_actual_recovery_readiness_boundary_requires_new_supported_protocol(monkeypatch, version, supported, accepted):
+    from agent_dispatch.acquisition_receipts import verify_recovery_bridge
+    monkeypatch.setattr("agent_dispatch.procutil.agent_bridge_launch_prefix", lambda: ["bridge-native"])
+    seen = []
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "supported": supported, "required_protocol": version,
+        }), "")
+    monkeypatch.setattr("agent_dispatch.acquisition_receipts.subprocess.run", run)
+    if accepted:
+        verify_recovery_bridge()
+    else:
+        with pytest.raises(TaskError):
+            verify_recovery_bridge()
+    assert seen == [["bridge-native", "acquisition-readiness"]]
 
 
 def test_recovery_cli_requires_explicit_scoped_inputs():

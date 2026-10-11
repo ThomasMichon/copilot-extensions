@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent_bridge import acquisition_authority, acquisition_runtime, session_manager as core
-from agent_bridge.acquisition_cli import acquire as client_acquire
+from agent_bridge.acquisition_cli import ACQUISITION_PROTOCOL_VERSION, acquire as client_acquire
 from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionRequest
 from agent_bridge.acquisition_store import AcquisitionStore
 from agent_bridge.acquisition_executor import executor
@@ -433,7 +433,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
         assert refused.json()["detail"]["code"] == "cli_options_unsupported"
         assert refused.json()["detail"]["effect"] == "not_started"
     client = BridgeClient("http://unused", "unused", connect_grace=0)
-    client._daemon_proto = (30, 1)
+    client._daemon_proto = (ACQUISITION_PROTOCOL_VERSION, 1)
     sent = []
 
     def request(method, path, body, **kw):
@@ -444,9 +444,9 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     result = client_acquire(client, req(mode="cli"))
     assert result.native_session_id == response.json()["native_session_id"]
     assert sent[0][:2] == ("POST", "/api/v1/acquisitions")
-    assert sent[0][2]["protocol_version"] == 30
+    assert sent[0][2]["protocol_version"] == ACQUISITION_PROTOCOL_VERSION
     assert sent[0][2]["mode"] == "cli"
-    client._daemon_proto = (29, 1)
+    client._daemon_proto = (30, 1)
     with pytest.raises(BridgeClientError) as error:
         client_acquire(client, req(mode="cli"))
     assert error.value.status == 426

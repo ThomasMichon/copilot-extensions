@@ -66,6 +66,14 @@ class SpawnRearmMixin:
             ).fetchone()
             if foreign:
                 raise TaskError("another task has an active reservation on the worktree")
+            exclusive_owner = conn.execute(
+                "SELECT key FROM spawn_reservations WHERE exclusive_key=? "
+                "AND state IN ('reserving','spawned','cold','releasing') "
+                "AND (exclusive_released=0 OR task_id=?) LIMIT 1",
+                (task.exclusive_key, task_id),
+            ).fetchone()
+            if exclusive_owner:
+                raise TaskError("exclusive-key spawn authority is still active")
             timestamp = self._now(None)
             conn.execute(
                 "UPDATE tasks SET generation=generation+1, updated_at=? WHERE id=?",

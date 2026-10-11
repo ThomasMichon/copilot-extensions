@@ -2,7 +2,7 @@
 
 One-shot `create --spawn`, local supervisor `make_headless_spawn`/
 `make_embody_spawn`, and interactive embodiment acquire and deliver through
-`agent-bridge acquire --request-file -`, HTTP protocol 30. Existing
+`agent-bridge acquire --request-file -`, current-client HTTP protocol 31. Existing
 `spawn_backend=bridge` selects ACP; explicit `embody` selects CLI. No missing-
 capability fallback changes mode or invokes worktree session launch directly.
 Standalone task/script dispatch still works without bridge.
@@ -119,3 +119,6 @@ the operator's check blocks launch; permission never authorizes stopping it.
 An active reservation must finish its normal defer/conclusion before this verb;
 never force-clear it or directly edit the database. Deploy the promoted
 bridge and dispatch fixes through normal immutable-runtime activation first.
+The promoted bridge payload/client must be deployed too: current acquisition
+clients require daemon protocol 31 and refuse a protocol-30 daemon before
+sending a request, rather than assume it implements recovery revalidation.
