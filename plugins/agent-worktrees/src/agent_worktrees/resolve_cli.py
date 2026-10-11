@@ -461,6 +461,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
         if state.requested_machine:
             config = state.load_config()
+            target_is_local = machine_identity.is_local_machine(state.requested_machine, config)
             requested_environment = getattr(args, "environment", None) or ""
             if requested_environment:
                 from .resolve_machine_cli import _ENV_LABEL_TO_NAME
@@ -469,7 +470,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 if want_platform is None:
                     output.err(f"Unknown environment: {requested_environment}")
                     return 1
-                if want_platform != cfg.detect_platform():
+                if not target_is_local or want_platform != cfg.detect_platform():
                     rc = _emit_remote_plan_for_env(
                         config, state.requested_machine, requested_environment
                     )
@@ -477,7 +478,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         return rc
                     output.err("Requested machine environment is unavailable.")
                     return 1
-            if not machine_identity.is_local_machine(state.requested_machine, config):
+            if not target_is_local:
                 rc = _try_machine_handoff(config, state.requested_machine)
                 if rc is not None:
                     return rc

@@ -242,14 +242,24 @@ def test_self_alias_rejects_unknown_environment(monkeypatch, tmp_path, capfd):
     assert "Unknown environment" in json.loads(capfd.readouterr().out)["error"]
 
 
-@pytest.mark.parametrize("environment,expected", [("WSL", 7), ("Bogus", 1)])
+@pytest.mark.parametrize("target,environment,expected", [
+    ("local-alias", "WSL", 7),
+    ("local-alias", "Bogus", 1),
+    ("remote-host", "WSL", 7),
+    ("remote-host", "Win", 7),
+    ("remote-host", "Bogus", 1),
+])
 def test_interactive_self_alias_honors_explicit_environment(
-    monkeypatch, tmp_path, environment, expected,
+    monkeypatch, tmp_path, target, environment, expected,
 ):
     config = _config(tmp_path, "example-host")
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "peek_base_repo", lambda: False)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(
+        resolve_cli.machine_identity, "is_local_machine",
+        lambda name, config: name == "local-alias",
+    )
     monkeypatch.setattr(resolve_cli.sys.stdin, "isatty", lambda: True)
     calls = []
     monkeypatch.setattr(
@@ -257,10 +267,10 @@ def test_interactive_self_alias_honors_explicit_environment(
         lambda *a, **k: calls.append("remote") or 7,
     )
     rc = resolve_cli.cmd_resolve(
-        _args(json=False, new_worktree=False, machine="local-alias", environment=environment)
+        _args(json=False, new_worktree=False, machine=target, environment=environment)
     )
     assert rc == expected
-    assert calls == (["remote"] if environment == "WSL" else [])
+    assert calls == (["remote"] if environment != "Bogus" else [])
 
 
 def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
