@@ -1,0 +1,9 @@
+{
+  "comment": "Document the confirm gate for worktree_actions and config_sections manifest entries.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
