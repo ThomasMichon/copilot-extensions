@@ -105,7 +105,7 @@ def _restore_container_config(
                 f"own {_CONFIG_PATH} after extracting its token (in-container "
                 f"command exited {proc.returncode}) -- the freshly logged-in "
                 "OAuth token may still be present in the container's "
-                "filesystem; consider recreating it",
+                f"filesystem; consider recreating container '{container_id}'",
                 file=sys.stderr,
             )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -113,7 +113,7 @@ def _restore_container_config(
             f"agent-containers: WARNING: could not restore {container_id}'s "
             f"own {_CONFIG_PATH} after extracting its token ({exc}) -- the "
             "freshly logged-in OAuth token may still be present in the "
-            "container's filesystem; consider recreating it",
+            f"container's filesystem; consider recreating container '{container_id}'",
             file=sys.stderr,
         )
 

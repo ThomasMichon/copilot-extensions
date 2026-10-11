@@ -304,18 +304,26 @@ def import_copilot_cli_token(
     rendered = "\n".join(header_lines + [json.dumps(data, indent=2)]) + "\n"
     tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     fd = -1
+    created = False
     try:
         fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        created = True
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             fd = -1
             stream.write(rendered)
             stream.flush()
             os.fsync(stream.fileno())
         tmp_path.replace(path)
+        created = False  # replaced onto `path` -- nothing left at tmp_path to clean up
     finally:
         if fd >= 0:
             os.close(fd)
-        tmp_path.unlink(missing_ok=True)
+        # Only remove a temp path THIS call actually created (and didn't
+        # already consume via replace()) -- never unlink on an O_EXCL
+        # creation failure, which would mean some other, unrelated file
+        # already occupied this (vanishingly unlikely, pid+uuid4-named) path.
+        if created:
+            tmp_path.unlink(missing_ok=True)
 
 
 def build_spawn_command(
