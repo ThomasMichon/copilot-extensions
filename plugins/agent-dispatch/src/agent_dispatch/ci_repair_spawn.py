@@ -24,7 +24,9 @@ def reservation_authorized(conn, task, reserved_by: str | None) -> bool:
 
         validate_registration("supervised-lane", spec)
         selected = execution(json.loads(task.prompt)["execution"])
-        return selected in spec.get("ci_repair_bindings", []) and spec.get("repo") == task.repo
+        from .identity import canonicalize_remote
+        lane_matches = spec.get("all_repos") is True or canonicalize_remote(spec.get("repo")) == task.repo
+        return selected in spec.get("ci_repair_bindings", []) and lane_matches
     except (ValueError, TypeError, KeyError):
         return False
 

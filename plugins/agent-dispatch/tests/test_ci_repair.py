@@ -386,6 +386,17 @@ def test_api_registration_rejects_bad_ci_bindings_before_reconciliation(tmp_path
     assert queue.register_registration("supervised-lane", {"repo": "example/project"}).id
 
 
+@pytest.mark.parametrize("scope", [{"all_repos": True}, {"repo": "https://github.com/example/project.git"}])
+def test_ci_reservation_accepts_canonical_and_all_repository_scopes(tmp_path, scope):
+    client = Client(tmp_path)
+    task = ci_repair.run_tick(client, config(enabled=True), runner=adapters)["created"][0]
+    client.queue.register_registration("supervised-lane", {
+        **scope, "labels": ["ci-repair"], "ci_repair_bindings": [EXECUTION],
+        "ci_repair_admission_command": ["fake-adapter"],
+    }, reg_id="repair-lane")
+    assert client.queue.reserve_spawn(task["id"], reserved_by="repair-lane")[1]
+
+
 @pytest.mark.parametrize(
     "error", [OSError("adapter missing"), subprocess.TimeoutExpired("adapter", 30)]
 )
