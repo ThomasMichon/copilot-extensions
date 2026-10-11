@@ -126,6 +126,7 @@ def test_first_touch_final_path_snapshot_and_completion(case, monkeypatch):
     }
     assert len(case.calls) == 4
     slot = Path(result["slot"])
+    assert not (slot / "build-state").exists()
     assert case.calls[0][0][-1] == str(slot)
     assert "--require-hashes" in case.calls[1][0]
     assert "--no-index" in case.calls[2][0]
@@ -561,7 +562,6 @@ def test_posix_launch_group_authority_from_parent(case, monkeypatch, contained):
     proxy.name = "posix"
     monkeypatch.setattr(staging, "os", proxy)
     monkeypatch.setattr(staging.sys, "platform", "linux")
-    monkeypatch.setattr(staging.signal, "SIGKILL", 9, raising=False)
     actual_is_file = Path.is_file
     monkeypatch.setattr(Path, "is_file", lambda path: (
         True if str(path).replace("\\", "/") == "/proc/self/stat" else actual_is_file(path)
@@ -582,12 +582,8 @@ def test_posix_launch_group_authority_from_parent(case, monkeypatch, contained):
                  deadline=time.monotonic() + 10)
     argv, kwargs = calls[0]
     assert kwargs.get("start_new_session", False) is (not contained)
-    if contained:
-        assert staging._CONTAINED_SUPERVISOR in argv
-        assert len(calls) == 1  # Never terminate the parent's group.
-    else:
-        assert argv == ["fake"]
-        assert calls[1] == ("group", process.pid)
+    assert staging._CONTAINED_SUPERVISOR in argv
+    assert len(calls) == 1  # No group signals, including after private leader exit.
 
 
 def test_cleanup_unconfirmed_preserves_candidate(case, monkeypatch):
@@ -638,3 +634,128 @@ time.sleep(120)
         "timeout" in str(error.value)
     )
     assert not list(case.tmp.glob(".build-output-*"))
+
+
+@pytest.mark.parametrize("current", ["reused-start-token", None])
+def test_supervisor_identity_mismatch_refuses_all_signals(monkeypatch, current):
+    process = SimpleNamespace(
+        pid=123, returncode=None, poll=lambda: None,
+        terminate=lambda: pytest.fail("unowned process must not be signalled"),
+        kill=lambda: pytest.fail("unowned process must not be killed"),
+    )
+    monkeypatch.setattr(staging, "_start_token", lambda pid: current)
+    with pytest.raises(staging._CleanupUnconfirmed, match="identity lost"):
+        staging._terminate_supervisor(process, "original-token", "probe")
+
+
+def test_reaped_supervisor_never_signalled(monkeypatch):
+    process = SimpleNamespace(
+        pid=123, returncode=0, poll=lambda: 0,
+        terminate=lambda: pytest.fail("reaped leader must not be signalled"),
+    )
+    monkeypatch.setattr(staging, "_start_token", lambda pid: pytest.fail("identity is gone"))
+    staging._terminate_supervisor(process, "original-token", "probe")
+
+
+@pytest.mark.parametrize("tool", ["python", "uv"])
+def test_tool_replaced_during_build_withholds_completion(case, monkeypatch, tool):
+    original = staging._run
+
+    def replace(argv, **kwargs):
+        output = original(argv, **kwargs)
+        if "-c" in argv:
+            getattr(case.build, tool).write_bytes(b"replacement")
+        return output
+
+    monkeypatch.setattr(staging, "_run", replace)
+    with pytest.raises(CandidateError, match="tool changed during"):
+        stage(case)
+    assert not (case.root / "versions" / "0.1.1.dev1").exists()
+
+
+def _cleanup_case(case):
+    slot = case.root / "versions" / "0.1.1.dev1"
+    target = slot / "build-state"
+    target.mkdir(parents=True)
+    (target / "payload").write_bytes(b"cache")
+    owner = {"token": "owned-token"}
+    (slot / ".stage-owner.json").write_text(json.dumps(owner))
+    return slot, target, owner
+
+
+@pytest.mark.parametrize("winerror", [5, 32, 145])
+def test_transient_owned_cleanup_retries(case, monkeypatch, winerror):
+    slot, target, owner = _cleanup_case(case)
+    real = staging.shutil.rmtree
+    attempts = []
+
+    def transient(path):
+        attempts.append(path)
+        if len(attempts) == 1:
+            error = OSError("transient")
+            error.winerror = winerror
+            raise error
+        return real(path)
+
+    monkeypatch.setattr(staging.shutil, "rmtree", transient)
+    staging._remove_owned_tree(target, slot=slot, owner=owner, primitive=case.primitive,
+                               root=case.root, version="0.1.1.dev1")
+    assert len(attempts) == 2
+    assert not target.exists()
+    assert (slot / ".stage-owner.json").exists()
+
+
+@pytest.mark.parametrize("winerror", [2, 5, 32, 145])
+def test_permanent_owned_cleanup_failure_preserves_candidate(case, monkeypatch, winerror):
+    slot, target, owner = _cleanup_case(case)
+    ticks = iter([0.0, 10.0])
+    monkeypatch.setattr(staging, "time", SimpleNamespace(
+        monotonic=lambda: next(ticks), sleep=lambda value: None,
+    ))
+
+    def fail(path):
+        error = OSError("permanent")
+        error.winerror = winerror
+        raise error
+
+    monkeypatch.setattr(staging.shutil, "rmtree", fail)
+    with pytest.raises(staging._CleanupUnconfirmed, match="cleanup failed"):
+        staging._remove_owned_tree(target, slot=slot, owner=owner, primitive=case.primitive,
+                                   root=case.root, version="0.1.1.dev1")
+    assert target.exists()
+    assert (slot / ".stage-owner.json").exists()
+
+
+def test_scratch_cleanup_failure_blocks_receipt_and_completion(case, monkeypatch):
+    original = staging._remove_owned_tree
+
+    def fail(target, **kwargs):
+        if target.name == "build-state":
+            raise staging._CleanupUnconfirmed("scratch cleanup failed")
+        return original(target, **kwargs)
+
+    monkeypatch.setattr(staging, "_remove_owned_tree", fail)
+    with pytest.raises(CandidateError, match="scratch cleanup failed"):
+        stage(case)
+    slot = case.root / "versions" / "0.1.1.dev1"
+    assert slot.exists()
+    assert not (slot / "candidate.json").exists()
+    assert not (slot / ".install-complete.json").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length cleanup")
+@pytest.mark.parametrize("kind", ["scratch", "failed-slot"])
+def test_real_deep_windows_owned_cache_cleanup(case, kind):
+    slot, target, owner = _cleanup_case(case)
+    deep = target
+    for index in range(12):
+        deep /= f"long-cache-segment-{index:02d}"
+    os.makedirs(staging._long_path(deep))
+    with open(staging._long_path(deep / "wheel.bin"), "wb") as stream:
+        stream.write(b"cache")
+    assert len(str(deep)) > 260
+    staging._remove_owned_tree(target if kind == "scratch" else slot,
+                               slot=slot, owner=owner, primitive=case.primitive,
+                               root=case.root, version="0.1.1.dev1")
+    assert not target.exists()
+    assert (slot / ".stage-owner.json").exists() is (kind == "scratch")

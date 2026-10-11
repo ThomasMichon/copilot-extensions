@@ -16,7 +16,6 @@ import math
 import os
 import re
 import shutil
-import signal
 import stat
 import subprocess
 import sys
@@ -332,6 +331,32 @@ def _operation(argv: list[str]) -> str:
     return "build operation"
 
 
+def _start_token(pid: int) -> str | None:
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text()
+        return text[text.rfind(")") + 2:].split()[19]
+    except (OSError, IndexError):
+        return None
+
+
+def _terminate_supervisor(process, token: str | None, operation: str) -> None:
+    if process.poll() is not None:
+        if process.returncode < 0 or process.returncode == 125:
+            raise _CleanupUnconfirmed(f"{operation}: supervisor cleanup not confirmed")
+        return
+    if token is None or _start_token(process.pid) != token:
+        raise _CleanupUnconfirmed(f"{operation}: supervisor identity lost; refusing signal")
+    process.terminate()
+    try:
+        code = process.wait(timeout=15)
+    except subprocess.TimeoutExpired as exc:
+        raise _CleanupUnconfirmed(
+            f"{operation}: descendant cleanup could not be confirmed"
+        ) from exc
+    if code < 0 or code == 125:
+        raise _CleanupUnconfirmed(f"{operation}: supervisor cleanup not confirmed")
+
+
 def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) -> str:
     from agent_procutil import (
         contained_test_mode,
@@ -346,7 +371,7 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
     kwargs = no_window_kwargs()
     contained = contained_test_mode()  # Parent authority, not a caller-supplied child env.
     private_group = os.name != "nt" and not contained
-    supervised = os.name != "nt" and contained
+    supervised = os.name != "nt"
     if supervised and (sys.platform != "linux" or not Path("/proc/self/stat").is_file()):
         raise CandidateError(f"{operation}: contained descendant supervision unavailable")
     if private_group:
@@ -355,7 +380,7 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
                 str(remaining), *argv] if supervised else argv)
     # Output is bounded on disk/read and never relayed as an error: uv may print credentials.
     output = cwd / f".build-output-{uuid.uuid4().hex}"
-    process = job = None
+    process = job = token = None
     try:
         fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as stream:
@@ -363,6 +388,8 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
                 command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                 stdout=stream, stderr=subprocess.DEVNULL, **kwargs,
             )
+            if supervised:
+                token = _start_token(process.pid)
             if os.name == "nt" and job is None:
                 raise CandidateError(f"{operation}: Windows Job containment unavailable")
             while process.poll() is None:
@@ -373,7 +400,7 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
                 time.sleep(0.05)
             code = process.returncode
             if code:
-                if supervised and code == 125:
+                if supervised and (code == 125 or code < 0):
                     raise _CleanupUnconfirmed(f"{operation}: descendant supervision failure")
                 classification = (
                     " (timeout)" if supervised and code == 124 else
@@ -384,20 +411,8 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
     finally:
         if job is not None:
             job.close()
-        elif process is not None and private_group:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        elif process is not None and supervised and process.poll() is None:
-            process.terminate()  # Supervisor handles its own descendants; never kill outer group.
-            try:
-                process.wait(timeout=15)
-            except subprocess.TimeoutExpired as exc:
-                # Do not clear candidate files with unconfirmed descendant cleanup.
-                raise _CleanupUnconfirmed(
-                    f"{operation}: descendant cleanup could not be confirmed"
-                ) from exc
+        elif process is not None and supervised:
+            _terminate_supervisor(process, token, operation)
         if process is not None and process.poll() is None:
             process.kill()
         if process is not None:
@@ -413,6 +428,62 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
                         f"{operation}: output handles remained open after cleanup"
                     ) from None
                 time.sleep(0.05)
+
+
+def _long_path(path: Path) -> str:
+    value = str(path)
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    if value.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + value[2:]
+    return "\\\\?\\" + value
+
+
+def _remove_owned_tree(
+    target: Path, *, slot: Path, owner: dict, primitive, root: Path, version: str,
+) -> None:
+    """Delete only this transaction's scratch or incomplete slot, retaining its fence."""
+    if target not in {slot, slot / "build-state"}:
+        raise _CleanupUnconfirmed("cleanup target is outside owned staging paths")
+    until = time.monotonic() + 5
+    owner_removed = False
+    while True:
+        try:
+            _path(slot)
+            _path(target)
+            if primitive.read_marker(root, version) is not None:
+                raise _CleanupUnconfirmed("refusing cleanup of completed candidate")
+            if not owner_removed and _read_json(slot / _OWNER) != owner:
+                raise _CleanupUnconfirmed("cleanup ownership mismatch")
+        except (OSError, CandidateError) as exc:
+            raise _CleanupUnconfirmed("owned cleanup safety revalidation failed") from exc
+        try:
+            if target == slot:
+                # Keep the ownership receipt until every other member is gone.
+                if not owner_removed:
+                    for entry in slot.iterdir():
+                        if entry.name == _OWNER:
+                            continue
+                        _path(entry, file=entry.is_file())
+                        if entry.is_dir():
+                            shutil.rmtree(_long_path(entry))
+                        else:
+                            os.unlink(_long_path(entry))
+                    os.unlink(_long_path(slot / _OWNER))
+                    owner_removed = True
+                os.rmdir(_long_path(slot))
+            elif target.exists():
+                shutil.rmtree(_long_path(target))
+            return
+        except OSError as exc:
+            if (
+                getattr(exc, "winerror", None) not in {5, 32, 145}
+                or time.monotonic() >= until
+            ):
+                raise _CleanupUnconfirmed(
+                    "owned staging cleanup failed; completion withheld"
+                ) from exc
+            time.sleep(0.05)
 
 
 _PROBE = """
@@ -638,6 +709,15 @@ def stage_candidate(
                     raise CandidateError("isolated native/dependency/version probe failed")
                 if _hash(_bytes(config_path)) != policy["uv_config_sha256"]:
                     raise CandidateError("uv policy changed during build")
+                _remove_owned_tree(
+                    scratch, slot=slot, owner=owner, primitive=primitive,
+                    root=root, version=version,
+                )
+                if (
+                    _file_hash(python) != policy["python_sha256"]
+                    or _file_hash(uv) != policy["uv_sha256"]
+                ):
+                    raise CandidateError("build tool changed during build")
                 if time.monotonic() >= deadline:
                     raise CandidateError("candidate build timeout before completion")
                 _write(slot / _RECEIPT, receipt)
@@ -651,7 +731,10 @@ def stage_candidate(
                     and primitive.read_marker(root, version) is None
                     and _read_json(slot / _OWNER) == owner
                 ):
-                    shutil.rmtree(slot)
+                    _remove_owned_tree(
+                        slot, slot=slot, owner=owner, primitive=primitive,
+                        root=root, version=version,
+                    )
                 raise
     except CandidateError:
         raise
