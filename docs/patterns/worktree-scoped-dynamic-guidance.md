@@ -62,8 +62,8 @@ reviewed body as the source of truth would leave two gaps:
 ## Standard approach
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
-purely checked-in: a gitignored, locally re-rendered cache that lives beside
-the checked-in projection for as long as the worktree exists, refreshed at
+purely checked-in: a gitignored, locally re-rendered cache that lives outside
+the instruction tree for as long as the worktree exists, refreshed at
 worktree lifecycle boundaries rather than every session start.
 
 ### 1. The gitignored non-discovered local body

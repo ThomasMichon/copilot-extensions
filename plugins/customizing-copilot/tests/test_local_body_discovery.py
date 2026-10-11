@@ -59,6 +59,9 @@ def test_nested_local_body_paths_preserve_subdirectories() -> None:
 
 @pytest.mark.parametrize("name", ["AGENTS", "CLAUDE", "GEMINI", "copilot-instructions"])
 def test_fallbacks_cannot_use_automatically_loaded_instruction_names(name: str) -> None:
+    assert delivery.local_destination(
+        f".github/instructions/policy/{name}.instructions.md"
+    ).endswith(f"/{name}.local.md")
     with pytest.raises(ValueError, match="automatic instruction discovery"):
         delivery.fallback_destination(f".github/instructions/policy/{name}.instructions.md")
 

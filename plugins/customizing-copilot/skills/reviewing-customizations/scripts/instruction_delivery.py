@@ -94,11 +94,16 @@ def render_projection(
 def local_destination(destination: str) -> str:
     if destination.endswith(".local.instructions.md"):
         raise ValueError("destination is already a local cache path")
-    fallback = PurePosixPath(fallback_destination(destination))
+    path = PurePosixPath(destination)
+    if (
+        path.parts[:2] != (".github", "instructions")
+        or len(path.parts) < 4 or not path.name.endswith(".instructions.md")
+    ):
+        raise ValueError("invalid selector destination")
     return str(
         PurePosixPath(".github/copilot/context-locals")
-        / PurePosixPath(*fallback.parts[3:]).with_name(
-            fallback.name.removesuffix(".md") + ".local.md"
+        / PurePosixPath(*path.parts[2:]).with_name(
+            path.name.removesuffix(".instructions.md") + ".local.md"
         )
     )
 
