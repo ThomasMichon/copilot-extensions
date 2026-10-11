@@ -312,8 +312,16 @@ containment.
 
 The standalone runner (`tools/run-standalone-tests.py`) uses the same
 environment lease protocol for managed venvs and custom `--python`
-interpreters. A custom interpreter reports its actual `sys.prefix`, so
-launchers at different paths using the same environment still contend.
+interpreters. Standard venv roots are discovered from the canonical containing
+`bin`/`Scripts` directory or `pyvenv.cfg`, without executing candidate code.
+The root remains identifiable while a competing rebuild temporarily removes
+the interpreter and configuration. Availability is checked only after the
+lease is acquired, so `--admission-wait` covers that race.
+Nonstandard custom launchers require `--environment-root <actual-env-root>`:
+their target cannot be inferred safely without executing them. This explicit
+address must name the environment they actually use, so different launchers
+sharing it contend. The override requires `--python` and cannot be used with
+`--prepare`; it is not an environment-exclusion bypass.
 `--prepare` remains restricted to repository `.test-venvs` interpreters;
 preparation and test use share one held lease. POSIX venv `bin/python`
 symlinks are invoked as venv launchers, not resolved to the base interpreter.

@@ -219,7 +219,7 @@ def test_standalone_managed_environment_protects_prepare_and_use(cache, monkeypa
     assert probe(environment) == 0
 
 
-def test_custom_interpreter_keys_real_prefix_not_executable_parent(cache, monkeypatch):
+def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cache, monkeypatch):
     runner = load_runner("run-standalone-tests.py")
     environment = cache / "custom-environment"
     subprocess.run(
@@ -242,3 +242,78 @@ def test_custom_interpreter_keys_real_prefix_not_executable_parent(cache, monkey
     assert runner.main(["agent-index-service", "--python", str(python)]) == 0
     assert seen == [True]
     assert probe(environment) == 0
+
+
+@pytest.mark.parametrize("custom", [False, True], ids=["managed", "custom-venv"])
+@pytest.mark.parametrize("wait", [0, 3], ids=["busy", "bounded-wait"])
+def test_missing_interpreter_during_rebuild_obeys_environment_lease(cache, custom, wait):
+    environment = cache / ".test-venvs" / sys.platform / "agent-index-service"
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    ready = cache / "holder-ready"
+    waiter_ready = cache / "waiter-ready"
+    holder = subprocess.Popen(
+        child_command(environment, mode="hold", ready=ready),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, **launch_options(),
+    )
+    waiter = None
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and holder.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists()
+        assert not python.exists()
+        (cache / "agent-index-service" / "tests").mkdir(parents=True)
+        script = """
+import importlib.util, sys
+from pathlib import Path
+tools, repo, python, ready, custom, wait = sys.argv[1:]
+sys.path.insert(0, tools)
+spec = importlib.util.spec_from_file_location('standalone_waiter', Path(tools) / 'run-standalone-tests.py')
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+runner.REPO = Path(repo)
+def run(command, **kwargs):
+    assert Path(command[0]) == Path(python)
+    assert Path(python).is_file()
+    print('protected-test-use', flush=True)
+    return 0
+runner.run_contained = run
+runner.subprocess.run = lambda *a, **k: (_ for _ in ()).throw(AssertionError('candidate probed'))
+Path(ready).touch()
+arguments = ['agent-index-service', '--admission-wait', wait]
+if custom == 'True':
+    arguments += ['--python', python]
+raise SystemExit(runner.main(arguments))
+"""
+        waiter = subprocess.Popen(
+            [
+                sys.executable, "-I", "-c", script, str(TOOLS), str(cache),
+                str(python), str(waiter_ready), str(custom), str(wait),
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **launch_options(),
+        )
+        if wait == 0:
+            stdout, stderr = waiter.communicate(timeout=10)
+            assert waiter.returncode == 3, (stdout, stderr)
+            assert "BUSY" in stderr
+            assert "protected-test-use" not in stdout
+        else:
+            deadline = time.monotonic() + 10
+            while not waiter_ready.exists() and waiter.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert waiter_ready.exists()
+            time.sleep(0.3)
+            assert waiter.poll() is None, "missing executable bypassed the lease wait"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            holder.communicate("release\n", timeout=10)
+            stdout, stderr = waiter.communicate(timeout=10)
+            assert waiter.returncode == 0, (stdout, stderr)
+            assert "protected-test-use" in stdout
+    finally:
+        if holder.poll() is None:
+            holder.communicate("release\n", timeout=10)
+        if waiter is not None and waiter.poll() is None:
+            waiter.communicate(timeout=10)
+    assert holder.returncode == 0

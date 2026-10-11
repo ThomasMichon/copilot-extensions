@@ -24,16 +24,25 @@ def default_python(component: str) -> Path:
 
 
 def interpreter_environment(python: Path) -> Path:
-    """Ask custom interpreters for their real prefix, not their launcher location."""
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    result = subprocess.run(
-        [str(python), "-I", "-c", "import sys; print(sys.prefix)"],
-        check=True, capture_output=True, text=True, timeout=30, **flags,
+    """Discover standard environment roots without executing the interpreter.
+
+    Layout remains identifiable while a lease holder rebuilds an environment,
+    even when both its executable and pyvenv.cfg are temporarily absent.
+    """
+    parent = python.parent.resolve()
+    if parent.name.lower() in {"bin", "scripts"}:
+        return parent.parent.resolve()
+    if (parent / "pyvenv.cfg").is_file():
+        return parent
+    resolved = python.resolve()
+    if resolved == Path(sys.executable).resolve():
+        return Path(sys.prefix).resolve()
+    if resolved != python:
+        return interpreter_environment(resolved)
+    raise ValueError(
+        "cannot discover this custom launcher's environment without executing it; "
+        "provide --environment-root for its actual Python environment"
     )
-    prefix = Path(result.stdout.strip())
-    if not result.stdout.strip() or not prefix.is_absolute():
-        raise ValueError("test interpreter did not report an absolute environment prefix")
-    return prefix.resolve()
 
 
 def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
@@ -78,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("component", choices=STANDALONE_CONSUMERS)
     parser.add_argument("--python", type=Path, help="test interpreter (default: managed venv)")
+    parser.add_argument(
+        "--environment-root", type=Path,
+        help="actual environment used by a nonstandard --python launcher (never probed)",
+    )
     parser.add_argument("--prepare", action="store_true", help="provision declared test dependencies")
     parser.add_argument("--smoke", action="store_true", help="run controller contracts without real deployment cycles")
     parser.add_argument("--admission-wait", type=float, default=0.0)
@@ -89,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--admission-wait must be a non-negative, finite number")
     if args.smoke and args.component != "agent-index-service":
         parser.error("--smoke is only defined for agent-index-service")
+    if args.environment_root and not args.python:
+        parser.error("--environment-root requires --python")
+    if args.environment_root and args.prepare:
+        parser.error("--environment-root cannot be used with --prepare")
     # Resolving bin/python itself follows a POSIX venv symlink to the base
     # interpreter and bypasses the venv. Resolve only its containing directory.
     requested_python = args.python or default_python(args.component)
@@ -96,8 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     root = REPO / args.component
     if args.prepare and not python.is_relative_to((REPO / ".test-venvs").resolve()):
         parser.error("--prepare may only provision an interpreter under repository .test-venvs")
-    if not (root / "tests").is_dir() or (not args.prepare and not python.is_file()):
-        parser.error("component tests and a prepared interpreter are required; use --prepare")
+    if not (root / "tests").is_dir():
+        parser.error("component tests are required")
     limits = Limits(wall_seconds=args.timeout)
     try:
         limits.validate()
@@ -105,10 +122,17 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
     try:
         environment_root = (
-            interpreter_environment(python)
-            if (args.python or args.prepare) and python.is_file()
-            else python.parent.parent.resolve()
+            args.environment_root.resolve()
+            if args.environment_root else interpreter_environment(python)
         )
+        if args.environment_root:
+            try:
+                discovered_root = interpreter_environment(python)
+            except ValueError:
+                pass  # An opaque launcher requires the caller's explicit address.
+            else:
+                if discovered_root != environment_root:
+                    parser.error("--environment-root disagrees with the interpreter's standard environment")
         if args.prepare and not environment_root.is_relative_to((REPO / ".test-venvs").resolve()):
             parser.error("--prepare may only provision an environment under repository .test-venvs")
         lease = acquire(args.admission_wait, environment_root)
@@ -123,8 +147,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"standalone tests: {exc}", file=sys.stderr)
         return 1
     try:
+        # Availability is meaningful only after a competing rebuild releases
+        # the environment. No candidate code runs before this exclusion.
+        if args.prepare and python.is_file() and not (environment_root / "pyvenv.cfg").is_file():
+            parser.error("--prepare requires a standard managed venv, not a copied host interpreter")
         if args.prepare:
             prepare(args.component, python, smoke=args.smoke)
+        elif not python.is_file():
+            parser.error("a prepared interpreter is required; use --prepare")
         with tempfile.TemporaryDirectory(prefix=f"{args.component}-tests-") as temporary:
             sandbox = Path(temporary)
             env = isolated_environment(os.environ, sandbox)

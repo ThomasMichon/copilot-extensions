@@ -64,12 +64,18 @@ def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkey
     python = tmp_path / ".test-venvs" / "fake" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.touch()
-    monkeypatch.setattr(runner, "interpreter_environment", lambda _: tmp_path / "host-environment")
-    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    released = []
+
+    class Lease:
+        def release(self):
+            released.append(True)
+
+    monkeypatch.setattr(runner, "acquire", lambda *_: Lease())
     monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
     with pytest.raises(SystemExit) as exc:
         runner.main(["agent-index-service", "--prepare", "--python", str(python)])
     assert exc.value.code == 2
+    assert released == [True]
 
 
 @pytest.mark.parametrize("smoke", [False, True])
@@ -86,7 +92,6 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
             released.append(True)
 
     environment_root = tmp_path / "actual-environment"
-    monkeypatch.setattr(runner, "interpreter_environment", lambda path: environment_root)
     acquisitions = []
     monkeypatch.setattr(
         runner, "acquire",
@@ -110,7 +115,10 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
         return 0
 
     monkeypatch.setattr(runner, "run_contained", run)
-    args = ["agent-index-service", "--python", str(python)]
+    args = [
+        "agent-index-service", "--python", str(python),
+        "--environment-root", str(environment_root),
+    ]
     if smoke:
         args.append("--smoke")
     assert runner.main(args) == 0
@@ -143,18 +151,46 @@ def test_invalid_admission_wait_rejected_before_preparation(monkeypatch, wait):
     assert exc.value.code == 2
 
 
-def test_custom_interpreter_probe_failure_is_not_silent_success(tmp_path, monkeypatch):
+def test_nonstandard_custom_launcher_requires_explicit_root_without_execution(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
     python = tmp_path / "invalid-python"
     python.touch()
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
 
-    def fail(_):
-        raise ValueError("invalid prefix")
-
-    monkeypatch.setattr(runner, "interpreter_environment", fail)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate executed"))
     assert runner.main(["agent-index-service", "--python", str(python)]) == 1
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--environment-root", "environment"],
+    ["--python", "launcher", "--environment-root", "environment", "--prepare"],
+])
+def test_explicit_root_does_not_bypass_preparation_guard(monkeypatch, arguments):
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["agent-index-service", *arguments])
+    assert exc.value.code == 2
+
+
+def test_standard_root_discovery_never_executes_candidate(tmp_path, monkeypatch):
+    python = tmp_path / "environment" / "bin" / "python"
+    monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate executed"))
+    assert runner.interpreter_environment(python) == python.parent.parent.resolve()
+    assert not python.exists()
+
+
+def test_explicit_root_cannot_override_discoverable_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    python = tmp_path / "environment" / "bin" / "python"
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main([
+            "agent-index-service", "--python", str(python),
+            "--environment-root", str(tmp_path / "wrong-environment"),
+        ])
+    assert exc.value.code == 2
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="POSIX outer containment regression uses Linux procfs")
