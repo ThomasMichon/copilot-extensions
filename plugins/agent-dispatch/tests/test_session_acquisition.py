@@ -185,3 +185,12 @@ def test_transport_failures_are_typed_at_acquisition_boundary(monkeypatch, error
     monkeypatch.setattr(session_acquisition.subprocess, "run", run)
     with pytest.raises(expected):
         session_acquisition.acquire(task(), mode="acp", prompt="work")
+
+
+@pytest.mark.parametrize("code", ["dispatch_capability_missing", "dispatch_authority_unavailable", "worktree_unknown", "head_unknown"])
+def test_unattested_refusal_code_never_authorizes_cleanup(monkeypatch, code):
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    monkeypatch.setattr(session_acquisition.subprocess, "run", lambda argv, **kwargs:
+        subprocess.CompletedProcess(argv, 1, json.dumps({"detail": {"code": code}}), "refused"))
+    with pytest.raises(bridge.BridgeCarriedSessionBusy):
+        session_acquisition.acquire(task(), mode="acp", prompt="work")

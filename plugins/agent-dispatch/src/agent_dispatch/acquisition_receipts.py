@@ -97,12 +97,11 @@ def start_authority(queue: Any, task_id: str) -> dict[str, Any] | None:
     with queue._connect() as conn:
         ensure(conn)
         row = conn.execute(
-            "SELECT a.delivery_id FROM acquisition_receipts a JOIN spawn_reservations s "
-            "ON s.key=a.reservation_key WHERE a.task_id=? "
-            "AND s.state IN ('reserving','spawned') AND s.release_requested=0 "
+            "SELECT a.delivery_id FROM spawn_reservations s LEFT JOIN acquisition_receipts a "
+            "ON s.key=a.reservation_key WHERE s.task_id=? "
             "ORDER BY s.attempt DESC LIMIT 1", (task_id,),
         ).fetchone()
-    return bridge_evidence(row["delivery_id"]) if row else None
+    return bridge_evidence(row["delivery_id"]) if row and row["delivery_id"] else None
 
 
 def validate_start(
@@ -110,16 +109,17 @@ def validate_start(
 ) -> None:
     ensure(conn)
     rows = conn.execute(
-        "SELECT a.* FROM acquisition_receipts a JOIN spawn_reservations s "
-        "ON s.key=a.reservation_key WHERE a.task_id=? "
-        "AND s.state IN ('reserving','spawned') AND s.release_requested=0 "
-        "ORDER BY s.attempt DESC", (task.id,),
+        "SELECT a.*,s.state AS reservation_state,s.release_requested FROM spawn_reservations s "
+        "LEFT JOIN acquisition_receipts a ON s.key=a.reservation_key WHERE s.task_id=? "
+        "ORDER BY s.attempt DESC LIMIT 1", (task.id,),
     ).fetchall()
-    if not rows:
+    if not rows or not rows[0]["delivery_id"]:
         if (task.owner or "").startswith("acquired-"):
             raise TaskError("acquired worker start requires a bridge acquisition receipt")
         return
     receipt = rows[0]
+    if receipt["reservation_state"] not in {"reserving", "spawned"} or receipt["release_requested"]:
+        raise TaskError("acquisition reservation was withdrawn before start")
     current = authority or {}
     if (
         current.get("delivery_id") != receipt["delivery_id"]

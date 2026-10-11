@@ -74,7 +74,7 @@ def acquire(
         ):
             # The previous acquisition CLI emits this exact pre-request gate.
             # Arbitrary string errors are still ambiguous.
-            detail = {"code": "unsupported_acquisition_protocol", "message": detail}
+            detail = {"code": "unsupported_acquisition_protocol", "message": detail, "effect": "not_started"}
         if isinstance(detail, dict):
             result.stderr = str(detail.get("message") or detail.get("code") or result.stderr)
         if isinstance(detail, dict) and detail.get("code") in {
@@ -83,14 +83,7 @@ def acquire(
             "owner_operation_pending",
         }:
             raise BridgeCarriedSessionBusy(str(detail.get("message") or detail["code"]))
-        if not isinstance(detail, dict) or detail.get("code") not in {
-            "unsupported_acquisition_protocol", "dispatch_capability_missing",
-            "dispatch_authority_unavailable",
-            "cli_options_unsupported", "worktrees_unavailable", "worktree_unknown",
-            "worktree_terminal", "head_unknown", "authority_unknown",
-            "retirement_unknown", "continuity_ambiguous", "session_busy",
-            "options_mismatch", "cli_capability_missing", "venue_unsupported",
-        }:
+        if not isinstance(detail, dict) or detail.get("effect") != "not_started":
             raise BridgeCarriedSessionBusy(
                 result.stderr or "bridge acquisition outcome requires reconciliation",
             )

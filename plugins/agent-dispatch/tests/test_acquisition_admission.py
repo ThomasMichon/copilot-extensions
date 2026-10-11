@@ -190,6 +190,29 @@ def test_start_bridge_observation_does_not_hold_queue_write_lock(tmp_path, monke
     assert len(writes) == 1
 
 
+def test_withdrawn_cli_receipt_cannot_fall_back_to_legacy_owner_start(tmp_path, monkeypatch):
+    queue = TaskQueue(tmp_path / "withdrawn.db")
+    task = queue.create("work")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="created")
+    receipt = {
+        "reservation_key": reservation.key, "task_id": task.id,
+        "task_generation": task.generation, "worktree_id": "worktree-a",
+        "session_id": "native-a", "native_session_id": "native-a",
+        "mode": "cli", "delivery_id": "delivery-a",
+    }
+    bind(queue, receipt, evidence=evidence(receipt))
+    queue.record_spawn(reservation.key, session_handle="native-a")
+    queue.claim_one("machine/worktree-a", task_id=task.id)
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: {
+        **evidence(receipt), "stage": "delivered",
+    })
+    queue.request_spawn_release(reservation.key)
+    with pytest.raises(TaskError, match="withdrawn"):
+        queue.start(task.id, "machine/worktree-a", owner_session_id="native-a")
+    assert queue.get(task.id).status == "claimed"
+
+
 def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
