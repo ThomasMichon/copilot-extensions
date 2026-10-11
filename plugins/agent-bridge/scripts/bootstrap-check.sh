@@ -151,6 +151,7 @@ now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # inside one flat `bash -c`, so it stays nohup-protected end to end -- no
 # extra un-nohup'd wrapper subshell that could die to a SIGHUP the nohup'd
 # child itself would have survived.
+cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
 nohup bash -c '
   reconcile_log="$1"; status_file="$2"; deployed="$3"; current="$4"; started_at="$5"
   shift 5

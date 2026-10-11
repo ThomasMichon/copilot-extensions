@@ -158,6 +158,11 @@ def _launch_env(
                 "the container's Copilot CLI would start signed out"
             )
         env["GH_TOKEN"] = github_token
+    from .resolver import resolve_copilot_cli_token_or_raise
+
+    copilot_token = resolve_copilot_cli_token_or_raise(config, target.fleet, args.name)
+    if copilot_token:
+        env["COPILOT_GITHUB_TOKEN"] = copilot_token
     for key in _DISPATCH_ENV_KEYS:
         value = os.environ.get(key, "").strip()
         if value:

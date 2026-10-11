@@ -129,6 +129,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
         relay_port=9857,
         credentials_for=lambda fleet: (True, True),
         acp_command_for=lambda fleet: command,
+        copilot_cli_account_for=lambda fleet: None,
     )
     fleet = types.SimpleNamespace(security_profile="trusted")
     ssh = SSHConfig(
@@ -189,6 +190,114 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     assert staged["GIT_CONFIG_VALUE_1"] == "/usr/local/bin/ado-auth-helper"
     assert staged["GIT_TERMINAL_PROMPT"] == "0"
     deploy.assert_called_once_with("instance-fixture", ado=True)
+
+
+def test_session_host_prepare_forwards_a_separate_copilot_cli_account_token(capsys):
+    """A configured copilot_cli_account reaches staged launch_env as
+    COPILOT_GITHUB_TOKEN, distinct from (and alongside) GH_TOKEN."""
+    from agent_containers.session_host_context import TrustedContext
+
+    config = types.SimpleNamespace(
+        relay_port=9857,
+        credentials_for=lambda fleet: (True, True),
+        acp_command_for=lambda fleet: "copilot --acp --stdio",
+        copilot_cli_account_for=lambda fleet: "inference-user",
+    )
+    fleet = types.SimpleNamespace(security_profile="trusted")
+    ssh = SSHConfig(
+        host_alias="agent-container-example",
+        user="vscode",
+        identity_file="/keys/id_ed25519",
+        config_file="/ssh/example.config",
+    )
+    with (
+        patch(
+            "agent_containers.__main__._trusted_session_host_context",
+            return_value=TrustedContext(config, fleet, "vscode", "/workspaces/example", "instance-fixture"),
+        ),
+        patch("agent_containers.__main__.prepare_ssh_config", return_value=ssh),
+        patch("agent_containers.__main__.cleanup_remote_envs"),
+        patch(
+            "agent_containers.__main__.container_environment",
+            return_value={"PATH": "/usr/bin"},
+        ),
+        patch("agent_containers.__main__.host_gh_token", return_value="github-secret"),
+        patch(
+            "agent_containers.resolver.host_copilot_cli_token",
+            return_value="copilot-secret",
+        ),
+        patch("agent_containers.__main__._relay_healthy", return_value=True),
+        patch(
+            "agent_containers.__main__.write_remote_env",
+            return_value="/tmp/agent-containers/env-123",
+        ) as write_env,
+        patch(
+            "agent_containers.__main__.build_remote_command",
+            return_value="source /tmp/agent-containers/env-123 && exec copilot",
+        ),
+        patch("agent_containers.container_shims.deploy"),
+        patch("agent_containers.relay_provider.token_for", return_value="relay-secret"),
+    ):
+        rc = main([
+            "session-host-prepare",
+            "example-web-1",
+            "--expected-instance",
+            "instance-fixture",
+            "--host-relay-port",
+            "61234",
+        ])
+
+    assert rc == 0
+    result = json.loads(capsys.readouterr().out)
+    assert "copilot-secret" not in json.dumps(result)
+    staged = write_env.call_args.args[2]
+    assert staged["GH_TOKEN"] == "github-secret"
+    assert staged["COPILOT_GITHUB_TOKEN"] == "copilot-secret"
+
+
+def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys):
+    """A configured copilot_cli_account with no live host login must abort
+    the launch entirely -- never silently fall back to GH_TOKEN's identity."""
+    from agent_containers.session_host_context import TrustedContext
+
+    config = types.SimpleNamespace(
+        relay_port=9857,
+        credentials_for=lambda fleet: (True, True),
+        acp_command_for=lambda fleet: "copilot --acp --stdio",
+        copilot_cli_account_for=lambda fleet: "inference-user",
+    )
+    fleet = types.SimpleNamespace(security_profile="trusted")
+    ssh = SSHConfig(
+        host_alias="agent-container-example",
+        user="vscode",
+        identity_file="/keys/id_ed25519",
+        config_file="/ssh/example.config",
+    )
+    with (
+        patch(
+            "agent_containers.__main__._trusted_session_host_context",
+            return_value=TrustedContext(config, fleet, "vscode", "/workspaces/example", "instance-fixture"),
+        ),
+        patch("agent_containers.__main__.prepare_ssh_config", return_value=ssh),
+        patch("agent_containers.__main__.cleanup_remote_envs"),
+        patch(
+            "agent_containers.__main__.container_environment",
+            return_value={"PATH": "/usr/bin"},
+        ),
+        patch("agent_containers.__main__.host_gh_token", return_value="github-secret"),
+        patch("agent_containers.resolver.host_copilot_cli_token", return_value=None),
+    ):
+        rc = main([
+            "session-host-prepare",
+            "example-web-1",
+            "--expected-instance",
+            "instance-fixture",
+            "--host-relay-port",
+            "61234",
+        ])
+
+    assert rc == 1
+    assert "copilot-login" in capsys.readouterr().err
 
 
 def test_session_host_state_is_non_waking(capsys):

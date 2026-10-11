@@ -9,7 +9,7 @@ import platform
 import stat
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 SCHEMA_VERSION = 1
 MAX_PROVENANCE_BYTES = 1024 * 1024
@@ -303,8 +303,8 @@ def ensure_real_directory(path: Path, *, durable: bool = False) -> Path:
     return absolute
 
 
-def open_regular_no_follow(path: Path):
-    """Open an existing regular file for binary reading without following links."""
+def open_regular_no_follow(path: Path, *, allow_writes: bool = True) -> BinaryIO:
+    """Read a regular file without links; optionally deny Windows writes/renames."""
     if platform.system() != "Windows":
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags)
@@ -319,7 +319,7 @@ def open_regular_no_follow(path: Path):
     from ctypes import wintypes
 
     generic_read = 0x80000000
-    share_all = 0x00000001 | 0x00000002 | 0x00000004
+    share_all = (0x00000001 | 0x00000002 | 0x00000004) if allow_writes else 0x00000001
     open_existing = 3
     file_attribute_normal = 0x00000080
     file_attribute_directory = 0x00000010

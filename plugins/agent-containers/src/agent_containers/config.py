@@ -28,6 +28,7 @@ from typing import Any
 import yaml
 
 from . import _peer_launch
+from .inference import NativeInferenceConfig
 from .private_state import ensure_private_dir
 
 log = logging.getLogger("agent-containers")
@@ -234,10 +235,19 @@ class FleetConfig:
     home_size: str | None = None
     # Explicit non-secret values baked into the container environment.
     environment: dict[str, str] = field(default_factory=dict)
+    native_inference: NativeInferenceConfig | None = None
     # Per-fleet credential overrides. Restricted fleets always resolve both
     # capabilities false, regardless of these values.
     forward_gh_token: bool | None = None
     relay_enabled: bool | None = None
+    # Per-fleet override of the GitHub account whose own Copilot CLI login on
+    # THIS host backs the container's Copilot inference auth specifically
+    # (COPILOT_GITHUB_TOKEN) -- independent of forward_gh_token's GH_TOKEN,
+    # which remains the container's git/gh identity. None (default) means
+    # this fleet does not separate the two; Copilot CLI then falls back to
+    # GH_TOKEN (if forwarded) per its own env-var precedence. See
+    # ContainersConfig.copilot_cli_account_for.
+    copilot_cli_account: str | None = None
     # "clone" (Model A, default) or "mount" (Model B, future).
     code_model: str = "clone"
     # Trusted, image-backed fleets only (validate_restricted rejects these on
@@ -338,6 +348,16 @@ class FleetConfig:
                 "(an incomplete pair silently falls back to ephemeral home "
                 "storage instead of failing loudly)"
             )
+        if self.native_inference is not None:
+            if not self.restricted:
+                raise RuntimeError("native_inference is restricted-only")
+            self.native_inference.validate()
+            if self.effective_network() == "none":
+                raise RuntimeError("native_inference requires an internal broker network")
+            if self.environment.keys() & self.native_inference.environment().keys():
+                raise RuntimeError(
+                    "native_inference environment must not be overridden by environment"
+                )
         if not self.restricted:
             return
         if self.host_workspace_path or self.host_home_path or self.systemd_capable:
@@ -405,6 +425,8 @@ class FleetConfig:
             "host_mounts": False,
             "writable_surfaces": "bounded-tmpfs",
         }
+        if self.native_inference is not None:
+            policy["native_inference"] = self.native_inference.environment()
         encoded = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()[:16]
 
@@ -420,6 +442,13 @@ class ContainersConfig:
     # Forward the host `gh auth token` into the container as GH_TOKEN so the
     # in-container Copilot CLI is authenticated headlessly.
     forward_gh_token: bool = True
+    # Global default: GitHub account whose own Copilot CLI login on this host
+    # backs every trusted fleet's Copilot inference auth (COPILOT_GITHUB_TOKEN)
+    # as a SEPARATE identity from GH_TOKEN/git-PR authorship. None (default)
+    # means no fleet separates the two unless it sets its own
+    # FleetConfig.copilot_cli_account. See copilot_cli_account_for and
+    # resolver.host_copilot_cli_token.
+    copilot_cli_account: str | None = None
     # On-demand credential relay: deploy in-container shims at connect that fetch
     # tokens from the host relay through the trusted SSH reverse forward. Fixes
     # rush dev-deploy (Azure storage) by serving the host az-login identity.
@@ -492,6 +521,21 @@ class ContainersConfig:
             else self.relay_enabled
         )
         return forward, relay
+
+    def copilot_cli_account_for(self, fleet: FleetConfig | None) -> str | None:
+        """Return the GitHub account whose Copilot CLI login should back this
+        fleet's Copilot inference auth (COPILOT_GITHUB_TOKEN), or None.
+
+        Restricted fleets never receive host credentials of any kind, same
+        hard boundary as credentials_for. A per-fleet value wins over the
+        global default; both default to None (no separate inference identity
+        -- Copilot CLI falls back to GH_TOKEN/GITHUB_TOKEN if forwarded).
+        """
+        if fleet and fleet.restricted:
+            return None
+        if fleet and fleet.copilot_cli_account is not None:
+            return fleet.copilot_cli_account or None
+        return self.copilot_cli_account or None
 
     def acp_command_for(self, fleet: FleetConfig | None) -> str:
         """Resolve a fleet launch command, failing closed for restricted fleets."""
@@ -669,6 +713,9 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     config.forward_gh_token = bool(
         data.get("forward_gh_token", config.forward_gh_token)
     )
+    if "copilot_cli_account" in data:
+        raw_account = data["copilot_cli_account"]
+        config.copilot_cli_account = str(raw_account) if raw_account else None
     relay = data.get("relay", {}) or {}
     if isinstance(relay, dict):
         config.relay_enabled = bool(relay.get("enabled", config.relay_enabled))
@@ -784,6 +831,11 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
                 str(k): str(v)
                 for k, v in raw_environment.items()
             },
+            native_inference=(
+                NativeInferenceConfig.from_mapping(raw["native_inference"])
+                if "native_inference" in raw
+                else None
+            ),
             forward_gh_token=(
                 bool(raw["forward_gh_token"])
                 if "forward_gh_token" in raw
@@ -794,6 +846,7 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
                 if "relay_enabled" in raw
                 else None
             ),
+            copilot_cli_account=raw.get("copilot_cli_account") or None,
             code_model=raw.get("code_model", "clone"),
             host_workspace_path=raw.get("host_workspace_path"),
             host_home_path=raw.get("host_home_path"),

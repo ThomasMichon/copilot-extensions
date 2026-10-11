@@ -148,7 +148,7 @@ try {
     # it as a window -- -WindowStyle Hidden ALONE is ignored by DefTerm (see
     # agent-bridge). Base64-encode the reconcile command to avoid arg quoting.
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("& `"$init`""))
-    $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden `
+    $proc = Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE -PassThru -WindowStyle Hidden `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
     try {
         if ($proc) { Set-Content -LiteralPath $lockFile -Value ([string]$proc.Id) -NoNewline -ErrorAction SilentlyContinue }

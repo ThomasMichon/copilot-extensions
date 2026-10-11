@@ -139,7 +139,7 @@ try {
     # quoting under conhost; children (uv/python building the venv) inherit the
     # headless console and stay hidden too.
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
-    $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden `
+    $proc = Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE -PassThru -WindowStyle Hidden `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
     try {
         if ($proc) { Set-Content -LiteralPath $lockFile -Value ([string]$proc.Id) -NoNewline -ErrorAction SilentlyContinue }

@@ -214,6 +214,62 @@ fleets:
     code_model: clone   # Model A: repo cloned inside the container
 ```
 
+### Separating Copilot CLI inference identity from git/PR identity
+
+By default, `forward_gh_token`'s GH_TOKEN does double duty for a trusted
+fleet: it is both the in-container `git`/`gh` identity AND (per Copilot
+CLI's own env-var precedence: `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` >
+`GITHUB_TOKEN`) the identity Copilot CLI itself authenticates inference
+requests as. Some setups want these to be two DIFFERENT GitHub accounts --
+e.g. a dedicated/dev account backs git commits and PRs while a separate
+seat's Copilot subscription backs the actual model calls. Set
+`copilot_cli_account` (globally or per-fleet) to the GitHub account whose
+own Copilot CLI login on THIS HOST should back `COPILOT_GITHUB_TOKEN`,
+independent of whatever GH_TOKEN carries:
+
+```yaml
+copilot_cli_account: inference-user   # global default for every trusted fleet
+fleets:
+  myrepo:
+    repo: your-org/your-repo
+    devcontainer_path: D:/Src/myrepo-devcontainer
+    forward_gh_token: true   # still true: git/PR identity stays GH_TOKEN
+    # copilot_cli_account: some-other-account   # per-fleet override, if needed
+```
+
+This reads the configured account's **live** Copilot CLI login from this
+host's own `~/.copilot/config.json` (`authTokens`/`loggedInUsers` --
+completely separate storage from `gh`'s own OAuth store, so `gh auth
+status` is unaffected) at every launch -- never the vault, never minted or
+refreshed by agent-containers itself. The operator keeps it current simply
+by running `copilot login` as that account on this host; agent-containers
+only ever reads whatever is currently there, and fails closed (refuses to
+launch, naming the exact fallback command below) if that account has no
+live login yet. `None` (the default, for both the global and per-fleet
+settings) means no fleet separates the two identities -- Copilot CLI falls
+back to whatever GH_TOKEN/GITHUB_TOKEN already carries, the pre-existing
+behavior. Restricted fleets never receive this (or any) host credential,
+same hard boundary as `forward_gh_token`.
+
+**Worst case: no live login exists anywhere for the configured account yet.**
+Run the device-code flow INSIDE a running container of the target fleet
+instead of on the bare host (useful when the host itself can't run an
+interactive OAuth flow, or you'd rather not touch the host's own default
+login):
+
+```bash
+agent-containers copilot-login myrepo-1 --account inference-user
+```
+
+This execs into the container, runs `copilot login --device-code`
+interactively (follow the printed URL/code in your own browser), then reads
+the resulting token back out of the container's own config.json and
+imports it into the **host's** `~/.copilot/config.json` -- so every future
+launch of this (or any other) fleet configured with that same
+`copilot_cli_account` finds it the normal way, with no repeat in-container
+login. This command is manual/on-demand only; it is never triggered
+automatically by any launch path.
+
 ### Security profiles
 
 Fleets default to `security_profile: trusted`, preserving the existing
@@ -282,6 +338,50 @@ configuration sets `forward_gh_token: true` or `relay_enabled: true` on a
 restricted fleet, both resolve false. `agent-containers fleet --json` reports
 the effective `security_profile`, `network`, and `host_credentials` posture so a
 dispatcher can verify the venue before launch.
+
+### Opt-in native inference for restricted ACP
+
+An image-backed restricted fleet may opt into a host-controlled native
+inference broker without receiving a host credential:
+
+```yaml
+fleets:
+  inference-worker:
+    image: example/copilot-agent:pinned
+    security_profile: restricted
+    workspace_folder: /workspace
+    exec_user: agent
+    acp_command: "cd /workspace && copilot --acp --stdio --allow-all"
+    network: inference-only
+    native_inference:
+      endpoint: http://inference-broker:8080
+      reference: openshell:resolve:env:EXAMPLE_INFERENCE
+```
+
+The network must pass the existing Docker-internal, single-network policy.
+The endpoint is an HTTP(S) origin with a single-label broker name, not an
+arbitrary URL, localhost, IP address, credential-returning relay, or host
+gateway. The reference is a public identifier in the exact
+`openshell:resolve:env:NAME` form, never a GitHub or model-session credential.
+Both fields are required; unknown fields and generic environment overrides
+are rejected. Changing either field changes the restricted policy fingerprint.
+
+Only the ACP exec process receives `COPILOT_API_URL` and
+`COPILOT_GITHUB_TOKEN` containing this reference. The provider rereads the
+profile at launch; it does not place it in the bridge spawn spec or bake it
+into the image/container environment. The generic sensitive-environment guard,
+restricted SSH adapter, host-token prohibition, and relay prohibition are
+unchanged. Trusted and restricted-local launches remain unchanged when this
+profile is absent.
+
+This is a launch seam, not a broker or a live-service authorization. The
+operator supplies and secures the broker, owns upstream authentication,
+enforces actual wire-model/route admission, cancellation, budgets and revocation,
+and keeps upstream credentials out of responses and logs. A public reference
+is not caller authentication: use an exclusively admitted network/assignment.
+Parent and child model selection still belongs to ACP/runtime configuration;
+the broker must enforce the finite wire-model allowlist independently.
+Pin and test the CLI against the broker before enabling live inference.
 
 ### Host-backed persistence and systemd for trusted, image-backed fleets
 

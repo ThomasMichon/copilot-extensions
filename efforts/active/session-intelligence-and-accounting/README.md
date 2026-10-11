@@ -194,6 +194,86 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-10 - Review-request recovery and absent-root correction
+- A confirmed GitHub REST quota exhaustion prevented the review-request
+  workflow from reaching the request. After the reported reset and a cooldown,
+  an explicit API re-request produced a new whole-PR review at the published
+  head. No workflow was rerun or merge gate bypassed.
+- That review confirmed the earlier decoder fix and found an initially absent
+  optional process-log root incorrectly failed snapshot commands. The fix
+  treats only initial absence as an empty pass, without creating the root;
+  permission, unsafe-root and disappearance-during-opening failures remain
+  explicit. Existing transfer-health semantics remain unchanged.
+- Code `9d3cac763` passed 435 bounded Linux sync/source/process-log tests
+  (21 skips), including the new absent-root and refusal regressions. Native
+  Windows evidence still belongs to the earlier source until rerun.
+- Exact updated-head review, complete required CI, merge, release and adoption
+  remain separate gates.
+
+### 2026-10-10 - ZIP review corrections validated
+- The first source review found an uncaught ZIP runtime failure and stale setup
+  guidance. Snapshot verification now rejects unsupported codecs explicitly
+  and records encrypted/corrupt-deflate runtime errors per file, preserving
+  later candidates and the scheduled raw-log transfer. A parameterized synthetic
+  regression exercises all three real decoder failure shapes, not a mocked
+  archive failure.
+- Updated the setup skill's scheduled/manual snapshot guidance, canonical config
+  example and discoverable command triggers. The customization scan reports
+  zero blocking findings and none on the changed setup skill.
+- Exact code `758971aa6838a423c7a8c5216b157f32a599c2b4` passed 426 Linux
+  network-disconnected sync/source cases (21 skips) and 183 bounded native
+  Windows ZIP/health/source cases (16 skips). Linux admission initially found a
+  live test-slot holder; a bounded wait admitted the run without stopping it.
+- Source re-review, exact-final-head CI, merge, release and adoption remain
+  separate outstanding gates. No original evidence was rewritten or retired.
+
+### 2026-10-10 - Native ZIP validation corrected and passed
+- Native Windows execution found three ZIP snapshot failures after the earlier
+  admission deferral. A synthetic metadata probe confirmed that `lstat` and
+  `fstat` can report different `ctime` meanings for one unchanged file.
+  The source fix uses stable Windows birth time, protects snapshot/verification
+  reads against writes and rename, and verifies a newly published ZIP through
+  its original kernel-owned handle rather than conflicting with its own
+  protected write handle.
+- Exact source `0bcc86120a68d8e40816182dfc898d07fe0bb218` passed the bounded
+  native Windows ZIP/process-log/combined-health/source-publication selection:
+  180 passed, 16 deliberate platform-fixture skips. The native directory and
+  file handle-lifetime tests executed. Matching Linux network-disconnected
+  sync/source selection passed 423 tests with 21 skips; both platform type
+  checks and install-contract passed.
+- This supplies native execution evidence for the new ZIP and inherited health
+  regressions, not release or consumer adoption. The source remains local,
+  unreviewed WIP; no public implementation PR or live publication was performed.
+  Source reclamation and all remaining parent Plan/Validation Plan items stay
+  open.
+
+### 2026-10-10 - Final health CI verified; ZIP preservation staged locally
+- Verified run `38098437985` completed successfully on exact health source
+  `155336c74ac2a41fad9e0550c7e821bec6e79980`. This resolves the outstanding
+  final-head CI obligation, not the historical timing correction: checks were
+  still pending when #6067 merged. The corrected journal #6084 merged as
+  `215364921396009df16f08e8c6d67de83c6ed555`.
+- The Windows archive-source lane selected only sessions, session ZIPs, source
+  roots/publication and chronicle contracts (435 passed, 14 skipped). It is not
+  native execution evidence for the new health regressions.
+- Staged a source-only, non-retiring ZIP preservation slice: explicit
+  local-producer opt-in, active-idle PID protection, content-addressed revisions,
+  bounded streaming and full member-hash verification, kernel-owned no-replace
+  publication, and pinned directory traversal. Reused the admission claim-file
+  primitive rather than retaining a named-temporary cleanup implementation.
+  Process-log configuration and command reporting have separate components
+  so the core config/engine stay within their enforced module ceilings.
+- Final focused Linux network-disconnected selection passed 423 tests with
+  20 skips; Linux/Windows type checks, lint, install-contract and docs-consistency
+  passed. A native Windows validation attempt was deferred by the host test
+  supervisor because its validation slot was unavailable; no native test
+  execution or acceptance is claimed.
+- This source is local WIP, not a reviewed/merged/released capability. Native
+  acceptance, public review/publication, and the remaining compaction/storage
+  gates are still owed. All originals and existing archives remain untouched;
+  reclamation, full sync/reader ancestor containment (#5727), catalog/accounting,
+  daily products, pinned consumer parity and approved rollout remain open.
+
 ### 2026-10-10 - Independently recoverable transfer health merged
 - #6067 merged as `cb1f9772ac40b41829920622f67228f3f9ef8989` after exact-head
   approval with zero open findings. Final-head CI run `38098437985` was still

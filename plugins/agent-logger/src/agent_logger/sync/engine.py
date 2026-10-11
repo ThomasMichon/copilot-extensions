@@ -20,6 +20,8 @@ from pathlib import Path
 from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sync.lock import sync_lock
+from agent_logger.sync.automation import automation_disabled as _automation_disabled
+from agent_logger.sync.log_archive_cli import run_compact_logs, snapshot_process_logs
 from agent_logger.sync.meta import (
     MAX_DEFERRED_FILE_SAMPLES,
     MAX_DEFERRED_PATH_CHARS,
@@ -28,11 +30,6 @@ from agent_logger.sync.notify import post_notify
 from agent_logger.sync.origin import classify_for_sync, effective_harness, mark_all
 from agent_logger.sync.targets import build_target
 from agent_logger.sync.worktree_binding import mark_all_worktrees
-
-
-def _automation_disabled() -> bool:
-    """Honor an opt-out so automation contexts can skip syncing."""
-    return os.environ.get("AGENT_LOGGER_SYNC_DISABLED") == "1"
 
 
 def _machine(cfg: Config) -> str:
@@ -270,6 +267,7 @@ def run_sync(
         return 0
 
     machine = _machine(cfg)
+    log_archive_settings = cfg.process_log_archives
     source = cfg.sync_source
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     allowlist = cfg.sync_repo_allowlist
@@ -384,6 +382,9 @@ def run_sync(
                     "(repo-scoped sync is not yet supported)"
                 )
             else:
+                if log_archive_settings.enabled:
+                    if snapshot_process_logs(cfg, dry_run=False):
+                        process_logs_failed = True
                 plog_result = target.push_process_logs(cfg.process_logs_source, machine)
                 if not plog_result.ok:
                     process_logs_failed = True
@@ -402,6 +403,11 @@ def run_sync(
                         f"session-sync: process-logs {plog_result.detail} "
                         f"({plog_result.file_count} files)"
                     )
+        elif log_archive_settings.enabled:
+            print(
+                "session-sync: process-log ZIP snapshots skipped "
+                "(process-log publication disabled)"
+            )
 
         if prune:
             removed = target.prune(machine, cfg.sync_retention_days)
@@ -866,6 +872,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compact.add_argument("--verbose", action="store_true", help="verbose output")
 
+    p_logs = sub.add_parser(
+        "compact-logs",
+        help="create verified settled-log ZIP snapshots, retaining all originals",
+    )
+    p_logs.add_argument("--dry-run", action="store_true", help="inspect without creating ZIPs")
+
     p_hub = sub.add_parser(
         "compact-hub",
         help="compact cold hub-only sessions in place and reconcile duplicates",
@@ -972,6 +984,8 @@ def main(argv: list[str] | None = None) -> int:
             return do_compact_hub(
                 cfg, dry_run=args.dry_run, verbose=args.verbose
             )
+        if args.command == "compact-logs":
+            return run_compact_logs(cfg, dry_run=args.dry_run)
         return 2
     finally:
         # A staged child (launched via `run --detach`) removes its throwaway

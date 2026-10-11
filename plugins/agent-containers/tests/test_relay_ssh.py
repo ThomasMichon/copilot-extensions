@@ -253,14 +253,15 @@ def test_restricted_launch_never_enters_credential_or_relay_paths(monkeypatch):
         lambda: pytest.fail("restricted launch must not resolve a relay"),
     )
     def build_restricted(*args):
-        seen["spawn"] = list(args)
+        seen["spawn"] = list(args[:3])
+        seen["fleet"] = args[3]
         return ["docker"]
 
     def run(command, **kwargs):
         seen["run"] = (command, kwargs["env"])
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(cli, "build_restricted_spawn_command", build_restricted)
+    monkeypatch.setattr(cli, "build_restricted_acp_spawn_command", build_restricted)
     monkeypatch.setattr(cli.subprocess, "run", run)
 
     assert cli._launch_container_agent(
@@ -272,6 +273,7 @@ def test_restricted_launch_never_enters_credential_or_relay_paths(monkeypatch):
         "minimal-agent --stdio",
     ) == 0
     assert seen["spawn"] == ["repo-1", "agent", "minimal-agent --stdio"]
+    assert seen["fleet"] is fleet
 
 
 def test_trusted_launch_uses_loopback_reverse_forward(monkeypatch):

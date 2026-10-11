@@ -4,7 +4,8 @@ The `agent_logger.process_logs` library supplies archive-transparent, bounded
 line reads for the session-intelligence accounting pipeline. `session-sync`
 can now additionally publish process-log evidence alongside session-state for
 the ordinary local-machine sync path (`sync.process_logs.enabled`, opt-in,
-filesystem targets only); scheduled compression and usage ingestion remain
+filesystem targets only). Optional scheduled ZIP snapshots preserve settled
+local logs without deleting originals; reclamation and usage ingestion remain
 separate implementation slices.
 
 ## Supported observations
@@ -83,8 +84,83 @@ Two scope limits, both deliberate rather than overlooked:
   repo-scoped sync needs its own design -- a known, explicit follow-up, never
   silently approximated here.
 
-Scheduled settled-log ZIP compaction, SSH/ingest target support, and
+Source reclamation after settled-log ZIP verification, SSH/ingest target support, and
 admission fencing for repo-scoped syncs remain outstanding.
+
+### Additive settled-log ZIP snapshots
+
+The existing scheduled `session-sync run` can create verified ZIP snapshots
+before its unfiltered process-log transfer:
+
+```yaml
+sync:
+  process_logs:
+    enabled: true
+    zip_snapshots:
+      enabled: true
+      local_source: true
+      min_quiet_seconds: 600
+```
+
+ZIP `enabled` and `local_source` both default to false. `local_source: true` explicitly attests that
+`<sync.source>/logs` contains this operating system's original producer logs,
+not a copied, rescued, remote, or foreign-OS corpus whose PIDs cannot be checked
+locally. Do not enable it on a shared Windows/WSL log root. Snapshot configuration
+is machine-local; no repository config or explicit namespace push enables it.
+The quiet threshold is a positive integer, not a retention/deletion policy.
+Existing retention defaults and session compaction are unchanged.
+
+Only `process-<epoch>-<pid>.log` inputs with a provably exited local PID and an
+old enough mtime qualify. Active-idle producers, reused PIDs, recent files, and
+unclassifiable names stay untouched. Permission/probe failures are visible
+errors, not evidence of exit. Existing gzip and ZIP files are not recompressed.
+The manual `session-sync compact-logs --dry-run` performs the same inspection
+under the sync lock without creating archives; omit `--dry-run` for snapshots.
+The manual command does not publish to any target. Disabled automation honors
+`AGENT_LOGGER_SYNC_DISABLED`, including the manual command.
+
+Each ZIP has one flat original log member. Its filename is content-addressed
+from the logical name and byte hash, so retries reuse verified identical
+snapshots and late changes create distinct revisions. Source fingerprints and
+the producer probe are checked around bounded streaming; the ZIP member's full
+hash is verified before and after no-replace publication. Truncation, rotation,
+append, corrupt existing archives, and unsupported kernel-owned publication fail
+explicitly. Neither a corrupt archive nor an original is overwritten/deleted.
+Snapshot verification accepts stored or deflated members (new snapshots use
+deflate), and rejects other codecs without attempting a decoder. Encryption
+and deflate runtime failures are per-file errors: later eligible files and the
+scheduled raw-log transfer still run, while the command returns failure.
+An initially absent optional log root is an empty snapshot pass and is not
+created. Permission errors, non-directory or redirected roots, and a root
+that disappears during validated opening still fail explicitly. This does
+not change transfer-health semantics for missing requested evidence.
+Publication reuses the source-admission kernel-owned file boundary: Linux
+uses an anonymous `O_TMPFILE` inode linked from its descriptor; Windows uses
+the protected original handle and a no-replace handle rename. Cleanup never
+deletes a file by a guessed temporary pathname. Abrupt Windows termination
+during disposition cancellation/rename can leave an artifact; restart does not
+guess its ownership or sweep unrelated files. Filesystems/platforms without
+these primitives fail explicitly; macOS ZIP snapshot publication is currently
+unsupported (ordinary process-log reads and sync remain unchanged).
+
+Canonical directory traversal is pinned with Linux descriptors, or native
+Windows ancestor handles denying directory rename. Intentionally relocated
+ancestors resolve once before pinning; later redirects cannot redirect archive
+I/O. ZIP file contents are flushed on both platforms; POSIX also flushes the
+containing directory. Windows directory-entry power-loss durability is not
+claimed. This new archive boundary does not retrofit the older sync/reader
+paths or close their remaining ancestor-containment tracker.
+Windows snapshot/verification read handles additionally deny writes and rename.
+Fingerprints use birth time there because native `lstat` and `fstat` can expose
+different `ctime` meanings; POSIX retains change time. Published ZIP verification
+stays on the kernel-owned original handle and checks the published file identity.
+
+Raw sources remain present and continue syncing alongside ZIP revisions.
+Readers deliberately retain those aliases; accounting must reconcile them by
+evidence identity, not count each path as new usage. This slice adds scheduled
+ZIP preservation, **not storage reclamation or completed compaction**. Source
+retirement, full normalized-storage parity, and native platform acceptance
+remain separate completion gates.
 
 ### Combined transfer health
 

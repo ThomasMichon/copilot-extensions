@@ -22,16 +22,21 @@ class ClaimFile(Protocol):
 class LinuxClaimFile:
     """Publish an O_TMPFILE inode while keeping its descriptor alive."""
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(
+        self, directory: Path, *, directory_fd: int | None = None, mode: int = 0o644,
+    ) -> None:
         temporary_flag = getattr(os, "O_TMPFILE", 0)
         if not temporary_flag:
             raise OSError(errno.ENOTSUP, "anonymous claim files are unsupported")
         self.directory = directory
+        self.mode = mode
         self._published = False
         with ExitStack() as stack:
-            self.directory_fd = os.open(
-                directory,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            self.directory_fd = (
+                os.dup(directory_fd) if directory_fd is not None else os.open(
+                    directory,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                )
             )
             stack.callback(os.close, self.directory_fd)
             fd = os.open(
@@ -57,7 +62,7 @@ class LinuxClaimFile:
         if destination.parent != self.directory:
             raise ValueError("claim publication must stay in its opened directory")
         self.stream.flush()
-        os.fchmod(self.stream.fileno(), 0o644)
+        os.fchmod(self.stream.fileno(), self.mode)
         os.fsync(self.stream.fileno())
         library = ctypes.CDLL(None, use_errno=True)
         link_at = getattr(library, "linkat", None)
@@ -79,14 +84,22 @@ class LinuxClaimFile:
 
 
 @contextmanager
-def create_claim_file(directory: Path) -> Iterator[ClaimFile]:
+def create_claim_file(
+    directory: Path, *, directory_fd: int | None = None, mode: int = 0o644,
+) -> Iterator[ClaimFile]:
+    """Create a kernel-owned file, optionally using a caller-pinned POSIX root.
+
+    ``directory_fd`` is the authoritative opened root when supplied; no path
+    fallback is attempted. ``mode`` affects POSIX publication only. Windows
+    retains the directory's inherited ACL and protected-handle lifecycle.
+    """
     if os.name == "nt":
         from agent_logger.sync.targets.windows_claim_file import WindowsClaimFile
 
         with WindowsClaimFile(directory) as claim:
             yield claim
     else:
-        claim = LinuxClaimFile(directory)
+        claim = LinuxClaimFile(directory, directory_fd=directory_fd, mode=mode)
         try:
             yield claim
         finally:

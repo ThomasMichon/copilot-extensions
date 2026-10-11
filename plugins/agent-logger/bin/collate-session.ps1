@@ -46,18 +46,55 @@ if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
     exit 126
 }
 
-$_cwd = (Get-Location).Path
+$_location = Get-Location
+$_cwd = $_location.Path
+$_nativeCwd = [IO.Directory]::GetCurrentDirectory()
 $_separators = [char[]]@(
     [IO.Path]::DirectorySeparatorChar,
     [IO.Path]::AltDirectorySeparatorChar
 )
 $_payloadPrefix = $_payloadRoot.TrimEnd($_separators) + [IO.Path]::DirectorySeparatorChar
-if (
+$_logicalInPayload = (
     [StringComparer]::OrdinalIgnoreCase.Equals($_cwd, $_payloadRoot) -or
     $_cwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
-) {
+)
+$_nativeInPayload = (
+    [StringComparer]::OrdinalIgnoreCase.Equals($_nativeCwd, $_payloadRoot) -or
+    $_nativeCwd.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
+)
+if ($_nativeInPayload -and -not $_logicalInPayload -and
+    $_location.Provider.Name -eq 'FileSystem' -and
+    (Test-Path -LiteralPath $_cwd -PathType Container)) {
+    [IO.Directory]::SetCurrentDirectory($_cwd)
+} elseif ($_logicalInPayload -or $_nativeInPayload) {
     $_outside = if ($env:COPILOT_PROJECT_DIR) { $env:COPILOT_PROJECT_DIR } else { $HOME }
-    if (-not (Test-Path -LiteralPath $_outside -PathType Container)) { $_outside = [IO.Path]::GetTempPath() }
+    if ($_outside -and (Test-Path -LiteralPath $_outside -PathType Container)) {
+        $_resolvedOutside = Resolve-Path -LiteralPath $_outside
+        $_outside = if ($_resolvedOutside.Provider.Name -eq 'FileSystem') {
+            $_resolvedOutside.ProviderPath
+        } else { '' }
+    }
+    if (
+        -not $_outside -or
+        -not (Test-Path -LiteralPath $_outside -PathType Container) -or
+        [StringComparer]::OrdinalIgnoreCase.Equals($_outside, $_payloadRoot) -or
+        $_outside.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
+    ) { $_outside = $HOME }
+    if ($_outside -and (Test-Path -LiteralPath $_outside -PathType Container)) {
+        $_resolvedOutside = Resolve-Path -LiteralPath $_outside
+        $_outside = if ($_resolvedOutside.Provider.Name -eq 'FileSystem') {
+            $_resolvedOutside.ProviderPath
+        } else { '' }
+    }
+    if (
+        -not $_outside -or
+        -not (Test-Path -LiteralPath $_outside -PathType Container) -or
+        [StringComparer]::OrdinalIgnoreCase.Equals($_outside, $_payloadRoot) -or
+        $_outside.StartsWith($_payloadPrefix, [StringComparison]::OrdinalIgnoreCase)
+    ) {
+        [Console]::Error.WriteLine("[$_command] cannot leave the payload: HOME is unavailable or inside the payload.")
+        exit 1
+    }
     Set-Location -LiteralPath $_outside
     [IO.Directory]::SetCurrentDirectory($_outside)
 }

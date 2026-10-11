@@ -184,6 +184,12 @@ Deployed as a 4-hourly **Scheduled Task** (Windows) or **systemd user timer**
 per-check `[ok]` / `[FAIL]` readiness lines. Configure and troubleshoot with
 the `session-sync-setup` skill.
 
+Opt-in `sync.process_logs.zip_snapshots` adds verified, content-addressed ZIP
+snapshots of settled local producer logs to that same scheduled pass. It retains
+all originals and does not change retention or enable source retirement.
+The manual inspection/publication boundary and platform guarantees are defined
+in [Process-log evidence](process-log-evidence.md#additive-settled-log-zip-snapshots).
+
 #### Provider rescue source
 
 `session-sync rescue-push --rescue-root <root>` validates host-owned provider
