@@ -109,6 +109,11 @@ copilot-extensions finalize          # clean up the worktree
 
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
+- Managed publication allows the complete pre-push guard up to 600 seconds
+  through this repository's `pr.push_timeout_seconds`. The timeout still
+  terminates the push and its owned hook descendants; no validation check is
+  skipped. Contract-evidence lookups reuse immutable Git results only within
+  the current validation pass.
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): once
   the wait-for-a-verdict loop below is satisfied, squash-merge with
