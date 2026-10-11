@@ -230,20 +230,13 @@ def push_changes(
     dry_run: bool = False,
     allow_unsquashed: bool = False,
     rewrite_pr: bool = False,
+    break_glass_reason: str | None = None,
+    confirm_break_glass: str | None = None,
 ) -> bool:
-    """Push worktree changes to the remote default branch.
-    Args:
-        worktree_id: The worktree identifier.
-        config: Loaded project configuration.
-        title: Optional title to set on the tracking record.
-        dry_run: If True, preview without side effects.
-        allow_unsquashed: If True, proceed with the individual commits when
-            the pre-squash step fails, instead of aborting. Off by default --
-            a squash failure must never silently degrade to pushing every
-            commit to the shared default branch (see issue #783).
+    """Publish through the configured PR/direct flow, preserving failed work.
 
-    Returns:
-        True on success, False on failure (worktree preserved).
+    Explicit recovery validates source-bound operator confirmation first;
+    ordinary publication never opts into recovery or unsquashed fallback.
     """
     repo = config.default_repo
     anchor = repo.anchor
@@ -253,7 +246,8 @@ def push_changes(
 
     # Load tracking record
     from . import config as cfg
-    yaml_path = (cfg.tracking_dir(config.repo_name) if rewrite_pr else cfg.tracking_dir()) / f"{worktree_id}.yaml"
+    explicit_rewrite = rewrite_pr or break_glass_reason is not None
+    yaml_path = (cfg.tracking_dir(config.repo_name) if explicit_rewrite else cfg.tracking_dir()) / f"{worktree_id}.yaml"
     record = None
     if yaml_path.exists():
         try:
@@ -267,16 +261,17 @@ def push_changes(
             return False
     branch = _worktree_branch(record, worktree_id)
 
-    # Set title early so it survives even if push fails. Gate on the
-    # *normalized* value -- a whitespace-only `--title` must not overwrite an
-    # existing, genuinely curated persisted title with `None`.
+    from .pr_break_glass import publish_recovery
+    recovery = publish_recovery(
+        worktree_id, config, record, reason=break_glass_reason, confirmation=confirm_break_glass,
+        title=title, dry_run=dry_run, allow_unsquashed=allow_unsquashed,
+    )
+    if recovery is not None:
+        return recovery
+    # A normalized title survives failed publication; whitespace never clears it.
     new_title = tracking.normalize_title(title)
     if new_title and record:
-        # Foreground RMW (#4547): persist the title under the blocking record
-        # lock. `record` was loaded unlocked above (it drives the whole push
-        # flow), so reload fresh inside the lock, apply just the title, and save
-        # -- then continue on the fresh snapshot. The window holds no I/O; the
-        # heavy fetch/push below runs AFTER the lock is released.
+        # Reload under the record lock before changing only the title.
         with tracking._RecordLock(yaml_path):
             record = tracking.load_record(yaml_path)
             record.title = new_title

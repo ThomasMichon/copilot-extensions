@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
+from .pr_source import github_source, pull_payload, source_text
 
 
 # HTTP statuses worth retrying (network / 5xx / 429 / 408); 4xx (auth / not-found
@@ -142,7 +143,7 @@ class GitHubProvider:
             [
                 "gh", "pr", "view", str(number),
                 "--repo", repo,
-                "--json", "url,number,state,headRefOid,baseRefName",
+                "--json", "url,number,state,headRefOid,baseRefName,headRefName,headRepository",
             ],
             env=self._env(token, host=host),
         )
@@ -150,7 +151,7 @@ class GitHubProvider:
             raise ProviderError(
                 f"gh pr view #{number} failed for {repo}: {proc.stderr.strip()}"
             )
-        data = json.loads(proc.stdout)
+        data = pull_payload(proc.stdout)
         # gh reports state as OPEN | CLOSED | MERGED; "merged" is the
         # authoritative landed signal.
         state = str(data.get("state", "open")).lower() or "open"
@@ -159,14 +160,12 @@ class GitHubProvider:
             number=int(data.get("number", number)),
             state=state,
             merged=(state == "merged"),
-            # The same lightweight call returns the head commit (#4699) and the
-            # base -- unlike the far heavier observe_head/get_snapshot calls
-            # (reviews, checks, statuses) a historical-PR boundary lookup has no need for.
-            # `headRefOid` is nullable (e.g. a deleted head ref) -- `or ""`
-            # normalizes an explicit JSON null, not just a missing key, so
-            # a stringified "None" never masquerades as a real head SHA.
-            head_sha=str(data.get("headRefOid") or ""),
-            base_ref=str(data.get("baseRefName") or ""),
+            # Lightweight lifecycle/source observation avoids reviews/checks.
+            # A nullable head (e.g. a deleted ref) is unknown, not a stringified
+            # null or non-string identity.
+            head_sha=source_text(data, "headRefOid"),
+            base_ref=source_text(data, "baseRefName"),
+            **github_source(data),
         )
 
     def observe_head(

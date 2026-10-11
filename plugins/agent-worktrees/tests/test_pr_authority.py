@@ -292,6 +292,55 @@ def test_pr_authority_refuses_unreadable_ledger(authority_state, monkeypatch, op
         pr_authority.assert_exclusive(config, record, record.pr)
 
 
+@pytest.mark.parametrize("operation", ["stat", "iterdir"])
+def test_recovery_audits_unavailable_historical_ledger(authority_state, monkeypatch, operation):
+    config, record, _root, _registry, ledgers = authority_state
+    original = getattr(Path, operation)
+
+    def denied(path, *args, **kwargs):
+        if path == ledgers["alias"]:
+            raise PermissionError("historical ledger unavailable")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, operation, denied)
+    with pr_authority.guard():
+        waived = pr_authority.assert_exclusive(
+            config, record, record.pr, recovery=True,
+            destination_identity=record.pr.rewrite_identity,
+        )
+    assert any("Historical ownership ledger unavailable" in item for item in waived)
+
+
+@pytest.mark.parametrize("case", ["same-pr", "other-pr", "ambiguous", "malformed-registry"])
+def test_recovery_distinguishes_history_from_shared_destination(authority_state, case):
+    config, record, _root, registry, ledgers = authority_state
+    record.pr.number, record.pr.provider = 42, "github"
+    tracking.save_record(record)
+    other = tracking.create_new_record(
+        "other", "worktree/other", "unavailable", "alias", "test", "linux", ledgers["alias"],
+    )
+    other.prs = [replace(record.pr, pr_id="other-pr", number=42 if case == "same-pr" else 43)]
+    if case == "ambiguous":
+        other.pr.rewrite_identity = ""
+        other.pr.head_identity = ""
+    tracking.save_record(other)
+    if case == "malformed-registry":
+        registry.write_text("projects: []")
+    with pr_authority.guard():
+        if case == "other-pr":
+            with pytest.raises(ValueError, match="shared history"):
+                pr_authority.assert_exclusive(
+                    config, record, record.pr, recovery=True,
+                    destination_identity=record.pr.rewrite_identity,
+                )
+        else:
+            waived = pr_authority.assert_exclusive(
+                config, record, record.pr, recovery=True,
+                destination_identity=record.pr.rewrite_identity,
+            )
+            assert waived
+
+
 def run_writer(root, ledger, wid, operation):
     script = """
 import json,sys

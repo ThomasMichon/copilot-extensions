@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from . import codename_tracking, config as cfg, finalize as fin, git_ops, output, pr_ops, tracking, worktree_identity
-from . import context_cli
+from . import context_cli, pr_break_glass
 
 
 def _core():
@@ -68,6 +69,16 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("push-changes", help="Push worktree changes to remote default branch")
     p.add_argument("--rewrite-pr", action="store_true",
                    help="Intentionally publish rewritten owned PR history using its recorded exact head lease")
+    p.add_argument(
+        "--break-glass-reason", default=None, metavar="REASON",
+        help="Preview operator recovery of an existing PR despite incomplete historical ownership. "
+        "Requires per-PR sign-off; preserves exact-head leases, hooks and merge gates.",
+    )
+    p.add_argument(
+        "--confirm-break-glass", default=None, metavar="PREVIEW_FINGERPRINT",
+        help="Confirm the exact previewed source/remote operation only after real operator sign-off. "
+        "Never add this automatically after a refusal.",
+    )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None, help="Set worktree title")
     p.add_argument(
@@ -405,6 +416,17 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
         ctx = None  # type: ignore[assignment]
 
     try:
+        recovery_reason = getattr(args, "break_glass_reason", None)
+        confirmation = getattr(args, "confirm_break_glass", None)
+        explicit_rewrite = getattr(args, "rewrite_pr", False) or recovery_reason is not None
+        if (confirmation is not None and recovery_reason is None) or (
+            recovery_reason is not None and (
+                getattr(args, "title_only", False) or getattr(args, "title", None)
+                or getattr(args, "allow_unsquashed", False)
+            )
+        ):
+            message = "Recovery confirmation requires a reason and cannot be combined with title/squash options."
+            return output._json_error(message) if use_json else (output.err(message) or 2)
         try:
             config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:
@@ -421,7 +443,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 return output._json_error(msg)
             output.err(msg)
             return 1
-        if getattr(args, "rewrite_pr", False):
+        if explicit_rewrite:
             worktree_id = worktree_identity._resolve_worktree_id(worktree_id, project=config.repo_name)
         else:
             worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
@@ -443,14 +465,24 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 return 1
             return 0
 
-        success = fin.push_changes(
-            worktree_id,
-            config,
-            title=args.title,
-            dry_run=args.dry_run,
-            allow_unsquashed=getattr(args, "allow_unsquashed", False),
-            rewrite_pr=getattr(args, "rewrite_pr", False),
-        )
+        try:
+            success = fin.push_changes(
+                worktree_id,
+                config,
+                title=args.title,
+                dry_run=args.dry_run,
+                allow_unsquashed=getattr(args, "allow_unsquashed", False),
+                rewrite_pr=getattr(args, "rewrite_pr", False),
+                break_glass_reason=recovery_reason,
+                confirm_break_glass=confirmation,
+            )
+        except pr_break_glass.ConfirmationRequired as exc:
+            if use_json:
+                output._json_output({"success": False, "worktree_id": worktree_id, **exc.preview})
+            else:
+                output.err(str(exc))
+                print(json.dumps(exc.preview, sort_keys=True, indent=2))
+            return 2
 
         reminder = context_cli._pr_reminder_for(
             config,
@@ -458,7 +490,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             ok=bool(success),
         )
         if use_json:
-            yaml_path = (cfg.tracking_dir(config.repo_name) if getattr(args, "rewrite_pr", False) else cfg.tracking_dir()) / f"{worktree_id}.yaml"
+            yaml_path = (cfg.tracking_dir(config.repo_name) if explicit_rewrite else cfg.tracking_dir()) / f"{worktree_id}.yaml"
             final_status = "pushed"
             if yaml_path.exists():
                 try:

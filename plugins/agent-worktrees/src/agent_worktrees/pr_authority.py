@@ -204,46 +204,86 @@ def _live_prs(data: dict, path: Path) -> list[dict]:
     return live
 
 
-def assert_exclusive(config: cfg.Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
-                     *, identity: str = "") -> None:
+def assert_exclusive(
+    config: cfg.Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
+    *, identity: str = "", recovery: bool = False, destination_identity: str | None = None,
+) -> tuple[str, ...]:
     """Strictly scan every adopted ledger while the outer authority guard is held."""
     selected = (cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml").resolve()
-    ledgers = _ledgers(config.repo_name)
+    waived: list[str] = []
+    identity_expected = destination_identity or identity or pr.rewrite_identity or pr.head_identity
+    if recovery and not identity_expected:
+        raise ValueError("Recovery requires an observed, exact publication destination.")
+    try:
+        ledgers = _ledgers(config.repo_name)
+    except ValueError as exc:
+        if not recovery:
+            raise
+        waived.append(f"Historical project ownership registry unavailable: {exc}")
+        ledgers = {}
     ledgers[selected.parent] = config.repo_name
     for ledger in sorted(ledgers):
         try:
             files = sorted(ledger.iterdir()) if _exists(ledger) else []
-        except OSError as exc:
-            raise ValueError(f"Cannot enumerate PR authority ledger: {ledger}") from exc
+        except (OSError, ValueError) as exc:
+            if not recovery or ledger == selected.parent:
+                raise ValueError(f"Cannot enumerate PR authority ledger: {ledger}") from exc
+            waived.append(f"Historical ownership ledger unavailable: {ledger}")
+            continue
         for path in files:
             if path.suffix != ".yaml":
                 continue
-            data = _read(path)
-            for candidate in _live_prs(data, path):
+            try:
+                data = _read(path)
+                candidates = _live_prs(data, path)
+            except ValueError as exc:
+                if not recovery or path.resolve() == selected:
+                    raise
+                waived.append(f"Historical ownership entry unavailable: {exc}")
+                continue
+            for candidate in candidates:
                 if candidate.get("branch") != pr.branch:
                     continue
                 if path.resolve() == selected and candidate.get("pr_id", "") == pr.pr_id:
+                    continue
+                same_pr = (
+                    candidate.get("number") == pr.number
+                    and candidate.get("repo", "").lower() == pr.repo.lower()
+                    and candidate.get("provider", pr.provider) in ("", pr.provider)
+                )
+                if recovery and same_pr:
+                    waived.append(f"Historical same-PR ownership entry: {path}")
                     continue
                 candidate_identity = candidate.get("rewrite_identity") or candidate.get("head_identity")
                 if not candidate_identity:
                     cwd = data.get("worktree_path")
                     if not isinstance(cwd, str) or not Path(cwd).is_dir():
-                        raise ValueError("Another tracking record has an ambiguous PR destination; rewrite refused.")
+                        if not recovery:
+                            raise ValueError("Another tracking record has an ambiguous PR destination; rewrite refused.")
+                        waived.append(f"Historical PR destination unavailable: {path}")
+                        continue
                     remote = candidate.get("remote")
                     if not remote:
                         project = ledgers[ledger]
                         candidate_config = config
                         if project != config.repo_name:
-                            _read(cfg.project_dir(project) / "config.yaml", context="project configuration")
                             try:
+                                _read(cfg.project_dir(project) / "config.yaml", context="project configuration")
                                 candidate_config = cfg.load_project_config(
                                     project, include_control_plane_related_pr=False,
                                 )
                             except (OSError, KeyError, TypeError, ValueError) as exc:
-                                raise ValueError("Cannot resolve another project's PR destination; rewrite refused.") from exc
+                                if not recovery:
+                                    raise ValueError("Cannot resolve another project's PR destination; rewrite refused.") from exc
+                                waived.append(f"Historical project destination unavailable: {path}")
+                                continue
                         remote = candidate_config.default_repo.remote
                     candidate_identity = pr_publish.push_identity(remote, cwd=cwd)
                 if not candidate_identity:
-                    raise ValueError("Another tracking record has an unreadable PR destination; rewrite refused.")
-                if candidate_identity == (identity or pr.rewrite_identity or pr.head_identity):
+                    if not recovery:
+                        raise ValueError("Another tracking record has an unreadable PR destination; rewrite refused.")
+                    waived.append(f"Historical PR destination unreadable: {path}")
+                    continue
+                if candidate_identity == identity_expected:
                     raise ValueError("Another worktree tracks this PR head; shared history cannot be rewritten.")
+    return tuple(sorted(set(waived)))

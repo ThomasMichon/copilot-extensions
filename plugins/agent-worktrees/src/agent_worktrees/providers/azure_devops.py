@@ -16,6 +16,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 from .base import ProviderError, PRScope, PullResult, run_cli
+from .pr_source import azure_source, pull_payload, source_object, source_text
 
 if TYPE_CHECKING:
     from ..pr_contract import PRDiff, PRSnapshot, ThreadsResult
@@ -159,25 +160,22 @@ class AzureDevOpsProvider:
             raise ProviderError(
                 f"az repos pr show #{number} failed for {repo}: {proc.stderr.strip()}"
             )
-        data = json.loads(proc.stdout)
+        data = pull_payload(proc.stdout)
         # Azure DevOps PR status: active | completed | abandoned. "completed"
         # means merged; canonicalize to the open|merged|closed vocab the
         # tracking record uses and expose the authoritative merged signal.
         status = str(data.get("status", "active")).lower()
         merged = (status == "completed")
         state = self._canonical_state(status)
-        merge_source = data.get("lastMergeSourceCommit")
-        head_sha = (
-            str(merge_source.get("commitId", "") or "")
-            if isinstance(merge_source, dict) else ""
-        )
+        head_sha = source_text(source_object(data, "lastMergeSourceCommit"), "commitId")
         return PullResult(
             url=self._web_url(api_base, project, name, number),
             number=number,
             state=state,
             merged=merged,
             head_sha=head_sha,
-            base_ref=str(data.get("targetRefName", "") or "").removeprefix("refs/heads/"),
+            base_ref=source_text(data, "targetRefName").removeprefix("refs/heads/"),
+            **azure_source(data),
         )
 
     def observe_head(
