@@ -194,6 +194,31 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-10 - Independently recoverable transfer health merged
+- #6067 merged as `cb1f9772ac40b41829920622f67228f3f9ef8989` after exact-head
+  approval with zero open findings and successful required CI. Session-state
+  and process-log legs retain independent status, partial streaks, freshness,
+  bounded failure reasons and filename-only deferred samples. Retry success
+  clears only its own leg; sustained log failures reach the existing health
+  threshold even across successful session transfers.
+- All metadata writers and classification share complete leg/aggregate
+  validation. Legacy heartbeat migration preserves the original attempt
+  timestamp, exact deferred count and streak. Null/malformed leg metadata is
+  preserved with explicit update warnings rather than silently repaired.
+- Process-log root identity comes from the validating stat, matches the opened
+  POSIX descriptor before enumeration, and is rechecked after copying. Missing
+  or replaced roots remain partial; empty existing roots remain successful.
+  The broader ancestor containment obligation is not closed.
+- Final bounded, network-disconnected Linux selection passed 88 tests.
+  Mypy of health/metadata, Ruff, install-contract and changed-module guards
+  passed. Required Windows archive-source CI passed, but native Windows
+  execution of the new health regressions is not claimed.
+- #5727 remains open for ancestor containment. Scheduled settled-log compaction,
+  complete transports/admission, catalog/accounting extraction, daily products,
+  pinned consumer parity and released runtime adoption remain unresolved.
+  Both the complete preservation and overall validation gates stay open;
+  no live publication, corpus rewrite, source retirement or rollout occurred.
+
 ### 2026-10-10 - Explicit identity-file CLI integration merged
 - #6027 merged as `58789f46905b350d8c600b37265f34ab0d8fd366` after current-head
   approval with no unresolved Medium/High findings and green required CI, including native Windows
