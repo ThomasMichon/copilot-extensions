@@ -394,7 +394,9 @@ def _same_file_content(src: Path, dst: Path) -> bool:
         return False
 
 
-def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
+def _copy_process_logs(
+    source: Path, dest: Path, source_identity: os.stat_result | None = None,
+) -> tuple[int, int, list[Path]]:
     """Flat, non-recursive incremental copy of process-log evidence.
 
     Process logs sit directly under *source* (never a directory tree like a
@@ -447,7 +449,7 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
     copied = 0
     nbytes = 0
     locked: list[Path] = []
-    source_identity = _lstat(source)
+    source_identity = source_identity or _lstat(source)
 
     def _revalidate_root(before: os.stat_result) -> None:
         after = _lstat(source)
@@ -739,10 +741,17 @@ def _ensure_real_directory(path: Path, *, durable: bool = False) -> Path:
 
 def _existing_real_directory(path: Path) -> Path | None:
     """Resolve an existing directory only through real directory components."""
+    validated = _existing_real_directory_identity(path)
+    return validated[0] if validated is not None else None
+
+
+def _existing_real_directory_identity(path: Path) -> tuple[Path, os.stat_result] | None:
+    """Return the final component's identity from the validating stat itself."""
     absolute = _anchored_path(path)
     current = Path(absolute.anchor)
     try:
-        anchor_mode = _lstat(current).st_mode
+        identity = _lstat(current)
+        anchor_mode = identity.st_mode
     except FileNotFoundError:
         return None
     if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
@@ -750,12 +759,13 @@ def _existing_real_directory(path: Path) -> Path | None:
     for part in absolute.parts[1:]:
         current /= part
         try:
-            mode = _lstat(current).st_mode
+            identity = _lstat(current)
+            mode = identity.st_mode
         except FileNotFoundError:
             return None
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"destination directory is unsafe: {current}")
-    return absolute
+    return absolute, identity
 
 
 def _validate_relative_path(relative: Path) -> None:
@@ -1905,14 +1915,14 @@ class FilesystemTarget(Target):
         as a known limitation rather than silently assumed safe.
         """
         try:
-            safe_source = _existing_real_directory(log_root)
+            safe_source = _existing_real_directory_identity(log_root)
         except OSError as exc:
             self._record_process_log_health(machine, "partial", reason="unsafe process-log source")
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
         if safe_source is None:
             self._record_process_log_health(machine, "partial", reason="no process-log source")
             return PushResult(ok=True, detail="no process-log source")
-        log_root = safe_source
+        log_root, source_identity = safe_source
         try:
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine) / "logs")
@@ -1923,7 +1933,7 @@ class FilesystemTarget(Target):
                 detail=f"cannot create safe destination for {machine}/logs: {exc}",
             )
         try:
-            copied, nbytes, locked_paths = _copy_process_logs(log_root, dest)
+            copied, nbytes, locked_paths = _copy_process_logs(log_root, dest, source_identity)
         except (OSError, ValueError) as exc:
             # ValueError surfaces here only from the root-pinning open
             # itself (e.g. the configured root was replaced with a symlink

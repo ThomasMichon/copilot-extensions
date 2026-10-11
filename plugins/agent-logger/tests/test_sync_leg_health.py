@@ -400,3 +400,30 @@ def test_missing_root_reason_is_not_a_deferred_file(tmp_path: Path) -> None:
     assert metadata["deferred_file_count"] == 0
     assert metadata["deferred_files"] == []
     assert metadata["sync_legs"]["process-logs"]["reason"] == "no process-log source"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory fd")
+def test_root_replacement_after_validation_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    root = tmp_path / "dest" / "machine"
+    meta.write_sync_meta(root, "machine", "local", "ok")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    real_validate = filesystem._existing_real_directory_identity
+
+    def replaced(path: Path) -> tuple[Path, os.stat_result] | None:
+        result = real_validate(path)
+        if path == logs:
+            path.rename(tmp_path / "original")
+            path.mkdir()
+            (path / "process-123-456.log").write_text("replacement\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(filesystem, "_existing_real_directory_identity", replaced)
+    assert not target.push_process_logs(logs, "machine").ok
+    assert not (root / "logs" / "process-123-456.log").exists()
+    assert meta.read_sync_meta(root)["status"] == "partial"
