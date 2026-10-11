@@ -36,9 +36,11 @@ existing service distributions. A unified entry point does not require one
 monolithic dependency set: client installation must remain thin and must not
 pull server dependencies or activate hosting roles.
 
-Reuse the existing standalone index distribution and shared installer,
-version-slot, endpoint discovery, process supervision and graceful cutover
-contracts. `fleet-manager` orchestrates approved placement; it does not become
+Reuse the shared installer, version-slot, endpoint discovery, process
+supervision and graceful cutover contracts. The independently owned standalone
+index campaign (#5768) supplies the distribution contract and staged packaging
+work; its complete install/activation lifecycle is a dependency to verify, not
+a shipped role assumed by this proposal. `fleet-manager` orchestrates approved placement; it does not become
 a second index installer, task queue, credential issuer or arbitrary package
 manager. Komodo remains a selected deployment backend, not the public API
 contract and not a mandatory installation on clients.
@@ -82,10 +84,19 @@ reload cannot activate a server role.
 ## API and auth boundary
 
 The harness CLI sends typed named requests through the configured encrypted
-controller API with supplied auth. External operator/service JWT/JWKS verification
-and separate connector proof-of-possession remain the selected routing-foundation
-model. Manager admin/onboarding authority is separate and never forwarded from
-arbitrary client headers.
+controller API with supplied auth. Operator control, access to an offered
+service, connector enrollment and manager administration remain distinct
+authorities. The routing proposal specifies these boundaries but does not itself
+deliver an authentication implementation.
+
+The operator separately selected external JWT/JWKS verification for configured
+operator and service principals plus separate connector proof-of-possession
+during the routing continuation. That is an explicit mechanism direction, not
+an already shipped foundation: the authentication adapter remains unpublished
+and needs its own reviewed validation/integration. Each principal's role and
+grants are independently configured; sharing signature verification does not
+merge operator and downstream service access. Manager admin/onboarding authority
+is separate and never forwarded from arbitrary client headers.
 
 Permission is scoped to fleet, target, service, operation and current generation.
 The controller returns durable operation identity and acceptance/outcome receipts;
@@ -102,6 +113,9 @@ worker mutation when the controller is unavailable.
 1. Agree and review distribution/dependency boundaries and role-selective lifecycle.
 2. Implement thin client config/request/error contracts and an authenticated
    synthetic controller endpoint; prove install/uninstall has no hosting effects.
+   Resolve and review the selected authentication mechanism's issuer/audience,
+   separate role/grant mapping, connector proof, revocation and replay/fencing
+   contracts before treating synthetic verification as production authorization.
 3. Implement controller configuration persistence and live-reload transactions
    with existing service lifecycle primitives.
 4. Connect fixed-service routing and named Komodo deployment adapters through
